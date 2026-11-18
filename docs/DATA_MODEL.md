@@ -19,7 +19,7 @@ not visible to this document, and `django_migrations` has no model and is not sh
 
 ## Overview
 
-56 tables and 114 single-column foreign keys.
+55 tables and 111 single-column foreign keys.
 
 ```mermaid
 erDiagram
@@ -49,7 +49,6 @@ erDiagram
     plants_plant
     plants_plantconfiguration
     plants_plantevent
-    plants_plantforecast
     plants_plantsubmission
     plants_productionobservation
     incidents_incidentrevision
@@ -92,8 +91,8 @@ erDiagram
     accounts_tenant ||--o{ accounts_workspacememberremoval : "tenant_id"
     auth_user ||--o{ accounts_workspacememberremoval : "user_id"
     auth_user ||--o{ regions_auditevent : "actor_id"
-    regions_region |o--o{ regions_auditevent : "region_id"
     connections_provideraccount |o--o{ regions_auditevent : "provider_account_id"
+    regions_region |o--o{ regions_auditevent : "region_id"
     connections_sitebinding |o--o{ regions_region : "approved_binding_id"
     accounts_tenant ||--o{ regions_region : "tenant_id"
     regions_region ||--o{ regions_regionlocationchangerequest : "region_id"
@@ -106,8 +105,8 @@ erDiagram
     forecasts_historicalreferenceimport |o--o{ forecasts_collectionjob : "reference_import_id"
     regions_region ||--o| forecasts_collectionschedule : "region_id"
     forecasts_forecastsnapshot ||--o| forecasts_forecastresult : "snapshot_id"
-    forecasts_collectionjob ||--o| forecasts_forecastsnapshot : "job_id"
     connections_sitebinding ||--o{ forecasts_forecastsnapshot : "binding_id"
+    forecasts_collectionjob ||--o| forecasts_forecastsnapshot : "job_id"
     connections_sitebinding ||--o{ forecasts_historicalreferenceimport : "binding_id"
     auth_user ||--o{ forecasts_historicalreferenceimport : "imported_by_id"
     auth_user ||--o{ forecasts_referencecapacitynormalization : "authorized_by_id"
@@ -122,26 +121,23 @@ erDiagram
     plants_plant ||--o{ plants_calibrationactivation : "plant_id"
     plants_plantconfiguration ||--o{ plants_calibrationactivation : "configuration_id"
     connections_sitebinding ||--o{ plants_calibrationrun : "binding_id"
+    plants_calibrationactivation |o--o{ plants_calibrationrun : "comparison_activation_id"
     auth_user ||--o{ plants_calibrationrun : "requested_by_id"
     plants_plant ||--o{ plants_calibrationrun : "plant_id"
     plants_plantconfiguration ||--o{ plants_calibrationrun : "configuration_id"
-    plants_calibrationactivation |o--o{ plants_calibrationrun : "comparison_activation_id"
     plants_calibrationrun |o--o{ plants_forecastissuance : "calibration_id"
-    plants_plantconfiguration ||--o{ plants_forecastissuance : "configuration_id"
-    plants_plant ||--o{ plants_forecastissuance : "plant_id"
     forecasts_forecastsnapshot ||--o{ plants_forecastissuance : "snapshot_id"
+    plants_plant ||--o{ plants_forecastissuance : "plant_id"
+    plants_plantconfiguration ||--o{ plants_forecastissuance : "configuration_id"
+    auth_user |o--o{ plants_plant : "automatic_calibration_enabled_by_id"
     regions_region ||--o{ plants_plant : "region_id"
     plants_plantconfiguration |o--o{ plants_plant : "current_configuration_id"
-    auth_user |o--o{ plants_plant : "automatic_calibration_enabled_by_id"
     connections_sitebinding ||--o{ plants_plantconfiguration : "binding_id"
     auth_user ||--o{ plants_plantconfiguration : "created_by_id"
     plants_plant ||--o{ plants_plantconfiguration : "plant_id"
     regions_region ||--o{ plants_plantconfiguration : "region_id"
     auth_user |o--o{ plants_plantevent : "actor_id"
     plants_plant ||--o{ plants_plantevent : "plant_id"
-    plants_calibrationrun |o--o{ plants_plantforecast : "calibration_id"
-    plants_plantconfiguration ||--o{ plants_plantforecast : "configuration_id"
-    forecasts_forecastsnapshot ||--o{ plants_plantforecast : "snapshot_id"
     plants_plant ||--o| plants_plantsubmission : "plant_id"
     auth_user ||--o{ plants_plantsubmission : "submitted_by_id"
     plants_plantconfiguration ||--o{ plants_productionobservation : "configuration_id"
@@ -154,14 +150,14 @@ erDiagram
     plants_plantconfiguration ||--o{ incidents_plantincident : "declared_configuration_id"
     plants_plant ||--o{ incidents_plantincident : "plant_id"
     auth_user ||--o{ incidents_plantincident : "updated_by_id"
+    connections_sitebinding ||--o{ notifications_notificationdelivery : "binding_id"
     forecasts_forecastsnapshot |o--o{ notifications_notificationdelivery : "snapshot_id"
-    connections_sitebinding |o--o{ notifications_notificationdelivery : "binding_id"
     notifications_reminderschedule ||--o{ notifications_notificationdelivery : "schedule_id"
-    regions_region ||--o{ notifications_reminderschedule : "region_id"
     auth_user |o--o{ notifications_reminderschedule : "configured_by_id"
+    regions_region ||--o{ notifications_reminderschedule : "region_id"
     plants_plantconfiguration ||--o{ metering_epiascollectionjob : "configuration_id"
-    metering_epiasconnection ||--o{ metering_epiascollectionjob : "connection_id"
     plants_plant ||--o{ metering_epiascollectionjob : "plant_id"
+    metering_epiasconnection ||--o{ metering_epiascollectionjob : "connection_id"
     auth_user ||--o{ metering_epiasconnection : "connected_by_id"
     plants_plant ||--o| metering_epiasconnection : "plant_id"
     plants_plantconfiguration ||--o{ metering_epiassnapshot : "configuration_id"
@@ -201,9 +197,9 @@ erDiagram
 erDiagram
     accounts_membership {
         bigint id PK
+        varchar_6 role
         integer user_id FK "references auth_user.id"
         bigint tenant_id FK "references accounts_tenant.id"
-        varchar_6 role
     }
     accounts_tenant {
         bigint id PK
@@ -276,6 +272,10 @@ erDiagram
 
 - `supported_user_language`: `CHECK ("language" IN ('en', 'tr'))`
 
+#### `accounts_workspaceinvitation`
+
+- `workspaceinvitation_delivery_status_chk`: `CHECK ("delivery_status" IN ('pending', 'sent', 'failed', 'uncertain'))`
+
 ## regions (`pyracast.regions`)
 
 ```mermaid
@@ -286,8 +286,8 @@ erDiagram
         integer revision
         timestamp_with_time_zone created_at
         integer actor_id FK "references auth_user.id"
-        bigint region_id FK "nullable; references regions_region.id"
         bigint provider_account_id FK "nullable; references connections_provideraccount.id"
+        bigint region_id FK "nullable; references regions_region.id"
     }
     regions_region {
         bigint id PK
@@ -298,9 +298,9 @@ erDiagram
         integer revision
         varchar_20 status
         timestamp_with_time_zone created_at
+        timestamp_with_time_zone deleted_at "nullable"
         bigint approved_binding_id FK "nullable; references connections_sitebinding.id"
         bigint tenant_id FK "references accounts_tenant.id"
-        timestamp_with_time_zone deleted_at "nullable"
     }
     regions_regionlocationchangerequest {
         bigint id PK
@@ -317,8 +317,8 @@ erDiagram
         integer reviewed_by_id FK "nullable; references auth_user.id"
     }
     auth_user ||--o{ regions_auditevent : "actor_id"
-    regions_region |o--o{ regions_auditevent : "region_id"
     connections_provideraccount |o--o{ regions_auditevent : "provider_account_id"
+    regions_region |o--o{ regions_auditevent : "region_id"
     connections_sitebinding |o--o{ regions_region : "approved_binding_id"
     accounts_tenant ||--o{ regions_region : "tenant_id"
     regions_region ||--o{ regions_regionlocationchangerequest : "region_id"
@@ -331,6 +331,7 @@ erDiagram
 #### `regions_auditevent`
 
 - `audit_exactly_one_target`: `CHECK ((("provider_account_id" IS NULL AND "region_id" IS NOT NULL) OR ("provider_account_id" IS NOT NULL AND "region_id" IS NULL)))`
+- `auditevent_action_chk`: `CHECK ("action" IN ('region_renamed', 'location_change_requested', 'location_change_approved', 'location_change_rejected', 'location_change_rebased', 'binding_configured', 'connection_validated', 'region_approved', 'region_rejected', 'region_suspended', 'region_trashed', 'region_restored', 'collection_schedule_updated', 'historical_reference_imported', 'reference_capacity_normalized', 'provider_account_created', 'provider_secret_rotated', 'provider_cooldown_cleared'))`
 - column check (name generated by PostgreSQL): `CHECK ("revision" >= 0)`
 
 #### `regions_region`
@@ -339,7 +340,8 @@ erDiagram
 - `one_active_region_per_tenant_location`: `UNIQUE INDEX ("tenant_id", (ROUND(("latitude")::numeric, 6)), (ROUND(("longitude")::numeric, 6))) WHERE "deleted_at" IS NULL`
 - `region_latitude`: `CHECK (("latitude" >=  -90.0 AND "latitude" <= 90.0))`
 - `region_longitude`: `CHECK (("longitude" >=  -180.0 AND "longitude" <= 180.0))`
-- `region_status`: `CHECK ("status" IN ('pending', 'approved', 'rejected', 'suspended'))`
+- `region_status`: `CHECK ("status" IN ('pending', 'approved', 'suspended', 'rejected'))`
+- `region_status_approved_binding_chk`: `CHECK ((NOT ("status" = 'approved') OR "approved_binding_id" IS NOT NULL))`
 - column check (name generated by PostgreSQL): `CHECK ("revision" >= 0)`
 
 #### `regions_regionlocationchangerequest`
@@ -348,6 +350,7 @@ erDiagram
 - `location_request_longitude`: `CHECK (("longitude" >=  -180.0 AND "longitude" <= 180.0))`
 - `location_request_review_state`: `CHECK ((("reviewed_at" IS NULL AND "reviewed_by_id" IS NULL AND "status" = 'pending') OR ("reviewed_at" IS NOT NULL AND "reviewed_by_id" IS NOT NULL AND "status" IN ('approved', 'rejected'))))`
 - `one_pending_region_location_request`: `UNIQUE INDEX ("region_id") WHERE "status" = 'pending'`
+- `regionlocationchangerequest_status_chk`: `CHECK ("status" IN ('pending', 'approved', 'rejected'))`
 - column check (name generated by PostgreSQL): `CHECK ("base_revision" >= 0)`
 
 ## connections (`pyracast.connections`)
@@ -358,27 +361,28 @@ erDiagram
         bigint id PK
         varchar_30 provider
         varchar_200 external_account_id
+        varchar_2048 encrypted_api_key
         integer daily_quota
         boolean enabled
         integer credential_revision
+        timestamp_with_time_zone request_blocked_until "nullable"
+        integer authentication_failed_revision "nullable"
         varchar_500 authorization_reference
         timestamp_with_time_zone authorized_at "nullable"
         integer authorized_by_id FK "nullable; references auth_user.id"
-        varchar_2048 encrypted_api_key
-        integer authentication_failed_revision "nullable"
-        timestamp_with_time_zone request_blocked_until "nullable"
     }
     connections_sitebinding {
         bigint id PK
         integer region_revision
         varchar_200 site_id
         double_precision capacity_kw
+        double_precision dc_capacity_kw "nullable"
         varchar_2 power_basis
         boolean capacity_semantics_verified
-        double_precision tilt_degrees
         double_precision azimuth_degrees
         double_precision losses_percent
         date installation_date "nullable"
+        varchar_500 settings_verification_reference
         double_precision latitude
         double_precision longitude
         varchar_100 timezone
@@ -388,8 +392,6 @@ erDiagram
         timestamp_with_time_zone created_at
         bigint provider_account_id FK "references connections_provideraccount.id"
         bigint region_id FK "references regions_region.id"
-        varchar_500 settings_verification_reference
-        double_precision dc_capacity_kw "nullable"
     }
     auth_user |o--o{ connections_provideraccount : "authorized_by_id"
     connections_provideraccount ||--o{ connections_sitebinding : "provider_account_id"
@@ -402,6 +404,7 @@ erDiagram
 
 - `canonical_provider_account`: `UNIQUE INDEX ((CASEFOLD(BTRIM("provider", ' \u0009\u000a\u000d\u000b\u000c\u001c\u001d\u001e\u001f\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000') COLLATE "pg_unicode_fast")), (CASEFOLD(BTRIM("external_account_id", ' \u0009\u000a\u000d\u000b\u000c\u001c\u001d\u001e\u001f\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000') COLLATE "pg_unicode_fast")))`
 - `provider_account_encrypted_api_key`: `CHECK ((("encrypted_api_key" = '' AND "provider" = 'fixture') OR "encrypted_api_key"::text LIKE 'encrypted:v1:%'))`
+- `provideraccount_provider_chk`: `CHECK ("provider" IN ('fixture', 'solcast'))`
 - column check (name generated by PostgreSQL): `CHECK ("authentication_failed_revision" >= 0)`
 - column check (name generated by PostgreSQL): `CHECK ("credential_revision" >= 0)`
 - column check (name generated by PostgreSQL): `CHECK ("daily_quota" >= 0)`
@@ -419,7 +422,6 @@ erDiagram
 - `binding_losses`: `CHECK (("losses_percent" >= 0.0 AND "losses_percent" < 100.0))`
 - `binding_power_basis`: `CHECK ("power_basis" IN ('ac', 'dc'))`
 - `binding_region_identity`: `UNIQUE ("id", "region_id")`
-- `horizontal_binding`: `CHECK ("tilt_degrees" = 0.0)`
 - column check (name generated by PostgreSQL): `CHECK ("region_revision" >= 0)`
 - column check (name generated by PostgreSQL): `CHECK ("validated_credential_revision" >= 0)`
 
@@ -434,13 +436,13 @@ erDiagram
         date target_date
         varchar_20 status
         timestamp_with_time_zone available_at
+        timestamp_with_time_zone retry_until "nullable"
         uuid lease_token "nullable"
         timestamp_with_time_zone lease_expires_at "nullable"
         integer attempts
         varchar_40 last_error
         timestamp_with_time_zone created_at
         bigint binding_id FK "references connections_sitebinding.id"
-        timestamp_with_time_zone retry_until "nullable"
         bigint reference_import_id FK "nullable; references forecasts_historicalreferenceimport.id"
     }
     forecasts_collectionschedule {
@@ -461,9 +463,9 @@ erDiagram
     forecasts_forecastresult {
         bigint id PK
         jsonb payload
+        jsonb daily_payloads
         timestamp_with_time_zone published_at
         bigint snapshot_id FK, UK "references forecasts_forecastsnapshot.id"
-        jsonb daily_payloads
     }
     forecasts_forecastsnapshot {
         bigint id PK
@@ -471,14 +473,14 @@ erDiagram
         jsonb normalized_intervals
         timestamp_with_time_zone collected_at
         timestamp_with_time_zone issued_at "nullable"
-        bigint job_id FK, UK "references forecasts_collectionjob.id"
         varchar_20 source_kind
-        timestamp_with_time_zone available_at "nullable"
-        timestamp_with_time_zone coverage_end "nullable"
         timestamp_with_time_zone coverage_start "nullable"
-        varchar_64 weather_error
+        timestamp_with_time_zone coverage_end "nullable"
+        timestamp_with_time_zone available_at "nullable"
         jsonb weather_payload "nullable"
+        varchar_64 weather_error
         bigint binding_id FK "references connections_sitebinding.id"
+        bigint job_id FK, UK "references forecasts_collectionjob.id"
     }
     forecasts_historicalreferenceimport {
         bigint id PK
@@ -517,8 +519,8 @@ erDiagram
     forecasts_historicalreferenceimport |o--o{ forecasts_collectionjob : "reference_import_id"
     regions_region ||--o| forecasts_collectionschedule : "region_id"
     forecasts_forecastsnapshot ||--o| forecasts_forecastresult : "snapshot_id"
-    forecasts_collectionjob ||--o| forecasts_forecastsnapshot : "job_id"
     connections_sitebinding ||--o{ forecasts_forecastsnapshot : "binding_id"
+    forecasts_collectionjob ||--o| forecasts_forecastsnapshot : "job_id"
     connections_sitebinding ||--o{ forecasts_historicalreferenceimport : "binding_id"
     auth_user ||--o{ forecasts_historicalreferenceimport : "imported_by_id"
     auth_user ||--o{ forecasts_referencecapacitynormalization : "authorized_by_id"
@@ -554,7 +556,7 @@ erDiagram
 - `snapshot_binding_source_age`: `INDEX ("binding_id", "source_kind", "collected_at" DESC, "available_at" DESC, "id" DESC)`
 - `snapshot_coverage_bounds`: `CHECK ((("coverage_end" IS NULL AND "coverage_start" IS NULL) OR ("coverage_end" > ("coverage_start") AND "coverage_end" IS NOT NULL AND "coverage_start" IS NOT NULL)))`
 - `snapshot_job_binding_fk`: `FOREIGN KEY (job_id, binding_id) REFERENCES forecasts_collectionjob (id, binding_id) DEFERRABLE INITIALLY DEFERRED`
-- `snapshot_source_kind`: `CHECK ("source_kind" IN ('unknown', 'forecast', 'estimated_actuals'))`
+- `snapshot_source_kind`: `CHECK ("source_kind" IN ('forecast', 'estimated_actuals'))`
 
 #### `forecasts_historicalreferenceimport`
 
@@ -596,6 +598,12 @@ erDiagram
         date window_start
         date window_end
         timestamp_with_time_zone cutoff_at
+        bigint observation_id_cutoff "nullable"
+        jsonb production_snapshot_ids
+        varchar_80 measurement_selection_policy
+        jsonb reference_snapshot_ids "nullable"
+        jsonb incident_revision_ids
+        varchar_64 input_fingerprint
         timestamp_with_time_zone created_at
         timestamp_with_time_zone completed_at "nullable"
         varchar_20 status
@@ -609,16 +617,10 @@ erDiagram
         integer attempts
         varchar_200 last_error
         bigint binding_id FK "references connections_sitebinding.id"
+        bigint comparison_activation_id FK "nullable; references plants_calibrationactivation.id"
         integer requested_by_id FK "references auth_user.id"
         bigint plant_id FK "references plants_plant.id"
         bigint configuration_id FK "references plants_plantconfiguration.id"
-        bigint observation_id_cutoff "nullable"
-        bigint comparison_activation_id FK "nullable; references plants_calibrationactivation.id"
-        varchar_64 input_fingerprint
-        jsonb reference_snapshot_ids "nullable"
-        jsonb incident_revision_ids
-        jsonb production_snapshot_ids
-        varchar_80 measurement_selection_policy
     }
     plants_forecastissuance {
         bigint id PK
@@ -631,20 +633,19 @@ erDiagram
         jsonb outage_scenarios
         jsonb native_intervals
         bigint calibration_id FK "nullable; references plants_calibrationrun.id"
-        bigint configuration_id FK "references plants_plantconfiguration.id"
-        bigint plant_id FK "references plants_plant.id"
         bigint snapshot_id FK "references forecasts_forecastsnapshot.id"
+        bigint plant_id FK "references plants_plant.id"
+        bigint configuration_id FK "references plants_plantconfiguration.id"
     }
     plants_plant {
         bigint id PK
         varchar_200 name
         timestamp_with_time_zone created_at
+        boolean automatic_calibration_enabled
+        timestamp_with_time_zone next_calibration_check_at "nullable"
+        integer automatic_calibration_enabled_by_id FK "nullable; references auth_user.id"
         bigint region_id FK "references regions_region.id"
         bigint current_configuration_id FK "nullable; references plants_plantconfiguration.id"
-        timestamp_with_time_zone deleted_at "nullable"
-        boolean automatic_calibration_enabled
-        integer automatic_calibration_enabled_by_id FK "nullable; references auth_user.id"
-        timestamp_with_time_zone next_calibration_check_at "nullable"
     }
     plants_plantconfiguration {
         bigint id PK
@@ -652,14 +653,14 @@ erDiagram
         double_precision dc_capacity_mw
         double_precision inverter_capacity_mw "nullable"
         double_precision export_limit_mw "nullable"
+        varchar_10 mounting_type
+        double_precision surface_tilt "nullable"
+        double_precision surface_azimuth "nullable"
         varchar_20 measurement_basis
         timestamp_with_time_zone created_at
         bigint binding_id FK "references connections_sitebinding.id"
         integer created_by_id FK "references auth_user.id"
         bigint plant_id FK "references plants_plant.id"
-        varchar_10 mounting_type
-        double_precision surface_azimuth "nullable"
-        double_precision surface_tilt "nullable"
         bigint region_id FK "references regions_region.id"
     }
     plants_plantevent {
@@ -669,16 +670,6 @@ erDiagram
         timestamp_with_time_zone created_at
         integer actor_id FK "nullable; references auth_user.id"
         bigint plant_id FK "references plants_plant.id"
-    }
-    plants_plantforecast {
-        bigint id PK
-        integer resolution_minutes
-        date target_date
-        jsonb payload
-        timestamp_with_time_zone created_at
-        bigint calibration_id FK "nullable; references plants_calibrationrun.id"
-        bigint configuration_id FK "references plants_plantconfiguration.id"
-        bigint snapshot_id FK "references forecasts_forecastsnapshot.id"
     }
     plants_plantsubmission {
         bigint id PK
@@ -701,11 +692,11 @@ erDiagram
         varchar_20 quality
         varchar_200 source
         timestamp_with_time_zone recorded_at
+        boolean is_current
+        boolean is_reverted
         bigint configuration_id FK "references plants_plantconfiguration.id"
         bigint plant_id FK "references plants_plant.id"
         integer recorded_by_id FK "references auth_user.id"
-        boolean is_current
-        boolean is_reverted
         bigint supersedes_id FK, UK "nullable; references plants_productionobservation.id"
     }
     auth_user |o--o{ plants_calibrationactivation : "actor_id"
@@ -713,26 +704,23 @@ erDiagram
     plants_plant ||--o{ plants_calibrationactivation : "plant_id"
     plants_plantconfiguration ||--o{ plants_calibrationactivation : "configuration_id"
     connections_sitebinding ||--o{ plants_calibrationrun : "binding_id"
+    plants_calibrationactivation |o--o{ plants_calibrationrun : "comparison_activation_id"
     auth_user ||--o{ plants_calibrationrun : "requested_by_id"
     plants_plant ||--o{ plants_calibrationrun : "plant_id"
     plants_plantconfiguration ||--o{ plants_calibrationrun : "configuration_id"
-    plants_calibrationactivation |o--o{ plants_calibrationrun : "comparison_activation_id"
     plants_calibrationrun |o--o{ plants_forecastissuance : "calibration_id"
-    plants_plantconfiguration ||--o{ plants_forecastissuance : "configuration_id"
-    plants_plant ||--o{ plants_forecastissuance : "plant_id"
     forecasts_forecastsnapshot ||--o{ plants_forecastissuance : "snapshot_id"
+    plants_plant ||--o{ plants_forecastissuance : "plant_id"
+    plants_plantconfiguration ||--o{ plants_forecastissuance : "configuration_id"
+    auth_user |o--o{ plants_plant : "automatic_calibration_enabled_by_id"
     regions_region ||--o{ plants_plant : "region_id"
     plants_plantconfiguration |o--o{ plants_plant : "current_configuration_id"
-    auth_user |o--o{ plants_plant : "automatic_calibration_enabled_by_id"
     connections_sitebinding ||--o{ plants_plantconfiguration : "binding_id"
     auth_user ||--o{ plants_plantconfiguration : "created_by_id"
     plants_plant ||--o{ plants_plantconfiguration : "plant_id"
     regions_region ||--o{ plants_plantconfiguration : "region_id"
     auth_user |o--o{ plants_plantevent : "actor_id"
     plants_plant ||--o{ plants_plantevent : "plant_id"
-    plants_calibrationrun |o--o{ plants_plantforecast : "calibration_id"
-    plants_plantconfiguration ||--o{ plants_plantforecast : "configuration_id"
-    forecasts_forecastsnapshot ||--o{ plants_plantforecast : "snapshot_id"
     plants_plant ||--o| plants_plantsubmission : "plant_id"
     auth_user ||--o{ plants_plantsubmission : "submitted_by_id"
     plants_plantconfiguration ||--o{ plants_productionobservation : "configuration_id"
@@ -775,7 +763,7 @@ erDiagram
 
 #### `plants_plant`
 
-- `one_active_plant_per_region`: `UNIQUE INDEX ("region_id") WHERE "deleted_at" IS NULL`
+- `one_plant_per_region`: `UNIQUE ("region_id")`
 - `plant_current_config_owner_fk`: `FOREIGN KEY (current_configuration_id, id) REFERENCES plants_plantconfiguration (id, plant_id) DEFERRABLE INITIALLY DEFERRED`
 - `plant_region_identity`: `UNIQUE ("id", "region_id")`
 
@@ -796,13 +784,6 @@ erDiagram
 - `plant_surface_azimuth_valid`: `CHECK (("surface_azimuth" IS NULL OR ("surface_azimuth" >= 0.0 AND "surface_azimuth" < 360.0)))`
 - `plant_surface_tilt_valid`: `CHECK (("surface_tilt" IS NULL OR ("surface_tilt" >= 0.0 AND "surface_tilt" <= 90.0)))`
 - column check (name generated by PostgreSQL): `CHECK ("revision" >= 0)`
-
-#### `plants_plantforecast`
-
-- `forecast_calibration_config_fk`: `FOREIGN KEY (calibration_id, configuration_id) REFERENCES plants_calibrationrun (id, configuration_id) DEFERRABLE INITIALLY DEFERRED`
-- `plant_forecast_resolution`: `CHECK ("resolution_minutes" IN (30, 60))`
-- `plant_forecast_unique`: `UNIQUE NULLS NOT DISTINCT ("configuration_id", "snapshot_id", "calibration_id", "resolution_minutes", "target_date")`
-- column check (name generated by PostgreSQL): `CHECK ("resolution_minutes" >= 0)`
 
 #### `plants_plantsubmission`
 
@@ -894,20 +875,19 @@ erDiagram
         integer attempts
         uuid lease_token "nullable"
         timestamp_with_time_zone lease_expires_at "nullable"
-        timestamp_with_time_zone sent_at "nullable"
-        varchar_40 last_error
-        bigint snapshot_id FK "nullable; references forecasts_forecastsnapshot.id"
-        bigint binding_id FK "nullable; references connections_sitebinding.id"
-        timestamp_with_time_zone preparation_deadline "nullable"
+        jsonb recipients
+        jsonb recipient_memberships
+        jsonb revoked_recipients
+        varchar_2 language
+        timestamp_with_time_zone preparation_deadline
         jsonb prepared_message "nullable"
         timestamp_with_time_zone transmit_started_at "nullable"
-        varchar_2 language
-        bigint schedule_id FK "references notifications_reminderschedule.id"
-        boolean grouped
-        jsonb recipient_memberships
-        jsonb recipients
-        jsonb revoked_recipients
+        timestamp_with_time_zone sent_at "nullable"
+        varchar_40 last_error
         uuid message_token UK
+        bigint binding_id FK "references connections_sitebinding.id"
+        bigint snapshot_id FK "nullable; references forecasts_forecastsnapshot.id"
+        bigint schedule_id FK "references notifications_reminderschedule.id"
     }
     notifications_notificationsettings {
         smallint id PK
@@ -916,21 +896,20 @@ erDiagram
     notifications_reminderschedule {
         bigint id PK
         boolean enabled
-        jsonb times
-        timestamp_with_time_zone effective_from
-        bigint region_id FK "references regions_region.id"
         jsonb recipients
-        integer configured_by_id FK "nullable; references auth_user.id"
-        varchar_2 language
-        timestamp_with_time_zone retired_at "nullable"
         boolean include_workspace_members
         jsonb recipient_memberships
+        jsonb times
+        timestamp_with_time_zone effective_from
+        varchar_2 language
+        integer configured_by_id FK "nullable; references auth_user.id"
+        bigint region_id FK "references regions_region.id"
     }
+    connections_sitebinding ||--o{ notifications_notificationdelivery : "binding_id"
     forecasts_forecastsnapshot |o--o{ notifications_notificationdelivery : "snapshot_id"
-    connections_sitebinding |o--o{ notifications_notificationdelivery : "binding_id"
     notifications_reminderschedule ||--o{ notifications_notificationdelivery : "schedule_id"
-    regions_region ||--o{ notifications_reminderschedule : "region_id"
     auth_user |o--o{ notifications_reminderschedule : "configured_by_id"
+    regions_region ||--o{ notifications_reminderschedule : "region_id"
 ```
 
 ### Constraints and indexes
@@ -938,9 +917,10 @@ erDiagram
 #### `notifications_notificationdelivery`
 
 - `notification_delivery_language_valid`: `CHECK ("language" IN ('en', 'tr'))`
-- `notification_delivery_status_valid`: `CHECK ("status" IN ('pending', 'retry', 'sending', 'sent', 'failed', 'uncertain', 'skipped', 'unavailable', 'cancelled'))`
+- `notification_delivery_sending_prepared`: `CHECK ((NOT ("status" = 'sending') OR "prepared_message" IS NOT NULL))`
+- `notification_delivery_status_valid`: `CHECK ("status" IN ('pending', 'retry', 'sending', 'sent', 'failed', 'uncertain', 'skipped', 'cancelled'))`
 - `notification_dispatch_ready`: `INDEX ("available_at", "id") WHERE "status" IN ('pending', 'retry', 'sending')`
-- `unique_reminder_group_slot`: `UNIQUE INDEX ("schedule_id", "scheduled_for") WHERE "grouped"`
+- `unique_reminder_group_slot`: `UNIQUE ("schedule_id", "scheduled_for")`
 - column check (name generated by PostgreSQL): `CHECK ("attempts" >= 0)`
 
 #### `notifications_notificationsettings`
@@ -952,7 +932,7 @@ erDiagram
 
 #### `notifications_reminderschedule`
 
-- `one_current_region_reminder_schedule`: `UNIQUE INDEX ("region_id") WHERE "retired_at" IS NULL`
+- `one_reminder_schedule_per_region`: `UNIQUE ("region_id")`
 - `reminder_schedule_language_valid`: `CHECK ("language" IN ('en', 'tr'))`
 
 ## metering (`pyracast.metering`)
@@ -964,24 +944,26 @@ erDiagram
         integer connection_revision
         jsonb provider_plant
         date target_day
+        date period_end_day "nullable"
+        varchar_30 source_kind
         timestamp_with_time_zone scheduled_for
         varchar_20 status
         uuid lease_token "nullable"
         timestamp_with_time_zone lease_expires_at "nullable"
         smallint attempts
         timestamp_with_time_zone next_attempt_at
+        timestamp_with_time_zone retry_until "nullable"
         varchar_40 last_error
         timestamp_with_time_zone created_at
         bigint configuration_id FK "references plants_plantconfiguration.id"
-        bigint connection_id FK "references metering_epiasconnection.id"
-        date period_end_day "nullable"
-        varchar_30 source_kind
-        timestamp_with_time_zone retry_until "nullable"
         bigint plant_id FK "references plants_plant.id"
+        bigint connection_id FK "references metering_epiasconnection.id"
     }
     metering_epiasconnection {
         bigint id PK
         bigint provider_plant_id
+        bigint settlement_plant_id "nullable"
+        timestamp_with_time_zone settlement_checked_at "nullable"
         varchar_100 eic
         varchar_300 name
         boolean enabled
@@ -990,13 +972,15 @@ erDiagram
         timestamp_with_time_zone updated_at
         integer connected_by_id FK "references auth_user.id"
         bigint plant_id FK, UK "references plants_plant.id"
-        bigint settlement_plant_id "nullable"
-        timestamp_with_time_zone settlement_checked_at "nullable"
     }
     metering_epiassnapshot {
         bigint id PK
         smallint attempt
         date target_day
+        varchar_30 source_kind
+        jsonb provider_plant
+        varchar_200 endpoint
+        varchar_40 normalization_policy
         timestamp_with_time_zone collected_at
         timestamp_with_time_zone available_at
         jsonb raw_payload
@@ -1006,14 +990,10 @@ erDiagram
         bigint configuration_id FK "references plants_plantconfiguration.id"
         bigint connection_id FK "references metering_epiasconnection.id"
         bigint job_id FK "references metering_epiascollectionjob.id"
-        varchar_200 endpoint
-        varchar_40 normalization_policy
-        jsonb provider_plant
-        varchar_30 source_kind
     }
     plants_plantconfiguration ||--o{ metering_epiascollectionjob : "configuration_id"
-    metering_epiasconnection ||--o{ metering_epiascollectionjob : "connection_id"
     plants_plant ||--o{ metering_epiascollectionjob : "plant_id"
+    metering_epiasconnection ||--o{ metering_epiascollectionjob : "connection_id"
     auth_user ||--o{ metering_epiasconnection : "connected_by_id"
     plants_plant ||--o| metering_epiasconnection : "plant_id"
     plants_plantconfiguration ||--o{ metering_epiassnapshot : "configuration_id"
@@ -1070,11 +1050,11 @@ erDiagram
         timestamp_with_time_zone closed_at "nullable"
         varchar_500 decision_reason
         timestamp_with_time_zone outcome_seen_at "nullable"
+        jsonb reviewed_context
         bigint configuration_id FK "references plants_plantconfiguration.id"
         bigint plant_id FK "references plants_plant.id"
         integer proposed_by_id FK "references auth_user.id"
         integer reviewed_by_id FK "nullable; references auth_user.id"
-        jsonb reviewed_context
     }
     change_requests_incidentchange {
         bigint id PK
@@ -1126,11 +1106,13 @@ erDiagram
 - `change_request_idempotency_unique`: `UNIQUE ("proposer_membership_id", "idempotency_key")`
 - `change_request_kind_valid`: `CHECK ("kind" IN ('production', 'incident'))`
 - `change_request_review_state`: `CHECK ((("closed_at" IS NULL AND "decision_reason" = '' AND "outcome_seen_at" IS NULL AND "reviewed_by_id" IS NULL AND "status" = 'pending') OR ("closed_at" IS NOT NULL AND "outcome_seen_at" IS NULL AND "reviewed_by_id" IS NULL AND "status" = 'withdrawn') OR ("closed_at" IS NOT NULL AND "reviewed_by_id" IS NOT NULL AND "status" IN ('approved', 'rejected'))))`
+- `changerequest_status_chk`: `CHECK ("status" IN ('pending', 'approved', 'rejected', 'withdrawn'))`
 - `proposal_configuration_owner_fk`: `FOREIGN KEY (configuration_id, plant_id) REFERENCES plants_plantconfiguration (id, plant_id) DEFERRABLE INITIALLY DEFERRED`
 - column check (name generated by PostgreSQL): `CHECK ("proposer_membership_id" >= 0)`
 
 #### `change_requests_incidentchange`
 
+- `incidentchange_action_chk`: `CHECK ("action" IN ('create', 'update', 'resolve', 'cancel'))`
 - `proposal_incident_dc_finite`: `CHECK (("available_dc_mw" IS NULL OR ("available_dc_mw" >= 0.0 AND "available_dc_mw" < 'Infinity'::float8)))`
 - `proposal_incident_end_required`: `CHECK ((NOT ("action" = 'resolve') OR "ends_at" IS NOT NULL))`
 - `proposal_incident_export_finite`: `CHECK (("available_export_mw" IS NULL OR ("available_export_mw" >= 0.0 AND "available_export_mw" < 'Infinity'::float8)))`

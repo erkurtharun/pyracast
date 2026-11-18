@@ -55,7 +55,7 @@ sequenceDiagram
 - Authentication: `SessionAuthentication` with CSRF; `request()` in `web/src/lib/api.ts` sends `X-CSRFToken`.
 - View: `IsAuthenticated`, then `WorkspaceWritePermission` (`pyracast.api.permissions`) admits non-safe methods only for an active administrator of `tenant_id`, without a lock. `GET sites/` needs membership (`site_queryset` calls `require_member`). `PlantsView.post` then resolves the region in the tenant (`plant_queryset`, `require_member`), so an unknown or trashed region is 404.
 - Operation: `require_workspace_admin` (`pyracast.accounts.operations`) in `submit_region` and `create_plant` locks the tenant and re-checks the role; `submit_site` runs both.
-- Database: `one_active_region_per_tenant_location`, `one_active_plant_per_region`, `submission_*` check constraints, `region_latitude`, `region_longitude`, `region_status`.
+- Database: `one_active_region_per_tenant_location`, `one_plant_per_region`, `submission_*` check constraints, `region_latitude`, `region_longitude`, `region_status`.
 - UI: the button and wizard are admin-only (`canManage`) as a convenience only.
 
 ## Failure paths

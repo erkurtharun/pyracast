@@ -16,10 +16,10 @@ from pyracast.plants.models import (
     CalibrationRun,
     ForecastIssuance,
     PlantConfiguration,
-    PlantForecast,
     ProductionObservation,
 )
 from pyracast.plants.performance import forecast_performance
+from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
 from tests.support.domain import NOW
 from tests.support.forecast_performance import DAY, measurements, publish, selected_factor
@@ -49,7 +49,6 @@ def test_performance_reads_frozen_native_clipping_and_keeps_read_only(
     assert result["days"][0]["factor"] == 1
     assert result["days"][0]["calibration_id"] is None
     assert result["days"][0]["snapshot_id"] == source.pk
-    assert not PlantForecast.objects.exists()
     assert ForecastIssuance.objects.count() == 1
 
 
@@ -209,10 +208,9 @@ def test_performance_scope_and_date_validation(monkeypatch: pytest.MonkeyPatch) 
     assert response.status_code == 200
     assert response.json()["requested_days"] == 1
     assert client.get(path, {"start_date": "bad"}).status_code == 400
-    plant.deleted_at = NOW
-    plant.save()
+    Region.objects.filter(pk=plant.region_id).update(deleted_at=NOW)
     assert client.get(path).status_code == 404
-    plant.deleted_at = None
+    Region.objects.filter(pk=plant.region_id).update(deleted_at=None)
     plant.current_configuration = None
     plant.save()
     empty = forecast_performance(plant)

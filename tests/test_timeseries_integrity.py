@@ -14,7 +14,6 @@ from pyracast.plants.models import (
     CalibrationRun,
     Plant,
     PlantConfiguration,
-    PlantForecast,
     PlantSubmission,
     ProductionObservation,
 )
@@ -113,7 +112,10 @@ def test_configuration_owner_keys_protect_parent_updates(
         transaction.atomic(),
     ):
         if parent == "plant":
-            Plant.objects.filter(pk=first.plant_id).update(region=second.region, deleted_at=NOW)
+            empty = Region.objects.create(
+                tenant=second.region.tenant, name="Empty", latitude=42, longitude=31, timezone="UTC"
+            )
+            Plant.objects.filter(pk=first.plant_id).update(region=empty)
         else:
             SiteBinding.objects.filter(pk=first.binding_id).update(region=second.region)
 
@@ -202,7 +204,7 @@ def test_database_rejects_configuration_from_another_tenant(
                 )
 
 
-@pytest.mark.parametrize("record", ["activation", "comparison", "forecast"])
+@pytest.mark.parametrize("record", ["activation", "comparison"])
 def test_database_rejects_calibration_from_another_configuration(
     owners: tuple[System, PlantConfiguration, PlantConfiguration], record: str
 ) -> None:
@@ -211,7 +213,6 @@ def test_database_rejects_calibration_from_another_configuration(
     constraint = {
         "activation": "activation_calibration_config_fk",
         "comparison": "calibration_comparison_config_fk",
-        "forecast": "forecast_calibration_config_fk",
     }[record]
     with pytest.raises(IntegrityError, match=constraint), transaction.atomic():  # noqa: PT012 -- commit checks the selected write.
         match record:
@@ -226,30 +227,6 @@ def test_database_rejects_calibration_from_another_configuration(
                 candidate = calibration(first)
                 CalibrationRun.objects.filter(pk=candidate.pk).update(
                     comparison_activation=activation
-                )
-            case "forecast":
-                from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
-
-                job = CollectionJob.objects.create(
-                    binding=system.binding,
-                    target_date=NOW.date(),
-                    scheduled_slot=NOW,
-                    available_at=NOW,
-                )
-                snapshot = ForecastSnapshot.objects.create(
-                    job=job,
-                    binding=system.binding,
-                    raw_payload={},
-                    normalized_intervals=[],
-                    collected_at=NOW,
-                )
-                PlantForecast.objects.create(
-                    configuration=first,
-                    snapshot=snapshot,
-                    calibration=run,
-                    resolution_minutes=60,
-                    target_date=NOW.date(),
-                    payload={},
                 )
 
 
@@ -384,8 +361,8 @@ def test_authorized_retention_purge_removes_epias_archive_explicitly(
         readings=[],
         content_sha256="a" * 64,
     )
-    Plant.objects.filter(pk=first.plant_id).update(deleted_at=NOW)
-    assert purge_expired(NOW + RETENTION) == {"regions": 0, "plants": 1}
+    Region.objects.filter(pk=first.region_id).update(deleted_at=NOW)
+    assert purge_expired(NOW + RETENTION) == {"regions": 1, "plants": 1}
     assert not EpiasSnapshot.objects.exists()
     assert not EpiasCollectionJob.objects.exists()
     assert not EpiasConnection.objects.exists()

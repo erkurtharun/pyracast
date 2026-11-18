@@ -16,7 +16,7 @@ from pyracast.accounts.authorization import (
     requires_admin_mfa,
     tenant_membership,
 )
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 
 
 def _workspace() -> tuple[Tenant, User, User, User]:
@@ -24,21 +24,21 @@ def _workspace() -> tuple[Tenant, User, User, User]:
     administrator = User.objects.create_user(username="administrator")
     viewer = User.objects.create_user(username="viewer")
     outsider = User.objects.create_user(username="outsider")
-    Membership.objects.create(user=administrator, tenant=tenant, role=Membership.Role.ADMIN)
-    Membership.objects.create(user=viewer, tenant=tenant, role=Membership.Role.VIEWER)
+    Membership.objects.create(user=administrator, tenant=tenant, role=WorkspaceRole.ADMIN)
+    Membership.objects.create(user=viewer, tenant=tenant, role=WorkspaceRole.VIEWER)
     return tenant, administrator, viewer, outsider
 
 
 @pytest.mark.django_db
 def test_tenant_membership_returns_the_active_row_with_the_required_role() -> None:
     tenant, administrator, viewer, outsider = _workspace()
-    assert tenant_membership(viewer, tenant.pk).role == Membership.Role.VIEWER
-    assert tenant_membership(viewer, tenant.pk, role=Membership.Role.VIEWER).user == viewer
-    assert tenant_membership(administrator, tenant.pk, role=Membership.Role.ADMIN, lock=True)
+    assert tenant_membership(viewer, tenant.pk).role == WorkspaceRole.VIEWER
+    assert tenant_membership(viewer, tenant.pk, role=WorkspaceRole.VIEWER).user == viewer
+    assert tenant_membership(administrator, tenant.pk, role=WorkspaceRole.ADMIN, lock=True)
     with pytest.raises(PermissionDenied, match="administrator"):
-        tenant_membership(viewer, tenant.pk, role=Membership.Role.ADMIN)
+        tenant_membership(viewer, tenant.pk, role=WorkspaceRole.ADMIN)
     with pytest.raises(PermissionDenied, match="submit requests"):
-        tenant_membership(administrator, tenant.pk, role=Membership.Role.VIEWER)
+        tenant_membership(administrator, tenant.pk, role=WorkspaceRole.VIEWER)
     with pytest.raises(PermissionDenied, match="membership"):
         tenant_membership(outsider, tenant.pk)
     User.objects.filter(pk=viewer.pk).update(is_active=False)

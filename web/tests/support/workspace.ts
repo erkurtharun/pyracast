@@ -1,6 +1,20 @@
 import { expect, type Page } from "@playwright/test";
 
-export const region = {
+import type { components } from "../../src/lib/schema";
+
+type TenantRow = components["schemas"]["TenantOutput"];
+
+export const tenantRow = (
+    tenant: Pick<TenantRow, "id" | "name" | "role">,
+    counts: Partial<Omit<TenantRow, "id" | "name" | "role">> = {},
+): TenantRow => ({
+    pending_review_count: tenant.role === "admin" ? 0 : null,
+    unread_outcome_count: 0,
+    ...tenant,
+    ...counts,
+});
+
+export const region: components["schemas"]["RegionOutput"] = {
     id: 11,
     name: "Antalya solar park",
     latitude: 36.9,
@@ -86,7 +100,9 @@ export async function mockApi(
                 csrf_token: signedIn ? "signed-token" : "anonymous-token",
             };
         } else if (path === "/api/tenants/")
-            data = paged([{ id: 1, name: "Sunfield Energy", role: "admin" }]);
+            data = paged([
+                tenantRow({ id: 1, name: "Sunfield Energy", role: "admin" }),
+            ]);
         else if (/\/api\/tenants\/\d+\/change-requests\/$/.test(path)) {
             data = paged([]);
         } else if (

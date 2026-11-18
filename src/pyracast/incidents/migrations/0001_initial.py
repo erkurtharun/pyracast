@@ -1,21 +1,25 @@
+from typing import ClassVar
+
 import django.contrib.postgres.constraints
 import django.contrib.postgres.fields.ranges
 import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
+from django.db.migrations.operations.base import Operation
 
 import pyracast.plants.models
+from pyracast import schema_objects
 
 
 class Migration(migrations.Migration):
     initial = True
 
-    dependencies = (
-        ("plants", "0006_calibrationrun_input_fingerprint_and_more"),
+    dependencies: ClassVar = [
+        ("plants", "0001_initial"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
-    )
+    ]
 
-    operations = (
+    operations: ClassVar[list[Operation]] = [
         migrations.CreateModel(
             name="PlantIncident",
             fields=[
@@ -125,40 +129,57 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.AddConstraint(
-            model_name="incidentrevision",
-            constraint=models.UniqueConstraint(
-                fields=("incident", "revision"), name="incident_revision_unique"
-            ),
-        ),
-        migrations.AddConstraint(
             model_name="plantincident",
             constraint=models.CheckConstraint(
-                condition=models.Q(kind__in=("inverter", "panels", "grid", "other", "multiple")),
+                condition=models.Q(
+                    ("kind__in", ("inverter", "panels", "grid", "other", "multiple"))
+                ),
                 name="incident_kind_valid",
             ),
         ),
         migrations.AddConstraint(
             model_name="plantincident",
             constraint=models.CheckConstraint(
-                condition=models.Q(available_dc_mw__isnull=True)
-                | models.Q(available_dc_mw__gte=0, available_dc_mw__lt=float("inf")),
+                condition=models.Q(
+                    ("available_dc_mw__isnull", True),
+                    models.Q(("available_dc_mw__gte", 0), ("available_dc_mw__lt", float("inf"))),
+                    _connector="OR",
+                ),
                 name="incident_dc_finite",
             ),
         ),
         migrations.AddConstraint(
             model_name="plantincident",
             constraint=models.CheckConstraint(
-                condition=models.Q(available_inverter_mw__isnull=True)
-                | models.Q(available_inverter_mw__gte=0, available_inverter_mw__lt=float("inf")),
+                condition=models.Q(
+                    ("available_inverter_mw__isnull", True),
+                    models.Q(
+                        ("available_inverter_mw__gte", 0),
+                        ("available_inverter_mw__lt", float("inf")),
+                    ),
+                    _connector="OR",
+                ),
                 name="incident_inverter_finite",
             ),
         ),
         migrations.AddConstraint(
             model_name="plantincident",
             constraint=models.CheckConstraint(
-                condition=models.Q(available_export_mw__isnull=True)
-                | models.Q(available_export_mw__gte=0, available_export_mw__lt=float("inf")),
+                condition=models.Q(
+                    ("available_export_mw__isnull", True),
+                    models.Q(
+                        ("available_export_mw__gte", 0), ("available_export_mw__lt", float("inf"))
+                    ),
+                    _connector="OR",
+                ),
                 name="incident_export_finite",
             ),
         ),
-    )
+        migrations.AddConstraint(
+            model_name="incidentrevision",
+            constraint=models.UniqueConstraint(
+                fields=("incident", "revision"), name="incident_revision_unique"
+            ),
+        ),
+        *schema_objects.operations("incidents", "0001_initial"),
+    ]

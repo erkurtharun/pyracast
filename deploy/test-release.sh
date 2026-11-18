@@ -97,7 +97,10 @@ fi
 case "$MODE:$*" in
   preflight:*' --profile release pull --quiet' | redeploy-preflight:*' --profile release pull --quiet') exit 41 ;;
   deploy-check:*' run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING') exit 48 ;;
-  plan:*' run --rm --no-deps migrate pyracast migrate --plan') exit 49 ;;
+  plan:*' run --rm --no-deps migrate pyracast migrate --plan')
+    echo 'CommandError: The migration ledger names Pyracast migrations that are not on disk' >&2
+    exit 49
+    ;;
   support-rabbit:*' up -d rabbitmq') exit 42 ;;
   support-postgres:*' up -d postgres') exit 46 ;;
   drain:*' stop -t 660 worker notifications') exit 47 ;;
@@ -276,7 +279,11 @@ for MODE in preflight deploy-check plan secrets units-invalid image live-artifac
         case "$MODE" in
           preflight|redeploy-preflight) test "$result" == 41 ;;
           deploy-check) test "$result" == 48 ;;
-          plan) test "$result" == 49 ;;
+          plan)
+            test "$result" == 49
+            grep -Fq 'not on disk' /result
+            grep -q 'migrate pyracast migrate --plan$' /calls
+            ;;
           secrets) test "$result" == 52 ;;
           units-invalid) test "$result" == 54 ;;
         esac
@@ -290,6 +297,7 @@ for MODE in preflight deploy-check plan secrets units-invalid image live-artifac
         grep -Fxq 'POSTGRES_PASSWORD=old-password' /run/pyracast/database.env
         test ! -e /backup-entered
         absent ' stop '
+        absent '--kind prerelease'
         units_untouched
         ;;
       drain|backup|first-backup|record-invalid|support-postgres|support-rabbit|migration|maintenance-migration|health|tls|response)

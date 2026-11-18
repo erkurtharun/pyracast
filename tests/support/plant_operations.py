@@ -101,9 +101,7 @@ def publish_snapshot(
     )
     with transaction.atomic():
         plant = (
-            Plant.objects.select_for_update()
-            .filter(region_id=snapshot.binding.region_id, deleted_at__isnull=True)
-            .first()
+            Plant.objects.select_for_update().filter(region_id=snapshot.binding.region_id).first()
         )
         snapshot.job.status = "succeeded"
         snapshot.job.save(update_fields=["status"])

@@ -39,7 +39,6 @@ class Plant(models.Model):
         "PlantConfiguration", null=True, on_delete=models.PROTECT, related_name="+"
     )
     created_at = models.DateTimeField(auto_now_add=True)
-    deleted_at = models.DateTimeField(null=True, db_index=True)
     automatic_calibration_enabled = models.BooleanField(default=False)
     automatic_calibration_enabled_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="+"
@@ -49,11 +48,7 @@ class Plant(models.Model):
     class Meta:
         constraints = (
             models.UniqueConstraint(fields=("id", "region"), name="plant_region_identity"),
-            models.UniqueConstraint(
-                fields=("region",),
-                condition=Q(deleted_at__isnull=True),
-                name="one_active_plant_per_region",
-            ),
+            models.UniqueConstraint(fields=("region",), name="one_plant_per_region"),
         )
 
 
@@ -339,34 +334,6 @@ class CalibrationActivation(models.Model):
         constraints = (
             models.UniqueConstraint(
                 fields=("id", "configuration"), name="activation_id_config_unique"
-            ),
-        )
-
-
-class PlantForecast(models.Model):
-    configuration = models.ForeignKey(PlantConfiguration, on_delete=models.PROTECT)
-    snapshot = models.ForeignKey("forecasts.ForecastSnapshot", on_delete=models.PROTECT)
-    calibration = models.ForeignKey(CalibrationRun, null=True, on_delete=models.PROTECT)
-    resolution_minutes = models.PositiveIntegerField()
-    target_date = models.DateField()
-    payload = models.JSONField()
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = (
-            models.UniqueConstraint(
-                fields=(
-                    "configuration",
-                    "snapshot",
-                    "calibration",
-                    "resolution_minutes",
-                    "target_date",
-                ),
-                nulls_distinct=False,
-                name="plant_forecast_unique",
-            ),
-            models.CheckConstraint(
-                condition=Q(resolution_minutes__in=(30, 60)), name="plant_forecast_resolution"
             ),
         )
 

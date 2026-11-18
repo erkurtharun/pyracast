@@ -20,6 +20,7 @@ from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import PREPARATION_GRACE, enqueue_due
+from pyracast.notifications.sources import eligible_saved_forecasts
 from pyracast.notifications.views import reminder_schedule_payload
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
@@ -253,40 +254,6 @@ def test_partial_tomorrow_survives_missing_today_and_does_not_invent_daily_total
     assert delivery.prepared_message["tomorrow_complete"] is False
 
 
-def test_legacy_unprepared_recipient_reuses_existing_slot_content() -> None:
-    system, schedule = configured()
-    snapshot = complete_saved(system)
-    delivery_id = enqueue_due(SLOT)[0]
-    assert process_notification(delivery_id, SLOT)
-    extra = NotificationDelivery.objects.create(
-        schedule=schedule,
-        binding=system.binding,
-        snapshot=snapshot,
-        scheduled_for=SLOT,
-        recipients=["legacy@example.com"],
-        grouped=False,
-        available_at=SLOT,
-    )
-    schedule.recipients = ["legacy@example.com"]
-    schedule.save()
-    assert process_notification(extra.pk, SLOT)
-    original = NotificationDelivery.objects.get(pk=delivery_id)
-    extra.refresh_from_db()
-    assert original.prepared_message == extra.prepared_message
-    assert mail.outbox[0].body == mail.outbox[1].body
-
-
-def test_legacy_preparation_uses_slot_cutoff_without_grace() -> None:
-    system, _ = configured()
-    old = complete_saved(system)
-    delivery_id = enqueue_due(SLOT)[0]
-    NotificationDelivery.objects.filter(pk=delivery_id).update(preparation_deadline=None)
-    newer = complete_saved(system, SLOT + timedelta(seconds=30))
-    CollectionJob.objects.filter(pk=newer.job_id).update(scheduled_slot=SLOT)
-    assert process_notification(delivery_id, SLOT + timedelta(minutes=1))
-    assert NotificationDelivery.objects.get(pk=delivery_id).snapshot_id == old.pk
-
-
 @pytest.mark.parametrize(
     "change", ["actuals", "future_acquisition", "late_publication", "failed_job"]
 )
@@ -373,6 +340,7 @@ def test_candidate_loading_excludes_unrelated_history_and_defers_provider_json(
                 binding=system.binding,
                 job=job,
                 collected_at=job.scheduled_slot,
+                available_at=job.scheduled_slot,
                 source_kind="forecast",
                 raw_payload={"unused": "history"},
                 normalized_intervals=[],
@@ -529,3 +497,13 @@ def test_legacy_history_with_invalid_preparation_metadata_uses_sent_time(
     assert isinstance(payload, list)
     assert payload[0]["source_age_seconds"] == (SLOT - NOW).total_seconds()
     assert payload[0]["stale"] is False
+
+
+def test_a_saved_forecast_is_eligible_only_once_its_snapshot_is_available() -> None:
+    system, _ = configured()
+    snapshot = saved(system)
+    delivery = NotificationDelivery.objects.get(pk=enqueue_due(SLOT)[0])
+    ForecastSnapshot.objects.filter(pk=snapshot.pk).update(available_at=NOW)
+    assert list(eligible_saved_forecasts(delivery, SLOT)) == [snapshot]
+    ForecastSnapshot.objects.filter(pk=snapshot.pk).update(available_at=None)
+    assert not eligible_saved_forecasts(delivery, SLOT).exists()

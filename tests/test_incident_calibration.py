@@ -16,7 +16,6 @@ from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
     ForecastIssuance,
-    PlantForecast,
     ProductionObservation,
 )
 from pyracast.plants.numerics import FitResult, fit_calibration
@@ -175,7 +174,6 @@ def test_live_outlook_rejects_contaminated_factor_without_rewriting_saved_foreca
     assert past_payload == archived["result"]
     saved.refresh_from_db()
     assert saved.payloads == frozen_payloads
-    assert not PlantForecast.objects.exists()
 
 
 def test_outlook_shows_partial_outage_then_single_forecast_after_resolution(

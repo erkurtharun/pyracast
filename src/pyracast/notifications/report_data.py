@@ -157,13 +157,11 @@ def saved_report_context(
     available_at: datetime | None = None,
 ) -> dict[str, object]:
     binding = delivery.binding
-    assert binding is not None  # noqa: S101 -- Preparation requires an authorized binding.
     cutoff = known_at or delivery.scheduled_for
     today = delivery.scheduled_for.astimezone(ZoneInfo(binding.timezone)).date()
     plant = Plant.objects.filter(
         region_id=delivery.schedule.region_id,
         region__tenant_id=binding.region.tenant_id,
-        deleted_at__isnull=True,
     ).first()
     configuration = (
         PlantConfiguration.objects.select_related("binding", "plant")
@@ -209,7 +207,6 @@ def saved_report_context(
                 if (
                     day_snapshot is None
                     or day_snapshot.binding_id != binding.pk
-                    or day_snapshot.source_kind not in {"forecast", "estimated_actuals"}
                     or (offset == 1 and day_snapshot.source_kind != "forecast")
                 ):
                     context["days"].append(row)

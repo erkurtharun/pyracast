@@ -90,7 +90,6 @@ def prepare_forecast_issuances(snapshot: ForecastSnapshot) -> tuple[PreparedFore
         PlantConfiguration.objects.select_related("binding", "plant")
         .filter(
             plant__region_id=snapshot.binding.region_id,
-            plant__deleted_at__isnull=True,
             plant__current_configuration_id=F("pk"),
         )
         .first()
@@ -184,7 +183,6 @@ def save_forecast_issuances(
     for item in prepared:
         if (
             plant is None
-            or plant.deleted_at is not None
             or plant.pk != item.plant_id
             or plant.current_configuration_id != item.configuration_id
         ):

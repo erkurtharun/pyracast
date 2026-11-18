@@ -3,7 +3,7 @@ from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest
 from django.utils.translation import gettext as _
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.security import has_verified_mfa
 
 
@@ -24,9 +24,9 @@ def tenant_membership(
         membership = active_membership(actor, tenant_id)
     if membership is None:
         raise PermissionDenied("Tenant membership required.")
-    if role == Membership.Role.ADMIN and membership.role != role:
+    if role == WorkspaceRole.ADMIN and membership.role != role:
         raise PermissionDenied(_("Workspace administrator required."))
-    if role == Membership.Role.VIEWER and membership.role != role:
+    if role == WorkspaceRole.VIEWER and membership.role != role:
         raise PermissionDenied(
             _("Workspace members submit requests; administrators edit directly.")
         )

@@ -3,7 +3,14 @@ import AxeBuilder from "@axe-core/playwright";
 import { parseProduction } from "../src/lib/production";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
-import { region, plant, user, paged, mockApi } from "./support/workspace";
+import {
+    region,
+    plant,
+    user,
+    paged,
+    mockApi,
+    tenantRow,
+} from "./support/workspace";
 
 test("mock contract: signs in with CSRF, selects region, and signs out", async ({
     page,
@@ -1420,9 +1427,7 @@ test("recycle bin confirms deletion and restores a plant site with associated da
     ).toBeVisible();
 });
 
-test("recycle bin disables expired records and asks to restore a parent region first", async ({
-    page,
-}) => {
+test("recycle bin disables expired records", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await mockApi(page);
     await page.route("**/trash/regions/", async (route) =>
@@ -1434,22 +1439,6 @@ test("recycle bin disables expired records and asks to restore a parent region f
                     deleted_at: "2026-01-01T00:00:00Z",
                     purge_after: "2026-01-31T00:00:00Z",
                     can_restore: false,
-                },
-            ]),
-        }),
-    );
-    await page.route("**/trash/plants/", async (route) =>
-        route.fulfill({
-            json: paged([
-                {
-                    id: 92,
-                    name: "Plant in deleted region",
-                    deleted_at: "2026-11-10T00:00:00Z",
-                    purge_after: "2026-12-10T00:00:00Z",
-                    can_restore: false,
-                    region_id: 11,
-                    region_name: region.name,
-                    parent_deleted: true,
                 },
             ]),
         }),
@@ -1466,15 +1455,6 @@ test("recycle bin disables expired records and asks to restore a parent region f
     ).toBeDisabled();
     await expect(
         page.getByText("The 30-day restore period has ended.", { exact: true }),
-    ).toBeVisible();
-    await expect(
-        page.getByRole("button", {
-            name: "Restore Plant in deleted region",
-            exact: true,
-        }),
-    ).toBeDisabled();
-    await expect(
-        page.getByText("Restore its location first.", { exact: true }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", { name: /permanently delete|purge/i }),
@@ -1497,8 +1477,8 @@ test("recycle bin ignores a prior workspace response and restores only in the se
     await page.route("**/api/tenants/", async (route) =>
         route.fulfill({
             json: paged([
-                { id: 1, name: "Sunfield Energy", role: "admin" },
-                { id: 2, name: "Second workspace", role: "admin" },
+                tenantRow({ id: 1, name: "Sunfield Energy", role: "admin" }),
+                tenantRow({ id: 2, name: "Second workspace", role: "admin" }),
             ]),
         }),
     );

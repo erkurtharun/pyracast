@@ -13,7 +13,7 @@ from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecasting import plant_forecast
 from pyracast.plants.history import plant_outlook
-from pyracast.plants.models import ForecastIssuance, PlantConfiguration, PlantForecast
+from pyracast.plants.models import ForecastIssuance, PlantConfiguration
 from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
@@ -46,7 +46,6 @@ def test_forecast_replay_requires_electrical_publication_before_cutoff(
         as_of=datetime.fromisoformat(available["as_of"]),
     )
     assert replay == available
-    assert not PlantForecast.objects.exists()
 
 
 def test_later_pre_sunrise_forecast_replaces_previous_evening_archive(
@@ -95,7 +94,6 @@ def test_new_configuration_cannot_reconstruct_a_historical_forecast(
         "estimated_actuals_unavailable" if source == "auto" else "configuration_unavailable"
     )
     assert result["outage_scenario"] is None
-    assert not PlantForecast.objects.exists()
 
 
 def test_eligible_archived_forecast_survives_a_later_configuration(
@@ -113,7 +111,6 @@ def test_eligible_archived_forecast_survives_a_later_configuration(
     expected["quality_flags"] = [*expected["quality_flags"], "previous_configuration"]
     assert result["result"] == expected
     assert result["freshness"] == "stale"
-    assert not PlantForecast.objects.exists()
 
 
 def test_archive_api_keeps_tenant_boundaries_after_source_changes(
@@ -136,7 +133,6 @@ def test_archive_api_keeps_tenant_boundaries_after_source_changes(
     assert client.get(path, {"date": DAY.isoformat()}).status_code == 403
     own_path = path.replace(f"tenants/{system.tenant.pk}", f"tenants/{other.pk}")
     assert client.get(own_path, {"date": DAY.isoformat()}).status_code == 404
-    assert not PlantForecast.objects.exists()
 
 
 def actuals(system: System, *, acquired: datetime = NOW - timedelta(hours=1)) -> ForecastSnapshot:
@@ -162,7 +158,6 @@ def test_past_actuals_use_declared_configuration_without_backdating_or_replacing
     archived_payload = archived["result"]
     assert isinstance(archived_payload, dict)
     assert archived_payload["energy_mwh"] == 1560
-    assert not PlantForecast.objects.exists()
     PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(created_at=NOW)
     client = Client()
     client.force_login(system.member)
@@ -194,7 +189,6 @@ def test_past_actuals_use_declared_configuration_without_backdating_or_replacing
             flag for flag in archived_payload["quality_flags"] if flag != "archived_forecast"
         ],
     }
-    assert not PlantForecast.objects.exists()
     assert PlantConfiguration.objects.get(pk=plant.current_configuration_id).created_at == NOW
     client.force_login(User.objects.create_user("unrelated-user"))
     assert client.get(path, {"date": DAY.isoformat(), "data_source": "auto"}).status_code == 403

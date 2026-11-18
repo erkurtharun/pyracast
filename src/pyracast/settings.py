@@ -114,7 +114,6 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.Argon2PasswordHasher",
-    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
 ]
 AUTHENTICATION_BACKENDS = ["pyracast.accounts.authentication.AuthenticationBackend"]
 ACCOUNT_ADAPTER = "pyracast.accounts.adapters.AccountAdapter"
@@ -220,16 +219,27 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "Pyracast API",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "POSTPROCESSING_HOOKS": [
+        "drf_spectacular.hooks.postprocess_schema_enums",
+        "pyracast.api.schema.stored_vocabularies",
+    ],
     "ENUM_NAME_OVERRIDES": {
-        "PowerBasisEnum": [("ac", "ac"), ("dc", "dc")],
+        "LanguageEnum": "pyracast.accounts.models.Language",
+        "WorkspaceRoleEnum": "pyracast.accounts.models.WorkspaceRole",
+        "InvitationDeliveryStatusEnum": "pyracast.accounts.models.InvitationDeliveryStatus",
+        "RegionStatusEnum": "pyracast.regions.models.RegionStatus",
+        "LocationChangeStatusEnum": "pyracast.regions.models.LocationChangeStatus",
+        "AuditActionEnum": "pyracast.regions.models.AuditAction",
+        "PowerBasisEnum": "pyracast.connections.models.PowerBasis",
+        "BindingHealthEnum": "pyracast.connections.models.BindingHealth",
+        "ChangeRequestKindEnum": "pyracast.change_requests.models.ChangeRequestKind",
+        "ChangeRequestStatusEnum": "pyracast.change_requests.models.ChangeRequestStatus",
+        "ProductionChangeActionEnum": "pyracast.change_requests.models.ProductionChangeAction",
+        "IncidentChangeActionEnum": "pyracast.change_requests.models.IncidentChangeAction",
         "CalibrationStatusEnum": "pyracast.plants.serializers.calibration_status_choices",
         "ForecastSourceKindEnum": ["forecast", "estimated_actuals", "mixed"],
         "ProductionQualityEnum": "pyracast.plants.models.OBSERVATION_QUALITIES",
-        "ChangeRequestStatusEnum": ["pending", "approved", "rejected", "withdrawn"],
-        "ChangeRequestKindEnum": ["production", "incident"],
         "IncidentKindEnum": ["inverter", "panels", "grid", "other", "multiple"],
-        "IncidentChangeActionEnum": ["create", "update", "resolve", "cancel"],
-        "ProductionChangeActionEnum": ["set", "revert"],
     },
 }
 LANGUAGE_CODE = "en"

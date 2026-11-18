@@ -1019,46 +1019,6 @@
                         "description": ""
                     }
                 }
-            },
-            "delete": {
-                "operationId": "tenants_regions_plants_destroy",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "plant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No response body"
-                    }
-                }
             }
         },
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibration/automation/": {
@@ -2321,55 +2281,6 @@
                 }
             }
         },
-        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/restore/": {
-            "post": {
-                "operationId": "tenants_regions_plants_restore_create",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "plant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/PlantOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
         "/api/tenants/{tenant_id}/regions/{region_id}/reminders/": {
             "get": {
                 "operationId": "tenants_regions_reminders_retrieve",
@@ -2584,48 +2495,6 @@
                 }
             }
         },
-        "/api/tenants/{tenant_id}/trash/plants/": {
-            "get": {
-                "operationId": "tenants_trash_plants_list",
-                "parameters": [
-                    {
-                        "name": "page",
-                        "required": false,
-                        "in": "query",
-                        "description": "A page number within the paginated result set.",
-                        "schema": {
-                            "type": "integer"
-                        }
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/PaginatedTrashedPlantOutputList"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
         "/api/tenants/{tenant_id}/trash/regions/": {
             "get": {
                 "operationId": "tenants_trash_regions_list",
@@ -2713,6 +2582,30 @@
                 },
                 "required": ["review_fingerprint"]
             },
+            "AuditActionEnum": {
+                "enum": [
+                    "region_renamed",
+                    "location_change_requested",
+                    "location_change_approved",
+                    "location_change_rejected",
+                    "location_change_rebased",
+                    "binding_configured",
+                    "connection_validated",
+                    "region_approved",
+                    "region_rejected",
+                    "region_suspended",
+                    "region_trashed",
+                    "region_restored",
+                    "collection_schedule_updated",
+                    "historical_reference_imported",
+                    "reference_capacity_normalized",
+                    "provider_account_created",
+                    "provider_secret_rotated",
+                    "provider_cooldown_cleared"
+                ],
+                "type": "string",
+                "description": "* `region_renamed` - Plant location renamed\n* `location_change_requested` - Location change requested\n* `location_change_approved` - Location change approved\n* `location_change_rejected` - Location change rejected\n* `location_change_rebased` - Location change request moved to the new revision\n* `binding_configured` - Provider connection configured\n* `connection_validated` - Provider connection validated\n* `region_approved` - Plant approved\n* `region_rejected` - Plant rejected\n* `region_suspended` - Plant suspended\n* `region_trashed` - Plant location moved to trash\n* `region_restored` - Plant location restored\n* `collection_schedule_updated` - Collection schedule updated\n* `historical_reference_imported` - Historical reference imported\n* `reference_capacity_normalized` - Reference capacity normalized\n* `provider_account_created` - Provider account created\n* `provider_secret_rotated` - Provider key rotated\n* `provider_cooldown_cleared` - Provider request pause cleared"
+            },
             "AutomaticCalibrationAttemptOutput": {
                 "type": "object",
                 "properties": {
@@ -2737,6 +2630,11 @@
                 "enum": ["activated", "skipped"],
                 "type": "string",
                 "description": "* `activated` - activated\n* `skipped` - skipped"
+            },
+            "BindingHealthEnum": {
+                "enum": ["unknown", "healthy", "error"],
+                "type": "string",
+                "description": "* `unknown` - Unknown\n* `healthy` - Healthy\n* `error` - Error"
             },
             "CalibrationAutomationOutput": {
                 "type": "object",
@@ -2981,7 +2879,7 @@
             "ChangeRequestKindEnum": {
                 "enum": ["production", "incident"],
                 "type": "string",
-                "description": "* `production` - production\n* `incident` - incident"
+                "description": "* `production` - Production\n* `incident` - Incident"
             },
             "ChangeRequestOutput": {
                 "type": "object",
@@ -3103,7 +3001,7 @@
             "ChangeRequestStatusEnum": {
                 "enum": ["pending", "approved", "rejected", "withdrawn"],
                 "type": "string",
-                "description": "* `pending` - pending\n* `approved` - approved\n* `rejected` - rejected\n* `withdrawn` - withdrawn"
+                "description": "* `pending` - Pending\n* `approved` - Approved\n* `rejected` - Rejected\n* `withdrawn` - Withdrawn"
             },
             "ChangeRequestSummaryOutput": {
                 "type": "object",
@@ -3431,11 +3329,6 @@
                 },
                 "required": ["ends_at", "starts_at"]
             },
-            "DeliveryStatusEnum": {
-                "enum": ["pending", "accepted", "failed", "uncertain"],
-                "type": "string",
-                "description": "* `pending` - Pending\n* `accepted` - Accepted\n* `failed` - Failed\n* `uncertain` - Uncertain"
-            },
             "EpiasConnectionOutput": {
                 "type": "object",
                 "properties": {
@@ -3623,7 +3516,7 @@
             "IncidentChangeActionEnum": {
                 "enum": ["create", "update", "resolve", "cancel"],
                 "type": "string",
-                "description": "* `create` - create\n* `update` - update\n* `resolve` - resolve\n* `cancel` - cancel"
+                "description": "* `create` - Create\n* `update` - Update\n* `resolve` - Resolve\n* `cancel` - Cancel"
             },
             "IncidentChangeOutput": {
                 "type": "object",
@@ -3911,10 +3804,15 @@
                         "type": "integer"
                     },
                     "role": {
-                        "$ref": "#/components/schemas/RoleEnum"
+                        "$ref": "#/components/schemas/WorkspaceRoleEnum"
                     }
                 },
                 "required": ["role", "tenant_id"]
+            },
+            "InvitationDeliveryStatusEnum": {
+                "enum": ["pending", "sent", "failed", "uncertain"],
+                "type": "string",
+                "description": "* `pending` - Pending\n* `sent` - Sent\n* `failed` - Failed\n* `uncertain` - Uncertain"
             },
             "InvitationInput": {
                 "type": "object",
@@ -3946,7 +3844,7 @@
                     "delivery_status": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/DeliveryStatusEnum"
+                                "$ref": "#/components/schemas/InvitationDeliveryStatusEnum"
                             }
                         ],
                         "readOnly": true
@@ -3957,7 +3855,7 @@
             "LanguageEnum": {
                 "enum": ["en", "tr"],
                 "type": "string",
-                "description": "* `en` - en\n* `tr` - tr"
+                "description": "* `en` - English\n* `tr` - Türkçe"
             },
             "LanguageInput": {
                 "type": "object",
@@ -4034,7 +3932,11 @@
                         "readOnly": true
                     },
                     "status": {
-                        "type": "string",
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/LocationChangeStatusEnum"
+                            }
+                        ],
                         "readOnly": true
                     },
                     "created_at": {
@@ -4060,6 +3962,11 @@
                     "status",
                     "timezone"
                 ]
+            },
+            "LocationChangeStatusEnum": {
+                "enum": ["pending", "approved", "rejected"],
+                "type": "string",
+                "description": "* `pending` - Pending\n* `approved` - Approved\n* `rejected` - Rejected"
             },
             "MeasurementBasisEnum": {
                 "enum": ["net_export", "ac_generation"],
@@ -4410,34 +4317,6 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/TenantOutput"
-                        }
-                    }
-                }
-            },
-            "PaginatedTrashedPlantOutputList": {
-                "type": "object",
-                "required": ["count", "results"],
-                "properties": {
-                    "count": {
-                        "type": "integer",
-                        "example": 123
-                    },
-                    "next": {
-                        "type": "string",
-                        "nullable": true,
-                        "format": "uri",
-                        "example": "http://api.example.org/accounts/?page=4"
-                    },
-                    "previous": {
-                        "type": "string",
-                        "nullable": true,
-                        "format": "uri",
-                        "example": "http://api.example.org/accounts/?page=2"
-                    },
-                    "results": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/TrashedPlantOutput"
                         }
                     }
                 }
@@ -5023,10 +4902,15 @@
                     "surface_tilt"
                 ]
             },
+            "PowerBasisEnum": {
+                "enum": ["ac", "dc"],
+                "type": "string",
+                "description": "* `ac` - AC\n* `dc` - DC"
+            },
             "ProductionChangeActionEnum": {
                 "enum": ["set", "revert"],
                 "type": "string",
-                "description": "* `set` - set\n* `revert` - revert"
+                "description": "* `set` - Set\n* `revert` - Revert"
             },
             "ProductionChangeRow": {
                 "type": "object",
@@ -5698,7 +5582,11 @@
                         "readOnly": true
                     },
                     "status": {
-                        "type": "string",
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/RegionStatusEnum"
+                            }
+                        ],
                         "readOnly": true
                     }
                 },
@@ -5711,6 +5599,11 @@
                     "status",
                     "timezone"
                 ]
+            },
+            "RegionStatusEnum": {
+                "enum": ["pending", "approved", "suspended", "rejected"],
+                "type": "string",
+                "description": "* `pending` - Awaiting approval\n* `approved` - Approved\n* `suspended` - Suspended\n* `rejected` - Rejected"
             },
             "RejectionInput": {
                 "type": "object",
@@ -5950,11 +5843,6 @@
                 },
                 "required": ["expected_revision"]
             },
-            "RoleEnum": {
-                "enum": ["admin", "viewer"],
-                "type": "string",
-                "description": "* `admin` - Administrator\n* `viewer` - Viewer"
-            },
             "SessionOutput": {
                 "type": "object",
                 "properties": {
@@ -6132,7 +6020,11 @@
                         "readOnly": true
                     },
                     "status": {
-                        "type": "string",
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/RegionStatusEnum"
+                            }
+                        ],
                         "readOnly": true
                     },
                     "plant": {
@@ -6175,7 +6067,7 @@
                     "role": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/RoleEnum"
+                                "$ref": "#/components/schemas/WorkspaceRoleEnum"
                             }
                         ],
                         "readOnly": true
@@ -6196,52 +6088,6 @@
                     "pending_review_count",
                     "role",
                     "unread_outcome_count"
-                ]
-            },
-            "TrashedPlantOutput": {
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "integer",
-                        "readOnly": true
-                    },
-                    "name": {
-                        "type": "string",
-                        "readOnly": true
-                    },
-                    "region_id": {
-                        "type": "integer"
-                    },
-                    "region_name": {
-                        "type": "string"
-                    },
-                    "parent_deleted": {
-                        "type": "boolean",
-                        "readOnly": true
-                    },
-                    "deleted_at": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "purge_after": {
-                        "type": "string",
-                        "format": "date-time",
-                        "readOnly": true
-                    },
-                    "can_restore": {
-                        "type": "boolean",
-                        "readOnly": true
-                    }
-                },
-                "required": [
-                    "can_restore",
-                    "deleted_at",
-                    "id",
-                    "name",
-                    "parent_deleted",
-                    "purge_after",
-                    "region_id",
-                    "region_name"
                 ]
             },
             "TrashedRegionOutput": {
@@ -6326,7 +6172,7 @@
                         "format": "email"
                     },
                     "role": {
-                        "$ref": "#/components/schemas/RoleEnum"
+                        "$ref": "#/components/schemas/WorkspaceRoleEnum"
                     }
                 },
                 "required": ["email", "id", "role"]
@@ -6342,6 +6188,11 @@
                     }
                 },
                 "required": ["members"]
+            },
+            "WorkspaceRoleEnum": {
+                "enum": ["admin", "viewer"],
+                "type": "string",
+                "description": "* `admin` - Administrator\n* `viewer` - Viewer"
             }
         },
         "securitySchemes": {

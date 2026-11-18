@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
-from pyracast.accounts.models import Membership
+from pyracast.accounts.models import WorkspaceRole
 from pyracast.plants.measurements import select_measurements, select_provider_measurements
 from pyracast.plants.models import Plant, PlantConfiguration, PlantEvent, ProductionObservation
 from pyracast.plants.observations import observation_heads
@@ -73,7 +73,7 @@ def lock_production_configuration(
         regions = regions.select_for_update()
         plants = plants.select_for_update()
     region = regions.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
-    plant = plants.get(pk=plant_id, region=region, deleted_at__isnull=True)
+    plant = plants.get(pk=plant_id, region=region)
     configuration = PlantConfiguration.objects.select_related("binding").get(
         pk=configuration_id, plant=plant
     )
@@ -161,7 +161,7 @@ def change_production(
     changes: list[ProductionChange],
 ) -> ObservationImportResult:
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         configuration = lock_production_configuration(
             tenant_id, region_id, plant_id, configuration_id
         )
@@ -246,7 +246,7 @@ def preview_production(
     observations: list[ObservationInput],
 ) -> dict[str, Any]:
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         configuration = lock_production_configuration(
             tenant_id, region_id, plant_id, configuration_id
         )

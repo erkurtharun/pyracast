@@ -3,10 +3,8 @@ from calendar import monthrange
 from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
-from importlib import import_module
 
 import pytest
-from django.apps import apps
 from django.db import connection
 
 from pyracast.epias import (
@@ -22,7 +20,7 @@ from pyracast.metering.scheduler import enqueue_due_epias_jobs
 from pyracast.plants.models import Plant, ProductionObservation
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
-from tests.support.metering import NEXT_NIGHT, PROVIDER_PLANT, connected, day_data
+from tests.support.metering import NEXT_NIGHT, PROVIDER_PLANT, connected
 from tests.support.metering_settlement import (
     SETTLEMENT,
     SettlementClient,
@@ -219,41 +217,6 @@ def test_settlement_publication_and_calibration_request_share_one_transaction(
     monkeypatch.setattr("pyracast.plants.preparation.prepare_calibration", lambda *_: None)
     assert run_epias_job(job.pk, fetch=lambda *_: data, now=job.next_attempt_at)
     assert EpiasSnapshot.objects.filter(job=job).count() == 31
-
-
-def test_existing_archive_normalization_preserves_raw_digest_and_pinned_identity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _, _, linked = connected(monkeypatch)
-    job = EpiasCollectionJob.objects.first()
-    assert job is not None
-    assert run_epias_job(job.pk, fetch=day_data, now=NOW)
-    snapshot = EpiasSnapshot.objects.get(job=job)
-    original_raw = snapshot.raw_payload
-    original_digest = snapshot.content_sha256
-    old_readings = [
-        {key: value for key, value in row.items() if key not in {"period_start", "period_end"}}
-        for row in snapshot.readings
-    ]
-    EpiasSnapshot.objects.filter(pk=snapshot.pk).update(
-        readings=old_readings,
-        endpoint="",
-        provider_plant={},
-    )
-    EpiasConnection.objects.filter(pk=linked.pk).update(provider_plant_id=999, eic="new-eic")
-    migration = import_module(
-        "pyracast.metering.migrations.0002_remove_epiascollectionjob_epias_unique_collection_slot_and_more"
-    )
-    with connection.schema_editor() as editor:
-        migration.normalize_archived_readings(apps, editor)
-    snapshot.refresh_from_db()
-    assert snapshot.raw_payload == original_raw
-    assert snapshot.content_sha256 == original_digest
-    assert snapshot.provider_plant == job.provider_plant
-    assert snapshot.endpoint == f"{BASE_URL}/realtime-generation"
-    assert snapshot.readings[0]["provider_timestamp"] == old_readings[0]["provider_timestamp"]
-    assert snapshot.readings[0]["period_start"] == old_readings[0]["provider_timestamp"]
-    assert snapshot.readings[0]["period_end"].endswith("T01:00:00+00:00")
 
 
 @pytest.mark.parametrize("revocation", ["configuration", "approval"])

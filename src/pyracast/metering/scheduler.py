@@ -162,7 +162,6 @@ def enqueue_due_epias_jobs(*, now: datetime | None = None) -> list[int]:
     identifiers = []
     for connection in EpiasConnection.objects.filter(
         enabled=True,
-        plant__deleted_at__isnull=True,
         plant__region__deleted_at__isnull=True,
     ).select_related("plant"):
         check_settlement = (
@@ -182,9 +181,7 @@ def enqueue_due_epias_jobs(*, now: datetime | None = None) -> list[int]:
             )
             if region is None:
                 continue
-            plant = Plant.objects.select_for_update().filter(pk=connection.plant_id).first()
-            if plant is None:
-                continue
+            plant = Plant.objects.select_for_update().get(pk=connection.plant_id)
             current = EpiasConnection.objects.select_for_update().filter(pk=connection.pk).first()
             if current is not None:
                 if (

@@ -5,7 +5,7 @@ from pyracast.accounts.social_views import provider_callback
 from pyracast.admin import site
 from pyracast.api import error_pages
 from pyracast.api.session import SessionLanguageView, SessionView
-from pyracast.api.trash import RestoreRegionView, TrashedPlantsView, TrashedRegionsView
+from pyracast.api.trash import RestoreRegionView, TrashedRegionsView
 from pyracast.api.views import ForecastView, LocationChangeRequestsView, RegionView, TenantsView
 from pyracast.api.workspaces import (
     InvitationAcceptanceView,
@@ -54,7 +54,6 @@ urlpatterns = [
     path("api/invitations/accept/", InvitationAcceptanceView.as_view()),
     path("api/tenants/<int:tenant_id>/sites/", SitesView.as_view()),
     path("api/tenants/<int:tenant_id>/trash/regions/", TrashedRegionsView.as_view()),
-    path("api/tenants/<int:tenant_id>/trash/plants/", TrashedPlantsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/<int:region_id>/", RegionView.as_view()),
     path(
         "api/tenants/<int:tenant_id>/regions/<int:region_id>/location-change-requests/",

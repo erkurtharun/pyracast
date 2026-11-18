@@ -10,7 +10,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.accounts.authorization import require_platform_admin, tenant_membership
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.calibration_data import current_source_validation
 from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
@@ -38,7 +38,7 @@ def _authorized(plant: Plant, *, lock: bool = False) -> bool:
         user_id=actor_id,
         user__is_active=True,
         tenant_id=plant.region.tenant_id,
-        role=Membership.Role.ADMIN,
+        role=WorkspaceRole.ADMIN,
     )
     if lock:
         if not User.objects.select_for_update().filter(pk=actor_id, is_active=True).exists():
@@ -124,13 +124,11 @@ def set_calibration_automation(
     actor: User, tenant_id: int, region_id: int, plant_id: int, *, enabled: bool
 ) -> Plant:
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
-        plant = Plant.objects.select_for_update().get(
-            pk=plant_id, region=region, deleted_at__isnull=True
-        )
+        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         if enabled and (
             plant.current_configuration is None
             or not configuration_is_current(plant.current_configuration)
@@ -276,7 +274,6 @@ def prepare_due_calibrations(now: datetime, limit: int = 100) -> list[int]:
         Plant.objects.filter(
             Q(next_calibration_check_at__isnull=True) | Q(next_calibration_check_at__lte=now),
             automatic_calibration_enabled=True,
-            deleted_at__isnull=True,
             region__deleted_at__isnull=True,
         )
         .order_by("next_calibration_check_at", "pk")
@@ -292,7 +289,6 @@ def prepare_due_calibrations(now: datetime, limit: int = 100) -> list[int]:
             plant = Plant.objects.select_for_update().filter(pk=plant_id).first()
             if (
                 plant is None
-                or plant.deleted_at is not None
                 or not plant.automatic_calibration_enabled
                 or (
                     plant.next_calibration_check_at is not None

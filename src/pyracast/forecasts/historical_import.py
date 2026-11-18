@@ -17,7 +17,7 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, HistoricalReferenceImport
 from pyracast.irradiance.pairs import PowerFile, load_power
-from pyracast.regions.models import AuditEvent, Region
+from pyracast.regions.models import AuditAction, AuditEvent, Region
 
 
 @dataclass(frozen=True)
@@ -124,7 +124,6 @@ def _validate_binding(binding: SiteBinding, source: HistoricalSourceSettings) ->
         "longitude",
         "capacity_kw",
         "dc_capacity_kw",
-        "tilt_degrees",
         "azimuth_degrees",
         "losses_percent",
     ):
@@ -148,7 +147,7 @@ def _prepare_region_calibrations(region_id: int) -> None:
     from pyracast.plants.preparation import prepare_calibration
 
     for plant_id in Plant.objects.filter(
-        region_id=region_id, deleted_at__isnull=True, current_configuration__isnull=False
+        region_id=region_id, current_configuration__isnull=False
     ).values_list("pk", flat=True):
         prepare_calibration(plant_id)
 
@@ -250,7 +249,7 @@ def _archive_historical_reference(
     AuditEvent.objects.create(
         actor=actor,
         region=region,
-        action="historical_reference_imported",
+        action=AuditAction.HISTORICAL_REFERENCE_IMPORTED,
         revision=region.revision,
     )
     transaction.on_commit(lambda: _prepare_region_calibrations(region.pk))

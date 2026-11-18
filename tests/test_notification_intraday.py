@@ -26,7 +26,7 @@ from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.regions.models import Region
 from tests.support.domain import System
 from tests.support.incident_calibration import incident
-from tests.support.notification_report_data import report_delivery
+from tests.support.notification_report_data import region_delivery, report_delivery
 from tests.support.notifications import SLOT, cache_saved_days
 from tests.support.plant_operations import publish_snapshot, snapshot_for
 
@@ -37,6 +37,12 @@ def intraday_delivery(
     monkeypatch: pytest.MonkeyPatch, *, archived_morning: bool = True
 ) -> tuple[System, Plant, NotificationDelivery, ForecastSnapshot | None]:
     system, plant, delivery = report_delivery(monkeypatch)
+    return system, plant, delivery, intraday_sources(system, delivery, archived_morning)
+
+
+def intraday_sources(
+    system: System, delivery: NotificationDelivery, archived_morning: bool = True
+) -> ForecastSnapshot | None:
     day = SLOT.astimezone(ZoneInfo(system.binding.timezone)).date()
     start, end = local_day_bounds(day, system.binding.timezone)
     old = (
@@ -63,7 +69,7 @@ def intraday_delivery(
     ]
     latest.save()
     cache_saved_days(latest, latest.collected_at)
-    return system, plant, delivery, old
+    return old
 
 
 def test_today_report_composes_archived_morning_and_intraday_forecast_before_aggregation(
@@ -205,7 +211,7 @@ def test_today_report_excludes_ineligible_archived_forecasts(
     assert old.pk not in today["normal"]["provenance"]["source_snapshot_ids"]
 
 
-def test_prepared_intraday_report_freezes_message_attachment_and_later_language(
+def test_prepared_intraday_report_freezes_message_and_attachment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, plant, delivery, old = intraday_delivery(monkeypatch)
@@ -223,21 +229,6 @@ def test_prepared_intraday_report_freezes_message_attachment_and_later_language(
     )
     ForecastResult.objects.filter(snapshot_id=delivery.snapshot_id).update(daily_payloads={})
     PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(dc_capacity_mw=260)
-    new_language = NotificationDelivery.objects.create(
-        schedule=delivery.schedule,
-        binding=delivery.binding,
-        recipients=["turkish@example.com"],
-        grouped=False,
-        language="tr",
-        scheduled_for=SLOT,
-        available_at=SLOT,
-        preparation_deadline=delivery.preparation_deadline,
-    )
-    assert prepare_delivery(new_language, SLOT + timedelta(minutes=1))
-    assert new_language.prepared_message is not None
-    assert new_language.prepared_message["report_context"] == original["report_context"]
-    assert new_language.prepared_message["results"] == original["results"]
-    assert new_language.prepared_message["body"] != original["body"]
     assert prepare_delivery(delivery, SLOT + timedelta(minutes=2))
     assert delivery.prepared_message == original
     assert process_notification(delivery.pk, SLOT + timedelta(minutes=3))
@@ -250,9 +241,9 @@ def test_prepared_intraday_report_freezes_message_attachment_and_later_language(
 def test_region_only_preparation_composes_today_and_keeps_selected_tomorrow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _, plant, delivery, old = intraday_delivery(monkeypatch)
+    system, delivery = region_delivery(monkeypatch)
+    old = intraday_sources(system, delivery)
     assert old is not None
-    Plant.objects.filter(pk=plant.pk).update(deleted_at=SLOT)
     assert prepare_delivery(delivery, SLOT)
     assert delivery.prepared_message is not None
     context = cast(dict[str, Any], delivery.prepared_message["report_context"])
@@ -424,9 +415,9 @@ def test_same_slot_forecast_grace_never_admits_actuals_published_after_reminder(
 def test_region_today_mixes_actuals_and_archive_without_selected_tomorrow_forecast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    system, plant, delivery, _ = intraday_delivery(monkeypatch)
+    system, delivery = region_delivery(monkeypatch)
+    intraday_sources(system, delivery)
     actuals = saved_intraday_actuals(system, SLOT)
-    Plant.objects.filter(pk=plant.pk).update(deleted_at=SLOT)
     ForecastResult.objects.filter(snapshot_id=delivery.snapshot_id).update(daily_payloads={})
     assert prepare_delivery(delivery, SLOT)
     assert delivery.snapshot_id is None

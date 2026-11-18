@@ -133,7 +133,12 @@ def test_snapshot_requires_a_complete_increasing_coverage_pair(
     system = make_system(approved=True)
     job = CollectionJob.objects.get(binding=system.binding)
     snapshot = ForecastSnapshot.objects.create(
-        job=job, binding=system.binding, raw_payload={}, normalized_intervals=[], collected_at=NOW
+        job=job,
+        binding=system.binding,
+        raw_payload={},
+        normalized_intervals=[],
+        collected_at=NOW,
+        source_kind="forecast",
     )
     with pytest.raises(IntegrityError, match="snapshot_coverage_bounds"), transaction.atomic():
         ForecastSnapshot.objects.filter(pk=snapshot.pk).update(
@@ -146,3 +151,21 @@ def test_snapshot_requires_a_complete_increasing_coverage_pair(
         ForecastSnapshot.objects.filter(pk=snapshot.pk).update(source_kind="other")
     with pytest.raises(IntegrityError, match="collection_job_status"), transaction.atomic():
         CollectionJob.objects.filter(pk=job.pk).update(status="lost")
+
+
+@pytest.mark.parametrize("source_kind", [None, "unknown"])
+def test_snapshot_names_whether_it_holds_a_forecast_or_estimated_actuals(
+    source_kind: str | None,
+) -> None:
+    system = make_system(approved=True)
+    job = CollectionJob.objects.get(binding=system.binding)
+    values: dict[str, Any] = {} if source_kind is None else {"source_kind": source_kind}
+    with pytest.raises(IntegrityError, match="snapshot_source_kind"), transaction.atomic():
+        ForecastSnapshot.objects.create(
+            job=job,
+            binding=system.binding,
+            raw_payload={},
+            normalized_intervals=[],
+            collected_at=NOW,
+            **values,
+        )

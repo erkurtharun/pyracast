@@ -9,7 +9,7 @@ from django.db import IntegrityError, close_old_connections, connection, transac
 from django.test import Client
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.models import CollectionJob
 from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
@@ -23,7 +23,7 @@ from pyracast.regions.operations import (
     review_location_change,
     submit_region,
 )
-from pyracast.trash import purge_expired, restore_plant, restore_region, trash_plant, trash_region
+from pyracast.trash import purge_expired, restore_region, trash_region
 from tests.support.domain import NOW, FakeAdapter, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -222,7 +222,7 @@ def test_duplicate_locations_use_six_decimal_tenant_scoped_identity() -> None:
     with pytest.raises(ValidationError, match="location_already_exists"):
         submit_site(system.member, system.tenant.pk, **site_values(latitude=41.1234562))
     other = Tenant.objects.create(name="Other")
-    Membership.objects.create(user=system.member, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=system.member, tenant=other, role=WorkspaceRole.ADMIN)
     assert submit_site(system.member, other.pk, **site_values()).pk != site.pk
     with pytest.raises(IntegrityError), transaction.atomic():
         Region.objects.create(
@@ -234,7 +234,7 @@ def test_duplicate_locations_use_six_decimal_tenant_scoped_identity() -> None:
         )
 
 
-def test_plant_and_location_restore_reject_replacement_conflicts() -> None:
+def test_one_plant_per_location_and_restore_rejects_a_replacement_location() -> None:
     system = make_system()
     plant = pending_plant(system)
     parent = (system.member, system.tenant.pk, system.region.pk)
@@ -242,12 +242,6 @@ def test_plant_and_location_restore_reject_replacement_conflicts() -> None:
         pending_plant(system)
     with pytest.raises(IntegrityError), transaction.atomic():
         Plant.objects.create(region=system.region, name="Direct")
-    trash_plant(*parent, plant.pk)
-    replacement = pending_plant(system)
-    with pytest.raises(ValidationError, match="location_already_has_plant"):
-        restore_plant(*parent, plant.pk)
-    trash_plant(*parent, replacement.pk)
-    assert restore_plant(*parent, plant.pk).deleted_at is None
     trash_region(*parent)
     replacement_region = submit_region(
         system.member,
@@ -313,8 +307,8 @@ def test_concurrent_site_and_plant_submission_preserve_uniqueness(kind: str) -> 
 def test_pending_submission_is_purged_with_its_plant() -> None:
     system = make_system()
     plant = pending_plant(system)
-    trash_plant(system.member, system.tenant.pk, system.region.pk, plant.pk)
+    trash_region(system.member, system.tenant.pk, system.region.pk)
     from pyracast.trash import RETENTION
 
-    assert purge_expired(timezone.now() + RETENTION) == {"regions": 0, "plants": 1}
-    assert not PlantSubmission.objects.exists()
+    assert purge_expired(timezone.now() + RETENTION) == {"regions": 1, "plants": 1}
+    assert not PlantSubmission.objects.filter(plant_id=plant.pk).exists()

@@ -30,7 +30,7 @@ from django.test import Client, override_settings
 from pyracast.accounts import social, social_views
 from pyracast.accounts.forms import CompanySignupForm
 from pyracast.accounts.invitations import invite_workspace_member
-from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference
+from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
 from pyracast.accounts.social import SocialAccountAdapter
 from tests.support.auth_lifecycle import PASSWORD, member, submit
 from tests.support.company_registration import mailed_code
@@ -214,7 +214,7 @@ def test_provider_signup_creates_workspace_atomically(
     assert not user.is_staff
     assert UserLanguagePreference.objects.get(user=user).language == "tr"
     assert Membership.objects.get(user=user).tenant.name == "Social Solar"
-    assert Membership.objects.get(user=user).role == Membership.Role.ADMIN
+    assert Membership.objects.get(user=user).role == WorkspaceRole.ADMIN
     assert not SocialToken.objects.exists()
     assert SocialAccount.objects.get(user=user).provider == provider
     if provider == "microsoft":
@@ -882,7 +882,7 @@ def test_social_signup_with_invitation_requires_explicit_acceptance(
 ) -> None:
     owner = member()
     tenant = Tenant.objects.create(name="Inviting workspace")
-    Membership.objects.create(user=owner, tenant=tenant, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=owner, tenant=tenant, role=WorkspaceRole.ADMIN)
     invite_workspace_member(owner, tenant.pk, oauth_profile["email"])
     invitation = invitation_token()
     client = Client(enforce_csrf_checks=True)

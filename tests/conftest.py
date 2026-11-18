@@ -67,30 +67,7 @@ SUBPROCESS = frozenset(
         "test_test_settings",
     }
 )
-MIGRATION = frozenset(
-    {
-        "test_delivery_health",
-        "test_derived_metadata",
-        "test_epias_meter_basis_migration",
-        "test_location_change_rebase_migration",
-        "test_notification_group_boundaries",
-        "test_notification_groups",
-        "test_notification_language",
-        "test_notification_migration",
-        "test_notification_recipient_history",
-        "test_notifications",
-        "test_onboarding_boundaries",
-        "test_ownership_key_migrations",
-        "test_provider_database_keys",
-        "test_provider_identity",
-        "test_provisional_migration",
-        "test_quota_wait_migration",
-        "test_reminder_message_id",
-        "test_shared_reminder_migration",
-        "test_snapshot_lineage",
-        "test_workspace_migration",
-    }
-)
+MIGRATION = frozenset[str]()
 SELECTION_SETS = {
     "tooling": TOOLING,
     "subprocess": SUBPROCESS,

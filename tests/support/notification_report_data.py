@@ -21,7 +21,17 @@ def report_delivery(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant, Not
         dc_capacity_mw=130,
         export_limit_mw=100,
     )
+    return system, plant, saved_delivery(system)
+
+
+def region_delivery(monkeypatch: pytest.MonkeyPatch) -> tuple[System, NotificationDelivery]:
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    system, _ = configured()
+    return system, saved_delivery(system)
+
+
+def saved_delivery(system: System) -> NotificationDelivery:
     snapshot = complete_saved(system)
     delivery = NotificationDelivery.objects.get(pk=enqueue_due(SLOT)[0])
     delivery.snapshot = snapshot
-    return system, plant, delivery
+    return delivery

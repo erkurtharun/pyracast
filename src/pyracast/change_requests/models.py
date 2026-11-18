@@ -3,17 +3,43 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models import F, Q
 
+from pyracast.db import choices_check
+
+
+class ChangeRequestKind(models.TextChoices):
+    PRODUCTION = "production", "Production"
+    INCIDENT = "incident", "Incident"
+
+
+class ChangeRequestStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    APPROVED = "approved", "Approved"
+    REJECTED = "rejected", "Rejected"
+    WITHDRAWN = "withdrawn", "Withdrawn"
+
+
+class ProductionChangeAction(models.TextChoices):
+    SET = "set", "Set"
+    REVERT = "revert", "Revert"
+
+
+class IncidentChangeAction(models.TextChoices):
+    CREATE = "create", "Create"
+    UPDATE = "update", "Update"
+    RESOLVE = "resolve", "Resolve"
+    CANCEL = "cancel", "Cancel"
+
+
+DECIDED = (ChangeRequestStatus.APPROVED, ChangeRequestStatus.REJECTED)
+INCIDENT_EDITS = (IncidentChangeAction.CREATE, IncidentChangeAction.UPDATE)
+
 
 class ChangeRequest(models.Model):
     plant = models.ForeignKey("plants.Plant", on_delete=models.PROTECT)
     configuration = models.ForeignKey("plants.PlantConfiguration", on_delete=models.PROTECT)
-    kind = models.CharField(
-        max_length=20, choices=(("production", "Production"), ("incident", "Incident"))
-    )
+    kind = models.CharField(max_length=20, choices=ChangeRequestKind)
     status = models.CharField(
-        max_length=20,
-        default="pending",
-        choices=tuple((v, v) for v in ("pending", "approved", "rejected", "withdrawn")),
+        max_length=20, choices=ChangeRequestStatus, default=ChangeRequestStatus.PENDING
     )
     proposed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
@@ -37,25 +63,24 @@ class ChangeRequest(models.Model):
                 fields=("proposer_membership_id", "idempotency_key"),
                 name="change_request_idempotency_unique",
             ),
-            models.CheckConstraint(
-                condition=Q(kind__in=("production", "incident")), name="change_request_kind_valid"
-            ),
+            choices_check("kind", ChangeRequestKind, name="change_request_kind_valid"),
+            choices_check("status", ChangeRequestStatus),
             models.CheckConstraint(
                 condition=Q(
-                    status="pending",
+                    status=ChangeRequestStatus.PENDING,
                     closed_at__isnull=True,
                     reviewed_by__isnull=True,
                     outcome_seen_at__isnull=True,
                     decision_reason="",
                 )
                 | Q(
-                    status="withdrawn",
+                    status=ChangeRequestStatus.WITHDRAWN,
                     closed_at__isnull=False,
                     reviewed_by__isnull=True,
                     outcome_seen_at__isnull=True,
                 )
                 | Q(
-                    status__in=("approved", "rejected"),
+                    status__in=DECIDED,
                     closed_at__isnull=False,
                     reviewed_by__isnull=False,
                 ),
@@ -71,7 +96,7 @@ class ProductionChangeItem(models.Model):
     )
     starts_at = models.DateTimeField()
     ends_at = models.DateTimeField()
-    action = models.CharField(max_length=10)
+    action = models.CharField(max_length=10, choices=ProductionChangeAction)
     energy_mwh = models.FloatField()
     quality = models.CharField(max_length=20)
     source = models.CharField(max_length=200)
@@ -86,8 +111,8 @@ class ProductionChangeItem(models.Model):
 
     class Meta:
         constraints = (
-            models.CheckConstraint(
-                condition=Q(action__in=("set", "revert")), name="proposal_production_action_valid"
+            choices_check(
+                "action", ProductionChangeAction, name="proposal_production_action_valid"
             ),
             models.CheckConstraint(
                 condition=Q(energy_mwh__gte=0, energy_mwh__lt=float("inf")),
@@ -116,7 +141,7 @@ class IncidentChange(models.Model):
     request = models.OneToOneField(
         ChangeRequest, on_delete=models.CASCADE, related_name="incident_change"
     )
-    action = models.CharField(max_length=10)
+    action = models.CharField(max_length=10, choices=IncidentChangeAction)
     incident = models.ForeignKey("incidents.PlantIncident", on_delete=models.PROTECT, null=True)
     expected_revision = models.PositiveIntegerField(null=True)
     kind = models.CharField(max_length=20, blank=True)
@@ -134,9 +159,17 @@ class IncidentChange(models.Model):
     class Meta:
         constraints = (
             models.CheckConstraint(
-                condition=Q(action="create", incident__isnull=True, expected_revision__isnull=True)
+                condition=Q(
+                    action=IncidentChangeAction.CREATE,
+                    incident__isnull=True,
+                    expected_revision__isnull=True,
+                )
                 | Q(
-                    action__in=("update", "resolve", "cancel"),
+                    action__in=(
+                        IncidentChangeAction.UPDATE,
+                        IncidentChangeAction.RESOLVE,
+                        IncidentChangeAction.CANCEL,
+                    ),
                     incident__isnull=False,
                     expected_revision__gte=1,
                     expected_revision__isnull=False,
@@ -144,9 +177,9 @@ class IncidentChange(models.Model):
                 name="proposal_incident_target_valid",
             ),
             models.CheckConstraint(
-                condition=Q(action__in=("resolve", "cancel"))
+                condition=Q(action__in=(IncidentChangeAction.RESOLVE, IncidentChangeAction.CANCEL))
                 | Q(
-                    action__in=("create", "update"),
+                    action__in=INCIDENT_EDITS,
                     starts_at__isnull=False,
                     kind__in=("inverter", "panels", "grid", "other", "multiple"),
                 )
@@ -154,9 +187,10 @@ class IncidentChange(models.Model):
                 name="proposal_incident_values_valid",
             ),
             models.CheckConstraint(
-                condition=~Q(action="resolve") | Q(ends_at__isnull=False),
+                condition=~Q(action=IncidentChangeAction.RESOLVE) | Q(ends_at__isnull=False),
                 name="proposal_incident_end_required",
             ),
+            choices_check("action", IncidentChangeAction),
             *(
                 models.CheckConstraint(
                     condition=Q(**{f"{field}__isnull": True})

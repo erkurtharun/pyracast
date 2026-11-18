@@ -78,7 +78,7 @@ sequenceDiagram
 - `jobs._current` runs at claim, after failure and at publication under the row locks: connection enabled, revision equal, `provider_plant` id and EIC equal to the connection (settlement id for settlement jobs), configuration still current, and for windowed jobs no disabled schedule.
 - Lease ownership (`_owns`: running, same token, unexpired) is rechecked under lock before any failure or publication write.
 - One platform credential pair is shared by all tenants. It is sent only in the login form to the fixed CAS host; the ticket goes only in the `TGT` header to the fixed data host. `EpiasClient` follows no redirects and rejects responses echoing the username, password or ticket (`unsafe_epias_response`).
-- Database: unique slot (`epias_unique_collection_slot`), unique acquisition (`epias_unique_job_acquisition`), status and source check constraints, deferred composite FKs pinning snapshot -> job -> connection, configuration and plant (migrations `0005`, `0009`).
+- Database: unique slot (`epias_unique_collection_slot`), unique acquisition (`epias_unique_job_acquisition`), status and source check constraints, deferred composite FKs pinning snapshot -> job -> connection, configuration and plant (declared in `pyracast/schema_objects.py`).
 
 ## Failure paths
 
