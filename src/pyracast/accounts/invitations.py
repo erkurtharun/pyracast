@@ -256,6 +256,12 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
             actor_id=invitation.created_by_id,
             administrator=actor,
         )
+        record_on_commit(
+            SecurityEvent.WORKSPACE_ADMIN_REASSIGNED,
+            user_id=invitation.created_by_id,
+            tenant_id=invitation.tenant_id,
+            target_id=actor.pk,
+        )
     invitation.accepted_at = timezone.now()
     invitation.save(update_fields=["accepted_at"])
     record_on_commit(

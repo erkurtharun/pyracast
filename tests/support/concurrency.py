@@ -6,11 +6,9 @@ from threading import Event
 from django.db import connection, connections, transaction
 
 
-def _waits_for(pid: int) -> bool:
+def _waits_for(holder_pid: int, waiter_pid: int) -> bool:
     with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT count(*) FROM pg_stat_activity WHERE %s = ANY(pg_blocking_pids(pid))", [pid]
-        )
+        cursor.execute("SELECT %s = ANY(pg_blocking_pids(%s))", [holder_pid, waiter_pid])
         row = cursor.fetchone()
     return bool(row and row[0])
 
@@ -20,6 +18,8 @@ def behind_open_transaction[T, U](holder: Callable[[], T], waiter: Callable[[], 
     # whatever the waiter reads before it blocks comes from the state before the holder's change.
     held, release = Event(), Event()
     holder_pid: list[int] = []
+    waiter_pid: list[int] = []
+    waiter_ready = Event()
 
     def hold() -> T:
         try:
@@ -36,6 +36,10 @@ def behind_open_transaction[T, U](holder: Callable[[], T], waiter: Callable[[], 
 
     def wait() -> U:
         try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_backend_pid()")
+                waiter_pid.extend(cursor.fetchone() or ())
+            waiter_ready.set()
             return waiter()
         finally:
             connections.close_all()
@@ -45,8 +49,9 @@ def behind_open_transaction[T, U](holder: Callable[[], T], waiter: Callable[[], 
         try:
             assert held.wait(timeout=10), holding.exception(timeout=0)
             waiting = pool.submit(wait)
+            assert waiter_ready.wait(timeout=10)
             deadline = time.monotonic() + 10
-            while not waiting.done() and not _waits_for(holder_pid[0]):
+            while not waiting.done() and not _waits_for(holder_pid[0], waiter_pid[0]):
                 assert time.monotonic() < deadline
                 time.sleep(0.02)
         finally:

@@ -190,12 +190,15 @@ def member_removal(
         Membership.objects.select_related("tenant", "user"), tenant_id=tenant_id, user_id=user_id
     )
     label = member_label(membership.user)
+    is_self = membership.user_id == _actor(request).pk
     errors: list[str] = []
     if request.method == "POST":
         try:
             remove_workspace_member(_actor(request), tenant_id, user_id, platform=True)
         except ValidationError as refusal:
             errors = refusal.messages
+            if is_self and membership.role != WorkspaceRole.ADMIN:
+                errors = [_("You cannot remove your own membership from this console.")]
         else:
             messages.success(
                 request, _("%(member)s was removed from the workspace.") % {"member": label}
@@ -209,6 +212,7 @@ def member_removal(
             "tenant": membership.tenant,
             "member": label,
             "is_administrator": membership.role == WorkspaceRole.ADMIN,
+            "is_self": is_self,
             "errors": errors,
         },
         status=400 if errors else 200,

@@ -603,7 +603,9 @@ def test_the_console_keeps_the_signed_in_membership_and_explains_self_removal() 
     client, operator = verified_admin()
     Membership.objects.create(tenant=tenant, user=operator)
     url = f"/admin/workspaces/{tenant.pk}/members/{operator.pk}/removal/"
-    for response in (client.get(url), client.post(url)):
+    responses = (client.get(url), client.post(url))
+    assert [response.status_code for response in responses] == [200, 400]
+    for response in responses:
         html = response.content.decode()
         assert "You cannot remove your own membership from this console." in html
         assert ">Remove member</button>" not in html

@@ -8,6 +8,7 @@
       <h2 id="errors-title">{% translate "Review the form" %}</h2>
       <ul class="error-summary">
         {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+        {% for field in form.hidden_fields %}{% for error in field.errors %}<li>{{ error }} <a href="{{ request.path }}">{% translate "Reload this page" %}</a></li>{% endfor %}{% endfor %}
         {% for field in form.visible_fields %}{% for error in field.errors %}<li><a href="#{{ field.id_for_label }}">{{ field.label }}: {{ error }}</a></li>{% endfor %}{% endfor %}
       </ul>
       {% if stale %}<p><a href="{{ request.path }}">{% translate "Reload this page" %}</a></p>{% endif %}
