@@ -45,7 +45,14 @@ if (setupForm instanceof HTMLFormElement) {
   }
 }
 
-const coordinatePair = /^\s*(-?\d+(?:\.\d+)?)\s*(?:[,;]\s*|\s+)(-?\d+(?:\.\d+)?)\s*$/;
+const coordinateNumber = /^-?\d+(?:\.\d+)?$/;
+function parseCoordinatePair(text) {
+  const input = text.trim();
+  const separated = input.split(/[,;]/);
+  const pair = separated.length === 1 ? input.split(/\s+/) : separated.map((value) => value.trim());
+  return pair.length === 2 && pair.every((value) => coordinateNumber.test(value)) ? pair : null;
+}
+
 document.querySelectorAll("[data-coordinate-pair]").forEach((latitude) => {
   if (!(latitude instanceof HTMLInputElement) || !latitude.form) return;
   const longitude = latitude.form.elements.namedItem(latitude.dataset.coordinatePair);
@@ -57,11 +64,11 @@ document.querySelectorAll("[data-coordinate-pair]").forEach((latitude) => {
     latitude.setAttribute("aria-describedby", described ? `${described} ${hint.id}` : hint.id);
   }
   latitude.addEventListener("paste", (event) => {
-    const pair = coordinatePair.exec(event.clipboardData?.getData("text") ?? "");
+    const pair = parseCoordinatePair(event.clipboardData?.getData("text") ?? "");
     if (!pair) return;
     event.preventDefault();
-    latitude.value = pair[1];
-    longitude.value = pair[2];
+    latitude.value = pair[0];
+    longitude.value = pair[1];
   });
 });
 

@@ -24,7 +24,7 @@
       <a class="btn btn--primary" href="{% url 'admin:workspace_plant_new' tenant.pk %}">{% translate "Add plant" %}</a>
     </div>
     {% if plants %}
-      <div class="table-wrap" role="region" aria-labelledby="plants-title" tabindex="0">
+      <div class="table-wrap" role="region" aria-labelledby="plants-title">
         <table class="table table--stack">
           <thead><tr>
             <th scope="col">{% translate "Plant" %}</th>
@@ -52,7 +52,7 @@
       <a class="btn btn--primary" href="{% url 'admin:workspace_invitation_new' tenant.pk %}">{% translate "Invite member" %}</a>
     </div>
     {% if members %}
-      <div class="table-wrap" role="region" aria-labelledby="members-title" tabindex="0">
+      <div class="table-wrap" role="region" aria-labelledby="members-title">
         <table class="table table--stack">
           <thead><tr>
             <th scope="col">{% translate "Member" %}</th>
@@ -81,7 +81,7 @@
   <section class="panel" aria-labelledby="invitations-title">
     <div class="panel-head"><h2 id="invitations-title">{% translate "Invitations" %}</h2></div>
     {% if invitations %}
-      <div class="table-wrap" role="region" aria-labelledby="invitations-title" tabindex="0">
+      <div class="table-wrap" role="region" aria-labelledby="invitations-title">
         <table class="table table--stack">
           <thead><tr>
             <th scope="col">{% translate "Email address" %}</th>

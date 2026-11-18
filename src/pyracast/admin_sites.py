@@ -125,11 +125,11 @@ class SiteForm(forms.Form):
         )
         if site.is_valid():
             self.site = dict(site.validated_data)
-            return data
-        for name, errors in site.errors.items():
-            field = name if name in self.fields else None
-            if field not in self.errors:
-                self.add_error(field, errors)
+        else:
+            for name, errors in site.errors.items():
+                field = name if name in self.fields else None
+                if field not in self.errors:
+                    self.add_error(field, errors)
         return data
 
 
