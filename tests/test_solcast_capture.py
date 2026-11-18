@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -252,6 +254,24 @@ def test_capture_cli_requires_explicit_live_flag(
 
     assert caught.value.code == 2
     assert "Live requests require --live." in capsys.readouterr().err
+
+
+def test_capture_cli_starts_in_a_fresh_interpreter_before_django_is_configured() -> None:
+    environment = {
+        key: value for key, value in os.environ.items() if key != "DJANGO_SETTINGS_MODULE"
+    }
+    result = subprocess.run(
+        [sys.executable, "scripts/check_solcast.py", "--binding-id", "1", "--kind", "settings"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 2, result.stderr
+    assert "Live requests require --live." in result.stderr
 
 
 def test_settings_sanitization_selects_exact_site_and_allowlisted_fields() -> None:

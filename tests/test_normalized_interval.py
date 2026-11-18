@@ -28,6 +28,12 @@ ROW: dict[str, Any] = {
             "original_start": START.isoformat(),
             "original_end": END.isoformat(),
         },
+        {
+            **ROW,
+            "start": (START + timedelta(minutes=10)).isoformat(),
+            "original_start": START.isoformat(),
+        },
+        {**ROW, "end": (END - timedelta(minutes=10)).isoformat(), "original_end": END.isoformat()},
     ],
 )
 def test_a_stored_interval_row_round_trips(row: dict[str, Any]) -> None:
@@ -45,6 +51,7 @@ def test_a_stored_row_without_sunlight_reads_as_unknown() -> None:
         ({"start": None}, "timestamps must be ISO strings"),
         ({"end": 5}, "timestamps must be ISO strings"),
         ({"start": "2026-11-09T10:00:00"}, "UTC offset"),
+        ({"end": "not a timestamp"}, "Invalid isoformat string"),
         ({"power_kw": "1"}, "power must be numeric"),
         ({"power_kw": True}, "power must be numeric"),
         ({"sunlight": "dusk"}, "sunlight classification"),
