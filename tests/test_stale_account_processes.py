@@ -1,6 +1,9 @@
 import re
+import threading
 import time
 from collections.abc import Callable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
+from functools import partial
 from types import SimpleNamespace
 from typing import Any
 
@@ -15,7 +18,9 @@ from allauth.core.internal import ratelimit
 from allauth.headless.account.inputs import VerifyEmailInput
 from django.contrib.auth.models import User
 from django.core import mail
-from django.db import connection
+from django.core.exceptions import ObjectDoesNotExist
+from django.db import IntegrityError, OperationalError, connection, connections
+from django.db.models.signals import post_delete
 from django.test import Client, override_settings
 
 from pyracast.accounts.inputs import ResetPasswordInput
@@ -85,6 +90,33 @@ def reset_elsewhere(email: str) -> None:
 def assert_signed_out_without_pending_verification(client: Client) -> None:
     assert client.get("/api/session/").json()["user"] is None
     assert PENDING not in client.get(AUTH + "auth/session").json()["data"]["flows"]
+
+
+@pytest.mark.parametrize("authenticated", [False, True])
+def test_verification_without_a_pending_process_answers_conflict(authenticated: bool) -> None:
+    client = signed_in(member()) if authenticated else browser()
+
+    response = submit(client, "auth/email/verify", {"key": "1234-5678"})
+
+    assert answer(response) == (409, {"status": 409})
+    assert mail.outbox == []
+    assert PENDING not in client.get(AUTH + "auth/session").json()["data"].get("flows", [])
+
+
+@pytest.mark.parametrize("authenticated", [False, True])
+def test_resend_rate_limit_mails_nothing_and_allows_a_later_retry(
+    authenticated: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _ = change_pending(member()) if authenticated else pending_signup()
+
+    response = submit(client, "auth/email/verify/resend", {})
+
+    assert answer(response) == (429, {"status": 429})
+    assert mail.outbox == []
+    one_minute_later(monkeypatch)
+    assert submit(client, "auth/email/verify/resend", {}).status_code == 200
+    code = mailed_code()
+    assert submit(client, "auth/email/verify", {"key": code}).status_code == 200
 
 
 def test_signup_code_for_an_address_verified_meanwhile_answers_like_no_pending_verification() -> (
@@ -183,13 +215,28 @@ def test_reset_for_a_deleted_account_answers_like_no_pending_reset() -> None:
     assert client.get("/api/session/").json()["user"] is None
 
 
+def on_own_connection[T](work: Callable[[], T]) -> Callable[[], T]:
+    def run() -> T:
+        try:
+            return work()
+        finally:
+            connections.close_all()
+
+    return run
+
+
+def elsewhere(work: Callable[[], object]) -> None:
+    with ThreadPoolExecutor(1) as pool:
+        pool.submit(on_own_connection(work)).result(timeout=10)
+
+
 def before(
     monkeypatch: pytest.MonkeyPatch, owner: type, name: str, competitor: Callable[[], object]
 ) -> None:
     original = getattr(owner, name)
 
     def run_competitor_first(self: Any, *args: Any, **kwargs: Any) -> Any:
-        competitor()
+        elsewhere(competitor)
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(owner, name, run_competitor_first)
@@ -223,13 +270,26 @@ def verified_change_address(user: User) -> Callable[[], object]:
     )
 
 
+def after(
+    monkeypatch: pytest.MonkeyPatch, owner: type, name: str, competitor: Callable[[], object]
+) -> None:
+    original = getattr(owner, name)
+
+    def run_competitor_next(self: Any, *args: Any, **kwargs: Any) -> Any:
+        result = original(self, *args, **kwargs)
+        elsewhere(competitor)
+        return result
+
+    monkeypatch.setattr(owner, name, run_competitor_next)
+
+
 def before_property(
     monkeypatch: pytest.MonkeyPatch, owner: type, name: str, competitor: Callable[[], object]
 ) -> None:
     original = getattr(owner, name)
 
     def run_competitor_first(self: Any) -> Any:
-        competitor()
+        elsewhere(competitor)
         return original.fget(self)
 
     monkeypatch.setattr(owner, name, property(run_competitor_first))
@@ -325,6 +385,248 @@ def test_reset_answers_like_nothing_pending_when_the_account_is_deleted_before_c
     assert mail.outbox == []
     assert not User.objects.filter(pk=user.pk).exists()
     assert client.get("/api/session/").json()["user"] is None
+
+
+def account(email: str, username: str, *, verified: bool = True) -> User:
+    user = User.objects.create_user(username=username, email=email, password=PASSWORD)
+    EmailAddress.objects.create(user=user, email=email, primary=True, verified=verified)
+    return user
+
+
+def code_to(address: str) -> str:
+    (message,) = [message for message in mail.outbox if message.to == [address]]
+    match = CODE.search(str(message.body))
+    assert match is not None
+    return match.group(1)
+
+
+def sent() -> list[tuple[str, list[str]]]:
+    return [(message.extra_headers["X-Pyracast-Mail"], message.to) for message in mail.outbox]
+
+
+def addresses(user: User) -> list[tuple[str, bool, bool]]:
+    return list(EmailAddress.objects.filter(user=user).values_list("email", "primary", "verified"))
+
+
+def verify(client: Client, key: str) -> Any:
+    return submit(client, "auth/email/verify", {"key": key})
+
+
+def test_accounts_verifying_each_others_stored_address_both_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = account("first@example.com", "first")
+    second = account("second@example.com", "second")
+    EmailAddress.objects.create(user=first, email="x@example.com")
+    EmailAddress.objects.create(user=second, email="y@example.com")
+    changes = [(signed_in(first), "y@example.com"), (signed_in(second), "x@example.com")]
+    for client, address in changes:
+        assert submit(client, "account/email", {"email": address}).status_code == 200
+    keys = [code_to(address) for _, address in changes]
+    mail.outbox.clear()
+    together = threading.Barrier(2, timeout=10)
+    finish = EmailVerificationProcess.finish
+
+    def finish_together(self: EmailVerificationProcess) -> EmailAddress | None:
+        together.wait()
+        return finish(self)
+
+    monkeypatch.setattr(EmailVerificationProcess, "finish", finish_together)
+
+    with ThreadPoolExecutor(2) as pool:
+        verifications = [
+            pool.submit(on_own_connection(partial(verify, client, key)))
+            for (client, _), key in zip(changes, keys, strict=True)
+        ]
+        statuses = [verification.result(timeout=30).status_code for verification in verifications]
+
+    assert statuses == [200, 200]
+    assert addresses(first) == [("y@example.com", True, True)]
+    assert addresses(second) == [("x@example.com", True, True)]
+
+
+deleting = threading.local()
+
+
+def waiting_on_a_lock() -> bool:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT count(*) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+        )
+        row = cursor.fetchone()
+    return bool(row and row[0])
+
+
+def during_deletion(user: User, request: Callable[[], Any]) -> Any:
+    addresses_gone = threading.Event()
+    resume = threading.Event()
+
+    def pause(**kwargs: Any) -> None:
+        if getattr(deleting, "active", False) and not addresses_gone.is_set():
+            addresses_gone.set()
+            assert resume.wait(timeout=10)
+
+    def delete() -> None:
+        deleting.active = True
+        user.delete()
+
+    post_delete.connect(pause, sender=EmailAddress, weak=False)
+    try:
+        with ThreadPoolExecutor(1) as deleter, ThreadPoolExecutor(1) as requester:
+            deletion = deleter.submit(on_own_connection(delete))
+            assert addresses_gone.wait(timeout=10)
+            response: Future[Any] = requester.submit(on_own_connection(request))
+            deadline = time.monotonic() + 10
+            while not response.done() and not waiting_on_a_lock():
+                assert time.monotonic() < deadline
+                time.sleep(0.02)
+            resume.set()
+            deletion.result(timeout=20)
+            return response.result(timeout=20)
+    finally:
+        post_delete.disconnect(pause, sender=EmailAddress)
+
+
+def test_verification_during_account_deletion_answers_like_a_serial_order() -> None:
+    client, code = pending_signup()
+    owner = User.objects.get(email="owner@example.com")
+
+    response = during_deletion(owner, lambda: verify(client, code))
+
+    assert (response.status_code, sent()) in [(409, []), (200, [])]
+    assert not User.objects.filter(pk=owner.pk).exists()
+    assert client.get("/api/session/").json()["user"] is None
+
+
+def test_resend_during_account_deletion_answers_like_a_serial_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _ = pending_signup()
+    owner = User.objects.get(email="owner@example.com")
+    one_minute_later(monkeypatch)
+
+    response = during_deletion(owner, lambda: submit(client, "auth/email/verify/resend", {}))
+
+    signup_code = ("account/email/email_confirmation_signup", ["owner@example.com"])
+    assert (response.status_code, sent()) in [(409, []), (200, [signup_code])]
+    assert not User.objects.filter(pk=owner.pk).exists()
+
+
+def test_reset_during_account_deletion_answers_like_a_serial_order() -> None:
+    owner = account("unverified@example.com", "unverified", verified=False)
+    client = browser()
+    assert submit(client, "auth/password/request", {"email": owner.email}).status_code == 401
+    reset = {"key": mailed_code(), "password": PASSWORD + "reset"}
+
+    response = during_deletion(owner, lambda: submit(client, "auth/password/reset", reset))
+
+    notice = ("account/email/password_reset", ["unverified@example.com"])
+    assert (response.status_code, sent()) in [(409, []), (401, [notice])]
+    assert not User.objects.filter(pk=owner.pk).exists()
+
+
+def test_verification_never_writes_over_an_address_reassigned_before_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, code = pending_signup()
+    other = member()
+    after(
+        monkeypatch,
+        VerifyEmailInput,
+        "clean_key",
+        lambda: EmailAddress.objects.filter(email="owner@example.com").update(
+            user=other, primary=False, verified=True
+        ),
+    )
+
+    response = verify(client, code)
+
+    assert answer(response) == (409, {"status": 409})
+    assert mail.outbox == []
+    assert_signed_out_without_pending_verification(client)
+    assert EmailAddress.objects.filter(
+        email="owner@example.com", user=other, verified=True
+    ).exists()
+
+
+def deadlock() -> Exception:
+    error = OperationalError("deadlock detected")
+    error.__cause__ = psycopg.errors.DeadlockDetected("deadlock detected")
+    return error
+
+
+FAILURES: dict[str, Callable[[], Exception]] = {
+    "unique-rule": lambda: IntegrityError("duplicate key value"),
+    "row-gone": ObjectDoesNotExist,
+    "account-gone": lambda: User.NotUpdated("Save with update_fields did not affect any rows."),
+    "deadlock": deadlock,
+}
+
+
+def fail_after(monkeypatch: pytest.MonkeyPatch, owner: type, failure: Exception) -> None:
+    original = owner.finish  # type: ignore[attr-defined]
+
+    def finish_then_fail(self: Any) -> Any:
+        original(self)
+        raise failure
+
+    monkeypatch.setattr(owner, "finish", finish_then_fail)
+
+
+@pytest.mark.parametrize("failure", FAILURES.values(), ids=FAILURES)
+def test_failed_verification_writes_nothing_and_discards_the_process(
+    failure: Callable[[], Exception], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, code = pending_signup()
+    fail_after(monkeypatch, EmailVerificationProcess, failure())
+
+    response = verify(client, code)
+
+    assert answer(response) == (409, {"status": 409})
+    assert mail.outbox == []
+    assert not EmailAddress.objects.get(email="owner@example.com").verified
+    assert_signed_out_without_pending_verification(client)
+
+
+@pytest.mark.parametrize("failure", FAILURES.values(), ids=FAILURES)
+def test_failed_reset_writes_nothing_and_discards_the_process(
+    failure: Callable[[], Exception], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = member()
+    client = browser()
+    assert submit(client, "auth/password/request", {"email": user.email}).status_code == 401
+    reset = {"key": mailed_code(), "password": PASSWORD + "reset"}
+    fail_after(monkeypatch, PasswordResetVerificationProcess, failure())
+
+    response = submit(client, "auth/password/reset", reset)
+
+    assert answer(response) == (409, {"status": 409})
+    assert mail.outbox == []
+    user.refresh_from_db()
+    assert user.check_password(PASSWORD)
+    assert answer(submit(client, "auth/password/reset", reset)) == (409, {"status": 409})
+
+
+def pending_completion(owner: type) -> tuple[Client, str, dict[str, str]]:
+    if owner is EmailVerificationProcess:
+        client, key = pending_signup()
+        return client, "auth/email/verify", {"key": key}
+    user = member()
+    client = browser()
+    assert submit(client, "auth/password/request", {"email": user.email}).status_code == 401
+    return client, "auth/password/reset", {"key": mailed_code(), "password": PASSWORD + "reset"}
+
+
+@pytest.mark.parametrize("owner", [EmailVerificationProcess, PasswordResetVerificationProcess])
+def test_completion_does_not_answer_other_database_errors_as_conflicts(
+    owner: type, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, endpoint, data = pending_completion(owner)
+    fail_after(monkeypatch, owner, OperationalError("server closed the connection"))
+
+    with pytest.raises(OperationalError, match="server closed the connection"):
+        submit(client, endpoint, data)
 
 
 def held_rows(email: str, user_id: int) -> tuple[bool, bool]:
