@@ -197,7 +197,8 @@ def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() ->
     deploy = release_jobs()["deploy"]
     checkout, move = deploy["steps"][:2]
 
-    assert checkout["uses"].startswith("actions/checkout@")
+    assert step_index(deploy, "actions/checkout") == 0
+    assert step_index(deploy, "git checkout") == 1
     assert checkout["with"] == {
         "repository": "erkurtharun/pyracast",
         "ref": "refs/heads/main",
