@@ -15,17 +15,29 @@ MAX_REPORTS = 10
 CONTENT_TYPES = frozenset({"application/csp-report", "application/reports+json"})
 
 
-def _origin_only(value: object) -> str:
+def _origin(value: object) -> str:
     if not isinstance(value, str):
         return ""
-    parts = urlsplit(value)
-    if parts.netloc:
-        return f"{parts.scheme}://{parts.netloc}"
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError:
+        return ""
+    if parts.hostname:
+        host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+        return f"{parts.scheme}://{host}" + ("" if port is None else f":{port}")
     return parts.scheme or value[:32]
 
 
-def _path_only(value: object) -> str:
-    return urlsplit(value).path if isinstance(value, str) else ""
+def _first_segment(value: object) -> str:
+    try:
+        path = urlsplit(value).path if isinstance(value, str) else ""
+    except ValueError:
+        return ""
+    if not path.startswith("/"):
+        return ""
+    segment = path.split("/", 2)[1][:32]
+    return f"/{segment}/" if segment else "/"
 
 
 def _violations(document: object) -> Iterator[dict[str, Any]]:
@@ -53,7 +65,8 @@ def _violations(document: object) -> Iterator[dict[str, Any]]:
                 }
 
 
-# Report URLs can carry tokens in paths and queries, so only origins and document paths are kept.
+# Report URLs can carry credentials and tokens, so only the blocked origin and the document's
+# first path segment are kept.
 @csrf_exempt
 @require_POST
 def csp_report(request: HttpRequest) -> HttpResponse:
@@ -72,8 +85,8 @@ def csp_report(request: HttpRequest) -> HttpResponse:
                     {
                         "event": "csp_violation",
                         "directive": str(violation["directive"] or ""),
-                        "blocked": _origin_only(violation["blocked"]),
-                        "document": _path_only(violation["document"]),
+                        "blocked": _origin(violation["blocked"]),
+                        "document": _first_segment(violation["document"]),
                         "disposition": str(violation["disposition"] or ""),
                     }
                 ),

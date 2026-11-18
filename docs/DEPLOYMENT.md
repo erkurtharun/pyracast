@@ -67,7 +67,7 @@ lists against both `deploy/compose.yaml` and the Terraform ingress rules.
 `deploy/routes.yml` limits each client (the address Cloudflare appended) by request
 rate, a tighter rate on `/api/auth/` and concurrent requests, and each router by body
 size; an API body over its limit gets the API error body `request_too_large`. Rate
-refusals are plain 429 answers. The gateway owns HSTS, `nosniff`, `Permissions-Policy`
+and concurrency refusals are plain 429 answers. The gateway owns HSTS, `nosniff`, `Permissions-Policy`
 and `Cross-Origin-Opener-Policy`; the applications own CSP, `Referrer-Policy` and cache
 control, and both CSPs report violations to `/api/csp-reports/`.
 
@@ -313,8 +313,8 @@ sign-in project, not the internal Gmail sender project.
 
 In GitHub, create **Settings → Environments → production**. Restrict deployment
 branches to `main`; enable required reviewers if you want a human release gate.
-Protect `main` with the `CI result` check, which fails unless every other CI job
-passed. The workflow independently requires that check of the exact current `main`
+Protect `main` with the `CI result` check, which passes only when every other CI job
+passed or, for Sonar alone, was skipped. The workflow independently requires that check of the exact current `main`
 commit's CI run; a failed test, stale commit, fork or pull-request run cannot deploy.
 
 Use `terraform -chdir=infra/terraform output -json github_environment_variables`
@@ -324,8 +324,8 @@ passed to `gcloud --secret`, without a `projects/.../secrets/` prefix. Set
 `migration_secret_version` in Terraform to the enabled version of that secret before
 adding `GCP_MIGRATION_SECRET_VERSION`; without that variable releases read `latest`.
 `PYRACAST_PUBLIC_ORIGIN` makes each release request `/api/session/` and `/app/`
-through Cloudflare after the install; add it once a request from a GitHub runner
-reaches the site without a challenge.
+through Cloudflare after the install (without it the run warns that it did not); add
+it once a request from a GitHub runner reaches the site without a challenge.
 Add **`GCP_DEPLOY_ENABLED=true` as a repository variable**, because the initial
 authorization job runs before entering the production environment.
 
@@ -335,7 +335,8 @@ successful `main` CI runs trigger it automatically. The workflow:
 1. Verifies the image artifact from that exact successful CI run, whose CI already
    tested these exact images, and scans it again before any cloud credential exists,
    rejecting HIGH/CRITICAL vulnerabilities. A run whose commit `main` has moved past
-   ends as a skip; only the deploy job waits for another release.
+   ends as a skip; only the deploy job waits for another release, and it checks `main`
+   again just before the transfer and cancels the run when it moved.
 2. Publishes the backend, web, gateway and PostgreSQL images without rebuilding. OCI
    digests, SBOM and provenance are preserved; all four release references are
    immutable.
@@ -740,11 +741,10 @@ statement and finds no verifier or password in that log, applies migrations unde
 owner, provisions again, checks that
 the runtime role can neither create tables nor write the migration ledger and that
 the superuser cannot sign in over TCP, checks frontend/API/static
-routing and forged proxy headers, including a simulated Cloudflare socket peer
-with a forged forwarding prefix, the exact gateway headers, each router's body limit
-and the per-client rate limits, publishes one synthetic forecast through the
-real RabbitMQ worker, and exercises dispatcher and idle worker stop. Through the
-gateway it also checks the anonymous `/api/session/` JSON shape, that a
+routing, forged proxy headers (also from a simulated Cloudflare peer), the exact
+gateway headers and each router's body, rate and in-flight limits, publishes one
+synthetic forecast through the real RabbitMQ worker, and exercises dispatcher and
+idle worker stop. Through the gateway it also checks the anonymous `/api/session/` JSON shape, that a
 wrong-password sign-in gets the normal 400 `email_password_mismatch` refusal and
 that the `/app/` workspace app shell loads.
 On those rows it runs `reset_database.py` `prepare`, checks that the gateway then
@@ -753,8 +753,7 @@ answers 503 with `Retry-After` (the maintenance page for a navigation, the
 `reset`, a refused `abort`, a pre-release dump of the empty database, `migrate` from zero under the
 restricted owner and a start; then the stop a failed release leaves and `restore`,
 after which ownership, privileges, stored rows and a stored password are back and
-the site is ready; last it requires the edge certificate and proves that a handshake
-without it fails. `deploy/test-release.sh` runs the installer against a model of which
+the site is ready; last it requires the edge certificate. `deploy/test-release.sh` runs the installer against a model of which
 secret each release starts with and which one the runtime role's password matches. It
 proves that a failure before `migrate` starts the previous release with the secret
 `host.json` names, that no password change happens while API or web run or after a

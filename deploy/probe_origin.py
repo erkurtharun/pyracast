@@ -85,6 +85,9 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("origin")
     options = parser.parse_args(arguments)
+    if not options.origin:
+        print("::warning::PYRACAST_PUBLIC_ORIGIN is not set; the public origin was not probed.")
+        return 0
     try:
         origin = public_origin(options.origin)
     except ValueError as error:

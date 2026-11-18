@@ -199,7 +199,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
-      actions: read
+      actions: write
       id-token: write
     env:
       RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
@@ -266,6 +266,28 @@ jobs:
         env:
           REGISTRY_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
         run: bash deploy/oci-images.sh publish "$RUNNER_TEMP/release-images" "$RELEASE_SHA" "$GCP_ARTIFACT_REPOSITORY"
+      - name: Read the current main commit
+        id: main
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { data } = await github.rest.repos.getBranch({ ...context.repo, branch: 'main' });
+            core.setOutput('sha', data.commit.sha);
+      - name: Decide whether main has moved past this release
+        id: current
+        env:
+          MAIN_SHA: ${{ steps.main.outputs.sha }}
+        run: python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA"
+      # A successful job here records a production deployment that the next release classifies its
+      # changes against, so a release that installs nothing ends cancelled, never successful.
+      - name: Cancel a release that main has moved past
+        if: steps.current.outputs.current != 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await github.rest.actions.cancelWorkflowRun({ ...context.repo, run_id: context.runId });
+            await new Promise(resolve => setTimeout(resolve, 300000));
+            core.setFailed('The release was not cancelled; nothing was transferred.');
       # The installer runs in a transient systemd unit, so a cancelled job or a dropped tunnel only
       # stops following it; a lost connection (ssh status 255) follows the same unit again.
       - name: Transfer the verified release and deploy through IAP
@@ -306,7 +328,6 @@ jobs:
         run: |
           printf 'Released %s\n\nBackend: %s\n\nWeb: %s\n\nGateway: %s\n\nPostgreSQL: %s\n' "$RELEASE_SHA" "$BACKEND_IMAGE" "$WEB_IMAGE" "$GATEWAY_IMAGE" "$POSTGRES_IMAGE" >> "$GITHUB_STEP_SUMMARY"
       - name: Probe the public origin through the edge
-        if: vars.PYRACAST_PUBLIC_ORIGIN != ''
         env:
           PYRACAST_PUBLIC_ORIGIN: ${{ vars.PYRACAST_PUBLIC_ORIGIN }}
         run: python3 deploy/probe_origin.py "$PYRACAST_PUBLIC_ORIGIN"

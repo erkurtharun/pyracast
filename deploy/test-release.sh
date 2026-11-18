@@ -207,8 +207,6 @@ release_directory() {
 new_release=$(release_directory "$backend_image" "$web_image" "$gateway_image" "$postgres_image")
 previous_build=$(release_directory "$rebuilt_backend_image" "$web_image" "$gateway_image" "$postgres_image")
 
-# The release command starts the installer in a transient unit and follows it; the job is cancelled
-# while the installer migrates, and a second command follows the same unit to its end.
 run_cancelled_release() {
   local stage=/run/pyracast-release-$revision-1-1 follower
   mkdir -p "$stage/bundle"
@@ -618,7 +616,6 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
       success|prune|first-success|redeploy|lock-wait|maintenance-success|cancelled)
         test "$result" == 0
         if [[ $MODE == cancelled ]]; then
-          # The cancelled job ended before the release; the second command followed the same unit to its end.
           if grep -Fq "Release $revision is healthy." /follow-cancelled; then exit 1; fi
           grep -Fxq "Release $revision is healthy." /result
           test -e "/units/pyracast-release-$revision-1-1.service.ended"

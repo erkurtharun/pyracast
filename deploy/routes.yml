@@ -71,7 +71,8 @@ http:
       inFlightReq:
         amount: 32
         sourceCriterion: {ipStrategy: {depth: 1, ipv6Subnet: 64}}
-    # The application never answers 413, so every 413 here is a body over the gateway's limit.
+    # The application never answers 413, so every 413 here is a body over the gateway's limit. It
+    # does answer 429 with its own codes and Retry-After, which this middleware would replace.
     api-refusals:
       errors: {status: ["413"], service: maintenance, query: /api/413}
     # Traefik answers 502 only when api or web is unreachable; the application never does.
