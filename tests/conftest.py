@@ -70,7 +70,12 @@ SUBPROCESS = frozenset(
     }
 )
 MIGRATION = frozenset(
-    {"test_invariant_migrations", "test_vocabulary_migrations", "test_workspace_name_migration"}
+    {
+        "test_invariant_migrations",
+        "test_invitation_role_migration",
+        "test_vocabulary_migrations",
+        "test_workspace_name_migration",
+    }
 )
 # Modules that drive every writer of the tables with stored invariants. After each passing test
 # of these modules the rows are checked with raw queries written independently of the CHECK and
@@ -80,7 +85,9 @@ INVARIANT_AUDIT = frozenset(
         "test_account_rotation",
         "test_admin_health_queries",
         "test_admin_health_views",
+        "test_admin_plant_console",
         "test_admin_setup",
+        "test_admin_workspace_management",
         "test_archive_invariants",
         "test_calibration_automation",
         "test_calibration_invariants",
@@ -98,6 +105,7 @@ INVARIANT_AUDIT = frozenset(
         "test_historical_upload",
         "test_incident_calibration",
         "test_job_lease_invariants",
+        "test_location_correction",
         "test_jobs",
         "test_metering",
         "test_metering_nightly",
@@ -109,6 +117,7 @@ INVARIANT_AUDIT = frozenset(
         "test_notifications",
         "test_plant_operations",
         "test_plant_training",
+        "test_platform_workspace_authority",
         "test_production_changes",
         "test_provider_account_invariants",
         "test_provider_identity",

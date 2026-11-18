@@ -1,9 +1,12 @@
-from typing import Any, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from django import forms
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.http import HttpRequest, HttpResponse, QueryDict
+from django.template.response import TemplateResponse
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from django.views.decorators.debug import sensitive_variables
@@ -17,8 +20,71 @@ from pyracast.connections.models import (
     SiteBinding,
 )
 from pyracast.connections.operations import create_account, rotate_secret
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.regions.models import Region
 from pyracast.regions.operations import configure_binding
+
+if TYPE_CHECKING:
+    from pyracast.admin import PlatformAdminSite
+
+STALE_CODES = frozenset(
+    {ErrorCode.CONFLICT, ErrorCode.WORKSPACE_ADMIN_CHANGED, ErrorCode.REGION_REVISION_CHANGED}
+)
+CONSOLE_MESSAGES = {
+    ErrorCode.LOCATION_ALREADY_EXISTS: gettext_lazy(
+        "This workspace already has a plant at this location."
+    ),
+    ErrorCode.LOCATION_CHANGE_ALREADY_PENDING: gettext_lazy(
+        "A location request is waiting for review. "
+        "Approve or reject it before correcting the location."
+    ),
+}
+
+
+def form_data(request: HttpRequest) -> QueryDict | None:
+    return request.POST if request.method == "POST" else None
+
+
+def add_refusal(form: forms.BaseForm, error: ValidationError) -> None:
+    if isinstance(error, DomainError):
+        field = error.field if error.field in form.fields else None
+        message = CONSOLE_MESSAGES.get(error.code, error.message)
+        form.add_error(field, ValidationError(message, code=error.code))
+        return
+    form.add_error(None, error)
+
+
+def submitted(
+    request: HttpRequest, form: forms.BaseForm, action: Callable[[], HttpResponse]
+) -> HttpResponse | None:
+    if request.method != "POST" or not form.is_valid():
+        return None
+    try:
+        return action()
+    except ValidationError as error:
+        add_refusal(form, error)
+        return None
+
+
+def form_page(
+    site: PlatformAdminSite,
+    request: HttpRequest,
+    template: str,
+    title: str,
+    context: dict[str, Any],
+    *,
+    section: str = "tenant",
+) -> TemplateResponse:
+    form: forms.BaseForm = context["form"]
+    stale = any(error.code in STALE_CODES for error in form.non_field_errors().as_data())
+    return site.workspace_response(
+        request,
+        section,
+        title,
+        {**context, "stale": stale},
+        status=400 if request.method == "POST" else 200,
+        template=template,
+    )
 
 
 class EpiasConnectionForm(forms.Form):

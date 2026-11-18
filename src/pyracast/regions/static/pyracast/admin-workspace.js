@@ -44,3 +44,45 @@ if (setupForm instanceof HTMLFormElement) {
     syncAccountGroups();
   }
 }
+
+const coordinateNumber = /^-?\d+(?:\.\d+)?$/;
+function parseCoordinatePair(text) {
+  const input = text.trim();
+  const separated = input.split(/[,;]/);
+  const pair = separated.length === 1 ? input.split(/\s+/) : separated.map((value) => value.trim());
+  return pair.length === 2 && pair.every((value) => coordinateNumber.test(value)) ? pair : null;
+}
+
+document.querySelectorAll("[data-coordinate-pair]").forEach((latitude) => {
+  if (!(latitude instanceof HTMLInputElement) || !latitude.form) return;
+  const longitude = latitude.form.elements.namedItem(latitude.dataset.coordinatePair);
+  if (!(longitude instanceof HTMLInputElement)) return;
+  const hint = latitude.form.querySelector("[data-coordinate-hint]");
+  if (hint instanceof HTMLElement) {
+    hint.hidden = false;
+    const described = latitude.getAttribute("aria-describedby");
+    latitude.setAttribute("aria-describedby", described ? `${described} ${hint.id}` : hint.id);
+  }
+  latitude.addEventListener("paste", (event) => {
+    const pair = parseCoordinatePair(event.clipboardData?.getData("text") ?? "");
+    if (!pair) return;
+    event.preventDefault();
+    latitude.value = pair[0];
+    longitude.value = pair[1];
+  });
+});
+
+document.querySelectorAll("[data-mounting]").forEach((mounting) => {
+  if (!(mounting instanceof HTMLSelectElement) || !mounting.form) return;
+  const groups = mounting.form.querySelectorAll("[data-fixed-mounting]");
+  const syncAngles = () => {
+    groups.forEach((group) => {
+      group.hidden = mounting.value !== "fixed" && !group.querySelector(".errorlist");
+      group.querySelectorAll("input").forEach((field) => {
+        field.disabled = group.hidden;
+      });
+    });
+  };
+  mounting.addEventListener("change", syncAngles);
+  syncAngles();
+});

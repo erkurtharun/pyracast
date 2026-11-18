@@ -60,9 +60,13 @@ class WorkspaceInvitation(models.Model):
     delivery_status = models.CharField(
         max_length=9, choices=InvitationDeliveryStatus, default=InvitationDeliveryStatus.PENDING
     )
+    role = models.CharField(max_length=6, choices=WorkspaceRole, default=WorkspaceRole.VIEWER)
 
     class Meta:
-        constraints = (choices_check("delivery_status", InvitationDeliveryStatus),)
+        constraints = (
+            choices_check("delivery_status", InvitationDeliveryStatus),
+            choices_check("role", WorkspaceRole),
+        )
 
 
 class WorkspaceAdminChange(models.Model):

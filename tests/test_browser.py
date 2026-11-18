@@ -17,7 +17,7 @@ from django.utils import timezone
 
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.mfa import MFAAdapter
-from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
 from pyracast.calculation import calculate
 from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.jobs import collect
@@ -72,6 +72,16 @@ def test_browser_against_live_django(
     Authenticator.objects.create(
         user=system.admin, type="totp", data={"secret": MFAAdapter().encrypt(admin_secret)}
     )
+    console_secret = generate_totp_secret()
+    console_admin = User.objects.create_superuser(
+        username="console-admin", email="console-admin@example.com", password=password
+    )
+    EmailAddress.objects.create(
+        user=console_admin, email=console_admin.email, primary=True, verified=True
+    )
+    Authenticator.objects.create(
+        user=console_admin, type="totp", data={"secret": MFAAdapter().encrypt(console_secret)}
+    )
     mailbox = tmp_path / "auth-mailbox.json"
     mailbox.write_text("[]", encoding="utf-8")
     messages: list[dict[str, str]] = []
@@ -109,6 +119,8 @@ def test_browser_against_live_django(
     outsider = User.objects.create_user(username="other")
     other_tenant = Tenant.objects.create(name="Other")
     Membership.objects.create(user=outsider, tenant=other_tenant, role=WorkspaceRole.ADMIN)
+    removable = User.objects.create_user(username="removable", email="removable@example.test")
+    Membership.objects.create(user=removable, tenant=other_tenant)
     other_region = submit_region(
         outsider,
         other_tenant.pk,
@@ -177,6 +189,9 @@ def test_browser_against_live_django(
         "BROWSER_ADMIN_EMAIL": system.admin.email,
         "BROWSER_ADMIN_PASSWORD": password,
         "BROWSER_ADMIN_TOTP_SEED": admin_secret,
+        "BROWSER_CONSOLE_EMAIL": console_admin.email,
+        "BROWSER_CONSOLE_TOTP_SEED": console_secret,
+        "BROWSER_REMOVABLE_MEMBER": removable.email,
         "BROWSER_ADMIN_ORIGIN": live_server.url,
         "BROWSER_REVIEW_REGION": str(review_region.pk),
         "BROWSER_NOW": now.isoformat(),
@@ -210,7 +225,7 @@ def test_browser_against_live_django(
             cwd=Path(__file__).resolve().parent.parent,
             env=env,
             check=True,
-            timeout=240,
+            timeout=360,
         )
     plant = Plant.objects.select_related("current_configuration").get(
         region=system.region, name="Browser plant"
@@ -247,3 +262,22 @@ def test_browser_against_live_django(
     assert review_region.status == "approved"
     assert location_change.status == "rejected"
     assert NotificationSettings.objects.get().max_recipients == 6
+    console_tenant = Tenant.objects.get(name="Browser console customer")
+    owner_invitation = WorkspaceInvitation.objects.get(tenant=console_tenant)
+    assert (owner_invitation.email, owner_invitation.role, owner_invitation.created_by) == (
+        "browser-owner@example.test",
+        WorkspaceRole.ADMIN,
+        console_admin,
+    )
+    console_plant = Plant.objects.select_related("submission").get(region__tenant=console_tenant)
+    assert console_plant.name == "Browser console plant"
+    assert (console_plant.region.latitude, console_plant.region.longitude) == (41.0082, 28.9784)
+    assert (console_plant.submission.surface_tilt, console_plant.submission.surface_azimuth) == (
+        25,
+        180,
+    )
+    assert not Membership.objects.filter(user=removable).exists()
+    invited_viewer = WorkspaceInvitation.objects.get(
+        tenant=other_tenant, email="browser-viewer@example.test"
+    )
+    assert invited_viewer.role == WorkspaceRole.VIEWER

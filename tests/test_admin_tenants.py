@@ -32,7 +32,11 @@ def test_workspace_administration_requires_verified_platform_admin(identity: str
             user.is_staff = user.is_superuser = True
             user.save()
         client.force_login(user)
-    for path in ("/admin/workspaces/", f"/admin/workspaces/{tenant.pk}/"):
+    for path in (
+        "/admin/workspaces/",
+        f"/admin/workspaces/{tenant.pk}/",
+        f"/admin/workspaces/{tenant.pk}/administrator/",
+    ):
         assert client.get(path).status_code == 302
         assert client.post(path, {"administrator": viewer.pk}).status_code == 302
     assert Membership.objects.get(tenant=tenant, user=owner).role == "admin"
@@ -44,7 +48,7 @@ def test_workspace_admin_selects_only_active_members_and_transfers_permissions()
     inactive = User.objects.create_user(username="inactive", is_active=False)
     Membership.objects.create(tenant=tenant, user=inactive)
     client, _ = verified_admin()
-    path = f"/admin/workspaces/{tenant.pk}/"
+    path = f"/admin/workspaces/{tenant.pk}/administrator/"
     page = client.get(path)
     assert page.status_code == 200
     content = page.content.decode()
@@ -65,10 +69,25 @@ def test_workspace_admin_selects_only_active_members_and_transfers_permissions()
     assert Membership.objects.get(tenant=tenant, user=viewer).role == "admin"
 
 
+def test_workspace_admin_page_states_only_the_consequences_that_apply() -> None:
+    tenant, owner, _ = workspace_members()
+    client, _ = verified_admin()
+    path = f"/admin/workspaces/{tenant.pk}/administrator/"
+    page = client.get(path).content.decode()
+    assert "The current administrator becomes a viewer and pending invitations are revoked." in (
+        page
+    )
+    assert 'aria-describedby="id_administrator_helptext"' in page
+    Membership.objects.filter(user=owner).delete()
+    unassigned = client.get(path).content.decode()
+    assert "The current administrator becomes a viewer" not in unassigned
+    assert "Pending invitations are revoked." in unassigned
+
+
 def test_workspace_admin_csrf_and_method_boundaries() -> None:
     tenant, owner, viewer = workspace_members()
     client, _ = verified_admin(enforce_csrf_checks=True)
-    path = f"/admin/workspaces/{tenant.pk}/"
+    path = f"/admin/workspaces/{tenant.pk}/administrator/"
     assert client.post(path, {"administrator": viewer.pk}).status_code == 403
     assert Membership.objects.get(tenant=tenant, user=owner).role == "admin"
     assert client.get(path).status_code == 200
@@ -91,7 +110,7 @@ def test_workspace_list_search_pagination_and_empty_administrator() -> None:
     assert tenant_list_context(tenant.name, "1")["page_obj"].paginator.count == 1
     for page in ("1", "2"):
         assert client.get(f"/admin/workspaces/?page={page}").status_code == 200
-    assert b"No workspaces found." in client.get("/admin/workspaces/?q=missing").content
+    assert b"No workspaces match this search." in client.get("/admin/workspaces/?q=missing").content
     empty = Tenant.objects.get(name="Other workspace 00")
     assert client.get(f"/admin/workspaces/{empty.pk}/").status_code == 200
 
@@ -115,7 +134,7 @@ def test_workspace_admin_form_handles_concurrent_membership_change(monkeypatch: 
 
     monkeypatch.setattr("pyracast.admin_tenants.reassign_workspace_admin", removed)
     response = client.post(
-        f"/admin/workspaces/{tenant.pk}/",
+        f"/admin/workspaces/{tenant.pk}/administrator/",
         {"administrator": viewer.pk, "expected_admin_id": owner.pk},
     )
     assert response.status_code == 400

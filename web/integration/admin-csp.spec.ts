@@ -1,68 +1,22 @@
-import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { totp } from "./support/totp";
-
-async function checkPage(page: Page, testInfo: TestInfo, name: string) {
-    await page.screenshot({
-        path: testInfo.outputPath(`${name}.png`),
-        fullPage: true,
-    });
-    expect(
-        await page.evaluate(
-            () => document.documentElement.scrollWidth <= window.innerWidth,
-        ),
-    ).toBe(true);
-    expect(
-        (
-            await new AxeBuilder({ page })
-                .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
-                .analyze()
-        ).violations,
-    ).toEqual([]);
-    expect(
-        await page.evaluate(
-            () =>
-                (window as Window & { cspViolations?: string[] })
-                    .cspViolations ?? [],
-        ),
-    ).toEqual([]);
-}
+import { expect, test } from "@playwright/test";
+import {
+    checkPage,
+    recordCspViolations,
+    signInToConsole,
+} from "./support/console";
 
 test("an MFA administrator reviews plants and operations on desktop and mobile under CSP", async ({
     page,
 }, testInfo) => {
     test.setTimeout(120_000);
-    const violations: string[] = [];
-    page.on("console", (message) => {
-        if (/content security policy/i.test(message.text()))
-            violations.push(message.text());
-    });
-    await page.addInitScript(() => {
-        document.addEventListener("securitypolicyviolation", (event) => {
-            const target = window as Window & { cspViolations?: string[] };
-            (target.cspViolations ??= []).push(event.violatedDirective);
-        });
-    });
+    const violations = await recordCspViolations(page);
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.goto("/app/");
-    await page
-        .getByLabel("Email", { exact: true })
-        .fill(process.env.BROWSER_ADMIN_EMAIL!);
-    await page
-        .getByLabel("Password", { exact: true })
-        .fill(process.env.BROWSER_ADMIN_PASSWORD!);
-    await page
-        .locator("form")
-        .getByRole("button", { name: "Sign in", exact: true })
-        .click();
-    await expect(
-        page.getByRole("heading", { name: "Two-factor authentication" }),
-    ).toBeVisible();
-    await page
-        .getByLabel("Authenticator or recovery code")
-        .fill(totp(process.env.BROWSER_ADMIN_TOTP_SEED!));
-    await page.getByRole("button", { name: "Verify code" }).click();
-    await expect(page).toHaveURL("/admin/");
+    await signInToConsole(
+        page,
+        process.env.BROWSER_ADMIN_EMAIL!,
+        process.env.BROWSER_ADMIN_PASSWORD!,
+        process.env.BROWSER_ADMIN_TOTP_SEED!,
+    );
     const session = await page.request.get("/api/session/");
     expect((await session.json()).user.can_admin).toBe(true);
     const response = await page.goto("/admin/");

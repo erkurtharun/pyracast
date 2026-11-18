@@ -312,7 +312,8 @@ h3 {
     border-radius: var(--radius);
     background: var(--white);
 }
-.panel--narrow {
+.panel--narrow,
+.form-page {
     max-width: 640px;
 }
 .panel-head {
@@ -320,7 +321,8 @@ h3 {
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 4px 16px;
+    gap: 12px 16px;
+    min-height: 44px;
     margin-bottom: 16px;
 }
 .columns {
@@ -452,6 +454,7 @@ a.stat:hover {
     font-size: 14px;
     font-weight: 600;
     line-height: 1.4;
+    white-space: nowrap;
 }
 .badge::before {
     content: "";
@@ -562,8 +565,12 @@ a.stat:hover {
     gap: 0;
     margin-top: 12px;
 }
+.panel-head + .facts--compact {
+    margin-top: 0;
+}
 .facts--compact > div {
     display: flex;
+    align-items: baseline;
     justify-content: space-between;
     gap: 16px;
     padding: 8px 0;
@@ -573,8 +580,16 @@ a.stat:hover {
     font-size: 15px;
 }
 .facts--compact dd {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 0 16px;
     font-weight: 700;
     text-align: right;
+}
+.facts--compact .text-link {
+    font-weight: 400;
 }
 .facts--tinted {
     padding: 16px;
@@ -659,6 +674,28 @@ a.stat:hover {
     max-width: 280px;
     overflow-wrap: anywhere;
 }
+.table .cell-fit,
+.table .cell-action {
+    width: 1%;
+    max-width: none;
+}
+.table .row-title {
+    position: relative;
+    display: inline-block;
+    min-height: 0;
+}
+.table .row-title::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 0;
+    left: 0;
+    height: max(100%, 44px);
+    transform: translateY(-50%);
+}
+.nowrap {
+    white-space: nowrap;
+}
 .cell {
     display: grid;
     gap: 2px;
@@ -667,6 +704,12 @@ a.stat:hover {
 }
 .cell-action {
     text-align: right;
+    white-space: nowrap;
+}
+.cell-actions {
+    display: inline-flex;
+    justify-content: flex-end;
+    gap: 8px;
 }
 
 .health-checks {
@@ -732,6 +775,16 @@ a.stat:hover {
 .callout--danger {
     border-color: var(--danger);
     background: var(--danger-soft);
+}
+[data-error-summary] {
+    margin-bottom: 24px;
+}
+.error-summary {
+    display: grid;
+    gap: 4px;
+    margin-top: 8px;
+    padding-left: 20px;
+    list-style: disc;
 }
 
 .form {
@@ -805,12 +858,34 @@ a.stat:hover {
 .field--wide {
     grid-column: 1 / -1;
 }
+.field-grid > .field:not(.field--check) {
+    display: flex;
+    flex-direction: column;
+}
+.field-grid > .field:not(.field--check) > :last-child {
+    margin-top: auto;
+}
 .field label {
     font-weight: 600;
 }
 .field .helptext {
     color: var(--muted);
     font-size: 14px;
+}
+.field fieldset {
+    display: grid;
+    gap: 6px;
+}
+.field legend {
+    padding: 0;
+    font-weight: 600;
+}
+.field fieldset label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    font-weight: 400;
 }
 .field input:not([type="checkbox"]):not([type="radio"]),
 .field select,
@@ -862,6 +937,9 @@ a.stat:hover {
 }
 .errorlist li::before {
     content: "Error: ";
+}
+:lang(tr) .errorlist li::before {
+    content: "Hata: ";
 }
 .errorlist .errorlist li::before {
     content: none;
@@ -1027,12 +1105,24 @@ a.stat:hover {
     .facts {
         grid-template-columns: minmax(0, 1fr);
     }
+    .facts--compact > div {
+        flex-direction: column;
+        gap: 0;
+    }
+    .facts--compact dd {
+        justify-content: flex-start;
+        text-align: left;
+    }
     .steps {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .stats {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+}
+/* Tables stack once the main column leaves them less than about 800px: below 881px
+   without the rail, and up to 1185px beside the 256px rail. */
+@media (max-width: 880px), (min-width: 961px) and (max-width: 1185px) {
     .table-wrap {
         border: 0;
         border-radius: 0;
@@ -1061,17 +1151,18 @@ a.stat:hover {
     .table--stack tr:last-child {
         margin-bottom: 0;
     }
-    .table--stack tbody th,
+    .table--stack tbody th {
+        padding: 8px 0;
+        border-top: 0;
+    }
     .table--stack td {
-        display: grid;
-        grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-        gap: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 4px 12px;
         max-width: none;
         padding: 8px 0;
         border-top: 1px solid var(--line);
-    }
-    .table--stack tbody th {
-        border-top: 0;
     }
     .table--stack [data-label]::before {
         content: attr(data-label);
@@ -1079,12 +1170,39 @@ a.stat:hover {
         font-size: 13px;
         font-weight: 700;
     }
+    .table--stack td::before {
+        flex: 0 0 min(calc(40% - 12px), 12rem);
+    }
+    .table--stack td > * {
+        flex: 1 1 60%;
+        min-width: 0;
+    }
+    .table--stack td > .badge {
+        flex: none;
+    }
+    .table--stack td > .cell {
+        min-width: auto;
+    }
+    .table--stack tbody th::before {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
     .table--stack .cell-action {
         display: block;
+        width: auto;
         text-align: left;
+        white-space: normal;
     }
-    .table--stack .cell-action .btn {
-        width: 100%;
+    .table--stack .cell-action:empty {
+        display: none;
+    }
+    .table--stack .cell-actions {
+        flex-wrap: wrap;
+        justify-content: flex-start;
     }
 }
 @media (max-width: 420px) {
@@ -1093,8 +1211,13 @@ a.stat:hover {
     }
     .form-actions .btn,
     .form-actions form,
-    .filters-actions .btn {
+    .filters-actions .btn,
+    .table--stack .cell-action .btn {
         width: 100%;
+    }
+    .table--stack .cell-actions {
+        display: grid;
+        justify-content: stretch;
     }
 }
 @media (forced-colors: active) {

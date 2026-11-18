@@ -1,0 +1,27 @@
+{% extends "admin/workspace/base.html" %}
+{% load i18n %}
+{% block title %}{{ title }}{% endblock %}
+{% block heading %}{{ title }}{% endblock %}
+{% block content %}<div class="form-page">
+  {% if form.errors %}
+    <section class="notice notice--error" role="alert" tabindex="-1" data-error-summary aria-labelledby="errors-title">
+      <h2 id="errors-title">{% translate "Review the form" %}</h2>
+      <ul class="error-summary">
+        {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+        {% for field in form.hidden_fields %}{% for error in field.errors %}<li>{{ error }} <a href="{{ request.path }}">{% translate "Reload this page" %}</a></li>{% endfor %}{% endfor %}
+        {% for field in form.visible_fields %}{% for error in field.errors %}<li><a href="#{{ field.id_for_label }}">{{ field.label }}: {{ error }}</a></li>{% endfor %}{% endfor %}
+      </ul>
+      {% if stale %}<p><a href="{{ request.path }}">{% translate "Reload this page" %}</a></p>{% endif %}
+    </section>
+  {% endif %}
+  {% block notes %}{% endblock %}
+  <form method="post" class="panel form">
+    {% csrf_token %}
+    {% for field in form.hidden_fields %}{{ field }}{% endfor %}
+    {% block fields %}{% endblock %}
+    <div class="form-actions">
+      <button type="submit" class="btn btn--primary">{% block submit %}{% endblock %}</button>
+      <a class="text-link" href="{% block cancel %}{% endblock %}">{% translate "Cancel" context "console" %}</a>
+    </div>
+  </form>
+</div>{% endblock %}

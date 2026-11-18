@@ -277,9 +277,6 @@ msgstr "Güncel sınır"
 msgid "Current location:"
 msgstr "Güncel konum:"
 
-msgid "Customer declaration"
-msgstr "Müşteri beyanı"
-
 msgid "Customer workspace"
 msgstr "Müşteri çalışma alanı"
 
@@ -1501,17 +1498,8 @@ msgstr "Yönetici"
 msgid "Members"
 msgstr "Üyeler"
 
-msgid "No workspaces found."
-msgstr "Çalışma alanı bulunamadı."
-
 msgid "Workspace pages"
 msgstr "Çalışma alanı sayfaları"
-
-msgid "Workspace administrator"
-msgstr "Çalışma alanı yöneticisi"
-
-msgid "Save administrator"
-msgstr "Yöneticiyi kaydet"
 
 msgid "Workspace administrator updated."
 msgstr "Çalışma alanı yöneticisi güncellendi."
@@ -2133,3 +2121,383 @@ msgstr "Sağlayıcı anahtarı yenilendi"
 msgid "Provider request pause cleared"
 msgstr "Sağlayıcı istek beklemesi kaldırıldı"
 
+msgid "Review the form"
+msgstr "Formu kontrol edin"
+
+msgid "Reload this page"
+msgstr "Bu sayfayı yeniden yükleyin"
+
+msgctxt "console"
+msgid "Cancel"
+msgstr "Vazgeç"
+
+msgid ""
+"A workspace holds one customer's plants and the people who can see them."
+msgstr ""
+"Bir çalışma alanı, bir müşterinin santrallerini ve onları görebilen kişileri "
+"bir araya getirir."
+
+msgid "Create workspace"
+msgstr "Çalışma alanı oluştur"
+
+msgid "Save changes"
+msgstr "Değişiklikleri kaydet"
+
+msgid ""
+"The current administrator becomes a viewer and pending invitations are "
+"revoked."
+msgstr "Mevcut yönetici izleyici olur ve bekleyen davetler iptal edilir."
+
+msgid "Only active members can be chosen."
+msgstr "Yalnızca etkin üyeler seçilebilir."
+
+msgid "Pending invitations are revoked."
+msgstr "Bekleyen davetler iptal edilir."
+
+msgid "Change administrator"
+msgstr "Yöneticiyi değiştir"
+
+msgid ""
+"The invitation is valid for seven days and can be accepted only with this "
+"email address."
+msgstr ""
+"Davet yedi gün geçerlidir ve yalnızca bu e-posta adresiyle kabul edilebilir."
+
+msgid "Send invitation"
+msgstr "Davet gönder"
+
+msgid "The member was not removed"
+msgstr "Üye çıkarılmadı"
+
+msgid "What happens"
+msgstr "Ne olacak"
+
+msgid ""
+"The administrator cannot be removed. Make another member the administrator "
+"first."
+msgstr "Yönetici çıkarılamaz. Önce başka bir üyeyi yönetici yapın."
+
+msgid "Their access to this workspace ends at once."
+msgstr "Bu çalışma alanına erişimi hemen sona erer."
+
+msgid "They no longer receive email reminders for this workspace."
+msgstr "Bu çalışma alanının e-posta hatırlatmalarını artık almaz."
+
+msgid "Pending invitations to their addresses expire."
+msgstr "Adreslerine gönderilmiş bekleyen davetlerin süresi dolar."
+
+msgid "Their account, the plants and the saved data stay."
+msgstr "Hesabı, santraller ve kaydedilmiş veriler korunur."
+
+msgid "Remove member"
+msgstr "Üyeyi çıkar"
+
+msgid ""
+"A location request is waiting for review. Approve or reject it before "
+"correcting the location."
+msgstr ""
+"İncelenmeyi bekleyen bir konum talebi var. Konumu düzeltmeden önce talebi "
+"onaylayın veya reddedin."
+
+msgid "Review the request"
+msgstr "Talebi incele"
+
+msgid "Capacity and metering"
+msgstr "Kapasite ve ölçüm"
+
+msgid "Fixed mounting"
+msgstr "Sabit montaj"
+
+msgid ""
+"The plant starts in review. After saving, set up its provider connection, "
+"then validate and approve it."
+msgstr ""
+"Santral önce incelemeye alınır. Kaydettikten sonra sağlayıcı bağlantısını "
+"kurun, ardından doğrulayıp onaylayın."
+
+msgid "Add plant"
+msgstr "Santral ekle"
+
+msgid "Before saving"
+msgstr "Kaydetmeden önce"
+
+msgid ""
+"Saving a changed location starts a new review. The plant awaits approval "
+"again and its provider connection must be set up, validated and approved."
+msgstr ""
+"Değişen bir konumu kaydetmek yeni bir inceleme başlatır. Santral yeniden "
+"onay bekler; sağlayıcı bağlantısı kurulmalı, doğrulanmalı ve onaylanmalıdır."
+
+msgid ""
+"Changed technical details of an approved plant are saved as a new "
+"configuration revision and turn off automatic calibration."
+msgstr ""
+"Onaylı bir santralin değişen teknik bilgileri yeni bir yapılandırma "
+"revizyonu olarak kaydedilir ve otomatik kalibrasyonu kapatır."
+
+msgid ""
+"Create a workspace for each customer, then add its plants and invite its "
+"members."
+msgstr ""
+"Her müşteri için bir çalışma alanı oluşturun, ardından santrallerini ekleyip "
+"üyelerini davet edin."
+
+msgid "New workspace"
+msgstr "Yeni çalışma alanı"
+
+msgid "Invitation pending"
+msgstr "Davet bekliyor"
+
+msgid "No administrator"
+msgstr "Yönetici yok"
+
+msgid "No workspaces match this search."
+msgstr "Bu aramayla eşleşen çalışma alanı yok."
+
+msgid ""
+"No workspaces yet. A workspace holds one customer's plants and the people "
+"who can see them."
+msgstr ""
+"Henüz çalışma alanı yok. Bir çalışma alanı, bir müşterinin santrallerini ve "
+"onları görebilen kişileri bir araya getirir."
+
+msgid "Invite an administrator"
+msgstr "Yönetici davet et"
+
+msgid "Add the first plant"
+msgstr "İlk santrali ekle"
+
+msgid "No plants yet. Add the first plant with its location and capacity."
+msgstr "Henüz santral yok. İlk santrali konumu ve kapasitesiyle ekleyin."
+
+msgid "Invite member"
+msgstr "Üye davet et"
+
+msgid "Member"
+msgstr "Üye"
+
+msgid "Role"
+msgstr "Rol"
+
+msgid "Last sign-in"
+msgstr "Son oturum açma"
+
+msgid "Actions"
+msgstr "İşlemler"
+
+msgid "Account deactivated"
+msgstr "Hesap devre dışı"
+
+msgid "Viewer"
+msgstr "İzleyici"
+
+msgid "Make administrator"
+msgstr "Yönetici yap"
+
+msgctxt "console"
+msgid "Remove"
+msgstr "Çıkar"
+
+msgid "No members yet. Invite the customer's administrator first."
+msgstr "Henüz üye yok. Önce müşterinin yöneticisini davet edin."
+
+msgid ""
+"No members yet. The administrator appears here after accepting the "
+"invitation."
+msgstr "Henüz üye yok. Yönetici, daveti kabul edince burada görünür."
+
+msgctxt "last sign-in"
+msgid "Never"
+msgstr "Hiç oturum açmadı"
+
+msgctxt "review status"
+msgid "Review"
+msgstr "İnceleme"
+
+msgid "Invitations"
+msgstr "Davetler"
+
+msgid "Email address"
+msgstr "E-posta adresi"
+
+msgid "Delivery"
+msgstr "Gönderim"
+
+msgid "Expires"
+msgstr "Son geçerlilik"
+
+msgid "Resend"
+msgstr "Yeniden gönder"
+
+msgid "Revoke"
+msgstr "İptal et"
+
+msgid "No pending invitations. Invite people under Members."
+msgstr "Bekleyen davet yok. Kişileri Üyeler bölümünden davet edin."
+
+msgid "Rename workspace"
+msgstr "Çalışma alanını yeniden adlandır"
+
+msgid "Rename"
+msgstr "Yeniden adlandır"
+
+msgid "This workspace has no administrator. Invite the administrator first."
+msgstr "Bu çalışma alanının yöneticisi yok. Önce yöneticiyi davet edin."
+
+msgid "Paste a pair such as 41.0082, 28.9784 into Latitude to fill both."
+msgstr ""
+"41.0082, 28.9784 gibi bir çifti Enlem alanına yapıştırırsanız iki alan "
+"birlikte dolar."
+
+msgid "Plant details"
+msgstr "Santral bilgileri"
+
+msgid "Edit details"
+msgstr "Bilgileri düzenle"
+
+msgid "This workspace already has a plant at this location."
+msgstr "Bu çalışma alanında bu konumda zaten bir santral var."
+
+msgid "Sent"
+msgstr "Gönderildi"
+
+msgid "Delivery unknown"
+msgstr "Gönderim belirsiz"
+
+msgid "Administrator email (optional)"
+msgstr "Yönetici e-postası (isteğe bağlı)"
+
+msgid ""
+"We email this address an invitation to administer the workspace. Without "
+"one, the workspace has no administrator until you invite one."
+msgstr ""
+"Bu adrese çalışma alanını yönetmesi için bir davet e-postası gönderilir. "
+"Adres girilmezse, siz birini davet edene kadar çalışma alanının yöneticisi "
+"olmaz."
+
+msgid "Invitation language"
+msgstr "Davet dili"
+
+msgid ""
+"This workspace changed after you opened this page. Reload it to see the "
+"current name."
+msgstr ""
+"Bu sayfayı açtıktan sonra çalışma alanı değişti. Güncel adı görmek için "
+"sayfayı yeniden yükleyin."
+
+msgid "Viewer: sees plants, forecasts and production"
+msgstr "İzleyici: santralleri, tahminleri ve üretimi görür"
+
+msgid "Administrator: manages plants, members and settings"
+msgstr "Yönetici: santralleri, üyeleri ve ayarları yönetir"
+
+msgid "Offered while the workspace has no administrator."
+msgstr "Çalışma alanının yöneticisi yokken sunulur."
+
+msgid "The invitation to %(email)s was sent."
+msgstr "%(email)s adresine davet gönderildi."
+
+msgid ""
+"The invitation to %(email)s could not be sent. Check the mail service, then "
+"resend it."
+msgstr ""
+"%(email)s adresine davet gönderilemedi. E-posta hizmetini kontrol edip "
+"daveti yeniden gönderin."
+
+msgid ""
+"The invitation to %(email)s may not have been delivered. Check the mail "
+"service before resending it."
+msgstr ""
+"%(email)s adresine gönderilen davet teslim edilmemiş olabilir. Yeniden "
+"göndermeden önce e-posta hizmetini kontrol edin."
+
+msgid "Workspace %(name)s created."
+msgstr "%(name)s çalışma alanı oluşturuldu."
+
+msgid "%(name)s is the new workspace name."
+msgstr "Çalışma alanının adı %(name)s olarak değiştirildi."
+
+msgid "Invitation to %(email)s revoked."
+msgstr "%(email)s adresine gönderilen davet iptal edildi."
+
+msgid "%(member)s was removed from the workspace."
+msgstr "%(member)s çalışma alanından çıkarıldı."
+
+msgid "Plant name"
+msgstr "Santral adı"
+
+msgid "Latitude (°)"
+msgstr "Enlem (°)"
+
+msgid "Longitude (°)"
+msgstr "Boylam (°)"
+
+msgid "Timezone"
+msgstr "Saat dilimi"
+
+msgid "IANA name, for example Europe/Istanbul."
+msgstr "IANA adı, örneğin Europe/Istanbul."
+
+msgid "DC capacity (MW)"
+msgstr "DC kapasitesi (MW)"
+
+msgid "Inverter AC capacity (MW, optional)"
+msgstr "İnvertör AC kapasitesi (MW, isteğe bağlı)"
+
+msgid "Grid export limit (MW, optional)"
+msgstr "Şebekeye veriş sınırı (MW, isteğe bağlı)"
+
+msgid "Mounting type"
+msgstr "Montaj türü"
+
+msgid "Tilt (°, optional)"
+msgstr "Eğim (°, isteğe bağlı)"
+
+msgid "Azimuth (°, optional)"
+msgstr "Azimut (°, isteğe bağlı)"
+
+msgid "Clockwise from north; south is 180."
+msgstr "Kuzeyden saat yönünde; güney 180'dir."
+
+msgid "Reason for a location correction (optional)"
+msgstr "Konum düzeltmesinin nedeni (isteğe bağlı)"
+
+msgid ""
+"This plant changed after you opened this page. Reload it to see the current "
+"details."
+msgstr ""
+"Bu sayfayı açtıktan sonra santral değişti. Güncel bilgileri görmek için "
+"sayfayı yeniden yükleyin."
+
+msgid ""
+"Plant %(name)s created. Next, set up its provider connection, then validate "
+"and approve it."
+msgstr ""
+"%(name)s santrali oluşturuldu. Şimdi sağlayıcı bağlantısını kurun, ardından "
+"doğrulayıp onaylayın."
+
+msgid ""
+"Plant details saved. The plant is back in review with its corrected "
+"location. Set up its provider connection again."
+msgstr ""
+"Santral bilgileri kaydedildi. Santral düzeltilen konumuyla yeniden "
+"incelemede. Sağlayıcı bağlantısını yeniden kurun."
+
+msgid "Plant details saved."
+msgstr "Santral bilgileri kaydedildi."
+
+msgid "Edit plant details"
+msgstr "Santral bilgilerini düzenle"
+
+msgid "%(counter)s plant"
+msgid_plural "%(counter)s plants"
+msgstr[0] "%(counter)s santral"
+msgstr[1] "%(counter)s santral"
+
+msgid "%(counter)s member"
+msgid_plural "%(counter)s members"
+msgstr[0] "%(counter)s üye"
+msgstr[1] "%(counter)s üye"
+
+msgid "You cannot remove your own membership from this console."
+msgstr "Bu konsoldan kendi üyeliğinizi kaldıramazsınız."

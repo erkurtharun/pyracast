@@ -332,7 +332,7 @@ def test_admin_switcher_requires_csrf_and_uses_account_preference() -> None:
         ("/admin/plants/", "Santraller"),
         ("/admin/operations/", "İşlemler"),
         ("/admin/settings/", "Ayarlar"),
-        (f"/admin/plants/{system.region.pk}/", "Müşteri beyan\u0131"),
+        (f"/admin/plants/{system.region.pk}/", "Santral bilgileri"),
     ):
         page = client.get(path, HTTP_ACCEPT_LANGUAGE="en")
         assert page.status_code == 200

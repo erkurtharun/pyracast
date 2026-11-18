@@ -347,6 +347,7 @@ def _prepared_delivery(monkeypatch: pytest.MonkeyPatch) -> models.Model:
 
 STORED_VOCABULARIES = (
     StoredVocabulary(Membership, "role", _membership),
+    StoredVocabulary(WorkspaceInvitation, "role", _invitation),
     StoredVocabulary(WorkspaceInvitation, "delivery_status", _invitation, retired=("accepted",)),
     StoredVocabulary(UserLanguagePreference, "language", _language),
     StoredVocabulary(Region, "status", _region),

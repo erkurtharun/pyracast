@@ -5,7 +5,7 @@ from django.db.models.functions import Lower
 from django.utils import timezone
 
 from pyracast.accounts.audit import SecurityEvent, record_on_commit
-from pyracast.accounts.authorization import require_platform_admin, tenant_membership
+from pyracast.accounts.authorization import authorize_workspace_admin, require_platform_admin
 from pyracast.accounts.models import (
     Membership,
     Tenant,
@@ -26,8 +26,10 @@ def register_account(user: User, *, language: str, workspace_name: str | None) -
 
 
 @transaction.atomic
-def remove_workspace_member(actor: User, tenant_id: int, user_id: int) -> None:
-    tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
+def remove_workspace_member(
+    actor: User, tenant_id: int, user_id: int, *, platform: bool = False
+) -> None:
+    authorize_workspace_admin(actor, tenant_id, platform=platform)
     membership = Membership.objects.filter(tenant_id=tenant_id, user_id=user_id).first()
     if membership is None:
         return
