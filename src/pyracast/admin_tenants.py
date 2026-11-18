@@ -5,9 +5,8 @@ from django.contrib import messages
 from django.contrib.admin.models import ADDITION, CHANGE, LogEntry
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import Count, Exists, OuterRef, Q, QuerySet, Subquery
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest, QueryDict
@@ -109,32 +108,11 @@ def _log(actor: User, tenant: Tenant, flag: int, message: str) -> None:
     )
 
 
-def _save_name(tenant: Tenant, **options: Any) -> None:
-    try:
-        with transaction.atomic():
-            tenant.save(**options)
-    except IntegrityError as error:
-        try:
-            tenant.validate_constraints()
-        except ValidationError as violation:
-            raise ValidationError({"name": violation.messages}) from error
-        raise ConflictError(ErrorCode.DATABASE_CONFLICT) from error
-
-
 class WorkspaceNameForm(TenantForm):
     class Meta:
         model = Tenant
         fields = ("name",)
         labels: ClassVar = {"name": gettext_lazy("Workspace name")}
-
-    def validate_constraints(self) -> None:
-        # The model's constraints are the name rules; every violation belongs to the name.
-        if "name" in self.errors:
-            return
-        try:
-            self.instance.validate_constraints()
-        except ValidationError as error:
-            self.add_error("name", error.messages)
 
 
 class WorkspaceForm(WorkspaceNameForm):
@@ -154,7 +132,7 @@ class WorkspaceForm(WorkspaceNameForm):
         require_platform_admin(actor)
         email = self.cleaned_data["administrator_email"]
         with transaction.atomic():
-            _save_name(self.instance)
+            self.instance.save()
             _log(actor, self.instance, ADDITION, "Created.")
             invitation = (
                 invite_workspace_member(
@@ -190,7 +168,7 @@ class WorkspaceRenameForm(WorkspaceNameForm):
             if name == expected:
                 return False
             tenant.name = name
-            _save_name(tenant, update_fields=("name",))
+            tenant.save(update_fields=("name",))
             _log(actor, tenant, CHANGE, f"Renamed from {expected} to {name}.")
         return True
 

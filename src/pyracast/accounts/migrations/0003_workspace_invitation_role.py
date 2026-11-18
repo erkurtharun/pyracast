@@ -1,12 +1,15 @@
 from typing import ClassVar
 
+from django.conf import settings
 from django.db import migrations, models
 from django.db.migrations.operations.base import Operation
-from django.db.models.functions import Lower, Trim
 
 
 class Migration(migrations.Migration):
-    dependencies: ClassVar = [("accounts", "0001_initial")]
+    dependencies: ClassVar = [
+        ("accounts", "0002_workspace_names_need_not_be_unique"),
+        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+    ]
 
     operations: ClassVar[list[Operation]] = [
         migrations.AddField(
@@ -23,15 +26,6 @@ class Migration(migrations.Migration):
             constraint=models.CheckConstraint(
                 condition=models.Q(("role__in", ["admin", "viewer"])),
                 name="workspaceinvitation_role_chk",
-            ),
-        ),
-        migrations.AlterConstraint(
-            model_name="tenant",
-            name="unique_workspace_name",
-            constraint=models.UniqueConstraint(
-                Lower(Trim("name")),
-                name="unique_workspace_name",
-                violation_error_message="This workspace name is already in use.",
             ),
         ),
     ]

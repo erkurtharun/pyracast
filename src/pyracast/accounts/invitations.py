@@ -230,13 +230,12 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
     Tenant.objects.select_for_update().get(pk=invitation.tenant_id)
     invitation = WorkspaceInvitation.objects.select_for_update().get(pk=invitation.pk)
     admin_role = invitation.role == WorkspaceRole.ADMIN
-    if (
-        invitation.accepted_at is not None
-        or invitation.expires_at <= timezone.now()
-        or (admin_role and has_workspace_admin(invitation.tenant_id))
-    ):
+    if invitation.accepted_at is not None or invitation.expires_at <= timezone.now():
         reason = "accepted" if invitation.accepted_at is not None else "expired"
         _record_refused_acceptance(actor, invitation, reason)
+        raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
+    if admin_role and has_workspace_admin(invitation.tenant_id):
+        _record_refused_acceptance(actor, invitation, "administrator_exists")
         raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
     if (
         not User.objects.filter(pk=actor.pk, is_active=True).exists()
