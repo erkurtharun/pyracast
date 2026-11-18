@@ -119,7 +119,7 @@ def test_password_whitespace_is_preserved_across_login_reauthentication_and_chan
     assert not user.check_password((password + "new  ").strip())
 
 
-def test_password_change_requires_at_least_twelve_characters() -> None:
+def test_password_change_requires_at_least_fifteen_characters() -> None:
     user = member()
     client = Client(enforce_csrf_checks=True)
     assert (
@@ -128,7 +128,7 @@ def test_password_change_requires_at_least_twelve_characters() -> None:
     rejected = submit(
         client,
         "account/password/change",
-        {"current_password": PASSWORD, "new_password": "aB!57mQ8nP4"},
+        {"current_password": PASSWORD, "new_password": "aB!57mQ8nP4zK2"},
     )
     assert rejected.status_code == 400
     assert any(error["code"] == "password_too_short" for error in rejected.json()["errors"])
@@ -138,11 +138,11 @@ def test_password_change_requires_at_least_twelve_characters() -> None:
     changed = submit(
         client,
         "account/password/change",
-        {"current_password": PASSWORD, "new_password": "aB!57mQ8nP4z"},
+        {"current_password": PASSWORD, "new_password": "aB!57mQ8nP4zK2w"},
     )
     assert changed.status_code == 401
     user.refresh_from_db()
-    assert user.check_password("aB!57mQ8nP4z")
+    assert user.check_password("aB!57mQ8nP4zK2w")
 
 
 def test_oversized_login_password_is_rejected_before_hashing(
@@ -214,22 +214,22 @@ def test_password_reset_is_generic_session_bound_single_use_and_revokes_sessions
     )
 
 
-def test_password_reset_requires_at_least_twelve_characters() -> None:
+def test_password_reset_requires_at_least_fifteen_characters() -> None:
     user = member()
     client = Client(enforce_csrf_checks=True)
     assert submit(client, "auth/password/request", {"email": user.email}).status_code == 401
     code = mailed_code()
 
-    rejected = submit(client, "auth/password/reset", {"key": code, "password": "aB!57mQ8nP4"})
+    rejected = submit(client, "auth/password/reset", {"key": code, "password": "aB!57mQ8nP4zK2"})
     assert rejected.status_code == 400
     assert any(error["code"] == "password_too_short" for error in rejected.json()["errors"])
     user.refresh_from_db()
     assert user.check_password(PASSWORD)
 
-    changed = submit(client, "auth/password/reset", {"key": code, "password": "aB!57mQ8nP4z"})
+    changed = submit(client, "auth/password/reset", {"key": code, "password": "aB!57mQ8nP4zK2w"})
     assert changed.status_code == 401
     user.refresh_from_db()
-    assert user.check_password("aB!57mQ8nP4z")
+    assert user.check_password("aB!57mQ8nP4zK2w")
 
 
 def test_expired_reset_code_cannot_change_the_password(monkeypatch: pytest.MonkeyPatch) -> None:

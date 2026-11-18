@@ -1,0 +1,257 @@
+from collections.abc import Callable
+from concurrent.futures import Future
+from datetime import datetime, timedelta
+from typing import Any
+
+import pytest
+from allauth.account.models import EmailAddress
+from allauth.socialaccount.models import SocialAccount
+from allauth.usersessions.models import UserSession
+from django.contrib.auth.models import User
+from django.contrib.sessions.models import Session
+from django.db.models.deletion import Collector
+from django.test import override_settings
+from django.utils import timezone
+
+from pyracast.accounts import headless, retention
+from pyracast.accounts.invitations import invite_workspace_member
+from pyracast.accounts.models import (
+    Membership,
+    Tenant,
+    WorkspaceAdminChange,
+    WorkspaceInvitation,
+    WorkspaceRole,
+)
+from pyracast.forecasts.management.commands import dispatch
+from tests.support.account_sessions import alongside, browser, session_user
+from tests.support.auth_lifecycle import submit
+from tests.support.company_registration import mailed_code, signup
+
+pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+LOCAL_MAIL = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
+
+
+def session(key: str, expires: datetime, user: User | None = None) -> None:
+    Session.objects.create(session_key=key, session_data="", expire_date=expires)
+    if user is not None:
+        device(key, user)
+
+
+def device(key: str, user: User) -> None:
+    UserSession.objects.create(user=user, session_key=key, ip="127.0.0.1", user_agent="test")
+
+
+def test_the_retention_phase_removes_expired_sessions_and_their_device_rows() -> None:
+    now = timezone.now()
+    user = User.objects.create_user(username="owner")
+    session("live", now + timedelta(hours=1), user)
+    session("expired-signed-in", now - timedelta(seconds=1), user)
+    session("expired-anonymous", now - timedelta(seconds=1))
+    device("orphan", user)
+
+    dispatch._retention()
+
+    assert list(Session.objects.values_list("session_key", flat=True)) == ["live"]
+    assert list(UserSession.objects.values_list("session_key", flat=True)) == ["live"]
+
+
+def test_session_cleanup_removes_a_bounded_batch_per_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = timezone.now()
+    user = User.objects.create_user(username="owner")
+    for index in range(3):
+        session(f"expired-{index}", now - timedelta(minutes=index + 1))
+        device(f"orphan-{index}", user)
+    monkeypatch.setattr(retention, "BATCH_SIZE", 2)
+
+    first = retention.end_expired_sessions(now)
+    remaining = (Session.objects.count(), UserSession.objects.count())
+    second = retention.end_expired_sessions(now)
+
+    assert (first, remaining, second) == (4, (1, 1), 2)
+    assert not Session.objects.exists()
+    assert not UserSession.objects.exists()
+
+
+def signup_account(name: str, *, days: int = 8) -> User:
+    user = User.objects.create_user(username=name, email=f"{name}@example.com")
+    User.objects.filter(pk=user.pk).update(date_joined=timezone.now() - timedelta(days=days))
+    EmailAddress.objects.create(user=user, email=user.email, primary=True)
+    tenant = Tenant.objects.create(name=f"{name} workspace")
+    Membership.objects.create(tenant=tenant, user=user, role=WorkspaceRole.ADMIN)
+    return user
+
+
+def workspace(user: User) -> Tenant:
+    return Tenant.objects.get(membership__user=user)
+
+
+def verified(user: User) -> None:
+    EmailAddress.objects.filter(user=user).update(verified=True)
+
+
+def signed_in_once(user: User) -> None:
+    User.objects.filter(pk=user.pk).update(last_login=timezone.now())
+
+
+def staff(user: User) -> None:
+    User.objects.filter(pk=user.pk).update(is_staff=True)
+
+
+def shared(user: User) -> None:
+    other = User.objects.create_user(username=f"{user.username}-viewer")
+    Membership.objects.create(tenant=workspace(user), user=other)
+
+
+def invited(user: User) -> None:
+    owner = User.objects.create_user(username=f"{user.username}-inviter")
+    WorkspaceInvitation.objects.create(
+        tenant=workspace(user),
+        email="guest@example.com",
+        token_hash=user.username.ljust(64, "0"),
+        created_by=owner,
+        expires_at=timezone.now() + timedelta(days=7),
+    )
+
+
+def referenced(user: User) -> None:
+    WorkspaceAdminChange.objects.create(tenant=workspace(user), actor=user, administrator=user)
+
+
+def provider_linked(user: User) -> None:
+    SocialAccount.objects.create(user=user, provider="microsoft", uid=f"{user.username}-uid")
+
+
+def without_workspace(user: User) -> None:
+    workspace(user).delete()
+
+
+def unchanged(user: User) -> None:
+    return None
+
+
+SELECTION: dict[str, tuple[int, Callable[[User], None], bool]] = {
+    "abandoned": (8, unchanged, True),
+    "abandoned-with-provider-identity": (8, provider_linked, True),
+    "abandoned-without-workspace": (8, without_workspace, True),
+    "joined-within-seven-days": (6, unchanged, False),
+    "verified": (8, verified, False),
+    "signed-in-once": (8, signed_in_once, False),
+    "staff": (8, staff, False),
+    "workspace-with-another-member": (8, shared, False),
+    "workspace-with-an-invitation": (8, invited, False),
+    "referenced-by-a-kept-record": (8, referenced, False),
+}
+
+
+@pytest.mark.parametrize("case", SELECTION)
+def test_the_retention_phase_reclaims_only_abandoned_signups(case: str) -> None:
+    days, state, reclaimed = SELECTION[case]
+    user = signup_account("owner", days=days)
+    state(user)
+    tenants = list(Tenant.objects.filter(membership__user=user).values_list("pk", flat=True))
+
+    dispatch._retention()
+
+    assert User.objects.filter(pk=user.pk).exists() is not reclaimed
+    assert Tenant.objects.filter(pk__in=tenants).exists() is (bool(tenants) and not reclaimed)
+
+
+AFTER_SELECTION: dict[str, Callable[[User], None]] = {
+    "verified": verified,
+    "workspace-with-another-member": shared,
+    "workspace-with-an-invitation": invited,
+}
+
+
+@pytest.mark.parametrize("case", AFTER_SELECTION)
+def test_a_signup_that_changes_after_selection_is_kept(case: str) -> None:
+    user = signup_account("owner")
+    cutoff = timezone.now() - retention.ABANDONED_AFTER
+    AFTER_SELECTION[case](user)
+
+    assert not retention.reclaim_signup(user.pk, cutoff)
+
+    assert User.objects.filter(pk=user.pk).exists()
+    assert Tenant.objects.filter(membership__user=user).exists()
+
+
+def test_an_invitation_to_a_workspace_being_reclaimed_waits_and_finds_it_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = signup_account("owner")
+    tenant = workspace(user)
+    administrator = User.objects.create_user(
+        username="administrator", is_staff=True, is_superuser=True
+    )
+    invitations: list[Future[None]] = []
+    collect = Collector.collect
+
+    def invite() -> None:
+        invite_workspace_member(administrator, tenant.pk, "guest@example.com", platform=True)
+
+    def invited_meanwhile(self: Collector, *args: Any, **kwargs: Any) -> Any:
+        if not invitations:
+            invitations.append(alongside(invite))
+        return collect(self, *args, **kwargs)
+
+    monkeypatch.setattr(Collector, "collect", invited_meanwhile)
+
+    with override_settings(MAILERS=LOCAL_MAIL):
+        reclaimed = retention.reclaim_signup(user.pk, timezone.now() - retention.ABANDONED_AFTER)
+        with pytest.raises(Tenant.DoesNotExist):
+            invitations[0].result(timeout=10)
+
+    assert reclaimed
+    assert not WorkspaceInvitation.objects.exists()
+
+
+def test_a_verification_completing_while_its_signup_is_reclaimed_keeps_the_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = browser()
+    with override_settings(MAILERS=LOCAL_MAIL):
+        assert signup(client).status_code == 401
+        code = mailed_code()
+    user = User.objects.get()
+    User.objects.filter(pk=user.pk).update(date_joined=timezone.now() - timedelta(days=8))
+    sweeps: list[Future[None]] = []
+    claim = headless.claim
+
+    def reclaimed_meanwhile(address: EmailAddress) -> None:
+        claim(address)
+        sweeps.append(alongside(lambda: retention.reclaim_abandoned_signups(timezone.now())))
+
+    monkeypatch.setattr(headless, "claim", reclaimed_meanwhile)
+
+    response = submit(client, "auth/email/verify", {"key": code})
+    sweeps[0].result(timeout=20)
+
+    assert response.status_code == 200
+    assert session_user(client) == user.pk
+    assert Tenant.objects.filter(membership__user=user).exists()
+
+
+def test_a_kept_signup_does_not_hold_back_later_abandoned_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kept = signup_account("kept")
+    referenced(kept)
+    abandoned = signup_account("abandoned")
+    monkeypatch.setattr(retention, "BATCH_SIZE", 1)
+
+    reclaimed = retention.reclaim_abandoned_signups(timezone.now())
+
+    assert (reclaimed, abandoned.pk > kept.pk) == (1, True)
+    assert list(User.objects.values_list("pk", flat=True)) == [kept.pk]
+
+
+def test_signup_reclaim_removes_a_bounded_batch_per_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    for index in range(3):
+        signup_account(f"owner-{index}")
+    monkeypatch.setattr(retention, "BATCH_SIZE", 2)
+
+    counts = [retention.reclaim_abandoned_signups(timezone.now()) for _ in range(3)]
+
+    assert counts == [2, 1, 0]
+    assert not User.objects.exists()
+    assert not Tenant.objects.exists()

@@ -6,6 +6,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from allauth.account.internal.flows.email_verification import (
+    consume_email_verification_rate_limit,
+)
+from allauth.account.internal.flows.email_verification_by_code import EmailVerificationProcess
 from allauth.account.models import EmailAddress
 from django.contrib.auth.hashers import BasePasswordHasher, get_hasher
 from django.contrib.auth.models import User
@@ -19,6 +23,7 @@ from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.signup import CompanySignupInput
+from tests.support.account_sessions import capture_security_events
 from tests.support.auth_lifecycle import submit
 from tests.support.company_registration import AUTH, DETAILS, PASSWORD, mailed_code, signup
 from tests.support.workspaces import invitation_token
@@ -116,13 +121,13 @@ def test_registration_rejects_invalid_input_without_partial_records(
     assert not EmailAddress.objects.exists()
 
 
-def test_registration_accepts_a_twelve_character_password() -> None:
-    response = signup(Client(enforce_csrf_checks=True), {"password": "aB!57mQ8nP4z"})
+def test_registration_accepts_a_fifteen_character_password() -> None:
+    response = signup(Client(enforce_csrf_checks=True), {"password": "aB!57mQ8nP4zK2w"})
 
     assert response.status_code == 401
     assert any(flow["id"] == "verify_email" for flow in response.json()["data"]["flows"])
     user = User.objects.get(email="owner@example.com")
-    assert user.check_password("aB!57mQ8nP4z")
+    assert user.check_password("aB!57mQ8nP4zK2w")
     assert not EmailAddress.objects.get(user=user).verified
 
 
@@ -427,6 +432,55 @@ def test_a_signup_answers_alike_after_its_address_was_requested_as_a_new_email(
     assert [answer.status_code for answer in answers] == [401, 401, 401]
     assert answers[0].json() == answers[1].json() == answers[2].json()
     assert clock.waits == [0.75, 0.75, 0.75]
+    assert mail.outbox == []
+
+
+def test_a_signup_that_meets_the_address_mail_limit_records_one_throttle_for_either_kind(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    known = User.objects.create_user(username="known", email="known@example.com")
+    EmailAddress.objects.create(user=known, email=known.email, primary=True, verified=True)
+    addresses = ["new@example.com", "known@example.com"]
+    for index, address in enumerate(addresses):
+        request_as_new_email(address, f"requester-{index}")
+    events = capture_security_events(caplog, monkeypatch)
+    records = []
+
+    for address in addresses:
+        caplog.clear()
+        assert signup(Client(enforce_csrf_checks=True), {"email": address}).status_code == 401
+        records.append(
+            [event for event in events() if event["event"] == "authentication_request_throttled"]
+        )
+
+    throttled = {"event": "authentication_request_throttled", "user_id": None}
+    assert records == [[throttled | {"client_ip": "127.0.0.1"}]] * 2
+
+
+def test_a_signup_whose_address_mail_limit_is_met_meanwhile_records_one_throttle_for_either_kind(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    known = User.objects.create_user(username="known", email="known@example.com")
+    EmailAddress.objects.create(user=known, email=known.email, primary=True, verified=True)
+    events = capture_security_events(caplog, monkeypatch)
+    send = EmailVerificationProcess.send
+
+    def limit_met_meanwhile(self: EmailVerificationProcess, **kwargs: Any) -> None:
+        assert consume_email_verification_rate_limit(self.request, self.email)
+        send(self, **kwargs)
+
+    monkeypatch.setattr(EmailVerificationProcess, "send", limit_met_meanwhile)
+    records = []
+
+    for address in ["new@example.com", "known@example.com"]:
+        caplog.clear()
+        assert signup(Client(enforce_csrf_checks=True), {"email": address}).status_code == 401
+        records.append(
+            [event for event in events() if event["event"] == "authentication_request_throttled"]
+        )
+
+    throttled = {"event": "authentication_request_throttled", "user_id": None}
+    assert records == [[throttled | {"client_ip": "127.0.0.1"}]] * 2
     assert mail.outbox == []
 
 
