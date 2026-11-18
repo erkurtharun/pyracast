@@ -252,8 +252,9 @@ The first release initializes an empty PostgreSQL data directory. Every release
 applies [deploy/bootstrap.sql](../deploy/bootstrap.sql) through
 `deploy/bootstrap_database.py`, before maintenance and again after `migrate`; a
 second run changes nothing. It creates or converges `pyracast_owner` for migrations
-and `pyracast_app` for application DML, sets a role's password from the secrets
-only when it differs, keeps the migration ledger read-only for `pyracast_app`,
+and `pyracast_app` for application DML, sets the owner's password from the secrets
+only when it differs (the runtime role's password: see "Key rotation" below), keeps
+the migration ledger read-only for `pyracast_app`,
 installs `btree_gist` and removes public schema creation. Neither application
 identity is a superuser or can create databases, and the superuser signs in only
 over the database container's local socket (`deploy/postgres/pg_hba.conf`).
@@ -310,10 +311,12 @@ successful `main` CI runs trigger it automatically. The workflow:
 2. Rejects HIGH/CRITICAL image vulnerabilities and tests the exact image digests.
 3. Transfers the release through IAP using a short-lived OIDC identity.
 4. Checks configuration, that containers cannot reach the metadata server, database
-   provisioning and access, the migration plan, that every stored secret decrypts
-   with the configured keys (`check_secrets`) and the shipped systemd units; stops
-   the dispatcher and drains workers while the site still serves, starts the new
-   gateway with its maintenance notice and stops the API and web servers, takes a
+   provisioning and the owner's access, the migration plan, that every stored secret
+   decrypts with the release's staged secrets (`check_secrets` in the new image) and
+   the shipped systemd units; nothing the serving release reads changes before
+   maintenance. It then stops the dispatcher and drains workers while the site still
+   serves, starts the new gateway with its maintenance notice, stops the API and web
+   servers, gives the runtime role the release's password and probes it, takes a
    database dump and waits for its off-host upload before upgrading
    PostgreSQL/RabbitMQ, migrates with the schema owner, and starts the tested
    revision; "A release that fails during maintenance" below covers failures. The
@@ -453,8 +456,10 @@ fixtures do not establish provider access or inbox delivery.
   only initializes a new data directory: existing broker passwords require a
   coordinated `rabbitmqctl change_password` and application restart. Never delete
   the broker data volume to rotate a password. A database password changed in the
-  secrets reaches its SQL role with the next release, before maintenance; when the
-  runtime role's password changes, the serving release restarts with it at once.
+  secrets reaches its SQL role with the next release: the owner's in preflight (the
+  serving release does not use it), while the runtime role's password changes only after
+  that release has stopped the serving API and web servers, together with the secret
+  the new release starts with.
 - **Patching and storage:** review weekly Dependabot PRs, rebuild and test images;
   exact image digests do not update themselves. Review Ubuntu security updates and
   pinned Docker/Compose/PostgreSQL versions during planned maintenance. PostgreSQL
@@ -614,13 +619,20 @@ The Release run is red in every case below; the log says which one applies.
 
 - **Preflight:** the running release keeps serving and no marker is created (the run
   may have written the new release directory and staged secrets and enabled or reset
-  `pyracast.service`); during a reset the marker `reset` left stays. Provisioning may already have changed a database password; the serving
-  release then restarted with it, or the log names `systemctl restart pyracast.service`.
-- **Before `migrate`, in an upgrade that began without the marker** (drain, pre-release
-  backup or its record, PostgreSQL or RabbitMQ start): the installer starts the previous
-  release from its own Compose file, probes readiness and removes the marker; the log
-  says "Release SHA failed before migrate; the previous release ... serves again and
-  the marker is removed." Fix the cause and release again.
+  `pyracast.service`); during a reset the marker `reset` left stays. Provisioning may
+  have changed the owner's password, which the serving release does not use. When the
+  release's staged keys cannot read a stored secret, the log says "Release SHA refused
+  before maintenance: check_secrets exited N ..." with the rows and the run exits with
+  that status; correct the runtime secret version in `/etc/pyracast/host.json` before
+  `pyracast.service` restarts, since each start renders that version.
+- **Before `migrate`, in an upgrade that began without the marker** (drain, the runtime
+  password switch or probe, pre-release backup or its record, PostgreSQL or RabbitMQ
+  start): the installer writes the runtime role's previous password back if this run
+  changed it, starts the previous release from its own Compose file with its own
+  secrets, probes readiness and removes the marker; the log says "Release SHA failed
+  before migrate; the previous release ... serves again and the marker is removed." Fix
+  the cause and release again. After a password revert the log also says that
+  `host.json` names the new secret: release again instead of restarting `pyracast.service`.
 - **After promotion:** the log prints "Release SHA is serving", stops nothing and names
   the command that finishes the release. The new release serves the migrated database,
   so the fix goes forward; a rerun of that release is refused because it is already
@@ -632,7 +644,13 @@ Any other failure, or a resume that fails, prints "Release failed during mainten
 with the outcome of the stop commands: either every one succeeded and the application
 is stopped, or one failed and the log names the `docker compose ... ps` command that
 shows what still runs; stop it before recovery. The log then says whether the gateway
-shows the maintenance notice. Support images are not downgraded: `abort` and `restore`
+shows the maintenance notice. When the helper in `/opt/pyracast/current` predates the
+maintenance notice (the first upgrade to it), its `restore` refuses while the gateway
+runs, so the installer stops the gateway and the notice as well and the site is
+unreachable until recovery. The runtime role keeps the release's password, which
+`abort` and `restore` render from `host.json`; when setting it fails the log prints
+the commands to run first. A first installation names no helper: fix the cause and
+release again. Support images are not downgraded: `abort` and `restore`
 start PostgreSQL and RabbitMQ from the previous release's Compose file. Both refuse
 without the marker (the log says when writing it failed) and `restore` also refuses
 while an application container runs, but `abort` does not check for running
