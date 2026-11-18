@@ -19,12 +19,16 @@ from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration, Pr
 from tests.support.capacity_normalization import normalize, scaled_system
 from tests.support.domain import NOW, System, make_system
 from tests.support.invariants import (
+    BINDING_REVISION_RULE,
     CALIBRATION_RUN_RULE,
+    IMPORT_SHAPE_RULE,
+    NORMALIZATION_FACTOR_RULE,
     OBSERVATION_LINEAGE_RULE,
     PLANT_AUTOMATION_RULE,
     PROVIDER_ACCOUNT_RULE,
     SITE_BINDING_RULE,
     lease_violations,
+    stored_violations,
     violations,
 )
 from tests.support.metering import connected
@@ -158,9 +162,11 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     )
     stored_account = ProviderAccount.objects.values().get(pk=system.account.pk)
     stored_binding = SiteBinding.objects.values().get(pk=system.binding.pk)
+    assert {label.partition(":")[0] for label in stored_violations()} == set(CLEAN)
 
     forward()
 
+    assert stored_violations() == {}
     assert _installed() == _all_new()
     assert lease_violations() == CLEAN
     stray.refresh_from_db()
@@ -272,6 +278,7 @@ def test_calibration_migration_refuses_run_and_automation_states_no_writer_produ
     row = stored(monkeypatch)
     rows = type(row)._default_manager.filter(pk=row.pk)
     kept = rows.values().get()
+    assert {label.partition(":")[0] for label in stored_violations()} == {row._meta.db_table}
 
     with pytest.raises(ValueError, match=refusal):
         forward()
@@ -354,6 +361,7 @@ def test_provider_migration_refuses_accounts_and_bindings_no_writer_produces(
     rows.update(**values)
     changed = rows.values().get()
     table = model._meta.db_table
+    assert {label.partition(":")[0] for label in stored_violations()} == {table}
 
     with pytest.raises(ValueError, match=rf"{table} holds 1 row.*{rule}"):
         forward()
@@ -435,6 +443,7 @@ def test_binding_migration_refuses_two_bindings_of_one_region_revision() -> None
     SiteBinding.objects.filter(pk=duplicate.pk).update(
         region_revision=system.binding.region_revision
     )
+    assert set(stored_violations()) == {f"connections_sitebinding: {BINDING_REVISION_RULE}"}
 
     with pytest.raises(ValueError, match=r"connections_sitebinding holds 2 row.*one binding per"):
         forward()
@@ -478,6 +487,7 @@ def test_collection_migration_refuses_reference_imports_of_another_shape(
     )
     migrate(PREVIOUS["forecasts"])
     CollectionJob.objects.filter(pk=job.pk).update(**values)
+    assert set(stored_violations()) == {f"forecasts_collectionjob: {IMPORT_SHAPE_RULE}"}
 
     with pytest.raises(ValueError, match=rf"forecasts_collectionjob holds 1 row.*{rule}"):
         forward()
@@ -498,6 +508,9 @@ def test_normalization_migration_refuses_a_factor_that_disagrees_with_its_capaci
     normalize(system, target)
     migrate(PREVIOUS["forecasts"])
     ReferenceCapacityNormalization.objects.update(factor=F("factor") * 2)
+    assert set(stored_violations()) == {
+        f"forecasts_referencecapacitynormalization: {NORMALIZATION_FACTOR_RULE}"
+    }
 
     with pytest.raises(
         ValueError, match=r"forecasts_referencecapacitynormalization holds 1 row.*factor"

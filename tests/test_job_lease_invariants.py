@@ -12,6 +12,7 @@ from pyracast.epias import EpiasDay, EpiasError, EpiasPlant
 from pyracast.forecasts.jobs import LEASE_DURATION, claim, collect, pending_job_ids
 from pyracast.forecasts.models import CollectionJob
 from pyracast.forecasts.schedule import configure_schedule
+from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.metering.jobs import claim_epias_job, pending_epias_ids, run_epias_job
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.metering.operations import disconnect_epias
@@ -183,6 +184,25 @@ def test_collection_lease_writers_keep_the_lease_with_the_running_status() -> No
             "status", flat=True
         )
     ) == {"stale"}
+    assert lease_violations() == CLEAN
+
+
+def test_the_scheduler_requeues_a_cancelled_current_slot_without_a_lease() -> None:
+    system = make_system(approved=True)
+    configure_schedule(
+        system.member, system.tenant.pk, system.region.pk, enabled=True, times=["16:00"], now=NOW
+    )
+    enqueue_due(NOW)
+    current = CollectionJob.objects.filter(endpoint="forecasts", scheduled_slot=NOW)
+    current.update(status="stale")
+
+    assert current.get().pk in enqueue_due(NOW)
+
+    assert current.values_list("status", "lease_token", "lease_expires_at").get() == (
+        "pending",
+        None,
+        None,
+    )
     assert lease_violations() == CLEAN
 
 

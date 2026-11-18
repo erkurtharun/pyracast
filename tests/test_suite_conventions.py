@@ -92,6 +92,12 @@ def test_selection_markers_cover_every_module_that_needs_them(marker: str, patte
     assert marked == _modules_matching(pattern) - {"test_suite_conventions"}
 
 
+def test_the_invariant_audit_names_existing_database_modules() -> None:
+    from tests.conftest import INVARIANT_AUDIT
+
+    assert _modules_matching(r"django_db") >= INVARIANT_AUDIT
+
+
 def test_selection_markers_are_applied_by_module(request: pytest.FixtureRequest) -> None:
     assert request.node.get_closest_marker("tooling") is not None
     assert request.node.get_closest_marker("migration") is None

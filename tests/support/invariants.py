@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 from django.db import connection, models
@@ -56,6 +57,45 @@ OBSERVATION_LINEAGE_RULE = (
     " AND previous.starts_at = plants_productionobservation.starts_at"
     " AND previous.ends_at = plants_productionobservation.ends_at)"
 )
+IMPORT_SHAPE_RULE = (
+    "(endpoint = 'historical_import') = (reference_import_id IS NOT NULL)"
+    " AND (reference_import_id IS NULL OR status = 'succeeded')"
+)
+NATIVE_SLOT_RULE = (
+    "endpoint NOT IN ('forecasts', 'estimated_actuals') OR NOT EXISTS (SELECT 1"
+    " FROM forecasts_collectionjob AS other WHERE other.id <> forecasts_collectionjob.id"
+    " AND other.binding_id = forecasts_collectionjob.binding_id"
+    " AND other.endpoint = forecasts_collectionjob.endpoint"
+    " AND other.scheduled_slot = forecasts_collectionjob.scheduled_slot)"
+)
+BINDING_REVISION_RULE = (
+    "NOT EXISTS (SELECT 1 FROM connections_sitebinding AS other"
+    " WHERE other.id <> connections_sitebinding.id"
+    " AND other.region_id = connections_sitebinding.region_id"
+    " AND other.region_revision = connections_sitebinding.region_revision)"
+)
+NORMALIZATION_FACTOR_RULE = (
+    "abs(factor * source_capacity_kw - target_capacity_kw) <= 1e-9 * target_capacity_kw"
+)
+# Every row invariant the database enforces on the constrained tables; archive immutability is
+# a before/after property and is audited by `rewritten_archive_rows`.
+STORED_RULES: tuple[tuple[str, str], ...] = (
+    *LEASE_RULES.items(),
+    ("forecasts_collectionjob", IMPORT_SHAPE_RULE),
+    ("forecasts_collectionjob", NATIVE_SLOT_RULE),
+    ("forecasts_referencecapacitynormalization", NORMALIZATION_FACTOR_RULE),
+    ("connections_provideraccount", PROVIDER_ACCOUNT_RULE),
+    ("connections_sitebinding", SITE_BINDING_RULE),
+    ("connections_sitebinding", BINDING_REVISION_RULE),
+    ("plants_calibrationrun", CALIBRATION_RUN_RULE),
+    ("plants_plant", PLANT_AUTOMATION_RULE),
+    ("plants_productionobservation", OBSERVATION_LINEAGE_RULE),
+)
+ARCHIVES = (
+    "forecasts_historicalreferenceimport",
+    "metering_epiassnapshot",
+    "plants_productionobservation",
+)
 
 
 def violations(table: str, rule: str) -> int:
@@ -82,3 +122,58 @@ def stored_again[Row: models.Model](row: Row, **changes: Any) -> Row:
 
 def lease_violations() -> dict[str, int]:
     return {table: violations(table, rule) for table, rule in LEASE_RULES.items()}
+
+
+def stored_violations() -> dict[str, int]:
+    """Count the rows of each constrained table that break a stored rule, in one query; only
+    the broken rules are returned."""
+    query = sql.SQL(" UNION ALL ").join(
+        sql.SQL("SELECT {}, count(*) FROM {} WHERE NOT ({})").format(
+            sql.Literal(f"{table}: {rule}"), sql.Identifier(table), sql.SQL(rule)
+        )
+        for table, rule in STORED_RULES
+    )
+    with connection.cursor() as cursor:
+        cursor.execute(query)
+        return {label: count for label, count in cursor.fetchall() if count}
+
+
+def archived_rows() -> dict[str, dict[int, dict[str, Any]]]:
+    rows: dict[str, dict[int, dict[str, Any]]] = {}
+    with connection.cursor() as cursor:
+        for table in ARCHIVES:
+            cursor.execute(
+                sql.SQL("SELECT id, to_jsonb(stored) FROM {} AS stored").format(
+                    sql.Identifier(table)
+                )
+            )
+            rows[table] = {key: json.loads(row) for key, row in cursor.fetchall()}
+    return rows
+
+
+def superseded_revisions(
+    before: dict[str, dict[int, dict[str, Any]]], after: dict[str, dict[int, dict[str, Any]]]
+) -> set[int]:
+    observations = "plants_productionobservation"
+    return {
+        key
+        for key, row in before[observations].items()
+        if row["is_current"] and not after[observations].get(key, row)["is_current"]
+    }
+
+
+def rewritten_archive_rows(
+    before: dict[str, dict[int, dict[str, Any]]], after: dict[str, dict[int, dict[str, Any]]]
+) -> dict[str, list[int]]:
+    """Archive rows stored before a writer ran that it changed or removed; a production
+    revision may only leave the current set."""
+    superseded = superseded_revisions(before, after)
+    changed: dict[str, list[int]] = {}
+    for table, rows in before.items():
+        for key, row in rows.items():
+            stored = after[table].get(key)
+            if stored is not None and key in superseded:
+                stored = {**stored, "is_current": True}
+            if stored != row:
+                changed.setdefault(table, []).append(key)
+    return changed

@@ -1,6 +1,10 @@
+import json
+from collections.abc import Callable
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.contrib.auth.models import User
@@ -15,14 +19,27 @@ from pyracast.forecasts.models import (
     HistoricalReferenceImport,
     ReferenceCapacityNormalization,
 )
-from pyracast.metering.models import EpiasConnection, EpiasSnapshot
+from pyracast.irradiance import local_day_bounds
+from pyracast.metering.jobs import run_epias_job
+from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
+from pyracast.plants.operations import ObservationInput, import_observations
 from pyracast.regions.models import Region
 from tests.support.capacity_normalization import normalize, scaled_system
 from tests.support.domain import NOW, System, make_system
-from tests.support.plant_operations import make_plant
+from tests.support.historical_reference_import import archive, power_file, system_for_import
+from tests.support.invariants import (
+    OBSERVATION_LINEAGE_RULE,
+    archived_rows,
+    rewritten_archive_rows,
+    superseded_revisions,
+    violations,
+)
+from tests.support.metering import connected, day_data
+from tests.support.plant_operations import make_plant, saved_actuals
 from tests.support.plant_training import actual_snapshot_for
-from tests.support.provisional_measurements import acquisition
+from tests.support.production_changes import edit, provider, write
+from tests.support.provisional_measurements import DAY, acquisition
 from tests.support.trash_operations import sibling
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -251,6 +268,101 @@ def test_an_imported_reference_day_is_stored_as_a_succeeded_import(
 
     with pytest.raises(IntegrityError, match=constraint), transaction.atomic():
         CollectionJob.objects.filter(pk=job.pk).update(**values)
+
+
+type Writer = Callable[[pytest.MonkeyPatch, Path], Callable[[], object]]
+
+
+def _reference_import_correction(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Callable[[], object]:
+    system = system_for_import(monkeypatch)
+    path = power_file(tmp_path)
+    archive(system, path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["estimated_actuals"][1]["pv_power_rooftop"] = 0.25
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return lambda: archive(system, path)
+
+
+def _epias_acquisition(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[[], object]:
+    connected(monkeypatch)
+    EpiasCollectionJob.objects.update(next_attempt_at=NOW, retry_until=None)
+    first, second = EpiasCollectionJob.objects.order_by("pk")[:2]
+    assert run_epias_job(first.pk, fetch=day_data, now=NOW)
+    return lambda: run_epias_job(second.pk, fetch=day_data, now=NOW)
+
+
+def _observation_import(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[[], object]:
+    system, plant = make_plant(monkeypatch)
+    start = NOW - timedelta(days=2)
+    saved_actuals(system, start.astimezone(ZoneInfo(system.binding.timezone)).date())
+
+    def entered(hour: int) -> object:
+        assert plant.current_configuration_id is not None
+        moment = start + timedelta(hours=hour)
+        return import_observations(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            plant.pk,
+            configuration_id=plant.current_configuration_id,
+            unit="kWh",
+            observations=[ObservationInput(moment, moment + timedelta(hours=1), 500)],
+        )
+
+    entered(0)
+    return lambda: entered(1)
+
+
+def _manual_production(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant, datetime, int]:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+    acquisition((configuration, provider(system, plant)))
+    slot = local_day_bounds(DAY, system.binding.timezone)[0] + timedelta(hours=10)
+    return system, plant, slot, write(system, plant, [edit(slot, 3500)], unit="kWh")["ids"][0]
+
+
+def _production_correction(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[[], object]:
+    system, plant, slot, first = _manual_production(monkeypatch)
+    return lambda: write(system, plant, [edit(slot, 4, revision_id=first)])
+
+
+def _production_revert(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[[], object]:
+    system, plant, slot, first = _manual_production(monkeypatch)
+    second = write(system, plant, [edit(slot, 4, revision_id=first)])["ids"][0]
+    return lambda: write(system, plant, [edit(slot, revision_id=second, action="revert")])
+
+
+@pytest.mark.parametrize(
+    ("writer", "table", "superseded"),
+    [
+        (_reference_import_correction, "forecasts_historicalreferenceimport", 0),
+        (_epias_acquisition, "metering_epiassnapshot", 0),
+        (_observation_import, "plants_productionobservation", 0),
+        (_production_correction, "plants_productionobservation", 1),
+        (_production_revert, "plants_productionobservation", 1),
+    ],
+)
+def test_archive_writers_append_and_never_rewrite_stored_rows(
+    writer: Writer,
+    table: str,
+    superseded: int,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run = writer(monkeypatch, tmp_path)
+    before = archived_rows()
+    assert before[table]
+
+    run()
+
+    after = archived_rows()
+    assert rewritten_archive_rows(before, after) == {}
+    assert len(after[table]) > len(before[table])
+    assert len(superseded_revisions(before, after)) == superseded
+    assert violations("plants_productionobservation", OBSERVATION_LINEAGE_RULE) == 0
 
 
 def test_two_source_revisions_of_one_slot_normalize_onto_one_target(
