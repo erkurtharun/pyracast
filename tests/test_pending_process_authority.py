@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from allauth.account import utils as account_utils
+from allauth.account.internal.flows.login import AUTHENTICATION_METHODS_SESSION_KEY
 from allauth.account.internal.flows.password_reset_by_code import (
     PasswordResetVerificationProcess,
 )
@@ -56,6 +57,7 @@ from tests.support.account_sessions import (
     totp_clock,
     with_totp,
 )
+from tests.support.admin_mfa_bootstrap import TEST_PASSWORD, administrator
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit, totp_code
 from tests.support.company_registration import signup
 from tests.support.social_accounts import (
@@ -827,6 +829,37 @@ def test_a_second_factor_completed_with_a_migrated_recovery_code_signs_in() -> N
     assert response.status_code == 200
     assert session_user(client) == user.pk
     assert RecoveryCodes(recovery_codes(user)).get_unused_codes() == ["87654321"]
+
+
+def established_admin(client: Client) -> tuple[int, bool, int]:
+    records = client.session.get(AUTHENTICATION_METHODS_SESSION_KEY, [])
+    can_admin = client.get("/api/session/").json()["user"]["can_admin"]
+    return len(records), can_admin, client.get("/admin/").status_code
+
+
+@pytest.mark.parametrize("kind", ["totp", "recovery-code"])
+def test_a_repeated_second_factor_completion_leaves_the_established_session_signed_in(
+    kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = time.time()
+    totp_clock(monkeypatch, now)
+    user = administrator()
+    secret = with_totp(user)
+    codes = RecoveryCodes.activate(user).get_unused_codes()
+    client = browser()
+    credentials = {"email": user.email, "password": TEST_PASSWORD}
+    assert submit(client, "auth/login", credentials).status_code == 401
+    data = {"code": totp_code(secret, now) if kind == "totp" else codes[0]}
+    assert submit(client, "auth/2fa/authenticate", data).status_code == 200
+    assert established_admin(client) == (2, True, 200)
+
+    status, body = answer(submit(client, "auth/2fa/authenticate", data))
+
+    assert status == 401
+    assert (body["code"], body["meta"]) == ("not_authenticated", {"is_authenticated": None})
+    assert "user" not in body["data"]
+    assert established_admin(client) == (2, True, 200)
+    assert session_user(client) == user.pk
 
 
 def test_a_password_change_started_while_a_reset_code_is_requested_waits_and_ends_the_code(
