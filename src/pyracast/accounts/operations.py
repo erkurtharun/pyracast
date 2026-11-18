@@ -49,7 +49,7 @@ def remove_workspace_member(
         tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=now
     ).alias(normalized_email=Lower("email")).filter(
         normalized_email__in=[email.lower() for email in emails]
-    ).update(expires_at=now)
+    ).update(expires_at=now, revoked_at=now)
     WorkspaceMemberRemoval.objects.create(tenant_id=tenant_id, actor=actor, user_id=user_id)
     membership.delete()
     record_on_commit(
@@ -87,9 +87,10 @@ def reassign_workspace_admin(
         )
         membership.role = WorkspaceRole.ADMIN
         membership.save(update_fields=["role"])
+        now = timezone.now()
         WorkspaceInvitation.objects.filter(
-            tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=timezone.now()
-        ).update(expires_at=timezone.now())
+            tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=now
+        ).update(expires_at=now, revoked_at=now)
         WorkspaceAdminChange.objects.create(
             tenant_id=tenant_id,
             actor=actor,

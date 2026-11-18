@@ -15,10 +15,10 @@ from pyracast.accounts.models import Tenant
 from pyracast.connections.models import PowerBasis, Provider, ProviderAccount, SiteBinding
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.forecasts.models import CollectionJob
+from pyracast.regions.audit import record_audit
 from pyracast.regions.models import (
     REGION_TRANSITIONS,
     AuditAction,
-    AuditEvent,
     LocationChangeStatus,
     Region,
     RegionLocationChangeRequest,
@@ -144,11 +144,12 @@ def request_location_change(
             timezone=timezone,
             reason=reason.strip(),
         )
-        AuditEvent.objects.create(
+        record_audit(
             actor=actor,
             region=region,
             action=AuditAction.LOCATION_CHANGE_REQUESTED,
             revision=region.revision,
+            details={"request_id": change.pk},
         )
         return change
 
@@ -230,7 +231,7 @@ def review_location_change(
         change.reviewed_by = actor
         change.reviewed_at = django_timezone.now()
         change.save(update_fields=("status", "reviewed_by", "reviewed_at"))
-        AuditEvent.objects.create(
+        record_audit(
             actor=actor,
             region=region,
             action=(
@@ -239,6 +240,7 @@ def review_location_change(
                 else AuditAction.LOCATION_CHANGE_REJECTED
             ),
             revision=region.revision,
+            details={"request_id": change.pk},
         )
         return change
 
@@ -251,7 +253,7 @@ def _start_revision(actor: User, region: Region) -> None:
     if RegionLocationChangeRequest.objects.filter(
         region=region, status=LocationChangeStatus.PENDING
     ).update(base_revision=region.revision):
-        AuditEvent.objects.create(
+        record_audit(
             actor=actor,
             region=region,
             action=AuditAction.LOCATION_CHANGE_REBASED,
@@ -322,11 +324,12 @@ def configure_binding(
         binding = SiteBinding.objects.create(
             region=region, region_revision=region.revision, **values
         )
-        AuditEvent.objects.create(
+        record_audit(
             actor=actor,
             region=region,
             action=AuditAction.BINDING_CONFIGURED,
             revision=region.revision,
+            details={"binding_id": binding.pk},
         )
     return binding
 
@@ -362,8 +365,12 @@ def approve_region(actor: User, region_id: int, binding_id: int, now: datetime) 
         from pyracast.plants.operations import activate_submitted_plants
 
         activate_submitted_plants(actor, region, binding)
-        AuditEvent.objects.create(
-            actor=actor, region=region, action=AuditAction.REGION_APPROVED, revision=region.revision
+        record_audit(
+            actor=actor,
+            region=region,
+            action=AuditAction.REGION_APPROVED,
+            revision=region.revision,
+            details={"binding_id": binding.pk},
         )
         job, _ = CollectionJob.objects.get_or_create(
             binding=binding,
@@ -386,7 +393,5 @@ def transition_region(actor: User, region_id: int, status: str) -> Region:
         region = Region.objects.select_for_update().get(pk=region_id, deleted_at__isnull=True)
         region.status = status
         region.save(update_fields=("status",))
-        AuditEvent.objects.create(
-            actor=actor, region=region, action=action, revision=region.revision
-        )
+        record_audit(actor=actor, region=region, action=action, revision=region.revision)
     return region

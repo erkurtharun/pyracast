@@ -11,7 +11,8 @@ from django.contrib.auth.models import User
 from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
 from django.db import connection, transaction
-from django.db.models import Q, QuerySet
+from django.db.models import Q, QuerySet, Value
+from django.db.models.functions import Least
 from django.template.loader import render_to_string
 from django.utils import timezone, translation
 from django.utils.translation import gettext as _
@@ -148,9 +149,10 @@ def invite_workspace_member(
     now = timezone.now()
     _check_budgets(actor, tenant_id, email, now)
     replaced = Q(email=email) | Q(role=WorkspaceRole.ADMIN) if admin_role else Q(email=email)
+    # Expired invitations are revoked too: one invitation per address stays unrevoked.
     WorkspaceInvitation.objects.filter(
-        replaced, tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=now
-    ).update(expires_at=now)
+        replaced, tenant_id=tenant_id, accepted_at__isnull=True, revoked_at__isnull=True
+    ).update(revoked_at=now, expires_at=Least("expires_at", Value(now)))
     token = secrets.token_urlsafe(32)
     invitation = WorkspaceInvitation.objects.create(
         tenant_id=tenant_id,
@@ -285,8 +287,11 @@ def revoke_workspace_invitation(
     )
     if invitation is None:
         raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
-    invitation.expires_at = min(invitation.expires_at, timezone.now())
-    invitation.save(update_fields=["expires_at"])
+    now = timezone.now()
+    invitation.expires_at = min(invitation.expires_at, now)
+    if invitation.accepted_at is None and invitation.revoked_at is None:
+        invitation.revoked_at = now
+    invitation.save(update_fields=["expires_at", "revoked_at"])
     record_on_commit(
         SecurityEvent.INVITATION_REVOKED,
         user_id=actor.pk,

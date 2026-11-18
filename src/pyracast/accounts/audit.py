@@ -22,6 +22,8 @@ from django.dispatch import Signal
 from django.http import HttpRequest
 from django.utils.crypto import salted_hmac
 
+from pyracast.event_details import INTEGER, OPTIONAL_INTEGER, OPTIONAL_TEXT, TEXT, Kind
+
 logger = logging.getLogger("pyracast.security")
 failure_logger = logging.getLogger(__name__)
 
@@ -62,6 +64,7 @@ class SecurityEvent(StrEnum):
     ADMIN_MFA_PROVISIONED = "admin_mfa_provisioned"
     INVALID_PROXY_HEADERS = "invalid_proxy_headers"
     AUTHENTICATION_REQUEST_THROTTLED = "authentication_request_throttled"
+    API_REQUEST_THROTTLED = "api_throttled"
     AUTHORIZATION_DENIED = "authorization_denied"
     CSRF_REFUSED = "csrf_refused"
     INVITATION_SENT = "invitation_sent"
@@ -101,21 +104,52 @@ SIGNAL_EVENTS: Mapping[Signal, SecurityEvent] = {
 
 # A line never carries an address, name, token, code or password: an address becomes `subject`.
 # `method` is allauth's step (password, code, mfa, socialaccount); `provider` a provider id.
-LINE_KEYS = frozenset(
-    {
-        "event",
-        "user_id",
-        "client_ip",
-        "subject",
-        "tenant_id",
-        "target_id",
-        "reason",
-        "view",
-        "method",
-        "authenticator_type",
-        "provider",
-    }
-)
+LINE_KINDS: Mapping[str, Kind] = {
+    "user_id": OPTIONAL_INTEGER,
+    "client_ip": OPTIONAL_TEXT,
+    "subject": TEXT,
+    "tenant_id": INTEGER,
+    "target_id": INTEGER,
+    "reason": TEXT,
+    "view": TEXT,
+    "method": TEXT,
+    "authenticator_type": TEXT,
+    "provider": TEXT,
+    "scope": TEXT,
+}
+LINE_KEYS = frozenset({"event", *LINE_KINDS})
+# The details each event may carry beside event, user and client IP; a line with any other
+# detail is refused. A signalled event carries what allauth reports about the step, and of
+# those only a failed sign-in names an address.
+SIGNALLED_DETAILS = frozenset({"method", "authenticator_type", "provider"})
+WORKSPACE_DETAILS = frozenset({"tenant_id", "target_id"})
+REFUSAL_DETAILS = frozenset({"tenant_id", "reason", "view"})
+SECURITY_EVENT_DETAILS: Mapping[SecurityEvent, frozenset[str]] = {
+    **dict.fromkeys(SIGNAL_EVENTS.values(), SIGNALLED_DETAILS),
+    SecurityEvent.LOGIN_FAILED: SIGNALLED_DETAILS | {"subject"},
+    SecurityEvent.REAUTHENTICATION_FAILED: SIGNALLED_DETAILS,
+    SecurityEvent.LOGIN_REFUSED: frozenset({"reason"}),
+    SecurityEvent.LOGIN_LOCKED: frozenset({"subject"}),
+    SecurityEvent.SESSION_EXPIRED: frozenset({"reason"}),
+    SecurityEvent.RESET_REQUESTED: frozenset({"subject"}),
+    SecurityEvent.CURRENT_CREDENTIAL_REFUSED: frozenset(),
+    SecurityEvent.AUTHENTICATOR_UNREADABLE: frozenset(),
+    SecurityEvent.SECOND_FACTOR_LOCKED: frozenset(),
+    SecurityEvent.SOCIAL_LOGIN_REFUSED: frozenset({"provider", "reason"}),
+    SecurityEvent.ADMIN_MFA_PROVISIONED: frozenset(),
+    SecurityEvent.INVALID_PROXY_HEADERS: frozenset(),
+    SecurityEvent.AUTHENTICATION_REQUEST_THROTTLED: frozenset(),
+    SecurityEvent.API_REQUEST_THROTTLED: frozenset({"scope"}),
+    SecurityEvent.AUTHORIZATION_DENIED: REFUSAL_DETAILS,
+    SecurityEvent.CSRF_REFUSED: REFUSAL_DETAILS,
+    SecurityEvent.INVITATION_SENT: WORKSPACE_DETAILS | {"subject"},
+    SecurityEvent.INVITATION_LIMITED: frozenset({"tenant_id", "subject", "reason"}),
+    SecurityEvent.INVITATION_REVOKED: WORKSPACE_DETAILS,
+    SecurityEvent.INVITATION_ACCEPTED: WORKSPACE_DETAILS,
+    SecurityEvent.INVITATION_DENIED: WORKSPACE_DETAILS | {"reason"},
+    SecurityEvent.WORKSPACE_MEMBER_REMOVED: WORKSPACE_DETAILS,
+    SecurityEvent.WORKSPACE_ADMIN_REASSIGNED: WORKSPACE_DETAILS,
+}
 
 
 def redacted_key(address: str) -> str:
@@ -157,6 +191,7 @@ def record_security_event(
     method: str | None = None,
     authenticator_type: str | None = None,
     provider: str | None = None,
+    scope: str | None = None,
 ) -> None:
     with _contained(event):
         details = {
@@ -168,13 +203,20 @@ def record_security_event(
             "method": method,
             "authenticator_type": authenticator_type,
             "provider": provider,
+            "scope": scope,
         }
+        carried = {key: value for key, value in details.items() if value is not None}
+        if undeclared := carried.keys() - SECURITY_EVENT_DETAILS[event]:
+            raise ValueError(f"{event} declares no {', '.join(sorted(undeclared))}.")
         line = {
             "event": event.value,
             "user_id": user_id,
             "client_ip": _client_ip(request, client_ip),
-        }
-        line |= {key: value for key, value in details.items() if value is not None}
+        } | carried
+        if mistyped := [
+            key for key, kind in LINE_KINDS.items() if key in line and not kind.accepts(line[key])
+        ]:
+            raise ValueError(f"{event} takes {', '.join(mistyped)} of another type.")
         logger.info("%s", json.dumps(line, sort_keys=True))
 
 

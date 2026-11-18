@@ -1,3 +1,5 @@
+import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from typing import Any, cast
@@ -13,6 +15,7 @@ from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 from rest_framework.views import APIView
 
+from pyracast.accounts.audit import logger as security_logger
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.api import throttling
 from tests.support.domain import make_system
@@ -39,11 +42,17 @@ def test_production_rates_cover_every_endpoint_kind() -> None:
     assert set(rates) == {"forecast", "calibration", "production_import", "submission"}
 
 
-def test_a_throttled_read_answers_429_with_retry_after_in_the_error_contract() -> None:
+def test_a_throttled_read_answers_429_with_retry_after_in_the_error_contract(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(security_logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(security_logger, "propagate", False)
+    caplog.set_level(logging.INFO, logger="pyracast.security")
     system = make_system()
     client = signed_in(system.member)
     base = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/"
     params = {"date": timezone.now().date().isoformat()}
+    caplog.clear()
     with one_forecast_a_minute():
         assert client.get(base + "forecast/", params).status_code == 200
         throttled = client.get(base + "forecast/", params)
@@ -54,6 +63,18 @@ def test_a_throttled_read_answers_429_with_retry_after_in_the_error_contract() -
     assert body["code"] == "throttled"
     assert 0 < body["retry_after"] <= 60
     assert throttled["Retry-After"] == str(body["retry_after"])
+    assert [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "pyracast.security"
+    ] == [
+        {
+            "event": "api_throttled",
+            "user_id": system.member.pk,
+            "client_ip": "127.0.0.1",
+            "scope": "forecast",
+        }
+    ]
 
 
 def test_each_user_has_a_budget_of_their_own() -> None:

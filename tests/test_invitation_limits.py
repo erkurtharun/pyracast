@@ -81,6 +81,7 @@ def earlier_invitations(
             email=email or f"earlier-{index}@example.com",
             token_hash=f"{tenant.pk:08x}{index:056x}",
             expires_at=now,
+            revoked_at=now,
         )
         for index in range(len(ages))
     )

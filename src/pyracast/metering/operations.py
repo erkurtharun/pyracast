@@ -14,7 +14,8 @@ from pyracast.metering.models import (
     EpiasSnapshot,
     EpiasSourceKind,
 )
-from pyracast.plants.models import Plant, PlantEvent, PlantEventAction
+from pyracast.plants.events import record_plant_event
+from pyracast.plants.models import Plant, PlantEventAction
 from pyracast.plants.operations import configuration_is_current
 from pyracast.regions.models import Region
 
@@ -74,8 +75,8 @@ def connect_epias(
         connection.connected_by = actor
         connection.enabled = True
         connection.save()
-        PlantEvent.objects.create(
-            plant=plant,
+        record_plant_event(
+            plant_id=plant.pk,
             actor=actor,
             action=PlantEventAction.EPIAS_CONNECTED,
             details={
@@ -102,8 +103,8 @@ def disconnect_epias(plant_id: int, *, actor: User) -> None:
             return
         connection.enabled = False
         connection.save(update_fields=("enabled", "updated_at"))
-        PlantEvent.objects.create(
-            plant=plant,
+        record_plant_event(
+            plant_id=plant.pk,
             actor=actor,
             action=PlantEventAction.EPIAS_DISCONNECTED,
             details={

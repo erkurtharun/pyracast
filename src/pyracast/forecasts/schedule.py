@@ -27,7 +27,8 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
 )
 from pyracast.forecasts.timing import effective_forecast_schedule, next_forecast_slot
-from pyracast.regions.models import AuditAction, AuditEvent, Region
+from pyracast.regions.audit import record_audit
+from pyracast.regions.models import AuditAction, Region
 
 MAX_COLLECTION_TIMES = 1440
 
@@ -105,7 +106,7 @@ def configure_schedule(
             ]
             unclaimed = unclaimed.exclude(pk__in=retained)
         unclaimed.update(status=CollectionJobStatus.STALE, lease_token=None, lease_expires_at=None)
-        AuditEvent.objects.create(
+        record_audit(
             actor=actor,
             region=region,
             action=AuditAction.COLLECTION_SCHEDULE_UPDATED,

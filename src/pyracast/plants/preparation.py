@@ -10,6 +10,7 @@ from pyracast.forecasts.jobs import binding_is_current
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
 from pyracast.plants.availability import reference_intervals
+from pyracast.plants.events import record_plant_event
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 from pyracast.plants.measurements import (
     Measurement,
@@ -23,7 +24,6 @@ from pyracast.plants.models import (
     CalibrationStatus,
     Plant,
     PlantConfiguration,
-    PlantEvent,
     PlantEventAction,
     ProductionObservation,
 )
@@ -172,8 +172,8 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             incident_revision_ids=incidents,
             input_fingerprint=fingerprint,
         )
-        PlantEvent.objects.create(
-            plant=plant,
+        record_plant_event(
+            plant_id=plant.pk,
             actor=actor,
             action=PlantEventAction.CALIBRATION_SCHEDULED,
             details={"calibration_id": run.pk, "observation_id_cutoff": watermark},

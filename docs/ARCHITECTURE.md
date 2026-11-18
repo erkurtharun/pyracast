@@ -88,7 +88,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | ReferenceCapacityNormalization | Authorized capacity-only copies, original source lineage and conversion availability |
 | ForecastIssuance, PlantEvent | Immutable published electrical forecast and audited plant operations |
 | NotificationSettings, ReminderSchedule, NotificationDelivery | Shared plant email schedule, explicit recipients and language, pinned saved forecasts and grouped delivery outcomes |
-| AuditEvent | Actor, action, target and timestamp for privileged changes |
+| AuditEvent | Actor, action, target, the details its action declares and timestamp for privileged changes |
 
 Regions select explicit provider accounts rather than embedding credentials. One canonical record per account spans tenants and credential rotations; duplicate records must not create independent quota budgets.
 

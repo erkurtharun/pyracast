@@ -12,6 +12,7 @@ from pyracast.accounts.authorization import require_platform_admin, tenant_membe
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.calibration_data import current_source_validation
+from pyracast.plants.events import record_plant_event
 from pyracast.plants.models import (
     CalibrationAssessment,
     CalibrationRun,
@@ -101,8 +102,8 @@ def update_automation(plant: Plant, actor: User, *, enabled: bool, now: datetime
             "next_calibration_check_at",
         )
     )
-    PlantEvent.objects.create(
-        plant=plant,
+    record_plant_event(
+        plant_id=plant.pk,
         actor=actor,
         action=PlantEventAction.CALIBRATION_AUTOMATION_ENABLED
         if enabled
@@ -169,8 +170,8 @@ def set_calibration_automation(
 
 
 def _skip(plant: Plant, run_id: int | None, reason: str) -> None:
-    PlantEvent.objects.create(
-        plant=plant,
+    record_plant_event(
+        plant_id=plant.pk,
         actor=None,
         action=PlantEventAction.CALIBRATION_AUTOMATIC_SKIPPED,
         details={

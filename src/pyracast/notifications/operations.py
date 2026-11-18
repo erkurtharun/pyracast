@@ -43,7 +43,7 @@ def invalid_reminder_recipient_count() -> int:
         try:
             for address in effective_recipients(schedule):
                 validate_recipient(address)
-        except ValidationError, TypeError:
+        except ValidationError:
             invalid += 1
     return invalid
 

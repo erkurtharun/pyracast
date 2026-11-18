@@ -17,6 +17,7 @@ from pyracast.accounts.models import Tenant
 from pyracast.background.failures import log_failure
 from pyracast.connections.models import ProviderAccount
 from pyracast.plants.calibration_data import build_calibration_dataset, current_source_validation
+from pyracast.plants.events import record_plant_event
 from pyracast.plants.forecasting import power_limit
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import production_identity_current
@@ -26,7 +27,6 @@ from pyracast.plants.models import (
     CalibrationStatus,
     Plant,
     PlantConfiguration,
-    PlantEvent,
     PlantEventAction,
 )
 from pyracast.plants.numerics import (
@@ -168,7 +168,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
         run.lease_expires_at = None
         run.last_error = ""
         run.save()
-        PlantEvent.objects.create(
+        record_plant_event(
             plant_id=run.plant_id,
             actor=None,
             action=PlantEventAction.CALIBRATION_COMPLETED,

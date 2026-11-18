@@ -116,7 +116,7 @@ def regions_for_issue(issue: str, now: datetime) -> QuerySet[Region]:
             try:
                 for address in effective_recipients(schedule):
                     validate_recipient(address)
-            except ValidationError, TypeError:
+            except ValidationError:
                 invalid_region_ids.append(schedule.region_id)
         return regions.filter(pk__in=invalid_region_ids)
     approved = regions.filter(status="approved", approved_binding__provider_account__enabled=True)

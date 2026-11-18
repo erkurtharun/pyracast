@@ -3,7 +3,7 @@ from django.db import models
 from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.models import Tenant
-from pyracast.db import choices_check
+from pyracast.db import choices_check, json_shape_check
 
 
 class RegionStatus(models.TextChoices):
@@ -174,6 +174,7 @@ class AuditEvent(models.Model):
     )
     action = models.CharField(max_length=40, choices=AuditAction)
     revision = models.PositiveIntegerField()
+    details = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -186,4 +187,5 @@ class AuditEvent(models.Model):
                 name="audit_exactly_one_target",
             ),
             choices_check("action", AuditAction),
+            json_shape_check("details", "object"),
         )

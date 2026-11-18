@@ -58,8 +58,15 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
         for app in project
     } == baseline
     forward = {
-        "accounts": ("0002_workspace_names_need_not_be_unique", "0003_workspace_invitation_role"),
-        "change_requests": ("0002_change_vocabulary_checks",),
+        "accounts": (
+            "0002_workspace_names_need_not_be_unique",
+            "0003_workspace_invitation_role",
+            "0004_invitation_and_administrator_change_checks",
+        ),
+        "change_requests": (
+            "0002_change_vocabulary_checks",
+            "0003_decision_reason_and_incident_interval_checks",
+        ),
         "connections": ("0003_provider_account_and_binding_checks",),
         "forecasts": (
             "0002_collection_endpoint_and_request_purpose_checks",
@@ -67,11 +74,16 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
         ),
         "incidents": ("0002_incident_kind_choices",),
         "metering": ("0002_epias_vocabulary_choices", "0003_lease_check_and_snapshot_trigger"),
-        "notifications": ("0002_delivery_vocabulary_checks", "0003_delivery_lease_check"),
+        "notifications": (
+            "0002_delivery_vocabulary_checks",
+            "0003_delivery_lease_check",
+            "0004_recipient_and_time_shape_checks",
+        ),
         "plants": (
             "0002_plant_event_action_and_calibration_error_checks",
             "0003_lease_check_and_observation_trigger",
         ),
+        "regions": ("0002_audit_event_details",),
     }
     expected = {app: names | set(forward.get(app, ())) for app, names in baseline.items()}
     assert {app: {name for label, name in disk if label == app} for app in project} == expected

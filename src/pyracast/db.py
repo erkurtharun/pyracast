@@ -95,6 +95,33 @@ def choices_check(
     )
 
 
+class JsonType(models.Func):
+    function = "jsonb_typeof"
+    output_field = models.TextField()
+
+
+class JsonPathExists(models.Func):
+    # Strict paths raise on a value of another structure; the trailing `true` turns that into
+    # NULL, so the type test beside the path decides.
+    template = "jsonb_path_exists(%(expressions)s::jsonpath, '{}', true)"
+    output_field = models.BooleanField()
+
+
+TEXT_ITEMS = 'strict $[*] ? (@.type() != "string")'
+
+
+def json_shape(field: str, kind: str, breach: str = "") -> models.Q:
+    """The JSON value has the type `kind` and nothing matches the strict jsonpath `breach`."""
+    shape = models.Q(models.lookups.Exact(JsonType(field), kind))
+    return shape & ~models.Q(JsonPathExists(field, models.Value(breach))) if breach else shape
+
+
+def json_shape_check(field: str, kind: str, breach: str = "") -> models.CheckConstraint:
+    return models.CheckConstraint(
+        condition=json_shape(field, kind, breach), name=f"%(class)s_{field}_chk"
+    )
+
+
 def violated_constraint(error: IntegrityError) -> str | None:
     name = getattr(getattr(error.__cause__, "diag", None), "constraint_name", None)
     return name if isinstance(name, str) else None

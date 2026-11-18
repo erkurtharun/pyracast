@@ -57,6 +57,7 @@ class WorkspaceInvitation(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     accepted_at = models.DateTimeField(null=True)
+    revoked_at = models.DateTimeField(null=True)
     delivery_status = models.CharField(
         max_length=9, choices=InvitationDeliveryStatus, default=InvitationDeliveryStatus.PENDING
     )
@@ -66,6 +67,25 @@ class WorkspaceInvitation(models.Model):
         constraints = (
             choices_check("delivery_status", InvitationDeliveryStatus),
             choices_check("role", WorkspaceRole),
+            # Readers treat an invitation as open while `expires_at` lies ahead, so a revocation
+            # ends the deadline too.
+            models.CheckConstraint(
+                condition=models.Q(revoked_at__isnull=True)
+                | models.Q(accepted_at__isnull=True, expires_at__lte=models.F("revoked_at")),
+                name="%(class)s_revoked_at_chk",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant", "email"),
+                condition=models.Q(accepted_at__isnull=True, revoked_at__isnull=True),
+                name="%(class)s_tenant_email_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant",),
+                condition=models.Q(
+                    role=WorkspaceRole.ADMIN, accepted_at__isnull=True, revoked_at__isnull=True
+                ),
+                name="%(class)s_tenant_administrator_uniq",
+            ),
         )
 
 
@@ -86,6 +106,14 @@ class WorkspaceAdminChange(models.Model):
         related_name="previous_workspace_admin_assignments",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = (
+            models.CheckConstraint(
+                condition=~models.Q(administrator=models.F("previous_administrator")),
+                name="%(class)s_administrator_chk",
+            ),
+        )
 
 
 class WorkspaceMemberRemoval(models.Model):
