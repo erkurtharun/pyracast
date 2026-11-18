@@ -4,6 +4,7 @@ from typing import Any
 from django.db import connection, models, transaction
 from psycopg import sql
 
+from pyracast.change_requests.models import ChangeRequestStatus
 from pyracast.forecasts.models import CollectionJobStatus
 from pyracast.metering.models import EpiasJobStatus
 from pyracast.notifications.models import NotificationDeliveryStatus
@@ -98,10 +99,64 @@ NORMALIZATION_FACTOR_RULE = """CASE
         WHEN factor >= 8.98846567431158e307
         THEN factor * 0.5 = target_capacity_kw * 0.5 / source_capacity_kw ELSE false END
     ELSE false END"""
+ADMINISTRATOR_CHANGE_RULE = (
+    "previous_administrator_id IS NULL OR previous_administrator_id <> administrator_id"
+)
+INVITATION_STATE_RULE = (
+    "revoked_at IS NULL OR (accepted_at IS NULL AND NOT expires_at > revoked_at)"
+)
+OPEN_INVITATION_RULE = """
+accepted_at IS NOT NULL OR revoked_at IS NOT NULL OR NOT EXISTS (
+    SELECT 1 FROM accounts_workspaceinvitation AS other
+    WHERE other.id <> accounts_workspaceinvitation.id
+      AND other.tenant_id = accounts_workspaceinvitation.tenant_id
+      AND other.accepted_at IS NULL AND other.revoked_at IS NULL
+      AND (other.email = accounts_workspaceinvitation.email
+           OR (other.role = 'admin' AND accounts_workspaceinvitation.role = 'admin')))
+"""
+REJECTION_REASON_RULE = f"status <> '{ChangeRequestStatus.REJECTED}' OR length(decision_reason) > 0"
+INCIDENT_INTERVAL_RULE = "starts_at IS NULL OR ends_at IS NULL OR starts_at < ends_at"
+# The JSON rules unpack the values with set-returning functions, apart from the jsonpath
+# expressions of the CHECK constraints; CASE keeps a value of another type from raising.
+RECIPIENTS_RULE = """CASE WHEN jsonb_typeof(recipients) = 'array' THEN NOT EXISTS (
+    SELECT 1 FROM jsonb_array_elements(recipients) AS item WHERE jsonb_typeof(item) <> 'string')
+    ELSE false END"""
+REVOKED_RECIPIENTS_RULE = """CASE WHEN jsonb_typeof(revoked_recipients) = 'array'
+    THEN NOT EXISTS (SELECT 1 FROM jsonb_array_elements(revoked_recipients) AS item
+                     WHERE jsonb_typeof(item) <> 'string')
+    ELSE false END"""
+MEMBERSHIPS_RULE = """CASE WHEN jsonb_typeof(recipient_memberships) = 'object' THEN NOT EXISTS (
+    SELECT 1 FROM jsonb_each(recipient_memberships) AS entry WHERE CASE
+        WHEN jsonb_typeof(entry.value) = 'array' THEN EXISTS (
+            SELECT 1 FROM jsonb_array_elements(entry.value) AS member WHERE CASE
+                WHEN jsonb_typeof(member) = 'number'
+                THEN member::numeric < 1 OR member::numeric <> trunc(member::numeric)
+                ELSE true END)
+        ELSE true END)
+    ELSE false END"""
+REMINDER_TIMES_RULE = """CASE WHEN jsonb_typeof(times) = 'array' THEN NOT EXISTS (
+    SELECT 1 FROM jsonb_array_elements(times) AS item WHERE CASE
+        WHEN jsonb_typeof(item) = 'string'
+        THEN item #>> '{}' !~ '^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$'
+        ELSE true END)
+    ELSE false END"""
+AUDIT_DETAILS_RULE = "left(details::text, 1) = '{'"
 # Every row invariant the database enforces on the constrained tables; archive immutability is
 # a before/after property and is audited by `rewritten_archive_rows`.
 STORED_RULES: tuple[tuple[str, str], ...] = (
     *LEASE_RULES.items(),
+    ("accounts_workspaceadminchange", ADMINISTRATOR_CHANGE_RULE),
+    ("accounts_workspaceinvitation", INVITATION_STATE_RULE),
+    ("accounts_workspaceinvitation", OPEN_INVITATION_RULE),
+    ("change_requests_changerequest", REJECTION_REASON_RULE),
+    ("change_requests_incidentchange", INCIDENT_INTERVAL_RULE),
+    ("notifications_reminderschedule", RECIPIENTS_RULE),
+    ("notifications_reminderschedule", MEMBERSHIPS_RULE),
+    ("notifications_reminderschedule", REMINDER_TIMES_RULE),
+    ("notifications_notificationdelivery", RECIPIENTS_RULE),
+    ("notifications_notificationdelivery", REVOKED_RECIPIENTS_RULE),
+    ("notifications_notificationdelivery", MEMBERSHIPS_RULE),
+    ("regions_auditevent", AUDIT_DETAILS_RULE),
     ("forecasts_collectionjob", IMPORT_SHAPE_RULE),
     ("forecasts_collectionjob", NATIVE_SLOT_RULE),
     ("forecasts_referencecapacitynormalization", NORMALIZATION_FACTOR_RULE),

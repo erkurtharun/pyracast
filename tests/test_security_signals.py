@@ -21,12 +21,15 @@ from django.test import RequestFactory
 
 from pyracast.accounts.audit import (
     LINE_KEYS,
+    SECURITY_EVENT_DETAILS,
     SIGNAL_EVENTS,
     RefusalThrottle,
     SecurityEvent,
     connect_security_events,
+    failure_logger,
     logger,
     record_on_commit,
+    record_security_event,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +50,8 @@ PINNED_LINE_KEYS = frozenset(
     }
 )
 WRITERS = frozenset({"record_security_event", "record_on_commit", "record_refusal"})
+LINE_ARGUMENTS = frozenset({"request", "user_id", "client_ip"})
+DETAIL_OF_ARGUMENT = {"address": "subject"}
 SIGNALLED = frozenset(
     {
         "login_succeeded",
@@ -291,6 +296,54 @@ def test_every_written_event_has_a_writer_call_and_every_writer_call_names_one()
     assert calls
     assert [location for location, events in named.items() if not events] == []
     assert {SecurityEvent[name].value for events in named.values() for name in events} == WRITTEN
+
+
+def written_details() -> list[tuple[str, set[str], set[str]]]:
+    found = []
+    for path in SOURCE.rglob("*.py"):
+        if path.name == "audit.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in WRITERS
+            ):
+                arguments = {keyword.arg for keyword in node.keywords if keyword.arg}
+                found.append(
+                    (
+                        f"{path.relative_to(SOURCE)}:{node.lineno}",
+                        named_events(next(iter(node.args), None)),
+                        {DETAIL_OF_ARGUMENT.get(name, name) for name in arguments - LINE_ARGUMENTS},
+                    )
+                )
+    return found
+
+
+def test_every_writer_call_passes_only_the_details_its_events_declare() -> None:
+    calls = written_details()
+    undeclared = {
+        f"{location} {name}": sorted(details - SECURITY_EVENT_DETAILS[SecurityEvent[name]])
+        for location, events, details in calls
+        for name in events
+        if details - SECURITY_EVENT_DETAILS[SecurityEvent[name]]
+    }
+
+    assert calls
+    assert undeclared == {}
+    assert set().union(*SECURITY_EVENT_DETAILS.values()) <= LINE_KEYS
+
+
+def test_a_detail_its_event_does_not_declare_is_refused_and_reported(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(failure_logger, "handlers", [caplog.handler])
+
+    record_security_event(SecurityEvent.LOGOUT, user_id=USER_ID, tenant_id=7)
+
+    assert [record.getMessage() for record in caplog.records] == [
+        "security_line_failed event=logout error_type=ValueError"
+    ]
 
 
 def test_failures_for_one_address_share_a_subject_that_is_not_the_address(
