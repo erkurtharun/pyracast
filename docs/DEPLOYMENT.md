@@ -392,8 +392,9 @@ To redeploy `main`:
    below), run **Actions → Release → Run workflow → main** while that CI run's
    image artifact is unexpired (one day). Once it has expired, repeat step 1 and
    dispatch Release after its automatic Release skipped again.
-When retrying CI, choose **Re-run all jobs** so reports and images belong to the
-same attempt; **Re-run failed jobs** cannot supply a complete release record.
+When retrying CI, **Re-run failed jobs** is enough: each job reads the artifacts of the
+attempt that produced them, and Release takes the images of the newest attempt that
+built them.
 
 Runtime and deployment accounts have separate secret access. The deploy account
 can administer this VM and therefore has a privileged production trust boundary;

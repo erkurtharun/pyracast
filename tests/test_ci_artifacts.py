@@ -12,10 +12,16 @@ NEEDS_OUTPUT = re.compile(r"\$\{\{ needs\.(?P<job>[\w-]+)\.outputs\.(?P<key>[\w-
 ENV = re.compile(r"\$\{\{ env\.(?P<name>\w+) \}\}")
 UPLOADED_ID = re.compile(r"steps\.(?P<step>[\w-]+)\.outputs\.artifact-id")
 SHA = "a" * 40
+RUNNER_OS = {"ubuntu-latest": "Linux", "windows-latest": "Windows"}
 
 
 def uses(candidate: dict[str, Any], action: str) -> bool:
     return str(candidate.get("uses", "")).startswith(action)
+
+
+def runs_on_its_runner(job: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    match = re.fullmatch(r"runner\.os == '(\w+)'", str(candidate.get("if", "")))
+    return match is None or RUNNER_OS[job["runs-on"]] == match[1]
 
 
 def uploads() -> list[tuple[str, str, dict[str, Any]]]:
@@ -24,7 +30,7 @@ def uploads() -> list[tuple[str, str, dict[str, Any]]]:
         for path in sorted(WORKFLOWS.glob("*.yml"))
         for identifier, job in workflow(path.name)["jobs"].items()
         for candidate in job["steps"]
-        if uses(candidate, UPLOAD)
+        if uses(candidate, UPLOAD) and runs_on_its_runner(job, candidate)
     ]
 
 
@@ -42,11 +48,10 @@ def artifact_references(job: dict[str, Any], download: dict[str, Any]) -> list[s
     return str(job.get("env", {}).get(match["name"], "")).split(",") if match else []
 
 
-def uploaded_by(producer: dict[str, Any], key: str) -> dict[str, Any]:
+def assert_uploaded_by(producer: dict[str, Any], key: str) -> None:
     (identifier,) = [match["step"] for match in UPLOADED_ID.finditer(producer["outputs"][key])]
     (upload,) = [candidate for candidate in producer["steps"] if candidate.get("id") == identifier]
     assert uses(upload, UPLOAD)
-    return upload
 
 
 def outputs_read_by_downloads() -> set[tuple[str, str]]:
@@ -103,7 +108,7 @@ def test_every_ci_download_reads_the_artifact_ids_its_producers_uploaded() -> No
                 match = NEEDS_OUTPUT.fullmatch(reference)
                 assert match, reference
                 assert match["job"] in needed(job), reference
-                uploaded_by(jobs[match["job"]], match["key"])
+                assert_uploaded_by(jobs[match["job"]], match["key"])
             more = f"(,[0-9]+){{{len(references) - 1}}}" if len(references) > 1 else ""
             guard = step(job, GUARD)
             assert f"[[ ${variable['name']} =~ ^[0-9]+{more}$ ]]" in guard["run"].splitlines()
