@@ -424,7 +424,9 @@ fixtures do not establish provider access or inbox delivery.
 - **Backups:** the host's hourly timer uploads a custom-format PostgreSQL dump to
   the private backup bucket; each release requires another successful dump before
   migration. The hourly backup waits up to ten minutes for the release lock and
-  reports `pyracast_backup_skipped` when a release keeps the lock or stays blocked.
+  reports `pyracast_backup_skipped` when a release keeps the lock or stays blocked;
+  that skip exits 75, which `pyracast-backup.service` counts as success, while any
+  other failure leaves the unit failed.
   Hourly backups and releases exclude each other through that lock from the dump to
   the replacement of `/var/lib/pyracast/last-backup.json`, so the pointer always
   names the newest snapshot; a release waits up to its 300-second lock timeout for a
