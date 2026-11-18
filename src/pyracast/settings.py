@@ -324,6 +324,9 @@ elif _email_backend == "gmail":
 else:
     _mailer = {"BACKEND": "django.core.mail.backends.console.EmailBackend"}
 MAILERS = {"default": _mailer}
+# A command run through `docker compose exec` writes to its own stream, which the log driver
+# never sees; deployments point this at PID 1's stdout so every security line is shipped.
+_security_log_path = os.environ.get("PYRACAST_SECURITY_LOG_PATH")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -335,6 +338,20 @@ LOGGING = {
             "stream": "ext://sys.stdout",
         },
         "discard": {"class": "logging.NullHandler"},
+        "security": (
+            {
+                "class": "logging.FileHandler",
+                "formatter": "standard",
+                "filename": _security_log_path,
+                "delay": True,
+            }
+            if _security_log_path
+            else {
+                "class": "logging.StreamHandler",
+                "formatter": "standard",
+                "stream": "ext://sys.stdout",
+            }
+        ),
     },
     "loggers": {
         "pyracast": {
@@ -342,6 +359,7 @@ LOGGING = {
             "level": os.environ.get("PYRACAST_LOG_LEVEL", "INFO"),
             "propagate": False,
         },
+        "pyracast.security": {"handlers": ["security"], "level": "INFO", "propagate": False},
         "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
         "django.security": {"handlers": ["console"], "level": "WARNING", "propagate": False},
         "django.security.DisallowedHost": {"handlers": ["discard"], "propagate": False},

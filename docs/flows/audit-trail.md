@@ -9,7 +9,7 @@ Most mutating operations append their own record in the same transaction as thei
 - `AuditEvent` writers: `regions.operations` (`update_region`, `request_location_change`, `review_location_change`, `configure_binding`, `approve_region`, `transition_region`), `plants.operations` `_rename` (`region_renamed`), `connections.operations` (`create_account`, `rotate_secret`, `validate_binding`), `connections.recovery` `clear_provider_cooldown`, `forecasts.schedule` `configure_schedule`, `forecasts.historical_import` `import_historical_reference`, `forecasts.capacity_normalization` `normalize_reference_capacity`, `trash` (`trash_region`, `restore_region`).
 - `PlantEvent` writers: `plants.operations` (`_save_configuration`, `_save_plant_parameters` (submission), `_rename` (`plant_renamed`), `import_observations`, `request_calibration`, `_activate`), `plants.production_changes` `change_production`, `plants.automation` (`update_automation`, `_skip`), `metering.operations` (`connect_epias`, `disconnect_epias`); worker writers `plants.preparation` `prepare_calibration` and `plants.training` `_publish`.
 - Ledgers: `accounts.operations` `remove_workspace_member` (`WorkspaceMemberRemoval`) and `reassign_workspace_admin` (`WorkspaceAdminChange`). Settings edit: `WorkspaceSettingsForm.apply` writes a Django `LogEntry`.
-- Security log: `pyracast.accounts.audit` `connect_security_events` (called from `AccountsConfig.ready`) maps 16 allauth, MFA and Django auth signals to `record_security_event`; `accounts.social` connects the two social-account signals at import; `api.middleware` `PrivateAPIResponses` logs `authentication_request_throttled` on 429 under `/api/auth/`; command `provision_admin_mfa` logs `admin_mfa_provisioned`; `AccountAdapter.pre_authenticate` logs `login_locked` for a refused password check and `ChangePasswordInput` logs `password_change_failed`.
+- Security log: `pyracast.accounts.audit` owns the `SecurityEvent` vocabulary; `connect_security_events` (called from `AccountsConfig.ready`) maps the Django auth, allauth account, MFA and social signals in `SIGNAL_EVENTS`, and every other writer (`login_locked`, refusals in `api.errors` and `api.error_pages`, invitation and membership changes on commit, `provision_admin_mfa`, the 429 middleware) passes a `SecurityEvent` member. Lines carry ids and a keyed `subject` instead of addresses.
 - Purge: `dispatch` command retention phase -> `trash.purge_expired` deletes events of expired regions and plants.
 
 ## Sequence
@@ -20,7 +20,7 @@ flowchart LR
     OP -->|"same transaction"| PE[("plants_plantevent")]
     OP -->|"same transaction"| LG[("accounts ledgers and django_admin_log")]
     WK["Workers: prepare_calibration, training publish, automation skip or promote"] -->|"same transaction, no actor check"| PE
-    SIG["allauth, MFA, Django signals, 429 middleware, provision command"] -->|"INFO line with JSON message, no row"| LOG["logger pyracast.security to stdout"]
+    SIG["Account signals, refusals, invitation and membership changes, operator commands"] -->|"INFO line with JSON message, no row"| LOG["logger pyracast.security to the container stream"]
     AE -->|"region not trashed, newest first"| CON["Admin console Recent activity"]
     PE -->|"epias_connected up to cutoff"| ID["production_identity_at"]
     PE -->|"latest automatic attempt for current configuration"| AS["automation_status API"]

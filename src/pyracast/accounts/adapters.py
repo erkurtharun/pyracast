@@ -100,11 +100,15 @@ class AccountAdapter(DefaultAccountAdapter):
             self._client_failure.rollback()
         return user
 
-    def populate_username(self, request: HttpRequest, user: AbstractBaseUser) -> None:
-        # The suffix keeps concurrent sign-ups with one mailbox name from taking one username.
-        account = cast(User, user)
-        super().populate_username(request, account)
-        account.username = f"{account.username[:140]}-{secrets.token_hex(2)}"
+    def generate_unique_username(self, txts: list[str | None], regex: str | None = None) -> str:
+        # A random part before allauth's uniqueness check keeps concurrent sign-ups with one
+        # mailbox name from choosing one username; allauth still avoids any taken name.
+        token = secrets.token_hex(8)
+        candidates: list[str | None] = []
+        for text in txts:
+            name, at, domain = (text or "").partition("@")
+            candidates.append(f"{name}-{token}{at}{domain}" if name else text)
+        return super().generate_unique_username(candidates, regex)
 
     def get_client_ip(self, request: HttpRequest) -> str:
         try:

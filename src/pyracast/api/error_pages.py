@@ -16,6 +16,11 @@ def _api(request: HttpRequest) -> bool:
     return request.path.startswith("/api/")
 
 
+def _route(request: HttpRequest) -> str:
+    match = request.resolver_match
+    return (match.url_name if match else None) or "-"
+
+
 def _private(response: HttpResponse) -> HttpResponse:
     patch_cache_control(response, private=True, no_store=True)
     return response
@@ -28,6 +33,7 @@ def bad_request(request: HttpRequest, exception: Exception) -> HttpResponse:
 
 
 def permission_denied(request: HttpRequest, exception: Exception) -> HttpResponse:
+    record_refused(request, ErrorCode.PERMISSION_DENIED, _route(request), None)
     if not _api(request):
         return _private(defaults.permission_denied(request, exception))
     return error_json(request, lambda: api_error(exception, request, "-"))
@@ -48,8 +54,8 @@ def server_error(request: HttpRequest) -> HttpResponse:
 
 
 def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:
-    route = request.resolver_match.url_name if request.resolver_match else None
-    record_refused(request, ErrorCode.CSRF_FAILED, route or "-", None)
+    route = _route(request)
+    record_refused(request, ErrorCode.CSRF_FAILED, route, None)
     if not _api(request):
         return _private(csrf.csrf_failure(request, reason))
     if route in PROVIDER_NAVIGATIONS and request.headers.get("Sec-Fetch-Mode") == "navigate":
