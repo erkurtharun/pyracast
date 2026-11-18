@@ -200,7 +200,10 @@ def password_reauthentication(*, correct: bool) -> Flow:
 def code_reauthentication(*, correct: bool) -> Flow:
     def flow(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         user = member()
-        client = signed_in(user)
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(user)
         requested = submit(client, "auth/reauthenticate/code/request", {"email": user.email})
         assert requested.status_code == 200
         code = mailed_code() if correct else WRONG_CODE

@@ -36,10 +36,20 @@ def account(name: str, *, verified: bool = True) -> User:
     return user
 
 
+def passwordless(name: str) -> User:
+    user = account(name)
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
+    return user
+
+
 def signed_in(user: User, *, reauthenticated: bool = False) -> Client:
     client = browser()
-    credentials = {"email": user.email, "password": PASSWORD}
-    assert submit(client, "auth/login", credentials).status_code == 200
+    if user.has_usable_password():
+        credentials = {"email": user.email, "password": PASSWORD}
+        assert submit(client, "auth/login", credentials).status_code == 200
+    else:
+        client.force_login(user)
     if reauthenticated:
         assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     return client

@@ -2,7 +2,6 @@ import json
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from io import StringIO
 from threading import Barrier, Event, Lock
 from types import SimpleNamespace
 from typing import Any
@@ -17,7 +16,6 @@ from django.contrib.sessions.exceptions import SessionInterrupted
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
-from django.core.management import call_command
 from django.db import DatabaseError, InterfaceError, OperationalError, connections
 from django.http import HttpResponse
 from django.test import Client, RequestFactory, override_settings
@@ -26,6 +24,7 @@ from pyracast.accounts import session_lock
 from pyracast.accounts.mfa import MFAAdapter
 from pyracast.accounts.session_lock import SessionRequestSerialization, serialize_session
 from pyracast.api.session import SessionView
+from tests.support.admin_mfa_bootstrap import enrollment_secret, run
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, member, submit, totp_code
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
@@ -194,15 +193,18 @@ def test_ordinary_api_response_cannot_restore_stale_code_attempts(
 
 
 @override_settings(MAILERS=MAILERS)
-def test_provisioned_legacy_admin_needs_totp_after_email_code(
+def test_a_bootstrapped_administrator_needs_the_authenticator_after_the_email_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = User.objects.create_superuser(username="legacy-admin", password=PASSWORD)
-    call_command(
-        "provision_admin_mfa",
-        username=user.username,
-        email="operator@example.com",
-        stdout=StringIO(),
+    user = User.objects.create_superuser(
+        username="legacy-admin", email="operator@example.com", password=PASSWORD
+    )
+    enrolled_at = time.time()
+    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: enrolled_at))
+    run(
+        "bootstrap_admin",
+        [PASSWORD, PASSWORD, lambda shown: totp_code(enrollment_secret(shown), enrolled_at)],
+        email=user.email,
     )
     client = Client(enforce_csrf_checks=True)
     response = submit(client, "auth/login", {"email": "operator@example.com", "password": PASSWORD})

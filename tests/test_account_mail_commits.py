@@ -48,11 +48,7 @@ FAMILIES = (
     Combination("password", "passwordless", "none", "reauthenticated", "none"),
     Combination("password", "verified", "none", "reauthenticated", "none"),
     Combination(
-        "reauthentication-code",
-        "verified-secondary",
-        "own-verified-secondary",
-        "reauthentication-pending",
-        "none",
+        "reauthentication-code", "passwordless", "own-primary", "reauthentication-pending", "none"
     ),
     Combination("totp-on", "verified", "none", "reauthenticated", "none"),
     Combination("totp-off", "verified", "none", "reauthenticated", "none"),

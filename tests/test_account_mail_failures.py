@@ -260,7 +260,10 @@ def test_account_mail_failure_is_logged_once_without_address_or_code(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     user = member()
-    client = signed_in(user)
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(user)
 
     with caplog.at_level("INFO", logger="pyracast"):
         response = submit(client, "auth/reauthenticate/code/request", {"email": user.email})

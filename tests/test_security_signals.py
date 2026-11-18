@@ -94,6 +94,7 @@ WRITTEN = frozenset(
         "password_change_failed",
         "second_factor_locked",
         "admin_mfa_provisioned",
+        "mfa_reset_by_operator",
         "invalid_proxy_headers",
         "authentication_request_throttled",
         "api_throttled",

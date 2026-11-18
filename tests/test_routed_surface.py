@@ -99,6 +99,7 @@ CONSOLE_ROUTES = sorted(
         "admin/",
         "admin/(?P<url>.*)$",
         "admin/^(?P<app_label>notifications|forecasts|regions|accounts|connections|plants)/$",
+        "admin/confirm/",
         "admin/jsi18n/",
         "admin/language/",
         "admin/login/",

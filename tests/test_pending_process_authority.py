@@ -55,6 +55,7 @@ from tests.support.account_sessions import (
     browser,
     elsewhere,
     moment,
+    passwordless,
     session_user,
     signed_in,
     totp_clock,
@@ -121,7 +122,7 @@ def signup_resend(monkeypatch: pytest.MonkeyPatch) -> Pending:
 
 
 def reauthentication_code(monkeypatch: pytest.MonkeyPatch) -> Pending:
-    user = account("owner")
+    user = passwordless("owner")
     EmailAddress.objects.create(user=user, email=SECOND, verified=True)
     client = signed_in(user)
     request = {"email": SECOND}
@@ -531,10 +532,22 @@ def test_a_reset_code_dies_when_its_authority_changes_after_the_code_is_sent(
     assert list(EmailAddress.objects.values_list("email", flat=True)) == addresses
 
 
+def test_a_reauthentication_code_dies_when_the_account_gains_an_authenticator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pending = reauthentication_code(monkeypatch)
+    with_totp(pending.user)
+
+    pending.client.get("/api/session/")
+
+    assert REAUTHENTICATION_CODE_SESSION_KEY not in pending.client.session
+    assert mail.outbox == []
+
+
 def test_a_reauthentication_code_dies_when_its_address_is_replaced_after_the_code_is_sent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = account("owner")
+    user = passwordless("owner")
     EmailAddress.objects.create(user=user, email=SECOND, verified=True)
     client = signed_in(user)
     changes = changing(

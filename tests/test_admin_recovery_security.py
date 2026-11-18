@@ -33,7 +33,7 @@ def test_session_and_password_cannot_read_or_replace_recovery_codes(
     recovery = RecoveryCodes.activate(user).instance
     original = recovery.data.copy()
     assert (
-        submit(client, AUTH + "auth/reauthenticate", {"password": TEST_PASSWORD}).status_code == 200
+        submit(client, AUTH + "auth/reauthenticate", {"password": TEST_PASSWORD}).status_code == 403
     )
     response = client.get(RECOVERY) if method == "get" else submit(client, RECOVERY, {})
     assert response.status_code == 401
@@ -73,7 +73,7 @@ def test_fresh_mfa_reauthentication_allows_recovery_code_rotation(
 
     monkeypatch.setattr(time, "time", lambda: now + 301)
     assert (
-        submit(client, AUTH + "auth/reauthenticate", {"password": TEST_PASSWORD}).status_code == 200
+        submit(client, AUTH + "auth/reauthenticate", {"password": TEST_PASSWORD}).status_code == 403
     )
     assert submit(client, RECOVERY, {}).status_code == 401
 
@@ -123,7 +123,7 @@ def test_anonymous_request_has_no_mfa_reauthentication() -> None:
 def test_password_reauthentication_cannot_remove_customer_totp() -> None:
     client, user, _ = authenticated_account(privileged=False)
     assert (
-        submit(client, AUTH + "auth/reauthenticate", {"password": TEST_PASSWORD}).status_code == 200
+        submit(client, AUTH + "auth/reauthenticate", {"password": TEST_PASSWORD}).status_code == 403
     )
     token = client.get("/api/session/").json()["csrf_token"]
     response = client.delete(AUTH + "account/authenticators/totp", HTTP_X_CSRFTOKEN=token)
