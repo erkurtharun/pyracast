@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -281,7 +282,7 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
             )
     error = {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
     assert documented[("/api/session/", "get")] == []
-    assert documented[("/api/session/language/", "post")] == ["400", "403"]
+    assert documented[("/api/session/language/", "post")] == ["400", "403", "415"]
     assert documented[("/api/tenants/", "get")] == ["401", "404"]
     assert documented[("/api/tenants/{tenant_id}/members/", "get")] == ["401", "403"]
     assert documented[("/api/tenants/{tenant_id}/members/{user_id}/", "delete")] == [
@@ -289,11 +290,30 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
         "403",
         "404",
     ]
-    assert documented[("/api/tenants/{tenant_id}/sites/", "post")] == ["400", "401", "403", "429"]
+    assert documented[("/api/tenants/{tenant_id}/sites/", "post")] == [
+        "400",
+        "401",
+        "403",
+        "415",
+        "429",
+    ]
     forecast = schema["paths"]["/api/tenants/{tenant_id}/regions/{region_id}/forecast/"]["get"]
     refusals = ("400", "401", "403", "404", "429")
     assert sorted(forecast["responses"]) == ["200", *refusals, "default"]
     assert all(forecast["responses"][status]["content"] == error for status in refusals)
+    for route, methods in schema["paths"].items():
+        pattern = re.sub(r"\{(\w+)\}", r"<int:\1>", route.removeprefix("/"))
+        for method, operation in methods.items():
+            access, throttle = POLICIES[pattern][method.upper()]
+            responses = operation["responses"]
+            assert ("401" in responses) == (access != PUBLIC)
+            assert ("403" in responses) == (method != "get" or access in {MEMBER, ADMIN})
+            assert ("429" in responses) == (throttle is not None)
+            if "requestBody" in operation:
+                assert "415" in responses
+            for status, response in responses.items():
+                if status.startswith(("4", "5")) or status == "default":
+                    assert response["content"] == error
 
 
 def test_a_request_that_bypassed_the_url_resolver_is_refused() -> None:

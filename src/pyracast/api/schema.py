@@ -14,6 +14,7 @@ REFUSALS = {
     "401": "Sign-in is required.",
     "403": "Access was refused.",
     "404": "The addressed item or page does not exist.",
+    "415": "Send the request as JSON.",
     "429": "Too many requests; Retry-After gives the seconds to wait.",
 }
 
@@ -28,6 +29,7 @@ def documented_refusals(policy: Policy, method: str, operation: dict[str, Any]) 
         # Every unsafe method also answers 403 when the session's CSRF check fails.
         "403": method not in {"GET", "HEAD"} or policy.access in {Access.MEMBER, Access.ADMIN},
         "404": bool(path - {"tenant_id"}) or "page" in query,
+        "415": "requestBody" in operation,
         "429": policy.throttle is not None,
     }
     return [status for status, applies in statuses.items() if applies]

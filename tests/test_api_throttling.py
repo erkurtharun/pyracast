@@ -1,12 +1,20 @@
-from typing import cast
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+from typing import Any, cast
 
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.core.cache import caches
 from django.test import Client, override_settings
+from django.urls import resolve
 from django.utils import timezone
+from rest_framework.request import Request
+from rest_framework.test import APIRequestFactory
+from rest_framework.views import APIView
 
 from pyracast.accounts.models import Membership, WorkspaceRole
+from pyracast.api import throttling
 from tests.support.domain import make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -72,3 +80,46 @@ def test_refused_requests_spend_no_budget() -> None:
         Membership.objects.create(user=user, tenant=system.tenant, role=WorkspaceRole.VIEWER)
         assert client.get(path, params).status_code == 200
         assert client.get(path, params).status_code == 429
+
+
+def test_concurrent_requests_share_one_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    cache = caches["throttle"]
+    write = cache.set
+    first_write = Event()
+    release_write = Event()
+    second_started = Event()
+    second_finished = Event()
+    path = "/api/tenants/1/regions/1/forecast/"
+
+    def delayed_write(key: str, value: Any, *args: Any, **kwargs: Any) -> None:
+        if not first_write.is_set():
+            first_write.set()
+            assert release_write.wait(10)
+        write(key, value, *args, **kwargs)
+
+    def admit() -> bool:
+        raw = APIRequestFactory().get(path)
+        raw.resolver_match = resolve(path)
+        request = Request(raw)
+        request.user = User(pk=123)
+        return throttling.RouteThrottle().allow_request(request, APIView())
+
+    def admit_second() -> bool:
+        second_started.set()
+        try:
+            return admit()
+        finally:
+            second_finished.set()
+
+    monkeypatch.setattr(cache, "set", delayed_write)
+    monkeypatch.setattr(throttling, "caches", {"throttle": cache})
+    with one_forecast_a_minute(), ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(admit)
+        try:
+            assert first_write.wait(10)
+            second = executor.submit(admit_second)
+            assert second_started.wait(10)
+            second_finished.wait(1)
+        finally:
+            release_write.set()
+        assert sorted((first.result(timeout=10), second.result(timeout=10))) == [False, True]

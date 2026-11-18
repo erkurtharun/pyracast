@@ -9,8 +9,29 @@ from pathlib import Path
 import pytest
 from django.core.management import call_command
 from django.test import override_settings
+from django.urls import path
+from drf_spectacular.utils import extend_schema
+from rest_framework.request import Request
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from scripts import generate_api_schema
+
+
+def test_excluded_operations_do_not_receive_route_policy_responses() -> None:
+    class ExcludedView(APIView):
+        @extend_schema(exclude=True)
+        def get(self, request: Request) -> Response:
+            return Response({})
+
+    class ExcludedURLConf:
+        urlpatterns = (path("api/excluded/", ExcludedView.as_view()),)
+
+    output = StringIO()
+    with override_settings(ROOT_URLCONF=ExcludedURLConf):
+        call_command("spectacular", format="openapi-json", stdout=output)
+
+    assert json.loads(output.getvalue())["paths"] == {}
 
 
 @pytest.mark.parametrize("debug", ["0", "1"])

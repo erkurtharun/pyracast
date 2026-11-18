@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from threading import Lock
 from typing import TYPE_CHECKING, cast
 
 from django.conf import settings
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
     from rest_framework.views import APIView
 
 logger = logging.getLogger("pyracast.api")
+_budget_lock = Lock()
 
 
 class RouteThrottle(SimpleRateThrottle):
@@ -32,8 +34,9 @@ class RouteThrottle(SimpleRateThrottle):
         self.rate = rates[self.scope]
         self.num_requests, self.duration = self.parse_rate(self.rate)
         self.cache = caches["throttle"]
-        if super().allow_request(request, view):
-            return True
+        with _budget_lock:
+            if super().allow_request(request, view):
+                return True
         logger.warning("api_throttled scope=%s user=%s", self.scope, request.user.pk)
         return False
 
