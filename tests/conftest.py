@@ -151,6 +151,7 @@ INVARIANT_AUDIT = frozenset(
         "test_provider_identity",
         "test_provider_recovery",
         "test_provider_retry",
+        "test_provider_snapshot_restore",
         "test_region_editing",
         "test_reminder_recipient_shape",
         "test_revalidation_schedule",

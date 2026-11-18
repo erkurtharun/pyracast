@@ -8,7 +8,7 @@ from django.db import close_old_connections, transaction
 from django.db.models.functions import Greatest
 
 from pyracast.background.failures import log_failure
-from pyracast.collection_window import nightly_window
+from pyracast.collection_window import INTRADAY_HISTORY_WINDOW, nightly_window
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import (
     CollectionEndpoint,
@@ -17,7 +17,11 @@ from pyracast.forecasts.models import (
     CollectionJobStatus,
     CollectionSchedule,
 )
-from pyracast.forecasts.timing import effective_forecast_schedule, latest_forecast_slot
+from pyracast.forecasts.timing import (
+    approval_job,
+    effective_forecast_schedule,
+    latest_forecast_slot,
+)
 from pyracast.regions.models import Region
 
 logger = logging.getLogger(__name__)
@@ -43,16 +47,7 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
         binding = region.approved_binding
         if binding is None or binding.validated_at is None or not binding_is_current(binding):
             return jobs
-        first_slot = (
-            CollectionJob.objects.filter(
-                binding=binding,
-                endpoint=CollectionEndpoint.FORECASTS,
-                reference_import__isnull=True,
-            )
-            .order_by("scheduled_slot")
-            .values_list("scheduled_slot", flat=True)
-            .first()
-        )
+        _, first_slot = approval_job(binding.pk) or (None, None)
         schedule = CollectionSchedule.objects.filter(region=region).first()
         timing = effective_forecast_schedule(
             first_slot=first_slot,
@@ -135,7 +130,7 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
             lease_expires_at=None,
         )
         jobs.append(job.pk)
-        if now < slot + timedelta(minutes=15):
+        if now < slot + INTRADAY_HISTORY_WINDOW:
             history, _ = CollectionJob.objects.get_or_create(
                 binding=binding,
                 endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
@@ -143,7 +138,7 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
                 defaults={
                     "target_date": slot.astimezone(zone).date(),
                     "available_at": now,
-                    "retry_until": slot + timedelta(minutes=15),
+                    "retry_until": slot + INTRADAY_HISTORY_WINDOW,
                 },
             )
             jobs.append(history.pk)

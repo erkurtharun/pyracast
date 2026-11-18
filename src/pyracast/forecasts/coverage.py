@@ -1,4 +1,5 @@
 import math
+from collections.abc import Iterable
 from datetime import date, datetime
 
 from pyracast.forecasts.models import ForecastSnapshot
@@ -6,10 +7,14 @@ from pyracast.irradiance import local_day_bounds
 
 
 def history_day_complete(snapshot: ForecastSnapshot, target: date, timezone: str) -> bool:
+    return intervals_cover_day(snapshot.normalized_intervals, target, timezone)
+
+
+def intervals_cover_day(intervals: Iterable[object], target: date, timezone: str) -> bool:
     start, end = local_day_bounds(target, timezone)
     cursor = start
     rows: list[tuple[datetime, datetime, object]] = []
-    for row in snapshot.normalized_intervals:
+    for row in intervals:
         if not isinstance(row, dict):
             return False
         raw_start, raw_end = row.get("start"), row.get("end")

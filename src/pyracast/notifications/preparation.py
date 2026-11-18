@@ -12,7 +12,11 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
 )
 from pyracast.forecasts.projections import saved_day_payload
-from pyracast.forecasts.timing import effective_forecast_schedule, latest_forecast_slot
+from pyracast.forecasts.timing import (
+    approval_job,
+    effective_forecast_schedule,
+    latest_forecast_slot,
+)
 from pyracast.notifications.mail import build_message, message_payload
 from pyracast.notifications.models import NotificationDelivery, PreparedMessageKind
 from pyracast.notifications.presentation import report_summary
@@ -38,14 +42,7 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
         None,
     )
     schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
-    first_slot = (
-        CollectionJob.objects.filter(
-            binding=binding, endpoint=CollectionEndpoint.FORECASTS, reference_import__isnull=True
-        )
-        .order_by("scheduled_slot")
-        .values_list("scheduled_slot", flat=True)
-        .first()
-    )
+    _, first_slot = approval_job(binding.pk) or (None, None)
     timing = effective_forecast_schedule(
         first_slot=first_slot, schedule=schedule, daily_quota=binding.provider_account.daily_quota
     )

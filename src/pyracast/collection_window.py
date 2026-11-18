@@ -6,6 +6,7 @@ from pyracast.notifications.schedule import local_slot
 HISTORY_CLOCK = "00:00"
 HISTORY_END_CLOCK = "09:00"
 NIGHT_RETRY_DELAY = timedelta(minutes=30)
+INTRADAY_HISTORY_WINDOW = timedelta(minutes=15)
 # A clock change or skipped calendar day removes at most one local day's slots.
 SLOT_SEARCH_DAYS = 3
 
