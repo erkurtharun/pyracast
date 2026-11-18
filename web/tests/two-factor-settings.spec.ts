@@ -4,6 +4,7 @@ import { expect, test, type Page } from "./support/test";
 import jsQR from "jsqr";
 import { PNG } from "pngjs";
 import { mockApi, paged, user, tenantRow } from "./support/workspace";
+import { allauthErrorBody } from "./support/errors";
 
 const secret = "JBSWY3DPEHPK3PXP";
 const provisioningUri = `otpauth://totp/Pyracast:solar%40example.test?secret=${secret}&issuer=Pyracast`;
@@ -211,16 +212,13 @@ test("failed enrollment retains the key and a corrected code can be submitted", 
         if (attempts === 1)
             return route.fulfill({
                 status: 400,
-                json: {
-                    status: 400,
-                    errors: [
-                        {
-                            code: "invalid",
-                            param: "code",
-                            message: "Invalid code.",
-                        },
-                    ],
-                },
+                json: allauthErrorBody(400, "invalid_request", [
+                    {
+                        code: "invalid",
+                        param: "code",
+                        message: "Invalid code.",
+                    },
+                ]),
             });
         return route.fallback();
     });
@@ -430,10 +428,9 @@ test("a failed authenticator list offers an explicit retry without guessing acco
         if (unavailable)
             return route.fulfill({
                 status: 503,
-                json: {
-                    status: 503,
-                    errors: [{ message: "Security settings unavailable." }],
-                },
+                json: allauthErrorBody(503, "server_error", [
+                    { message: "Security settings unavailable." },
+                ]),
             });
         return route.fallback();
     });
@@ -894,23 +891,22 @@ test("a rejected enrollment code preserves the QR without refetching authenticat
         listRequests += 1;
         return route.fulfill({
             status: 500,
-            json: { status: 500, errors: [{ message: "Status unavailable." }] },
+            json: allauthErrorBody(500, "server_error", [
+                { message: "Status unavailable." },
+            ]),
         });
     });
     await page.route(`**${authenticatorsPath}/totp`, (route) => {
         if (route.request().method() !== "POST") return route.fallback();
         return route.fulfill({
             status: 400,
-            json: {
-                status: 400,
-                errors: [
-                    {
-                        code: "invalid",
-                        param: "code",
-                        message: "Incorrect authenticator code.",
-                    },
-                ],
-            },
+            json: allauthErrorBody(400, "invalid_request", [
+                {
+                    code: "invalid",
+                    param: "code",
+                    message: "Incorrect authenticator code.",
+                },
+            ]),
         });
     });
     await openSettings(page);

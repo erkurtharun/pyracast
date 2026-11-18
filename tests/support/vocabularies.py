@@ -607,7 +607,7 @@ INPUT_VOCABULARIES = (
         "language",
         _save_language,
         accepted="tr",
-        error="unsupported_language",
+        error="Choose a supported language.",
     ),
     InputVocabulary(
         "incident_change_action",

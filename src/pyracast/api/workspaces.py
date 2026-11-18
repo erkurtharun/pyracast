@@ -1,18 +1,15 @@
 from typing import cast
 
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
-from rest_framework.exceptions import Throttled, ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.invitations import (
-    InvitationRateLimitError,
     accept_workspace_invitation,
     invite_workspace_member,
     revoke_workspace_invitation,
@@ -78,10 +75,7 @@ class WorkspaceMembersView(APIView):
 class WorkspaceMemberView(APIView):
     @extend_schema(responses={204: None})
     def delete(self, request: Request, tenant_id: int, user_id: int) -> Response:
-        try:
-            remove_workspace_member(cast(User, request.user), tenant_id, user_id)
-        except DjangoValidationError as error:
-            raise ValidationError(error.messages) from error
+        remove_workspace_member(cast(User, request.user), tenant_id, user_id)
         return Response(status=204)
 
 
@@ -98,24 +92,16 @@ class WorkspaceInvitationsView(APIView):
     def post(self, request: Request, tenant_id: int) -> Response:
         data = InvitationInput(data=request.data)
         data.is_valid(raise_exception=True)
-        try:
-            invitation = invite_workspace_member(
-                cast(User, request.user), tenant_id, data.validated_data["email"]
-            )
-        except DjangoValidationError as error:
-            raise ValidationError(error.messages) from error
-        except InvitationRateLimitError as error:
-            raise Throttled(wait=60) from error
+        invitation = invite_workspace_member(
+            cast(User, request.user), tenant_id, data.validated_data["email"]
+        )
         return Response(InvitationOutput(invitation).data, status=201)
 
 
 class WorkspaceInvitationView(APIView):
     @extend_schema(responses={204: None})
     def delete(self, request: Request, tenant_id: int, invitation_id: int) -> Response:
-        try:
-            revoke_workspace_invitation(cast(User, request.user), tenant_id, invitation_id)
-        except DjangoValidationError as error:
-            raise ValidationError(error.messages) from error
+        revoke_workspace_invitation(cast(User, request.user), tenant_id, invitation_id)
         return Response(status=204)
 
 
@@ -124,10 +110,7 @@ class InvitationAcceptanceView(APIView):
     def post(self, request: Request) -> Response:
         data = InvitationAcceptanceInput(data=request.data)
         data.is_valid(raise_exception=True)
-        try:
-            membership = accept_workspace_invitation(
-                cast(User, request.user), data.validated_data["token"]
-            )
-        except DjangoValidationError as error:
-            raise ValidationError(error.messages) from error
+        membership = accept_workspace_invitation(
+            cast(User, request.user), data.validated_data["token"]
+        )
         return Response({"tenant_id": membership.tenant_id, "role": membership.role})

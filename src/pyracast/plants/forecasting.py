@@ -7,8 +7,10 @@ from zoneinfo import ZoneInfo
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastSnapshot
@@ -259,7 +261,7 @@ def archived_forecast(
 ) -> dict[str, object]:
     today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
     if not today - timedelta(days=366) <= target_date <= today:
-        raise ValidationError("date_out_of_range")
+        raise DomainError(ErrorCode.DATE_OUT_OF_RANGE)
     return _issued_forecast(
         plant, target_date, resolution_minutes, now, as_of=as_of, binding_id=binding_id
     )
@@ -277,9 +279,9 @@ def _issued_forecast(
     from pyracast.plants.forecast_archive import forecast_cutoff, select_forecast_issuance
 
     if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
-        raise ValidationError("Resolution must be 30 or 60 minutes.")
+        raise ValidationError(gettext("Resolution must be 30 or 60 minutes."))
     if as_of is not None and (as_of.utcoffset() is None or as_of > now):
-        raise ValidationError("as_of must be aware and no later than now.")
+        raise ValidationError(gettext("as_of must be aware and no later than now."))
     cutoff = (as_of or now).astimezone(UTC)
     issuance = select_forecast_issuance(plant, target_date, as_of=cutoff, binding_id=binding_id)
     if issuance is None:
@@ -358,5 +360,5 @@ def plant_forecast(
     now = timezone.now()
     today = now.astimezone(ZoneInfo(region.timezone)).date()
     if not today - timedelta(days=366) <= target_date <= today + timedelta(days=14):
-        raise ValidationError("date_out_of_range")
+        raise DomainError(ErrorCode.DATE_OUT_OF_RANGE)
     return _issued_forecast(plant, target_date, resolution_minutes, now, as_of=as_of)

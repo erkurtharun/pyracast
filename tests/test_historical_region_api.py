@@ -106,10 +106,15 @@ def test_region_history_preserves_application_validation_response(
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
     response = client.get(path, {"date": DAY.isoformat(), "data_source": "estimated_actuals"})
     assert response.status_code == 400
-    assert response.json() == {
-        "code": "invalid_request",
-        "detail": errors,
-    }
+    assert response.json() == (
+        {"code": "invalid_request", "message": "Invalid saved irradiance."}
+        if isinstance(errors, list)
+        else {
+            "code": "invalid_request",
+            "message": "Check the highlighted values and try again.",
+            "fields": {"saved": "Invalid saved irradiance."},
+        }
+    )
 
 
 @pytest.mark.parametrize(
@@ -129,7 +134,7 @@ def test_region_outlook_preserves_request_error_codes(
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
     response = client.get(path, {"date": target_date, "data_source": source})
     assert response.status_code == 400
-    assert response.json() == {"code": code}
+    assert response.json()["code"] == code
 
 
 @pytest.mark.parametrize("future_field", ["collected_at", "issued_at", "published_at"])

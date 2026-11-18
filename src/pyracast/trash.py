@@ -10,6 +10,7 @@ from django.utils import timezone
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionJobStatus,
@@ -47,7 +48,7 @@ PURGE_BATCH_SIZE = 100
 
 def _restore_deadline(deleted_at: datetime | None, now: datetime) -> None:
     if deleted_at is not None and now >= deleted_at + RETENTION:
-        raise ValidationError("trash_retention_expired")
+        raise DomainError(ErrorCode.TRASH_RETENTION_EXPIRED)
 
 
 def _cancel_calibrations(plants: list[int], now: datetime) -> None:

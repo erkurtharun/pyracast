@@ -1,6 +1,7 @@
 import { expect, test } from "./support/test";
 import type { Page } from "@playwright/test";
 import { mockApi, paged, region, user, tenantRow } from "./support/workspace";
+import { errorBody } from "./support/errors";
 
 test("shared reminder recipients and email language survive administrator transfer", async ({
     page,
@@ -559,11 +560,16 @@ test("dynamic recipient limit and server error retain entered values", async ({
     await page.route("**/reminders/", (route) =>
         route.fulfill({
             status: 400,
-            json: {
-                recipients: [
-                    "The recipient limit changed. Use at most 1 email address.",
-                ],
-            },
+            json: errorBody(
+                "invalid_request",
+                "Check the highlighted values and try again.",
+                {
+                    fields: {
+                        recipients:
+                            "The recipient limit changed. Use at most 1 email address.",
+                    },
+                },
+            ),
         }),
     );
     await page.getByRole("button", { name: "Save reminders" }).click();
@@ -832,9 +838,10 @@ test("reminder access errors do not reveal recipient controls", async ({
     await page.route("**/reminders/", (route) =>
         route.fulfill({
             status: 403,
-            json: {
-                detail: "You do not have permission to access this plant.",
-            },
+            json: errorBody(
+                "membership_required",
+                "You do not have permission to access this plant.",
+            ),
         }),
     );
     await openReminders(page);
@@ -862,11 +869,16 @@ test("shared plant capacity rejection retains entered addresses", async ({
     await page.route("**/reminders/", (route) =>
         route.fulfill({
             status: 400,
-            json: {
-                recipients: [
-                    "This plant has no room for another address. Remove an address or ask an administrator to raise the limit.",
-                ],
-            },
+            json: errorBody(
+                "invalid_request",
+                "Check the highlighted values and try again.",
+                {
+                    fields: {
+                        recipients:
+                            "This plant has no room for another address. Remove an address or ask an administrator to raise the limit.",
+                    },
+                },
+            ),
         }),
     );
     await page.getByRole("button", { name: "Save reminders" }).click();

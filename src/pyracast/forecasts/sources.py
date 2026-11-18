@@ -1,10 +1,10 @@
 from datetime import datetime
 from typing import cast
 
-from django.core.exceptions import ValidationError
 from django.db.models import Q, QuerySet
 
 from pyracast.connections.contracts import ProviderData
+from pyracast.errors import BusyError, ErrorCode
 from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.irradiance import SourceKind
 from pyracast.weather import WeatherError, restore_weather
@@ -66,7 +66,7 @@ def covering_snapshots(
             break
     selected = list(snapshots.filter(pk__in=identifiers))
     if {snapshot.pk for snapshot in selected} != set(identifiers):
-        raise ValidationError("forecast_sources_changed")
+        raise BusyError(ErrorCode.FORECAST_SOURCES_CHANGED)
     return selected
 
 

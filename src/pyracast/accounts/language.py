@@ -4,13 +4,14 @@ from typing import Literal, cast, get_args
 
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, User
-from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.utils import translation
 from django.utils.cache import patch_vary_headers
+from django.utils.translation import gettext_lazy as _
 
 from pyracast.accounts.models import UserLanguagePreference
+from pyracast.errors import DomainError, ErrorCode
 
 Language = Literal["en", "tr"]
 LANGUAGES: tuple[Language, ...] = get_args(Language)
@@ -40,7 +41,9 @@ def user_language(user: User | AnonymousUser) -> Language | None:
 @transaction.atomic
 def save_user_language(user: User, language: Language) -> None:
     if language not in LANGUAGES:
-        raise ValidationError("unsupported_language")
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST, _("Choose a supported language."), field="language"
+        )
     User.objects.select_for_update().get(pk=user.pk)
     UserLanguagePreference.objects.update_or_create(
         user_id=user.pk, defaults={"language": language}

@@ -468,7 +468,7 @@ def test_schedule_api_reads_updates_and_scopes_tenant() -> None:
     system = make_system(approved=True)
     client = APIClient()
     url = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/collection-schedule/"
-    assert client.get(url).status_code == 403
+    assert client.get(url).status_code == 401
     client.force_authenticate(system.member)
     response = client.get(url)
     assert response.status_code == 200

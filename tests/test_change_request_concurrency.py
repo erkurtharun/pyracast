@@ -16,7 +16,7 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin, remove_workspace_member
 from pyracast.change_requests import operations, preparation, queries
 from pyracast.change_requests.models import ChangeRequest
-from pyracast.change_requests.operations import RequestConflictError
+from pyracast.errors import ConflictError
 from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.incidents.operations import lock_incident_plant
 from pyracast.metering import jobs as metering_jobs
@@ -107,7 +107,7 @@ def test_decision_winning_tenant_lock_prevents_waiting_approval(
                 )
             else:
                 operations.withdraw_request(case.proposer, case.system.tenant.pk, proposal.pk)
-        with pytest.raises(RequestConflictError) as conflict:
+        with pytest.raises(ConflictError) as conflict:
             future.result(timeout=10)
     assert conflict.value.code == "request_already_closed"
     proposal.refresh_from_db()
@@ -139,7 +139,7 @@ def test_direct_production_write_wins_against_waiting_proposal_approval(
                     )
                 ],
             )
-        with pytest.raises(RequestConflictError) as conflict:
+        with pytest.raises(ConflictError) as conflict:
             future.result(timeout=10)
     assert conflict.value.code == "request_conflict"
     proposal.refresh_from_db()
@@ -241,7 +241,7 @@ def test_concurrent_submissions_preserve_idempotency_and_the_last_pending_slot(
         if shared_key:
             assert future.result(timeout=10).pk == first.pk
         else:
-            with pytest.raises(RequestConflictError) as conflict:
+            with pytest.raises(ConflictError) as conflict:
                 future.result(timeout=10)
             assert conflict.value.code == "pending_request_limit"
     assert ChangeRequest.objects.count() == (1 if shared_key else 20)
@@ -310,7 +310,7 @@ def test_provider_publication_winning_plant_lock_invalidates_waiting_review_cont
         finally:
             finish_publication.set()
         assert publishing.result(timeout=10)
-        with pytest.raises(RequestConflictError) as conflict:
+        with pytest.raises(ConflictError) as conflict:
             approving.result(timeout=10)
     assert conflict.value.code == "review_context_changed"
     proposal.refresh_from_db()
@@ -378,7 +378,7 @@ def test_detail_read_allows_publication_and_binds_fingerprint_to_returned_values
         detail = reading_detail.result(timeout=10)
     assert detail["production_items"][0]["current"] is None
     assert EpiasSnapshot.objects.filter(job=job).count() == 1
-    with pytest.raises(RequestConflictError) as conflict:
+    with pytest.raises(ConflictError) as conflict:
         operations.approve_request(
             case.system.member,
             case.system.tenant.pk,
