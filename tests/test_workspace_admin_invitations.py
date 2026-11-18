@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
@@ -15,7 +17,9 @@ from pyracast.accounts.models import (
     WorkspaceInvitation,
     WorkspaceRole,
 )
+from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.errors import ConflictError, DomainError
+from tests.support.concurrency import behind_open_transaction
 from tests.support.workspaces import invitation_token
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
@@ -133,6 +137,87 @@ def test_an_administrator_invitation_is_unavailable_once_the_workspace_has_an_ad
     assert not Membership.objects.filter(user=late).exists()
     assert WorkspaceInvitation.objects.get().accepted_at is None
     assert not WorkspaceAdminChange.objects.exists()
+
+
+def outcome(operation: Callable[[], object]) -> Callable[[], str]:
+    def run() -> str:
+        try:
+            operation()
+        except DomainError as refusal:
+            return str(refusal.code)
+        return "done"
+
+    return run
+
+
+def test_concurrent_administrator_invitations_leave_only_the_later_one_pending(
+    unadministered: tuple[Tenant, User],
+) -> None:
+    tenant, platform = unadministered
+
+    def invite(email: str) -> Callable[[], str]:
+        return outcome(
+            lambda: invite_workspace_member(
+                platform, tenant.pk, email, role=WorkspaceRole.ADMIN, platform=True
+            )
+        )
+
+    assert behind_open_transaction(invite("first@example.com"), invite("second@example.com")) == (
+        "done",
+        "done",
+    )
+    assert pending(tenant) == [("second@example.com", WorkspaceRole.ADMIN)]
+
+
+def test_competing_acceptances_of_an_administrator_invitation_record_one_change(
+    unadministered: tuple[Tenant, User],
+) -> None:
+    tenant, platform = unadministered
+    invite_workspace_member(
+        platform, tenant.pk, "owner@example.com", role=WorkspaceRole.ADMIN, platform=True
+    )
+    token = invitation_token()
+    owner = verified_account("owner", "owner@example.com")
+    accept = outcome(lambda: accept_workspace_invitation(owner, token))
+
+    assert behind_open_transaction(accept, accept) == ("done", "invitation_unavailable")
+    assert Membership.objects.get(tenant=tenant).user == owner
+    assert Membership.objects.get(tenant=tenant).role == WorkspaceRole.ADMIN
+    assert WorkspaceAdminChange.objects.get(tenant=tenant).administrator == owner
+
+
+@pytest.mark.parametrize(
+    ("first", "refusal"),
+    [("acceptance", "workspace_admin_changed"), ("reassignment", "invitation_unavailable")],
+)
+def test_administrator_acceptance_and_reassignment_leave_one_administrator(
+    unadministered: tuple[Tenant, User], first: str, refusal: str
+) -> None:
+    tenant, platform = unadministered
+    viewer = User.objects.create_user(username="viewer", email="viewer@example.com")
+    Membership.objects.create(tenant=tenant, user=viewer)
+    invite_workspace_member(
+        platform, tenant.pk, "owner@example.com", role=WorkspaceRole.ADMIN, platform=True
+    )
+    token = invitation_token()
+    owner = verified_account("owner", "owner@example.com")
+    operations = {
+        "acceptance": outcome(lambda: accept_workspace_invitation(owner, token)),
+        "reassignment": outcome(
+            lambda: reassign_workspace_admin(platform, tenant.pk, viewer.pk, expected_admin_id=None)
+        ),
+    }
+    second = "reassignment" if first == "acceptance" else "acceptance"
+
+    assert behind_open_transaction(operations[first], operations[second]) == ("done", refusal)
+    administrator = owner if first == "acceptance" else viewer
+    assert list(
+        Membership.objects.filter(tenant=tenant, role=WorkspaceRole.ADMIN).values_list(
+            "user", flat=True
+        )
+    ) == [administrator.pk]
+    assert WorkspaceAdminChange.objects.get(tenant=tenant).administrator == administrator
+    assert pending(tenant) == []
 
 
 def test_viewer_invitation_acceptance_keeps_the_viewer_role(

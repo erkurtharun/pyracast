@@ -177,6 +177,27 @@ def test_details_of_an_approved_plant_are_saved_as_a_new_configuration() -> None
     assert PlantConfiguration.objects.filter(plant=plant).count() == 2
 
 
+def test_details_shown_at_full_precision_are_saved_back_without_a_new_revision() -> None:
+    system = make_system(approved=True)
+    plant = create_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        name="Plant",
+        dc_capacity_mw=1.2345678901234567,
+        export_limit_mw=100,
+    )
+    client, _ = verified_admin()
+    url = f"/admin/plants/{system.region.pk}/details/"
+    shown = re.search(r'name="dc_capacity_mw" value="([^"]+)"', client.get(url).content.decode())
+    assert shown is not None
+    assert float(shown.group(1)) == 1.2345678901234567
+    unchanged = client.post(url, details(client, system.region, dc_capacity_mw=shown.group(1)))
+    assert unchanged.status_code == 302
+    assert "Nothing changed." in client.get(unchanged["Location"]).content.decode()
+    assert PlantConfiguration.objects.get(plant=plant).revision == 1
+
+
 def test_a_location_correction_returns_the_plant_to_review_with_both_audit_events() -> None:
     system, plant = approved_plant()
     client, operator = verified_admin()
@@ -245,6 +266,35 @@ def test_a_waiting_location_request_blocks_a_correction_and_is_linked() -> None:
     region = Region.objects.get(pk=system.region.pk)
     assert (region.latitude, region.status) == (40, RegionStatus.APPROVED)
     assert RegionLocationChangeRequest.objects.get().status == LocationChangeStatus.PENDING
+
+
+def test_a_refused_location_correction_saves_none_of_the_changed_details() -> None:
+    system, plant = approved_plant()
+    Region.objects.create(
+        tenant=system.tenant, name="Neighbour", latitude=40.5, longitude=29, timezone="UTC"
+    )
+    client, _ = verified_admin()
+    url = f"/admin/plants/{system.region.pk}/details/"
+    refused = client.post(
+        url,
+        details(client, system.region, name="Renamed plant", latitude="40.5", dc_capacity_mw="140"),
+    )
+    assert refused.status_code == 400
+    assert "This workspace already has a plant at this location." in refused.content.decode()
+    region = Region.objects.get(pk=system.region.pk)
+    assert (region.name, region.latitude, region.revision, region.status) == (
+        system.region.name,
+        40,
+        system.region.revision,
+        RegionStatus.APPROVED,
+    )
+    assert Plant.objects.get(pk=plant.pk).name == "Plant"
+    configuration = PlantConfiguration.objects.get(plant=plant)
+    assert (configuration.revision, configuration.dc_capacity_mw) == (1, 130)
+    assert not RegionLocationChangeRequest.objects.exists()
+    assert not AuditEvent.objects.filter(
+        region=region, action=AuditAction.LOCATION_CHANGE_REQUESTED
+    ).exists()
 
 
 def test_a_stale_details_page_asks_for_a_reload_and_a_plant_in_review_updates_its_submission() -> (

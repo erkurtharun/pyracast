@@ -15,10 +15,12 @@ from pyracast.accounts.models import (
     WorkspaceMemberRemoval,
     WorkspaceRole,
 )
+from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.mail.errors import NotSentError
 from pyracast.plants.sites import submit_site
 from pyracast.regions.models import Region
 from tests.support.api import verified_admin
+from tests.support.concurrency import behind_open_transaction
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -405,6 +407,29 @@ def test_pending_invitations_are_reissued_and_revoked_from_the_workspace_page() 
     client.post(f"{base}invitations/{replacement.pk}/reissue/")
     assert "The invitation is invalid or expired." in client.get(base).content.decode()
     assert WorkspaceInvitation.objects.count() == 2
+
+
+def test_a_resend_waiting_for_an_administrator_change_does_not_revive_the_invitation() -> None:
+    tenant, owner, viewer = workspace()
+    client, operator = verified_admin()
+    invitation = invite_workspace_member(operator, tenant.pk, "guest@example.com", platform=True)
+    WorkspaceInvitation.objects.update(created_at=timezone.now() - timedelta(minutes=2))
+    sent = len(mail.outbox)
+    base = f"/admin/workspaces/{tenant.pk}/"
+
+    _, resent = behind_open_transaction(
+        lambda: reassign_workspace_admin(
+            operator, tenant.pk, viewer.pk, expected_admin_id=owner.pk
+        ),
+        lambda: client.post(f"{base}invitations/{invitation.pk}/reissue/"),
+    )
+
+    assert resent["Location"] == f"{base}#invitations-title"
+    assert Membership.objects.get(user=viewer).role == WorkspaceRole.ADMIN
+    assert list(WorkspaceInvitation.objects.values_list("pk", flat=True)) == [invitation.pk]
+    assert WorkspaceInvitation.objects.get().expires_at <= timezone.now()
+    assert len(mail.outbox) == sent
+    assert "The invitation is invalid or expired." in client.get(base).content.decode()
 
 
 def test_member_removal_states_its_consequences_and_keeps_the_administrator() -> None:

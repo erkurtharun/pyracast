@@ -7,7 +7,11 @@ from django.core import mail
 from django.core.exceptions import PermissionDenied
 from django.utils import timezone
 
-from pyracast.accounts.invitations import invite_workspace_member, revoke_workspace_invitation
+from pyracast.accounts.invitations import (
+    invite_workspace_member,
+    reissue_workspace_invitation,
+    revoke_workspace_invitation,
+)
 from pyracast.accounts.models import (
     Membership,
     WorkspaceInvitation,
@@ -130,6 +134,7 @@ def test_platform_authority_refuses_everyone_who_is_not_a_platform_administrator
     operations: list[Callable[[], Any]] = [
         lambda: invite_workspace_member(actor, tenant_id, "other@example.com", platform=True),
         lambda: revoke_workspace_invitation(actor, tenant_id, invitation.pk, platform=True),
+        lambda: reissue_workspace_invitation(actor, tenant_id, invitation.pk),
         lambda: remove_workspace_member(actor, tenant_id, viewer.pk, platform=True),
         lambda: submit_site(
             actor,
