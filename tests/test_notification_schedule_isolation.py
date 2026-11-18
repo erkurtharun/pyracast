@@ -194,3 +194,26 @@ def test_a_terminated_connection_is_recovered_before_processing_another_tenant(
         enqueue_due(SLOT)
     assert not NotificationDelivery.objects.filter(schedule=broken).exists()
     assert NotificationDelivery.objects.filter(schedule=healthy, status="pending").count() == 1
+
+
+def test_a_failing_schedule_is_logged_with_its_origin_and_the_others_are_published(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    system, broken = configured()
+    healthy = another_tenant_schedule(system)
+    original = notification_scheduler._enqueue_schedule
+
+    def enqueue(schedule: ReminderSchedule, now: datetime) -> list[int]:
+        if schedule.pk == broken.pk:
+            raise RuntimeError("private schedule detail")
+        return original(schedule, now)
+
+    monkeypatch.setattr(notification_scheduler, "_enqueue_schedule", enqueue)
+    actor = MagicMock()
+    with pytest.raises(Exception, match=r"^1 "):
+        runtime.dispatch_notifications(actor, SLOT)
+    delivery = NotificationDelivery.objects.get(schedule=healthy)
+    actor.send.assert_called_once_with(delivery.pk)
+    assert f"item=schedule:{broken.pk}" in pyracast_logs.text
+    assert "origin=pyracast." in pyracast_logs.text
+    assert "private schedule detail" not in pyracast_logs.text

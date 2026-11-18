@@ -57,3 +57,16 @@ def test_pending_messages_are_dispatched_before_a_scheduling_failure_is_reported
     assert schedule.call_args == pending.call_args
     assert actor.send.call_args_list == [call(11), call(12)]
     close_connections.assert_called_once()
+
+
+def test_a_publish_failure_does_not_replace_the_scheduling_failure(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(runtime, "enqueue_due", MagicMock(side_effect=LookupError("scheduling")))
+    monkeypatch.setattr(runtime, "pending_notification_ids", MagicMock(return_value=[11]))
+    actor = MagicMock()
+    actor.send.side_effect = ConnectionError("private-broker-url")
+    with pytest.raises(LookupError, match="scheduling"):
+        runtime.dispatch_notifications(actor)
+    assert "error_type=ConnectionError" in pyracast_logs.text
+    assert "private-broker-url" not in pyracast_logs.text
