@@ -2,6 +2,8 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 SOURCE = Path(__file__).resolve().parents[1] / "src" / "pyracast"
 CODE = re.compile(r"[a-z][a-z0-9_]*")
 VIEW_BASES = {"APIView", "GenericAPIView", "ScopedView", "RequestView"}
@@ -233,3 +235,48 @@ def test_the_scan_recognises_allauth_and_indirect_shapes() -> None:
     assert sorted(handmade_error_bodies(sample)) == [8, 16, 17, 18, 19]
     assert validation_error_factories(sample) == [21]
     assert enclosing_names(sample)[8] == "Login.post"
+
+
+@pytest.mark.parametrize(
+    ("import_line", "base"),
+    [
+        ("import allauth.headless.account.views as views", "views.LoginView"),
+        ("import allauth.headless.account.views", "allauth.headless.account.views.LoginView"),
+    ],
+)
+def test_the_scan_recognises_direct_allauth_view_imports(import_line: str, base: str) -> None:
+    sample = ast.parse(
+        f"{import_line}\n"
+        f"class Login({base}):\n"
+        "    def post(self, request):\n"
+        "        try:\n"
+        "            pass\n"
+        "        except KeyError:\n"
+        "            return Response({'message': 'x'}, status=400)\n"
+    )
+    assert framework_errors_and_translations(sample) == [6]
+
+
+def test_the_scan_keeps_an_explicit_reraise_of_the_caught_error() -> None:
+    sample = ast.parse(
+        "class View(APIView):\n"
+        "    def post(self, request):\n"
+        "        try:\n"
+        "            pass\n"
+        "        except KeyError as error:\n"
+        "            raise error\n"
+    )
+    assert framework_errors_and_translations(sample) == []
+
+
+def test_the_scan_recognises_a_replaced_caught_error() -> None:
+    sample = ast.parse(
+        "class View(APIView):\n"
+        "    def post(self, request):\n"
+        "        try:\n"
+        "            pass\n"
+        "        except KeyError as error:\n"
+        "            error = ValueError('replacement')\n"
+        "            raise error\n"
+    )
+    assert framework_errors_and_translations(sample) == [5]

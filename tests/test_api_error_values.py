@@ -123,8 +123,13 @@ def test_error_bodies_beyond_the_parse_bound_are_left_alone() -> None:
 
     content = json.dumps({"status": 400, "padding": "x" * 1_000_000}).encode()
     response = HttpResponse(content, status=400, content_type="application/json")
+    response["ETag"] = '"original"'
+    response.set_cookie("example", "original")
     result = with_error_contract(RequestFactory().get("/api/example/"), response)
+    assert result is response
     assert result.content == content
+    assert result["ETag"] == '"original"'
+    assert result.cookies["example"].value == "original"
 
 
 def test_rewritten_error_bodies_drop_the_stale_entity_tag() -> None:
