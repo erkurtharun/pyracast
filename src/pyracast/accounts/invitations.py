@@ -16,7 +16,12 @@ from django.template.loader import render_to_string
 from django.utils import timezone, translation
 from django.utils.translation import gettext as _
 
-from pyracast.accounts.audit import SecurityEvent, record_on_commit, record_security_event
+from pyracast.accounts.audit import (
+    SecurityEvent,
+    record_on_commit,
+    record_security_event,
+    refusal_throttle,
+)
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.language import user_language
 from pyracast.accounts.models import (
@@ -180,6 +185,18 @@ def invite_workspace_member(actor: User, tenant_id: int, email: str) -> Workspac
     return invitation
 
 
+def _record_refused_acceptance(actor: User, invitation: WorkspaceInvitation, reason: str) -> None:
+    # Like other signed-in refusals: one line a minute per actor, invitation and reason.
+    if refusal_throttle.admit((actor.pk, f"invitation:{invitation.pk}", reason)):
+        record_security_event(
+            SecurityEvent.INVITATION_DENIED,
+            user_id=actor.pk,
+            tenant_id=invitation.tenant_id,
+            target_id=invitation.pk,
+            reason=reason,
+        )
+
+
 @transaction.atomic
 def accept_workspace_invitation(actor: User, token: str) -> Membership:
     invitation = WorkspaceInvitation.objects.filter(token_hash=invitation_digest(token)).first()
@@ -188,6 +205,8 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
     Tenant.objects.select_for_update().get(pk=invitation.tenant_id)
     invitation = WorkspaceInvitation.objects.select_for_update().get(pk=invitation.pk)
     if invitation.accepted_at is not None or invitation.expires_at <= timezone.now():
+        reason = "accepted" if invitation.accepted_at is not None else "expired"
+        _record_refused_acceptance(actor, invitation, reason)
         raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
     if (
         not User.objects.filter(pk=actor.pk, is_active=True).exists()
@@ -195,6 +214,7 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
             user=actor, email__iexact=invitation.email, verified=True
         ).exists()
     ):
+        _record_refused_acceptance(actor, invitation, "email_unverified")
         raise ForbiddenError(ErrorCode.INVITATION_EMAIL_UNVERIFIED)
     membership, _created = Membership.objects.get_or_create(
         tenant_id=invitation.tenant_id, user=actor, defaults={"role": WorkspaceRole.VIEWER}

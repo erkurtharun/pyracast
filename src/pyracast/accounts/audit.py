@@ -3,8 +3,8 @@ import logging
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Mapping
-from contextlib import suppress
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager, suppress
 from enum import StrEnum
 from functools import partial
 from ipaddress import ip_address
@@ -23,6 +23,7 @@ from django.http import HttpRequest
 from django.utils.crypto import salted_hmac
 
 logger = logging.getLogger("pyracast.security")
+failure_logger = logging.getLogger(__name__)
 
 
 class SecurityEvent(StrEnum):
@@ -67,6 +68,7 @@ class SecurityEvent(StrEnum):
     INVITATION_LIMITED = "invitation_limited"
     INVITATION_REVOKED = "invitation_revoked"
     INVITATION_ACCEPTED = "invitation_accepted"
+    INVITATION_DENIED = "invitation_denied"
     WORKSPACE_MEMBER_REMOVED = "workspace_member_removed"
     WORKSPACE_ADMIN_REASSIGNED = "workspace_admin_reassigned"
 
@@ -129,6 +131,18 @@ def _client_ip(request: HttpRequest | None, client_ip: str | None) -> str | None
     return client_ip
 
 
+@contextmanager
+def _contained(event: SecurityEvent) -> Iterator[None]:
+    # A line that cannot be written must not fail the request it describes. Only the error type
+    # is logged: an exception message can carry an address.
+    try:
+        yield
+    except Exception as error:
+        failure_logger.error(
+            "security_line_failed event=%s error_type=%s", event, type(error).__name__
+        )
+
+
 def record_security_event(
     event: SecurityEvent,
     *,
@@ -144,19 +158,24 @@ def record_security_event(
     authenticator_type: str | None = None,
     provider: str | None = None,
 ) -> None:
-    details = {
-        "subject": None if address is None else redacted_key(address),
-        "tenant_id": tenant_id,
-        "target_id": target_id,
-        "reason": reason,
-        "view": view,
-        "method": method,
-        "authenticator_type": authenticator_type,
-        "provider": provider,
-    }
-    line = {"event": event.value, "user_id": user_id, "client_ip": _client_ip(request, client_ip)}
-    line |= {key: value for key, value in details.items() if value is not None}
-    logger.info("%s", json.dumps(line, sort_keys=True))
+    with _contained(event):
+        details = {
+            "subject": None if address is None else redacted_key(address),
+            "tenant_id": tenant_id,
+            "target_id": target_id,
+            "reason": reason,
+            "view": view,
+            "method": method,
+            "authenticator_type": authenticator_type,
+            "provider": provider,
+        }
+        line = {
+            "event": event.value,
+            "user_id": user_id,
+            "client_ip": _client_ip(request, client_ip),
+        }
+        line |= {key: value for key, value in details.items() if value is not None}
+        logger.info("%s", json.dumps(line, sort_keys=True))
 
 
 def record_on_commit(event: SecurityEvent, **fields: Any) -> None:
@@ -263,8 +282,8 @@ def _last_step(request: HttpRequest | None, user: Any) -> Mapping[str, Any]:
     return records[-1] if records else {}
 
 
-def _receive(
-    signal_event: SecurityEvent, *, request: HttpRequest | None = None, **arguments: Any
+def _write_signalled(
+    signal_event: SecurityEvent, request: HttpRequest | None, arguments: Mapping[str, Any]
 ) -> None:
     event = _routed(signal_event, request, arguments)
     if event is None:
@@ -287,6 +306,13 @@ def _receive(
         authenticator_type=_text(step.get("type") if authenticator is None else authenticator.type),
         provider=_signal_provider(arguments) or _text(step.get("provider")),
     )
+
+
+def _receive(
+    signal_event: SecurityEvent, *, request: HttpRequest | None = None, **arguments: Any
+) -> None:
+    with _contained(signal_event):
+        _write_signalled(signal_event, request, arguments)
 
 
 def connect_security_events() -> None:
