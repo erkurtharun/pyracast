@@ -74,7 +74,7 @@ def test_oversized_json_integer_does_not_prevent_hobby_publication() -> None:
     assert ForecastResult.objects.get().payload["weather_reference"]["status"] == "unavailable"
 
 
-@pytest.mark.parametrize("interruption", ["expired", "missing_lease", "reclaimed"])
+@pytest.mark.parametrize("interruption", ["expired", "reclaimed"])
 def test_interrupted_weather_preserves_hobby_acquisition_and_rejects_stale_attachment(
     monkeypatch: pytest.MonkeyPatch, interruption: str
 ) -> None:
@@ -91,8 +91,6 @@ def test_interrupted_weather_preserves_hobby_acquisition_and_rejects_stale_attac
         assert ForecastSnapshot.objects.get().raw_payload == {"fixture": True}
         result = original(latitude, longitude, start, end)
         elapsed = LEASE_DURATION.total_seconds() + 1
-        if interruption == "missing_lease":
-            CollectionJob.objects.filter(pk=job.pk).update(lease_expires_at=None)
         if interruption == "reclaimed":
             assert collect(job.pk, FakeAdapter(), calculate, recovery_at, weather_provider=weather)
         return result

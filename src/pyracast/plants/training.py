@@ -280,8 +280,7 @@ def pending_calibration_ids(now: datetime, limit: int = 100) -> list[int]:
     return list(
         CalibrationRun.objects.filter(
             Q(status=CalibrationStatus.PENDING)
-            | Q(status=CalibrationStatus.RUNNING, lease_expires_at__lte=now)
-            | Q(status=CalibrationStatus.RUNNING, lease_expires_at__isnull=True),
+            | Q(status=CalibrationStatus.RUNNING, lease_expires_at__lte=now),
             plant__region__deleted_at__isnull=True,
         )
         .order_by("created_at", "pk")

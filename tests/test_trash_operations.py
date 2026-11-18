@@ -86,6 +86,7 @@ def test_region_purge_removes_imported_reference_archive_and_preserves_other_own
             scheduled_slot=NOW,
             target_date=NOW.date(),
             available_at=NOW,
+            status="succeeded",
         )
         snapshot = ForecastSnapshot.objects.create(
             job=job,
@@ -147,6 +148,7 @@ def linked_records(system: System, plant: Plant) -> tuple[ForecastSnapshot, Remi
         effective_from=NOW - timedelta(days=1),
     )
     for index, status in enumerate(("pending", "retry", "sending", "sent", "uncertain")):
+        leased = status in {"sending", "uncertain"}
         NotificationDelivery.objects.create(
             schedule=schedule,
             snapshot=source,
@@ -156,8 +158,8 @@ def linked_records(system: System, plant: Plant) -> tuple[ForecastSnapshot, Remi
             scheduled_for=NOW + timedelta(minutes=index),
             preparation_deadline=NOW + timedelta(minutes=index),
             available_at=NOW,
-            lease_token=uuid.uuid4(),
-            lease_expires_at=NOW + timedelta(minutes=5),
+            lease_token=uuid.uuid4() if leased else None,
+            lease_expires_at=NOW + timedelta(minutes=5) if leased else None,
         )
     CollectionSchedule.objects.create(
         region=system.region, enabled=True, times=["16:00"], effective_from=NOW - timedelta(days=1)
@@ -202,7 +204,7 @@ def test_region_trash_preserves_history_and_invalidates_pending_work(
         "uncertain",
     ]
     assert all(row.lease_token is None and row.lease_expires_at is None for row in states[:3])
-    assert states[3].lease_token is not None
+    assert states[4].lease_token is not None
     schedule.refresh_from_db()
     assert schedule.enabled
     assert CollectionSchedule.objects.get(region=region).times == ["16:00"]

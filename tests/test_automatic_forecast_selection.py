@@ -241,6 +241,7 @@ def test_reference_transition_selects_archive_for_the_previous_binding(
     start, _ = local_day_bounds(DAY, system.binding.timezone)
     binding = SiteBinding.objects.get(pk=current.binding_id)
     binding.pk = None
+    binding.region_revision += 1
     binding.site_id = "intermediate-site"
     binding.save()
     PlantConfiguration.objects.filter(pk=current.pk).update(revision=3)

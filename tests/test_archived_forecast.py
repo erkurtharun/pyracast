@@ -33,6 +33,7 @@ def test_archive_replays_previous_binding_without_writing_cache(
     snapshot = publish_snapshot(snapshot_for(system, DAY))
     binding = SiteBinding.objects.get(pk=system.binding.pk)
     binding.pk = None
+    binding.region_revision += 1
     binding.site_id = "new-site"
     binding.capacity_kw = 1000
     binding.save()

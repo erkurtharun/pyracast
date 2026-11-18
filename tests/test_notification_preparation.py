@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -58,6 +59,8 @@ def test_same_clock_collection_waits_without_spending_mail_attempts_then_uses_pu
             target_date=(SLOT + timedelta(days=1)).date(),
             available_at=SLOT,
             status=state,
+            lease_token=uuid.uuid4() if state == "running" else None,
+            lease_expires_at=SLOT + timedelta(minutes=5) if state == "running" else None,
         )
     delivery_id = enqueue_due(SLOT)[0]
     assert not process_notification(delivery_id, SLOT)
@@ -73,7 +76,9 @@ def test_same_clock_collection_waits_without_spending_mail_attempts_then_uses_pu
             scheduled_slot=SLOT + timedelta(seconds=1)
         )
         ForecastSnapshot.objects.filter(pk=fresh.pk).update(job=job)
-        CollectionJob.objects.filter(pk=job.pk).update(status="succeeded")
+        CollectionJob.objects.filter(pk=job.pk).update(
+            status="succeeded", lease_token=None, lease_expires_at=None
+        )
     else:
         CollectionJob.objects.filter(pk=fresh.job_id).update(scheduled_slot=SLOT)
     assert process_notification(delivery_id, when + timedelta(minutes=1))

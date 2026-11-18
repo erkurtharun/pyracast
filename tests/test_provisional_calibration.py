@@ -39,20 +39,19 @@ def reported(
     *,
     minute: int = 0,
 ) -> EpiasSnapshot:
-    snapshot = settlement(connection, configuration, day, minute=minute)
-    identity = {
-        "id": connection.provider_plant_id,
-        "eic": connection.eic,
-        "name": "Plant",
-        "short_name": "Plant",
-    }
-    snapshot.source_kind = "realtime_generation"
-    snapshot.provider_plant = identity
-    snapshot.save(update_fields=("source_kind", "provider_plant"))
-    snapshot.job.source_kind = "realtime_generation"
-    snapshot.job.provider_plant = identity
-    snapshot.job.save(update_fields=("source_kind", "provider_plant"))
-    return snapshot
+    return settlement(
+        connection,
+        configuration,
+        day,
+        minute=minute,
+        source_kind="realtime_generation",
+        identity={
+            "id": connection.provider_plant_id,
+            "eic": connection.eic,
+            "name": "Plant",
+            "short_name": "Plant",
+        },
+    )
 
 
 def test_provisional_fit_freezes_sources_then_settlement_prepares_a_new_candidate(

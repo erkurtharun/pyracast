@@ -258,7 +258,7 @@ def test_import_never_rescales_mismatched_source(
         ("account", {"authorization_reference": ""}),
         ("account", {"provider": "fixture"}),
         ("account", {"credential_revision": 2}),
-        ("binding", {"validated_at": None}),
+        ("binding", {"validated_at": None, "validated_credential_revision": None}),
         ("binding", {"capacity_semantics_verified": False}),
         ("binding", {"settings_verification_reference": ""}),
         ("region", {"status": "suspended"}),

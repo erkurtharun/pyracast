@@ -30,7 +30,9 @@ def publish(source: ForecastSnapshot, *, published_at: datetime | None = None) -
         )
 
 
-def measurements(system: System, configuration: PlantConfiguration, energy: float) -> None:
+def measurements(
+    system: System, configuration: PlantConfiguration, energy: float, *, quality: str = "valid"
+) -> None:
     start, end = local_day_bounds(DAY, system.binding.timezone)
     while start < end:
         ProductionObservation.objects.create(
@@ -41,6 +43,7 @@ def measurements(system: System, configuration: PlantConfiguration, energy: floa
             energy_mwh=energy,
             recorded_by=system.member,
             source="meter",
+            quality=quality,
         )
         start += timedelta(hours=1)
 

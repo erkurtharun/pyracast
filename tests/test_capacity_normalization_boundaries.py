@@ -68,6 +68,7 @@ def test_historical_exports_cannot_be_reclassified_as_native_by_normalization(
         imported_at=NOW,
         interval_count=48,
     )
+    source.job.endpoint = "historical_import"
     source.job.save()
     assert normalize(system, target) == ()
 
@@ -79,9 +80,11 @@ def test_scaled_copies_cannot_be_normalized_again(monkeypatch: pytest.MonkeyPatc
     next_target = SiteBinding.objects.get(pk=target.pk)
     next_target.pk = None
     next_target.capacity_kw = next_target.dc_capacity_kw = 1_000_000
+    next_target.region_revision += 1
     next_target.save()
     system.region.approved_binding = next_target
-    system.region.save(update_fields=["approved_binding"])
+    system.region.revision = next_target.region_revision
+    system.region.save(update_fields=["approved_binding", "revision"])
     assert normalize(replace(system, binding=target), next_target) == ()
     assert ReferenceCapacityNormalization.objects.count() == 1
 

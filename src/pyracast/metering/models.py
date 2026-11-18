@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db import models
 from django.db.models import F, Q
 
-from pyracast.db import choices_check
+from pyracast.db import choices_check, lease_check
 
 
 class EpiasSourceKind(models.TextChoices):
@@ -85,6 +85,7 @@ class EpiasCollectionJob(models.Model):
             ),
             choices_check("source_kind", EpiasSourceKind, name="epias_job_source_valid"),
             choices_check("status", EpiasJobStatus, name="epias_job_status_valid"),
+            lease_check((EpiasJobStatus.RUNNING,)),
         )
         indexes = (models.Index(fields=("status", "next_attempt_at")),)
 

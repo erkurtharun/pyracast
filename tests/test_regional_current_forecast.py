@@ -145,7 +145,7 @@ def test_region_current_forecast_never_reads_a_superseded_binding(
         replacement = SiteBinding.objects.create(
             region=system.region,
             provider_account=system.account,
-            region_revision=system.region.revision,
+            region_revision=system.region.revision + 1,
             site_id="replacement",
             capacity_kw=1,
             capacity_semantics_verified=True,
@@ -153,7 +153,9 @@ def test_region_current_forecast_never_reads_a_superseded_binding(
             longitude=system.region.longitude,
             timezone=system.region.timezone,
         )
-        Region.objects.filter(pk=system.region.pk).update(approved_binding=replacement)
+        Region.objects.filter(pk=system.region.pk).update(
+            approved_binding=replacement, revision=replacement.region_revision
+        )
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"

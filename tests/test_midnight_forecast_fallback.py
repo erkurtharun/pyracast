@@ -203,6 +203,7 @@ def test_saved_fallback_keeps_day_end_configuration_and_tenant_scope(
     )
     other_binding = SiteBinding.objects.get(pk=system.binding.pk)
     other_binding.pk = None
+    other_binding.region_revision += 1
     other_binding.site_id = "different-provider-site"
     other_binding.save()
     original_binding = system.binding
@@ -212,7 +213,9 @@ def test_saved_fallback_keeps_day_end_configuration_and_tenant_scope(
     )
     system.binding = original_binding
     monkeypatch.setattr(timezone, "now", lambda: end + timedelta(minutes=1))
-    Region.objects.filter(pk=system.region.pk).update(approved_binding=other_binding)
+    Region.objects.filter(pk=system.region.pk).update(
+        approved_binding=other_binding, revision=other_binding.region_revision
+    )
     revise_plant(
         system.member,
         system.tenant.pk,

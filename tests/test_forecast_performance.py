@@ -165,12 +165,10 @@ def test_performance_excludes_incomplete_days_and_retrospective_configuration(
     assert plant.current_configuration_id is not None
     configuration = PlantConfiguration.objects.get(pk=plant.current_configuration_id)
     source = snapshot_for(system, DAY)
-    measurements(system, configuration, 52)
+    measurements(system, configuration, 52, quality="curtailed" if kind == "quality" else "valid")
     reason = "incomplete_or_invalid_day"
     if kind == "meter":
         ProductionObservation.objects.order_by("pk").first().delete()  # type: ignore[union-attr]
-    elif kind == "quality":
-        ProductionObservation.objects.update(quality="curtailed")
     elif kind == "source":
         source.normalized_intervals[0]["power_kw"] = None
         source.save()

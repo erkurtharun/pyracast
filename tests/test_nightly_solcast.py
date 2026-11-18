@@ -159,7 +159,9 @@ def test_forecast_time_edit_preserves_history_and_global_disable_cancels_it() ->
         system.member, system.tenant.pk, system.region.pk, enabled=True, times=["18:00"], now=NIGHT
     )
     assert claim(job.pk, NIGHT) is not None
-    CollectionJob.objects.filter(pk=job.pk).update(status="retry", lease_token=None)
+    CollectionJob.objects.filter(pk=job.pk).update(
+        status="retry", lease_token=None, lease_expires_at=None
+    )
     configure_schedule(
         system.member, system.tenant.pk, system.region.pk, enabled=False, times=[], now=NIGHT
     )
@@ -481,7 +483,7 @@ def test_inactive_collection_does_not_block_shared_account_history_budget(inacti
     inactive_binding = SiteBinding.objects.create(
         region=region,
         provider_account=system.account,
-        region_revision=1,
+        region_revision=2 if inactive == "stale_binding" else 1,
         site_id="inactive",
         capacity_kw=1,
         latitude=40,

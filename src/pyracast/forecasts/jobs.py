@@ -218,7 +218,9 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             )
         ):
             job.status = CollectionJobStatus.STALE
-            job.save(update_fields=("status",))
+            job.lease_token = None
+            job.lease_expires_at = None
+            job.save(update_fields=("status", "lease_token", "lease_expires_at"))
             return None
         token = uuid.uuid4()
         job.status = CollectionJobStatus.RUNNING

@@ -211,8 +211,11 @@ def test_past_actuals_follow_configuration_at_day_start_after_binding_change(
     new_binding = SiteBinding.objects.get(pk=system.binding.pk)
     new_binding.pk = None
     new_binding.site_id = "new-site"
+    new_binding.region_revision += 1
     new_binding.save()
-    Region.objects.filter(pk=system.region.pk).update(approved_binding=new_binding)
+    Region.objects.filter(pk=system.region.pk).update(
+        approved_binding=new_binding, revision=new_binding.region_revision
+    )
     revised = revise_plant(
         system.member,
         system.tenant.pk,

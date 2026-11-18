@@ -1,4 +1,6 @@
-from django.db import connection
+from typing import Any
+
+from django.db import connection, models
 from psycopg import sql
 
 from pyracast.forecasts.models import CollectionJobStatus
@@ -46,6 +48,18 @@ def violations(table: str, rule: str) -> int:
         cursor.execute(query)
         (count,) = cursor.fetchone()
     return int(count)
+
+
+def stored_again[Row: models.Model](row: Row, **changes: Any) -> Row:
+    """Archive rows refuse updates, so a test stores another shape of one by deleting it and
+    inserting it again under the same key."""
+    key = row.pk
+    row.delete()
+    for name, value in changes.items():
+        setattr(row, name, value)
+    row.pk = key
+    row.save(force_insert=True)
+    return row
 
 
 def lease_violations() -> dict[str, int]:

@@ -18,6 +18,7 @@ from pyracast.plants.numerics import FitResult, fit_calibration
 from pyracast.plants.operations import activate_calibration
 from pyracast.plants.preparation import prepare_calibration
 from tests.support.domain import NOW
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant
 from tests.support.plant_training import actual_snapshot_for
 from tests.support.settlement_calibration import settlement
@@ -47,8 +48,7 @@ def test_istanbul_snapshots_cover_a_london_local_day(monkeypatch: pytest.MonkeyP
     assert rows[0].starts_at == start
     assert rows[-1].ends_at == end
     first.delete()
-    second.readings = second.readings[:3]
-    second.save(update_fields=("readings",))
+    stored_again(second, readings=second.readings[:3])
     assert latest_measurement_day(config, end, NOW, 0) == date(2026, 11, 7)
 
 
@@ -126,12 +126,8 @@ def test_settlement_only_automatically_prepares_and_pins_revision(
         day = date(2026, 11, 1) + timedelta(days=offset)
         actual_snapshot_for(system, day)
         snapshots.append(settlement(connection, config, day))
-    empty = settlement(connection, config, date(2026, 11, 8))
-    empty.readings = []
-    empty.save(update_fields=("readings",))
-    old = settlement(connection, config, date(2025, 1, 1))
-    old.readings = [None]
-    old.save(update_fields=("readings",))
+    stored_again(settlement(connection, config, date(2026, 11, 8)), readings=[])
+    stored_again(settlement(connection, config, date(2025, 1, 1)), readings=[None])
     run = prepare_calibration(plant.pk)
     assert run is not None
     assert run.requested_by == system.member
@@ -218,7 +214,7 @@ def test_partial_latest_settlement_preserves_missing_and_rejects_invalid_rows(
     settlement(connection, config, day)
     latest = settlement(connection, config, day, minute=1)
     valid = latest.readings[0]
-    latest.readings = [
+    readings = [
         None,
         {},
         {"total_mwh": "1", "period_start": "bad", "period_end": "bad"},
@@ -234,8 +230,7 @@ def test_partial_latest_settlement_preserves_missing_and_rejects_invalid_rows(
         },
         valid,
     ]
-    latest.complete = False
-    latest.save(update_fields=("readings", "complete"))
+    stored_again(latest, readings=readings, complete=False)
     rows, ids = select_measurements(config, start, end, NOW)
     assert ids == [latest.pk]
     assert len(rows) == 1

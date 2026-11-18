@@ -43,15 +43,18 @@ def _reference_import(system: System) -> HistoricalReferenceImport:
 
 
 def _observation(configuration: PlantConfiguration, **values: Any) -> ProductionObservation:
+    start = NOW - timedelta(days=2)
     return ProductionObservation.objects.create(
-        plant_id=configuration.plant_id,
-        configuration=configuration,
-        starts_at=NOW - timedelta(days=2),
-        ends_at=NOW - timedelta(days=2) + timedelta(hours=1),
-        energy_mwh=1,
-        source="manual",
-        recorded_by=_member(configuration),
-        **values,
+        **{
+            "plant_id": configuration.plant_id,
+            "configuration": configuration,
+            "starts_at": start,
+            "ends_at": start + timedelta(hours=1),
+            "energy_mwh": 1,
+            "source": "manual",
+            "recorded_by": _member(configuration),
+        }
+        | values
     )
 
 

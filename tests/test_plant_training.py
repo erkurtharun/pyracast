@@ -1,4 +1,5 @@
 import re
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from threading import Event
@@ -181,9 +182,10 @@ def test_actuals_and_meter_cutoff_exclude_later_information(
     ForecastSnapshot.objects.filter(pk=second.pk).update(issued_at=NOW + timedelta(seconds=1))
     excluded = ProductionObservation.objects.order_by("starts_at").last()
     assert excluded is not None
-    ProductionObservation.objects.filter(pk=excluded.pk).update(
-        recorded_at=NOW + timedelta(seconds=1)
-    )
+    excluded.delete()
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(seconds=1))
+    excluded.save()
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
     run = request_run(system, plant)
     assert run_calibration(run.pk, NOW)
     run.refresh_from_db()
@@ -285,7 +287,7 @@ def test_source_errors_retry_bounded_and_sanitized(monkeypatch: pytest.MonkeyPat
     assert not run_calibration(run.pk, NOW + timedelta(minutes=1))
 
 
-@pytest.mark.parametrize("case", ["future_cutoff", "exhausted", "missing_expiry"])
+@pytest.mark.parametrize("case", ["future_cutoff", "exhausted", "expired_lease"])
 def test_invalid_or_interrupted_run_state(monkeypatch: pytest.MonkeyPatch, case: str) -> None:
     system, plant = make_plant(monkeypatch)
     run = request_run(system, plant)
@@ -294,12 +296,12 @@ def test_invalid_or_interrupted_run_state(monkeypatch: pytest.MonkeyPatch, case:
     elif case == "exhausted":
         run.attempts = 3
     else:
-        run.status = "running"
+        run.status, run.lease_token, run.lease_expires_at = "running", uuid.uuid4(), NOW
     run.save()
     assert pending_calibration_ids(NOW) == [run.pk]
-    assert run_calibration(run.pk, NOW) == (case == "missing_expiry")
+    assert run_calibration(run.pk, NOW) == (case == "expired_lease")
     run.refresh_from_db()
-    assert run.status == ("insufficient" if case == "missing_expiry" else "failed")
+    assert run.status == ("insufficient" if case == "expired_lease" else "failed")
 
 
 def test_worker_clock_and_dispatch_bounds(monkeypatch: pytest.MonkeyPatch) -> None:

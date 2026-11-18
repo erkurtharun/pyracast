@@ -10,6 +10,7 @@ from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Language, WorkspaceRole
+from pyracast.connections.models import MAX_DAILY_QUOTA
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationSettings,
@@ -141,7 +142,7 @@ def configure_reminders(
                 params={"limit": address_limit},
             )
         binding = region.approved_binding
-        limit = binding.provider_account.daily_quota if binding is not None else 10
+        limit = binding.provider_account.daily_quota if binding is not None else MAX_DAILY_QUOTA
         if len(times) != len(set(times)) or len(times) > limit:
             raise ValidationError(
                 gettext("Provide at most %(limit)s distinct local HH:MM times."),

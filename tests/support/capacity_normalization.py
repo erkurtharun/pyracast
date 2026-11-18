@@ -18,9 +18,11 @@ def scaled_system(monkeypatch: pytest.MonkeyPatch) -> tuple[System, SiteBinding]
     target = SiteBinding.objects.get(pk=system.binding.pk)
     target.pk = None
     target.capacity_kw = target.dc_capacity_kw = 1000
+    target.region_revision += 1
     target.save()
     system.region.approved_binding = target
-    system.region.save(update_fields=["approved_binding"])
+    system.region.revision = target.region_revision
+    system.region.save(update_fields=["approved_binding", "revision"])
     return system, target
 
 

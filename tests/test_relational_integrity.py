@@ -112,12 +112,15 @@ def test_historical_job_cannot_use_an_import_from_another_binding() -> None:
         interval_count=1,
     )
     job = CollectionJob.objects.get(binding=system.binding)
+    imported = {"endpoint": "historical_import", "status": "succeeded"}
     with pytest.raises(IntegrityError, match="collection_import_binding_fk"), transaction.atomic():
-        CollectionJob.objects.filter(pk=job.pk).update(reference_import=reference_import)
+        CollectionJob.objects.filter(pk=job.pk).update(
+            reference_import=reference_import, **imported
+        )
     CollectionJob.objects.filter(pk=job.pk).update(
-        binding=other_binding, reference_import=reference_import
+        binding=other_binding, reference_import=reference_import, **imported
     )
-    with pytest.raises(IntegrityError, match="collection_import_binding_fk"), transaction.atomic():
+    with pytest.raises(IntegrityError, match="are immutable"), transaction.atomic():
         HistoricalReferenceImport.objects.filter(pk=reference_import.pk).update(
             binding=system.binding
         )

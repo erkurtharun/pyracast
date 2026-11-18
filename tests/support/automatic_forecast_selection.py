@@ -34,8 +34,11 @@ def reference_transition(
     new.pk = None
     new.capacity_kw = 1000
     new.dc_capacity_kw = 1000
+    new.region_revision += 1
     new.save()
-    Region.objects.filter(pk=system.region.pk).update(approved_binding=new)
+    Region.objects.filter(pk=system.region.pk).update(
+        approved_binding=new, revision=new.region_revision
+    )
     plant = revise_plant(
         system.member,
         system.tenant.pk,

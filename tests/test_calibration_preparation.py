@@ -404,9 +404,10 @@ def test_legacy_run_without_watermark_preserves_timestamp_cutoff(
     assert first_new is not None
     assert last_new is not None
     assert first_new.recorded_at == run.cutoff_at
-    ProductionObservation.objects.filter(pk=last_new.pk).update(
-        recorded_at=run.cutoff_at + timedelta(seconds=1)
-    )
+    last_new.delete()
+    monkeypatch.setattr(timezone, "now", lambda: run.cutoff_at + timedelta(seconds=1))
+    last_new.save()
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
     lease = training._claim(run.pk, NOW)
     assert lease is not None
     dataset = build_calibration_dataset(lease.run, lease.configuration)

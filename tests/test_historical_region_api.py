@@ -70,6 +70,7 @@ def test_region_forecast_marks_invalidated_binding_stale(
         system.region.status = "pending"
         system.region.save(update_fields=["status"])
     else:
+        system.region.revision += 1
         system.region.approved_binding = SiteBinding.objects.create(
             region=system.region,
             provider_account=system.account,
@@ -81,7 +82,7 @@ def test_region_forecast_marks_invalidated_binding_stale(
             longitude=system.region.longitude,
             timezone=system.region.timezone,
         )
-        system.region.save(update_fields=["approved_binding"])
+        system.region.save(update_fields=["approved_binding", "revision"])
     response = client.get(path, query)
     assert response.status_code == 200
     assert response.json()["freshness"] == "stale"

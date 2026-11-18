@@ -199,7 +199,7 @@ def test_binding_migration_refuses_two_bindings_of_one_region_revision() -> None
         region_revision=system.binding.region_revision
     )
 
-    with pytest.raises(ValueError, match=r"connections_sitebinding holds 1 row.*one binding per"):
+    with pytest.raises(ValueError, match=r"connections_sitebinding holds 2 row.*one binding per"):
         forward()
 
     assert "sitebinding_region_region_revision_uniq" not in constraints("connections_sitebinding")

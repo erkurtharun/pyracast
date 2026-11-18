@@ -6,7 +6,7 @@ from django.contrib.postgres.fields import DateTimeRangeField, RangeBoundary, Ra
 from django.db import models
 from django.db.models import F, Q
 
-from pyracast.db import choices_check
+from pyracast.db import choices_check, lease_check
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 
 
@@ -333,6 +333,7 @@ class CalibrationRun(models.Model):
                 name="calibration_factor_finite",
             ),
             choices_check("status", CalibrationStatus, name="calibration_status_valid"),
+            lease_check((CalibrationStatus.RUNNING,)),
         )
 
 

@@ -22,11 +22,14 @@ class BindingHealth(models.TextChoices):
     ERROR = "error", "Error"
 
 
+MAX_DAILY_QUOTA = 10
+
+
 class ProviderAccount(models.Model):
     provider = models.CharField(max_length=30, choices=Provider)
     external_account_id = models.CharField(max_length=200)
     encrypted_api_key = models.CharField(max_length=2048, blank=True, default="")
-    daily_quota = models.PositiveIntegerField(default=10)
+    daily_quota = models.PositiveIntegerField(default=MAX_DAILY_QUOTA)
     enabled = models.BooleanField(default=True)
     credential_revision = models.PositiveIntegerField(default=1)
     request_blocked_until = models.DateTimeField(null=True)
@@ -48,6 +51,22 @@ class ProviderAccount(models.Model):
                 name="provider_account_encrypted_api_key",
             ),
             choices_check("provider", Provider),
+            models.CheckConstraint(
+                condition=models.Q(daily_quota__gte=1, daily_quota__lte=MAX_DAILY_QUOTA),
+                name="%(class)s_daily_quota_chk",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(credential_revision__gte=1),
+                name="%(class)s_credential_revision_chk",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(authentication_failed_revision__isnull=True)
+                | models.Q(
+                    authentication_failed_revision__gte=1,
+                    authentication_failed_revision__lte=models.F("credential_revision"),
+                ),
+                name="%(class)s_authentication_failed_revision_chk",
+            ),
         )
 
 
@@ -104,4 +123,14 @@ class SiteBinding(models.Model):
                 name="binding_losses",
             ),
             choices_check("health", BindingHealth, name="binding_health"),
+            models.CheckConstraint(
+                condition=models.Q(
+                    validated_at__isnull=True, validated_credential_revision__isnull=True
+                )
+                | models.Q(validated_at__isnull=False, validated_credential_revision__isnull=False),
+                name="%(class)s_validated_chk",
+            ),
+            models.UniqueConstraint(
+                fields=("region", "region_revision"), name="%(class)s_region_region_revision_uniq"
+            ),
         )

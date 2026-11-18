@@ -17,6 +17,7 @@ from pyracast.collection_window import (
     NIGHT_RETRY_DELAY,
     next_nightly_start,
 )
+from pyracast.connections.models import MAX_DAILY_QUOTA
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import (
     CollectionEndpoint,
@@ -61,7 +62,9 @@ def configure_schedule(
             .get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
         )
         binding = region.approved_binding
-        limit = forecast_time_limit(binding.provider_account.daily_quota if binding else 10)
+        limit = forecast_time_limit(
+            binding.provider_account.daily_quota if binding else MAX_DAILY_QUOTA
+        )
         if len(times) != len(set(times)) or len(times) > limit:
             raise ValidationError(
                 gettext(
@@ -142,7 +145,7 @@ def _next_collection_at(schedule: CollectionSchedule, now: datetime) -> datetime
 
 def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, object]:
     binding = schedule.region.approved_binding
-    limit = binding.provider_account.daily_quota if binding else 10
+    limit = binding.provider_account.daily_quota if binding else MAX_DAILY_QUOTA
     jobs = CollectionJob.objects.filter(binding=binding)
     return {
         "enabled": schedule.enabled,
