@@ -1,9 +1,11 @@
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import date, timedelta
 
 import pytest
+from django.db import models
 from django.db.models import F
+from django.db.models.functions import Now
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import (
@@ -24,7 +26,7 @@ from tests.support.invariants import (
 )
 from tests.support.metering import connected
 from tests.support.migrations import checks, constraints, forward, leaf_nodes, migrate, triggers
-from tests.support.plant_operations import request_run
+from tests.support.plant_operations import make_plant, request_run
 from tests.support.plant_training import actual_snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -185,6 +187,52 @@ def _delivery(system: System) -> NotificationDelivery:
         last_error="mail_rejected",
         prepared_message=UNAVAILABLE,
     )
+
+
+def _collection_job(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    system = make_system()
+    return CollectionJob.objects.create(
+        binding=system.binding, scheduled_slot=NOW, target_date=NOW.date(), available_at=NOW
+    )
+
+
+def _epias_job(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    connected(monkeypatch)
+    return EpiasCollectionJob.objects.order_by("pk")[0]
+
+
+def _calibration_run(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    return request_run(*make_plant(monkeypatch))
+
+
+def _notification_delivery(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    return _delivery(make_system())
+
+
+@pytest.mark.usefixtures("leaf")
+@pytest.mark.parametrize(
+    ("row", "leased"),
+    [
+        (_collection_job, "running"),
+        (_epias_job, "running"),
+        (_calibration_run, "running"),
+        (_notification_delivery, "sending"),
+    ],
+)
+def test_lease_repair_expires_an_ownerless_lease_at_the_migration(
+    row: Callable[[pytest.MonkeyPatch], models.Model],
+    leased: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stored = row(monkeypatch)
+    rows = type(stored)._default_manager.filter(pk=stored.pk)
+    migrate(*PREVIOUS.values())
+    rows.update(status=leased, lease_token=None, lease_expires_at=Now() + timedelta(days=1))
+
+    forward()
+
+    assert rows.filter(lease_token__isnull=False, lease_expires_at__lte=Now()).exists()
+    assert lease_violations() == CLEAN
 
 
 @pytest.mark.usefixtures("leaf")
