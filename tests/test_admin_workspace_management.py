@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 
 import pytest
@@ -23,6 +24,8 @@ from tests.support.api import verified_admin
 from tests.support.concurrency import behind_open_transaction
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+PRIMARY_ACTION = re.compile(r'class="btn btn--primary"[^>]*>([^<]+)<')
 
 
 def workspace() -> tuple[Tenant, User, User]:
@@ -213,7 +216,7 @@ def test_workspace_creation_invites_its_administrator_in_the_chosen_language() -
     )
     assert "çal\u0131şma alan\u0131n\u0131n yöneticisi yapar" in str(mail.outbox[-1].body)
     html = client.get(response["Location"]).content.decode()
-    assert "Invitation sent to boss@example.com." in html
+    assert "The invitation to boss@example.com was sent." in html
     assert "Invitation pending" in html
 
 
@@ -269,7 +272,8 @@ def test_workspace_rename_is_logged_and_refuses_a_stale_page() -> None:
         "Renamed from Solar workspace to Sunny workspace.",
     )
     assert (
-        "Workspace renamed to Sunny workspace." in client.get(renamed["Location"]).content.decode()
+        "Sunny workspace is the new workspace name."
+        in client.get(renamed["Location"]).content.decode()
     )
     stale = client.post(url, {"name": "Other name", "expected_name": "Solar workspace"})
     assert stale.status_code == 400
@@ -297,7 +301,8 @@ def test_invitation_form_offers_the_administrator_role_only_without_an_administr
     invitation = WorkspaceInvitation.objects.get(tenant=unassigned)
     assert (invitation.role, invitation.created_by) == (WorkspaceRole.ADMIN, operator)
     assert (
-        "Invitation sent to boss@example.com." in client.get(invited["Location"]).content.decode()
+        "The invitation to boss@example.com was sent."
+        in client.get(invited["Location"]).content.decode()
     )
 
     stale = client.post(
@@ -313,6 +318,23 @@ def test_invitation_form_offers_the_administrator_role_only_without_an_administr
     assert viewer.status_code == 302
     assert WorkspaceInvitation.objects.get(tenant=tenant).role == WorkspaceRole.VIEWER
     assert "salt okunur erişim" in str(mail.outbox[-1].body)
+
+
+def test_invitation_form_defaults_to_the_administrator_role_until_one_is_invited() -> None:
+    tenant = Tenant.objects.create(name="Unassigned workspace")
+    client, operator = verified_admin()
+    url = f"/admin/workspaces/{tenant.pk}/invitations/new/"
+    page = client.get(url).content.decode()
+    assert 'value="admin" id="id_role_1" checked' in page
+    assert "This workspace has no administrator. Invite the administrator first." in page
+
+    invite_workspace_member(
+        operator, tenant.pk, "boss@example.com", role=WorkspaceRole.ADMIN, platform=True
+    )
+    pending = client.get(url).content.decode()
+    assert 'value="viewer" id="id_role_0" checked' in pending
+    assert 'value="admin" id="id_role_1">' in pending
+    assert "Invite the administrator first." not in pending
 
 
 def test_invitation_refusals_are_form_errors_that_keep_the_values() -> None:
@@ -395,7 +417,7 @@ def test_pending_invitations_are_reissued_and_revoked_from_the_workspace_page() 
     replacement = WorkspaceInvitation.objects.latest("pk")
     assert (replacement.email, replacement.role) == ("guest@example.com", WorkspaceRole.VIEWER)
     assert mail.outbox[-1].to == ["guest@example.com"]
-    assert "Invitation sent to guest@example.com." in client.get(base).content.decode()
+    assert "The invitation to guest@example.com was sent." in client.get(base).content.decode()
 
     revoked = client.post(f"{base}invitations/{replacement.pk}/revocation/")
     assert revoked["Location"] == f"{base}#invitations-title"
@@ -434,11 +456,13 @@ def test_a_resend_waiting_for_an_administrator_change_does_not_revive_the_invita
 
 def test_member_removal_states_its_consequences_and_keeps_the_administrator() -> None:
     tenant, owner, viewer = workspace()
+    Tenant.objects.filter(pk=tenant.pk).update(name="Solar Enerji A.Ş.")
     client, operator = verified_admin()
     url = f"/admin/workspaces/{tenant.pk}/members/{viewer.pk}/removal/"
     page = client.get(url).content.decode()
-    assert "viewer@example.com" in page
-    assert "Solar workspace" in page
+    assert "<dt>Member</dt><dd>viewer@example.com</dd>" in page
+    assert "<dt>Workspace</dt><dd>Solar Enerji A.Ş.</dd>" in page
+    assert "A.Ş.." not in page
     for consequence in (
         "Their access to this workspace ends at once.",
         "They no longer receive email reminders for this workspace.",
@@ -456,6 +480,7 @@ def test_member_removal_states_its_consequences_and_keeps_the_administrator() ->
 
     administrator = f"/admin/workspaces/{tenant.pk}/members/{owner.pk}/removal/"
     page = client.get(administrator).content.decode()
+    assert "<dt>Member</dt><dd>owner@example.com</dd>" in page
     assert "The administrator cannot be removed." in page
     assert ">Remove member</button>" not in page
     refused = client.post(administrator)
@@ -464,10 +489,15 @@ def test_member_removal_states_its_consequences_and_keeps_the_administrator() ->
     assert Membership.objects.get(user=owner).role == WorkspaceRole.ADMIN
 
 
+def settings_section(html: str) -> str:
+    return html[html.index('<h2 id="settings-title"') :]
+
+
 def test_workspace_page_orders_its_sections_and_points_to_the_next_step() -> None:
-    client, _ = verified_admin()
+    client, operator = verified_admin()
     fresh = Tenant.objects.create(name="Fresh workspace")
-    html = client.get(f"/admin/workspaces/{fresh.pk}/").content.decode()
+    base = f"/admin/workspaces/{fresh.pk}/"
+    html = client.get(base).content.decode()
     assert html.count("<h1") == 1
     positions = [
         html.index(f'<h2 id="{section}-title"')
@@ -476,26 +506,48 @@ def test_workspace_page_orders_its_sections_and_points_to_the_next_step() -> Non
     assert positions == sorted(positions)
     for section in ("plants", "members", "invitations", "settings"):
         assert f'aria-labelledby="{section}-title"' in html
-    for empty in ("No plants yet.", "No members yet.", "No pending invitations."):
+    for empty in (
+        "No plants yet.",
+        "No members yet. Invite the customer's administrator first.",
+        "No pending invitations. Invite people under Members.",
+    ):
         assert empty in html
-    assert f'href="/admin/workspaces/{fresh.pk}/plants/new/"' in html
-    assert f'href="/admin/workspaces/{fresh.pk}/invitations/new/?role=admin"' in html
+    assert PRIMARY_ACTION.findall(html) == ["Add plant", "Invite member"]
+    assert f'href="{base}plants/new/"' in html
+    settings = settings_section(html)
+    assert f'href="{base}name/">Rename</a>' in settings
+    assert f'href="{base}invitations/new/?role=admin">Invite an administrator</a>' in settings
+
+    invite_workspace_member(
+        operator, fresh.pk, "boss@example.com", role=WorkspaceRole.ADMIN, platform=True
+    )
+    invited = client.get(base).content.decode()
+    assert "boss@example.com" in settings_section(invited)
+    assert "Invitation pending" in settings_section(invited)
+    assert "?role=admin" not in invited
+    assert (
+        "No members yet. The administrator appears here after accepting the invitation." in invited
+    )
 
     tenant, owner, viewer = workspace()
     region = site(owner, tenant)
-    html = client.get(f"/admin/workspaces/{tenant.pk}/").content.decode()
+    base = f"/admin/workspaces/{tenant.pk}/"
+    html = client.get(base).content.decode()
     assert "Console site" in html
     assert "1.5 MW" in html
     assert "Awaiting approval" in html
     assert "Not configured" in html
-    assert f'href="/admin/plants/{region.pk}/"' in html
+    assert html.count(f'href="/admin/plants/{region.pk}/"') == 1
     assert owner.email in html
     assert viewer.email in html
     assert "Never" in html
     assert f"/members/{viewer.pk}/removal/" in html
     assert f"/members/{owner.pk}/removal/" not in html
     assert f"/administrator/?member={viewer.pk}" in html
-    assert f'href="/admin/workspaces/{tenant.pk}/name/"' in html
+    assert PRIMARY_ACTION.findall(html) == ["Add plant", "Invite member"]
+    settings = settings_section(html)
+    assert f'href="{base}name/">Rename</a>' in settings
+    assert f'href="{base}administrator/">Change administrator</a>' in settings
 
 
 def test_workspace_console_pages_render_in_turkish_without_mail_or_provider_calls(
@@ -530,3 +582,14 @@ def test_workspace_console_pages_render_in_turkish_without_mail_or_provider_call
         assert '<html lang="tr">' in html, path
         assert text in html, path
         assert html.count("<h1") == 1, path
+
+    page = client.get(base, HTTP_ACCEPT_LANGUAGE="tr").content.decode()
+    assert '<th scope="col">İnceleme</th>' in page
+    assert '<th scope="col">Gönderim</th>' in page
+    assert "Hiç oturum açmad\u0131" in page
+    assert "Teslimat" not in page
+    for path, header in (
+        ("/admin/plants/", '<th scope="col">İnceleme</th>'),
+        (f"/admin/plants/{region.pk}/", "<dt>İnceleme</dt>"),
+    ):
+        assert header in client.get(path, HTTP_ACCEPT_LANGUAGE="tr").content.decode(), path

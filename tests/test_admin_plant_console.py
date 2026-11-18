@@ -48,6 +48,7 @@ def test_adding_a_plant_lands_on_its_page_with_the_next_step() -> None:
     assert '<option value="Europe/Istanbul">' in page
     for hook in ("data-coordinate-pair", "data-mounting", "data-fixed-mounting"):
         assert hook in page
+    assert re.search(r"<p [^>]*data-coordinate-hint hidden>[^<]*41\.0082, 28\.9784", page)
     response = client.post(url, site_values())
     region = Region.objects.get(tenant=tenant)
     assert response.status_code == 302
