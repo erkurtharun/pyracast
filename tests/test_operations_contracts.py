@@ -868,17 +868,74 @@ def test_the_new_gateway_answers_with_the_notice_before_api_and_web_stop() -> No
     assert '"${old[@]}" stop -t 100' not in script
 
 
-def test_a_rotated_runtime_password_restarts_the_serving_release_before_maintenance() -> None:
+def preflight() -> str:
     script = installer()
-    rotated = script.index('rotated=$(python3 "$release/deploy/bootstrap_database.py"')
-    refresh = script.index(
-        "python3 /opt/pyracast/current/deploy/runtime_secrets.py /etc/pyracast/host.json"
-    )
-    restart = script.index('"${old[@]}" up -d --wait --wait-timeout 180', refresh)
+    return script[script.index("trap cleanup EXIT\n") : script.index("\nbegin_maintenance\n")]
 
-    assert rotated < refresh < restart < script.index("\nbegin_maintenance\n")
-    assert "[[ $rotated == *pyracast_app* && -n $previous ]] && (( blocked_before == 0 ))" in script
-    assert "systemctl restart pyracast.service" in script
+
+def function_body(script: str, name: str) -> str:
+    start = script.index(f"{name}() {{\n")
+    return script[start : script.index("\n}\n", start)]
+
+
+def test_preflight_changes_nothing_the_serving_release_reads() -> None:
+    body = preflight()
+
+    assert '"${old[@]}"' not in body
+    assert "switch_runtime" not in body
+    assert "switch-runtime" not in body
+    assert 'python3 "$release/deploy/bootstrap_database.py" converge "$release" "$secrets"' in body
+    assert "/opt/pyracast/current/deploy/runtime_secrets.py" not in installer()
+
+
+def test_staged_secrets_that_cannot_read_the_stored_secrets_refuse_before_maintenance() -> None:
+    body = preflight()
+    check = '"${compose[@]}" run --rm --no-deps migrate pyracast check_secrets || {'
+
+    assert check in body
+    refusal = body[body.index(check) : body.index("\n}\n", body.index(check))]
+    assert "status=$?" in refusal
+    assert "cannot read every stored secret" in refusal
+    assert "unchanged" in refusal
+    assert 'exit "$status"' in refusal
+    assert "api pyracast check_secrets" not in installer()
+
+
+def test_the_runtime_role_switches_only_after_the_serving_release_stopped() -> None:
+    script = installer()
+    body = script[script.index("\nbegin_maintenance\n") :]
+    switch = body.index("\nswitch_runtime\nprobe_database api\n")
+
+    assert body.index("resumable=1") < switch
+    assert body.index('  "${compose[@]}" stop -t 100 api web\n') < switch
+    assert switch < body.index("--kind prerelease")
+    assert 'switch-runtime "$release" "$secrets" "$verifier"' in function_body(
+        script, "switch_runtime"
+    )
+    assert 'verifier="$session/runtime-verifier"' in script
+
+
+def test_a_resume_gives_the_runtime_role_its_previous_password_before_the_release_starts() -> None:
+    script = installer()
+    resume = function_body(script, "resume_previous")
+    postgres = resume.index('"${old[@]}" up -d --wait --wait-timeout 180 postgres')
+    revert = resume.index('revert-runtime "$release" "$verifier"')
+
+    assert "if [[ -e $verifier ]]; then" in resume
+    assert postgres < revert < resume.index('"${old[@]}" up -d --wait --wait-timeout 180 && ready')
+    assert "restarting pyracast.service" in script
+
+
+def test_a_stopped_release_leaves_the_runtime_role_on_the_secret_that_recovery_renders() -> None:
+    script = installer()
+    stop_path = script[
+        script.index("elif (( maintenance_started == 1 )); then") : script.index(
+            "trap cleanup EXIT"
+        )
+    ]
+
+    assert "switch_runtime || switched=0" in stop_path
+    assert "switch-runtime $release $secrets $secrets/runtime-verifier" in stop_path
 
 
 def test_a_failure_before_migrate_resumes_the_previous_release() -> None:
@@ -908,7 +965,7 @@ def test_preflight_proves_the_metadata_guard_and_the_stored_secrets_before_maint
     maintenance_begins = script.index("\nbegin_maintenance\n")
 
     assert script.index("169.254.169.254") < maintenance_begins
-    assert script.index("run --rm --no-deps api pyracast check_secrets") < maintenance_begins
+    assert script.index("run --rm --no-deps migrate pyracast check_secrets") < maintenance_begins
     for service in compose_services().values():
         assert "network_mode" not in service
         assert "dns" not in service
@@ -916,7 +973,7 @@ def test_preflight_proves_the_metadata_guard_and_the_stored_secrets_before_maint
 
 def test_every_release_converges_database_provisioning_before_and_after_migrate() -> None:
     script = installer()
-    converge = 'python3 "$release/deploy/bootstrap_database.py" "$release" "$secrets"'
+    converge = 'python3 "$release/deploy/bootstrap_database.py" converge "$release" "$secrets"'
     first = script.index(converge)
     migrate = script.index('"${compose[@]}" run --rm --no-deps migrate\n')
 

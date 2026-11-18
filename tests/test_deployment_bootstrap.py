@@ -284,14 +284,14 @@ def test_converge_applies_the_definition_in_one_transaction_without_plaintext(
         release(tmp_path / "release"), tmp_path / "secrets"
     )
 
-    assert changed == ["pyracast_app", "pyracast_owner"]
+    assert changed == ["pyracast_owner"]
     (query, _), (apply, script) = psql.calls
     assert "pg_authid" in query[-1]
     assert "--single-transaction" in apply
     assert script is not None
     assert script.startswith(BOOTSTRAP)
     assert script.count("ALTER ROLE pyracast_owner PASSWORD 'SCRAM-SHA-256$4096:") == 1
-    assert script.count("ALTER ROLE pyracast_app PASSWORD 'SCRAM-SHA-256$4096:") == 1
+    assert "ALTER ROLE pyracast_app" not in script
     assert "secret" not in script.replace("SECRET", "")
     assert not any("secret" in argument for command, _ in psql.calls for argument in command)
 
@@ -337,14 +337,148 @@ def test_bootstrap_is_one_idempotent_definition_without_its_own_transaction() ->
     assert "DATABASE pyracast" not in BOOTSTRAP
 
 
-def test_command_line_prints_each_role_whose_password_changed(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+class ServerPsql:
+    def __init__(self, database: str) -> None:
+        self.database = database
+        self.scripts: list[str] = []
+
+    def __call__(
+        self, command: list[str], *, input: str | None = None, **options: Any
+    ) -> subprocess.CompletedProcess[str]:
+        with psycopg.connect(**server_parameters(self.database)) as connection:
+            if input is None:
+                rows = connection.execute(command[-1].encode()).fetchall()
+                stdout = "".join(f"{row[0]}\n" for row in rows)
+                return subprocess.CompletedProcess(command, 0, stdout=stdout)
+            self.scripts.append(input)
+            connection.execute(input.encode())
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+
+def runtime_verifier(database: str) -> str | None:
+    with psycopg.connect(**server_parameters(database)) as connection:
+        (verifier,) = connection.execute(
+            "SELECT rolpassword FROM pg_authid WHERE rolname = 'pyracast_app'"
+        ).fetchone() or (None,)
+    return verifier
+
+
+def set_runtime_verifier(database: str, verifier: str | None) -> None:
+    with psycopg.connect(**server_parameters(database), autocommit=True) as connection:
+        connection.execute(
+            sql.SQL("ALTER ROLE pyracast_app PASSWORD {}").format(sql.Literal(verifier))
+        )
+
+
+@pytest.fixture
+def runtime_role(scratch_database: str) -> Iterator[str]:
+    with psycopg.connect(**server_parameters(scratch_database)) as connection:
+        # The role belongs to the cluster: hold its password still for the other test databases.
+        connection.execute("SELECT pg_advisory_lock(hashtext('pyracast-runtime-role'))")
+        provision(scratch_database)
+        original = runtime_verifier(scratch_database)
+        try:
+            yield scratch_database
+        finally:
+            set_runtime_verifier(scratch_database, original)
+            connection.execute("SELECT pg_advisory_unlock(hashtext('pyracast-runtime-role'))")
+
+
+def test_the_runtime_password_switches_once_and_reverts_to_the_identical_verifier(
+    runtime_role: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        bootstrap_database, "converge_database", lambda _release, _directory: ["pyracast_app"]
-    )
-    monkeypatch.setattr(sys, "argv", ["bootstrap_database.py", "release", "secrets"])
+    previous = bootstrap_database.scram_verifier("previous-runtime-password", SALT)
+    set_runtime_verifier(runtime_role, previous)
+    environment(tmp_path / "secrets")
+    saved = tmp_path / "session" / "runtime-verifier"
+    saved.parent.mkdir()
+    psql = ServerPsql(runtime_role)
+    monkeypatch.setattr(subprocess, "run", psql)
+    target = release(tmp_path / "release")
+
+    assert bootstrap_database.switch_runtime(target, tmp_path / "secrets", saved)
+    switched = runtime_verifier(runtime_role)
+    assert bootstrap_database.scram_matches(switched, "app-secret")
+    assert not bootstrap_database.scram_matches(switched, "previous-runtime-password")
+    assert saved.read_text() == previous
+    assert not bootstrap_database.switch_runtime(target, tmp_path / "secrets", saved)
+    assert saved.read_text() == previous
+
+    assert bootstrap_database.revert_runtime(target, saved)
+    assert runtime_verifier(runtime_role) == previous
+    assert not saved.exists()
+    assert not bootstrap_database.revert_runtime(target, saved)
+    assert runtime_verifier(runtime_role) == previous
+    assert not any("app-secret" in script for script in psql.scripts)
+
+
+def test_a_switch_from_a_role_without_password_reverts_to_none(
+    runtime_role: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    set_runtime_verifier(runtime_role, None)
+    environment(tmp_path / "secrets")
+    saved = tmp_path / "runtime-verifier"
+    monkeypatch.setattr(subprocess, "run", ServerPsql(runtime_role))
+    target = release(tmp_path / "release")
+
+    assert bootstrap_database.switch_runtime(target, tmp_path / "secrets", saved)
+    assert bootstrap_database.revert_runtime(target, saved)
+
+    assert runtime_verifier(runtime_role) is None
+
+
+@pytest.mark.parametrize("saved", ["x'; DROP ROLE pyracast_owner; --", "SCRAM-SHA-256$4096:x"])
+def test_revert_refuses_a_saved_value_that_is_not_a_verifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, saved: str
+) -> None:
+    path = tmp_path / "runtime-verifier"
+    path.write_text(saved)
+    psql = Psql("")
+    monkeypatch.setattr(subprocess, "run", psql)
+
+    with pytest.raises(ValueError, match="verifier"):
+        bootstrap_database.revert_runtime(release(tmp_path / "release"), path)
+    assert psql.calls == []
+    assert path.exists()
+
+
+def test_switch_refuses_a_runtime_role_outside_the_definition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment(tmp_path / "secrets", app="postgres")
+    psql = Psql("")
+    monkeypatch.setattr(subprocess, "run", psql)
+
+    with pytest.raises(ValueError, match="role names"):
+        bootstrap_database.switch_runtime(
+            release(tmp_path / "release"), tmp_path / "secrets", tmp_path / "saved"
+        )
+    assert psql.calls == []
+
+
+@pytest.mark.parametrize(
+    ("arguments", "call"),
+    [
+        (["converge", "release", "secrets"], ("converge_database", "release", "secrets")),
+        (
+            ["switch-runtime", "release", "secrets", "saved"],
+            ("switch_runtime", "release", "secrets", "saved"),
+        ),
+        (["revert-runtime", "release", "saved"], ("revert_runtime", "release", "saved")),
+    ],
+)
+def test_command_line_runs_each_step(
+    monkeypatch: pytest.MonkeyPatch, arguments: list[str], call: tuple[str, ...]
+) -> None:
+    calls: list[tuple[str, ...]] = []
+    for name in ("converge_database", "switch_runtime", "revert_runtime"):
+        monkeypatch.setattr(
+            bootstrap_database,
+            name,
+            lambda *paths, name=name: calls.append((name, *map(str, paths))) or [],
+        )
+    monkeypatch.setattr(sys, "argv", ["bootstrap_database.py", *arguments])
 
     bootstrap_database.main()
 
-    assert capsys.readouterr().out == "pyracast_app\n"
+    assert calls == [call]
