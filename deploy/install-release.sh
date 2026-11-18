@@ -47,9 +47,11 @@ begin_maintenance() {
     && sync -f /var/lib/pyracast
 }
 ready() {
-  [[ $(curl --fail --silent --show-error --noproxy '*' \
+  local response
+  response=$(curl --fail --silent --show-error --noproxy '*' \
     --connect-timeout 5 --max-time 10 --retry 18 --retry-delay 5 --retry-max-time 180 \
-    --retry-all-errors --resolve "$site_address:443:127.0.0.1" "https://$site_address/health/ready/") == ok ]]
+    --retry-all-errors --resolve "$site_address:443:127.0.0.1" "https://$site_address/health/ready/") || return $?
+  [[ $response == ok ]]
 }
 # The runtime role and the release's runtime secret change together; the first change saves the
 # role's previous verifier in $verifier.
