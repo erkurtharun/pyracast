@@ -10,6 +10,7 @@ export type SessionState = { session?: Session; ended: boolean };
 let state: SessionState = { ended: false };
 let flight: { epoch: number; promise: Promise<Session> } | undefined;
 let ending = false;
+let signingOut = false;
 const listeners = new Set<() => void>();
 
 export function sessionState() {
@@ -30,7 +31,10 @@ export function useSessionState() {
 export function adoptSession(session: Session) {
     state = {
         session,
-        ended: session.user ? false : state.ended || ending,
+        ended: session.user
+            ? false
+            : !signingOut &&
+              (state.ended || ending || Boolean(state.session?.user)),
     };
     setCsrfToken(session.csrf_token);
     for (const listener of listeners) listener();
@@ -57,7 +61,12 @@ export function loadSession(): Promise<Session> {
 
 export async function signOut() {
     await authRequest("auth/session", "DELETE");
-    return loadSession();
+    signingOut = true;
+    try {
+        return await loadSession();
+    } finally {
+        signingOut = false;
+    }
 }
 
 onSessionEnded(() => {

@@ -19,10 +19,12 @@ type RequiredBody<O> = O extends {
 }
     ? B
     : never;
-type OptionalBody<O> = O extends {
-    requestBody?: { content: { "application/json": infer B } };
-}
-    ? B
+type OptionalBody<O> = O extends { requestBody?: infer R }
+    ? [NonNullable<R>] extends [never]
+        ? never
+        : NonNullable<R> extends { content: { "application/json": infer B } }
+          ? B
+          : never
     : never;
 
 type Options<O> = ([PathParams<O>] extends [never]
@@ -67,9 +69,12 @@ type Loose = {
 
 export function buildUrl(path: string, options: object = {}) {
     const { path: params, query } = options as Loose;
-    const filled = path.replace(/\{(\w+)\}/g, (_, name: string) =>
-        encodeURIComponent(String(params?.[name])),
-    );
+    const filled = path.replace(/\{(\w+)\}/g, (_, name: string) => {
+        const value = params?.[name];
+        if (value === undefined)
+            throw new Error(`Missing path parameter: ${name}`);
+        return encodeURIComponent(String(value));
+    });
     const search = new URLSearchParams();
     for (const [name, value] of Object.entries(query ?? {}))
         if (value !== undefined && value !== null)

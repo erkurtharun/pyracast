@@ -473,6 +473,7 @@ test("region collection schedule validates and saves distinct local times", asyn
     await page.clock.install();
     await mockApi(page);
     let saves = 0;
+    let reads = 0;
     let schedule = {
         enabled: true,
         times: ["09:00"],
@@ -523,7 +524,7 @@ test("region collection schedule validates and saves distinct local times", asyn
                 times: ["09:00", "10:00", "11:00"],
             });
             schedule = { ...schedule, ...route.request().postDataJSON() };
-        }
+        } else reads++;
         await route.fulfill({ json: schedule });
     });
     await page.goto("/app/");
@@ -538,6 +539,7 @@ test("region collection schedule validates and saves distinct local times", asyn
             "Daily history: 03:00 (Europe/Istanbul). Pausing also stops history collection.",
         ),
     ).toBeVisible();
+    expect(reads).toBe(1);
     await page.getByText("Collection details", { exact: true }).click();
     await expect(
         page.getByText(
@@ -603,6 +605,7 @@ test("region collection schedule validates and saves distinct local times", asyn
     await expect(
         page.getByText("Last successful collection").locator(".."),
     ).toContainText("Jan 1, 2026, 9:00 AM");
+    expect(reads).toBe(2);
     await page.getByRole("button", { name: "+ Add time" }).click();
     await page.getByLabel("Collection time 3 (Europe/Istanbul)").fill("10:00");
     await page

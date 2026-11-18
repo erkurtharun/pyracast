@@ -3,7 +3,8 @@ import { useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import type { Tenant } from "@/lib/api";
 import { api } from "@/lib/api/client";
-import { signOut, type Session } from "@/lib/session-client";
+import type { Session } from "@/lib/session-client";
+import { authRequest } from "@/lib/auth-api";
 import type { components } from "@/lib/schema";
 import { ActionForm, Field, Notice, useResource } from "./ui";
 import { clearWorkspaceInvitation } from "./workspace-invitation";
@@ -269,7 +270,7 @@ export function AcceptInvitation({
                     children={null}
                     submit={t("useAnotherAccount")}
                     onSubmit={async () => {
-                        await signOut();
+                        await authRequest("auth/session", "DELETE");
                         window.location.replace("/app/");
                     }}
                 />

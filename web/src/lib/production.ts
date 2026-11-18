@@ -5,7 +5,11 @@ import { messages } from "@/i18n/messages";
 export const QUALITIES = ["valid", "outage", "curtailed", "invalid"] as const;
 export type Quality = (typeof QUALITIES)[number];
 export function qualityOf(value: string | null | undefined): Quality {
-    return QUALITIES.find((quality) => quality === value) ?? "valid";
+    if (value === null || value === undefined) return "valid";
+    const selected = QUALITIES.find((quality) => quality === value);
+    if (selected === undefined)
+        throw new Error("Unrecognized production quality.");
+    return selected;
 }
 export type Observation = {
     starts_at: string;

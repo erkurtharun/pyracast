@@ -20,7 +20,10 @@ function choice<T extends string>(
     value: FormDataEntryValue | null,
     options: readonly [T, ...T[]],
 ): T {
-    return options.find((option) => option === value) ?? options[0];
+    const selected = options.find((option) => option === value);
+    if (selected === undefined)
+        throw new Error("Select a valid plant configuration.");
+    return selected;
 }
 
 export function configurationInput(data: FormData) {

@@ -22,6 +22,11 @@ function proposal(id = 1) {
         plant_name: "East array",
         configuration_id: 31,
         timezone: "Europe/Istanbul",
+        item_count: 1,
+        period_start: "2026-11-09T08:00:00+03:00",
+        period_end: "2026-11-09T08:30:00+03:00",
+        incident_action: null,
+        incident_title: null,
         proposed_by: { id: 2, name: "Member" },
         submitted_at: "2026-11-09T12:00:00Z",
         reason: "Verified meter reading",
@@ -175,6 +180,8 @@ test("member submits a native production correction with a stable retry key and 
         .click();
     await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
     expect(submissions).toHaveLength(2);
+    expect(submissions[0]?.idempotency_key).toEqual(expect.any(String));
+    expect(submissions[1]?.idempotency_key).toEqual(expect.any(String));
     expect(submissions[0]?.idempotency_key).toBe(
         submissions[1]?.idempotency_key,
     );

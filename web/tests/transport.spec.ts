@@ -1,8 +1,18 @@
 import { expect, test } from "@playwright/test";
-import { api, apiUrl } from "../src/lib/api/client";
+import {
+    api,
+    apiUrl,
+    buildUrl,
+    type RequestOptions,
+} from "../src/lib/api/client";
 import { ApiError } from "../src/lib/api/errors";
 import { authRequest } from "../src/lib/auth-api";
-import { loadSession, sessionState } from "../src/lib/session-client";
+import {
+    adoptSession,
+    loadSession,
+    sessionState,
+    signOut,
+} from "../src/lib/session-client";
 import { errorBody } from "./support/errors";
 
 type Call = {
@@ -31,7 +41,7 @@ function answer(...answers: ((call: Call) => Answer)[]) {
             token: new Headers(init?.headers).get("X-CSRFToken"),
             body: typeof init?.body === "string" ? init.body : undefined,
         };
-        const next = answers[Math.min(calls.length, answers.length - 1)];
+        const next = answers[calls.length];
         calls.push(call);
         if (!next) throw new Error("No answer is prepared for this request.");
         return next(call);
@@ -62,7 +72,7 @@ const signedIn = (token: string) => ({
         language_preference: null,
     },
     csrf_token: token,
-    language: "en",
+    language: "en" as const,
     expires_at: "2026-11-18T22:00:00Z",
 });
 
@@ -101,9 +111,9 @@ test("the retry waits for the announced Retry-After", async () => {
 });
 
 test("a change refused twice as busy is reported instead of sent a third time", async () => {
-    answer(() =>
-        json(errorBody("session_busy", "Busy.", { retry_after: 0 }), 429),
-    );
+    const refused = () =>
+        json(errorBody("session_busy", "Busy.", { retry_after: 0 }), 429);
+    answer(refused, refused);
     const error = await api
         .post("/api/tenants/{tenant_id}/sites/", site)
         .catch((failure) => failure);
@@ -277,4 +287,63 @@ test("path parameters and query values build one encoded URL", () => {
     ).toBe(
         "/api/tenants/1/regions/11/plants/21/forecast/?date=2026-11-18&data_source=auto",
     );
+    expect(
+        apiUrl(
+            "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/forecast/",
+            {
+                path: { tenant_id: 1, region_id: 11, plant_id: 21 },
+                query: {
+                    date: "2026-11-18",
+                    as_of: "2026-11-18T10:00:00+03:00",
+                },
+            },
+        ),
+    ).toBe(
+        "/api/tenants/1/regions/11/plants/21/forecast/?date=2026-11-18&as_of=2026-11-18T10%3A00%3A00%2B03%3A00",
+    );
+});
+
+test("bodyless operations accept no body in their typed options", () => {
+    const getBodyIsForbidden: NonNullable<
+        RequestOptions<"/api/tenants/", "get">["body"]
+    > extends never
+        ? true
+        : false = true;
+    const deleteBodyIsForbidden: NonNullable<
+        RequestOptions<
+            "/api/tenants/{tenant_id}/members/{user_id}/",
+            "delete"
+        >["body"]
+    > extends never
+        ? true
+        : false = true;
+    expect(getBodyIsForbidden).toBe(true);
+    expect(deleteBodyIsForbidden).toBe(true);
+});
+
+test("a URL requires every named path parameter", () => {
+    expect(() => buildUrl("/api/tenants/{tenant_id}/", {})).toThrow(
+        "Missing path parameter: tenant_id",
+    );
+});
+
+test("a session read that discovers expiry records the signed-out transition", async () => {
+    adoptSession(signedIn("token"));
+    answer(() =>
+        json({ ...signedIn("anonymous"), user: null, expires_at: null }),
+    );
+    await loadSession();
+    expect(sessionState().session?.user).toBeNull();
+    expect(sessionState().ended).toBe(true);
+});
+
+test("an explicit sign-out returns to sign-in without an expiry notice", async () => {
+    adoptSession(signedIn("token"));
+    answer(
+        () => json({ status: 401, meta: { is_authenticated: false } }, 401),
+        () => json({ ...signedIn("anonymous"), user: null, expires_at: null }),
+    );
+    await signOut();
+    expect(sessionState().session?.user).toBeNull();
+    expect(sessionState().ended).toBe(false);
 });

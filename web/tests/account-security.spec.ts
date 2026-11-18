@@ -99,8 +99,11 @@ test("an email change that needs a fresh sign-in confirms the password and sends
 }) => {
     await mockApi(page);
     const submitted: unknown[] = [];
+    const confirmations: unknown[] = [];
     await page.route("**/api/auth/browser/v1/account/email", (route) => {
         submitted.push(route.request().postDataJSON());
+        if (submitted.length === 2)
+            expect(confirmations).toEqual([{ password: "current-password" }]);
         return route.fulfill(
             submitted.length === 1
                 ? {
@@ -119,6 +122,7 @@ test("an email change that needs a fresh sign-in confirms the password and sends
         );
     });
     await page.route("**/api/auth/browser/v1/auth/reauthenticate", (route) => {
+        confirmations.push(route.request().postDataJSON());
         expect(route.request().postDataJSON()).toEqual({
             password: "current-password",
         });
@@ -131,8 +135,13 @@ test("an email change that needs a fresh sign-in confirms the password and sends
     await page.getByText("Change email", { exact: true }).click();
     await page.getByLabel("New email address").fill("new@example.test");
     await page.getByRole("button", { name: "Send verification code" }).click();
-    await page.getByLabel("Current password").first().fill("current-password");
-    await page.getByRole("button", { name: "Confirm password" }).click();
+    const changeEmail = page.locator(".account-disclosure").filter({
+        has: page.getByText("Change email", { exact: true }),
+    });
+    await changeEmail
+        .getByLabel("Current password", { exact: true })
+        .fill("current-password");
+    await changeEmail.getByRole("button", { name: "Confirm password" }).click();
     await expect
         .poll(() => submitted)
         .toEqual([
@@ -140,6 +149,15 @@ test("an email change that needs a fresh sign-in confirms the password and sends
             { email: "new@example.test" },
         ]);
     await expect(page.getByLabel("Email verification code")).toBeVisible();
+    expect(confirmations).toEqual([{ password: "current-password" }]);
+    await expect(changeEmail.getByLabel("New email address")).toHaveValue(
+        "new@example.test",
+    );
+    await expect(
+        changeEmail.getByText(
+            "Enter the code sent to your email in this browser.",
+        ),
+    ).toBeVisible();
     await expect(
         page.getByText("Please confirm your identity and try again."),
     ).toHaveCount(0);

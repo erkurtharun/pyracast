@@ -16,6 +16,7 @@ export function CollectionSchedule({
     region: Region;
 }) {
     const t = useTranslations("CollectionSchedule");
+    const { tenant_id, region_id } = scope;
 
     const [version, setVersion] = useState(0);
     const [data, setData] = useState<Schedule>();
@@ -27,7 +28,7 @@ export function CollectionSchedule({
             const requestSequence = ++sequence;
             api.get(
                 "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/",
-                { path: scope },
+                { path: { tenant_id, region_id } },
             )
                 .then((result) => {
                     if (active && requestSequence === sequence) {
@@ -46,7 +47,7 @@ export function CollectionSchedule({
             active = false;
             clearInterval(timer);
         };
-    }, [scope, version]);
+    }, [tenant_id, region_id, version]);
     if (!data)
         return error ? (
             <Notice error>{error}</Notice>

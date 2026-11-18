@@ -11,10 +11,10 @@ import {
     refreshExpiredSession,
     type ReauthMode,
 } from "./security-reauthentication";
-import { ActionForm, Field } from "./ui";
+import { ActionForm, Field, Notice } from "./ui";
 
 type Step =
-    | { status: "address" }
+    | { status: "address" | "sent"; address: string }
     | { status: "reauthenticate"; mode: ReauthMode; address: string };
 
 export function EmailChange({
@@ -26,14 +26,15 @@ export function EmailChange({
 }) {
     const t = useTranslations("Dashboard");
     const security = useTranslations("Security");
-    const [step, setStep] = useState<Step>({ status: "address" });
+    const auth = useTranslations("Auth");
+    const [step, setStep] = useState<Step>({ status: "address", address: "" });
 
     async function requestCode(address: string, replay = false) {
         const result = await authRequest("account/email", "POST", {
             email: address,
         });
         if (result.status !== 401) {
-            setStep({ status: "address" });
+            setStep({ status: "sent", address });
             return;
         }
         if (!result.meta?.is_authenticated)
@@ -50,12 +51,15 @@ export function EmailChange({
         <details className="account-disclosure">
             <summary>{t("changeEmail")}</summary>
             <p className="fine">{t("currentEmail", { email })}</p>
+            {step.status === "sent" && <Notice>{auth("codeSent")}</Notice>}
             {step.status === "reauthenticate" ? (
                 <ReauthenticationForm
                     mode={step.mode}
                     email={email}
                     autoFocus
-                    onCancel={() => setStep({ status: "address" })}
+                    onCancel={() =>
+                        setStep({ status: "address", address: step.address })
+                    }
                     onVerified={() => requestCode(step.address, true)}
                 />
             ) : (
@@ -65,7 +69,12 @@ export function EmailChange({
                         requestCode(String(data.get("email") ?? ""))
                     }
                 >
-                    <Field label={t("newEmail")} name="email" type="email" />
+                    <Field
+                        label={t("newEmail")}
+                        name="email"
+                        type="email"
+                        defaultValue={step.address}
+                    />
                 </ActionForm>
             )}
             <ActionForm
