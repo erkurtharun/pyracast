@@ -22,6 +22,7 @@ from deploy import (
     authorize_gmail,
     backup,
     host,
+    probe_origin_pull,
     release_state,
     reset_database,
     runtime_secrets,
@@ -1278,3 +1279,59 @@ def test_host_local_probes_use_the_loopback_entrypoint_without_the_edge_certific
     assert '\nready "$release"\n' in script
     assert "LOCAL_HTTPS_BIND=127.0.0.1:18444" in smoke
     assert "https://localhost:18444/health/ready/" in smoke
+
+
+def shell_function(script: str, name: str) -> str:
+    start = script.index(f"\n{name}() {{\n")
+    return script[start : script.index("\n}\n", start)]
+
+
+def test_with_origin_pulls_required_readiness_needs_an_enforcing_public_entrypoint() -> None:
+    script = installer()
+    gateway = '"${compose[@]}" up -d --no-deps --wait --wait-timeout 180 maintenance gateway\n'
+
+    enforced = shell_function(script, "edge_enforced")
+    assert "if grep -qsx 'ORIGIN_PULL=required' \"$1/deploy/release.env\"; then" in enforced
+    assert 'python3 "$release/deploy/probe_origin_pull.py" "$site_address"' in enforced
+    assert '[[ $response == ok ]] && edge_enforced "$1"' in shell_function(script, "ready")
+    assert f'  {gateway}  edge_enforced "$release"\n  "${{compose[@]}}" stop -t 100 api web\n' in (
+        script
+    )
+    assert script.index('edge_enforced "$release"\n') < script.index("recorded=1\n")
+    assert script.index('edge_enforced "$release"\n') < script.index(
+        '"${compose[@]}" run --rm --no-deps migrate\n'
+    )
+
+
+def test_the_harness_resumes_the_previous_release_when_origin_pulls_are_not_enforced() -> None:
+    harness = text(DEPLOY / "test-release.sh")
+    modes = re.search(r"^for MODE in (.*); do$", harness, re.M)
+    resumed = re.search(r"^      (drain\|backup\|[^)]*)\)$", harness, re.M)
+    released = re.search(r"^      (success\|[^)]*)\)$", harness, re.M)
+
+    assert modes
+    assert resumed
+    assert released
+    assert {"origin-pull", "origin-pull-open"} <= set(modes[1].split())
+    assert "origin-pull-open" in resumed[1].split("|")
+    assert "origin-pull" in released[1].split("|")
+    assert "*/probe_origin_pull.py" in harness
+    assert "/source/origin-pull-off.pem" in harness
+
+
+def test_the_smoke_tells_an_enforcing_entrypoint_from_one_whose_authority_is_rejected() -> None:
+    smoke = text(DEPLOY / "smoke.sh")
+    required = smoke[smoke.index("ORIGIN_PULL=required") :]
+    invalid = 'ORIGIN_PULL=required ORIGIN_PULL_CA="$invalid_authority"'
+
+    assert (
+        '"$root/deploy/probe_origin_pull.py" localhost --port 18443 --cafile "$temporary/ca.pem"'
+        in smoke
+    )
+    assert required.index('"${probe_origin_pull[@]}" --attempts 1\n') < required.index(invalid)
+    rejected = required[required.index(invalid) :]
+    assert r"printf -- '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n'" in required
+    loopback = rejected.index("https://localhost:18444/health/ready/) == ok ]]")
+    observed = rejected.index(f"[[ $refused == 1 && $observed == *'{probe_origin_pull.CLOSED}'* ]]")
+    assert loopback < observed < rejected.index('refused_handshake "${edge[@]}"\n')
+    assert rejected.index('refused_handshake "${edge[@]}"\n') < rejected.index("\nready\n")
