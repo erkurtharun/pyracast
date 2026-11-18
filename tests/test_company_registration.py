@@ -396,6 +396,40 @@ def test_a_signup_answers_after_the_minimum_time_whether_or_not_the_address_has_
     assert User.objects.count() == 1
 
 
+def request_as_new_email(address: str, requester: str) -> None:
+    email = f"{requester}@example.com"
+    account = User.objects.create_user(username=requester, email=email, password=PASSWORD)
+    EmailAddress.objects.create(user=account, email=email, primary=True, verified=True)
+    client = Client(enforce_csrf_checks=True)
+    login = submit(client, "auth/login", {"email": email, "password": PASSWORD})
+    assert login.status_code == 200
+    assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+    assert submit(client, "account/email", {"email": address}).status_code == 200
+
+
+def test_a_signup_answers_alike_after_its_address_was_requested_as_a_new_email(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for address, verified in (("verified@example.com", True), ("unverified@example.com", False)):
+        account = User.objects.create_user(username=address.partition("@")[0], email=address)
+        EmailAddress.objects.create(user=account, email=address, primary=True, verified=verified)
+    addresses = ["new@example.com", "verified@example.com", "unverified@example.com"]
+    for index, address in enumerate(addresses):
+        request_as_new_email(address, f"requester-{index}")
+    mail.outbox.clear()
+    clock = answer_clock(monkeypatch, 100.0, 100.25, 200.0, 200.25, 300.0, 300.25)
+
+    with override_settings(PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS=1.0):
+        answers = [
+            signup(Client(enforce_csrf_checks=True), {"email": email}) for email in addresses
+        ]
+
+    assert [answer.status_code for answer in answers] == [401, 401, 401]
+    assert answers[0].json() == answers[1].json() == answers[2].json()
+    assert clock.waits == [0.75, 0.75, 0.75]
+    assert mail.outbox == []
+
+
 @pytest.mark.parametrize(
     "body",
     [
