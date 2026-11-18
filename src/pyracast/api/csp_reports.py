@@ -65,6 +65,13 @@ def _violations(document: object) -> Iterator[dict[str, Any]]:
                 }
 
 
+def _document(body: bytes) -> object:
+    try:
+        return json.loads(body) if len(body) <= MAX_REPORT_BYTES else None
+    except ValueError:
+        return None
+
+
 # Report URLs can carry credentials and tokens, so only the blocked origin and the document's
 # first path segment are kept.
 class CSPReportView(APIView):
@@ -74,11 +81,7 @@ class CSPReportView(APIView):
     def post(self, request: Request) -> HttpResponse:
         if request.content_type.split(";", 1)[0].strip() in CONTENT_TYPES:
             body = request.read(MAX_REPORT_BYTES + 1)
-            try:
-                document = json.loads(body) if len(body) <= MAX_REPORT_BYTES else None
-            except ValueError:
-                document = None
-            for count, violation in enumerate(_violations(document)):
+            for count, violation in enumerate(_violations(_document(body))):
                 if count == MAX_REPORTS:
                     break
                 logger.info(
