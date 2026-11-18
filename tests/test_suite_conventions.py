@@ -152,7 +152,7 @@ def test_the_coverage_floor_and_every_scanner_read_the_deployment_code() -> None
     qodana = yaml.safe_load((root / "qodana.yaml").read_text(encoding="utf-8"))
     (skipped,) = [item["paths"] for item in qodana["exclude"] if item["name"] == "All"]
 
-    assert coverage["coverage"]["run"]["source"] == ["src/pyracast", "deploy"]
+    assert coverage["coverage"]["run"]["source"] == ["src", "deploy"]
     assert coverage["coverage"]["report"]["fail_under"] == 100
     assert {"src", "scripts", "deploy", ".github"} <= set(sonar["sonar.sources"].split(","))
     assert not [

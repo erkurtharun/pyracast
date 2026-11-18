@@ -132,7 +132,7 @@ faulthandler_timeout = 300
 [tool.coverage.run]
 branch = true
 relative_files = true
-source = ["src/pyracast", "deploy"]
+source = ["src", "deploy"]
 
 [tool.coverage.report]
 fail_under = 100

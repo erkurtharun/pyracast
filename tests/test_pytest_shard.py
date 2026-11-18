@@ -1,7 +1,9 @@
 import json
 import os
+import re
 import subprocess
 import sys
+from html import unescape
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,46 @@ from scripts.pytest_shard import (
     selected_nodes,
     validate_shards,
 )
+
+
+def test_coverage_xml_resolves_each_package_initializer_to_one_source(tmp_path: Path) -> None:
+    configuration = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    files = ["src/pyracast/__init__.py", "deploy/__init__.py"]
+    for name in files:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True)
+        path.write_text("ready = True\n", encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os\nfrom coverage import Coverage\n"
+            "measurement = Coverage(config_file=os.environ['PYRACAST_COVERAGE_CONFIG'], "
+            "data_file=None)\n"
+            "data = measurement.get_data()\n"
+            "try:\n"
+            "    data.add_lines({'src/pyracast/__init__.py': {1}, 'deploy/__init__.py': {1}})\n"
+            "    measurement.xml_report(outfile='coverage.xml')\n"
+            "finally:\n"
+            "    data.close(force=True)\n",
+        ],
+        cwd=tmp_path,
+        env=os.environ | {"PYRACAST_COVERAGE_CONFIG": str(configuration)},
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    xml = (tmp_path / "coverage.xml").read_text(encoding="utf-8")
+    filenames = re.findall(r'filename="([^"]+)"', xml)
+    roots = [tmp_path / unescape(source) for source in re.findall(r"<source>([^<]+)</source>", xml)]
+    resolved = [
+        {(root / name).resolve() for root in roots if (root / name).is_file()} for name in filenames
+    ]
+    assert len(filenames) == len(files)
+    assert all(len(paths) == 1 for paths in resolved)
+    assert set.union(*resolved) == {(tmp_path / name).resolve() for name in files}
 
 
 @pytest.mark.parametrize("value", ["0/2", "3/2", "1/1", "one/two", "1/2/3"])
