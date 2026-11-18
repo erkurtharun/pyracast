@@ -321,7 +321,8 @@ h3 {
     flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: 4px 16px;
+    gap: 12px 16px;
+    min-height: 44px;
     margin-bottom: 16px;
 }
 .columns {
@@ -453,6 +454,7 @@ a.stat:hover {
     font-size: 14px;
     font-weight: 600;
     line-height: 1.4;
+    white-space: nowrap;
 }
 .badge::before {
     content: "";
@@ -563,8 +565,12 @@ a.stat:hover {
     gap: 0;
     margin-top: 12px;
 }
+.panel-head + .facts--compact {
+    margin-top: 0;
+}
 .facts--compact > div {
     display: flex;
+    align-items: baseline;
     justify-content: space-between;
     gap: 16px;
     padding: 8px 0;
@@ -574,8 +580,16 @@ a.stat:hover {
     font-size: 15px;
 }
 .facts--compact dd {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 0 16px;
     font-weight: 700;
     text-align: right;
+}
+.facts--compact .text-link {
+    font-weight: 400;
 }
 .facts--tinted {
     padding: 16px;
@@ -660,6 +674,27 @@ a.stat:hover {
     max-width: 280px;
     overflow-wrap: anywhere;
 }
+.table .cell-fit,
+.table .cell-action {
+    width: 1%;
+}
+.table .row-title {
+    position: relative;
+    display: inline-block;
+    min-height: 0;
+}
+.table .row-title::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    right: 0;
+    left: 0;
+    height: max(100%, 44px);
+    transform: translateY(-50%);
+}
+.nowrap {
+    white-space: nowrap;
+}
 .cell {
     display: grid;
     gap: 2px;
@@ -668,10 +703,10 @@ a.stat:hover {
 }
 .cell-action {
     text-align: right;
+    white-space: nowrap;
 }
 .cell-actions {
     display: inline-flex;
-    flex-wrap: wrap;
     justify-content: flex-end;
     gap: 8px;
 }
@@ -822,6 +857,13 @@ a.stat:hover {
 .field--wide {
     grid-column: 1 / -1;
 }
+.field-grid > .field:not(.field--check) {
+    display: flex;
+    flex-direction: column;
+}
+.field-grid > .field:not(.field--check) > :last-child {
+    margin-top: auto;
+}
 .field label {
     font-weight: 600;
 }
@@ -894,6 +936,9 @@ a.stat:hover {
 }
 .errorlist li::before {
     content: "Error: ";
+}
+:lang(tr) .errorlist li::before {
+    content: "Hata: ";
 }
 .errorlist .errorlist li::before {
     content: none;
@@ -1059,6 +1104,14 @@ a.stat:hover {
     .facts {
         grid-template-columns: minmax(0, 1fr);
     }
+    .facts--compact > div {
+        flex-direction: column;
+        gap: 0;
+    }
+    .facts--compact dd {
+        justify-content: flex-start;
+        text-align: left;
+    }
     .steps {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -1093,17 +1146,18 @@ a.stat:hover {
     .table--stack tr:last-child {
         margin-bottom: 0;
     }
-    .table--stack tbody th,
+    .table--stack tbody th {
+        padding: 8px 0;
+        border-top: 0;
+    }
     .table--stack td {
-        display: grid;
-        grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-        gap: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 4px 12px;
         max-width: none;
         padding: 8px 0;
         border-top: 1px solid var(--line);
-    }
-    .table--stack tbody th {
-        border-top: 0;
     }
     .table--stack [data-label]::before {
         content: attr(data-label);
@@ -1111,15 +1165,39 @@ a.stat:hover {
         font-size: 13px;
         font-weight: 700;
     }
+    .table--stack td::before {
+        flex: 0 0 calc(40% - 12px);
+    }
+    .table--stack td > * {
+        flex: 1 1 60%;
+        min-width: 0;
+    }
+    .table--stack td > .badge {
+        flex: none;
+    }
+    .table--stack tbody th::before {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
     .table--stack .cell-action {
         display: block;
+        width: auto;
         text-align: left;
+        white-space: normal;
+    }
+    .table--stack .cell-action:empty {
+        display: none;
     }
     .table--stack .cell-action .btn {
         width: 100%;
     }
     .table--stack .cell-actions {
         display: grid;
+        justify-content: stretch;
     }
 }
 @media (max-width: 420px) {
