@@ -230,21 +230,17 @@ def test_restored_actuals_are_admitted_at_their_slot_as_the_exported_ones(
     admitted = []
     for original in before.actuals:
         copy = restored_copy(system.binding, original)
-        slot = original.job.scheduled_slot
+        slot, start, end = (
+            original.job.scheduled_slot,
+            original.coverage_start,
+            original.coverage_end,
+        )
+        assert start is not None
+        assert end is not None
         for grace in (None, slot + INTRADAY_HISTORY_WINDOW):
-            exported = native_actual_snapshots(
-                source,
-                original.coverage_start,
-                original.coverage_end,
-                slot,
-                actuals_grace_until=grace,
-            )
+            exported = native_actual_snapshots(source, start, end, slot, actuals_grace_until=grace)
             held = native_actual_snapshots(
-                system.binding,
-                original.coverage_start,
-                original.coverage_end,
-                slot,
-                actuals_grace_until=grace,
+                system.binding, start, end, slot, actuals_grace_until=grace
             )
             assert (original in exported) == (copy in held)
             if copy in held:
