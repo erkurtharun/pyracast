@@ -68,7 +68,8 @@ class AuthenticateView(views.AuthenticateView):
     input_class = SecondFactorInput
 
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        if request.method != "POST":
+        # Without a pending sign-in allauth answers and the session keeps its authentication.
+        if request.method != "POST" or LOGIN_SESSION_KEY not in request.session:
             return super().handle(request, *args, **kwargs)
         # The step is checked under the account's locks before its input uses up a code, so the
         # code, the authenticator write and the sign-in commit together.

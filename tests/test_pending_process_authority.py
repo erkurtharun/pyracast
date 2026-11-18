@@ -862,6 +862,20 @@ def test_a_repeated_second_factor_completion_leaves_the_established_session_sign
     assert session_user(client) == user.pk
 
 
+def test_a_repeated_provider_second_factor_completion_leaves_the_session_signed_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pending = provider_second_factor(monkeypatch)
+    assert submit(pending.client, pending.endpoint, pending.data).status_code == 200
+    records = pending.client.session[AUTHENTICATION_METHODS_SESSION_KEY]
+
+    status, body = answer(submit(pending.client, pending.endpoint, pending.data))
+
+    assert (status, body["code"]) == (401, "not_authenticated")
+    assert pending.client.session[AUTHENTICATION_METHODS_SESSION_KEY] == records
+    assert session_user(pending.client) == pending.user.pk
+
+
 def test_a_password_change_started_while_a_reset_code_is_requested_waits_and_ends_the_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
