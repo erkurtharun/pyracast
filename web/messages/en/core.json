@@ -143,6 +143,7 @@
         "emailAddress": "Email address",
         "sendVerification": "Send verification code",
         "sessionExpired": "Your session has expired. Please sign in again.",
+        "sessionEndingSoon": "Your session ends at {time}. Save your work; you will need to sign in again.",
         "confirmIdentity": "Please confirm your identity and try again.",
         "newEmail": "New email address",
         "verifyEmail": "Verify new email",
@@ -223,7 +224,9 @@
     "Errors": {
         "request": "Request failed ({status}). Please try again.",
         "invalidResponse": "The server returned an invalid response. Please try again.",
-        "reference": "Reference: {reference}"
+        "reference": "Reference: {reference}",
+        "network": "Could not reach the server. Check your connection and try again.",
+        "unconfirmed": "The server did not confirm the change. Reload to check whether it was saved."
     },
     "ProductionCsv": {
         "size": "Choose a CSV no larger than 2 MiB.",

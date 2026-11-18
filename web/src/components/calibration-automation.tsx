@@ -2,12 +2,12 @@
 import { useCanManageWorkspace } from "./workspace-access";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import { request, type CalibrationAutomation } from "@/lib/api";
+import type { PlantScope } from "@/lib/api";
+import { api } from "@/lib/api/client";
 import { Notice, useResource } from "./ui";
 
 type PanelProps = {
-    base: string;
-    token: string;
+    scope: PlantScope;
     refresh: number;
     disabled: boolean;
     onPendingChange: (pending: boolean) => void;
@@ -18,7 +18,7 @@ export function CalibrationAutomationPanel(props: PanelProps) {
     const [revision, setRevision] = useState(0);
     return (
         <AutomationStatus
-            key={`${props.base}-${revision}`}
+            key={`${props.scope.plant_id}-${revision}`}
             {...props}
             onSaved={() => {
                 setRevision((value) => value + 1);
@@ -29,8 +29,7 @@ export function CalibrationAutomationPanel(props: PanelProps) {
 }
 
 function AutomationStatus({
-    base,
-    token,
+    scope,
     refresh,
     disabled,
     onPendingChange,
@@ -74,8 +73,9 @@ function AutomationStatus({
             live.current = false;
         };
     }, []);
-    const resource = useResource<CalibrationAutomation>(
-        `${base}calibration/automation/`,
+    const resource = useResource(
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibration/automation/",
+        { path: scope },
         refresh,
         30_000,
     );
@@ -86,11 +86,12 @@ function AutomationStatus({
         onPendingChange(true);
         setError(undefined);
         try {
-            await request<CalibrationAutomation>(
-                `${base}calibration/automation/`,
-                "PATCH",
-                { enabled },
-                token,
+            await api.patch(
+                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibration/automation/",
+                {
+                    path: scope,
+                    body: { enabled },
+                },
             );
             if (live.current) onSaved();
         } catch (reason) {

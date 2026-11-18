@@ -11,6 +11,7 @@ async function workspace(
     page: Page,
     unknownImpact = false,
     configurationChanged = false,
+    { configured = true, role = "admin" as "admin" | "viewer" } = {},
 ) {
     const paged = (results: unknown[]) => ({
         results,
@@ -51,7 +52,8 @@ async function workspace(
                 csrf_token: "token",
             };
         else if (path === "/api/tenants/")
-            data = paged([tenantRow({ id: 1, name: "Tenant", role: "admin" })]);
+            data = paged([tenantRow({ id: 1, name: "Tenant", role })]);
+        else if (path.endsWith("/change-requests/")) data = paged([]);
         else if (path.endsWith("/sites/")) data = paged([region]);
         else if (path.endsWith("/plants/"))
             data = paged([
@@ -59,7 +61,8 @@ async function workspace(
                     id: 21,
                     name: "Outage plant",
                     region_id: 11,
-                    current_configuration: configuration,
+                    current_configuration: configured ? configuration : null,
+                    submission: configured ? null : configuration,
                 },
             ]);
         else if (path.endsWith("/performance/"))
@@ -240,7 +243,7 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
         normal_energy_mwh: "2",
         affected_energy_mwh: "0",
     });
-    expect(csv[1]["outage_scenario.incidents"]).toContain(
+    expect(csv[1]?.["outage_scenario.incidents"]).toContain(
         "Inverter disconnected",
     );
     await page.getByRole("button", { name: "Outages", exact: true }).click();
@@ -256,7 +259,7 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
         .getByLabel("Resolved at (device time)", { exact: true })
         .fill("2026-11-11T14:00");
     await page.getByRole("button", { name: "Save resolution" }).click();
-    await expect(page.getByText("resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
     expect(state.incident()).toMatchObject({
         ends_at: "2026-11-11T11:00:00.000Z",
         revision: 3,
@@ -347,6 +350,112 @@ test("rejects future times and requires confirmation to cancel an incorrect inci
     await page
         .getByRole("button", { name: "Cancel outage", exact: true })
         .click();
-    await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
+    await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
     expect(state.incident()?.revision).toBe(2);
+});
+
+for (const role of ["admin", "viewer"] as const) {
+    test(`without a plant configuration the ${role} cannot report an outage and sees why`, async ({
+        page,
+    }) => {
+        await workspace(page, false, false, { configured: false, role });
+        await page
+            .getByRole("button", { name: "Outages", exact: true })
+            .click();
+        await expect(
+            page.getByText(
+                "Outages can be reported once the plant configuration is approved.",
+            ),
+        ).toBeVisible();
+        await expect(
+            page.getByRole("button", { name: /^(Report|Submit) outage$/ }),
+        ).toHaveCount(0);
+    });
+}
+
+test("reduced capacity needs at least one available value", async ({
+    page,
+}) => {
+    const state = await workspace(page);
+    await page.getByRole("button", { name: "Outages", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Report outage", exact: true })
+        .click();
+    await page.getByLabel("Incident title").fill("Inverter disconnected");
+    await page
+        .getByLabel("Started at (device time)", { exact: true })
+        .fill("2026-11-11T11:00");
+    await page.getByLabel("Capacity impact").selectOption("reduced");
+    await page
+        .getByRole("button", { name: "Save outage", exact: true })
+        .click();
+    await expect(
+        page.getByRole("alert").filter({
+            hasText:
+                "Enter at least one available capacity, or choose unknown impact.",
+        }),
+    ).toBeVisible();
+    expect(state.incident()).toBeNull();
+});
+
+test("capacity inputs show the configured ceiling", async ({ page }) => {
+    await workspace(page);
+    await page.getByRole("button", { name: "Outages", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Report outage", exact: true })
+        .click();
+    await page.getByLabel("Capacity impact").selectOption("reduced");
+    await expect(
+        page.getByLabel("Available panel DC capacity (MW)"),
+    ).toHaveAttribute("max", "5");
+    await expect(
+        page.getByLabel("Available inverter AC capacity (MW)"),
+    ).toHaveAttribute("max", "4");
+    await expect(
+        page.getByLabel("Available grid export capacity (MW)"),
+    ).toHaveAttribute("max", "4");
+});
+
+test("an emptied resolution is refused before it is sent", async ({ page }) => {
+    const state = await workspace(page);
+    await create(page);
+    const resolutions: string[] = [];
+    page.on("request", (request) => {
+        if (request.url().endsWith("/resolve/"))
+            resolutions.push(request.url());
+    });
+    await page
+        .getByRole("button", { name: "Resolve outage", exact: true })
+        .click();
+    const resolvedAt = page.getByLabel("Resolved at (device time)", {
+        exact: true,
+    });
+    await resolvedAt.fill("");
+    await page.getByRole("button", { name: "Save resolution" }).click();
+    expect(
+        await resolvedAt.evaluate(
+            (input: HTMLInputElement) => input.validity.valueMissing,
+        ),
+    ).toBe(true);
+    expect(resolutions).toEqual([]);
+    expect(state.incident()?.revision).toBe(1);
+});
+
+test("an ongoing outage is tagged as a warning and a resolved one is labelled", async ({
+    page,
+}) => {
+    await workspace(page);
+    await create(page);
+    const tag = page.locator("article.provenance .tag");
+    await expect(tag).toHaveText("Active");
+    await expect(tag).toHaveClass(/tag-warning/);
+    await page
+        .getByRole("button", { name: "Resolve outage", exact: true })
+        .click();
+    await page
+        .getByLabel("Resolved at (device time)", { exact: true })
+        .fill("2026-11-11T14:00");
+    await page.getByRole("button", { name: "Save resolution" }).click();
+    await expect(tag).toHaveText("Resolved");
+    await expect(tag).toHaveClass(/tag-neutral/);
 });

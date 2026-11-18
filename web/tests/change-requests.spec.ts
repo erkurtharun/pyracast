@@ -22,6 +22,11 @@ function proposal(id = 1) {
         plant_name: "East array",
         configuration_id: 31,
         timezone: "Europe/Istanbul",
+        item_count: 1,
+        period_start: "2026-11-09T08:00:00+03:00",
+        period_end: "2026-11-09T08:30:00+03:00",
+        incident_action: null,
+        incident_title: null,
         proposed_by: { id: 2, name: "Member" },
         submitted_at: "2026-11-09T12:00:00Z",
         reason: "Verified meter reading",
@@ -175,7 +180,11 @@ test("member submits a native production correction with a stable retry key and 
         .click();
     await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
     expect(submissions).toHaveLength(2);
-    expect(submissions[0].idempotency_key).toBe(submissions[1].idempotency_key);
+    expect(submissions[0]?.idempotency_key).toEqual(expect.any(String));
+    expect(submissions[1]?.idempotency_key).toEqual(expect.any(String));
+    expect(submissions[0]?.idempotency_key).toBe(
+        submissions[1]?.idempotency_key,
+    );
     expect(submissions[1]).toMatchObject({
         reason: "Checked meter",
         unit: "MWh",
@@ -207,10 +216,10 @@ test("member submits a native production correction with a stable retry key and 
         changes: [{ action: "revert", expected_revision_id: 4 }],
     });
     expect(
-        (submissions[2].changes as Record<string, unknown>[])[0],
+        (submissions[2]?.changes as Record<string, unknown>[] | undefined)?.[0],
     ).not.toHaveProperty("energy");
-    expect(submissions[2].idempotency_key).not.toBe(
-        submissions[1].idempotency_key,
+    expect(submissions[2]?.idempotency_key).not.toBe(
+        submissions[1]?.idempotency_key,
     );
     expect(direct).toEqual([]);
 });
@@ -902,4 +911,143 @@ test("the inbox label counts several updates in the plural", async ({
     await expect(
         page.getByRole("button", { name: "Inbox, 2 updates", exact: true }),
     ).toBeVisible();
+});
+
+async function routeUnavailableRows(
+    page: Page,
+    reasons: (string | null)[],
+    role: "member" | "admin",
+) {
+    await page.route("**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        );
+        if (date === null) throw new Error("The production read names no day.");
+        const hour = (value: number) =>
+            `${date}T${String(value).padStart(2, "0")}:00:00+03:00`;
+        return route.fulfill({
+            json: nativeProductionHistory(
+                date,
+                "Europe/Istanbul",
+                reasons.map((reason, index) => ({
+                    starts_at: hour(8 + index),
+                    ends_at: hour(9 + index),
+                    effective: reading,
+                    ...(role === "member"
+                        ? {
+                              can_edit: false,
+                              edit_unavailable_reason: "workspace_readonly",
+                              can_propose: reason === null,
+                              proposal_unavailable_reason: reason,
+                          }
+                        : {
+                              can_edit: reason === null,
+                              edit_unavailable_reason: reason,
+                          }),
+                })),
+            ),
+        });
+    });
+}
+
+test("a member sees why an interval cannot be proposed", async ({ page }) => {
+    await member(page);
+    await routeUnavailableRows(
+        page,
+        [null, "interval_not_completed"],
+        "member",
+    );
+    await openPlant(page, "Production");
+    const rows = page.locator(".production-table tbody tr");
+    await expect(
+        rows.nth(0).getByRole("button", { name: /^Suggest correction for/ }),
+    ).toBeVisible();
+    await expect(rows.nth(1)).toContainText(
+        "Only completed intervals can be changed.",
+    );
+});
+
+test("a member sees one notice when no interval of the day can be proposed", async ({
+    page,
+}) => {
+    await member(page);
+    await routeUnavailableRows(
+        page,
+        [
+            "configuration_not_current",
+            "observation_overlap",
+            "configuration_not_current",
+        ],
+        "member",
+    );
+    await openPlant(page, "Production");
+    await expect(
+        page.getByText(
+            "Nothing on this day can be changed. Values recorded under an earlier plant configuration cannot be changed.",
+        ),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: /^Suggest correction for/ }),
+    ).toHaveCount(0);
+});
+
+test("an administrator sees why an interval cannot be edited", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
+    await routeUnavailableRows(page, [null, "configuration_mismatch"], "admin");
+    await openPlant(page, "Production");
+    const rows = page.locator(".production-table tbody tr");
+    await expect(
+        rows.nth(0).getByRole("button", { name: /^Edit / }),
+    ).toBeVisible();
+    await expect(rows.nth(1)).toContainText(
+        "Values recorded under another plant configuration cannot be changed here.",
+    );
+});
+
+test("review cards show the period, item count and outage title", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/change-requests/?*", (route) =>
+        route.fulfill({
+            json: paged([
+                {
+                    ...proposal(1),
+                    item_count: 2,
+                    period_start: "2026-11-09T05:00:00Z",
+                    period_end: "2026-11-09T06:00:00Z",
+                    incident_action: null,
+                    incident_title: null,
+                },
+                {
+                    ...proposal(2),
+                    kind: "incident",
+                    production_items: [],
+                    item_count: 1,
+                    period_start: "2026-11-09T08:00:00Z",
+                    period_end: null,
+                    incident_action: "create",
+                    incident_title: "Grid unavailable",
+                },
+            ]),
+        }),
+    );
+    await page.goto("/app/");
+    await page.getByRole("button", { name: "Inbox", exact: true }).click();
+    const cards = page.locator(".inbox-card");
+    await expect(cards.nth(0)).toContainText("2 intervals");
+    await expect(
+        cards.nth(0).locator('time[datetime="2026-11-09T05:00:00Z"]'),
+    ).toHaveCount(1);
+    await expect(
+        cards.nth(0).locator('time[datetime="2026-11-09T06:00:00Z"]'),
+    ).toHaveCount(1);
+    await expect(cards.nth(1)).toContainText("New outage: Grid unavailable");
+    await expect(cards.nth(1)).toContainText("Ongoing");
+    await expect(
+        cards.nth(1).locator('time[datetime="2026-11-09T08:00:00Z"]'),
+    ).toHaveCount(1);
 });

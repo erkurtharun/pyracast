@@ -16,7 +16,7 @@ export function totp(secret: string): string {
     const digest = createHmac("sha1", Buffer.from(bytes))
         .update(counter)
         .digest();
-    const offset = digest[digest.length - 1] & 15;
+    const offset = digest.readUInt8(digest.length - 1) & 15;
     return String(
         (digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000,
     ).padStart(6, "0");

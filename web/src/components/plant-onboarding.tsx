@@ -2,7 +2,8 @@
 import { useTranslations, useFormatter } from "next-intl";
 
 import { useRef, useState } from "react";
-import { request, type Region, type Plant } from "@/lib/api";
+import type { Region } from "@/lib/api";
+import { api } from "@/lib/api/client";
 import type { components } from "@/lib/schema";
 import { Field, Notice } from "./ui";
 import {
@@ -14,13 +15,11 @@ export type PlantSite = components["schemas"]["SiteOutput"];
 
 export function PlantOnboarding({
     tenant,
-    token,
     existing,
     onCreated,
     onCancel,
 }: {
     tenant: number;
-    token: string;
     existing?: Region;
     onCreated: (site: PlantSite) => void;
     onCancel: () => void;
@@ -103,23 +102,34 @@ export function PlantOnboarding({
                         const site = existing
                             ? {
                                   ...existing,
-                                  plant: await request<Plant>(
-                                      `/api/tenants/${tenant}/regions/${existing.id}/plants/`,
-                                      "POST",
-                                      body,
-                                      token,
+                                  plant: await api.post(
+                                      "/api/tenants/{tenant_id}/regions/{region_id}/plants/",
+                                      {
+                                          path: {
+                                              tenant_id: tenant,
+                                              region_id: existing.id,
+                                          },
+                                          body,
+                                      },
                                   ),
                               }
-                            : await request<PlantSite>(
-                                  `/api/tenants/${tenant}/sites/`,
-                                  "POST",
+                            : await api.post(
+                                  "/api/tenants/{tenant_id}/sites/",
                                   {
-                                      ...body,
-                                      latitude: Number(data.get("latitude")),
-                                      longitude: Number(data.get("longitude")),
-                                      timezone: data.get("timezone"),
+                                      path: { tenant_id: tenant },
+                                      body: {
+                                          ...body,
+                                          latitude: Number(
+                                              data.get("latitude"),
+                                          ),
+                                          longitude: Number(
+                                              data.get("longitude"),
+                                          ),
+                                          timezone: String(
+                                              data.get("timezone") ?? "",
+                                          ),
+                                      },
                                   },
-                                  token,
                               );
                         onCreated(site);
                     } catch (error) {

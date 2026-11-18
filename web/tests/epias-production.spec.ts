@@ -285,7 +285,7 @@ test("actual production defaults to generation hours and full day restores every
         { header: true, skipEmptyLines: true },
     ).data;
     expect(records).toHaveLength(24);
-    expect(records[8].energy).toBe("");
+    expect(records[8]?.energy).toBe("");
     expect(records[0]).toMatchObject({
         energy: "0",
         unit: "MWh",
@@ -373,6 +373,8 @@ test("generation filtering preserves native intervals and repeated local hours a
     page,
 }) => {
     await productionApi(page, true);
+    const [template] = oneInterval(1).intervals;
+    if (!template) throw new Error("The production fixture has no interval.");
     const intervals = [
         ["00:00:00+02:00", "01:30:00+02:00", 0],
         ["01:30:00+02:00", "02:00:00+02:00", 1],
@@ -381,16 +383,13 @@ test("generation filtering preserves native intervals and repeated local hours a
         ["02:30:00+01:00", "03:00:00+01:00", 1],
         ["03:00:00+01:00", "23:00:00+01:00", 0],
     ].map(([start, end, energy]) => ({
-        ...oneInterval(1).intervals[0],
+        ...template,
         starts_at: `2026-10-25T${start}`,
         ends_at: `2026-10-25T${end}`,
         effective:
             energy === null
                 ? null
-                : {
-                      ...oneInterval(1).intervals[0].effective,
-                      energy_mwh: energy,
-                  },
+                : { ...template.effective, energy_mwh: energy },
     }));
     await page.route("**/production/?*", (route) =>
         route.fulfill({
@@ -543,7 +542,10 @@ test("importing a different native interval preserves an open draft for recovery
     await page.route("**/production/?*", (route) => {
         if (!imported) return route.fallback();
         const history = oneInterval(0.25);
-        history.intervals[0].ends_at = "2026-11-09T08:30:00+03:00";
+        const [interval] = history.intervals;
+        if (!interval)
+            throw new Error("The production fixture has no interval.");
+        interval.ends_at = "2026-11-09T08:30:00+03:00";
         return route.fulfill({ json: history });
     });
     await page.route("**/production/changes/", (route) => {

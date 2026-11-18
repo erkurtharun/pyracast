@@ -1,7 +1,8 @@
 "use client";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import { request } from "@/lib/api";
+import type { PlantScope } from "@/lib/api";
+import { api } from "@/lib/api/client";
 import type { components } from "@/lib/schema";
 import { intervalTimeFormatter } from "@/lib/intervals";
 import { parseProduction, type Observation } from "@/lib/production";
@@ -22,23 +23,21 @@ type Selection =
 type ImportResult = components["schemas"]["ObservationImportOutput"];
 
 export function ProductionImport({
-    base,
+    scope,
     configuration,
     timezone,
-    token,
     onSaved,
 }: {
-    base: string;
+    scope: PlantScope;
     configuration: number;
     timezone: string;
-    token: string;
     onSaved: () => void;
 }) {
     const t = useTranslations("ProductionImport");
     const locale = useLocale();
     const sequence = useRef(0);
     const [selection, setSelection] = useState<Selection>({ status: "empty" });
-    const [unit, setUnit] = useState("kWh");
+    const [unit, setUnit] = useState<"MWh" | "kWh">("kWh");
     const [result, setResult] = useState<ImportResult>();
     const [confirming, setConfirming] = useState(false);
     const [previewRequest, setPreviewRequest] = useState<
@@ -137,15 +136,16 @@ export function ProductionImport({
                     const current = ++sequence.current;
                     setPreviewRequest({ status: "pending" });
                     try {
-                        const preview = await request<Preview>(
-                            `${base}production/preview/`,
-                            "POST",
+                        const preview = await api.post(
+                            "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/preview/",
                             {
-                                configuration_id: configuration,
-                                unit,
-                                observations: selection.observations,
+                                path: scope,
+                                body: {
+                                    configuration_id: configuration,
+                                    unit,
+                                    observations: selection.observations,
+                                },
                             },
-                            token,
                         );
                         if (current === sequence.current) {
                             setSelection({
@@ -197,7 +197,11 @@ export function ProductionImport({
                                 disabled={confirming}
                                 onChange={(event) => {
                                     ++sequence.current;
-                                    setUnit(event.target.value);
+                                    setUnit(
+                                        event.target.value === "MWh"
+                                            ? "MWh"
+                                            : "kWh",
+                                    );
                                     setResult(undefined);
                                     setPreviewRequest({ status: "idle" });
                                     if (selection.status === "preview")
@@ -313,18 +317,18 @@ export function ProductionImport({
                                 const current = ++sequence.current;
                                 setConfirming(true);
                                 try {
-                                    const response =
-                                        await request<ImportResult>(
-                                            `${base}production/changes/`,
-                                            "POST",
-                                            {
+                                    const response = await api.post(
+                                        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
+                                        {
+                                            path: scope,
+                                            body: {
                                                 configuration_id: configuration,
                                                 unit,
                                                 changes:
                                                     selection.preview.changes,
                                             },
-                                            token,
-                                        );
+                                        },
+                                    );
                                     if (current === sequence.current) {
                                         setResult(response);
                                         setSelection({

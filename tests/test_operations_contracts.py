@@ -1,4 +1,5 @@
 import ast
+import io
 import ipaddress
 import itertools
 import re
@@ -13,6 +14,7 @@ import yaml
 from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.test import Client
 from django.urls import URLPattern, URLResolver
 from dramatiq.brokers.stub import StubBroker
 
@@ -297,6 +299,28 @@ def test_every_actor_queue_is_consumed_by_exactly_one_compose_worker() -> None:
 
 def test_watchdog_supervises_every_long_running_compose_service() -> None:
     assert set(watchdog.SERVICES) == long_running_services()
+
+
+@pytest.mark.django_db
+def test_smoke_accepts_the_anonymous_session_contract(
+    client: Client,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    response = client.get("/api/session/")
+    assert response.status_code == 200
+    probe = re.search(
+        r"^csrf_token=.*?python -c '\n(.*?)\n'\)", text(DEPLOY / "smoke.sh"), re.M | re.S
+    )
+    assert probe
+    fixture = tmp_path / "smoke_session.py"
+    fixture.write_text(probe[1], encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", io.StringIO(response.content.decode()))
+
+    runpy.run_path(str(fixture))
+
+    assert capsys.readouterr().out.strip() == response.json()["csrf_token"]
 
 
 @pytest.mark.django_db

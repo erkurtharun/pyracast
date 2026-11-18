@@ -79,18 +79,18 @@ for (const explicitAction of [true, false]) {
             expect(requests).toHaveLength(0);
             await page.locator("[data-preview-button]").click();
             await expect.poll(() => requests.length).toBe(1);
-            expect(requests[0].pathname).toBe(endpoint);
-            expect(requests[0].body).toContain('name="action"\r\n\r\npreview');
+            expect(requests[0]?.pathname).toBe(endpoint);
+            expect(requests[0]?.body).toContain('name="action"\r\n\r\npreview');
             await expect(
                 page.getByRole("heading", { name: "File preview" }),
             ).toBeVisible();
             await page.locator('[name="settings_confirmed"]').check();
             await page.locator("[data-save-button]").click();
             await expect.poll(() => requests.length).toBe(2);
-            expect(requests[1].pathname).toBe(endpoint);
-            expect(requests[1].body).toContain('name="action"\r\n\r\nsave');
-            expect(requests[1].body).toContain('filename="history.json"');
-            expect(requests[1].body).toContain(
+            expect(requests[1]?.pathname).toBe(endpoint);
+            expect(requests[1]?.body).toContain('name="action"\r\n\r\nsave');
+            expect(requests[1]?.body).toContain('filename="history.json"');
+            expect(requests[1]?.body).toContain(
                 'name="preview_token"\r\n\r\npreview-token',
             );
             await expect(page.getByRole("status")).toHaveText(
