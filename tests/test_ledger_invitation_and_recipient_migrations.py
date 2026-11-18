@@ -224,6 +224,32 @@ def test_migrations_close_superseded_invitations_and_keep_every_valid_row(
     assert all(installed(table) == set() for table in NEW)
 
 
+@pytest.mark.usefixtures("leaf")
+def test_migration_uses_the_earliest_successor_time_in_primary_key_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = make_request_case(monkeypatch)
+    migrate(*PREVIOUS.values())
+    older = invited(case, ADDRESS, START, START + timedelta(days=4))
+    middle = invited(case, ADDRESS, START + timedelta(days=5), START + timedelta(days=3))
+    latest = invited(case, ADDRESS, START + timedelta(days=3), START + WEEK)
+
+    with pytest.raises(ValueError, match=r"holds 1 row.*still open"):
+        forward()
+
+    invitations = previous_invitations()
+    assert invitations.get(pk=older).expires_at == START + timedelta(days=4)
+    invitations.filter(pk=older).update(expires_at=START + timedelta(days=3))
+    forward()
+
+    assert dict(WorkspaceInvitation.objects.values_list("pk", "revoked_at")) == {
+        older: START + timedelta(days=3),
+        middle: START + timedelta(days=3),
+        latest: None,
+    }
+    assert broken_rules() == {}
+
+
 def overlapping_invitations(case: RequestCase) -> models.QuerySet[Any]:
     older = invited(case, "a@example.com", START, START + WEEK)
     invited(case, "a@example.com", START + timedelta(days=1), START + WEEK)
