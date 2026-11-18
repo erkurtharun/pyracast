@@ -349,6 +349,11 @@ def test_bootstrap_is_one_idempotent_definition_without_its_own_transaction() ->
     assert "DATABASE pyracast" not in BOOTSTRAP
 
 
+def log_line(diagnostic: psycopg.errors.Diagnostic) -> str:
+    # A parse tree arrives as the detail of its log line.
+    return f"{diagnostic.message_primary or ''} {diagnostic.message_detail or ''}"
+
+
 class ServerPsql:
     # psql opens its session with the startup options of its -d connection string, and -1 sends
     # BEGIN before the script and COMMIT after it. Records each log line the server sends it.
@@ -359,7 +364,7 @@ class ServerPsql:
         self.emitted: list[str] = []
 
     def record(self, diagnostic: psycopg.errors.Diagnostic) -> None:
-        self.emitted.append(diagnostic.message_primary or "")
+        self.emitted.append(log_line(diagnostic))
 
     def __call__(
         self, command: list[str], *, input: str | None = None, **options: Any
@@ -394,11 +399,14 @@ def role_verifier(database: str, role: str = bootstrap_database.RUNTIME_ROLE) ->
 
 def set_role_verifier(
     database: str, verifier: str | None, role: str = bootstrap_database.RUNTIME_ROLE
-) -> None:
+) -> list[str]:
+    emitted: list[str] = []
     with psycopg.connect(**server_parameters(database), autocommit=True) as connection:
+        connection.add_notice_handler(lambda diagnostic: emitted.append(log_line(diagnostic)))
         connection.execute(
             sql.SQL("ALTER ROLE {} PASSWORD {}").format(sql.Identifier(role), sql.Literal(verifier))
         )
+    return emitted
 
 
 @pytest.fixture
@@ -494,6 +502,21 @@ def test_password_changes_run_in_a_session_whose_statements_postgresql_never_log
     leaked = re.compile("scram|secret", re.IGNORECASE)
     assert [line for line in psql.emitted if leaked.search(line)] == []
     assert not any("SCRAM" in argument for command in psql.commands for argument in command)
+
+
+@pytest.mark.parametrize("role", sorted(bootstrap_database.ROLES.values()))
+def test_restoring_a_role_verifier_logs_nothing_where_every_statement_is_logged(
+    logging_database: str, role: str
+) -> None:
+    control = ServerPsql(logging_database)
+    control(["psql", "-d", "pyracast", "-Atc", "SELECT 'logged-control'"])
+    assert any("logged-control" in line for line in control.emitted)
+    verifier = bootstrap_database.scram_verifier("restored-secret", SALT)
+
+    emitted = set_role_verifier(logging_database, verifier, role)
+
+    assert role_verifier(logging_database, role) == verifier
+    assert [line for line in emitted if "SCRAM-SHA-256" in line] == []
 
 
 def test_switch_refuses_a_runtime_role_outside_the_definition(
