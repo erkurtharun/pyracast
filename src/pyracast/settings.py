@@ -56,6 +56,8 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.csp.ContentSecurityPolicyMiddleware",
     "pyracast.api.middleware.PrivateAPIResponses",
+    # Outside the session lock, so a sign-up's session is free while its answer waits.
+    "pyracast.accounts.signup.SignupMinimumAnswerTime",
     "pyracast.accounts.session_lock.SessionRequestSerialization",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",

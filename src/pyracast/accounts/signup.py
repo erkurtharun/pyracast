@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable
 from http import HTTPStatus
 from typing import Any, cast
 
@@ -57,26 +58,28 @@ class CompanySignupInput(PasswordInput, SignupInput):
             return cast(User, super().save(request))
 
 
+_SIGNUP_STARTED = "pyracast.signup_started"
+
+
 class CompanySignupView(SignupView):
     input_class = {"POST": CompanySignupInput}  # noqa: RUF012 -- Allauth's view contract.
 
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        if request.method != "POST":
-            return super().dispatch(request, *args, **kwargs)
-        started = time.monotonic()
-        try:
-            response = super().dispatch(request, *args, **kwargs)
-        except ImmediateHttpResponse as error:
-            response = error.response
-        except Exception:
-            _wait_for_minimum_answer_time(started)
-            raise
-        if response.status_code != HTTPStatus.TOO_MANY_REQUESTS:
-            _wait_for_minimum_answer_time(started)
+        if request.method == "POST":
+            request.META[_SIGNUP_STARTED] = time.monotonic()
+        return super().dispatch(request, *args, **kwargs)
+
+
+class SignupMinimumAnswerTime:
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponseBase]) -> None:
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponseBase:
+        response = self.get_response(request)
+        started = request.META.get(_SIGNUP_STARTED)
+        if started is not None and response.status_code != HTTPStatus.TOO_MANY_REQUESTS:
+            elapsed = time.monotonic() - started
+            remaining = settings.PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
         return response
-
-
-def _wait_for_minimum_answer_time(started: float) -> None:
-    remaining = settings.PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS - (time.monotonic() - started)
-    if remaining > 0:
-        time.sleep(remaining)
