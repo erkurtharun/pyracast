@@ -455,6 +455,29 @@ def test_an_invalid_signup_answers_after_the_minimum_time(
     assert not User.objects.exists()
 
 
+@pytest.mark.parametrize("refusal", ["missing_token", "untrusted_origin"])
+def test_a_csrf_refused_signup_answers_after_the_minimum_time(
+    refusal: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = Client(enforce_csrf_checks=True)
+    headers = {}
+    if refusal == "untrusted_origin":
+        headers = {
+            "HTTP_X_CSRFTOKEN": client.get("/api/session/").json()["csrf_token"],
+            "HTTP_ORIGIN": "https://untrusted.example",
+        }
+    clock = answer_clock(monkeypatch, 100.0, 100.25)
+
+    with override_settings(PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS=1.0):
+        response = client.post(
+            AUTH + "auth/signup", DETAILS, content_type="application/json", **headers
+        )
+
+    assert response.status_code == 403
+    assert clock.waits == [0.75]
+    assert not User.objects.exists()
+
+
 def test_a_failed_signup_answers_after_the_minimum_time(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(**kwargs: Any) -> None:
         raise IntegrityError("membership write failed")
