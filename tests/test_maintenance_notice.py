@@ -87,6 +87,10 @@ def api_answer(headers: dict[str, str]) -> tuple[int, dict[str, str], bytes]:
         {"Accept-Language": "tr;q=0", "CF-IPCountry": "TR"},
         {"Cookie": "pyracast_language=tr", "Accept-Language": "en"},
         {"Cookie": "pyracast_language=xx; other=1", "Accept-Language": "tr"},
+        {"Cookie": 'pyracast_language="tr"', "Accept-Language": "en"},
+        {"Cookie": "a,b=1; pyracast_language=tr", "Accept-Language": "en"},
+        {"Cookie": "expires=1; pyracast_language=tr", "Accept-Language": "en"},
+        {"Cookie": "pyracast_language=tr; pyracast_language=en", "Accept-Language": "tr"},
     ],
 )
 def test_the_notice_answers_byte_for_byte_what_the_api_would(
