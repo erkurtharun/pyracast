@@ -186,14 +186,32 @@ def test_every_release_probes_the_public_origin_or_warns_that_none_is_set() -> N
     assert re.search(r'PYRACAST_PUBLIC_ORIGIN\s*=\s*"https://\$\{var\.domain\}"', outputs)
 
 
-def test_deploy_checks_out_the_authorized_commit_rather_than_a_moving_branch() -> None:
-    jobs = release_jobs()
-    for name in ("scan", "deploy"):
-        checkout = jobs[name]["steps"][step_index(jobs[name], "actions/checkout")]
-        assert checkout["with"]["ref"] == "${{ needs.authorize.outputs.sha }}", name
-    deploy_checkout = jobs["deploy"]["steps"][step_index(jobs["deploy"], "actions/checkout")]
-    assert deploy_checkout["with"]["repository"] == "erkurtharun/pyracast"
-    assert "refs/heads/main" not in str(jobs["deploy"])
+def test_scan_checks_out_the_authorized_commit() -> None:
+    scan = release_jobs()["scan"]
+    checkout = scan["steps"][step_index(scan, "actions/checkout")]
+
+    assert checkout["with"]["ref"] == "${{ needs.authorize.outputs.sha }}"
+
+
+def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() -> None:
+    deploy = release_jobs()["deploy"]
+    checkout, move = deploy["steps"][:2]
+
+    assert checkout["uses"].startswith("actions/checkout@")
+    assert checkout["with"] == {
+        "repository": "erkurtharun/pyracast",
+        "ref": "refs/heads/main",
+        "fetch-depth": 0,
+        "persist-credentials": False,
+    }
+    assert move["name"] == "Move to the authorized commit, which must be on main"
+    assert move["run"].splitlines() == [
+        '[[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]',
+        'git merge-base --is-ancestor "$RELEASE_SHA" HEAD',
+        'git checkout --detach "$RELEASE_SHA"',
+    ]
+    assert deploy["env"]["RELEASE_SHA"] == "${{ needs.authorize.outputs.sha }}"
+    assert "refs/heads/main" not in str(deploy["steps"][1:])
 
 
 def test_only_the_first_windows_shard_repeats_the_static_stages() -> None:
