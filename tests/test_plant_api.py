@@ -35,46 +35,51 @@ def test_mounting_geometry_is_validated_and_versioned_in_api() -> None:
     client, base, plant = setup_plant()
     configuration = plant["current_configuration"]
     assert configuration["mounting_type"] == "unknown"
-    assert configuration["surface_tilt"] is None
-    assert configuration["surface_azimuth"] is None
+    assert configuration["surface_tilt_degrees"] is None
+    assert configuration["surface_azimuth_degrees"] is None
     values = {
         "name": "Fixed PV",
         "dc_capacity_mw": 130,
         "export_limit_mw": 100,
         "mounting_type": "fixed",
-        "surface_tilt": 30,
-        "surface_azimuth": 180,
+        "surface_tilt_degrees": 30,
+        "surface_azimuth_degrees": 180,
     }
     detail = f"{base}{plant['id']}/"
     response = client.put(detail, values, content_type="application/json")
     assert response.status_code == 200, response.content
     fixed = response.json()["current_configuration"]
     assert fixed["mounting_type"] == "fixed"
-    assert fixed["surface_tilt"] == 30
-    assert fixed["surface_azimuth"] == 180
+    assert fixed["surface_tilt_degrees"] == 30
+    assert fixed["surface_azimuth_degrees"] == 180
     assert fixed["export_limit_mw"] == 100
     assert fixed["inverter_capacity_mw"] is None
     for invalid in (
         {"mounting_type": "tracking"},
         {"mounting_type": "unknown"},
         {"mounting_type": "dual_axis"},
-        {"surface_tilt": True},
-        {"surface_tilt": 91},
-        {"surface_azimuth": 360},
+        {"surface_tilt_degrees": True},
+        {"surface_tilt_degrees": 91},
+        {"surface_azimuth_degrees": 360},
     ):
         response = client.put(detail, values | invalid, content_type="application/json")
         assert response.status_code == 400, response.content
         assert client.get(base).json()["results"][0]["current_configuration"]["id"] == fixed["id"]
     response = client.put(
         detail,
-        values | {"mounting_type": "tracking", "surface_tilt": None, "surface_azimuth": None},
+        values
+        | {
+            "mounting_type": "tracking",
+            "surface_tilt_degrees": None,
+            "surface_azimuth_degrees": None,
+        },
         content_type="application/json",
     )
     assert response.status_code == 200, response.content
     tracking = response.json()["current_configuration"]
     assert tracking["mounting_type"] == "tracking"
-    assert tracking["surface_tilt"] is None
-    assert tracking["surface_azimuth"] is None
+    assert tracking["surface_tilt_degrees"] is None
+    assert tracking["surface_azimuth_degrees"] is None
     assert tracking["revision"] == fixed["revision"] + 1
 
 
@@ -324,7 +329,7 @@ def test_forecast_resolution_caps_native_intervals() -> None:
     target = now.astimezone(ZoneInfo("Europe/Istanbul")).date() + timedelta(days=1)
     start = datetime.combine(target, time.min, ZoneInfo("Europe/Istanbul"))
     job = CollectionJob.objects.create(
-        binding=configuration.binding, target_date=target, scheduled_slot=now, available_at=now
+        binding=configuration.binding, target_date=target, scheduled_for=now, available_at=now
     )
     snapshot = ForecastSnapshot.objects.create(
         job=job,

@@ -247,7 +247,7 @@ class PlatformAdminSite(admin.AdminSite):
     def decision(self, request: HttpRequest, object_id: int) -> HttpResponse:
         if request.method != "POST":
             return HttpResponseNotAllowed(("POST",))
-        get_object_or_404(Region, pk=object_id, deleted_at__isnull=True)
+        get_object_or_404(Region.objects.active(), pk=object_id)
         form = ReviewDecisionForm(request.POST)
         if form.is_valid():
             try:
@@ -375,9 +375,7 @@ class RegionAdmin(ReadOnlyAdmin):
     def setup(self, request: HttpRequest, object_id: int) -> HttpResponse:
         if request.method not in {"GET", "POST"}:
             return HttpResponseNotAllowed(("GET", "POST"))
-        region = get_object_or_404(
-            Region.objects.select_related("tenant"), pk=object_id, deleted_at__isnull=True
-        )
+        region = get_object_or_404(Region.objects.active().select_related("tenant"), pk=object_id)
         binding = (
             SiteBinding.objects.select_related("provider_account")
             .filter(region=region, region_revision=region.revision)

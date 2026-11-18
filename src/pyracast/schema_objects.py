@@ -14,6 +14,12 @@ class Extension:
 
 
 @dataclass(frozen=True)
+class Rename:
+    created_as: str
+    migration: MigrationKey
+
+
+@dataclass(frozen=True)
 class CompositeForeignKey:
     name: str
     table: str
@@ -21,17 +27,25 @@ class CompositeForeignKey:
     target: str
     target_columns: tuple[str, ...]
     migration: MigrationKey
+    rename: Rename | None = None
+
+    @property
+    def created_as(self) -> str:
+        return self.rename.created_as if self.rename else self.name
 
     def create_sql(self) -> list[str]:
         return [
-            f"ALTER TABLE {self.table} ADD CONSTRAINT {self.name} "
+            f"ALTER TABLE {self.table} ADD CONSTRAINT {self.created_as} "
             f"FOREIGN KEY ({', '.join(self.columns)}) "
             f"REFERENCES {self.target} ({', '.join(self.target_columns)}) "
             "DEFERRABLE INITIALLY DEFERRED"
         ]
 
     def drop_sql(self) -> list[str]:
-        return [f"ALTER TABLE {self.table} DROP CONSTRAINT {self.name}"]
+        return [f"ALTER TABLE {self.table} DROP CONSTRAINT {self.created_as}"]
+
+    def rename_sql(self, old: str, new: str) -> list[str]:
+        return [f"ALTER TABLE {self.table} RENAME CONSTRAINT {old} TO {new}"]
 
 
 @dataclass(frozen=True)
@@ -58,8 +72,22 @@ class RowTrigger:
 type SchemaObject = Extension | CompositeForeignKey | RowTrigger
 
 
+NAMING = {
+    "accounts": "0005_schema_naming_convention",
+    "change_requests": "0004_schema_naming_convention",
+    "connections": "0004_schema_naming_convention",
+    "forecasts": "0004_schema_naming_convention",
+    "incidents": "0003_schema_naming_convention",
+    "metering": "0004_schema_naming_convention",
+    "notifications": "0005_schema_naming_convention",
+    "plants": "0004_schema_naming_convention",
+    "regions": "0003_schema_naming_convention",
+}
+
+
 def _owner_key(
     name: str,
+    created_as: str,
     table: str,
     columns: tuple[str, ...],
     target: str,
@@ -67,7 +95,15 @@ def _owner_key(
     app_label: str,
     migration: str = "0001_initial",
 ) -> CompositeForeignKey:
-    return CompositeForeignKey(name, table, columns, target, target_columns, (app_label, migration))
+    return CompositeForeignKey(
+        name,
+        table,
+        columns,
+        target,
+        target_columns,
+        (app_label, migration),
+        Rename(created_as, (app_label, NAMING[app_label])),
+    )
 
 
 # The body is compared verbatim with pg_proc.prosrc, whitespace included. It restates the
@@ -176,6 +212,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
     # administratively (deploy/bootstrap.sql); the migration then skips the statement.
     Extension("btree_gist", ("accounts", "0001_initial")),
     _owner_key(
+        "region_approved_binding_fk",
         "approved_binding_region_fk",
         "regions_region",
         ("approved_binding_id", "id"),
@@ -185,6 +222,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "0002_initial",
     ),
     _owner_key(
+        "requestattempt_binding_provider_account_fk",
         "request_binding_account_fk",
         "forecasts_requestattempt",
         ("binding_id", "provider_account_id"),
@@ -193,6 +231,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "forecasts",
     ),
     _owner_key(
+        "requestattempt_job_binding_fk",
         "request_job_binding_fk",
         "forecasts_requestattempt",
         ("job_id", "binding_id"),
@@ -201,6 +240,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "forecasts",
     ),
     _owner_key(
+        "collectionjob_reference_import_binding_fk",
         "collection_import_binding_fk",
         "forecasts_collectionjob",
         ("reference_import_id", "binding_id"),
@@ -209,6 +249,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "forecasts",
     ),
     _owner_key(
+        "forecastsnapshot_job_binding_fk",
         "snapshot_job_binding_fk",
         "forecasts_forecastsnapshot",
         ("job_id", "binding_id"),
@@ -217,6 +258,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "forecasts",
     ),
     _owner_key(
+        "referencecapacitynormalization_snapshot_target_binding_fk",
         "normalization_snapshot_binding_fk",
         "forecasts_referencecapacitynormalization",
         ("snapshot_id", "target_binding_id"),
@@ -225,6 +267,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "forecasts",
     ),
     _owner_key(
+        "plant_current_configuration_fk",
         "plant_current_config_owner_fk",
         "plants_plant",
         ("current_configuration_id", "id"),
@@ -233,6 +276,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "plants",
     ),
     _owner_key(
+        "plantconfiguration_plant_region_fk",
         "configuration_plant_region_fk",
         "plants_plantconfiguration",
         ("plant_id", "region_id"),
@@ -241,6 +285,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "plants",
     ),
     _owner_key(
+        "plantconfiguration_binding_region_fk",
         "configuration_binding_region_fk",
         "plants_plantconfiguration",
         ("binding_id", "region_id"),
@@ -249,6 +294,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "plants",
     ),
     _owner_key(
+        "productionobservation_configuration_plant_fk",
         "observation_config_owner_fk",
         "plants_productionobservation",
         ("configuration_id", "plant_id"),
@@ -257,6 +303,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "plants",
     ),
     _owner_key(
+        "calibrationrun_configuration_plant_fk",
         "calibration_config_owner_fk",
         "plants_calibrationrun",
         ("configuration_id", "plant_id"),
@@ -265,6 +312,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "plants",
     ),
     _owner_key(
+        "calibrationrun_configuration_binding_fk",
         "calibration_config_binding_fk",
         "plants_calibrationrun",
         ("configuration_id", "binding_id"),
@@ -273,6 +321,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "plants",
     ),
     _owner_key(
+        "calibrationactivation_configuration_plant_fk",
         "activation_config_owner_fk",
         "plants_calibrationactivation",
         ("configuration_id", "plant_id"),
@@ -281,6 +330,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "plants",
     ),
     _owner_key(
+        "calibrationactivation_calibration_configuration_fk",
         "activation_calibration_config_fk",
         "plants_calibrationactivation",
         ("calibration_id", "configuration_id"),
@@ -289,6 +339,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "plants",
     ),
     _owner_key(
+        "calibrationrun_comparison_activation_configuration_fk",
         "calibration_comparison_config_fk",
         "plants_calibrationrun",
         ("comparison_activation_id", "configuration_id"),
@@ -297,6 +348,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "plants",
     ),
     _owner_key(
+        "forecastissuance_configuration_plant_fk",
         "issuance_configuration_owner_fk",
         "plants_forecastissuance",
         ("configuration_id", "plant_id"),
@@ -305,6 +357,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "plants",
     ),
     _owner_key(
+        "forecastissuance_calibration_configuration_fk",
         "issuance_calibration_configuration_fk",
         "plants_forecastissuance",
         ("calibration_id", "configuration_id"),
@@ -321,6 +374,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         ("plants", "0001_initial"),
     ),
     _owner_key(
+        "plantincident_declared_configuration_plant_fk",
         "incident_declared_config_owner_fk",
         "incidents_plantincident",
         ("declared_configuration_id", "plant_id"),
@@ -329,6 +383,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "incidents",
     ),
     _owner_key(
+        "epiascollectionjob_connection_plant_fk",
         "epias_job_connection_plant_fk",
         "metering_epiascollectionjob",
         ("connection_id", "plant_id"),
@@ -337,6 +392,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "metering",
     ),
     _owner_key(
+        "epiascollectionjob_configuration_plant_fk",
         "epias_job_configuration_plant_fk",
         "metering_epiascollectionjob",
         ("configuration_id", "plant_id"),
@@ -345,6 +401,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "metering",
     ),
     _owner_key(
+        "epiassnapshot_job_connection_configuration_fk",
         "epias_snapshot_job_lineage_fk",
         "metering_epiassnapshot",
         ("job_id", "connection_id", "configuration_id"),
@@ -353,6 +410,7 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "metering",
     ),
     _owner_key(
+        "changerequest_configuration_plant_fk",
         "proposal_configuration_owner_fk",
         "change_requests_changerequest",
         ("configuration_id", "plant_id"),
@@ -400,6 +458,20 @@ def operations(app_label: str, migration: str) -> list[Operation]:
             RunSQL(
                 [sql for item in raw for sql in item.create_sql()],
                 [sql for item in reversed(raw) for sql in item.drop_sql()],
+            )
+        )
+    renamed = [
+        item
+        for item in SCHEMA_OBJECTS
+        if isinstance(item, CompositeForeignKey)
+        and item.rename
+        and item.rename.migration == (app_label, migration)
+    ]
+    if renamed:
+        created.append(
+            RunSQL(
+                [sql for item in renamed for sql in item.rename_sql(item.created_as, item.name)],
+                [sql for item in renamed for sql in item.rename_sql(item.name, item.created_as)],
             )
         )
     return created

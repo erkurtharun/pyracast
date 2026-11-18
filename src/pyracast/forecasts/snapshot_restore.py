@@ -102,7 +102,7 @@ class ExportRow:
 
 @dataclass(frozen=True)
 class ExportedJob:
-    scheduled_slot: datetime
+    scheduled_for: datetime
     target_date: date
     available_at: datetime
     retry_until: datetime | None
@@ -288,7 +288,7 @@ def _exported_job(row: ExportRow, collected_at: datetime) -> ExportedJob:
     ):
         _job_value(row, job, name, partial(_expected, expected))
     return ExportedJob(
-        _job_value(row, job, "scheduled_slot", partial(_slot, collected_at)),
+        _job_value(row, job, "scheduled_for", partial(_slot, collected_at)),
         _job_value(row, job, "target_date", _day),
         _job_value(row, job, "available_at", _instant),
         _job_value(row, job, "retry_until", _optional_instant),
@@ -392,8 +392,8 @@ def _accepted_differences(
 def _publish_forecast(
     snapshot: ForecastSnapshot, binding: SiteBinding, line: int, published_at: datetime
 ) -> None:
-    data = snapshot_data(snapshot)
     try:
+        data = snapshot_data(snapshot)
         payload = calculate(binding, snapshot.job.target_date, data)
     except (ValueError, ArithmeticError) as error:
         raise RestoreRefusedError(
@@ -419,7 +419,7 @@ def _store(
     job = CollectionJob.objects.create(
         binding=binding,
         endpoint=row.endpoint,
-        scheduled_slot=exported.scheduled_slot,
+        scheduled_for=exported.scheduled_for,
         target_date=exported.target_date,
         status=CollectionJobStatus.SUCCEEDED,
         available_at=exported.available_at,
@@ -518,29 +518,29 @@ def _restore_rows(
     if approval_slot is None:
         raise RestoreRefusedError("The binding holds no approval collection.")
     later = min(
-        (item.row.line for item in acquisitions if item.job.scheduled_slot >= approval_slot),
+        (item.row.line for item in acquisitions if item.job.scheduled_for >= approval_slot),
         default=None,
     )
     if later is not None:
         raise RestoreRefusedError(
             f"Export line {later} is not before the binding's approval collection: "
-            f"{JOB_KEY}.scheduled_slot."
+            f"{JOB_KEY}.scheduled_for."
         )
     # An acquisition is its endpoint and job slot, the binding's unique collection slot;
     # snapshot ids restart with each database.
-    slots = [item.job.scheduled_slot for item in acquisitions]
+    slots = [item.job.scheduled_for for item in acquisitions]
     restored = set(
         ForecastSnapshot.objects.filter(
             binding=binding,
             job__endpoint__in=tuple(LIVE_KINDS),
-            job__scheduled_slot__in=slots,
+            job__scheduled_for__in=slots,
             raw_payload__has_key=PROVENANCE_KEY,
-        ).values_list("job__endpoint", "job__scheduled_slot")
+        ).values_list("job__endpoint", "job__scheduled_for")
     )
     taken = set(
         CollectionJob.objects.filter(
-            binding=binding, endpoint__in=tuple(LIVE_KINDS), scheduled_slot__in=slots
-        ).values_list("endpoint", "scheduled_slot")
+            binding=binding, endpoint__in=tuple(LIVE_KINDS), scheduled_for__in=slots
+        ).values_list("endpoint", "scheduled_for")
     )
     provenance: dict[str, object] = {
         "export_sha256": digest,
@@ -548,7 +548,7 @@ def _restore_rows(
         "restored_at": moment.isoformat(),
     }
     for item in acquisitions:
-        key = (item.row.endpoint, item.job.scheduled_slot)
+        key = (item.row.endpoint, item.job.scheduled_for)
         # A retry window still open at approval belongs to the binding's own schedule: the
         # scheduler's nightly lookup would take a restored job of it for tonight's collection.
         if item.job.retry_until is not None and item.job.retry_until > approval_slot:
@@ -608,9 +608,7 @@ def restore_provider_snapshots(
     moment = timezone.now()
     rows = _read_export(content)
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         binding = SiteBinding.objects.get(pk=binding_id, region=region)
         account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
         binding = SiteBinding.objects.select_for_update().get(pk=binding.pk)

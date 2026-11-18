@@ -27,26 +27,26 @@ def test_approved_binding_cannot_cross_tenant_regions() -> None:
         longitude=29,
         timezone="Europe/Istanbul",
     )
-    with pytest.raises(IntegrityError, match="approved_binding_region_fk"), transaction.atomic():
+    with pytest.raises(IntegrityError, match="region_approved_binding_fk"), transaction.atomic():
         Region.objects.filter(pk=other.pk).update(approved_binding=system.binding)
     Region.objects.filter(pk=system.region.pk).update(approved_binding=system.binding)
-    with pytest.raises(IntegrityError, match="approved_binding_region_fk"), transaction.atomic():
+    with pytest.raises(IntegrityError, match="region_approved_binding_fk"), transaction.atomic():
         SiteBinding.objects.filter(pk=system.binding.pk).update(region=other)
 
 
 @pytest.mark.parametrize(
     ("changes", "constraint"),
     [
-        ({"capacity_kw": float("inf")}, "binding_capacity_finite"),
-        ({"capacity_kw": float("nan")}, "binding_capacity_finite"),
-        ({"latitude": -91}, "binding_latitude"),
-        ({"latitude": float("nan")}, "binding_latitude"),
-        ({"longitude": 181}, "binding_longitude"),
-        ({"power_basis": "xx"}, "binding_power_basis"),
-        ({"azimuth_degrees": 360}, "binding_azimuth"),
-        ({"azimuth_degrees": float("nan")}, "binding_azimuth"),
-        ({"losses_percent": 100}, "binding_losses"),
-        ({"health": "other"}, "binding_health"),
+        ({"capacity_kw": float("inf")}, "sitebinding_capacity_kw_finite_chk"),
+        ({"capacity_kw": float("nan")}, "sitebinding_capacity_kw_finite_chk"),
+        ({"latitude": -91}, "sitebinding_latitude_chk"),
+        ({"latitude": float("nan")}, "sitebinding_latitude_chk"),
+        ({"longitude": 181}, "sitebinding_longitude_chk"),
+        ({"power_basis": "xx"}, "sitebinding_power_basis_chk"),
+        ({"azimuth_degrees": 360}, "sitebinding_azimuth_degrees_chk"),
+        ({"azimuth_degrees": float("nan")}, "sitebinding_azimuth_degrees_chk"),
+        ({"losses_percent": 100}, "sitebinding_losses_percent_chk"),
+        ({"health": "other"}, "sitebinding_health_chk"),
     ],
 )
 def test_binding_rejects_invalid_physical_metadata(
@@ -72,21 +72,30 @@ def test_request_account_and_job_must_match_the_binding() -> None:
         timezone="Europe/Istanbul",
     )
     values = {"utc_day": NOW.date(), "created_at": NOW, "purpose": "forecast"}
-    with pytest.raises(IntegrityError, match="request_binding_account_fk"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="requestattempt_binding_provider_account_fk"),
+        transaction.atomic(),
+    ):
         RequestAttempt.objects.create(provider_account=account, binding=system.binding, **values)
-    with pytest.raises(IntegrityError, match="request_job_binding_fk"), transaction.atomic():
+    with pytest.raises(IntegrityError, match="requestattempt_job_binding_fk"), transaction.atomic():
         RequestAttempt.objects.create(
             provider_account=account, binding=other_binding, job=job, **values
         )
-    with pytest.raises(IntegrityError, match="request_job_requires_binding"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="requestattempt_job_binding_chk"),
+        transaction.atomic(),
+    ):
         RequestAttempt.objects.create(provider_account=system.account, job=job, **values)
     attempt = RequestAttempt.objects.create(
         provider_account=system.account, binding=system.binding, job=job, **values
     )
-    with pytest.raises(IntegrityError, match="request_attempt_outcome"), transaction.atomic():
+    with pytest.raises(IntegrityError, match="requestattempt_outcome_chk"), transaction.atomic():
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="untracked")
     RequestAttempt.objects.create(provider_account=account, **values)
-    with pytest.raises(IntegrityError, match="request_binding_account_fk"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="requestattempt_binding_provider_account_fk"),
+        transaction.atomic(),
+    ):
         SiteBinding.objects.filter(pk=system.binding.pk).update(provider_account=account)
 
 
@@ -104,16 +113,19 @@ def test_historical_job_cannot_use_an_import_from_another_binding() -> None:
     )
     reference_import = HistoricalReferenceImport.objects.create(
         binding=other_binding,
-        sha256="a" * 64,
+        content_sha256="a" * 64,
         source_name="fixture",
         source_settings={},
         imported_by=system.admin,
-        imported_at=NOW,
+        created_at=NOW,
         interval_count=1,
     )
     job = CollectionJob.objects.get(binding=system.binding)
     imported = {"endpoint": "historical_import", "status": "succeeded"}
-    with pytest.raises(IntegrityError, match="collection_import_binding_fk"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="collectionjob_reference_import_binding_fk"),
+        transaction.atomic(),
+    ):
         CollectionJob.objects.filter(pk=job.pk).update(
             reference_import=reference_import, **imported
         )
@@ -143,14 +155,17 @@ def test_snapshot_requires_a_complete_increasing_coverage_pair(
         "collected_at": NOW,
         "source_kind": "forecast",
     }
-    with pytest.raises(IntegrityError, match="snapshot_coverage_bounds"), transaction.atomic():
+    with pytest.raises(IntegrityError, match="forecastsnapshot_coverage_chk"), transaction.atomic():
         ForecastSnapshot.objects.create(**stored, coverage_start=bounds[0], coverage_end=bounds[1])
-    with pytest.raises(IntegrityError, match="snapshot_source_kind"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="forecastsnapshot_source_kind_chk"),
+        transaction.atomic(),
+    ):
         ForecastSnapshot.objects.create(**stored | {"source_kind": "other"})
     ForecastSnapshot.objects.create(
         **stored, coverage_start=NOW, coverage_end=NOW + timedelta(minutes=30)
     )
-    with pytest.raises(IntegrityError, match="collection_job_status"), transaction.atomic():
+    with pytest.raises(IntegrityError, match="collectionjob_status_chk"), transaction.atomic():
         CollectionJob.objects.filter(pk=job.pk).update(status="lost")
 
 
@@ -161,7 +176,10 @@ def test_snapshot_names_whether_it_holds_a_forecast_or_estimated_actuals(
     system = make_system(approved=True)
     job = CollectionJob.objects.get(binding=system.binding)
     values: dict[str, Any] = {} if source_kind is None else {"source_kind": source_kind}
-    with pytest.raises(IntegrityError, match="snapshot_source_kind"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="forecastsnapshot_source_kind_chk"),
+        transaction.atomic(),
+    ):
         ForecastSnapshot.objects.create(
             job=job,
             binding=system.binding,

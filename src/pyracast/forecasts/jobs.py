@@ -4,7 +4,7 @@ import time
 import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
@@ -54,7 +54,7 @@ from pyracast.forecasts.timing import (
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import Plant
 from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
-from pyracast.regions.models import Region
+from pyracast.regions.models import Region, active_region
 from pyracast.weather import OpenMeteoProvider, WeatherError, serialize_weather
 
 if TYPE_CHECKING:
@@ -174,7 +174,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         if (
             job.endpoint == CollectionEndpoint.FORECASTS
             and latest_slot is not None
-            and latest_slot > job.scheduled_slot
+            and latest_slot > job.scheduled_for
         ):
             job.status = CollectionJobStatus.STALE
             job.last_error = CollectionJobError.FORECAST_SUPERSEDED
@@ -192,17 +192,17 @@ def claim(job_id: int, now: datetime) -> Lease | None:
                         or (
                             job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
                             and job.target_date
-                            == job.scheduled_slot.astimezone(ZoneInfo(binding.timezone)).date()
+                            == job.scheduled_for.astimezone(ZoneInfo(binding.timezone)).date()
                         )
                     )
-                    and job.scheduled_slot.astimezone(ZoneInfo(binding.region.timezone)).strftime(
+                    and job.scheduled_for.astimezone(ZoneInfo(binding.region.timezone)).strftime(
                         "%H:%M"
                     )
                     not in (timing.times if timing is not None else ())
                     # Approval creates one immediate acquisition outside existing clocks.
                     and (
                         job.endpoint != CollectionEndpoint.FORECASTS
-                        or job.scheduled_slot < schedule.effective_from
+                        or job.scheduled_for < schedule.effective_from
                         or job.pk != approval_id
                     )
                 )
@@ -223,7 +223,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         if job.retry_until is not None:
             job.available_at = now + (
                 LEASE_DURATION
-                if job.retry_until <= job.scheduled_slot + INTRADAY_HISTORY_WINDOW
+                if job.retry_until <= job.scheduled_for + INTRADAY_HISTORY_WINDOW
                 else NIGHT_RETRY_DELAY
             )
         job.save(
@@ -253,7 +253,7 @@ def retry(
         if not retryable:
             job.status = CollectionJobStatus.FAILED
         elif job.retry_until is not None:
-            intraday = job.retry_until <= job.scheduled_slot + INTRADAY_HISTORY_WINDOW
+            intraday = job.retry_until <= job.scheduled_for + INTRADAY_HISTORY_WINDOW
             job.available_at = next_retry_at(
                 now,
                 job.attempts,
@@ -303,20 +303,16 @@ def persist_snapshot(lease: Lease, data: ProviderData, now: datetime) -> Forecas
             defaults={
                 "binding": job.binding,
                 "raw_payload": data.raw_payload,
-                "normalized_intervals": data.intervals,
+                "normalized_intervals": [interval.to_row() for interval in data.intervals],
                 "collected_at": data.collected_at or now,
                 "issued_at": data.issued_at,
                 "source_kind": data.source_kind,
                 "weather_payload": serialize_weather(data.weather) if data.weather else None,
                 "weather_error": data.weather_error,
                 "coverage_start": min(
-                    (datetime.fromisoformat(cast(str, row["start"])) for row in data.intervals),
-                    default=None,
+                    (interval.start for interval in data.intervals), default=None
                 ),
-                "coverage_end": max(
-                    (datetime.fromisoformat(cast(str, row["end"])) for row in data.intervals),
-                    default=None,
-                ),
+                "coverage_end": max((interval.end for interval in data.intervals), default=None),
             },
         )
         return snapshot
@@ -392,7 +388,7 @@ def publish(
                     CollectionJob.objects.get_or_create(
                         binding=binding,
                         endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
-                        scheduled_slot=available,
+                        scheduled_for=available,
                         defaults={
                             "target_date": job.target_date,
                             "available_at": available,
@@ -442,12 +438,9 @@ def fetch_history(
         end = min(end, now)
     return ProviderData(
         data.raw_payload,
-        [
-            row
-            for row in data.intervals
-            if datetime.fromisoformat(cast(str, row["start"])) < end
-            and datetime.fromisoformat(cast(str, row["end"])) > start
-        ],
+        tuple(
+            interval for interval in data.intervals if interval.start < end and interval.end > start
+        ),
         data.issued_at,
         data.collected_at,
         data.source_kind,
@@ -456,13 +449,8 @@ def fetch_history(
 
 def _attach_weather(lease: Lease, data: ProviderData, provider: OpenMeteoProvider) -> ProviderData:
     day_start, day_end = local_day_bounds(lease.target_date, lease.binding.timezone)
-    start = min(
-        (datetime.fromisoformat(cast(str, row["start"])) for row in data.intervals),
-        default=day_start,
-    )
-    end = max(
-        (datetime.fromisoformat(cast(str, row["end"])) for row in data.intervals), default=day_end
-    )
+    start = min((interval.start for interval in data.intervals), default=day_start)
+    end = max((interval.end for interval in data.intervals), default=day_end)
     try:
         weather = provider.fetch(lease.binding.latitude, lease.binding.longitude, start, end)
     except WeatherError as exc:
@@ -639,8 +627,8 @@ def collect(
         return False
     if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS:
         return publish(lease, snapshot, {}, now + timedelta(seconds=time.monotonic() - started))
-    data = snapshot_data(snapshot)
     try:
+        data = snapshot_data(snapshot)
         payload = calculator(lease.binding, lease.target_date, data)
         prepared_issuances = prepare_forecast_issuances(snapshot)
     except Exception as exc:
@@ -669,13 +657,13 @@ def collect(
 def pending_job_ids(now: datetime, limit: int = 100) -> list[int]:
     return list(
         CollectionJob.objects.filter(
+            active_region("binding__region__"),
             Q(available_at__lte=now)
             | Q(
                 status=CollectionJobStatus.RETRY,
                 last_error=CollectionJobError.PROVIDER_THROTTLED,
                 binding__provider_account__request_blocked_until__isnull=True,
             ),
-            binding__region__deleted_at__isnull=True,
         )
         .filter(
             Q(status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY))

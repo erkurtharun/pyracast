@@ -1,3 +1,5 @@
+from typing import Self
+
 from django.conf import settings
 from django.db import models
 from django.utils.translation import gettext_lazy
@@ -72,6 +74,20 @@ def location_coordinate(field: str) -> models.Func:
     )
 
 
+def active_region(path: str = "") -> models.Q:
+    """Rows whose region, reached through `path` (for example "binding__region__"), is not in
+    the trash."""
+    return models.Q(**{f"{path}deleted_at__isnull": True})
+
+
+class RegionQuerySet[M: Region = Region, Row = M](models.QuerySet[M, Row]):
+    def active(self) -> Self:
+        return self.filter(active_region())
+
+    def trashed(self) -> Self:
+        return self.filter(deleted_at__isnull=False)
+
+
 class Region(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
     name = models.CharField(max_length=200)
@@ -86,28 +102,35 @@ class Region(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, db_index=True)
 
+    objects = RegionQuerySet.as_manager()
+
     class Meta:
         constraints = (
             models.UniqueConstraint(
                 models.F("tenant"),
                 location_coordinate("latitude"),
                 location_coordinate("longitude"),
-                condition=models.Q(deleted_at__isnull=True),
-                name="one_active_region_per_tenant_location",
+                condition=active_region(),
+                name="%(class)s_tenant_location_uniq",
             ),
             models.CheckConstraint(
-                condition=models.Q(latitude__gte=-90, latitude__lte=90), name="region_latitude"
+                condition=models.Q(latitude__gte=-90, latitude__lte=90),
+                name="%(class)s_latitude_chk",
             ),
             models.CheckConstraint(
-                condition=models.Q(longitude__gte=-180, longitude__lte=180), name="region_longitude"
+                condition=models.Q(longitude__gte=-180, longitude__lte=180),
+                name="%(class)s_longitude_chk",
             ),
-            choices_check("status", RegionStatus, name="region_status"),
+            choices_check("status", RegionStatus),
             models.CheckConstraint(
                 condition=~models.Q(status=RegionStatus.APPROVED)
                 | models.Q(approved_binding__isnull=False),
-                name="region_status_approved_binding_chk",
+                name="%(class)s_status_approved_binding_chk",
             ),
         )
+
+    def __str__(self) -> str:
+        return self.name
 
 
 class RegionLocationChangeRequest(models.Model):
@@ -137,15 +160,15 @@ class RegionLocationChangeRequest(models.Model):
             models.UniqueConstraint(
                 fields=("region",),
                 condition=models.Q(status=LocationChangeStatus.PENDING),
-                name="one_pending_region_location_request",
+                name="%(class)s_region_uniq",
             ),
             models.CheckConstraint(
                 condition=models.Q(latitude__gte=-90, latitude__lte=90),
-                name="location_request_latitude",
+                name="%(class)s_latitude_chk",
             ),
             models.CheckConstraint(
                 condition=models.Q(longitude__gte=-180, longitude__lte=180),
-                name="location_request_longitude",
+                name="%(class)s_longitude_chk",
             ),
             models.CheckConstraint(
                 condition=(
@@ -160,10 +183,13 @@ class RegionLocationChangeRequest(models.Model):
                         reviewed_at__isnull=False,
                     )
                 ),
-                name="location_request_review_state",
+                name="%(class)s_review_chk",
             ),
             choices_check("status", LocationChangeStatus),
         )
+
+    def __str__(self) -> str:
+        return f"Location change {self.pk} of region {self.region_id}: {self.status}"
 
 
 class AuditEvent(models.Model):
@@ -184,8 +210,11 @@ class AuditEvent(models.Model):
                     models.Q(region__isnull=False, provider_account__isnull=True)
                     | models.Q(region__isnull=True, provider_account__isnull=False)
                 ),
-                name="audit_exactly_one_target",
+                name="%(class)s_target_chk",
             ),
             choices_check("action", AuditAction),
             json_shape_check("details", "object"),
         )
+
+    def __str__(self) -> str:
+        return f"{self.action} at revision {self.revision}"

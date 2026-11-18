@@ -73,18 +73,18 @@ def test_region_purge_removes_imported_reference_archive_and_preserves_other_own
             region.save(update_fields=("tenant",))
         other_import = HistoricalReferenceImport.objects.create(
             binding=binding,
-            sha256="b" * 64,
+            content_sha256="b" * 64,
             source_name="other-reference.json",
             source_settings={},
             imported_by=system.admin,
-            imported_at=NOW,
+            created_at=NOW,
             interval_count=1,
         )
         job = CollectionJob.objects.create(
             binding=binding,
             reference_import=other_import,
             endpoint="historical_import",
-            scheduled_slot=NOW,
+            scheduled_for=NOW,
             target_date=NOW.date(),
             available_at=NOW,
             status="succeeded",
@@ -279,7 +279,7 @@ def test_purge_region_removes_owned_dependencies_and_preserves_shared_quota_ledg
         system.member, system.tenant.pk, region.pk, name="Other plant", dc_capacity_mw=2
     )
     other_job = CollectionJob.objects.create(
-        binding=binding, target_date=NOW.date(), scheduled_slot=NOW, available_at=NOW
+        binding=binding, target_date=NOW.date(), scheduled_for=NOW, available_at=NOW
     )
     other_attempt = RequestAttempt.objects.create(
         provider_account=system.account,

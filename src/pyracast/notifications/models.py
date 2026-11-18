@@ -35,14 +35,14 @@ class NotificationSettings(models.Model):
         verbose_name = "email reminder settings"
         verbose_name_plural = "email reminder settings"
         constraints = (
+            models.CheckConstraint(condition=models.Q(pk=1), name="%(class)s_id_chk"),
             models.CheckConstraint(
-                condition=models.Q(pk=1), name="singleton_notification_settings"
-            ),
-            models.CheckConstraint(
-                condition=models.Q(max_recipients__gte=1),
-                name="positive_notification_recipient_limit",
+                condition=models.Q(max_recipients__gte=1), name="%(class)s_max_recipients_chk"
             ),
         )
+
+    def __str__(self) -> str:
+        return "Email reminder settings"
 
 
 class ReminderSchedule(models.Model):
@@ -60,12 +60,15 @@ class ReminderSchedule(models.Model):
 
     class Meta:
         constraints = (
-            models.UniqueConstraint(fields=("region",), name="one_reminder_schedule_per_region"),
-            choices_check("language", Language, name="reminder_schedule_language_valid"),
+            models.UniqueConstraint(fields=("region",), name="%(class)s_region_uniq"),
+            choices_check("language", Language),
             json_shape_check("recipients", "array", TEXT_ITEMS),
             json_shape_check("recipient_memberships", "object", MEMBERSHIP_ITEMS),
             json_shape_check("times", "array", TIME_ITEMS),
         )
+
+    def __str__(self) -> str:
+        return f"Reminders of region {self.region_id}"
 
 
 class NotificationDeliveryError(models.TextChoices):
@@ -155,12 +158,10 @@ class NotificationDelivery(models.Model):
     class Meta:
         constraints = (
             models.UniqueConstraint(
-                fields=("schedule", "scheduled_for"), name="unique_reminder_group_slot"
+                fields=("schedule", "scheduled_for"), name="%(class)s_schedule_scheduled_for_uniq"
             ),
-            choices_check("language", Language, name="notification_delivery_language_valid"),
-            choices_check(
-                "status", NotificationDeliveryStatus, name="notification_delivery_status_valid"
-            ),
+            choices_check("language", Language),
+            choices_check("status", NotificationDeliveryStatus),
             choices_check("last_error", NotificationDeliveryError, blank=True),
             # A NULL message or a missing key passes: PostgreSQL treats the unknown result as true.
             choices_check(
@@ -176,7 +177,7 @@ class NotificationDelivery(models.Model):
             models.CheckConstraint(
                 condition=~models.Q(status=NotificationDeliveryStatus.SENDING)
                 | models.Q(prepared_message__isnull=False),
-                name="notification_delivery_sending_prepared",
+                name="%(class)s_prepared_message_chk",
             ),
             # An uncertain delivery keeps the lease of the send whose late outcome it awaits.
             lease_check(
@@ -196,6 +197,9 @@ class NotificationDelivery(models.Model):
                         NotificationDeliveryStatus.SENDING,
                     )
                 ),
-                name="notification_dispatch_ready",
+                name="%(class)s_due_idx",
             ),
         )
+
+    def __str__(self) -> str:
+        return f"Delivery {self.pk} of schedule {self.schedule_id}: {self.status}"

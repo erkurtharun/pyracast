@@ -331,7 +331,7 @@ def test_current_day_actuals_cannot_cross_a_shared_provider_accounts_tenant_bind
     job = CollectionJob.objects.create(
         binding=other,
         target_date=DAY,
-        scheduled_slot=now,
+        scheduled_for=now,
         available_at=now,
         endpoint="estimated_actuals",
         status="succeeded",
@@ -366,8 +366,8 @@ def test_paired_actuals_grace_admits_only_its_slot_and_completed_native_interval
     grace = slot + timedelta(minutes=10)
     forecast = publish_snapshot(snapshot_for(system, DAY))
     actual = intraday_actuals(system, grace)
-    actual.job.scheduled_slot = slot if exact_slot else slot + timedelta(seconds=1)
-    actual.job.save(update_fields=("scheduled_slot",))
+    actual.job.scheduled_for = slot if exact_slot else slot + timedelta(seconds=1)
+    actual.job.save(update_fields=("scheduled_for",))
     prepared = prepare_intraday_source(
         system.binding,
         DAY,

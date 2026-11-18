@@ -37,7 +37,7 @@ class FakeAdapter:
     def fetch(self, binding: SiteBinding, target_date: object) -> ProviderData:
         assert not connection.in_atomic_block
         self.action()
-        return ProviderData({"fixture": True}, [])
+        return ProviderData({"fixture": True}, ())
 
 
 @dataclass

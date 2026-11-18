@@ -22,12 +22,13 @@ from pyracast.api.serializers import (
 from pyracast.change_requests.models import DECIDED, ChangeRequest, ChangeRequestStatus
 from pyracast.db import read_snapshot
 from pyracast.forecasts.history import regional_outlook
+from pyracast.plants.models import active_plant
 from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import request_location_change
 
 
 def tenant_region(tenant_id: int, region_id: int) -> Region:
-    return get_object_or_404(Region, pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
+    return get_object_or_404(Region.objects.active(), pk=region_id, tenant_id=tenant_id)
 
 
 class TenantsView(GenericAPIView[Tenant]):
@@ -46,8 +47,8 @@ class TenantsView(GenericAPIView[Tenant]):
         membership_ids = [row.__dict__["current_membership_id"] for row in page]
         counters = (
             ChangeRequest.objects.filter(
+                active_plant("plant__"),
                 plant__region__tenant_id__in=[row.pk for row in page],
-                plant__region__deleted_at__isnull=True,
             )
             .values("plant__region__tenant_id")
             .annotate(

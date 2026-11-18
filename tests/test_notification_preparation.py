@@ -56,7 +56,7 @@ def test_same_clock_collection_waits_without_spending_mail_attempts_then_uses_pu
     if state != "missing":
         job = CollectionJob.objects.create(
             binding=system.binding,
-            scheduled_slot=SLOT,
+            scheduled_for=SLOT,
             target_date=(SLOT + timedelta(days=1)).date(),
             available_at=SLOT,
             status=state,
@@ -74,14 +74,14 @@ def test_same_clock_collection_waits_without_spending_mail_attempts_then_uses_pu
     fresh = complete_saved(system, when)
     if job is not None:
         CollectionJob.objects.filter(pk=fresh.job_id).update(
-            scheduled_slot=SLOT + timedelta(seconds=1)
+            scheduled_for=SLOT + timedelta(seconds=1)
         )
         stored_again(ForecastSnapshot.objects.get(pk=fresh.pk), job=job)
         CollectionJob.objects.filter(pk=job.pk).update(
             status="succeeded", lease_token=None, lease_expires_at=None
         )
     else:
-        CollectionJob.objects.filter(pk=fresh.job_id).update(scheduled_slot=SLOT)
+        CollectionJob.objects.filter(pk=fresh.job_id).update(scheduled_for=SLOT)
     assert process_notification(delivery_id, when + timedelta(minutes=1))
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.snapshot_id == fresh.pk != old.pk
@@ -106,7 +106,7 @@ def test_terminal_collection_prepares_immediately_using_older_complete_forecast(
     old = complete_saved(system)
     CollectionJob.objects.create(
         binding=system.binding,
-        scheduled_slot=SLOT,
+        scheduled_for=SLOT,
         target_date=(SLOT + timedelta(days=1)).date(),
         available_at=SLOT,
         status=job_state,
@@ -155,7 +155,7 @@ def test_restart_respects_fixed_publication_cutoff_and_hard_send_deadline() -> N
     system, _ = configured()
     old = complete_saved(system)
     late = complete_saved(system, SLOT + PREPARATION_GRACE + timedelta(seconds=1))
-    CollectionJob.objects.filter(pk=late.job_id).update(scheduled_slot=SLOT)
+    CollectionJob.objects.filter(pk=late.job_id).update(scheduled_for=SLOT)
     delivery_id = enqueue_due(SLOT + timedelta(minutes=90))[0]
     assert process_notification(delivery_id, SLOT + timedelta(minutes=90))
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
@@ -333,7 +333,7 @@ def test_candidate_loading_excludes_unrelated_history_and_defers_provider_json(
         [
             CollectionJob(
                 binding=system.binding,
-                scheduled_slot=NOW - timedelta(days=index + 1),
+                scheduled_for=NOW - timedelta(days=index + 1),
                 target_date=(NOW - timedelta(days=index)).date(),
                 available_at=NOW,
                 status="succeeded",
@@ -346,8 +346,8 @@ def test_candidate_loading_excludes_unrelated_history_and_defers_provider_json(
             ForecastSnapshot(
                 binding=system.binding,
                 job=job,
-                collected_at=job.scheduled_slot,
-                available_at=job.scheduled_slot,
+                collected_at=job.scheduled_for,
+                available_at=job.scheduled_for,
                 source_kind="forecast",
                 raw_payload={"unused": "history"},
                 normalized_intervals=[],
@@ -427,7 +427,7 @@ def test_default_collection_clock_waits_without_an_explicit_schedule_row() -> No
     enqueue_due(slot)
     delivery = NotificationDelivery.objects.get(schedule__region=system.region, scheduled_for=slot)
     assert not CollectionSchedule.objects.filter(region=system.region).exists()
-    assert not CollectionJob.objects.filter(binding=system.binding, scheduled_slot=slot).exists()
+    assert not CollectionJob.objects.filter(binding=system.binding, scheduled_for=slot).exists()
     assert not process_notification(delivery.pk, slot)
     delivery.refresh_from_db()
     assert delivery.prepared_message is None
@@ -440,7 +440,7 @@ def test_collection_retry_after_preparation_deadline_does_not_delay_saved_mail()
     complete_saved(system)
     CollectionJob.objects.create(
         binding=system.binding,
-        scheduled_slot=SLOT,
+        scheduled_for=SLOT,
         target_date=(SLOT + timedelta(days=1)).date(),
         status="retry",
         available_at=SLOT + PREPARATION_GRACE,

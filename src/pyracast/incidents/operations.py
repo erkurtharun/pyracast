@@ -58,7 +58,7 @@ def _evidence(revision: IncidentRevision) -> IncidentEvidence:
         incident_id=revision.incident_id,
         revision_id=revision.pk,
         revision=revision.revision,
-        recorded_at=revision.recorded_at,
+        recorded_at=revision.created_at,
         kind=data["kind"],
         title=data["title"],
         notes=data["notes"],
@@ -90,13 +90,13 @@ def select_incidents(
         raise ValueError("An aware, nonempty interval and aware knowledge time are required.")
     latest = (
         IncidentRevision.objects.filter(
-            incident_id=OuterRef("incident_id"), recorded_at__lte=known_at
+            incident_id=OuterRef("incident_id"), created_at__lte=known_at
         )
         .order_by("-revision")
         .values("pk")[:1]
     )
     revisions = IncidentRevision.objects.filter(
-        incident__plant_id=plant_id, recorded_at__lte=known_at, pk=Subquery(latest)
+        incident__plant_id=plant_id, created_at__lte=known_at, pk=Subquery(latest)
     ).order_by("incident_id")
     result = []
     for revision in revisions:
@@ -114,12 +114,12 @@ def select_incidents(
 def lock_incident_plant(
     tenant_id: int, region_id: int, plant_id: int, *, lock: bool = True
 ) -> Plant:
-    regions = Region.objects.all()
+    regions = Region.objects.active()
     plants = Plant.objects.select_related("current_configuration")
     if lock:
         regions = regions.select_for_update()
         plants = plants.select_for_update(of=("self",))
-    regions.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
+    regions.get(pk=region_id, tenant_id=tenant_id)
     return plants.get(pk=plant_id, region_id=region_id)
 
 

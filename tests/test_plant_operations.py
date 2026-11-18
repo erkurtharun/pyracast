@@ -178,15 +178,15 @@ def test_configuration_revision_and_activation_history(monkeypatch: pytest.Monke
         {"export_limit_mw": -1},
         {"measurement_basis": "dc"},
         {"mounting_type": "dual_axis"},
-        {"mounting_type": "unknown", "surface_tilt": 0},
-        {"mounting_type": "tracking", "surface_azimuth": 180},
-        {"mounting_type": "fixed", "surface_tilt": True},
-        {"mounting_type": "fixed", "surface_tilt": float("nan")},
-        {"mounting_type": "fixed", "surface_tilt": float("inf")},
-        {"mounting_type": "fixed", "surface_tilt": -1},
-        {"mounting_type": "fixed", "surface_tilt": 91},
-        {"mounting_type": "fixed", "surface_azimuth": -1},
-        {"mounting_type": "fixed", "surface_azimuth": 360},
+        {"mounting_type": "unknown", "surface_tilt_degrees": 0},
+        {"mounting_type": "tracking", "surface_azimuth_degrees": 180},
+        {"mounting_type": "fixed", "surface_tilt_degrees": True},
+        {"mounting_type": "fixed", "surface_tilt_degrees": float("nan")},
+        {"mounting_type": "fixed", "surface_tilt_degrees": float("inf")},
+        {"mounting_type": "fixed", "surface_tilt_degrees": -1},
+        {"mounting_type": "fixed", "surface_tilt_degrees": 91},
+        {"mounting_type": "fixed", "surface_azimuth_degrees": -1},
+        {"mounting_type": "fixed", "surface_azimuth_degrees": 360},
     ],
 )
 def test_invalid_configuration_is_atomic(
@@ -208,7 +208,11 @@ def test_geometry_revisions_preserve_explicit_unknowns_and_prior_settings(
     system, plant = make_plant(monkeypatch)
     initial = plant.current_configuration
     assert initial is not None
-    assert (initial.mounting_type, initial.surface_tilt, initial.surface_azimuth) == (
+    assert (
+        initial.mounting_type,
+        initial.surface_tilt_degrees,
+        initial.surface_azimuth_degrees,
+    ) == (
         "unknown",
         None,
         None,
@@ -222,11 +226,15 @@ def test_geometry_revisions_preserve_explicit_unknowns_and_prior_settings(
         dc_capacity_mw=130,
         export_limit_mw=100,
         mounting_type="fixed",
-        surface_tilt=90,
-        surface_azimuth=359.9,
+        surface_tilt_degrees=90,
+        surface_azimuth_degrees=359.9,
     ).current_configuration
     assert fixed is not None
-    assert (fixed.mounting_type, fixed.surface_tilt, fixed.surface_azimuth) == ("fixed", 90, 359.9)
+    assert (fixed.mounting_type, fixed.surface_tilt_degrees, fixed.surface_azimuth_degrees) == (
+        "fixed",
+        90,
+        359.9,
+    )
     tracking = revise_plant(
         system.member,
         system.tenant.pk,
@@ -238,7 +246,11 @@ def test_geometry_revisions_preserve_explicit_unknowns_and_prior_settings(
         mounting_type="tracking",
     ).current_configuration
     assert tracking is not None
-    assert (tracking.mounting_type, tracking.surface_tilt, tracking.surface_azimuth) == (
+    assert (
+        tracking.mounting_type,
+        tracking.surface_tilt_degrees,
+        tracking.surface_azimuth_degrees,
+    ) == (
         "tracking",
         None,
         None,
@@ -248,7 +260,7 @@ def test_geometry_revisions_preserve_explicit_unknowns_and_prior_settings(
     initial.refresh_from_db()
     fixed.refresh_from_db()
     assert initial.mounting_type == "unknown"
-    assert (fixed.surface_tilt, fixed.surface_azimuth) == (90, 359.9)
+    assert (fixed.surface_tilt_degrees, fixed.surface_azimuth_degrees) == (90, 359.9)
     partial = revise_plant(
         system.member,
         system.tenant.pk,
@@ -259,8 +271,8 @@ def test_geometry_revisions_preserve_explicit_unknowns_and_prior_settings(
         mounting_type="fixed",
     ).current_configuration
     assert partial is not None
-    assert partial.surface_tilt is None
-    assert partial.surface_azimuth is None
+    assert partial.surface_tilt_degrees is None
+    assert partial.surface_azimuth_degrees is None
 
 
 def test_tenant_and_binding_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -294,12 +306,12 @@ def test_observation_replay_units_zero_and_atomic_overlap(monkeypatch: pytest.Mo
     first = import_observations(
         system.member, system.tenant.pk, system.region.pk, plant.pk, **arguments
     )
-    stamp = ProductionObservation.objects.get().recorded_at
+    stamp = ProductionObservation.objects.get().created_at
     replay = import_observations(
         system.member, system.tenant.pk, system.region.pk, plant.pk, **arguments
     )
     assert first["created"] == replay["existing"] == 1
-    assert ProductionObservation.objects.get().recorded_at == stamp
+    assert ProductionObservation.objects.get().created_at == stamp
     second = ObservationInput(start + timedelta(hours=1), start + timedelta(hours=2), 500)
     conflict = ObservationInput(start + timedelta(minutes=30), start + timedelta(minutes=60), 1)
     with pytest.raises(ValidationError):
@@ -364,7 +376,7 @@ def test_new_configuration_accepts_old_meter_history_and_future_batch_rolls_back
     assert result["created"] == 1
     observation = ProductionObservation.objects.get()
     assert observation.ends_at < configuration.created_at
-    assert observation.recorded_at == NOW
+    assert observation.created_at == NOW
 
 
 @pytest.mark.parametrize(
@@ -526,7 +538,7 @@ def test_configless_plant_cannot_activate_and_historical_imports_keep_revision(
     )
     saved = ProductionObservation.objects.get()
     assert saved.configuration_id == old_id
-    assert saved.recorded_at == NOW
+    assert saved.created_at == NOW
     assert revised.current_configuration_id is not None
     with pytest.raises(ValidationError, match="Conflicting"):
         import_observations(
@@ -666,8 +678,8 @@ CONFIGURATION_FIELD_CHANGES: dict[str, Callable[[System, Plant], dict[str, Any]]
     "inverter_capacity_mw": lambda system, plant: {"inverter_capacity_mw": 120},
     "export_limit_mw": lambda system, plant: {"export_limit_mw": None},
     "mounting_type": lambda system, plant: {"mounting_type": "tracking"},
-    "surface_tilt": lambda system, plant: {"surface_tilt": 20},
-    "surface_azimuth": lambda system, plant: {"surface_azimuth": 180},
+    "surface_tilt_degrees": lambda system, plant: {"surface_tilt_degrees": 20},
+    "surface_azimuth_degrees": lambda system, plant: {"surface_azimuth_degrees": 180},
     "measurement_basis": lambda system, plant: {"measurement_basis": "ac_generation"},
 }
 

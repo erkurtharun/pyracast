@@ -35,9 +35,13 @@ def require_available_location(
     tenant_id: int, latitude: float, longitude: float, *, exclude_region_id: int | None = None
 ) -> None:
     Tenant.objects.select_for_update().get(pk=tenant_id)
-    regions = Region.objects.filter(tenant_id=tenant_id, deleted_at__isnull=True).annotate(
-        location_latitude=location_coordinate("latitude"),
-        location_longitude=location_coordinate("longitude"),
+    regions = (
+        Region.objects.active()
+        .filter(tenant_id=tenant_id)
+        .annotate(
+            location_latitude=location_coordinate("latitude"),
+            location_longitude=location_coordinate("longitude"),
+        )
     )
     if exclude_region_id is not None:
         regions = regions.exclude(pk=exclude_region_id)
@@ -116,9 +120,7 @@ def request_location_change(
         raise ValidationError(gettext("A reason of at most 1000 characters is required."))
     with transaction.atomic():
         authorize_workspace_admin(actor, tenant_id, platform=platform)
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         if region.revision != expected_revision:
             raise ConflictError(ErrorCode.REGION_REVISION_CHANGED)
         desired = (latitude, longitude, timezone, reason.strip())
@@ -166,9 +168,7 @@ def correct_location(
 ) -> RegionLocationChangeRequest:
     require_platform_admin(actor)
     with transaction.atomic():
-        tenant_id = Region.objects.values_list("tenant_id", flat=True).get(
-            pk=region_id, deleted_at__isnull=True
-        )
+        tenant_id = Region.objects.active().values_list("tenant_id", flat=True).get(pk=region_id)
         Tenant.objects.select_for_update().get(pk=tenant_id)
         if RegionLocationChangeRequest.objects.filter(
             region_id=region_id, status=LocationChangeStatus.PENDING
@@ -199,9 +199,7 @@ def review_location_change(
             require_available_location(
                 tenant_id, change.latitude, change.longitude, exclude_region_id=change.region_id
             )
-        region = Region.objects.select_for_update().get(
-            pk=change.region_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=change.region_id)
         change.refresh_from_db()
         status = LocationChangeStatus.APPROVED if approve else LocationChangeStatus.REJECTED
         if change.status == status:
@@ -294,7 +292,7 @@ def configure_binding(
     if not math.isfinite(losses_percent) or not 0 <= losses_percent < 100:
         raise ValidationError("Losses must be between 0 and 100 percent.")
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, deleted_at__isnull=True)
+        region = Region.objects.active().select_for_update().get(pk=region_id)
         account = ProviderAccount.objects.get(pk=provider_account_id, enabled=True)
         reference = settings_verification_reference.strip()
         if len(reference) > 500 or (
@@ -339,7 +337,7 @@ def approve_region(actor: User, region_id: int, binding_id: int, now: datetime) 
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, deleted_at__isnull=True)
+        region = Region.objects.active().select_for_update().get(pk=region_id)
         binding = SiteBinding.objects.select_related("provider_account").get(
             pk=binding_id, region=region, region_revision=region.revision
         )
@@ -375,7 +373,7 @@ def approve_region(actor: User, region_id: int, binding_id: int, now: datetime) 
         job, _ = CollectionJob.objects.get_or_create(
             binding=binding,
             endpoint="forecasts",
-            scheduled_slot=now,
+            scheduled_for=now,
             defaults={
                 "target_date": now.astimezone(ZoneInfo(region.timezone)).date() + timedelta(days=1),
                 "available_at": now,
@@ -390,7 +388,7 @@ def transition_region(actor: User, region_id: int, status: str) -> Region:
     if action is None:
         raise ValidationError("Use approval for approval transitions.")
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, deleted_at__isnull=True)
+        region = Region.objects.active().select_for_update().get(pk=region_id)
         region.status = status
         region.save(update_fields=("status",))
         record_audit(actor=actor, region=region, action=action, revision=region.revision)

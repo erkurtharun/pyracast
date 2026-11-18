@@ -119,9 +119,9 @@ def _reference_manifest(snapshot: ForecastSnapshot) -> dict[str, object]:
         "capacity_normalization": normalization,
         "reference_import": {
             "id": imported.pk,
-            "sha256": imported.sha256,
+            "sha256": imported.content_sha256,
             "source_name": imported.source_name,
-            "imported_at": imported.imported_at.isoformat(),
+            "imported_at": imported.created_at.isoformat(),
             "source_settings": imported.source_settings,
         }
         if imported is not None
@@ -338,7 +338,7 @@ def build_calibration_dataset(
         starts_at__gte=start,
         ends_at__lte=end,
     )
-    excluded = Q(recorded_at__gt=run.cutoff_at) | Q(ends_at__gt=run.cutoff_at)
+    excluded = Q(created_at__gt=run.cutoff_at) | Q(ends_at__gt=run.cutoff_at)
     if run.observation_id_cutoff is not None:
         excluded |= Q(pk__gt=run.observation_id_cutoff)
     late = candidates.filter(excluded).count()

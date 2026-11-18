@@ -280,7 +280,7 @@ class ProviderSetupForm(forms.Form):
     def configure(self, actor: User, region: Region) -> SiteBinding:
         data = self.cleaned_data
         with transaction.atomic():
-            current = Region.objects.select_for_update().get(pk=region.pk, deleted_at__isnull=True)
+            current = Region.objects.active().select_for_update().get(pk=region.pk)
             if current.revision != data["expected_revision"]:
                 raise ValidationError(_("The plant changed. Reload this page before saving."))
             current_binding_id = (

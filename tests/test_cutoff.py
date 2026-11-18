@@ -37,9 +37,9 @@ def test_configured_minute_sets_local_slot_and_deduplicates() -> None:
     job = CollectionJob.objects.get(pk=ids[0])
     assert job.endpoint == "forecasts"
     assert (
-        CollectionJob.objects.get(endpoint="estimated_actuals").scheduled_slot == job.scheduled_slot
+        CollectionJob.objects.get(endpoint="estimated_actuals").scheduled_for == job.scheduled_for
     )
-    assert job.scheduled_slot == NOW + timedelta(minutes=30)
+    assert job.scheduled_for == NOW + timedelta(minutes=30)
     assert job.target_date.isoformat() == "2026-11-10"
     assert enqueue_due(NOW + timedelta(hours=1)) == ids[:1]
 
@@ -53,7 +53,7 @@ def test_spring_gap_skips_nonexistent_forecast_cutoff_but_collects_night_history
         validated_at=datetime(2026, 3, 28, 12, tzinfo=UTC)
     )
     CollectionJob.objects.filter(binding=system.binding).update(
-        scheduled_slot=datetime(2026, 3, 28, 12, tzinfo=UTC)
+        scheduled_for=datetime(2026, 3, 28, 12, tzinfo=UTC)
     )
     ids = enqueue_due(datetime(2026, 3, 29, 1, 0, tzinfo=UTC))
     assert len(ids) == 1
@@ -70,13 +70,13 @@ def test_fall_fold_uses_first_cutoff_occurrence() -> None:
         validated_at=datetime(2026, 10, 24, 12, tzinfo=UTC)
     )
     CollectionJob.objects.filter(binding=system.binding).update(
-        scheduled_slot=datetime(2026, 10, 24, 12, tzinfo=UTC)
+        scheduled_for=datetime(2026, 10, 24, 12, tzinfo=UTC)
     )
     ids = enqueue_due(datetime(2026, 10, 25, 1, 15, tzinfo=UTC))
     assert len(ids) == 2
-    assert CollectionJob.objects.get(pk__in=ids, endpoint="forecasts").scheduled_slot == datetime(
+    assert CollectionJob.objects.get(pk__in=ids, endpoint="forecasts").scheduled_for == datetime(
         2026, 10, 25, 0, 30, tzinfo=UTC
     )
     history = CollectionJob.objects.get(pk__in=ids, endpoint="estimated_actuals")
-    assert history.scheduled_slot == datetime(2026, 10, 24, 22, tzinfo=UTC)
+    assert history.scheduled_for == datetime(2026, 10, 24, 22, tzinfo=UTC)
     assert history.target_date.isoformat() == "2026-10-24"

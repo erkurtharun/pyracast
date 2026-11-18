@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import Self
 
 from django.conf import settings
 from django.contrib.postgres.constraints import ExclusionConstraint
@@ -8,6 +9,7 @@ from django.db.models import F, Q
 
 from pyracast.db import choices_check, lease_check
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
+from pyracast.regions.models import active_region
 
 
 class MeasurementBasis(models.TextChoices):
@@ -87,14 +89,25 @@ CONFIGURATION_PARAMETERS = (
     "export_limit_mw",
     "measurement_basis",
     "mounting_type",
-    "surface_tilt",
-    "surface_azimuth",
+    "surface_tilt_degrees",
+    "surface_azimuth_degrees",
 )
 
 
 class TsTzRange(models.Func):
     function = "TSTZRANGE"
     output_field = DateTimeRangeField()
+
+
+def active_plant(path: str = "") -> Q:
+    """Rows whose plant, reached through `path` (for example "plant__"), has its region outside
+    the trash."""
+    return active_region(f"{path}region__")
+
+
+class PlantQuerySet[M: Plant = Plant, Row = M](models.QuerySet[M, Row]):
+    def active(self) -> Self:
+        return self.filter(active_plant())
 
 
 class Plant(models.Model):
@@ -110,10 +123,12 @@ class Plant(models.Model):
     )
     next_calibration_check_at = models.DateTimeField(null=True, db_index=True)
 
+    objects = PlantQuerySet.as_manager()
+
     class Meta:
         constraints = (
-            models.UniqueConstraint(fields=("id", "region"), name="plant_region_identity"),
-            models.UniqueConstraint(fields=("region",), name="one_plant_per_region"),
+            models.UniqueConstraint(fields=("id", "region"), name="%(class)s_id_region_uniq"),
+            models.UniqueConstraint(fields=("region",), name="%(class)s_region_uniq"),
             models.CheckConstraint(
                 condition=Q(
                     automatic_calibration_enabled=True,
@@ -129,6 +144,9 @@ class Plant(models.Model):
             ),
         )
 
+    def __str__(self) -> str:
+        return self.name
+
 
 class PlantSubmission(models.Model):
     plant = models.OneToOneField(Plant, on_delete=models.CASCADE, related_name="submission")
@@ -141,8 +159,8 @@ class PlantSubmission(models.Model):
     mounting_type = models.CharField(
         max_length=10, choices=MountingType, default=MountingType.UNKNOWN
     )
-    surface_tilt = models.FloatField(null=True)
-    surface_azimuth = models.FloatField(null=True)
+    surface_tilt_degrees = models.FloatField(null=True)
+    surface_azimuth_degrees = models.FloatField(null=True)
     submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -150,36 +168,34 @@ class PlantSubmission(models.Model):
         constraints = (
             models.CheckConstraint(
                 condition=Q(dc_capacity_mw__gt=0, dc_capacity_mw__lt=float("inf")),
-                name="submission_dc_capacity_finite",
+                name="%(class)s_dc_capacity_mw_chk",
             ),
             models.CheckConstraint(
                 condition=Q(inverter_capacity_mw__isnull=True)
                 | Q(inverter_capacity_mw__gt=0, inverter_capacity_mw__lt=float("inf")),
-                name="submission_inverter_finite",
+                name="%(class)s_inverter_capacity_mw_chk",
             ),
             models.CheckConstraint(
                 condition=Q(export_limit_mw__isnull=True)
                 | Q(export_limit_mw__gt=0, export_limit_mw__lt=float("inf")),
-                name="submission_export_finite",
+                name="%(class)s_export_limit_mw_chk",
             ),
-            choices_check(
-                "measurement_basis", MeasurementBasis, name="submission_measurement_basis"
-            ),
-            choices_check("mounting_type", MountingType, name="submission_mounting_supported"),
+            choices_check("measurement_basis", MeasurementBasis),
+            choices_check("mounting_type", MountingType),
             models.CheckConstraint(
-                condition=Q(surface_tilt__isnull=True)
-                | Q(surface_tilt__gte=0, surface_tilt__lte=90),
-                name="submission_tilt_valid",
+                condition=Q(surface_tilt_degrees__isnull=True)
+                | Q(surface_tilt_degrees__gte=0, surface_tilt_degrees__lte=90),
+                name="%(class)s_surface_tilt_degrees_chk",
             ),
             models.CheckConstraint(
-                condition=Q(surface_azimuth__isnull=True)
-                | Q(surface_azimuth__gte=0, surface_azimuth__lt=360),
-                name="submission_azimuth_valid",
+                condition=Q(surface_azimuth_degrees__isnull=True)
+                | Q(surface_azimuth_degrees__gte=0, surface_azimuth_degrees__lt=360),
+                name="%(class)s_surface_azimuth_degrees_chk",
             ),
             models.CheckConstraint(
                 condition=Q(mounting_type=MountingType.FIXED)
-                | Q(surface_tilt__isnull=True, surface_azimuth__isnull=True),
-                name="submission_angles_require_fixed",
+                | Q(surface_tilt_degrees__isnull=True, surface_azimuth_degrees__isnull=True),
+                name="%(class)s_angles_chk",
             ),
         )
 
@@ -195,8 +211,8 @@ class PlantConfiguration(models.Model):
     mounting_type = models.CharField(
         max_length=10, choices=MountingType, default=MountingType.UNKNOWN
     )
-    surface_tilt = models.FloatField(null=True)
-    surface_azimuth = models.FloatField(null=True)
+    surface_tilt_degrees = models.FloatField(null=True)
+    surface_azimuth_degrees = models.FloatField(null=True)
     measurement_basis = models.CharField(
         max_length=20, choices=MeasurementBasis, default=MeasurementBasis.NET_EXPORT
     )
@@ -206,49 +222,46 @@ class PlantConfiguration(models.Model):
     class Meta:
         constraints = (
             models.UniqueConstraint(
-                fields=("plant", "revision"), name="plant_config_revision_unique"
+                fields=("plant", "revision"), name="%(class)s_plant_revision_uniq"
             ),
-            models.UniqueConstraint(fields=("id", "plant"), name="plant_config_id_plant_unique"),
-            models.UniqueConstraint(
-                fields=("id", "binding"), name="plant_config_id_binding_unique"
-            ),
-            models.CheckConstraint(
-                condition=Q(revision__gte=1), name="plant_config_revision_positive"
-            ),
-            choices_check(
-                "measurement_basis", MeasurementBasis, name="plant_measurement_basis_valid"
-            ),
+            models.UniqueConstraint(fields=("id", "plant"), name="%(class)s_id_plant_uniq"),
+            models.UniqueConstraint(fields=("id", "binding"), name="%(class)s_id_binding_uniq"),
+            models.CheckConstraint(condition=Q(revision__gte=1), name="%(class)s_revision_chk"),
+            choices_check("measurement_basis", MeasurementBasis),
             models.CheckConstraint(
                 condition=Q(dc_capacity_mw__gt=0, dc_capacity_mw__lt=float("inf")),
-                name="plant_dc_capacity_finite",
+                name="%(class)s_dc_capacity_mw_chk",
             ),
             models.CheckConstraint(
                 condition=Q(inverter_capacity_mw__isnull=True)
                 | Q(inverter_capacity_mw__gt=0, inverter_capacity_mw__lt=float("inf")),
-                name="plant_inverter_capacity_finite",
+                name="%(class)s_inverter_capacity_mw_chk",
             ),
             models.CheckConstraint(
                 condition=Q(export_limit_mw__isnull=True)
                 | Q(export_limit_mw__gt=0, export_limit_mw__lt=float("inf")),
-                name="plant_export_limit_finite",
+                name="%(class)s_export_limit_mw_chk",
             ),
-            choices_check("mounting_type", MountingType, name="plant_mounting_type_supported"),
+            choices_check("mounting_type", MountingType),
             models.CheckConstraint(
-                condition=Q(surface_tilt__isnull=True)
-                | Q(surface_tilt__gte=0, surface_tilt__lte=90),
-                name="plant_surface_tilt_valid",
+                condition=Q(surface_tilt_degrees__isnull=True)
+                | Q(surface_tilt_degrees__gte=0, surface_tilt_degrees__lte=90),
+                name="%(class)s_surface_tilt_degrees_chk",
             ),
             models.CheckConstraint(
-                condition=Q(surface_azimuth__isnull=True)
-                | Q(surface_azimuth__gte=0, surface_azimuth__lt=360),
-                name="plant_surface_azimuth_valid",
+                condition=Q(surface_azimuth_degrees__isnull=True)
+                | Q(surface_azimuth_degrees__gte=0, surface_azimuth_degrees__lt=360),
+                name="%(class)s_surface_azimuth_degrees_chk",
             ),
             models.CheckConstraint(
                 condition=Q(mounting_type=MountingType.FIXED)
-                | Q(surface_tilt__isnull=True, surface_azimuth__isnull=True),
-                name="plant_angles_require_fixed",
+                | Q(surface_tilt_degrees__isnull=True, surface_azimuth_degrees__isnull=True),
+                name="%(class)s_angles_chk",
             ),
         )
+
+    def __str__(self) -> str:
+        return f"Plant {self.plant_id} revision {self.revision}"
 
 
 class ProductionObservation(models.Model):
@@ -262,7 +275,7 @@ class ProductionObservation(models.Model):
     )
     source = models.CharField(max_length=200)
     recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
-    recorded_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
     supersedes = models.OneToOneField(
         "self", null=True, on_delete=models.RESTRICT, related_name="replacement"
     )
@@ -274,20 +287,20 @@ class ProductionObservation(models.Model):
             models.UniqueConstraint(
                 fields=("plant", "starts_at", "ends_at"),
                 condition=Q(is_current=True),
-                name="plant_observation_unique",
+                name="%(class)s_plant_starts_at_ends_at_uniq",
             ),
             models.CheckConstraint(
                 condition=Q(ends_at=F("starts_at") + timedelta(minutes=30))
                 | Q(ends_at=F("starts_at") + timedelta(minutes=60)),
-                name="plant_observation_duration",
+                name="%(class)s_ends_at_chk",
             ),
             models.CheckConstraint(
                 condition=Q(energy_mwh__gte=0, energy_mwh__lt=float("inf")),
-                name="plant_observation_energy_finite",
+                name="%(class)s_energy_mwh_chk",
             ),
-            choices_check("quality", ObservationQuality, name="plant_observation_quality_valid"),
+            choices_check("quality", ObservationQuality),
             ExclusionConstraint(
-                name="plant_observation_no_overlap",
+                name="%(class)s_plant_interval_excl",
                 condition=Q(is_current=True, is_reverted=False),
                 expressions=(
                     ("plant", RangeOperators.EQUAL),
@@ -296,9 +309,12 @@ class ProductionObservation(models.Model):
             ),
             models.CheckConstraint(
                 condition=Q(is_reverted=False) | Q(supersedes__isnull=False),
-                name="plant_observation_revert_has_source",
+                name="%(class)s_is_reverted_chk",
             ),
         )
+
+    def __str__(self) -> str:
+        return f"Plant {self.plant_id} from {self.starts_at.isoformat()}"
 
 
 class CalibrationRun(models.Model):
@@ -317,7 +333,7 @@ class CalibrationRun(models.Model):
     measurement_selection_policy = models.CharField(max_length=80, default=MEASUREMENT_POLICY)
     reference_snapshot_ids = models.JSONField(null=True, default=None)
     incident_revision_ids = models.JSONField(default=list)
-    input_fingerprint = models.CharField(max_length=64, default="")
+    input_sha256 = models.CharField(max_length=64, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True)
     status = models.CharField(
@@ -341,19 +357,19 @@ class CalibrationRun(models.Model):
             models.UniqueConstraint(
                 fields=("plant",),
                 condition=Q(status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING)),
-                name="plant_one_pending_calibration",
+                name="%(class)s_plant_uniq",
             ),
             models.UniqueConstraint(
-                fields=("id", "configuration"), name="calibration_id_config_unique"
+                fields=("id", "configuration"), name="%(class)s_id_configuration_uniq"
             ),
             models.CheckConstraint(
-                condition=Q(window_end__gte=F("window_start")), name="calibration_window_valid"
+                condition=Q(window_end__gte=F("window_start")), name="%(class)s_window_chk"
             ),
             models.CheckConstraint(
                 condition=Q(factor__isnull=True) | Q(factor__gt=0, factor__lt=float("inf")),
-                name="calibration_factor_finite",
+                name="%(class)s_factor_chk",
             ),
-            choices_check("status", CalibrationStatus, name="calibration_status_valid"),
+            choices_check("status", CalibrationStatus),
             lease_check((CalibrationStatus.RUNNING,)),
             models.CheckConstraint(
                 condition=Q(status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING))
@@ -362,6 +378,9 @@ class CalibrationRun(models.Model):
             ),
             choices_check("assessment", CalibrationAssessment, blank=True),
         )
+
+    def __str__(self) -> str:
+        return f"Calibration {self.pk} of plant {self.plant_id}: {self.status}"
 
 
 class CalibrationActivation(models.Model):
@@ -374,9 +393,12 @@ class CalibrationActivation(models.Model):
     class Meta:
         constraints = (
             models.UniqueConstraint(
-                fields=("id", "configuration"), name="activation_id_config_unique"
+                fields=("id", "configuration"), name="%(class)s_id_configuration_uniq"
             ),
         )
+
+    def __str__(self) -> str:
+        return f"Activation {self.pk} of plant {self.plant_id}"
 
 
 class ForecastIssuance(models.Model):
@@ -394,22 +416,22 @@ class ForecastIssuance(models.Model):
     native_intervals = models.JSONField()
 
     class Meta:
-        indexes = (models.Index(fields=("plant", "target_date"), name="issuance_plant_day"),)
+        indexes = (models.Index(fields=("plant", "target_date"), name="%(class)s_plant_day_idx"),)
         constraints = (
             models.UniqueConstraint(
-                fields=("plant", "snapshot", "target_date"), name="forecast_issuance_unique"
+                fields=("plant", "snapshot", "target_date"),
+                name="%(class)s_plant_snapshot_target_date_uniq",
             ),
             models.CheckConstraint(
-                condition=Q(factor__gt=0, factor__lt=float("inf")),
-                name="forecast_issuance_factor_finite",
+                condition=Q(factor__gt=0, factor__lt=float("inf")), name="%(class)s_factor_chk"
             ),
             models.CheckConstraint(
                 condition=Q(published_at__lt=models.F("cutoff_at")),
-                name="forecast_issuance_before_daylight",
+                name="%(class)s_published_at_chk",
             ),
             models.CheckConstraint(
                 condition=Q(calibration__isnull=False) | Q(factor=1),
-                name="issuance_baseline_factor_identity",
+                name="%(class)s_calibration_factor_chk",
             ),
         )
 
@@ -423,3 +445,6 @@ class PlantEvent(models.Model):
 
     class Meta:
         constraints = (choices_check("action", PlantEventAction),)
+
+    def __str__(self) -> str:
+        return f"{self.action} on plant {self.plant_id}"

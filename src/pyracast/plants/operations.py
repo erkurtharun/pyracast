@@ -61,9 +61,8 @@ class ObservationImportResult(TypedDict):
 
 
 def configuration_is_current(configuration: PlantConfiguration) -> bool:
-    return Plant.objects.filter(
+    return Plant.objects.active().filter(
         pk=configuration.plant_id,
-        region__deleted_at__isnull=True,
         current_configuration_id=configuration.pk,
         region_id=configuration.binding.region_id,
     ).exists() and binding_is_current(configuration.binding)
@@ -98,8 +97,8 @@ def _validate_configuration(
     export_limit_mw: float | None,
     measurement_basis: str,
     mounting_type: str,
-    surface_tilt: float | None,
-    surface_azimuth: float | None,
+    surface_tilt_degrees: float | None,
+    surface_azimuth_degrees: float | None,
 ) -> None:
     if not name.strip() or len(name.strip()) > 200:
         raise ValidationError(gettext("A plant name of at most 200 characters is required."))
@@ -110,7 +109,10 @@ def _validate_configuration(
         raise ValidationError(gettext("Unsupported meter basis."))
     if mounting_type not in MountingType.values:
         raise ValidationError(gettext("Unsupported mounting type."))
-    for angle, bound, exclusive in ((surface_tilt, 90, False), (surface_azimuth, 360, True)):
+    for angle, bound, exclusive in (
+        (surface_tilt_degrees, 90, False),
+        (surface_azimuth_degrees, 360, True),
+    ):
         if angle is not None and (
             isinstance(angle, bool)
             or not isfinite(angle)
@@ -122,7 +124,7 @@ def _validate_configuration(
                 gettext("Surface angles must be finite and inside the allowed bounds.")
             )
     if mounting_type != MountingType.FIXED and (
-        surface_tilt is not None or surface_azimuth is not None
+        surface_tilt_degrees is not None or surface_azimuth_degrees is not None
     ):
         raise ValidationError(gettext("Only fixed mounting permits surface angles."))
 
@@ -199,8 +201,8 @@ def create_plant(
     export_limit_mw: float | None = None,
     measurement_basis: str = MeasurementBasis.NET_EXPORT,
     mounting_type: str = MountingType.UNKNOWN,
-    surface_tilt: float | None = None,
-    surface_azimuth: float | None = None,
+    surface_tilt_degrees: float | None = None,
+    surface_azimuth_degrees: float | None = None,
     platform: bool = False,
 ) -> Plant:
     _validate_configuration(
@@ -210,14 +212,12 @@ def create_plant(
         export_limit_mw,
         measurement_basis,
         mounting_type,
-        surface_tilt,
-        surface_azimuth,
+        surface_tilt_degrees,
+        surface_azimuth_degrees,
     )
     with transaction.atomic():
         authorize_workspace_admin(actor, tenant_id, platform=platform)
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         if Plant.objects.filter(region=region).exists():
             raise DomainError(ErrorCode.LOCATION_ALREADY_HAS_PLANT)
         plant = Plant.objects.create(region=region, name=name.strip())
@@ -231,8 +231,8 @@ def create_plant(
             export_limit_mw=export_limit_mw,
             measurement_basis=measurement_basis,
             mounting_type=mounting_type,
-            surface_tilt=surface_tilt,
-            surface_azimuth=surface_azimuth,
+            surface_tilt_degrees=surface_tilt_degrees,
+            surface_azimuth_degrees=surface_azimuth_degrees,
         )
         return plant
 
@@ -249,8 +249,8 @@ def revise_plant(
     export_limit_mw: float | None = None,
     measurement_basis: str = MeasurementBasis.NET_EXPORT,
     mounting_type: str = MountingType.UNKNOWN,
-    surface_tilt: float | None = None,
-    surface_azimuth: float | None = None,
+    surface_tilt_degrees: float | None = None,
+    surface_azimuth_degrees: float | None = None,
     platform: bool = False,
 ) -> Plant:
     _validate_configuration(
@@ -260,14 +260,12 @@ def revise_plant(
         export_limit_mw,
         measurement_basis,
         mounting_type,
-        surface_tilt,
-        surface_azimuth,
+        surface_tilt_degrees,
+        surface_azimuth_degrees,
     )
     with transaction.atomic():
         authorize_workspace_admin(actor, tenant_id, platform=platform)
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         _save_plant_parameters(
             actor,
@@ -279,8 +277,8 @@ def revise_plant(
             export_limit_mw=export_limit_mw,
             measurement_basis=measurement_basis,
             mounting_type=mounting_type,
-            surface_tilt=surface_tilt,
-            surface_azimuth=surface_azimuth,
+            surface_tilt_degrees=surface_tilt_degrees,
+            surface_azimuth_degrees=surface_azimuth_degrees,
         )
         return plant
 
@@ -296,8 +294,8 @@ def _save_plant_parameters(
     export_limit_mw: float | None,
     measurement_basis: str,
     mounting_type: str,
-    surface_tilt: float | None,
-    surface_azimuth: float | None,
+    surface_tilt_degrees: float | None,
+    surface_azimuth_degrees: float | None,
 ) -> None:
     parameters: dict[str, object] = {
         "dc_capacity_mw": dc_capacity_mw,
@@ -305,8 +303,8 @@ def _save_plant_parameters(
         "export_limit_mw": export_limit_mw,
         "measurement_basis": measurement_basis,
         "mounting_type": mounting_type,
-        "surface_tilt": surface_tilt,
-        "surface_azimuth": surface_azimuth,
+        "surface_tilt_degrees": surface_tilt_degrees,
+        "surface_azimuth_degrees": surface_azimuth_degrees,
     }
     if region.status == RegionStatus.PENDING and plant.current_configuration_id is None:
         _rename(actor, plant, region, name)
@@ -394,9 +392,7 @@ def import_observations(
         raise ValidationError(gettext("Use MWh or kWh and a batch of 1 to 2000 observations."))
     with transaction.atomic():
         tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         configuration = PlantConfiguration.objects.select_related("binding").get(
             pk=configuration_id, plant=plant
@@ -467,9 +463,7 @@ def request_calibration(
 ) -> CalibrationRun:
     with transaction.atomic():
         tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         configuration = _configuration(plant)
         now = timezone.now()
@@ -503,7 +497,7 @@ def request_calibration(
         _, end = local_day_bounds(end_date, configuration.binding.timezone)
         watermark = (
             ProductionObservation.objects.filter(
-                configuration=configuration, recorded_at__lte=now
+                configuration=configuration, created_at__lte=now
             ).aggregate(last=Max("pk"))["last"]
             or 0
         )
@@ -528,7 +522,7 @@ def request_calibration(
             measurement_selection_policy=MEASUREMENT_POLICY,
             reference_snapshot_ids=reference_ids,
             incident_revision_ids=incidents,
-            input_fingerprint=fingerprint,
+            input_sha256=fingerprint,
         )
         record_plant_event(
             plant_id=plant.pk,
@@ -622,9 +616,7 @@ def activate_calibration(
 ) -> CalibrationActivation:
     with transaction.atomic():
         tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         configuration = _configuration(plant)
         run = CalibrationRun.objects.get(
@@ -643,9 +635,7 @@ def reset_calibration(
 ) -> CalibrationActivation:
     with transaction.atomic():
         tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         from pyracast.plants.automation import update_automation
 

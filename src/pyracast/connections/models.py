@@ -43,12 +43,12 @@ class ProviderAccount(models.Model):
             models.UniqueConstraint(
                 canonical_account_identity("provider"),
                 canonical_account_identity("external_account_id"),
-                name="canonical_provider_account",
+                name="%(class)s_provider_external_account_id_uniq",
             ),
             models.CheckConstraint(
                 condition=models.Q(provider=Provider.FIXTURE, encrypted_api_key="")
                 | models.Q(encrypted_api_key__startswith="encrypted:v1:"),
-                name="provider_account_encrypted_api_key",
+                name="%(class)s_encrypted_api_key_chk",
             ),
             choices_check("provider", Provider),
             models.CheckConstraint(
@@ -93,36 +93,40 @@ class SiteBinding(models.Model):
 
     class Meta:
         constraints = (
-            models.UniqueConstraint(fields=("id", "region"), name="binding_region_identity"),
+            models.UniqueConstraint(fields=("id", "region"), name="%(class)s_id_region_uniq"),
             models.UniqueConstraint(
-                fields=("id", "provider_account"), name="binding_account_identity"
+                fields=("id", "provider_account"), name="%(class)s_id_provider_account_uniq"
             ),
-            models.CheckConstraint(condition=models.Q(capacity_kw__gt=0), name="binding_capacity"),
             models.CheckConstraint(
-                condition=models.Q(capacity_kw__lt=float("inf")), name="binding_capacity_finite"
+                condition=models.Q(capacity_kw__gt=0), name="%(class)s_capacity_kw_positive_chk"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(capacity_kw__lt=float("inf")),
+                name="%(class)s_capacity_kw_finite_chk",
             ),
             models.CheckConstraint(
                 condition=models.Q(dc_capacity_kw__isnull=True)
                 | models.Q(dc_capacity_kw__gt=0, dc_capacity_kw__lt=float("inf")),
-                name="binding_dc_capacity",
+                name="%(class)s_dc_capacity_kw_chk",
             ),
             models.CheckConstraint(
-                condition=models.Q(latitude__gte=-90, latitude__lte=90), name="binding_latitude"
+                condition=models.Q(latitude__gte=-90, latitude__lte=90),
+                name="%(class)s_latitude_chk",
             ),
             models.CheckConstraint(
                 condition=models.Q(longitude__gte=-180, longitude__lte=180),
-                name="binding_longitude",
+                name="%(class)s_longitude_chk",
             ),
-            choices_check("power_basis", PowerBasis, name="binding_power_basis"),
+            choices_check("power_basis", PowerBasis),
             models.CheckConstraint(
                 condition=models.Q(azimuth_degrees__gte=0, azimuth_degrees__lt=360),
-                name="binding_azimuth",
+                name="%(class)s_azimuth_degrees_chk",
             ),
             models.CheckConstraint(
                 condition=models.Q(losses_percent__gte=0, losses_percent__lt=100),
-                name="binding_losses",
+                name="%(class)s_losses_percent_chk",
             ),
-            choices_check("health", BindingHealth, name="binding_health"),
+            choices_check("health", BindingHealth),
             models.CheckConstraint(
                 condition=models.Q(
                     validated_at__isnull=True, validated_credential_revision__isnull=True
@@ -138,3 +142,6 @@ class SiteBinding(models.Model):
                 fields=("region", "region_revision"), name="%(class)s_region_region_revision_uniq"
             ),
         )
+
+    def __str__(self) -> str:
+        return f"Site {self.site_id} of region {self.region_id}"

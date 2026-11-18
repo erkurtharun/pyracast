@@ -32,7 +32,7 @@ from pyracast.forecasts.models import (
 )
 from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
 from pyracast.regions.audit import record_audit
-from pyracast.regions.models import AuditAction, Region, RegionStatus
+from pyracast.regions.models import AuditAction, Region, RegionStatus, active_region
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +207,7 @@ def validate_binding(
     started = time.monotonic()
     require_platform_admin(actor)
     binding = SiteBinding.objects.select_related("provider_account").get(
-        pk=binding_id, region__deleted_at__isnull=True
+        active_region("region__"), pk=binding_id
     )
     if binding.provider_account.provider == Provider.SOLCAST and (
         not binding.settings_verification_reference or binding.installation_date is None
@@ -256,9 +256,9 @@ def validate_binding(
                     binding=binding,
                     endpoint=CollectionEndpoint.FORECASTS,
                     reference_import__isnull=True,
-                    scheduled_slot__lte=recovered_at,
+                    scheduled_for__lte=recovered_at,
                 )
-                .order_by("-scheduled_slot", "-pk")
+                .order_by("-scheduled_for", "-pk")
                 .first()
             )
             if (

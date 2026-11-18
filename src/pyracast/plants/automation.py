@@ -23,7 +23,7 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.operations import _activate, _validate_activation, configuration_is_current
 from pyracast.plants.preparation import prepare_calibration
-from pyracast.regions.models import Region
+from pyracast.regions.models import Region, active_region
 
 MIN_AUTOMATIC_DAYS = 30
 MIN_NEW_HOLDOUT_DAYS = 7
@@ -137,9 +137,7 @@ def set_calibration_automation(
 ) -> Plant:
     with transaction.atomic():
         tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         if enabled and (
             plant.current_configuration is None
@@ -286,7 +284,7 @@ def prepare_due_calibrations(now: datetime, limit: int = 100) -> list[int]:
         automatic_calibration_enabled=True, next_calibration_check_at__lte=now
     )
     due = list(
-        due_plants.filter(region__deleted_at__isnull=True)
+        due_plants.filter(active_region("region__"))
         .order_by("next_calibration_check_at", "pk")
         .values_list("pk", "region_id", "region__tenant_id")[:limit]
     )

@@ -22,10 +22,10 @@ class Command(BaseCommand):
             "--mounting-type", choices=("unknown", "fixed", "tracking"), default="unknown"
         )
         parser.add_argument(
-            "--surface-tilt", type=float, help="Fixed surface tilt in degrees, 0 to 90."
+            "--surface-tilt-degrees", type=float, help="Fixed surface tilt in degrees, 0 to 90."
         )
         parser.add_argument(
-            "--surface-azimuth",
+            "--surface-azimuth-degrees",
             type=float,
             help="Fixed surface azimuth in degrees clockwise from north, 0 to below 360.",
         )
@@ -47,8 +47,8 @@ class Command(BaseCommand):
                     "export_limit_mw",
                     "measurement_basis",
                     "mounting_type",
-                    "surface_tilt",
-                    "surface_azimuth",
+                    "surface_tilt_degrees",
+                    "surface_azimuth_degrees",
                 )
             }
             if options["plant_id"] is None:

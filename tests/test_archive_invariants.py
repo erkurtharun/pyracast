@@ -55,11 +55,11 @@ IMMUTABLE = "are immutable"
 def _reference_import(system: System) -> HistoricalReferenceImport:
     return HistoricalReferenceImport.objects.create(
         binding=system.binding,
-        sha256="a" * 64,
+        content_sha256="a" * 64,
         source_name="fixture",
         source_settings={},
         imported_by=system.admin,
-        imported_at=NOW,
+        created_at=NOW,
         interval_count=1,
     )
 
@@ -115,7 +115,7 @@ def _sibling_configuration(configuration: PlantConfiguration) -> PlantConfigurat
 
 
 @pytest.mark.parametrize(
-    "values", [{"source_name": "changed"}, {"interval_count": 2}, {"sha256": "b" * 64}]
+    "values", [{"source_name": "changed"}, {"interval_count": 2}, {"content_sha256": "b" * 64}]
 )
 def test_a_stored_historical_reference_import_is_never_rewritten(values: dict[str, Any]) -> None:
     record = _reference_import(make_system())
@@ -159,7 +159,7 @@ def test_a_stored_epias_snapshot_is_never_rewritten(
     [
         {"energy_mwh": 2},
         {"quality": "curtailed"},
-        {"recorded_at": NOW},
+        {"created_at": NOW},
         {"source": "corrected"},
         {"is_current": False, "energy_mwh": 2},
     ],
@@ -212,7 +212,7 @@ def test_a_production_revision_supersedes_the_same_plant_and_interval(
 def _forecast_snapshot(**values: Any) -> ForecastSnapshot:
     system = make_system()
     job = CollectionJob.objects.create(
-        binding=system.binding, scheduled_slot=NOW, target_date=NOW.date(), available_at=NOW
+        binding=system.binding, scheduled_for=NOW, target_date=NOW.date(), available_at=NOW
     )
     return ForecastSnapshot.objects.create(
         **{
@@ -284,7 +284,9 @@ def test_a_capacity_normalization_stores_the_factor_of_its_capacities(
     rows = ReferenceCapacityNormalization.objects.all()
 
     with (
-        pytest.raises(IntegrityError, match="referencecapacitynormalization_factor_chk"),
+        pytest.raises(
+            IntegrityError, match="referencecapacitynormalization_target_over_source_chk"
+        ),
         transaction.atomic(),
     ):
         rows.update(factor=F("factor") * 2)
@@ -308,7 +310,7 @@ def test_only_reference_imports_use_the_historical_import_endpoint(
 ) -> None:
     system = make_system()
     job = CollectionJob.objects.create(
-        binding=system.binding, scheduled_slot=NOW, target_date=NOW.date(), available_at=NOW
+        binding=system.binding, scheduled_for=NOW, target_date=NOW.date(), available_at=NOW
     )
 
     with pytest.raises(IntegrityError, match=constraint), transaction.atomic():
@@ -331,7 +333,7 @@ def test_an_imported_reference_day_is_stored_as_a_succeeded_import(
         binding=system.binding,
         reference_import=_reference_import(system),
         endpoint="historical_import",
-        scheduled_slot=NOW,
+        scheduled_for=NOW,
         target_date=NOW.date(),
         available_at=NOW,
         status="succeeded",
@@ -366,7 +368,7 @@ def _capacity_normalization(
 
 def _epias_acquisition(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[[], object]:
     connected(monkeypatch)
-    EpiasCollectionJob.objects.update(next_attempt_at=NOW, retry_until=None)
+    EpiasCollectionJob.objects.update(available_at=NOW, retry_until=None)
     first, second = EpiasCollectionJob.objects.order_by("pk")[:2]
     assert run_epias_job(first.pk, fetch=day_data, now=NOW)
     return lambda: run_epias_job(second.pk, fetch=day_data, now=NOW)
@@ -484,13 +486,13 @@ def test_two_source_revisions_of_one_slot_normalize_onto_one_target(
     first_source = actual_snapshot_for(system, day)
     second_source = actual_snapshot_for(replace(system, binding=second), day)
     CollectionJob.objects.filter(pk=second_source.job_id).update(
-        scheduled_slot=first_source.job.scheduled_slot
+        scheduled_for=first_source.job.scheduled_for
     )
     copies = normalize(system, target)
     copies += normalize(replace(system, binding=second), target)
 
     assert len(copies) == 2
     assert {
-        snapshot.job.scheduled_slot
+        snapshot.job.scheduled_for
         for snapshot in ForecastSnapshot.objects.filter(pk__in=copies).select_related("job")
-    } == {first_source.job.scheduled_slot}
+    } == {first_source.job.scheduled_for}

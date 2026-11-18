@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -254,6 +256,24 @@ def test_capture_cli_requires_explicit_live_flag(
     assert "Live requests require --live." in capsys.readouterr().err
 
 
+def test_capture_cli_starts_in_a_fresh_interpreter_before_django_is_configured() -> None:
+    environment = {
+        key: value for key, value in os.environ.items() if key != "DJANGO_SETTINGS_MODULE"
+    }
+    result = subprocess.run(
+        [sys.executable, "scripts/check_solcast.py", "--binding-id", "1", "--kind", "settings"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode == 2, result.stderr
+    assert "Live requests require --live." in result.stderr
+
+
 def test_settings_sanitization_selects_exact_site_and_allowlisted_fields() -> None:
     payload = {
         "sites": [
@@ -320,8 +340,8 @@ def test_captured_forecast_fixture_preserves_documented_intervals_and_missing_is
     assert normalized.issued_at is None
     assert normalized.raw_payload == payload
     assert len(normalized.intervals) == 97
-    assert normalized.intervals[0]["end"] == "2026-11-09T15:30:00+00:00"
-    assert normalized.intervals[-1]["end"] == "2026-11-11T15:30:00+00:00"
+    assert normalized.intervals[0].end.isoformat() == "2026-11-09T15:30:00+00:00"
+    assert normalized.intervals[-1].end.isoformat() == "2026-11-11T15:30:00+00:00"
     assert all("ghi" not in row for row in payload["forecasts"])
 
 

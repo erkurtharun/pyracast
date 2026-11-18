@@ -23,7 +23,7 @@ def approval_job(binding_id: int) -> tuple[int, datetime] | None:
     return (
         CollectionJob.objects.filter(binding_id=binding_id, endpoint=CollectionEndpoint.FORECASTS)
         .order_by("created_at", "pk")
-        .values_list("pk", "scheduled_slot")
+        .values_list("pk", "scheduled_for")
         .first()
     )
 

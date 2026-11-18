@@ -115,10 +115,10 @@ def test_daily_reconciliation_preserves_acquisitions_and_history(
 ) -> None:
     system, plant, linked = connected(monkeypatch)
     assert EpiasCollectionJob.objects.count() == 90
-    assert {j.target_day for j in EpiasCollectionJob.objects.all()} == {
+    assert {j.target_date for j in EpiasCollectionJob.objects.all()} == {
         NOW.date() - timedelta(days=i) for i in range(1, 91)
     }
-    initial = EpiasCollectionJob.objects.order_by("-target_day").first()
+    initial = EpiasCollectionJob.objects.order_by("-target_date").first()
     assert initial is not None
     requests = RequestAttempt.objects.count()
     assert run_epias_job(initial.pk, fetch=day_data, now=NOW)
@@ -128,23 +128,23 @@ def test_daily_reconciliation_preserves_acquisitions_and_history(
     assert len(identifiers) == 7
     assert enqueue_due_epias_jobs(now=next_day) == identifiers
     revised = EpiasCollectionJob.objects.get(pk=identifiers[1])
-    assert revised.target_day == initial.target_day
+    assert revised.target_date == initial.target_date
     assert run_epias_job(revised.pk, fetch=day_data, now=next_day)
-    acquisitions = EpiasSnapshot.objects.filter(target_day=initial.target_day).order_by(
+    acquisitions = EpiasSnapshot.objects.filter(target_date=initial.target_date).order_by(
         "available_at"
     )
     assert acquisitions.count() == 2
     assert acquisitions[0].content_sha256 == acquisitions[1].content_sha256
     assert acquisitions[0].readings[0] == {
         "provider_timestamp": datetime.combine(
-            initial.target_day, datetime.min.time(), tzinfo=timezone.get_current_timezone()
+            initial.target_date, datetime.min.time(), tzinfo=timezone.get_current_timezone()
         ).isoformat(),
         "hour": "00:00",
         "period_start": datetime.combine(
-            initial.target_day, datetime.min.time(), tzinfo=timezone.get_current_timezone()
+            initial.target_date, datetime.min.time(), tzinfo=timezone.get_current_timezone()
         ).isoformat(),
         "period_end": datetime.combine(
-            initial.target_day, datetime.min.time(), tzinfo=timezone.get_current_timezone()
+            initial.target_date, datetime.min.time(), tzinfo=timezone.get_current_timezone()
         )
         .replace(hour=1)
         .isoformat(),
@@ -227,7 +227,7 @@ def test_daily_slot_uses_region_night_independently_of_forecast_times(
     assert enqueue_due_epias_jobs(now=after_slot + timedelta(minutes=1)) == first
     jobs = EpiasCollectionJob.objects.filter(pk__in=first)
     assert set(jobs.values_list("scheduled_for", flat=True)) == {after_slot}
-    assert set(jobs.values_list("target_day", flat=True)) == {
+    assert set(jobs.values_list("target_date", flat=True)) == {
         NEXT_NIGHT.date() - timedelta(days=offset) for offset in range(1, 8)
     }
     assert EpiasCollectionJob.objects.count() == 97
@@ -321,7 +321,7 @@ def test_expired_leases_exhaust_budget_and_ignore_old_response(
     assert job.attempts == 3
     other = EpiasCollectionJob.objects.exclude(pk=job.pk).first()
     assert other is not None
-    EpiasCollectionJob.objects.filter(pk=other.pk).update(next_attempt_at=NOW + timedelta(hours=1))
+    EpiasCollectionJob.objects.filter(pk=other.pk).update(available_at=NOW + timedelta(hours=1))
     assert claim_epias_job(other.pk, NOW) is None
     assert other.pk not in pending_epias_ids(NOW, limit=100)
 
@@ -342,8 +342,8 @@ def test_provider_failures_are_redacted_bounded_and_honor_retry_after(
         job.refresh_from_db()
         assert job.attempts == attempt
         assert job.last_error == "epias_provider_failure"
-        assert job.next_attempt_at >= now + timedelta(seconds=300)
-        now = job.next_attempt_at
+        assert job.available_at >= now + timedelta(seconds=300)
+        now = job.available_at
     assert job.status == "failed"
     assert not run_epias_job(job.pk, fetch=fail, now=now)
     assert not EpiasSnapshot.objects.exists()
@@ -409,9 +409,9 @@ def test_partial_acquisitions_are_immutable_and_retry_at_most_three_times(
         assert job.last_error == "partial_data"
         if attempt < 3:
             assert job.status == "pending"
-            assert job.next_attempt_at >= now + timedelta(minutes=30 * 2 ** (attempt - 1))
+            assert job.available_at >= now + timedelta(minutes=30 * 2 ** (attempt - 1))
             assert not run_epias_job(job.pk, fetch=partial, now=now)
-        now = job.next_attempt_at
+        now = job.available_at
     assert job.status == "failed"
     assert not EpiasSnapshot.objects.filter(job=job, complete=True).exists()
     assert not run_epias_job(job.pk, fetch=partial, now=now)
@@ -431,7 +431,7 @@ def test_partial_acquisition_can_be_completed_without_rewriting_first(
     assert not run_epias_job(job.pk, fetch=partial, now=NOW)
     first = EpiasSnapshot.objects.get(job=job)
     job.refresh_from_db()
-    assert run_epias_job(job.pk, fetch=day_data, now=job.next_attempt_at)
+    assert run_epias_job(job.pk, fetch=day_data, now=job.available_at)
     first.refresh_from_db()
     assert first.readings == [EpiasSnapshot.objects.get(job=job, attempt=2).readings[0]]
     assert not first.complete

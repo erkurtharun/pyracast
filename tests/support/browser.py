@@ -273,7 +273,7 @@ def seed_forecast_days(system: System) -> ForecastDays:
         binding=system.binding,
         endpoint="estimated_actuals",
         target_date=history,
-        scheduled_slot=now,
+        scheduled_for=now,
         available_at=now,
     )
     assert collect(history_job.pk, FixtureProvider(), calculate, timezone.now())
@@ -319,8 +319,8 @@ def seed_review(accounts: Accounts, other: OtherWorkspace) -> Review:
         dc_capacity_mw=12,
         inverter_capacity_mw=10,
         mounting_type="fixed",
-        surface_tilt=25,
-        surface_azimuth=180,
+        surface_tilt_degrees=25,
+        surface_azimuth_degrees=180,
     )
     binding = configure_binding(
         system.admin,

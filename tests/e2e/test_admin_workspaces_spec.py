@@ -40,7 +40,10 @@ def test_a_platform_administrator_creates_a_workspace_with_a_plant_and_manages_m
     console_plant = Plant.objects.select_related("submission").get(region__tenant=console_tenant)
     assert console_plant.name == "Browser console plant"
     assert (console_plant.region.latitude, console_plant.region.longitude) == (41.0082, 28.9784)
-    assert (console_plant.submission.surface_tilt, console_plant.submission.surface_azimuth) == (
+    assert (
+        console_plant.submission.surface_tilt_degrees,
+        console_plant.submission.surface_azimuth_degrees,
+    ) == (
         25,
         180,
     )

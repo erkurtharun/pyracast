@@ -366,12 +366,12 @@ def test_a_delivery_is_sending_only_with_prepared_content_in_a_known_state() -> 
     rows = NotificationDelivery.objects.filter(pk=delivery.pk)
     lease = {"lease_token": uuid.uuid4(), "lease_expires_at": SLOT}
     with (
-        pytest.raises(IntegrityError, match="notification_delivery_status_valid"),
+        pytest.raises(IntegrityError, match="notificationdelivery_status_chk"),
         transaction.atomic(),
     ):
         rows.update(status="unavailable")
     with (
-        pytest.raises(IntegrityError, match="notification_delivery_sending_prepared"),
+        pytest.raises(IntegrityError, match="notificationdelivery_prepared_message_chk"),
         transaction.atomic(),
     ):
         rows.update(status="sending", prepared_message=None, **lease)

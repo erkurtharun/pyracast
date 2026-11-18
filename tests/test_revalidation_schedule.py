@@ -40,7 +40,7 @@ def test_revalidation_after_cutoff_recovers_tomorrows_job_without_duplicate_requ
         assert recovered == existing[:1]
     job = CollectionJob.objects.get(pk=recovered[0])
     assert job.status == "pending"
-    assert job.scheduled_slot == cutoff
+    assert job.scheduled_for == cutoff
     assert job.target_date == cutoff.date() + timedelta(days=1)
     assert job.lease_token is None
     assert job.lease_expires_at is None
@@ -59,7 +59,7 @@ def test_first_approval_after_cutoff_does_not_backfill_a_preapproval_slot() -> N
 
     assert enqueue_due(approval_time) == []
     assert list(CollectionJob.objects.values_list("pk", flat=True)) == [initial.pk]
-    assert initial.scheduled_slot == approval_time
+    assert initial.scheduled_for == approval_time
 
 
 def test_approval_acquisition_runs_outside_an_existing_schedule_without_enabling_other_slots() -> (
@@ -80,7 +80,7 @@ def test_approval_acquisition_runs_outside_an_existing_schedule_without_enabling
     later = CollectionJob.objects.create(
         binding=system.binding,
         endpoint="forecasts",
-        scheduled_slot=NOW + timedelta(minutes=1),
+        scheduled_for=NOW + timedelta(minutes=1),
         available_at=NOW + timedelta(minutes=1),
         target_date=initial.target_date,
     )

@@ -45,7 +45,7 @@ def inbox(
         rows = rows.exclude(status=ChangeRequestStatus.PENDING)
     if plant_id is not None:
         rows = rows.filter(plant_id=plant_id)
-    return _with_triage(rows).order_by("-submitted_at", "-pk")
+    return _with_triage(rows).order_by("-created_at", "-pk")
 
 
 def _with_triage(rows: QuerySet[ChangeRequest]) -> QuerySet[ChangeRequest]:
@@ -172,7 +172,7 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
         "configuration_id": request.configuration_id,
         "proposed_by": _user(request.proposed_by),
         "reason": request.reason,
-        "submitted_at": request.submitted_at,
+        "created_at": request.created_at,
         "reviewed_by": _user(request.reviewed_by),
         "closed_at": request.closed_at,
         "decision_reason": request.decision_reason,
@@ -217,7 +217,7 @@ def request_summaries(
             "configuration_id": row.configuration_id,
             "proposed_by": _user(row.proposed_by),
             "reason": row.reason,
-            "submitted_at": row.submitted_at,
+            "created_at": row.created_at,
             "reviewed_by": _user(row.reviewed_by),
             "closed_at": row.closed_at,
             "decision_reason": row.decision_reason,

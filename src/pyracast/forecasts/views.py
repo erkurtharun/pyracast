@@ -29,7 +29,7 @@ class CollectionJobOutput(serializers.Serializer[dict[str, object]]):
     id = serializers.IntegerField()
     endpoint = serializers.ChoiceField(choices=CollectionEndpoint.choices)
     status = serializers.ChoiceField(choices=CollectionJobStatus.choices)
-    scheduled_slot = serializers.DateTimeField()
+    scheduled_for = serializers.DateTimeField()
     available_at = serializers.DateTimeField()
     retry_until = serializers.DateTimeField(allow_null=True)
     attempts = serializers.IntegerField()

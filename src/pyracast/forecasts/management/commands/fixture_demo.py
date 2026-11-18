@@ -23,7 +23,7 @@ REGION = "Synthetic Ankara"
 
 
 def _region(actor: User, tenant: Tenant) -> Region:
-    existing = Region.objects.filter(tenant=tenant, name=REGION, deleted_at__isnull=True).first()
+    existing = Region.objects.active().filter(tenant=tenant, name=REGION).first()
     return existing or submit_region(
         actor,
         tenant.pk,

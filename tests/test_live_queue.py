@@ -64,7 +64,7 @@ def test_rabbitmq_actuals_redelivery_archives_once_with_one_provider_request(
     job = CollectionJob.objects.create(
         binding=system.binding,
         endpoint="estimated_actuals",
-        scheduled_slot=NOW,
+        scheduled_for=NOW,
         target_date=NOW.date() - timedelta(days=1),
         available_at=NOW,
     )

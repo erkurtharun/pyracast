@@ -1,8 +1,10 @@
+import json
 import math
 import sys
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import date, datetime, timedelta
+from typing import Any
 
 import pytest
 from django.db import connection, models
@@ -30,6 +32,7 @@ from tests.support.invariants import (
     PLANT_AUTOMATION_RULE,
     PROVIDER_ACCOUNT_RULE,
     SITE_BINDING_RULE,
+    STORED_RULES,
     lease_violations,
     stored_violations,
     violations,
@@ -60,7 +63,9 @@ NEW_CHECKS = {
         "collectionjob_reference_import_chk",
         "collectionjob_import_status_chk",
     },
-    "forecasts_referencecapacitynormalization": {"referencecapacitynormalization_factor_chk"},
+    "forecasts_referencecapacitynormalization": {
+        "referencecapacitynormalization_target_over_source_chk"
+    },
     "metering_epiascollectionjob": {"epiascollectionjob_lease_chk"},
     "plants_calibrationrun": {
         "calibrationrun_lease_chk",
@@ -71,6 +76,10 @@ NEW_CHECKS = {
     "notifications_notificationdelivery": {"notificationdelivery_lease_chk"},
 }
 PLANT_TABLES = ("plants_calibrationrun", "plants_plant")
+# The audit as the columns before the naming migrations spell it.
+PREVIOUS_RULES = tuple(
+    (table, rule.replace("scheduled_for", "scheduled_slot")) for table, rule in STORED_RULES
+)
 NEW_TRIGGERS = {
     "forecastsnapshot_publication_guard",
     "historicalreferenceimport_immutable",
@@ -121,6 +130,29 @@ def _all_new() -> tuple[set[str], set[str]]:
     )
 
 
+def audit() -> dict[str, int]:
+    """The stored audit under the collection slot column of the migrated state."""
+    with connection.cursor() as cursor:
+        description = connection.introspection.get_table_description(
+            cursor, "forecasts_collectionjob"
+        )
+    named = "scheduled_for" in {column.name for column in description}
+    return stored_violations(STORED_RULES if named else PREVIOUS_RULES)
+
+
+def stored_row(rows: models.QuerySet[Any]) -> dict[str, Any]:
+    """The row under the column names of the migrated state."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            sql.SQL("SELECT to_jsonb(stored) FROM {} AS stored WHERE id = %s").format(
+                sql.Identifier(rows.model._meta.db_table)
+            ),
+            [rows.values_list("pk", flat=True).get()],
+        )
+        (row,) = cursor.fetchone()
+    return dict(json.loads(row))
+
+
 def _tuples() -> dict[tuple[str, int], str]:
     """The physical row version of every job row: an UPDATE gives a row a new xmin."""
     found: dict[tuple[str, int], str] = {}
@@ -139,7 +171,7 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     collection = list(CollectionJob.objects.order_by("pk"))
     released = CollectionJob.objects.create(
         binding=system.binding,
-        scheduled_slot=NOW + timedelta(hours=1),
+        scheduled_for=NOW + timedelta(hours=1),
         target_date=NOW.date(),
         available_at=NOW,
     )
@@ -174,9 +206,7 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     del valid["forecasts_collectionjob", released.pk]
     stored_account = ProviderAccount.objects.values().get(pk=system.account.pk)
     stored_binding = SiteBinding.objects.values().get(pk=system.binding.pk)
-    assert set(stored_violations()) == {
-        f"forecasts_collectionjob: {LEASE_RULES['forecasts_collectionjob']}"
-    }
+    assert set(audit()) == {f"forecasts_collectionjob: {LEASE_RULES['forecasts_collectionjob']}"}
 
     forward()
 
@@ -290,14 +320,14 @@ def test_calibration_migration_refuses_run_and_automation_states_no_writer_produ
 ) -> None:
     row = stored(monkeypatch)
     rows = type(row)._default_manager.filter(pk=row.pk)
-    kept = rows.values().get()
-    assert {label.partition(":")[0] for label in stored_violations()} == {row._meta.db_table}
+    kept = stored_row(rows)
+    assert {label.partition(":")[0] for label in audit()} == {row._meta.db_table}
 
     with pytest.raises(ValueError, match=refusal):
         forward()
 
     assert not any(checks(table) & NEW_CHECKS[table] for table in PLANT_TABLES)
-    assert rows.values().get() == kept
+    assert stored_row(rows) == kept
     rows.update(**correction)
     forward()
     assert all(NEW_CHECKS[table] <= checks(table) for table in PLANT_TABLES)
@@ -339,7 +369,7 @@ def test_observation_migration_refuses_a_revision_of_another_interval(
         forward()
 
     assert "productionobservation_revision_guard" not in triggers()
-    assert linked.get().supersedes_id == earlier.pk
+    assert linked.values_list("supersedes_id", flat=True).get() == earlier.pk
     linked.update(supersedes=None)
     forward()
     assert "productionobservation_revision_guard" in triggers()
@@ -375,7 +405,7 @@ def test_provider_migration_refuses_accounts_and_bindings_no_writer_produces(
     rows.update(**values)
     changed = rows.values().get()
     table = model._meta.db_table
-    assert {label.partition(":")[0] for label in stored_violations()} == {table}
+    assert {label.partition(":")[0] for label in audit()} == {table}
 
     with pytest.raises(ValueError, match=rf"{table} holds 1 row.*{rule}"):
         forward()
@@ -403,7 +433,7 @@ def _delivery(system: System) -> NotificationDelivery:
 def _collection_job(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     system = make_system()
     return CollectionJob.objects.create(
-        binding=system.binding, scheduled_slot=NOW, target_date=NOW.date(), available_at=NOW
+        binding=system.binding, scheduled_for=NOW, target_date=NOW.date(), available_at=NOW
     )
 
 
@@ -453,14 +483,14 @@ def test_lease_migrations_refuse_leases_no_writer_produces(
     check = f"{table.split('_', 1)[1]}_lease_chk"
     migrate(*PREVIOUS.values())
     rows.update(**stored)
-    kept = rows.values().get()
-    assert set(stored_violations()) == {f"{table}: {LEASE_RULES[table]}"}
+    kept = stored_row(rows)
+    assert set(audit()) == {f"{table}: {LEASE_RULES[table]}"}
 
     with pytest.raises(ValueError, match=rf"{table} holds 1 row.*lease"):
         forward()
 
     assert check not in checks(table)
-    assert rows.values().get() == kept
+    assert stored_row(rows) == kept
     rows.update(**correction)
     forward()
     assert check in checks(table)
@@ -478,7 +508,7 @@ def test_binding_migration_refuses_two_bindings_of_one_region_revision() -> None
     SiteBinding.objects.filter(pk=duplicate.pk).update(
         region_revision=system.binding.region_revision
     )
-    assert set(stored_violations()) == {f"connections_sitebinding: {BINDING_REVISION_RULE}"}
+    assert set(audit()) == {f"connections_sitebinding: {BINDING_REVISION_RULE}"}
 
     with pytest.raises(ValueError, match=r"connections_sitebinding holds 2 row.*one binding per"):
         forward()
@@ -504,25 +534,25 @@ def test_collection_migration_refuses_reference_imports_of_another_shape(
     system = make_system()
     record = HistoricalReferenceImport.objects.create(
         binding=system.binding,
-        sha256="a" * 64,
+        content_sha256="a" * 64,
         source_name="fixture",
         source_settings={},
         imported_by=system.admin,
-        imported_at=NOW,
+        created_at=NOW,
         interval_count=1,
     )
     job = CollectionJob.objects.create(
         binding=system.binding,
         reference_import=record,
         endpoint="historical_import",
-        scheduled_slot=NOW,
+        scheduled_for=NOW,
         target_date=NOW.date(),
         available_at=NOW,
         status="succeeded",
     )
     migrate(PREVIOUS["forecasts"])
     CollectionJob.objects.filter(pk=job.pk).update(**values)
-    assert set(stored_violations()) == {f"forecasts_collectionjob: {IMPORT_SHAPE_RULE}"}
+    assert set(audit()) == {f"forecasts_collectionjob: {IMPORT_SHAPE_RULE}"}
 
     with pytest.raises(ValueError, match=rf"forecasts_collectionjob holds 1 row.*{rule}"):
         forward()
@@ -543,7 +573,7 @@ def test_normalization_migration_refuses_a_factor_that_disagrees_with_its_capaci
     normalize(system, target)
     migrate(PREVIOUS["forecasts"])
     ReferenceCapacityNormalization.objects.update(factor=F("factor") * 2)
-    assert set(stored_violations()) == {
+    assert set(audit()) == {
         f"forecasts_referencecapacitynormalization: {NORMALIZATION_FACTOR_RULE}"
     }
 
@@ -554,7 +584,7 @@ def test_normalization_migration_refuses_a_factor_that_disagrees_with_its_capaci
 
     ReferenceCapacityNormalization.objects.update(factor=F("factor") / 2)
     forward()
-    assert "referencecapacitynormalization_factor_chk" in checks(
+    assert "referencecapacitynormalization_target_over_source_chk" in checks(
         "forecasts_referencecapacitynormalization"
     )
 
@@ -605,6 +635,6 @@ def test_the_factor_count_is_the_exact_quotient_and_never_fails_at_the_float_lim
         forward()
     rows.update(source_capacity_kw=1e308, target_capacity_kw=1e-10, factor=1e-10 / 1e308)
     forward()
-    assert "referencecapacitynormalization_factor_chk" in checks(
+    assert "referencecapacitynormalization_target_over_source_chk" in checks(
         "forecasts_referencecapacitynormalization"
     )

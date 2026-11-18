@@ -50,10 +50,9 @@ from pyracast.regions.models import Region
 class ScopedView[ModelT: Model](GenericAPIView[ModelT]):
     def plant_queryset(self) -> QuerySet[Plant]:
         region = get_object_or_404(
-            Region,
+            Region.objects.active(),
             pk=self.kwargs["region_id"],
             tenant_id=self.kwargs["tenant_id"],
-            deleted_at__isnull=True,
         )
         return (
             Plant.objects.filter(region=region)

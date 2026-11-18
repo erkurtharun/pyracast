@@ -33,6 +33,7 @@ from pyracast.forecasts.sources import (
     mark_forecast_fallback,
     snapshot_data,
 )
+from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import apply_composition, compose_snapshots
 from pyracast.regions.models import Region
@@ -114,7 +115,7 @@ def historical_irradiance(snapshot: ForecastSnapshot, target_date: date) -> dict
         target_date,
         ProviderData(
             raw_payload=snapshot.raw_payload,
-            intervals=snapshot.normalized_intervals,
+            intervals=NormalizedInterval.from_rows(snapshot.normalized_intervals),
             issued_at=snapshot.issued_at,
             collected_at=snapshot.collected_at,
             source_kind="estimated_actuals",

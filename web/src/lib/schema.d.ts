@@ -861,7 +861,7 @@ export interface components {
             proposed_by: components["schemas"]["UserOutput"];
             reason: string;
             /** Format: date-time */
-            submitted_at: string;
+            created_at: string;
             reviewed_by: components["schemas"]["UserOutput"] | null;
             /** Format: date-time */
             closed_at: string | null;
@@ -908,7 +908,7 @@ export interface components {
             proposed_by: components["schemas"]["UserOutput"];
             reason: string;
             /** Format: date-time */
-            submitted_at: string;
+            created_at: string;
             reviewed_by: components["schemas"]["UserOutput"] | null;
             /** Format: date-time */
             closed_at: string | null;
@@ -980,7 +980,7 @@ export interface components {
             endpoint: components["schemas"]["CollectionEndpointEnum"];
             status: components["schemas"]["CollectionJobStatusEnum"];
             /** Format: date-time */
-            scheduled_slot: string;
+            scheduled_for: string;
             /** Format: date-time */
             available_at: string;
             /** Format: date-time */
@@ -1041,9 +1041,9 @@ export interface components {
             readonly measurement_basis: components["schemas"]["MeasurementBasisEnum"];
             readonly mounting_type: components["schemas"]["MountingTypeEnum"];
             /** Format: double */
-            readonly surface_tilt: number | null;
+            readonly surface_tilt_degrees: number | null;
             /** Format: double */
-            readonly surface_azimuth: number | null;
+            readonly surface_azimuth_degrees: number | null;
             /** Format: date-time */
             readonly created_at: string;
         };
@@ -1600,7 +1600,7 @@ export interface components {
             readonly source: string;
             recorded_by_id: number;
             /** Format: date-time */
-            readonly recorded_at: string;
+            readonly created_at: string;
             supersedes_id: number | null;
             readonly is_reverted: boolean;
         };
@@ -1906,9 +1906,9 @@ export interface components {
             /** @default unknown */
             mounting_type: components["schemas"]["MountingTypeEnum"];
             /** Format: double */
-            surface_tilt?: number | null;
+            surface_tilt_degrees?: number | null;
             /** Format: double */
-            surface_azimuth?: number | null;
+            surface_azimuth_degrees?: number | null;
         };
         PlantOutput: {
             readonly id: number;
@@ -1931,9 +1931,9 @@ export interface components {
             readonly measurement_basis: components["schemas"]["MeasurementBasisEnum"];
             readonly mounting_type: components["schemas"]["MountingTypeEnum"];
             /** Format: double */
-            readonly surface_tilt: number | null;
+            readonly surface_tilt_degrees: number | null;
             /** Format: double */
-            readonly surface_azimuth: number | null;
+            readonly surface_azimuth_degrees: number | null;
             /** Format: date-time */
             readonly created_at: string;
         };
@@ -2282,9 +2282,9 @@ export interface components {
             /** @default unknown */
             mounting_type: components["schemas"]["MountingTypeEnum"];
             /** Format: double */
-            surface_tilt?: number | null;
+            surface_tilt_degrees?: number | null;
             /** Format: double */
-            surface_azimuth?: number | null;
+            surface_azimuth_degrees?: number | null;
         };
         SiteOutput: {
             readonly id: number;

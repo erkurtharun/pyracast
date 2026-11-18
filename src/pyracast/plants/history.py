@@ -49,7 +49,7 @@ def plant_outlook(
 
     with read_snapshot():
         tenant_membership(actor, tenant_id)
-        region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
+        region = Region.objects.active().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.get(pk=plant_id, region=region)
         plant.region = region
         result = _plant_outlook(

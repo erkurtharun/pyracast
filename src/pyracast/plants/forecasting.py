@@ -238,8 +238,8 @@ def forecast_payload(
         "capacity_normalization": normalization_provenance(snapshot),
         "source_kind": snapshot.source_kind,
         "collected_at": snapshot.collected_at.isoformat(),
-        "scheduled_slot": snapshot.job.scheduled_slot.isoformat(),
-        "late": snapshot.collected_at > snapshot.job.scheduled_slot,
+        "scheduled_slot": snapshot.job.scheduled_for.isoformat(),
+        "late": snapshot.collected_at > snapshot.job.scheduled_for,
         "lead_hours": (start - snapshot.collected_at).total_seconds() / 3600,
         "issued_at": snapshot.issued_at.isoformat() if snapshot.issued_at else None,
         "calibration_id": calibration.pk if calibration else None,
@@ -355,7 +355,7 @@ def plant_forecast(
     as_of: datetime | None = None,
 ) -> dict[str, object]:
     tenant_membership(actor, tenant_id)
-    region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
+    region = Region.objects.active().get(pk=region_id, tenant_id=tenant_id)
     plant = Plant.objects.get(pk=plant_id, region=region)
     now = timezone.now()
     today = now.astimezone(ZoneInfo(region.timezone)).date()

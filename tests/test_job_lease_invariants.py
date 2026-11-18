@@ -168,7 +168,7 @@ def test_collection_lease_writers_keep_the_lease_with_the_running_status() -> No
     waiting, running = (
         CollectionJob.objects.create(
             binding=system.binding,
-            scheduled_slot=NOW + timedelta(hours=hours),
+            scheduled_for=NOW + timedelta(hours=hours),
             target_date=NOW.date(),
             available_at=NOW,
         )
@@ -193,7 +193,7 @@ def test_the_scheduler_requeues_a_cancelled_current_slot_without_a_lease() -> No
         system.member, system.tenant.pk, system.region.pk, enabled=True, times=["16:00"], now=NOW
     )
     enqueue_due(NOW)
-    current = CollectionJob.objects.filter(endpoint="forecasts", scheduled_slot=NOW)
+    current = CollectionJob.objects.filter(endpoint="forecasts", scheduled_for=NOW)
     current.update(status="stale")
 
     assert current.get().pk in enqueue_due(NOW)
@@ -210,7 +210,7 @@ def test_metering_lease_writers_keep_the_lease_with_the_running_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant, _ = connected(monkeypatch)
-    EpiasCollectionJob.objects.update(next_attempt_at=NOW, retry_until=None)
+    EpiasCollectionJob.objects.update(available_at=NOW, retry_until=None)
     first, second, third, fourth = EpiasCollectionJob.objects.order_by("pk")[:4]
 
     def fail(provider: EpiasPlant, day: date) -> EpiasDay:

@@ -70,12 +70,12 @@ def _covers(spans: list[tuple[datetime, datetime]], start: datetime, end: dateti
 def lock_production_configuration(
     tenant_id: int, region_id: int, plant_id: int, configuration_id: int, *, lock: bool = True
 ) -> PlantConfiguration:
-    regions = Region.objects.all()
+    regions = Region.objects.active()
     plants = Plant.objects.all()
     if lock:
         regions = regions.select_for_update()
         plants = plants.select_for_update()
-    region = regions.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
+    region = regions.get(pk=region_id, tenant_id=tenant_id)
     plant = plants.get(pk=plant_id, region=region)
     configuration = PlantConfiguration.objects.select_related("binding").get(
         pk=configuration_id, plant=plant

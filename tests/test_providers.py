@@ -18,7 +18,7 @@ def test_normalization_preserves_raw_missingness_units_bounds_and_collection() -
     result = normalize_payload(raw, collected_at=collected)
     assert result.raw_payload == raw
     assert result.raw_payload is not raw
-    assert result.intervals == [
+    assert [interval.to_row() for interval in result.intervals] == [
         {
             "start": "2026-11-10T00:00:00+00:00",
             "end": "2026-11-10T00:30:00+00:00",
@@ -29,9 +29,9 @@ def test_normalization_preserves_raw_missingness_units_bounds_and_collection() -
     assert result.issued_at is None
     assert result.collected_at == collected
     assert result.source_kind == "forecast"
-    assert normalize_payload(payload_for(None)).intervals[0]["power_kw"] is None
-    assert normalize_payload(payload_for(-1)).intervals[0]["power_kw"] == -1
-    assert normalize_payload(payload_for(0)).intervals[0]["power_kw"] == 0
+    assert normalize_payload(payload_for(None)).intervals[0].power_kw is None
+    assert normalize_payload(payload_for(-1)).intervals[0].power_kw == -1
+    assert normalize_payload(payload_for(0)).intervals[0].power_kw == 0
 
 
 def test_actuals_are_distinct_from_archived_forecasts() -> None:
@@ -57,8 +57,13 @@ def test_captured_seven_day_actuals_preserves_source_and_interval_bounds() -> No
     assert data.source_kind == "estimated_actuals"
     assert data.issued_at is None
     assert len(data.intervals) == 337
-    assert min(cast(str, row["start"]) for row in data.intervals) == "2026-11-03T01:00:00+00:00"
-    assert max(cast(str, row["end"]) for row in data.intervals) == "2026-11-10T01:30:00+00:00"
+    assert (
+        min(interval.start for interval in data.intervals).isoformat()
+        == "2026-11-03T01:00:00+00:00"
+    )
+    assert (
+        max(interval.end for interval in data.intervals).isoformat() == "2026-11-10T01:30:00+00:00"
+    )
 
 
 @pytest.mark.parametrize("payload", [None, [], {}, {"forecasts": {}}, {"forecasts": None}])
@@ -106,8 +111,8 @@ def test_fixture_is_explicitly_synthetic_and_supports_dst_days() -> None:
     result = provider.fetch(binding, date(2026, 11, 1))
     assert len(result.intervals) == 50
     assert result.raw_payload["synthetic"] is True
-    assert {row["sunlight"] for row in result.intervals} == {"day", "night"}
-    assert {row["power_kw"] for row in result.intervals} == {0, 1.2}
+    assert {interval.sunlight for interval in result.intervals} == {"day", "night"}
+    assert {interval.power_kw for interval in result.intervals} == {0, 1.2}
     with pytest.raises(ProviderError, match="fixture_account_required"):
         provider.validate(binding_for())
 

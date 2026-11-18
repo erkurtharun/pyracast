@@ -49,10 +49,10 @@ def test_archive_preserves_instants_missingness_and_actual_import_provenance(
     path = power_file(tmp_path)
     attempts = system.account.requestattempt_set.count()
     record = archive(system, path)
-    assert record.imported_at == NOW
+    assert record.created_at == NOW
     assert record.imported_by == system.admin
     assert record.source_name == path.name
-    assert record.sha256 == sha256(path.read_bytes()).hexdigest()
+    assert record.content_sha256 == sha256(path.read_bytes()).hexdigest()
     assert record.interval_count == 3
     assert record.source_settings == asdict(source_settings())
     snapshots = list(ForecastSnapshot.objects.filter(job__reference_import=record).order_by("pk"))
@@ -69,7 +69,7 @@ def test_archive_preserves_instants_missingness_and_actual_import_provenance(
     ]
     for snapshot in snapshots:
         assert snapshot.source_kind == "estimated_actuals"
-        assert snapshot.collected_at == snapshot.available_at == snapshot.job.scheduled_slot == NOW
+        assert snapshot.collected_at == snapshot.available_at == snapshot.job.scheduled_for == NOW
         assert snapshot.issued_at is None
         assert snapshot.job.created_at == NOW
         assert snapshot.job.available_at == NOW
@@ -78,7 +78,7 @@ def test_archive_preserves_instants_missingness_and_actual_import_provenance(
         assert snapshot.job.attempts == 0
         assert snapshot.raw_payload["historical_import"] == {
             "id": record.pk,
-            "sha256": record.sha256,
+            "sha256": record.content_sha256,
             "source_settings": record.source_settings,
         }
         assert not history_day_complete(snapshot, snapshot.job.target_date, system.binding.timezone)
@@ -114,7 +114,7 @@ def test_idempotence_and_corrections_keep_immutable_versions(
     path.write_text(json.dumps(payload), encoding="utf-8")
     corrected = archive(system, path)
     assert corrected != original
-    assert corrected.sha256 != original.sha256
+    assert corrected.content_sha256 != original.content_sha256
     assert HistoricalReferenceImport.objects.count() == 2
     original_snapshot.refresh_from_db()
     assert original_snapshot.normalized_intervals[0]["power_kw"] == 0
@@ -462,18 +462,18 @@ def test_database_uniqueness_preserves_regular_slots_and_import_days(
             binding=system.binding,
             reference_import=record,
             endpoint="historical_import",
-            scheduled_slot=NOW + timedelta(seconds=1),
+            scheduled_for=NOW + timedelta(seconds=1),
             target_date=job.target_date,
             available_at=NOW,
         )
     with pytest.raises(IntegrityError), transaction.atomic():
         HistoricalReferenceImport.objects.create(
             binding=system.binding,
-            sha256=record.sha256,
+            content_sha256=record.content_sha256,
             source_name="duplicate",
             source_settings=record.source_settings,
             imported_by=system.admin,
-            imported_at=NOW,
+            created_at=NOW,
             interval_count=3,
         )
     normal = CollectionJob.objects.filter(reference_import__isnull=True).first()
@@ -482,7 +482,7 @@ def test_database_uniqueness_preserves_regular_slots_and_import_days(
         CollectionJob.objects.create(
             binding=system.binding,
             endpoint=normal.endpoint,
-            scheduled_slot=normal.scheduled_slot,
+            scheduled_for=normal.scheduled_for,
             target_date=normal.target_date,
             available_at=NOW,
         )

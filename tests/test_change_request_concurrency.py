@@ -254,12 +254,12 @@ def test_provider_publication_winning_plant_lock_invalidates_waiting_review_cont
     case = make_request_case(monkeypatch)
     monkeypatch.setattr("pyracast.metering.scheduler.get_epias_client", FixtureClient)
     linked = connect(case.plant, case.system.admin)
-    job = EpiasCollectionJob.objects.filter(connection=linked).order_by("-target_day").first()
+    job = EpiasCollectionJob.objects.filter(connection=linked).order_by("-target_date").first()
     assert job is not None
     lease = metering_jobs.claim_epias_job(job.pk, NOW)
     assert lease is not None
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(minutes=1))
-    data = day_data(FixtureClient().list_plants()[0], job.target_day)
+    data = day_data(FixtureClient().list_plants()[0], job.target_date)
     reading = data.readings[0]
     assert case.plant.current_configuration_id is not None
     proposal = operations.submit_production(
@@ -326,12 +326,12 @@ def test_detail_read_allows_publication_and_binds_fingerprint_to_returned_values
     case = make_request_case(monkeypatch)
     monkeypatch.setattr("pyracast.metering.scheduler.get_epias_client", FixtureClient)
     linked = connect(case.plant, case.system.admin)
-    job = EpiasCollectionJob.objects.filter(connection=linked).order_by("-target_day").first()
+    job = EpiasCollectionJob.objects.filter(connection=linked).order_by("-target_date").first()
     assert job is not None
     lease = metering_jobs.claim_epias_job(job.pk, NOW)
     assert lease is not None
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(minutes=1))
-    data = day_data(FixtureClient().list_plants()[0], job.target_day)
+    data = day_data(FixtureClient().list_plants()[0], job.target_date)
     reading = data.readings[0]
     assert case.plant.current_configuration_id is not None
     proposal = operations.submit_production(

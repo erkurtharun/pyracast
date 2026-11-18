@@ -35,11 +35,8 @@ def prepare_daily_payloads(
     first = data.collected_at.astimezone(zone).date()
     last = first + timedelta(days=2)
     days: set[date] = set()
-    for row in data.intervals:
-        try:
-            start, end = _timestamp(row.get("start")), _timestamp(row.get("end"))
-        except ValueError:
-            continue
+    for interval in data.intervals:
+        start, end = interval.start, interval.end
         if end <= start:
             continue
         day = max(first, start.astimezone(zone).date())

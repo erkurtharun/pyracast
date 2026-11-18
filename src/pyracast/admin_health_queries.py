@@ -15,13 +15,14 @@ from pyracast.notifications.models import (
     ReminderSchedule,
 )
 from pyracast.notifications.operations import effective_recipients, validate_recipient
-from pyracast.regions.models import Region
+from pyracast.plants.models import active_plant
+from pyracast.regions.models import Region, active_region
 
 
 def collection_jobs_for_issue(
     issue: str, now: datetime, maximum_lag: timedelta = timedelta(minutes=5)
 ) -> QuerySet[CollectionJob]:
-    jobs = CollectionJob.objects.filter(binding__region__deleted_at__isnull=True)
+    jobs = CollectionJob.objects.filter(active_region("binding__region__"))
     if issue == "overdue_collections":
         return jobs.filter(
             status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY),
@@ -34,7 +35,7 @@ def collection_jobs_for_issue(
         )
     if issue == "failed_collections":
         return jobs.filter(
-            status=CollectionJobStatus.FAILED, scheduled_slot__gte=now - timedelta(days=1)
+            status=CollectionJobStatus.FAILED, scheduled_for__gte=now - timedelta(days=1)
         )
     return jobs
 
@@ -42,7 +43,7 @@ def collection_jobs_for_issue(
 def notification_deliveries_for_issue(
     issue: str, now: datetime, maximum_lag: timedelta = timedelta(minutes=5)
 ) -> QuerySet[NotificationDelivery]:
-    deliveries = NotificationDelivery.objects.filter(schedule__region__deleted_at__isnull=True)
+    deliveries = NotificationDelivery.objects.filter(active_region("schedule__region__"))
     recent = now - timedelta(days=1)
     if issue == "overdue_notifications":
         return deliveries.filter(
@@ -90,9 +91,9 @@ def notification_deliveries_for_issue(
 def metering_jobs_for_issue(
     issue: str, now: datetime, maximum_lag: timedelta = timedelta(minutes=5)
 ) -> QuerySet[EpiasCollectionJob]:
-    jobs = EpiasCollectionJob.objects.filter(plant__region__deleted_at__isnull=True)
+    jobs = EpiasCollectionJob.objects.filter(active_plant("plant__"))
     if issue == "overdue_metering":
-        return jobs.filter(status=EpiasJobStatus.PENDING, next_attempt_at__lt=now - maximum_lag)
+        return jobs.filter(status=EpiasJobStatus.PENDING, available_at__lt=now - maximum_lag)
     if issue == "interrupted_metering":
         return jobs.filter(
             lease_expires_at__lte=now,
@@ -104,12 +105,12 @@ def metering_jobs_for_issue(
 
 
 def regions_for_issue(issue: str, now: datetime) -> QuerySet[Region]:
-    regions = Region.objects.filter(deleted_at__isnull=True)
+    regions = Region.objects.active()
     if issue == "invalid_reminder_recipients":
         invalid_region_ids: list[int] = []
         for schedule in ReminderSchedule.objects.filter(
+            active_region("region__"),
             enabled=True,
-            region__deleted_at__isnull=True,
             region__status="approved",
             region__approved_binding__provider_account__enabled=True,
         ):

@@ -328,7 +328,7 @@ def test_latest_published_pre_daylight_source_replaces_previous_forecast(
     acquired = datetime(2026, 11, 8, 13, 1, tzinfo=UTC)
     old = publish_snapshot(snapshot_for(system, DAY, collected_at=acquired - timedelta(days=1)))
     first = publish_snapshot(snapshot_for(system, DAY, collected_at=acquired))
-    first.job.scheduled_slot = acquired - timedelta(minutes=1)
+    first.job.scheduled_for = acquired - timedelta(minutes=1)
     first.job.save()
     newest = publish_snapshot(
         snapshot_for(system, DAY, power_kw=0.9, collected_at=datetime(2026, 11, 8, 20, tzinfo=UTC))

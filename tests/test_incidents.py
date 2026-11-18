@@ -42,7 +42,7 @@ def test_incident_api_revision_and_historical_evidence() -> None:
     assert incident["status"] == "active"
     assert incident["available_dc_mw"] == 0
     first = IncidentRevision.objects.get(incident_id=incident["id"])
-    cutoff = first.recorded_at
+    cutoff = first.created_at
     response = client.post(
         f"{url}{incident['id']}/resolve/",
         {"expected_revision": 1, "ends_at": (start + timedelta(hours=1)).isoformat()},

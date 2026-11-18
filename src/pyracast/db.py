@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from django.apps.registry import Apps
 from django.db import IntegrityError, connection, migrations, models, transaction
 from django.db.backends.base.schema import BaseDatabaseSchemaEditor
+from django.db.migrations.operations.base import Operation
+from django.db.migrations.state import ProjectState
 from django.db.transaction import TransactionManagementError
 
 
@@ -53,6 +55,72 @@ def refuse_rows(
             )
 
     return migrations.RunPython(refuse, migrations.RunPython.noop)
+
+
+class RenameInPlace(Operation):
+    """Rename a model constraint or index with ALTER ... RENAME: nothing is dropped, rebuilt or
+    validated again. `item` is the object as the model now declares it; it differs from the
+    stored one only in its name and in columns an earlier RenameField renamed, which
+    PostgreSQL follows by itself."""
+
+    reduces_to_sql = True
+
+    def __init__(
+        self, model_name: str, old_name: str, item: models.Index | models.BaseConstraint
+    ) -> None:
+        self.model_name = model_name
+        self.old_name = old_name
+        self.item = item
+
+    def state_forwards(self, app_label: str, state: ProjectState) -> None:
+        model = state.models[app_label, self.model_name.lower()]
+        option = "indexes" if isinstance(self.item, models.Index) else "constraints"
+        items = list(model.options[option])
+        position = next(index for index, item in enumerate(items) if item.name == self.old_name)
+        items[position] = self.item
+        model.options[option] = items
+        state.reload_model(app_label, self.model_name.lower(), delay=True)
+
+    def database_forwards(
+        self,
+        app_label: str,
+        schema_editor: BaseDatabaseSchemaEditor,
+        from_state: ProjectState,
+        to_state: ProjectState,
+    ) -> None:
+        model = to_state.apps.get_model(app_label, self.model_name)
+        schema_editor.execute(self.rename_sql(schema_editor, model, self.old_name, self.item.name))
+
+    def database_backwards(
+        self,
+        app_label: str,
+        schema_editor: BaseDatabaseSchemaEditor,
+        from_state: ProjectState,
+        to_state: ProjectState,
+    ) -> None:
+        model = to_state.apps.get_model(app_label, self.model_name)
+        schema_editor.execute(self.rename_sql(schema_editor, model, self.item.name, self.old_name))
+
+    def rename_sql(
+        self,
+        schema_editor: BaseDatabaseSchemaEditor,
+        model: type[models.Model],
+        old: str,
+        new: str,
+    ) -> str:
+        quote = schema_editor.quote_name
+        item = self.item
+        # Django builds these as indexes, which have no row in pg_constraint.
+        if isinstance(item, models.Index) or (
+            isinstance(item, models.UniqueConstraint)
+            and (item.condition is not None or item.contains_expressions)
+        ):
+            return f"ALTER INDEX {quote(old)} RENAME TO {quote(new)}"
+        table = quote(model._meta.db_table)
+        return f"ALTER TABLE {table} RENAME CONSTRAINT {quote(old)} TO {quote(new)}"
+
+    def describe(self) -> str:
+        return f"Rename {self.old_name} on {self.model_name} to {self.item.name}"
 
 
 def fire_deferred_checks(schema_editor: BaseDatabaseSchemaEditor) -> None:

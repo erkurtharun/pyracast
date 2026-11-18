@@ -199,7 +199,7 @@ def test_today_report_excludes_ineligible_archived_forecasts(
         job = CollectionJob.objects.create(
             binding=binding,
             target_date=old.job.target_date,
-            scheduled_slot=old.job.scheduled_slot,
+            scheduled_for=old.job.scheduled_for,
             available_at=old.collected_at,
             status="succeeded",
         )
@@ -396,8 +396,8 @@ def test_same_slot_forecast_grace_never_admits_actuals_published_after_reminder(
     latest.available_at = when
     latest.issued_at = when
     stored_again(latest)
-    latest.job.scheduled_slot = SLOT
-    latest.job.save(update_fields=("scheduled_slot",))
+    latest.job.scheduled_for = SLOT
+    latest.job.save(update_fields=("scheduled_for",))
     cache_saved_days(latest, when)
     actuals = saved_intraday_actuals(system, SLOT)
     actuals.collected_at = when
@@ -446,15 +446,15 @@ def test_paired_actual_collection_waits_then_uses_only_native_intervals_complete
     latest.available_at = forecast_published
     latest.issued_at = forecast_published
     stored_again(latest)
-    latest.job.scheduled_slot = SLOT
-    latest.job.save(update_fields=("scheduled_slot",))
+    latest.job.scheduled_for = SLOT
+    latest.job.save(update_fields=("scheduled_for",))
     cache_saved_days(latest, forecast_published)
     day = SLOT.astimezone(ZoneInfo(system.binding.timezone)).date()
     start, _ = local_day_bounds(day, system.binding.timezone)
     actual_job = CollectionJob.objects.create(
         binding=system.binding,
         target_date=day,
-        scheduled_slot=SLOT,
+        scheduled_for=SLOT,
         available_at=SLOT,
         endpoint="estimated_actuals",
         status="pending",

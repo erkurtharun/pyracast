@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date
 from math import isfinite
 from typing import cast
 
@@ -14,23 +14,6 @@ from pyracast.irradiance import (
 )
 from pyracast.irradiance.weather_reference import summarize_weather, unavailable_weather
 from pyracast.solar import daylight_energy_windows, daylight_window, summarize_daylight
-
-
-def _interval(row: dict[str, object]) -> PowerInterval:
-    start, end = row.get("start"), row.get("end")
-    power, sunlight = row.get("power_kw"), row.get("sunlight", "unknown")
-    if not isinstance(start, str) or not isinstance(end, str):
-        raise ValueError("Normalized interval timestamps must be ISO strings")
-    if power is not None and (isinstance(power, bool) or not isinstance(power, int | float)):
-        raise ValueError("Normalized power must be numeric or missing")
-    if sunlight not in ("day", "night", "partial", "unknown"):
-        raise ValueError("Invalid normalized sunlight classification")
-    return PowerInterval(
-        datetime.fromisoformat(start),
-        datetime.fromisoformat(end),
-        power,
-        sunlight,
-    )
 
 
 def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> dict[str, object]:
@@ -49,7 +32,10 @@ def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> di
         data.issued_at,
         f"{binding.pk}:{binding.region_revision}",
     )
-    source_intervals = tuple(_interval(row) for row in data.intervals)
+    source_intervals = tuple(
+        PowerInterval(interval.start, interval.end, interval.power_kw, interval.sunlight)
+        for interval in data.intervals
+    )
     series = estimate_intervals(source_intervals, configuration, vintage)
     result = integrate_day(series, target_date, binding.timezone)
     daylight = daylight_window(target_date, binding.timezone, binding.latitude, binding.longitude)
@@ -80,10 +66,10 @@ def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> di
                 daylight,
                 (
                     (
-                        datetime.fromisoformat(cast(str, row.get("original_start", row["start"]))),
-                        datetime.fromisoformat(cast(str, row.get("original_end", row["end"]))),
+                        interval.original_start or interval.start,
+                        interval.original_end or interval.end,
                     )
-                    for row in data.intervals
+                    for interval in data.intervals
                 ),
             ),
             unit="kwh_m2",

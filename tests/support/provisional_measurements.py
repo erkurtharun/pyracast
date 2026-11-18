@@ -50,9 +50,9 @@ def acquisition(
         connection_revision=connection.revision,
         provider_plant=identity,
         source_kind=kind,
-        target_day=DAY,
+        target_date=DAY,
         scheduled_for=stamp,
-        next_attempt_at=stamp,
+        available_at=stamp,
         status="succeeded",
     )
     return EpiasSnapshot.objects.create(
@@ -61,7 +61,7 @@ def acquisition(
             "attempt": 1,
             "connection": connection,
             "configuration": configuration,
-            "target_day": DAY,
+            "target_date": DAY,
             "source_kind": kind,
             "provider_plant": identity,
             "collected_at": stamp,

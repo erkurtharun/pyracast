@@ -150,7 +150,7 @@ def test_unsupported_and_mismatched_history_are_bounded_failures() -> None:
 
     class Mismatched(HistoricalFixture):
         def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
-            return ProviderData({}, [], source_kind="forecast")
+            return ProviderData({}, (), source_kind="forecast")
 
     assert not collect(history.pk, Mismatched(), no_calculation, history.available_at)
     history.refresh_from_db()
@@ -287,7 +287,7 @@ def test_three_daily_slots_create_forecasts_and_paired_history_jobs() -> None:
     for hour in range(3):
         slot = morning + timedelta(hours=hour)
         enqueue_due(slot)
-        forecast = CollectionJob.objects.get(endpoint="forecasts", scheduled_slot=slot)
+        forecast = CollectionJob.objects.get(endpoint="forecasts", scheduled_for=slot)
         assert collect(forecast.pk, HistoricalFixture(slot), calculate, slot)
     assert ForecastResult.objects.count() == 3
     assert ForecastSnapshot.objects.filter(source_kind="forecast").count() == 3
@@ -311,7 +311,7 @@ def test_schedule_edit_keeps_authorized_retry_and_only_creates_future_slots(
     )
     due = (NOW + timedelta(days=1)).replace(hour=7)
     enqueue_due(due)
-    job = CollectionJob.objects.get(endpoint="forecasts", scheduled_slot=due)
+    job = CollectionJob.objects.get(endpoint="forecasts", scheduled_for=due)
     lease = claim(job.pk, due)
     assert lease is not None
     retry(lease, due, CollectionJobError.PROVIDER_FAILURE)
@@ -334,11 +334,11 @@ def test_schedule_edit_keeps_authorized_retry_and_only_creates_future_slots(
     enqueue_due(due + timedelta(hours=1))
     assert (
         CollectionJob.objects.filter(
-            endpoint="forecasts", scheduled_slot=due + timedelta(hours=1)
+            endpoint="forecasts", scheduled_for=due + timedelta(hours=1)
         ).count()
         == 1
     )
-    assert not CollectionJob.objects.filter(scheduled_slot=due - timedelta(hours=2)).exists()
+    assert not CollectionJob.objects.filter(scheduled_for=due - timedelta(hours=2)).exists()
 
 
 @pytest.mark.parametrize("times", [["16:00", "16:00"], ["1:00"], ["24:00"], ["16:00"] * 10])
@@ -435,7 +435,7 @@ def test_concurrent_daytime_schedulers_create_forecasts_without_history() -> Non
 def test_forecast_and_history_share_atomic_account_quota() -> None:
     system = make_system(approved=True)
     forecast = CollectionJob.objects.get()
-    CollectionJob.objects.filter(pk=forecast.pk).update(available_at=NIGHT, scheduled_slot=NIGHT)
+    CollectionJob.objects.filter(pk=forecast.pk).update(available_at=NIGHT, scheduled_for=NIGHT)
     enqueue_due(NIGHT)
     ids = list(CollectionJob.objects.values_list("pk", flat=True))
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=2)
@@ -491,7 +491,7 @@ def test_empty_initial_actuals_response_does_not_finish_backfill() -> None:
     class Empty(HistoricalFixture):
         def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
             return ProviderData(
-                {"estimated_actuals": []}, [], collected_at=NIGHT, source_kind="estimated_actuals"
+                {"estimated_actuals": []}, (), collected_at=NIGHT, source_kind="estimated_actuals"
             )
 
     assert collect(first.pk, Empty(), no_calculation, NIGHT)
@@ -562,7 +562,7 @@ def test_reconfigured_first_slot_reschedules_cancelled_unacquired_history() -> N
     new_slot = NIGHT + timedelta(hours=1)
     enqueue_due(new_slot)
     history.refresh_from_db()
-    assert history.scheduled_slot == NIGHT - timedelta(hours=3)
+    assert history.scheduled_for == NIGHT - timedelta(hours=3)
     assert history.status == "pending"
     assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
     assert collect(history.pk, HistoricalFixture(new_slot), no_calculation, new_slot)
@@ -621,7 +621,7 @@ def test_reconfiguration_preserves_published_history_and_forecast_archives() -> 
     enqueue_due(NIGHT + timedelta(hours=1))
     history.refresh_from_db()
     history_snapshot.refresh_from_db()
-    assert history.scheduled_slot == NIGHT - timedelta(hours=3)
+    assert history.scheduled_for == NIGHT - timedelta(hours=3)
     assert history.status == "succeeded"
     assert (
         history_snapshot.raw_payload,

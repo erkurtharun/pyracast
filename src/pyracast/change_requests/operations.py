@@ -40,7 +40,7 @@ from pyracast.incidents.operations import (
     lock_incident_plant,
     save_incident,
 )
-from pyracast.plants.models import Plant
+from pyracast.plants.models import Plant, active_plant
 from pyracast.plants.production_changes import (
     ProductionChange,
     change_production,
@@ -233,12 +233,12 @@ def submit_incident(
 def visible_requests(actor: User, membership: Membership) -> QuerySet[ChangeRequest]:
     tenant_id = membership.tenant_id
     return ChangeRequest.objects.filter(
+        active_plant("plant__"),
         Q(plant__region__tenant__membership__role=WorkspaceRole.ADMIN)
         | Q(proposed_by_id=actor.pk, proposer_membership_id=membership.pk),
         plant__region__tenant_id=tenant_id,
         plant__region__tenant__membership__pk=membership.pk,
         plant__region__tenant__membership__user__is_active=True,
-        plant__region__deleted_at__isnull=True,
     )
 
 

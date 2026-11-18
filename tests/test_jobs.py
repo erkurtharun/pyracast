@@ -63,11 +63,11 @@ def test_interrupted_lease_can_be_reclaimed_and_old_owner_cannot_publish() -> No
     assert second is not None
     assert first.token != second.token
     assert (
-        persist_snapshot(first, ProviderData({}, []), NOW + LEASE_DURATION + timedelta(seconds=1))
+        persist_snapshot(first, ProviderData({}, ()), NOW + LEASE_DURATION + timedelta(seconds=1))
         is None
     )
     snapshot = persist_snapshot(
-        second, ProviderData({"vintage": 2}, []), NOW + LEASE_DURATION + timedelta(seconds=1)
+        second, ProviderData({"vintage": 2}, ()), NOW + LEASE_DURATION + timedelta(seconds=1)
     )
     assert snapshot is not None
     assert not publish(first, snapshot, {}, NOW + LEASE_DURATION + timedelta(seconds=1))
@@ -81,10 +81,10 @@ def test_expired_lease_cannot_persist_or_publish_even_without_redelivery() -> No
     job = CollectionJob.objects.get()
     lease = claim(job.pk, NOW)
     assert lease is not None
-    snapshot = persist_snapshot(lease, ProviderData({}, []), NOW)
+    snapshot = persist_snapshot(lease, ProviderData({}, ()), NOW)
     assert snapshot is not None
     assert (
-        persist_snapshot(lease, ProviderData({}, []), NOW + LEASE_DURATION + timedelta(seconds=1))
+        persist_snapshot(lease, ProviderData({}, ()), NOW + LEASE_DURATION + timedelta(seconds=1))
         is None
     )
     assert not publish(lease, snapshot, {}, NOW + LEASE_DURATION + timedelta(seconds=1))
@@ -111,7 +111,7 @@ def test_estimated_actuals_snapshot_cannot_be_published_after_restart() -> None:
     job = CollectionJob.objects.get()
     lease = claim(job.pk, NOW)
     assert lease is not None
-    snapshot = persist_snapshot(lease, ProviderData({}, [], source_kind="estimated_actuals"), NOW)
+    snapshot = persist_snapshot(lease, ProviderData({}, (), source_kind="estimated_actuals"), NOW)
     assert snapshot is not None
     snapshot.refresh_from_db()
     assert snapshot.source_kind == "estimated_actuals"
@@ -307,7 +307,7 @@ def test_scheduler_deduplicates_local_cutoff_and_recovers_missed_slot() -> None:
     assert len(jobs) == 2
     assert jobs[:1] == enqueue_due(NOW + timedelta(hours=1))
     scheduled = CollectionJob.objects.get(pk=jobs[0])
-    assert scheduled.scheduled_slot == NOW
+    assert scheduled.scheduled_for == NOW
     assert scheduled.target_date.isoformat() == "2026-11-10"
     assert enqueue_due(NOW + timedelta(hours=20)) == jobs[:1]
     next_day = enqueue_due(NOW + timedelta(days=1))
@@ -328,7 +328,7 @@ def test_scheduler_ignores_unvalidated_bindings_and_future_first_slots() -> None
     first = CollectionJob.objects.create(
         binding=system.binding,
         target_date=first_slot.date() + timedelta(days=1),
-        scheduled_slot=first_slot,
+        scheduled_for=first_slot,
         available_at=first_slot,
     )
     assert enqueue_due(NOW) == []
@@ -408,7 +408,7 @@ def test_publication_rejects_snapshot_from_another_job() -> None:
     first = CollectionJob.objects.get()
     other = CollectionJob.objects.create(
         binding=system.binding,
-        scheduled_slot=NOW + timedelta(days=1),
+        scheduled_for=NOW + timedelta(days=1),
         target_date=first.target_date + timedelta(days=1),
         available_at=NOW,
     )
@@ -416,7 +416,7 @@ def test_publication_rejects_snapshot_from_another_job() -> None:
     other_lease = claim(other.pk, NOW)
     assert first_lease is not None
     assert other_lease is not None
-    snapshot = persist_snapshot(first_lease, ProviderData({}, []), NOW)
+    snapshot = persist_snapshot(first_lease, ProviderData({}, ()), NOW)
     assert snapshot is not None
     with pytest.raises(ValidationError):
         publish(other_lease, snapshot, {"wrong": True}, NOW)
@@ -432,7 +432,7 @@ def test_publication_holds_account_lock_against_credential_rotation(
     job = CollectionJob.objects.get()
     lease = claim(job.pk, NOW)
     assert lease is not None
-    snapshot = persist_snapshot(lease, ProviderData({}, []), NOW)
+    snapshot = persist_snapshot(lease, ProviderData({}, ()), NOW)
     assert snapshot is not None
     account_checked = Event()
     rotation_blocked = Event()
@@ -482,7 +482,7 @@ def test_lease_expiration_includes_time_waiting_for_publication_locks(
     job = CollectionJob.objects.get()
     lease = claim(job.pk, NOW)
     assert lease is not None
-    snapshot = persist_snapshot(lease, ProviderData({}, []), NOW)
+    snapshot = persist_snapshot(lease, ProviderData({}, ()), NOW)
     assert snapshot is not None
     ticks = iter([0.0, LEASE_DURATION.total_seconds() + 1])
     monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: next(ticks)))

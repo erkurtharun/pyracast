@@ -102,7 +102,7 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             ProductionObservation.objects.filter(
                 plant=plant,
                 configuration=configuration,
-                recorded_at__lte=moment,
+                created_at__lte=moment,
                 ends_at__lte=day_start,
             )
             .order_by("-pk")
@@ -147,10 +147,10 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             window_end__gte=days[-1],
         )
         previous = previous.filter(incident_revision_ids=incidents)
-        if previous.filter(input_fingerprint=fingerprint).exists() or (
+        if previous.filter(input_sha256=fingerprint).exists() or (
             latest is not None
             and not snapshot_ids
-            and previous.filter(input_fingerprint="", observation_id_cutoff__gte=watermark).exists()
+            and previous.filter(input_sha256="", observation_id_cutoff__gte=watermark).exists()
         ):
             return None
         actor = (
@@ -170,7 +170,7 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             measurement_selection_policy=MEASUREMENT_POLICY,
             reference_snapshot_ids=reference_ids,
             incident_revision_ids=incidents,
-            input_fingerprint=fingerprint,
+            input_sha256=fingerprint,
         )
         record_plant_event(
             plant_id=plant.pk,

@@ -39,12 +39,12 @@ def test_month_collection_splits_immutable_daily_sources_without_manual_observat
     jobs = EpiasCollectionJob.objects.filter(source_kind="settlement_injection")
     assert jobs.count() == 12
     assert EpiasCollectionJob.objects.filter(source_kind="realtime_generation").count() == 90
-    assert jobs.earliest("target_day").target_day == date(2025, 11, 1)
-    assert list(jobs.order_by("target_day").values_list("target_day", "period_end_day")) == [
+    assert jobs.earliest("target_date").target_date == date(2025, 11, 1)
+    assert list(jobs.order_by("target_date").values_list("target_date", "period_end_day")) == [
         (date(year, month, 1), date(year, month, monthrange(year, month)[1]))
         for year, month in [(2025, 11), (2025, 12), *((2026, month) for month in range(1, 11))]
     ]
-    job = jobs.get(target_day=date(2026, 9, 1))
+    job = jobs.get(target_date=date(2026, 9, 1))
     prepared: list[int] = []
 
     def prepare(plant_id: int) -> None:
@@ -56,7 +56,7 @@ def test_month_collection_splits_immutable_daily_sources_without_manual_observat
     monkeypatch.setattr("pyracast.metering.jobs.get_epias_client", lambda: SettlementClient())
     assert run_epias_job(job.pk, now=NOW)
     assert not run_epias_job(job.pk, now=NOW)
-    snapshots = EpiasSnapshot.objects.filter(job=job).order_by("target_day")
+    snapshots = EpiasSnapshot.objects.filter(job=job).order_by("target_date")
     assert snapshots.count() == 30
     assert prepared == [linked.plant_id]
     assert not ProductionObservation.objects.exists()
@@ -81,15 +81,15 @@ def test_unpublished_and_partial_settlement_remain_missing_and_reconcile_in_next
 ) -> None:
     link_settlement(monkeypatch)
     job = EpiasCollectionJob.objects.get(
-        source_kind="settlement_injection", target_day=date(2026, 9, 1)
+        source_kind="settlement_injection", target_date=date(2026, 9, 1)
     )
-    full = month_data(SETTLEMENT, job.target_day, date(2026, 9, 30))
+    full = month_data(SETTLEMENT, job.target_date, date(2026, 9, 30))
     assert run_epias_job(job.pk, fetch=lambda *_: full, now=NOW)
-    original = EpiasSnapshot.objects.get(job=job, target_day=date(2026, 9, 1))
+    original = EpiasSnapshot.objects.get(job=job, target_date=date(2026, 9, 1))
     identifiers = enqueue_due_epias_jobs(now=NEXT_NIGHT)
     assert len(identifiers) == 9
     revised = EpiasCollectionJob.objects.get(
-        pk__in=identifiers, source_kind="settlement_injection", target_day=job.target_day
+        pk__in=identifiers, source_kind="settlement_injection", target_date=job.target_date
     )
     rows = (
         ()
@@ -112,7 +112,7 @@ def test_unpublished_and_partial_settlement_remain_missing_and_reconcile_in_next
     assert revised.attempts == 1
     assert revised.pk not in pending_epias_ids(NOW + timedelta(days=2))
     assert not run_epias_job(revised.pk, fetch=lambda *_: full, now=NOW + timedelta(days=2))
-    latest = EpiasSnapshot.objects.get(job=revised, target_day=original.target_day)
+    latest = EpiasSnapshot.objects.get(job=revised, target_date=original.target_date)
     assert not latest.complete
     assert [r["total_mwh"] for r in latest.readings] == ([] if empty else ["0", None])
     original.refresh_from_db()
@@ -154,8 +154,8 @@ def test_existing_connections_resolve_eic_outside_locks_with_daily_bound_and_rev
     if outcome == "resolved":
         settlement_jobs = EpiasCollectionJob.objects.filter(source_kind="settlement_injection")
         assert settlement_jobs.count() == 12
-        assert settlement_jobs.earliest("target_day").target_day == date(2025, 11, 1)
-        assert settlement_jobs.latest("target_day").period_end_day == date(2026, 10, 31)
+        assert settlement_jobs.earliest("target_date").target_date == date(2025, 11, 1)
+        assert settlement_jobs.latest("target_date").period_end_day == date(2026, 10, 31)
         assert EpiasCollectionJob.objects.filter(source_kind="realtime_generation").count() == 97
     if outcome != "revision_changed":
         assert enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(hours=2)) == identifiers
@@ -174,7 +174,7 @@ def test_changed_pinned_identity_cannot_publish(
         EpiasCollectionJob.objects.filter(
             connection=linked,
             source_kind="realtime_generation",
-            target_day=job.target_day,
+            target_date=job.target_date,
             scheduled_for=job.scheduled_for,
         ).delete()
 
@@ -201,7 +201,7 @@ def test_settlement_publication_and_calibration_request_share_one_transaction(
     job = EpiasCollectionJob.objects.filter(source_kind="settlement_injection").first()
     assert job is not None
     assert job.period_end_day is not None
-    data = month_data(SETTLEMENT, job.target_day, job.period_end_day)
+    data = month_data(SETTLEMENT, job.target_date, job.period_end_day)
 
     def fail(plant_id: int) -> None:
         assert connection.in_atomic_block
@@ -215,7 +215,7 @@ def test_settlement_publication_and_calibration_request_share_one_transaction(
     assert job.status == "pending"
     assert job.attempts == 1
     monkeypatch.setattr("pyracast.plants.preparation.prepare_calibration", lambda *_: None)
-    assert run_epias_job(job.pk, fetch=lambda *_: data, now=job.next_attempt_at)
+    assert run_epias_job(job.pk, fetch=lambda *_: data, now=job.available_at)
     assert EpiasSnapshot.objects.filter(job=job).count() == 31
 
 

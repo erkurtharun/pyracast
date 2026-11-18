@@ -38,9 +38,9 @@ def test_historical_health_reasons_are_visible_and_link_to_the_matching_records(
             configuration=failed.configuration,
             connection_revision=failed.connection_revision,
             provider_plant=failed.provider_plant,
-            target_day=failed.target_day,
+            target_date=failed.target_date,
             scheduled_for=NOW - timedelta(seconds=index),
-            next_attempt_at=NOW,
+            available_at=NOW,
             status="succeeded",
         )
     schedule = ReminderSchedule.objects.create(region=system.region, effective_from=NOW)
@@ -118,7 +118,7 @@ def test_metering_periods_publication_waits_and_email_content_are_distinct(
     job = EpiasCollectionJob.objects.first()
     assert job is not None
     job.source_kind = "settlement_injection"
-    job.period_end_day = job.target_day + timedelta(days=29)
+    job.period_end_day = job.target_date + timedelta(days=29)
     job.status = "awaiting_publication"
     job.last_error = "unpublished_data"
     job.scheduled_for = NOW + timedelta(seconds=1)

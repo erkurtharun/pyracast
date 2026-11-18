@@ -8,6 +8,7 @@ from pyracast.calculation import calculate
 from pyracast.connections.contracts import Calculator, ProviderData
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.intervals import NormalizedInterval
 from pyracast.plants.forecasting import power_intervals
 from pyracast.plants.models import PlantConfiguration
 from pyracast.providers import FixtureProvider, normalize_payload
@@ -32,7 +33,7 @@ def binding() -> SiteBinding:
 
 def data_for(row: dict[str, object] | None = None) -> ProviderData:
     intervals = [] if row is None else [row]
-    return ProviderData({}, intervals, collected_at=COLLECTED)
+    return ProviderData({}, NormalizedInterval.from_rows(intervals), collected_at=COLLECTED)
 
 
 def test_bridge_fits_calculator_and_outputs_explicit_json_safe_provenance() -> None:
@@ -135,7 +136,7 @@ def test_live_like_missing_daytime_and_issue_timestamp_are_preserved() -> None:
 
 def test_missing_collection_time_is_not_invented() -> None:
     with pytest.raises(ValueError, match="collection timestamp"):
-        calculate(binding(), TARGET, ProviderData({}, []))
+        calculate(binding(), TARGET, ProviderData({}, ()))
 
 
 @pytest.mark.parametrize(

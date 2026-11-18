@@ -268,7 +268,7 @@ function ScheduleEditor({
                                             : (statusLabels[job.status] ??
                                               t("statusUnavailable")),
                                     time: new Date(
-                                        job.scheduled_slot ?? job.available_at,
+                                        job.scheduled_for ?? job.available_at,
                                     ).toLocaleString(locale, {
                                         timeZone: data.timezone,
                                     }),

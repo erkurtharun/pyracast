@@ -34,8 +34,8 @@ class EpiasConnection(models.Model):
 
     class Meta:
         constraints = (
-            models.UniqueConstraint(fields=("id", "plant"), name="epias_connection_plant_identity"),
-            models.CheckConstraint(condition=Q(revision__gte=1), name="epias_revision_positive"),
+            models.UniqueConstraint(fields=("id", "plant"), name="%(class)s_id_plant_uniq"),
+            models.CheckConstraint(condition=Q(revision__gte=1), name="%(class)s_revision_chk"),
         )
 
 
@@ -53,7 +53,7 @@ class EpiasCollectionJob(models.Model):
     configuration = models.ForeignKey("plants.PlantConfiguration", on_delete=models.PROTECT)
     connection_revision = models.PositiveIntegerField()
     provider_plant = models.JSONField()
-    target_day = models.DateField()
+    target_date = models.DateField()
     period_end_day = models.DateField(null=True)
     source_kind = models.CharField(
         max_length=30, choices=EpiasSourceKind, default=EpiasSourceKind.REALTIME_GENERATION
@@ -63,7 +63,7 @@ class EpiasCollectionJob(models.Model):
     lease_token = models.UUIDField(null=True)
     lease_expires_at = models.DateTimeField(null=True)
     attempts = models.PositiveSmallIntegerField(default=0)
-    next_attempt_at = models.DateTimeField()
+    available_at = models.DateTimeField()
     retry_until = models.DateTimeField(null=True)
     last_error = models.CharField(max_length=40, choices=EpiasJobError, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -76,27 +76,28 @@ class EpiasCollectionJob(models.Model):
                     "connection_revision",
                     "configuration",
                     "source_kind",
-                    "target_day",
+                    "target_date",
                     "scheduled_for",
                 ),
-                name="epias_unique_collection_slot",
+                name="%(class)s_slot_uniq",
             ),
             models.UniqueConstraint(
-                fields=("id", "connection", "configuration"), name="epias_job_lineage_unique"
+                fields=("id", "connection", "configuration"),
+                name="%(class)s_id_connection_configuration_uniq",
             ),
             models.CheckConstraint(
-                condition=Q(period_end_day__isnull=True) | Q(period_end_day__gte=F("target_day")),
-                name="epias_job_period_valid",
+                condition=Q(period_end_day__isnull=True) | Q(period_end_day__gte=F("target_date")),
+                name="%(class)s_period_end_day_chk",
             ),
             models.CheckConstraint(
-                condition=Q(connection_revision__gte=1), name="epias_job_revision_positive"
+                condition=Q(connection_revision__gte=1), name="%(class)s_connection_revision_chk"
             ),
-            choices_check("source_kind", EpiasSourceKind, name="epias_job_source_valid"),
-            choices_check("status", EpiasJobStatus, name="epias_job_status_valid"),
+            choices_check("source_kind", EpiasSourceKind),
+            choices_check("status", EpiasJobStatus),
             choices_check("last_error", EpiasJobError, blank=True),
             lease_check((EpiasJobStatus.RUNNING,)),
         )
-        indexes = (models.Index(fields=("status", "next_attempt_at")),)
+        indexes = (models.Index(fields=("status", "available_at"), name="%(class)s_due_idx"),)
 
 
 class EpiasSnapshot(models.Model):
@@ -104,7 +105,7 @@ class EpiasSnapshot(models.Model):
     attempt = models.PositiveSmallIntegerField()
     connection = models.ForeignKey(EpiasConnection, on_delete=models.PROTECT)
     configuration = models.ForeignKey("plants.PlantConfiguration", on_delete=models.PROTECT)
-    target_day = models.DateField()
+    target_date = models.DateField()
     source_kind = models.CharField(
         max_length=30, choices=EpiasSourceKind, default=EpiasSourceKind.REALTIME_GENERATION
     )
@@ -121,11 +122,15 @@ class EpiasSnapshot(models.Model):
     class Meta:
         constraints = (
             models.UniqueConstraint(
-                fields=("job", "attempt", "target_day"), name="epias_unique_job_acquisition"
+                fields=("job", "attempt", "target_date"),
+                name="%(class)s_job_attempt_target_date_uniq",
             ),
-            models.CheckConstraint(
-                condition=Q(attempt__gte=1), name="epias_acquisition_attempt_positive"
-            ),
-            choices_check("source_kind", EpiasSourceKind, name="epias_acquisition_source_valid"),
+            models.CheckConstraint(condition=Q(attempt__gte=1), name="%(class)s_attempt_chk"),
+            choices_check("source_kind", EpiasSourceKind),
         )
-        indexes = (models.Index(fields=("connection", "target_day", "available_at")),)
+        indexes = (
+            models.Index(
+                fields=("connection", "target_date", "available_at"),
+                name="%(class)s_connection_idx",
+            ),
+        )

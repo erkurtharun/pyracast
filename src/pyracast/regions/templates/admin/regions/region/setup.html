@@ -97,7 +97,7 @@
         <div><dt>{% translate "Grid export limit" %}</dt><dd>{{ submission.export_limit_mw|default_if_none:_("Unknown") }}{% if submission.export_limit_mw != None %} MW{% endif %}</dd></div>
         <div><dt>{% translate "Measurement point" %}</dt><dd>{% translate submission.get_measurement_basis_display %}</dd></div>
         <div><dt>{% translate "Mounting" %}</dt><dd>{% translate submission.get_mounting_type_display %}</dd></div>
-        <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ submission.surface_tilt|default_if_none:_("Unknown") }}{% if submission.surface_tilt != None %}°{% endif %} / {{ submission.surface_azimuth|default_if_none:_("Unknown") }}{% if submission.surface_azimuth != None %}°{% endif %}</dd></div>
+        <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ submission.surface_tilt_degrees|default_if_none:_("Unknown") }}{% if submission.surface_tilt_degrees != None %}°{% endif %} / {{ submission.surface_azimuth_degrees|default_if_none:_("Unknown") }}{% if submission.surface_azimuth_degrees != None %}°{% endif %}</dd></div>
         <div><dt>{% translate "Submitted by" %}</dt><dd>{{ submission.submitted_by.username }} · <time datetime="{{ submission.created_at|date:'c' }}">{{ submission.created_at|date:"j M Y, H:i T" }}</time></dd></div>
       </dl>
     {% empty %}
@@ -111,7 +111,7 @@
               <div><dt>{% translate "Grid export limit" %}</dt><dd>{{ configuration.export_limit_mw|default_if_none:_("Unknown") }}{% if configuration.export_limit_mw != None %} MW{% endif %}</dd></div>
               <div><dt>{% translate "Measurement point" %}</dt><dd>{% translate configuration.get_measurement_basis_display %}</dd></div>
               <div><dt>{% translate "Mounting" %}</dt><dd>{% translate configuration.get_mounting_type_display %}</dd></div>
-              <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ configuration.surface_tilt|default_if_none:_("Unknown") }}{% if configuration.surface_tilt != None %}°{% endif %} / {{ configuration.surface_azimuth|default_if_none:_("Unknown") }}{% if configuration.surface_azimuth != None %}°{% endif %}</dd></div>
+              <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ configuration.surface_tilt_degrees|default_if_none:_("Unknown") }}{% if configuration.surface_tilt_degrees != None %}°{% endif %} / {{ configuration.surface_azimuth_degrees|default_if_none:_("Unknown") }}{% if configuration.surface_azimuth_degrees != None %}°{% endif %}</dd></div>
               <div><dt>{% translate "Configuration revision" %}</dt><dd>{{ configuration.revision }}</dd></div>
               <div><dt>{% translate "Saved" %}</dt><dd><time datetime="{{ configuration.created_at|date:'c' }}">{{ configuration.created_at|date:"j M Y, H:i T" }}</time></dd></div>
             </dl>

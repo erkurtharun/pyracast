@@ -103,8 +103,8 @@ def test_forecast_published_during_claim_lock_wait_is_available_to_preparation(
     system, _ = configured()
     older = saved(system)
     newer = saved(system, SLOT + timedelta(minutes=1))
-    newer.job.scheduled_slot = SLOT
-    newer.job.save(update_fields=("scheduled_slot",))
+    newer.job.scheduled_for = SLOT
+    newer.job.save(update_fields=("scheduled_for",))
     delivery_id = enqueue_due(SLOT)[0]
     clock = [0.0]
     monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: clock[0]))

@@ -7,6 +7,7 @@ from pyracast.api.serializers import BindingInput, RegionOutput
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import SiteBinding
+from pyracast.intervals import NormalizedInterval
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, make_system
 
@@ -28,13 +29,15 @@ def test_obsolete_reference_metadata_is_absent_from_models_and_region_api() -> N
         NOW.date(),
         ProviderData(
             {},
-            [
-                {
-                    "start": NOW.isoformat(),
-                    "end": (NOW + timedelta(minutes=30)).isoformat(),
-                    "power_kw": 0.5,
-                }
-            ],
+            NormalizedInterval.from_rows(
+                [
+                    {
+                        "start": NOW.isoformat(),
+                        "end": (NOW + timedelta(minutes=30)).isoformat(),
+                        "power_kw": 0.5,
+                    }
+                ]
+            ),
             collected_at=NOW,
         ),
     )

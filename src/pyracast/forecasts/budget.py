@@ -12,6 +12,7 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.notifications.schedule import local_slot
+from pyracast.regions.models import active_region
 
 
 def remaining_forecast_requests(account: ProviderAccount, now: datetime) -> int:
@@ -24,10 +25,10 @@ def remaining_forecast_requests(account: ProviderAccount, now: datetime) -> int:
     )
     needed: set[tuple[int, datetime]] = set()
     bindings = SiteBinding.objects.filter(
+        active_region("region__"),
         provider_account=account,
         region__approved_binding_id__isnull=False,
         region__status="approved",
-        region__deleted_at__isnull=True,
         validated_credential_revision=account.credential_revision,
     ).select_related("region")
     for binding in bindings:
@@ -41,11 +42,11 @@ def remaining_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         )
         if not jobs:
             continue
-        effective = schedule.effective_from if schedule else min(job.scheduled_slot for job in jobs)
+        effective = schedule.effective_from if schedule else min(job.scheduled_for for job in jobs)
         clocks = schedule.times if schedule else [settings.PYRACAST_CUTOFF_LOCAL.strftime("%H:%M")]
         clocks = clocks[: max(account.daily_quota - 1, 0)]
         paid_or_terminal = {
-            job.scheduled_slot
+            job.scheduled_for
             for job in jobs
             if job.pk in attempted
             or job.status
@@ -66,7 +67,7 @@ def remaining_forecast_requests(account: ProviderAccount, now: datetime) -> int:
                 and job.pk not in attempted
                 and job.available_at < day_end
             ):
-                needed.add((binding.pk, job.scheduled_slot))
+                needed.add((binding.pk, job.scheduled_for))
         zone = ZoneInfo(binding.region.timezone)
         first = day_start.astimezone(zone).date()
         last = (day_end - timedelta(microseconds=1)).astimezone(zone).date()

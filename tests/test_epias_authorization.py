@@ -71,7 +71,7 @@ def test_admin_without_membership_connects_and_tenants_keep_isolated_status_read
     linked = EpiasConnection.objects.get(plant=plant)
     assert linked.connected_by_id == actor.pk
     assert PlantEvent.objects.get(plant=plant, action="epias_connected").actor_id == actor.pk
-    job = EpiasCollectionJob.objects.filter(connection=linked).latest("target_day")
+    job = EpiasCollectionJob.objects.filter(connection=linked).latest("target_date")
     assert run_epias_job(job.pk, fetch=day_data)
     assert member.get(source).json()["archived_days"] == 1
     outsider = User.objects.create_user("other-member")

@@ -106,8 +106,8 @@ class SiteForm(forms.Form):
         choices=_choices(MountingType),
         widget=forms.Select(attrs={"data-mounting": ""}),
     )
-    surface_tilt = _number(gettext_lazy("Tilt (°, optional)"), required=False)
-    surface_azimuth = _number(
+    surface_tilt_degrees = _number(gettext_lazy("Tilt (°, optional)"), required=False)
+    surface_azimuth_degrees = _number(
         gettext_lazy("Azimuth (°, optional)"),
         required=False,
         help_text=gettext_lazy("Clockwise from north; south is 180."),
@@ -165,9 +165,7 @@ def save_plant_details(actor: User, region_id: int, form: PlantDetailsForm) -> t
     require_platform_admin(actor)
     site = form.site
     with transaction.atomic():
-        tenant_id = Region.objects.values_list("tenant_id", flat=True).get(
-            pk=region_id, deleted_at__isnull=True
-        )
+        tenant_id = Region.objects.active().values_list("tenant_id", flat=True).get(pk=region_id)
         Tenant.objects.select_for_update().get(pk=tenant_id)
         region = Region.objects.get(pk=region_id)
         plant = Plant.objects.select_related("current_configuration").get(region=region)
@@ -240,9 +238,7 @@ def new_plant(request: HttpRequest, tenant_id: int, *, site: PlatformAdminSite) 
 def plant_details_page(
     request: HttpRequest, object_id: int, *, site: PlatformAdminSite
 ) -> HttpResponse:
-    region = get_object_or_404(
-        Region.objects.select_related("tenant"), pk=object_id, deleted_at__isnull=True
-    )
+    region = get_object_or_404(Region.objects.active().select_related("tenant"), pk=object_id)
     plant = get_object_or_404(Plant.objects.select_related("current_configuration"), region=region)
     details = plant_details(region, plant)
     form = PlantDetailsForm(

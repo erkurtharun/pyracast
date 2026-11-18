@@ -58,7 +58,7 @@ def test_epias_queue_redelivery_archives_once_per_job(monkeypatch: pytest.Monkey
     connected(monkeypatch)
     ready_ids = list(EpiasCollectionJob.objects.order_by("pk").values_list("pk", flat=True)[:2])
     deferred = EpiasCollectionJob.objects.exclude(pk__in=ready_ids)
-    deferred.update(next_attempt_at=NOW + timedelta(days=1))
+    deferred.update(available_at=NOW + timedelta(days=1))
     monkeypatch.setattr("pyracast.metering.runtime.datetime", SimpleNamespace(now=lambda _: NOW))
     monkeypatch.setattr("pyracast.metering.jobs.get_epias_client", lambda: FixtureClient())
     broker = StubBroker()

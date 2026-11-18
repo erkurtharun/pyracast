@@ -394,7 +394,7 @@ def test_database_rejects_half_an_existing_incident_target(
     )
     with (
         transaction.atomic(),
-        pytest.raises(IntegrityError, match="proposal_incident_target_valid"),
+        pytest.raises(IntegrityError, match="incidentchange_target_chk"),
     ):
         IncidentChange.objects.filter(request=proposal).update(**{missing: None})
 

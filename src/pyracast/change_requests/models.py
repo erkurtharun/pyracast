@@ -56,7 +56,7 @@ class ChangeRequest(models.Model):
     idempotency_key = models.UUIDField()
     reason = models.CharField(max_length=500, blank=True)
     payload_sha256 = models.CharField(max_length=64)
-    submitted_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
     reviewed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", null=True
     )
@@ -69,9 +69,9 @@ class ChangeRequest(models.Model):
         constraints = (
             models.UniqueConstraint(
                 fields=("proposer_membership_id", "idempotency_key"),
-                name="change_request_idempotency_unique",
+                name="%(class)s_idempotency_key_uniq",
             ),
-            choices_check("kind", ChangeRequestKind, name="change_request_kind_valid"),
+            choices_check("kind", ChangeRequestKind),
             choices_check("status", ChangeRequestStatus),
             models.CheckConstraint(
                 condition=Q(
@@ -92,14 +92,18 @@ class ChangeRequest(models.Model):
                     closed_at__isnull=False,
                     reviewed_by__isnull=False,
                 ),
-                name="change_request_review_state",
+                name="%(class)s_review_chk",
             ),
             models.CheckConstraint(
                 condition=~Q(status=ChangeRequestStatus.REJECTED) | ~Q(decision_reason=""),
                 name="%(class)s_decision_reason_chk",
             ),
         )
-        indexes = (models.Index(fields=("plant", "status", "submitted_at")),)
+        indexes = (
+            models.Index(
+                fields=("plant", "status", "created_at"), name="%(class)s_plant_status_idx"
+            ),
+        )
 
 
 class ProductionChangeItem(models.Model):
@@ -123,26 +127,24 @@ class ProductionChangeItem(models.Model):
 
     class Meta:
         constraints = (
-            choices_check(
-                "action", ProductionChangeAction, name="proposal_production_action_valid"
-            ),
+            choices_check("action", ProductionChangeAction),
             models.CheckConstraint(
                 condition=Q(energy_mwh__gte=0, energy_mwh__lt=float("inf")),
-                name="proposal_production_energy_finite",
+                name="%(class)s_energy_mwh_chk",
             ),
             models.CheckConstraint(
                 condition=Q(baseline_energy_mwh__isnull=True)
                 | Q(baseline_energy_mwh__gte=0, baseline_energy_mwh__lt=float("inf")),
-                name="proposal_baseline_energy_finite",
+                name="%(class)s_baseline_energy_mwh_chk",
             ),
             models.CheckConstraint(
-                condition=Q(ends_at__gt=F("starts_at")), name="proposal_production_interval_valid"
+                condition=Q(ends_at__gt=F("starts_at")), name="%(class)s_ends_at_chk"
             ),
-            choices_check("quality", ObservationQuality, name="proposal_production_quality_valid"),
+            choices_check("quality", ObservationQuality),
             choices_check("baseline_source_kind", BaselineSourceKind, blank=True),
             models.UniqueConstraint(
                 fields=("request", "starts_at", "ends_at"),
-                name="proposal_production_interval_unique",
+                name="%(class)s_request_starts_at_ends_at_uniq",
             ),
         )
 
@@ -184,7 +186,7 @@ class IncidentChange(models.Model):
                     expected_revision__gte=1,
                     expected_revision__isnull=False,
                 ),
-                name="proposal_incident_target_valid",
+                name="%(class)s_target_chk",
             ),
             models.CheckConstraint(
                 condition=Q(action__in=(IncidentChangeAction.RESOLVE, IncidentChangeAction.CANCEL))
@@ -194,11 +196,11 @@ class IncidentChange(models.Model):
                     kind__in=IncidentKind.values,
                 )
                 & ~Q(title=""),
-                name="proposal_incident_values_valid",
+                name="%(class)s_values_chk",
             ),
             models.CheckConstraint(
                 condition=~Q(action=IncidentChangeAction.RESOLVE) | Q(ends_at__isnull=False),
-                name="proposal_incident_end_required",
+                name="%(class)s_resolution_chk",
             ),
             models.CheckConstraint(
                 condition=Q(starts_at__isnull=True)
@@ -212,12 +214,8 @@ class IncidentChange(models.Model):
                 models.CheckConstraint(
                     condition=Q(**{f"{field}__isnull": True})
                     | Q(**{f"{field}__gte": 0, f"{field}__lt": float("inf")}),
-                    name=f"proposal_incident_{name}_finite",
+                    name=f"%(class)s_{field}_chk",
                 )
-                for field, name in (
-                    ("available_dc_mw", "dc"),
-                    ("available_inverter_mw", "inverter"),
-                    ("available_export_mw", "export"),
-                )
+                for field in ("available_dc_mw", "available_inverter_mw", "available_export_mw")
             ),
         )

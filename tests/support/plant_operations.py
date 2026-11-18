@@ -72,7 +72,7 @@ def snapshot_for(
     job = CollectionJob.objects.create(
         binding=system.binding,
         target_date=day,
-        scheduled_slot=collected_at + timedelta(microseconds=CollectionJob.objects.count()),
+        scheduled_for=collected_at + timedelta(microseconds=CollectionJob.objects.count()),
         available_at=collected_at,
     )
     rows = stored.pop("normalized_intervals", None)

@@ -8,7 +8,7 @@ from pyracast.plants.models import ProductionObservation
 def observation_heads(
     *, cutoff: datetime, observation_id_cutoff: int | None = None
 ) -> QuerySet[ProductionObservation]:
-    eligible = ProductionObservation.objects.filter(recorded_at__lte=cutoff)
+    eligible = ProductionObservation.objects.filter(created_at__lte=cutoff)
     if observation_id_cutoff is not None:
         eligible = eligible.filter(pk__lte=observation_id_cutoff)
     # Current-head metadata enforces live uniqueness; historical replay uses only

@@ -5481,7 +5481,7 @@
                     "reason": {
                         "type": "string"
                     },
-                    "submitted_at": {
+                    "created_at": {
                         "type": "string",
                         "format": "date-time"
                     },
@@ -5576,6 +5576,7 @@
                     "closed_at",
                     "configuration_id",
                     "conflict",
+                    "created_at",
                     "decision_reason",
                     "former_member",
                     "id",
@@ -5595,7 +5596,6 @@
                     "review_fingerprint",
                     "reviewed_by",
                     "status",
-                    "submitted_at",
                     "timezone",
                     "unread"
                 ]
@@ -5635,7 +5635,7 @@
                     "reason": {
                         "type": "string"
                     },
-                    "submitted_at": {
+                    "created_at": {
                         "type": "string",
                         "format": "date-time"
                     },
@@ -5703,6 +5703,7 @@
                     "can_withdraw",
                     "closed_at",
                     "configuration_id",
+                    "created_at",
                     "decision_reason",
                     "former_member",
                     "id",
@@ -5719,7 +5720,6 @@
                     "region_id",
                     "reviewed_by",
                     "status",
-                    "submitted_at",
                     "timezone",
                     "unread"
                 ]
@@ -5766,7 +5766,7 @@
                     "status": {
                         "$ref": "#/components/schemas/CollectionJobStatusEnum"
                     },
-                    "scheduled_slot": {
+                    "scheduled_for": {
                         "type": "string",
                         "format": "date-time"
                     },
@@ -5800,7 +5800,7 @@
                     "id",
                     "last_error",
                     "retry_until",
-                    "scheduled_slot",
+                    "scheduled_for",
                     "status"
                 ]
             },
@@ -5953,13 +5953,13 @@
                         ],
                         "readOnly": true
                     },
-                    "surface_tilt": {
+                    "surface_tilt_degrees": {
                         "type": "number",
                         "format": "double",
                         "readOnly": true,
                         "nullable": true
                     },
-                    "surface_azimuth": {
+                    "surface_azimuth_degrees": {
                         "type": "number",
                         "format": "double",
                         "readOnly": true,
@@ -5981,8 +5981,8 @@
                     "measurement_basis",
                     "mounting_type",
                     "revision",
-                    "surface_azimuth",
-                    "surface_tilt"
+                    "surface_azimuth_degrees",
+                    "surface_tilt_degrees"
                 ]
             },
             "ConflictOutput": {
@@ -6936,7 +6936,7 @@
                     "recorded_by_id": {
                         "type": "integer"
                     },
-                    "recorded_at": {
+                    "created_at": {
                         "type": "string",
                         "format": "date-time",
                         "readOnly": true
@@ -6952,12 +6952,12 @@
                 },
                 "required": [
                     "configuration_id",
+                    "created_at",
                     "ends_at",
                     "energy_mwh",
                     "id",
                     "is_reverted",
                     "quality",
-                    "recorded_at",
                     "recorded_by_id",
                     "source",
                     "starts_at",
@@ -7672,14 +7672,14 @@
                         ],
                         "default": "unknown"
                     },
-                    "surface_tilt": {
+                    "surface_tilt_degrees": {
                         "type": "number",
                         "format": "double",
                         "maximum": 90,
                         "minimum": 0,
                         "nullable": true
                     },
-                    "surface_azimuth": {
+                    "surface_azimuth_degrees": {
                         "type": "number",
                         "format": "double",
                         "minimum": 0,
@@ -7773,13 +7773,13 @@
                         ],
                         "readOnly": true
                     },
-                    "surface_tilt": {
+                    "surface_tilt_degrees": {
                         "type": "number",
                         "format": "double",
                         "readOnly": true,
                         "nullable": true
                     },
-                    "surface_azimuth": {
+                    "surface_azimuth_degrees": {
                         "type": "number",
                         "format": "double",
                         "readOnly": true,
@@ -7799,8 +7799,8 @@
                     "inverter_capacity_mw",
                     "measurement_basis",
                     "mounting_type",
-                    "surface_azimuth",
-                    "surface_tilt"
+                    "surface_azimuth_degrees",
+                    "surface_tilt_degrees"
                 ]
             },
             "PowerBasisEnum": {
@@ -8921,14 +8921,14 @@
                         ],
                         "default": "unknown"
                     },
-                    "surface_tilt": {
+                    "surface_tilt_degrees": {
                         "type": "number",
                         "format": "double",
                         "maximum": 90,
                         "minimum": 0,
                         "nullable": true
                     },
-                    "surface_azimuth": {
+                    "surface_azimuth_degrees": {
                         "type": "number",
                         "format": "double",
                         "minimum": 0,

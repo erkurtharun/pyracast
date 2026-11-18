@@ -42,8 +42,10 @@ def forecast_time_limit(daily_quota: int) -> int:
 
 
 def get_schedule(tenant_id: int, region_id: int, now: datetime) -> CollectionSchedule:
-    region = Region.objects.select_related("approved_binding__provider_account").get(
-        pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
+    region = (
+        Region.objects.active()
+        .select_related("approved_binding__provider_account")
+        .get(pk=region_id, tenant_id=tenant_id)
     )
     return CollectionSchedule.objects.filter(region=region).first() or CollectionSchedule(
         region=region,
@@ -61,9 +63,10 @@ def configure_schedule(
     with transaction.atomic():
         tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         region = (
-            Region.objects.select_for_update(of=("self",))
+            Region.objects.active()
+            .select_for_update(of=("self",))
             .select_related("approved_binding__provider_account")
-            .get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
+            .get(pk=region_id, tenant_id=tenant_id)
         )
         binding = region.approved_binding
         limit = forecast_time_limit(
@@ -100,7 +103,7 @@ def configure_schedule(
             retained = [
                 pk
                 for pk, endpoint, slot, target in unclaimed.values_list(
-                    "pk", "endpoint", "scheduled_slot", "target_date"
+                    "pk", "endpoint", "scheduled_for", "target_date"
                 )
                 if (
                     endpoint != CollectionEndpoint.FORECASTS
@@ -163,11 +166,11 @@ def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, o
         else None,
         "next_collection_at": _next_collection_at(schedule, now),
         "recent_jobs": list(
-            jobs.order_by("-scheduled_slot", "-pk").values(
+            jobs.order_by("-scheduled_for", "-pk").values(
                 "id",
                 "endpoint",
                 "status",
-                "scheduled_slot",
+                "scheduled_for",
                 "available_at",
                 "retry_until",
                 "attempts",

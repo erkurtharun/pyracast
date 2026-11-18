@@ -407,8 +407,8 @@ function latestPlant(server: Plant, saved?: Plant): Plant {
                 "export_limit_mw",
                 "measurement_basis",
                 "mounting_type",
-                "surface_tilt",
-                "surface_azimuth",
+                "surface_tilt_degrees",
+                "surface_azimuth_degrees",
             ] as const
         ).every(
             (field) => incomingSubmission[field] === editedSubmission[field],

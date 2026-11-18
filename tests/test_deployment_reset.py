@@ -277,14 +277,12 @@ def full_start(commands: FakeCommands) -> int:
 
 
 def finish_release(commands: FakeCommands, host: Host) -> None:
-    """What a successful install does: it migrates, starts and removes the marker."""
     commands.live = {"accounts_tenant": 1, "django_migrations": 89}
     commands.running = APPLICATION | EDGE | SUPPORT
     host.marker.unlink()
 
 
 def fail_release(commands: FakeCommands, host: Host) -> None:
-    """What a later install that fails in maintenance leaves: a new marker, stopped services."""
     host.marker.touch()
     commands.running = set(SUPPORT)
 
@@ -832,7 +830,7 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_job_binding_and_pl
             job = CollectionJob.objects.create(
                 binding=binding,
                 endpoint=endpoint,
-                scheduled_slot=collected,
+                scheduled_for=collected,
                 target_date=collected.date(),
                 available_at=collected,
             )
@@ -868,8 +866,8 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_job_binding_and_pl
     for job, snapshot in zip(jobs, snapshots[:2], strict=True):
         assert set(job) == columns
         assert job["id"] == snapshot.job_id
-        assert {key: job[key] for key in ("scheduled_slot", "target_date", "status")} == {
-            "scheduled_slot": "2026-11-09T13:00:00+00:00",
+        assert {key: job[key] for key in ("scheduled_for", "target_date", "status")} == {
+            "scheduled_for": "2026-11-09T13:00:00+00:00",
             "target_date": "2026-11-09",
             "status": "pending",
         }

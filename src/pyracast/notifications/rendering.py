@@ -42,7 +42,7 @@ def render_forecast(
         results,
         prepared_at=prepared_at,
         fallback=bool(
-            delivery.snapshot and delivery.snapshot.job.scheduled_slot != delivery.scheduled_for
+            delivery.snapshot and delivery.snapshot.job.scheduled_for != delivery.scheduled_for
         ),
     )
     has_outage = any(day.has_outage for day in report.days)
