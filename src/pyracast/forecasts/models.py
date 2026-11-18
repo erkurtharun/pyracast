@@ -3,8 +3,6 @@ import uuid
 from django.conf import settings
 from django.db import models
 from django.db.models import F
-from django.db.models.functions import Abs
-from django.db.models.lookups import LessThanOrEqual
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.db import choices_check, lease_check
@@ -317,12 +315,10 @@ class ReferenceCapacityNormalization(models.Model):
                 condition=models.Q(factor__gt=0, factor__lt=float("inf")),
                 name="finite_positive_reference_scale",
             ),
-            # The factor is target / source in float64; 1e-9 relative absorbs its rounding.
+            # The writer stores target / source; Python and PostgreSQL divide float8 identically
+            # (IEEE 754), so the stored factor is the exact quotient at every capacity.
             models.CheckConstraint(
-                condition=LessThanOrEqual(
-                    Abs(F("factor") * F("source_capacity_kw") - F("target_capacity_kw")),
-                    F("target_capacity_kw") * 1e-9,
-                ),
+                condition=models.Q(factor=F("target_capacity_kw") / F("source_capacity_kw")),
                 name="%(class)s_factor_chk",
             ),
         )

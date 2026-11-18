@@ -74,9 +74,26 @@ BINDING_REVISION_RULE = (
     " AND other.region_id = connections_sitebinding.region_id"
     " AND other.region_revision = connections_sitebinding.region_revision)"
 )
-NORMALIZATION_FACTOR_RULE = (
-    "abs(factor * source_capacity_kw - target_capacity_kw) <= 1e-9 * target_capacity_kw"
-)
+# factor = target / source, evaluated without the float8 underflow or overflow errors
+# PostgreSQL raises: a quotient that rounds to 0 (at most 2^-1075) or to infinity (at least
+# 2^1024) breaks the rule, since a stored factor is positive and finite. The guards compare
+# exact power-of-two scalings: 2.2250738585072014e-308 = 2^-1022,
+# 8.98846567431158e307 = 2^1023, 4503599627370496 = 2^52, 9007199254740992 = 2^53, 5e-324 = 2^-1074.
+NORMALIZATION_FACTOR_RULE = """CASE
+    WHEN source_capacity_kw >= 1 THEN CASE
+        WHEN target_capacity_kw < 2.2250738585072014e-308 THEN CASE
+            WHEN target_capacity_kw * 8.98846567431158e307 * 4503599627370496 > source_capacity_kw
+            THEN factor = target_capacity_kw / source_capacity_kw ELSE false END
+        WHEN source_capacity_kw >= 9007199254740992 THEN CASE
+            WHEN target_capacity_kw > source_capacity_kw * 0.5 * 5e-324
+            THEN factor = target_capacity_kw / source_capacity_kw ELSE false END
+        ELSE factor = target_capacity_kw / source_capacity_kw END
+    WHEN target_capacity_kw < source_capacity_kw * 8.98846567431158e307
+    THEN factor = target_capacity_kw / source_capacity_kw
+    WHEN target_capacity_kw * 0.5 < source_capacity_kw * 8.98846567431158e307 THEN CASE
+        WHEN factor >= 8.98846567431158e307
+        THEN factor * 0.5 = target_capacity_kw * 0.5 / source_capacity_kw ELSE false END
+    ELSE false END"""
 # Every row invariant the database enforces on the constrained tables; archive immutability is
 # a before/after property and is audited by `rewritten_archive_rows`.
 STORED_RULES: tuple[tuple[str, str], ...] = (

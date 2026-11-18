@@ -5,8 +5,6 @@ from django.conf import settings
 from django.db import migrations, models
 from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.migrations.operations.base import Operation
-from django.db.models.functions import Abs
-from django.db.models.lookups import GreaterThan, LessThanOrEqual
 
 from pyracast import schema_objects
 from pyracast.db import fire_deferred_checks, refuse_lease_breaches, refuse_rows
@@ -34,15 +32,23 @@ def unfinished_import(model: type[models.Model]) -> models.Q:
     return models.Q(reference_import__isnull=False) & ~models.Q(status="succeeded")
 
 
-def factor_mismatch(model: type[models.Model]) -> models.Q:
-    return models.Q(
-        GreaterThan(
-            Abs(
-                models.F("factor") * models.F("source_capacity_kw") - models.F("target_capacity_kw")
-            ),
-            models.F("target_capacity_kw") * 1e-9,
-        )
+def refuse_factor_mismatch(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+    # Compared in Python: PostgreSQL raises instead of answering when a stored quotient leaves
+    # float8, while Python yields inf or 0.0, which no stored factor equals.
+    rows = apps.get_model("forecasts", "ReferenceCapacityNormalization")._default_manager
+    found = sorted(
+        key
+        for key, factor, source, target in rows.using(schema_editor.connection.alias)
+        .values_list("pk", "factor", "source_capacity_kw", "target_capacity_kw")
+        .iterator()
+        if factor != target / source
     )
+    if found:
+        raise ValueError(
+            f"forecasts_referencecapacitynormalization holds {len(found)} row(s) that break the "
+            f"rule 'the factor is the target capacity divided by the source capacity': ids "
+            f"{found}. Correct these rows and migrate again; nothing was changed."
+        )
 
 
 class Migration(migrations.Migration):
@@ -119,20 +125,12 @@ class Migration(migrations.Migration):
                 name="collectionjob_binding_endpoint_scheduled_slot_uniq",
             ),
         ),
-        refuse_rows(
-            "forecasts.referencecapacitynormalization",
-            factor_mismatch,
-            "the factor is the target capacity divided by the source capacity",
-        ),
+        migrations.RunPython(refuse_factor_mismatch, migrations.RunPython.noop),
         migrations.AddConstraint(
             model_name="referencecapacitynormalization",
             constraint=models.CheckConstraint(
-                condition=LessThanOrEqual(
-                    Abs(
-                        models.F("factor") * models.F("source_capacity_kw")
-                        - models.F("target_capacity_kw")
-                    ),
-                    models.F("target_capacity_kw") * 1e-9,
+                condition=models.Q(
+                    ("factor", models.F("target_capacity_kw") / models.F("source_capacity_kw"))
                 ),
                 name="referencecapacitynormalization_factor_chk",
             ),
