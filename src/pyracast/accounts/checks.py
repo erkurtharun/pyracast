@@ -37,7 +37,7 @@ def validate_public_origin() -> None:
 
 
 # Each entry reads what the one before it established: the session lock, the session, the user,
-# the session's limits, then the pending account processes resting on that account.
+# the session's limits, then the pending processes and reauthentications resting on that account.
 SESSION_MIDDLEWARE = (
     "pyracast.accounts.session_lock.SessionRequestSerialization",
     "pyracast.accounts.session_cookie.SessionCookie",

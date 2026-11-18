@@ -16,6 +16,7 @@ from pyracast.accounts.sessions import end_sessions
 UNKNOWN = "No account uses this address."
 NO_FACTOR = "This account has no second factor. Nothing was changed."
 MISMATCH = "The confirmation does not match the address. Nothing was changed."
+CHANGED = "The account changed while the command ran. Nothing was changed; run it again."
 NOTICE = "account/email/second_factor_reset"
 
 
@@ -48,7 +49,10 @@ class Command(OperatorCommand):
         if self.ask("Type the address again to confirm: ").strip().lower() != address:
             raise CommandError(MISMATCH)
         with transaction.atomic():
-            account = self.with_factors(address, lock=True)
+            current = self.with_factors(address, lock=True)
+            if current.pk != account.pk:
+                raise CommandError(CHANGED)
+            account = current
             factors, _removed = Authenticator.objects.filter(user=account).delete()
             sessions = end_sessions(account.pk, "mfa_reset")
             recipient = EmailAddress.objects.get_primary_email(account) or address

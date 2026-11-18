@@ -18,6 +18,9 @@ class Factor(StrEnum):
     CODE = auto()
 
 
+WEAKEST_FIRST = (Factor.CODE, Factor.PASSWORD, Factor.MFA)
+
+
 def normalize_client_ip(value: str) -> str:
     address = ip_address(value)
     if isinstance(address, IPv6Address) and address.ipv4_mapped:
@@ -29,6 +32,35 @@ def strongest_factor(user: AbstractBaseUser) -> Factor:
     if Authenticator.objects.filter(user_id=user.pk).exists():
         return Factor.MFA
     return Factor.PASSWORD if user.has_usable_password() else Factor.CODE
+
+
+def end_weaker_reauthentication(request: HttpRequest) -> None:
+    # A reauthentication rests on its factor being the strongest the account holds. allauth's own
+    # gates accept any recent one, so a proof by a weaker factor ends when the account gains a
+    # stronger one.
+    user = request.user
+    if not user.is_authenticated:
+        return
+    now = time.time()
+    weaker = [
+        record
+        for record in get_authentication_records(request, user)
+        if record.get("reauthenticated")
+        and record.get("method") in {Factor.CODE, Factor.PASSWORD}
+        and not _expired(record, now)
+    ]
+    if not weaker:
+        return
+    strongest = WEAKEST_FIRST.index(strongest_factor(user))
+    for record in weaker:
+        if WEAKEST_FIRST.index(Factor(record["method"])) < strongest:
+            record["reauthenticated"] = False
+            request.session.modified = True
+
+
+def _expired(record: dict[str, Any], now: float) -> bool:
+    at = record.get("at")
+    return isinstance(at, int | float) and now - at >= account_settings.REAUTHENTICATION_TIMEOUT
 
 
 def _recent(record: dict[str, Any], now: float) -> bool:

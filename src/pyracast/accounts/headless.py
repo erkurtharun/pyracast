@@ -34,8 +34,8 @@ from pyracast.accounts.processes import (
     lock_account,
     require_authority,
 )
-from pyracast.accounts.security import Factor
-from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor
+from pyracast.accounts.security import Factor, strongest_factor
+from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor, require_recent_mfa
 from pyracast.db import violated_constraint
 
 COMPLETION_FAILURES = (
@@ -188,6 +188,20 @@ class ConfirmReauthenticationCodeView(StrongestFactor, views.ConfirmReauthentica
 
 class ChangePasswordView(StepUpAnswers, views.ChangePasswordView):
     input_class = inputs.ChangePasswordInput
+
+    def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        # The current password proves only the password; an account with an authenticator also
+        # proves the authenticator.
+        user = request.user
+        if (
+            request.method == "POST"
+            and user.is_authenticated
+            and strongest_factor(user) is Factor.MFA
+        ):
+            refused = require_recent_mfa(request)
+            if refused is not None:
+                return refused
+        return super().handle(request, *args, **kwargs)
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         response: HttpResponse = super().post(request, *args, **kwargs)

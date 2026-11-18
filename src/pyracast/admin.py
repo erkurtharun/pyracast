@@ -139,11 +139,7 @@ class PlatformAdminSite(admin.AdminSite):
                 self.admin_view(self.workspace_logout, needs_confirmation=False),
                 name="logout",
             ),
-            path(
-                "language/",
-                self.admin_view(self.language, needs_confirmation=False),
-                name="workspace_language",
-            ),
+            path("language/", self.admin_view(self.language), name="workspace_language"),
             path(
                 "confirm/",
                 self.admin_view(self.confirm, needs_confirmation=False),

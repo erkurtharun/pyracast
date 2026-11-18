@@ -152,7 +152,8 @@ Only Google-authoritative Gmail or verified Workspace addresses satisfy mailbox
 verification; other addresses use Pyracast's email verification.
 Connections require an authenticated session and recent reauthentication. A
 reauthentication uses the strongest factor the account holds: its authenticator, else its
-password, else a code sent to its verified email. Linking is
+password, else a code sent to its verified email; it ends when the account gains a
+stronger factor. Linking is
 bound to the initiating user, and disconnects lock the user record to preserve a
 working login method. Provider sign-in retains Pyracast's local MFA requirements.
 
@@ -246,7 +247,7 @@ Workspace administrators can rename a plant and its region without changing a re
 
 ## Reliability and security
 
-- Keep one authentication authority: django-allauth browser sessions, with no app-token endpoints or separate password login. A platform administrator is an active staff superuser; the console also requires MFA evidence bound to the current user and a live authenticator, and every console write a reauthentication by that authenticator within the reauthentication window, which the API's MFA management uses too. Administrators require a TOTP factor provisioned through ootstrap_admin before login; password possession cannot bootstrap an administrative factor. Reauthentication protects security changes, and recovery codes are one-use and shown once. MFA secrets use authenticated encryption with an HKDF context distinct from provider credentials.
+- Keep one authentication authority: django-allauth browser sessions, with no app-token endpoints or separate password login. A platform administrator is an active staff superuser; the console also requires MFA evidence bound to the current user and a live authenticator, and every console write a reauthentication by that authenticator within the reauthentication window, which the API's MFA management uses too. Administrators require a TOTP factor provisioned through `bootstrap_admin` before login; password possession cannot bootstrap an administrative factor. Reauthentication protects security changes, and recovery codes are one-use and shown once. MFA secrets use authenticated encryption with an HKDF context distinct from provider credentials.
 - Derive tenant access from authenticated membership. Only console views pass platform authority (`platform=True`) to a shared operation, which checks the platform administrator before it takes the tenant lock; `/api/tenants/` routes never do. Scope list/detail/create/update operations, worker jobs and cache keys. Tenant ownership is not a trusted request field. Django admin does not provide tenant isolation automatically.
 - Store provider keys in a secret manager or authenticated encryption with keys outside the database. Accept credential changes through write-only admin inputs; redact secrets from responses, logs and audit payloads.
   The MFA-protected administration setup page supports existing authorized accounts
@@ -530,7 +531,8 @@ Local development may explicitly select Django's console backend with
 `PYRACAST_EMAIL_BACKEND=console` and `PYRACAST_DEBUG=1`; messages, including usable
 verification codes, go to private local process logs. Console mail in production or
 an unknown backend stops startup. Email replacements require reauthentication
-and verification; password changes invalidate other sessions. Customers can optionally
+and verification; a password change also needs a recent MFA reauthentication when the
+account has an authenticator, and invalidates other sessions. Customers can optionally
 enable TOTP from account settings. Enrollment renders the server-issued setup URI as a
 local QR code with a manual-key fallback. The browser keeps secrets only in component memory.
 Removing TOTP or accessing and regenerating recovery codes requires explicit MFA

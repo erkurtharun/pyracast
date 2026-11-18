@@ -27,6 +27,8 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.utils.crypto import salted_hmac
 from django.utils.http import base36_to_int
 
+from pyracast.accounts.security import end_weaker_reauthentication
+
 PROVIDER_SIGNUP_SESSION_KEY = "socialaccount_sociallogin"
 STAMP = "pyracast_authority"
 # Authenticator data allauth rewrites when a recovery code is used or the codes are shown; each
@@ -260,4 +262,5 @@ class PendingProcessAuthority:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         if request.session.session_key is not None:
             discard_stale(request)
+            end_weaker_reauthentication(request)
         return self.get_response(request)

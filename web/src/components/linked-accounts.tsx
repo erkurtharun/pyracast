@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { authRequest } from "@/lib/auth-api";
+import { authRequest, type AuthenticatorRecord } from "@/lib/auth-api";
 import {
     SocialProviderButtons,
     useSocialProviders,
@@ -85,6 +85,31 @@ export function LinkedAccounts({
             active = false;
         };
     }, [version, security, t]);
+    async function confirmConnection() {
+        setBusy(true);
+        setError(undefined);
+        setNotice(false);
+        try {
+            const result = await authRequest<AuthenticatorRecord[]>(
+                "account/authenticators",
+                "GET",
+            );
+            if (result.status === 401)
+                await refreshExpiredSession(security("sessionExpired"));
+            setReauth({
+                mode: result.data?.length
+                    ? "mfa"
+                    : hasPassword
+                      ? "password"
+                      : "email",
+                pending: { kind: "connect" },
+            });
+        } catch (err) {
+            setError(err instanceof Error ? err.message : t("loadError"));
+        } finally {
+            setBusy(false);
+        }
+    }
     async function disconnect(account: ProviderAccount, replay = false) {
         setBusy(true);
         setError(undefined);
@@ -199,13 +224,8 @@ export function LinkedAccounts({
                     <button
                         className="button secondary"
                         type="button"
-                        onClick={() => {
-                            setNotice(false);
-                            setReauth({
-                                mode: hasPassword ? "password" : "email",
-                                pending: { kind: "connect" },
-                            });
-                        }}
+                        disabled={busy}
+                        onClick={confirmConnection}
                     >
                         {t("connectAccount")}
                     </button>
