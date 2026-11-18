@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
@@ -131,7 +131,7 @@ def test_historical_job_cannot_use_an_import_from_another_binding() -> None:
     [(NOW, None), (None, NOW), (NOW, NOW), (NOW, NOW - timedelta(seconds=1))],
 )
 def test_snapshot_requires_a_complete_increasing_coverage_pair(
-    bounds: tuple[object, object],
+    bounds: tuple[datetime | None, datetime | None],
 ) -> None:
     system = make_system(approved=True)
     job = CollectionJob.objects.get(binding=system.binding)

@@ -123,7 +123,7 @@ def _all_new() -> tuple[set[str], set[str]]:
 
 def _tuples() -> dict[tuple[str, int], str]:
     """The physical row version of every job row: an UPDATE gives a row a new xmin."""
-    found = {}
+    found: dict[tuple[str, int], str] = {}
     with connection.cursor() as cursor:
         for table in CLEAN:
             cursor.execute(sql.SQL("SELECT id, xmin::text FROM {}").format(sql.Identifier(table)))
