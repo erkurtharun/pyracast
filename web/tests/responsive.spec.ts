@@ -800,6 +800,7 @@ test("mobile platform administrator can reach administration and customer naviga
     await expect(
         navigation.getByRole("link", { name: "Administration" }),
     ).toHaveAttribute("href", "/admin/");
+    await expect(navigation.locator("button, a")).toHaveCount(5);
     const controls = await navigation
         .locator("button, a")
         .evaluateAll((elements) =>
@@ -812,7 +813,6 @@ test("mobile platform administrator can reach administration and customer naviga
                 };
             }),
         );
-    expect(controls).toHaveLength(5);
     expect(
         controls.every(
             (control) =>
