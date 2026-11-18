@@ -401,7 +401,8 @@ def set_role_verifier(
     database: str, verifier: str | None, role: str = bootstrap_database.RUNTIME_ROLE
 ) -> list[str]:
     emitted: list[str] = []
-    with psycopg.connect(**server_parameters(database), autocommit=True) as connection:
+    parameters = server_parameters(database) | {"options": bootstrap_database.UNLOGGED}
+    with psycopg.connect(**parameters, autocommit=True) as connection:
         connection.add_notice_handler(lambda diagnostic: emitted.append(log_line(diagnostic)))
         connection.execute(
             sql.SQL("ALTER ROLE {} PASSWORD {}").format(sql.Identifier(role), sql.Literal(verifier))
