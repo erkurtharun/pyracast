@@ -176,16 +176,17 @@ def test_restored_rows_keep_the_acquisition_and_take_the_live_job_shape(
         "source_kind",
         "coverage_start",
         "coverage_end",
+        "available_at",
         "weather_payload",
     ):
         assert getattr(copy, name) == getattr(original, name)
-    assert copy.available_at == original.collected_at
     assert copy.weather_error == ""
     forecast = restored_copy(system.binding, before.forecasts[0])
     assert forecast.weather_payload == {"source": "open-meteo"}
     assert forecast.job.target_date == date(2026, 11, 6)
     result = ForecastResult.objects.get(snapshot=forecast)
-    assert result.published_at == forecast.collected_at == forecast.available_at
+    assert forecast.available_at == before.forecasts[0].available_at
+    assert result.published_at == forecast.available_at != forecast.collected_at
     assert result.payload["local_date"] == "2026-11-06"
     assert result.payload["vintage"] == {
         "provider": "solcast",
@@ -251,6 +252,44 @@ def test_restored_actuals_are_admitted_at_their_slot_as_the_exported_ones(
         (before.nights[0], True),
         (before.nights[2], True),
     ]
+
+
+def test_restored_actuals_published_after_the_grace_stay_outside_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    erased = binding_before_reset(system)
+    slot = local(date(2026, 11, 7), 10)
+    original = acquisition(
+        erased,
+        "estimated_actuals",
+        slot,
+        local(date(2026, 11, 7)),
+        slot,
+        collected_at=slot + timedelta(minutes=14, seconds=59),
+    )
+    assert original.available_at == slot + timedelta(minutes=15, seconds=59)
+
+    restore(system, export_content())
+
+    copy = restored_copy(system.binding, original)
+    graces = (slot + INTRADAY_HISTORY_WINDOW, slot + timedelta(minutes=16))
+    exported = [
+        original
+        in native_actual_snapshots(
+            erased, local(date(2026, 11, 7)), slot, slot, actuals_grace_until=grace
+        )
+        for grace in graces
+    ]
+    held = [
+        copy
+        in native_actual_snapshots(
+            system.binding, local(date(2026, 11, 7)), slot, slot, actuals_grace_until=grace
+        )
+        for grace in graces
+    ]
+    assert exported == held == [False, True]
+    assert copy.available_at == original.available_at
 
 
 def test_the_approval_acquisition_still_runs_after_older_forecasts_are_restored(
@@ -756,6 +795,8 @@ def test_a_row_without_its_identity_refuses_the_run(
             ]
         },
         {"weather_payload": []},
+        {"available_at": None},
+        {"available_at": "2026-11-05T07:01:00"},
     ],
 )
 def test_an_invalid_live_acquisition_refuses_the_run(

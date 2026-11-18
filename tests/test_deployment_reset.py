@@ -847,6 +847,9 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_job_binding_and_pl
                     source_kind="forecast",
                     coverage_start=collected,
                     coverage_end=collected + timedelta(days=3),
+                    available_at=collected + timedelta(minutes=1)
+                    if endpoint == "forecasts"
+                    else None,
                     weather_payload={"source": "open-meteo"} if endpoint == "forecasts" else None,
                 )
             )
@@ -878,6 +881,7 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_job_binding_and_pl
             "endpoint": "forecasts",
             "issued_at": "2026-11-09T13:00:00+00:00",
             "collected_at": "2026-11-09T13:00:00+00:00",
+            "available_at": "2026-11-09T13:01:00+00:00",
             "coverage_start": "2026-11-09T13:00:00+00:00",
             "coverage_end": "2026-11-12T13:00:00+00:00",
             "raw_payload": payload,
@@ -892,6 +896,7 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_job_binding_and_pl
             "endpoint": "scaled_forecasts",
             "issued_at": None,
             "collected_at": "2026-11-09T13:00:00+00:00",
+            "available_at": None,
             "coverage_start": "2026-11-09T13:00:00+00:00",
             "coverage_end": "2026-11-12T13:00:00+00:00",
             "raw_payload": payload,
