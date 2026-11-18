@@ -87,7 +87,7 @@ def _modules_matching(pattern: str) -> set[str]:
 @pytest.mark.parametrize(
     ("marker", "pattern"),
     [
-        ("migration", r"MigrationExecutor"),
+        ("migration", r"MigrationExecutor|from tests\.support\.migrations import"),
         ("subprocess", r"subprocess\.(run|Popen|check_output|check_call)\("),
     ],
 )
@@ -97,6 +97,13 @@ def test_selection_markers_cover_every_module_that_needs_them(marker: str, patte
     marked = {module for module, markers in MODULE_MARKERS.items() if marker in markers}
 
     assert marked == _modules_matching(pattern) - {"test_suite_conventions"}
+
+
+def test_the_invariant_audit_names_existing_database_modules() -> None:
+    from tests.conftest import INVARIANT_AUDIT
+
+    assert _modules_matching(r"django_db") >= INVARIANT_AUDIT
+    assert {"test_admin_health_queries", "test_admin_health_views"} <= INVARIANT_AUDIT
 
 
 def test_selection_markers_are_applied_by_module(request: pytest.FixtureRequest) -> None:

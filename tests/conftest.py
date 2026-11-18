@@ -69,7 +69,57 @@ SUBPROCESS = frozenset(
         "test_test_settings",
     }
 )
-MIGRATION = frozenset({"test_vocabulary_migrations", "test_workspace_name_migration"})
+MIGRATION = frozenset(
+    {"test_invariant_migrations", "test_vocabulary_migrations", "test_workspace_name_migration"}
+)
+# Modules that drive every writer of the tables with stored invariants. After each passing test
+# of these modules the rows are checked with raw queries written independently of the CHECK and
+# trigger definitions.
+INVARIANT_AUDIT = frozenset(
+    {
+        "test_account_rotation",
+        "test_admin_health_queries",
+        "test_admin_health_views",
+        "test_admin_setup",
+        "test_archive_invariants",
+        "test_calibration_automation",
+        "test_calibration_invariants",
+        "test_calibration_preparation",
+        "test_calibration_runtime",
+        "test_capacity_normalization",
+        "test_capacity_normalization_boundaries",
+        "test_change_requests",
+        "test_collection_calendar_windows",
+        "test_collection_resilience",
+        "test_collection_review_regressions",
+        "test_collection_schedule",
+        "test_epias_api",
+        "test_historical_reference_import",
+        "test_historical_upload",
+        "test_incident_calibration",
+        "test_job_lease_invariants",
+        "test_jobs",
+        "test_metering",
+        "test_metering_nightly",
+        "test_metering_settlement",
+        "test_nightly_solcast",
+        "test_notification_preparation",
+        "test_notification_revocations",
+        "test_notification_transmission",
+        "test_notifications",
+        "test_plant_operations",
+        "test_plant_training",
+        "test_production_changes",
+        "test_provider_account_invariants",
+        "test_provider_identity",
+        "test_provider_recovery",
+        "test_provider_retry",
+        "test_region_editing",
+        "test_revalidation_schedule",
+        "test_secret_reencryption",
+        "test_trash_operations",
+    }
+)
 SELECTION_SETS = {
     "tooling": TOOLING,
     "subprocess": SUBPROCESS,
@@ -87,6 +137,17 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         for marker in MODULE_MARKERS.get(item.path.stem, ()):
             item.add_marker(marker)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> Iterator[None]:
+    # Runs after the test body and before fixture teardown flushes its database.
+    yield
+    if item.path.stem in INVARIANT_AUDIT and item.get_closest_marker("django_db"):
+        # Imported here: the support module loads models, which needs Django set up.
+        from tests.support.invariants import stored_violations
+
+        assert stored_violations() == {}
 
 
 @pytest.fixture

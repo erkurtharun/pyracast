@@ -645,6 +645,7 @@ def test_plant_put_unchanged_returns_same_configuration(monkeypatch: pytest.Monk
 def _rebind_to_stale_binding(system: System, plant: Plant) -> dict[str, Any]:
     stale = SiteBinding.objects.get(pk=system.binding.pk)
     stale.pk = None
+    stale.region_revision += 1
     stale.save()
     assert plant.current_configuration_id is not None
     PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(binding=stale)

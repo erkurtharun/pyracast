@@ -26,6 +26,7 @@ from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.regions.models import Region
 from tests.support.domain import System
 from tests.support.incident_calibration import incident
+from tests.support.invariants import stored_again
 from tests.support.notification_report_data import region_delivery, report_delivery
 from tests.support.notifications import SLOT, cache_saved_days
 from tests.support.plant_operations import publish_snapshot, snapshot_for
@@ -67,7 +68,7 @@ def intraday_sources(
         }
         for index in range(77)
     ]
-    latest.save()
+    stored_again(latest)
     cache_saved_days(latest, latest.collected_at)
     return old
 
@@ -82,7 +83,7 @@ def test_today_report_composes_archived_morning_and_intraday_forecast_before_agg
         SLOT.astimezone(ZoneInfo(system.binding.timezone)).date(), system.binding.timezone
     )
     old.normalized_intervals[18]["power_kw"] = 2
-    old.save(update_fields=("normalized_intervals",))
+    stored_again(old)
     outage = incident(system, plant, start, None)
     counts = (
         RequestAttempt.objects.count(),
@@ -135,7 +136,7 @@ def test_today_report_never_fills_new_forecast_missingness_with_older_values(
         latest.normalized_intervals.remove(missing)
     else:
         missing["power_kw"] = None if value == "null" else 0
-    latest.save(update_fields=("normalized_intervals",))
+    stored_again(latest)
     today = cast(list[dict[str, Any]], saved_report_context(delivery)["days"])[0]
     daylight = today["normal"]["daylight"]
     assert daylight["partial_energy_mwh"] == pytest.approx(234)
@@ -172,11 +173,11 @@ def test_today_report_excludes_ineligible_archived_forecasts(
     if reason == "publication":
         ForecastResult.objects.filter(snapshot=old).update(published_at=later)
     elif reason == "availability":
-        ForecastSnapshot.objects.filter(pk=old.pk).update(available_at=later)
+        stored_again(ForecastSnapshot.objects.get(pk=old.pk), available_at=later)
     elif reason == "issue":
-        ForecastSnapshot.objects.filter(pk=old.pk).update(issued_at=later)
+        stored_again(ForecastSnapshot.objects.get(pk=old.pk), issued_at=later)
     elif reason == "acquisition":
-        ForecastSnapshot.objects.filter(pk=old.pk).update(collected_at=later)
+        stored_again(ForecastSnapshot.objects.get(pk=old.pk), collected_at=later)
     elif reason == "binding":
         region = Region.objects.create(
             tenant=Tenant.objects.create(name="Other tenant"),
@@ -202,9 +203,9 @@ def test_today_report_excludes_ineligible_archived_forecasts(
             available_at=old.collected_at,
             status="succeeded",
         )
-        ForecastSnapshot.objects.filter(pk=old.pk).update(binding=binding, job=job)
+        stored_again(ForecastSnapshot.objects.get(pk=old.pk), binding=binding, job=job)
     else:
-        ForecastSnapshot.objects.filter(pk=old.pk).update(source_kind="estimated_actuals")
+        stored_again(ForecastSnapshot.objects.get(pk=old.pk), source_kind="estimated_actuals")
     today = cast(list[dict[str, Any]], saved_report_context(delivery)["days"])[0]
     assert today["normal"]["daylight"]["energy_mwh"] is None
     assert today["normal"]["daylight"]["partial_energy_mwh"] == pytest.approx(221)
@@ -224,9 +225,8 @@ def test_prepared_intraday_report_freezes_message_and_attachment(
     today = cast(dict[str, Any], original["report_context"])["days"][0]
     assert today["normal"]["daylight"]["energy_mwh"] == pytest.approx(247)
     assert today["normal"]["provenance"]["source_snapshot_ids"] == [delivery.snapshot_id, old.pk]
-    ForecastSnapshot.objects.filter(pk__in=(old.pk, delivery.snapshot_id)).update(
-        normalized_intervals=[]
-    )
+    for source in ForecastSnapshot.objects.filter(pk__in=(old.pk, delivery.snapshot_id)):
+        stored_again(source, normalized_intervals=[])
     ForecastResult.objects.filter(snapshot_id=delivery.snapshot_id).update(daily_payloads={})
     PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(dc_capacity_mw=260)
     assert prepare_delivery(delivery, SLOT + timedelta(minutes=2))
@@ -267,8 +267,9 @@ def test_region_results_leave_unavailable_inputs_missing(
         CollectionJob.objects.filter(endpoint="forecasts").update(status="failed")
     else:
         assert delivery.snapshot is not None
-        ForecastSnapshot.objects.filter(pk=delivery.snapshot.pk).update(
-            normalized_intervals=[{"invalid": True}]
+        stored_again(
+            ForecastSnapshot.objects.get(pk=delivery.snapshot.pk),
+            normalized_intervals=[{"invalid": True}],
         )
     results = saved_report_results(delivery, SLOT)
     assert results[0] is None
@@ -309,7 +310,7 @@ def test_today_email_prioritizes_completed_valid_actuals_and_freezes_mixed_outag
     actuals.normalized_intervals[18]["power_kw"] = 0
     actuals.normalized_intervals[20]["power_kw"] = 2
     actuals.normalized_intervals.pop(17)
-    actuals.save(update_fields=("normalized_intervals",))
+    stored_again(actuals)
     monkeypatch.setattr(timezone, "now", lambda: SLOT - timedelta(minutes=1))
     day = SLOT.astimezone(ZoneInfo(system.binding.timezone)).date()
     start, _ = local_day_bounds(day, system.binding.timezone)
@@ -341,7 +342,7 @@ def test_today_email_prioritizes_completed_valid_actuals_and_freezes_mixed_outag
     assert hours[9]["energy_mwh"] == pytest.approx(19.5)
     assert hours[10]["energy_mwh"] == pytest.approx(26)
     assert tomorrow["normal"]["energy_mwh"] == pytest.approx(624)
-    ForecastSnapshot.objects.filter(pk=actuals.pk).update(normalized_intervals=[])
+    stored_again(ForecastSnapshot.objects.get(pk=actuals.pk), normalized_intervals=[])
     assert prepare_delivery(delivery, SLOT + timedelta(minutes=1))
     assert delivery.prepared_message == original
     assert process_notification(delivery.pk, SLOT + timedelta(minutes=2))
@@ -394,14 +395,14 @@ def test_same_slot_forecast_grace_never_admits_actuals_published_after_reminder(
     latest.collected_at = when
     latest.available_at = when
     latest.issued_at = when
-    latest.save(update_fields=("collected_at", "available_at", "issued_at"))
+    stored_again(latest)
     latest.job.scheduled_slot = SLOT
     latest.job.save(update_fields=("scheduled_slot",))
     cache_saved_days(latest, when)
     actuals = saved_intraday_actuals(system, SLOT)
     actuals.collected_at = when
     actuals.available_at = when
-    actuals.save(update_fields=("collected_at", "available_at"))
+    stored_again(actuals)
     ForecastResult.objects.filter(snapshot=actuals).update(published_at=when)
     assert prepare_delivery(delivery, when)
     assert delivery.prepared_message is not None
@@ -444,7 +445,7 @@ def test_paired_actual_collection_waits_then_uses_only_native_intervals_complete
     latest.collected_at = forecast_published
     latest.available_at = forecast_published
     latest.issued_at = forecast_published
-    latest.save(update_fields=("collected_at", "available_at", "issued_at"))
+    stored_again(latest)
     latest.job.scheduled_slot = SLOT
     latest.job.save(update_fields=("scheduled_slot",))
     cache_saved_days(latest, forecast_published)

@@ -25,6 +25,7 @@ from pyracast.solar import daylight_window
 from pyracast.weather import serialize_weather
 from tests.support.domain import System
 from tests.support.errors import raises_code
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 from tests.support.weather_collection import WeatherFixture
 
@@ -95,7 +96,7 @@ def test_actual_zero_wins_but_missing_negative_and_unfinished_actuals_keep_forec
     actual.normalized_intervals[22]["power_kw"] = -1
     actual.normalized_intervals[19]["power_kw"] = True
     del actual.normalized_intervals[23]
-    actual.save(update_fields=("normalized_intervals",))
+    stored_again(actual)
     monkeypatch.setattr(timezone, "now", lambda: now)
     result = cast(
         dict[str, Any],
@@ -127,7 +128,7 @@ def test_current_actuals_respect_knowledge_and_native_source_boundaries(
     actual = intraday_actuals(system, now - timedelta(minutes=1))
     if ineligible in {"collected", "available", "issued"}:
         setattr(actual, f"{ineligible}_at", now + timedelta(seconds=1))
-        actual.save()
+        stored_again(actual)
     else:
         if ineligible == "failed":
             actual.job.status = "failed"
@@ -246,7 +247,7 @@ def test_latest_actual_vintage_retains_its_gaps_instead_of_older_complete_actual
     old = intraday_actuals(system, now - timedelta(hours=1))
     latest = intraday_actuals(system, now - timedelta(minutes=1), power_kw=0.6)
     latest.normalized_intervals = latest.normalized_intervals[:16]
-    latest.save(update_fields=("normalized_intervals",))
+    stored_again(latest)
     prepared = prepare_intraday_source(
         system.binding,
         DAY,
@@ -419,7 +420,7 @@ def test_acquisition_clipping_does_not_turn_an_unfinished_native_actual_into_his
     row.update(original_start=row["start"], original_end=row["end"], end=now.isoformat())
     actual.normalized_intervals = actual.normalized_intervals[:21]
     actual.coverage_end = now
-    actual.save(update_fields=("normalized_intervals", "coverage_end"))
+    stored_again(actual)
     prepared = prepare_intraday_source(
         system.binding, DAY, [forecast], knowledge_cutoff=now, elapsed_cutoff=now
     )
@@ -448,7 +449,7 @@ def test_mixed_native_means_are_limited_before_hourly_aggregation_and_replay(
             "power_kw": 0.4,
         }
     ]
-    actual.save(update_fields=("normalized_intervals",))
+    stored_again(actual)
     monkeypatch.setattr(timezone, "now", lambda: now)
     outlook = plant_outlook(
         system.member,
@@ -485,7 +486,7 @@ def test_today_actuals_keep_independent_archived_forecast_weather(
         )
     elif weather == "failed":
         forecast.weather_error = "weather_request_failed"
-    forecast.save(update_fields=("weather_payload", "weather_error"))
+    stored_again(forecast)
     intraday_actuals(system, now)
     monkeypatch.setattr(timezone, "now", lambda: now)
     outlook = plant_outlook(
@@ -524,7 +525,7 @@ def test_intraday_actual_configuration_assumption_follows_contributing_native_in
     actual.normalized_intervals = actual.normalized_intervals[
         18 if before_configuration else 20 : 24
     ]
-    actual.save(update_fields=("normalized_intervals",))
+    stored_again(actual)
     monkeypatch.setattr(timezone, "now", lambda: now)
     outlook = plant_outlook(
         system.member,
@@ -558,7 +559,7 @@ def test_disjoint_actual_acquisitions_keep_owned_history_and_can_complete_daylig
     for snapshot in (old, new):
         snapshot.coverage_start = datetime.fromisoformat(snapshot.normalized_intervals[0]["start"])
         snapshot.coverage_end = datetime.fromisoformat(snapshot.normalized_intervals[-1]["end"])
-        snapshot.save(update_fields=("normalized_intervals", "coverage_start", "coverage_end"))
+        stored_again(snapshot)
     prepared = prepare_intraday_source(
         system.binding, DAY, [forecast], knowledge_cutoff=now, elapsed_cutoff=now
     )
@@ -612,7 +613,7 @@ def test_complete_astronomical_actuals_need_the_whole_native_sunrise_interval(
         original_start=row["start"], original_end=row["end"], start=partial_start.isoformat()
     )
     actual.coverage_start = partial_start
-    actual.save(update_fields=("normalized_intervals", "coverage_start"))
+    stored_again(actual)
     prepared = prepare_intraday_source(
         system.binding, DAY, [forecast], knowledge_cutoff=now, elapsed_cutoff=now
     )
@@ -638,10 +639,10 @@ def test_mixed_replay_preserves_a_calendar_clipped_forecasts_original_native_bou
         original_end=(start + timedelta(minutes=15)).isoformat(),
         end=(start + timedelta(minutes=15)).isoformat(),
     )
-    forecast.save(update_fields=("normalized_intervals",))
+    stored_again(forecast)
     actual = intraday_actuals(system, now)
     actual.normalized_intervals = actual.normalized_intervals[14:24]
-    actual.save(update_fields=("normalized_intervals",))
+    stored_again(actual)
     monkeypatch.setattr(timezone, "now", lambda: now)
     outlook = plant_outlook(
         system.member,
@@ -681,7 +682,7 @@ def test_intraday_rejects_damaged_original_native_bounds(
         row["original_end"] = datetime.fromisoformat(row["end"]).replace(tzinfo=None).isoformat()
     else:
         row["original_end"] = row["start"]
-    actual.save(update_fields=("normalized_intervals",))
+    stored_again(actual)
     monkeypatch.setattr(timezone, "now", lambda: now)
     with raises_code("calculation_out_of_range"):
         plant_outlook(
@@ -755,6 +756,6 @@ def test_pinned_intraday_replay_rejects_unavailable_source_evidence(
         provenance["source_snapshot_ids"].append(99999999)
     else:
         actual.normalized_intervals = []
-        actual.save(update_fields=("normalized_intervals",))
+        stored_again(actual)
     with pytest.raises(ValueError, match="unavailable"):
         replay_composition(provenance, plant.current_configuration, start, end)

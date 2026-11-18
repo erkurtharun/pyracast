@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -24,6 +25,7 @@ from pyracast.notifications.sources import eligible_saved_forecasts
 from pyracast.notifications.views import reminder_schedule_payload
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
+from tests.support.invariants import stored_again
 from tests.support.notification_preparation import complete_saved
 from tests.support.notifications import (
     SLOT,
@@ -58,6 +60,8 @@ def test_same_clock_collection_waits_without_spending_mail_attempts_then_uses_pu
             target_date=(SLOT + timedelta(days=1)).date(),
             available_at=SLOT,
             status=state,
+            lease_token=uuid.uuid4() if state == "running" else None,
+            lease_expires_at=SLOT + timedelta(minutes=5) if state == "running" else None,
         )
     delivery_id = enqueue_due(SLOT)[0]
     assert not process_notification(delivery_id, SLOT)
@@ -72,8 +76,10 @@ def test_same_clock_collection_waits_without_spending_mail_attempts_then_uses_pu
         CollectionJob.objects.filter(pk=fresh.job_id).update(
             scheduled_slot=SLOT + timedelta(seconds=1)
         )
-        ForecastSnapshot.objects.filter(pk=fresh.pk).update(job=job)
-        CollectionJob.objects.filter(pk=job.pk).update(status="succeeded")
+        stored_again(ForecastSnapshot.objects.get(pk=fresh.pk), job=job)
+        CollectionJob.objects.filter(pk=job.pk).update(
+            status="succeeded", lease_token=None, lease_expires_at=None
+        )
     else:
         CollectionJob.objects.filter(pk=fresh.job_id).update(scheduled_slot=SLOT)
     assert process_notification(delivery_id, when + timedelta(minutes=1))
@@ -124,8 +130,9 @@ def test_latest_partial_or_invalid_cache_cannot_hide_complete_saved_tomorrow(
     ForecastResult.objects.filter(snapshot=bad).update(
         daily_payloads={"2026-11-11": {"energy_kwh_m2": "NaN"}}
     )
-    ForecastSnapshot.objects.filter(pk=old.pk).update(
-        normalized_intervals=[{"invalid": "archived source is not recalculated"}]
+    stored_again(
+        ForecastSnapshot.objects.get(pk=old.pk),
+        normalized_intervals=[{"invalid": "archived source is not recalculated"}],
     )
 
     def broken(*args: object, **kwargs: object) -> None:
@@ -263,10 +270,10 @@ def test_ineligible_archived_sources_send_unavailable_without_exposing_their_val
     system, _ = configured()
     snapshot = complete_saved(system)
     if change == "actuals":
-        ForecastSnapshot.objects.filter(pk=snapshot.pk).update(source_kind="estimated_actuals")
+        stored_again(ForecastSnapshot.objects.get(pk=snapshot.pk), source_kind="estimated_actuals")
     elif change == "future_acquisition":
-        ForecastSnapshot.objects.filter(pk=snapshot.pk).update(
-            collected_at=SLOT + timedelta(seconds=1)
+        stored_again(
+            ForecastSnapshot.objects.get(pk=snapshot.pk), collected_at=SLOT + timedelta(seconds=1)
         )
     elif change == "late_publication":
         ForecastResult.objects.filter(snapshot=snapshot).update(
@@ -503,7 +510,7 @@ def test_a_saved_forecast_is_eligible_only_once_its_snapshot_is_available() -> N
     system, _ = configured()
     snapshot = saved(system)
     delivery = NotificationDelivery.objects.get(pk=enqueue_due(SLOT)[0])
-    ForecastSnapshot.objects.filter(pk=snapshot.pk).update(available_at=NOW)
+    stored_again(ForecastSnapshot.objects.get(pk=snapshot.pk), available_at=NOW)
     assert list(eligible_saved_forecasts(delivery, SLOT)) == [snapshot]
-    ForecastSnapshot.objects.filter(pk=snapshot.pk).update(available_at=None)
+    stored_again(ForecastSnapshot.objects.get(pk=snapshot.pk), available_at=None)
     assert not eligible_saved_forecasts(delivery, SLOT).exists()

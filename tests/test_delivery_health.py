@@ -1,5 +1,6 @@
 import io
 import json
+import uuid
 from datetime import datetime, timedelta
 
 import pytest
@@ -21,6 +22,7 @@ from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.regions.models import Region
 from tests.support.delivery_health import NOW, recent_forecast
 from tests.support.domain import FakeAdapter, System, make_system
+from tests.support.invariants import stored_again
 from tests.support.metering import connected
 
 
@@ -135,10 +137,12 @@ def test_incomplete_and_interrupted_deliveries_remain_visible_to_monitoring() ->
         status="sending",
         recipients=["recipient@example.test"],
         prepared_message={"kind": "current", "tomorrow_complete": True},
-        lease_expires_at=None,
+        lease_token=uuid.uuid4(),
+        lease_expires_at=NOW,
     )
     assert delivery_health(NOW, timedelta(minutes=5))["interrupted_notifications"] == 1
     delivery.status = "sent"
+    delivery.lease_token = delivery.lease_expires_at = None
     delivery.prepared_message = {"kind": "saved_partial", "tomorrow_complete": False}
     delivery.save()
     report = delivery_health(NOW, timedelta(minutes=5))
@@ -168,7 +172,9 @@ def test_long_cooldown_stale_forecasts_and_missed_delivery_are_not_healthy() -> 
     assert report["healthy"] is False
     system.account.request_blocked_until = None
     system.account.save(update_fields=("request_blocked_until",))
-    ForecastSnapshot.objects.filter(pk=snapshot.pk).update(collected_at=NOW - timedelta(hours=27))
+    stored_again(
+        ForecastSnapshot.objects.get(pk=snapshot.pk), collected_at=NOW - timedelta(hours=27)
+    )
     report = delivery_health(NOW, timedelta(minutes=5))
     assert report["regions_without_recent_forecasts"] == 1
     assert report["healthy"] is False
@@ -284,15 +290,16 @@ def test_interrupted_metering_is_unhealthy_even_with_recent_forecasts_and_health
     job = EpiasCollectionJob.objects.first()
     assert job is not None
     job.status = "running"
-    job.lease_expires_at = NOW - timedelta(minutes=1) if expired else None
-    job.save(update_fields=("status", "lease_expires_at"))
+    job.lease_token = uuid.uuid4()
+    job.lease_expires_at = NOW - timedelta(minutes=1) if expired else NOW
+    job.save(update_fields=("status", "lease_token", "lease_expires_at"))
     report = delivery_health(NOW, timedelta(minutes=5))
     assert report["interrupted_metering"] == 1
     assert report["healthy"] is False
     job.lease_expires_at = NOW + timedelta(minutes=1)
     job.save(update_fields=("lease_expires_at",))
     assert delivery_health(NOW, timedelta(minutes=5))["healthy"] is True
-    job.lease_expires_at = None
+    job.lease_expires_at = NOW
     job.save(update_fields=("lease_expires_at",))
     Region.objects.filter(pk=plant.region_id).update(deleted_at=NOW)
     assert delivery_health(NOW, timedelta(minutes=5))["interrupted_metering"] == 0

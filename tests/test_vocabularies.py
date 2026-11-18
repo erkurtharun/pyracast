@@ -1,7 +1,7 @@
 import json
 import re
 from pathlib import Path
-from typing import cast, get_args
+from typing import Literal, cast, get_args, get_type_hints
 
 import pytest
 from django.apps import apps
@@ -10,10 +10,13 @@ from django.db import models
 from drf_spectacular.plumbing import deep_import_string
 
 from pyracast.accounts.models import UserLanguagePreference
+from pyracast.connections.contracts import ProviderData
 from pyracast.forecasts.models import SnapshotWeatherError
 from pyracast.languages import Language
 from pyracast.mail.errors import MailFailure
 from pyracast.notifications.models import PAUSED_DELIVERY_ERRORS, NotificationDeliveryError
+from pyracast.plants.models import CalibrationAssessment
+from pyracast.plants.numerics import FitAssessment
 from pyracast.weather import WeatherFailure
 from tests.support.vocabularies import (
     COVERED_APPS,
@@ -169,6 +172,15 @@ def test_every_mail_failure_can_be_stored_on_a_reminder_delivery() -> None:
 
 def test_every_weather_failure_can_be_stored_on_a_snapshot() -> None:
     assert set(WeatherFailure) <= set(SnapshotWeatherError)
+
+
+def test_every_fitted_assessment_can_be_stored_on_a_calibration_run() -> None:
+    assert set(get_args(FitAssessment)) == set(CalibrationAssessment)
+
+
+def test_provider_data_carries_only_snapshot_weather_errors() -> None:
+    hint = get_type_hints(ProviderData)["weather_error"]
+    assert hint == SnapshotWeatherError | Literal[""]
 
 
 def test_supported_languages_have_one_value_set() -> None:

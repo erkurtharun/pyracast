@@ -12,6 +12,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.regions.models import Region
 from tests.support.archived_actual_composition_api import DAY, acquired_actuals
 from tests.support.domain import NOW, System
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -62,7 +63,7 @@ def test_archived_actual_composition_excludes_later_publication_and_other_tenant
     afternoon = acquired_actuals(system, 12, 18, 0.2)
     future = acquired_actuals(system, 7, 18, 0.9)
     setattr(future, future_field, NOW + timedelta(seconds=1))
-    future.save(update_fields=(future_field,))
+    stored_again(future)
     tenant = Tenant.objects.create(name="Other tenant")
     other = User.objects.create_user(username="other")
     Membership.objects.create(user=other, tenant=tenant, role="admin")

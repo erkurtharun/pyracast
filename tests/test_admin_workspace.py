@@ -164,8 +164,8 @@ def test_connection_validation_and_saved_data_are_independent_of_approval() -> N
         summarize_plant(workspace_regions().get(pk=system.region.pk)).connection
         == "Needs validation"
     )
-    system.binding.validated_at = None
-    system.binding.save(update_fields=("validated_at",))
+    system.binding.validated_at = system.binding.validated_credential_revision = None
+    system.binding.save(update_fields=("validated_at", "validated_credential_revision"))
     assert (
         summarize_plant(workspace_regions().get(pk=system.region.pk)).connection
         == "Needs validation"

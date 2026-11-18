@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.accounts.authorization import require_platform_admin, tenant_membership
@@ -14,6 +13,7 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.calibration_data import current_source_validation
 from pyracast.plants.models import (
+    CalibrationAssessment,
     CalibrationRun,
     CalibrationStatus,
     Plant,
@@ -198,7 +198,7 @@ def _promotion_reason(run: CalibrationRun, now: datetime) -> str | None:
     holdout = _holdout_dates(run)
     today = now.astimezone(ZoneInfo(run.binding.timezone)).date()
     if (
-        run.assessment != "evaluated"
+        run.assessment != CalibrationAssessment.EVALUATED
         or not isinstance(days, int)
         or isinstance(days, bool)
         or days < MIN_AUTOMATIC_DAYS
@@ -281,12 +281,11 @@ def promote_automatic_calibration(plant: Plant, run: CalibrationRun, now: dateti
 def prepare_due_calibrations(now: datetime, limit: int = 100) -> list[int]:
     if now.utcoffset() is None or isinstance(limit, bool) or not 1 <= limit <= 1000:
         raise ValidationError("Use an aware timestamp and a limit between 1 and 1000.")
+    due_plants = Plant.objects.filter(
+        automatic_calibration_enabled=True, next_calibration_check_at__lte=now
+    )
     due = list(
-        Plant.objects.filter(
-            Q(next_calibration_check_at__isnull=True) | Q(next_calibration_check_at__lte=now),
-            automatic_calibration_enabled=True,
-            region__deleted_at__isnull=True,
-        )
+        due_plants.filter(region__deleted_at__isnull=True)
         .order_by("next_calibration_check_at", "pk")
         .values_list("pk", "region_id", "region__tenant_id")[:limit]
     )
@@ -297,15 +296,8 @@ def prepare_due_calibrations(now: datetime, limit: int = 100) -> list[int]:
             region = Region.objects.select_for_update().filter(pk=region_id).first()
             if region is None or region.deleted_at is not None:
                 continue
-            plant = Plant.objects.select_for_update().filter(pk=plant_id).first()
-            if (
-                plant is None
-                or not plant.automatic_calibration_enabled
-                or (
-                    plant.next_calibration_check_at is not None
-                    and plant.next_calibration_check_at > now
-                )
-            ):
+            plant = due_plants.select_for_update().filter(pk=plant_id).first()
+            if plant is None:
                 continue
             if _authorized(plant, lock=True):
                 run = prepare_calibration(plant.pk, now)

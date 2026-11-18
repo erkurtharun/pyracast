@@ -16,6 +16,7 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.operations import activate_calibration, revise_plant
 from tests.support.domain import NOW
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -29,7 +30,7 @@ def test_native_clipping_zero_missingness_and_immutable_issuance(
     source = snapshot_for(system, DAY, power_kw=0)
     source.normalized_intervals[0]["power_kw"] = 120 / 130
     source.normalized_intervals[1]["power_kw"] = 80 / 130
-    source.save()
+    stored_again(source)
     publish_snapshot(source)
     result = plant_forecast(
         system.member,
@@ -60,7 +61,7 @@ def test_native_clipping_zero_missingness_and_immutable_issuance(
     assert second["as_of"] != result["as_of"]
     assert ForecastIssuance.objects.count() == 1
     source.normalized_intervals[1]["power_kw"] = None
-    source.save()
+    stored_again(source)
     partial = plant_forecast(
         system.member,
         system.tenant.pk,

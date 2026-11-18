@@ -3148,6 +3148,11 @@
             "BlankEnum": {
                 "enum": [""]
             },
+            "CalibrationAssessmentEnum": {
+                "enum": ["insufficient", "provisional", "evaluated"],
+                "type": "string",
+                "description": "* `insufficient` - Insufficient\n* `provisional` - Provisional\n* `evaluated` - Evaluated"
+            },
             "CalibrationAutomationOutput": {
                 "type": "object",
                 "properties": {
@@ -3261,8 +3266,15 @@
                         "readOnly": true
                     },
                     "assessment": {
-                        "type": "string",
-                        "readOnly": true
+                        "readOnly": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/CalibrationAssessmentEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/BlankEnum"
+                            }
+                        ]
                     },
                     "factor": {
                         "type": "number",
@@ -3363,8 +3375,15 @@
                         "readOnly": true
                     },
                     "assessment": {
-                        "type": "string",
-                        "readOnly": true
+                        "readOnly": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/CalibrationAssessmentEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/BlankEnum"
+                            }
+                        ]
                     },
                     "factor": {
                         "type": "number",

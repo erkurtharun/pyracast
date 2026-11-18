@@ -15,12 +15,14 @@ from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
     ForecastSnapshot,
+    HistoricalReferenceImport,
     RequestAttempt,
 )
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.providers import FixtureProvider, SolcastProvider
 from tests.support.domain import make_system
+from tests.support.invariants import stored_again
 from tests.support.providers import binding_for
 
 MORNING = datetime(2026, 11, 15, 5, 45, tzinfo=UTC)
@@ -131,7 +133,7 @@ def test_archived_daylight_skips_actuals_api_despite_missing_nights() -> None:
         for row in snapshot.normalized_intervals
         if 4 <= datetime.fromisoformat(row["start"]).hour < 15
     ]
-    snapshot.save(update_fields=("normalized_intervals",))
+    stored_again(snapshot)
     assert missing_actuals_window(system.binding, MORNING) is None
     job = actual_job(system.binding.pk)
 
@@ -304,10 +306,10 @@ def test_polar_night_does_not_require_archived_nighttime_values() -> None:
     snapshot = archive_actuals(system.binding.pk)
     for row in snapshot.normalized_intervals:
         row["power_kw"] = 0
-    snapshot.save(update_fields=("normalized_intervals",))
+    stored_again(snapshot)
     assert missing_actuals_window(system.binding, MORNING) is None
     del snapshot.normalized_intervals[-1]
-    snapshot.save(update_fields=("normalized_intervals",))
+    stored_again(snapshot)
     assert missing_actuals_window(system.binding, MORNING) is None
 
 
@@ -351,7 +353,18 @@ def test_newer_actuals_coverage_masks_old_valid_rows_when_planning_refresh(damag
 def test_imported_reference_cannot_suppress_native_actuals_collection() -> None:
     system = make_system(approved=True)
     snapshot = archive_actuals(system.binding.pk)
-    CollectionJob.objects.filter(pk=snapshot.job_id).update(endpoint="historical_import")
+    reference = HistoricalReferenceImport.objects.create(
+        binding=system.binding,
+        sha256="a" * 64,
+        source_name="authorized-export.json",
+        source_settings={},
+        imported_by=system.admin,
+        imported_at=MORNING,
+        interval_count=1,
+    )
+    CollectionJob.objects.filter(pk=snapshot.job_id).update(
+        endpoint="historical_import", reference_import=reference
+    )
     assert missing_actuals_window(system.binding, MORNING) is not None
 
 

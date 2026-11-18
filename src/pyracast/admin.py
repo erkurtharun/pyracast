@@ -371,7 +371,6 @@ class RegionAdmin(ReadOnlyAdmin):
         binding = (
             SiteBinding.objects.select_related("provider_account")
             .filter(region=region, region_revision=region.revision)
-            .order_by("-created_at", "-pk")
             .first()
         )
         plants = Plant.objects.filter(region=region).select_related(

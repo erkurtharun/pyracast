@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
 from math import ceil, isfinite
 from statistics import median
-from typing import cast
+from typing import Literal, cast
 from zoneinfo import ZoneInfo
 
 from pyracast.solar import Daylight, TimeWindows, daylight_energy_windows, summarize_daylight
@@ -49,11 +49,14 @@ class CalibrationSample:
     quality: str = "valid"
 
 
+FitAssessment = Literal["insufficient", "provisional", "evaluated"]
+
+
 @dataclass(frozen=True)
 class FitResult:
     status: str
     factor: float | None
-    assessment: str
+    assessment: FitAssessment
     report: dict[str, object]
 
 

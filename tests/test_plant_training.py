@@ -1,4 +1,5 @@
 import re
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from threading import Event
@@ -31,6 +32,7 @@ from pyracast.plants.training import LEASE_DURATION, pending_calibration_ids, ru
 from pyracast.regions.models import Region
 from pyracast.solar import DAYLIGHT_POLICY
 from tests.support.domain import NOW
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, ready_run, request_run, snapshot_for
 from tests.support.plant_training import actual_snapshot_for, history
 
@@ -141,7 +143,7 @@ def test_negative_power_outside_matched_days_does_not_break_fit(
         },
     )
     source.coverage_start = first_start - timedelta(minutes=30)
-    source.save()
+    stored_again(source)
     run = request_run(system, plant)
     assert run_calibration(run.pk, NOW)
     run.refresh_from_db()
@@ -157,7 +159,8 @@ def test_archived_forecasts_cannot_replace_missing_estimated_actuals(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     sources = history(system, plant)
-    ForecastSnapshot.objects.filter(pk__in=sources).update(source_kind="forecast")
+    for source in ForecastSnapshot.objects.filter(pk__in=sources):
+        stored_again(source, source_kind="forecast")
     CalibrationRun.objects.all().delete()
     run = request_run(system, plant)
     assert run_calibration(run.pk, NOW)
@@ -177,13 +180,14 @@ def test_actuals_and_meter_cutoff_exclude_later_information(
     CalibrationRun.objects.all().delete()
     first = ForecastSnapshot.objects.get(pk=sources[0])
     second = ForecastSnapshot.objects.get(pk=sources[1])
-    ForecastSnapshot.objects.filter(pk=first.pk).update(collected_at=NOW + timedelta(seconds=1))
-    ForecastSnapshot.objects.filter(pk=second.pk).update(issued_at=NOW + timedelta(seconds=1))
+    stored_again(ForecastSnapshot.objects.get(pk=first.pk), collected_at=NOW + timedelta(seconds=1))
+    stored_again(ForecastSnapshot.objects.get(pk=second.pk), issued_at=NOW + timedelta(seconds=1))
     excluded = ProductionObservation.objects.order_by("starts_at").last()
     assert excluded is not None
-    ProductionObservation.objects.filter(pk=excluded.pk).update(
-        recorded_at=NOW + timedelta(seconds=1)
-    )
+    excluded.delete()
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(seconds=1))
+    excluded.save()
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
     run = request_run(system, plant)
     assert run_calibration(run.pk, NOW)
     run.refresh_from_db()
@@ -285,7 +289,7 @@ def test_source_errors_retry_bounded_and_sanitized(monkeypatch: pytest.MonkeyPat
     assert not run_calibration(run.pk, NOW + timedelta(minutes=1))
 
 
-@pytest.mark.parametrize("case", ["future_cutoff", "exhausted", "missing_expiry"])
+@pytest.mark.parametrize("case", ["future_cutoff", "exhausted", "expired_lease"])
 def test_invalid_or_interrupted_run_state(monkeypatch: pytest.MonkeyPatch, case: str) -> None:
     system, plant = make_plant(monkeypatch)
     run = request_run(system, plant)
@@ -294,12 +298,12 @@ def test_invalid_or_interrupted_run_state(monkeypatch: pytest.MonkeyPatch, case:
     elif case == "exhausted":
         run.attempts = 3
     else:
-        run.status = "running"
+        run.status, run.lease_token, run.lease_expires_at = "running", uuid.uuid4(), NOW
     run.save()
     assert pending_calibration_ids(NOW) == [run.pk]
-    assert run_calibration(run.pk, NOW) == (case == "missing_expiry")
+    assert run_calibration(run.pk, NOW) == (case == "expired_lease")
     run.refresh_from_db()
-    assert run.status == ("insufficient" if case == "missing_expiry" else "failed")
+    assert run.status == ("insufficient" if case == "expired_lease" else "failed")
 
 
 def test_worker_clock_and_dispatch_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -320,7 +324,7 @@ def test_meter_native_intervals_are_frozen_before_hourly_fitting(
     source = actual_snapshot_for(system, date(2026, 11, 8))
     source.normalized_intervals[0]["power_kw"] = 120 / 130
     source.normalized_intervals[1]["power_kw"] = 80 / 130
-    source.save()
+    stored_again(source)
     start = datetime.fromisoformat(source.normalized_intervals[0]["start"])
     assert plant.current_configuration_id is not None
     import_observations(
@@ -374,13 +378,13 @@ def test_training_uses_latest_actuals_available_at_request_cutoff(
     latest.coverage_start = datetime.fromisoformat(intervals[0]["start"])
     latest.coverage_end = datetime.fromisoformat(intervals[-1]["end"])
     latest.issued_at = latest.collected_at
-    latest.save()
+    stored_again(latest)
     future = actual_snapshot_for(
         system, date(2026, 11, 10), collected_at=NOW + timedelta(seconds=1)
     )
     future.normalized_intervals = [dict(row, power_kw=0.9) for row in intervals]
     future.coverage_start, future.coverage_end = latest.coverage_start, latest.coverage_end
-    future.save()
+    stored_again(future)
     CalibrationRun.objects.all().delete()
     run = request_run(system, plant)
     assert run_calibration(run.pk, NOW)

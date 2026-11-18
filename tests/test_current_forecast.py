@@ -16,6 +16,7 @@ from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.operations import activate_calibration
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -132,7 +133,7 @@ def test_live_selection_excludes_unavailable_and_unmatched_snapshots(
     else:
         latest.coverage_end = local_day_bounds(DAY, system.binding.timezone)[0]
         latest.coverage_start = latest.coverage_end - timedelta(minutes=30)
-    latest.save()
+    stored_again(latest)
     result = plant_outlook(
         system.member,
         system.tenant.pk,
@@ -228,7 +229,7 @@ def test_live_forecast_api_keeps_tenant_boundary_and_rejects_corrupt_data(
         == snapshot.pk
     )
     snapshot.normalized_intervals[0]["power_kw"] = -1
-    snapshot.save()
+    stored_again(snapshot)
     assert client.get(path, {"date": DAY.isoformat()}).status_code == 400
     tenant = Tenant.objects.create(name="Other")
     user = User.objects.create_user("other-tenant")

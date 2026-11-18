@@ -8,6 +8,7 @@ from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot, RequestAttempt
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, make_system
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -93,7 +94,7 @@ def test_region_current_forecast_excludes_unpublished_or_unsuccessful_sources(
         latest.job.save(update_fields=["status"])
     else:
         setattr(latest, field, NOW + timedelta(seconds=1))
-        latest.save(update_fields=[field])
+        stored_again(latest)
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
@@ -145,7 +146,7 @@ def test_region_current_forecast_never_reads_a_superseded_binding(
         replacement = SiteBinding.objects.create(
             region=system.region,
             provider_account=system.account,
-            region_revision=system.region.revision,
+            region_revision=system.region.revision + 1,
             site_id="replacement",
             capacity_kw=1,
             capacity_semantics_verified=True,
@@ -153,7 +154,9 @@ def test_region_current_forecast_never_reads_a_superseded_binding(
             longitude=system.region.longitude,
             timezone=system.region.timezone,
         )
-        Region.objects.filter(pk=system.region.pk).update(approved_binding=replacement)
+        Region.objects.filter(pk=system.region.pk).update(
+            approved_binding=replacement, revision=replacement.region_revision
+        )
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"

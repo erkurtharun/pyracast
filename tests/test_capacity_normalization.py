@@ -15,6 +15,7 @@ from pyracast.plants.availability import actual_power_intervals
 from pyracast.plants.models import PlantConfiguration
 from tests.support.capacity_normalization import normalize, scaled_system
 from tests.support.domain import NOW
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import publish_snapshot, snapshot_for
 from tests.support.plant_training import actual_snapshot_for
 
@@ -31,7 +32,7 @@ def test_old_hobby_history_becomes_available_at_the_new_scale_without_rewriting_
     original.normalized_intervals[0]["power_kw"] = None
     original.normalized_intervals[1]["power_kw"] = 0
     original.normalized_intervals[2]["sunlight"] = "day"
-    original.save()
+    stored_again(original)
     before = deepcopy(original.normalized_intervals)
     attempts = system.account.requestattempt_set.count()
     assert select_actual_snapshot(target, day, NOW) is None
@@ -185,7 +186,7 @@ def test_scale_change_copies_only_snapshots_that_were_made_available(
 ) -> None:
     system, target = scaled_system(monkeypatch)
     original = publish_snapshot(snapshot_for(system, date(2026, 11, 9), power_kw=0.6))
-    ForecastSnapshot.objects.filter(pk=original.pk).update(available_at=None)
+    stored_again(ForecastSnapshot.objects.get(pk=original.pk), available_at=None)
     assert normalize(system, target) == ()
     assert not ReferenceCapacityNormalization.objects.exists()
 

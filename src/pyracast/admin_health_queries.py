@@ -29,7 +29,7 @@ def collection_jobs_for_issue(
         )
     if issue == "interrupted_collections":
         return jobs.filter(
-            Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True),
+            lease_expires_at__lte=now,
             status=CollectionJobStatus.RUNNING,
         )
     if issue == "failed_collections":
@@ -51,7 +51,7 @@ def notification_deliveries_for_issue(
         )
     if issue == "interrupted_notifications":
         return deliveries.filter(
-            Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True),
+            lease_expires_at__lte=now,
             status=NotificationDeliveryStatus.SENDING,
         )
     if issue == "failed_notifications":
@@ -95,7 +95,7 @@ def metering_jobs_for_issue(
         return jobs.filter(status=EpiasJobStatus.PENDING, next_attempt_at__lt=now - maximum_lag)
     if issue == "interrupted_metering":
         return jobs.filter(
-            Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True),
+            lease_expires_at__lte=now,
             status=EpiasJobStatus.RUNNING,
         )
     if issue == "failed_metering":

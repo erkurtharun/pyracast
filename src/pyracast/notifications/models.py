@@ -6,7 +6,7 @@ from django.db import models
 
 from pyracast.accounts.models import Language
 from pyracast.connections.models import SiteBinding
-from pyracast.db import choices_check
+from pyracast.db import choices_check, lease_check
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.regions.models import Region
 
@@ -165,6 +165,10 @@ class NotificationDelivery(models.Model):
                 condition=~models.Q(status=NotificationDeliveryStatus.SENDING)
                 | models.Q(prepared_message__isnull=False),
                 name="notification_delivery_sending_prepared",
+            ),
+            # An uncertain delivery keeps the lease of the send whose late outcome it awaits.
+            lease_check(
+                (NotificationDeliveryStatus.SENDING,), kept=(NotificationDeliveryStatus.UNCERTAIN,)
             ),
         )
         indexes = (

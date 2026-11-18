@@ -8,6 +8,7 @@ from pyracast.api.serializers import FiniteFloat, InputSerializer
 from pyracast.change_requests.models import ProductionChangeAction
 from pyracast.plants.models import (
     CalibrationActivation,
+    CalibrationAssessment,
     CalibrationRun,
     MeasurementBasis,
     MountingType,
@@ -376,6 +377,9 @@ class CalibrationOutput(serializers.ModelSerializer[CalibrationRun]):
     configuration_id = serializers.IntegerField()
     binding_id = serializers.IntegerField()
     requested_by_id = serializers.IntegerField()
+    assessment = serializers.ChoiceField(
+        choices=CalibrationAssessment.choices, allow_blank=True, read_only=True
+    )
 
     class Meta:
         model = CalibrationRun

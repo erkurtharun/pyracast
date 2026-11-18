@@ -54,7 +54,7 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
     cutoff = now - maximum_lag
     recent = now - timedelta(days=1)
     waiting_jobs = Q(status__in=("pending", "retry"))
-    expired_leases = Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True)
+    expired_leases = Q(lease_expires_at__lte=now)
     interrupted_jobs = Q(status="running") & expired_leases
     phases = {row.phase: row for row in DispatcherStatus.objects.all()}
     stale_phases = [

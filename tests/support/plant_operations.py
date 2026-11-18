@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+from typing import Any
 
 import pytest
 from django.db import transaction
@@ -18,6 +19,7 @@ from pyracast.plants.operations import (
     request_calibration,
 )
 from tests.support.domain import NOW, System, make_system
+from tests.support.invariants import stored_again
 
 
 def make_plant(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant]:
@@ -38,23 +40,7 @@ def make_plant(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant]:
     return system, plant
 
 
-def snapshot_for(
-    system: System,
-    day: date,
-    *,
-    power_kw: float = 0.4,
-    collected_at: datetime | None = None,
-    issued_at: datetime | None = None,
-    source_kind: str = "forecast",
-) -> ForecastSnapshot:
-    start, end = local_day_bounds(day, system.binding.timezone)
-    collected_at = start - timedelta(hours=1) if collected_at is None else collected_at
-    job = CollectionJob.objects.create(
-        binding=system.binding,
-        target_date=day,
-        scheduled_slot=collected_at + timedelta(microseconds=CollectionJob.objects.count()),
-        available_at=collected_at,
-    )
+def half_hours(start: datetime, end: datetime, power_kw: float) -> list[dict[str, Any]]:
     rows = []
     cursor = start
     while cursor < end:
@@ -66,14 +52,46 @@ def snapshot_for(
             }
         )
         cursor += timedelta(minutes=30)
-    return ForecastSnapshot.objects.create(
-        job=job,
+    return rows
+
+
+def snapshot_for(
+    system: System,
+    day: date,
+    *,
+    power_kw: float = 0.4,
+    collected_at: datetime | None = None,
+    issued_at: datetime | None = None,
+    source_kind: str = "forecast",
+    **stored: Any,
+) -> ForecastSnapshot:
+    """An acquisition stored with its coverage, as the collection stores it. Stored snapshots
+    refuse updates: another shape is given here through `stored` or by `stored_again`."""
+    start, end = local_day_bounds(day, system.binding.timezone)
+    collected_at = start - timedelta(hours=1) if collected_at is None else collected_at
+    job = CollectionJob.objects.create(
         binding=system.binding,
-        raw_payload={},
-        normalized_intervals=rows,
-        collected_at=collected_at,
-        issued_at=issued_at,
-        source_kind=source_kind,
+        target_date=day,
+        scheduled_slot=collected_at + timedelta(microseconds=CollectionJob.objects.count()),
+        available_at=collected_at,
+    )
+    rows = stored.pop("normalized_intervals", None)
+    rows = half_hours(start, end, power_kw) if rows is None else rows
+    return ForecastSnapshot.objects.create(
+        **{
+            "job": job,
+            "binding": system.binding,
+            "raw_payload": {},
+            "normalized_intervals": rows,
+            "collected_at": collected_at,
+            "issued_at": issued_at,
+            "source_kind": source_kind,
+            "coverage_start": min(
+                (datetime.fromisoformat(row["start"]) for row in rows), default=None
+            ),
+            "coverage_end": max((datetime.fromisoformat(row["end"]) for row in rows), default=None),
+        }
+        | stored
     )
 
 
@@ -92,7 +110,7 @@ def publish_snapshot(
     snapshot.coverage_end = datetime.fromisoformat(snapshot.normalized_intervals[-1]["end"])
     published_at = published_at or snapshot.collected_at
     snapshot.available_at = published_at
-    snapshot.save()
+    stored_again(snapshot)
     prepared = prepare_forecast_issuances(snapshot)
     data = snapshot_data(snapshot)
     payload = calculate(snapshot.binding, snapshot.job.target_date, data)
@@ -129,13 +147,11 @@ def request_run(system: System, plant: Plant) -> CalibrationRun:
 
 
 def saved_actuals(system: System, day: date) -> ForecastSnapshot:
-    start, end = local_day_bounds(day, system.binding.timezone)
+    _, end = local_day_bounds(day, system.binding.timezone)
+    acquired = end + timedelta(hours=1)
     source = snapshot_for(
-        system, day, collected_at=end + timedelta(hours=1), source_kind="estimated_actuals"
+        system, day, collected_at=acquired, source_kind="estimated_actuals", available_at=acquired
     )
-    source.available_at = source.collected_at
-    source.coverage_start, source.coverage_end = start, end
-    source.save()
     source.job.endpoint, source.job.status = "estimated_actuals", "succeeded"
     source.job.save()
     return source

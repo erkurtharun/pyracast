@@ -167,20 +167,6 @@ def test_expired_connection_is_retried_only_within_its_delivery_budget(
     assert delivery.last_error == "interrupted_connection"
 
 
-def test_missing_lease_expiry_prevents_transmission() -> None:
-    delivery = ready()
-
-    def invalidate_lease() -> None:
-        NotificationDelivery.objects.filter(pk=delivery.pk).update(lease_expires_at=None)
-
-    OpeningBackend.action = invalidate_lease
-    assert not process_notification(delivery.pk, SLOT)
-    assert not OpeningBackend.sent
-    delivery.refresh_from_db()
-    assert delivery.status == "retry"
-    assert delivery.transmit_started_at is None
-
-
 def test_injected_sender_also_requires_current_transmission_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

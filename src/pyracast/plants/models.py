@@ -6,7 +6,7 @@ from django.contrib.postgres.fields import DateTimeRangeField, RangeBoundary, Ra
 from django.db import models
 from django.db.models import F, Q
 
-from pyracast.db import choices_check
+from pyracast.db import choices_check, lease_check
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 
 
@@ -42,6 +42,12 @@ class CalibrationError(models.TextChoices):
     ATTEMPT_LIMIT = "attempt_limit", "Attempt limit reached"
     INVALID_CUTOFF = "invalid_cutoff", "Invalid cutoff"
     INVALID_CALIBRATION_DATA = "invalid_calibration_data", "Invalid calibration data"
+
+
+class CalibrationAssessment(models.TextChoices):
+    INSUFFICIENT = "insufficient", "Insufficient"
+    PROVISIONAL = "provisional", "Provisional"
+    EVALUATED = "evaluated", "Evaluated"
 
 
 class PlantEventAction(models.TextChoices):
@@ -108,6 +114,19 @@ class Plant(models.Model):
         constraints = (
             models.UniqueConstraint(fields=("id", "region"), name="plant_region_identity"),
             models.UniqueConstraint(fields=("region",), name="one_plant_per_region"),
+            models.CheckConstraint(
+                condition=Q(
+                    automatic_calibration_enabled=True,
+                    automatic_calibration_enabled_by__isnull=False,
+                    next_calibration_check_at__isnull=False,
+                )
+                | Q(
+                    automatic_calibration_enabled=False,
+                    automatic_calibration_enabled_by__isnull=True,
+                    next_calibration_check_at__isnull=True,
+                ),
+                name="%(class)s_automation_chk",
+            ),
         )
 
 
@@ -304,7 +323,9 @@ class CalibrationRun(models.Model):
     status = models.CharField(
         max_length=20, choices=CalibrationStatus, default=CalibrationStatus.PENDING
     )
-    assessment = models.CharField(max_length=200, default="")
+    assessment = models.CharField(
+        max_length=200, choices=CalibrationAssessment, blank=True, default=""
+    )
     factor = models.FloatField(null=True)
     result = models.JSONField(default=dict)
     dataset_manifest = models.JSONField(default=dict)
@@ -333,6 +354,13 @@ class CalibrationRun(models.Model):
                 name="calibration_factor_finite",
             ),
             choices_check("status", CalibrationStatus, name="calibration_status_valid"),
+            lease_check((CalibrationStatus.RUNNING,)),
+            models.CheckConstraint(
+                condition=Q(status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING))
+                | Q(completed_at__isnull=False),
+                name="%(class)s_completed_at_chk",
+            ),
+            choices_check("assessment", CalibrationAssessment, blank=True),
         )
 
 
