@@ -3,8 +3,10 @@ from collections.abc import Callable
 from io import StringIO
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
+import segno
 from allauth.account.internal.flows.login import record_authentication
 from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
@@ -24,6 +26,7 @@ from tests.support.admin_mfa_bootstrap import (
     administrator,
     enrollment_secret,
     run,
+    setup_link,
 )
 from tests.support.auth_lifecycle import totp_code
 
@@ -85,8 +88,10 @@ def refusal(
 def test_the_first_administrator_is_created_from_the_operator_terminal(
     now: float, events: Callable[[], list[dict[str, Any]]], caplog: pytest.LogCaptureFixture
 ) -> None:
-    shown, terminal = run("bootstrap_admin", guided(now), email=" First.Admin@Example.com ")
+    with patch.object(segno, "make_qr", wraps=segno.make_qr) as encode:
+        shown, terminal = run("bootstrap_admin", guided(now), email=" First.Admin@Example.com ")
 
+    encode.assert_called_once_with(setup_link(shown))
     user = User.objects.get()
     assert (user.email, user.is_active, user.is_staff, user.is_superuser) == (
         ADDRESS,

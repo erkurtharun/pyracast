@@ -21,6 +21,7 @@ from tests.support.account_sessions import capture_security_events
 from tests.support.admin_mfa_bootstrap import (
     NEW_PASSWORD,
     TEST_PASSWORD,
+    Answer,
     Terminal,
     administrator,
     enrollment_secret,
@@ -148,7 +149,7 @@ def test_a_dry_run_changes_nothing_and_asks_nothing(
     assert mail.outbox == []
 
 
-def refusal(email: str, answers: list[str], **options: object) -> tuple[str, Terminal]:
+def refusal(email: str, answers: list[Answer], **options: object) -> tuple[str, Terminal]:
     shown = StringIO()
     terminal = Terminal(shown, list(answers))
     with pytest.raises(CommandError) as refused:
@@ -207,6 +208,39 @@ def test_a_reset_needs_the_address_typed_again(
     assert message == "The confirmation does not match the address. Nothing was changed."
     assert state(user) == before
     assert client.get("/api/session/").json()["user"]["id"] == user.pk
+    assert events()[signed_in:] == []
+    assert mail.outbox == []
+
+
+def test_an_address_moved_to_another_account_during_the_confirmation_stops_the_reset(
+    events: Callable[[], list[dict[str, Any]]],
+) -> None:
+    first = customer()
+    with_factors(first)
+    address = first.email
+    second = User.objects.create_user(
+        username="second", email="second@example.com", password=TEST_PASSWORD
+    )
+    EmailAddress.objects.create(user=second, email=second.email, primary=True, verified=True)
+    with_factors(second)
+    kept = session_of(second)
+    before = state(second)
+    signed_in = len(events())
+
+    def address_moved_meanwhile(_shown: str) -> str:
+        EmailAddress.objects.filter(user=first).delete()
+        User.objects.filter(pk=first.pk).update(email="")
+        EmailAddress.objects.create(user=second, email=address, verified=True)
+        return address
+
+    message, _terminal = refusal(address, [address_moved_meanwhile])
+
+    assert message == (
+        "The account changed while the command ran. Nothing was changed; run it again."
+    )
+    assert state(second) == before
+    assert Authenticator.objects.filter(user=first).count() == 2
+    assert kept.get("/api/session/").json()["user"]["id"] == second.pk
     assert events()[signed_in:] == []
     assert mail.outbox == []
 

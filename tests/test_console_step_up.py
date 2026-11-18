@@ -7,6 +7,7 @@ from urllib.parse import quote
 
 import pytest
 from allauth.mfa.models import Authenticator
+from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.conf import settings
@@ -19,6 +20,7 @@ from django.urls import URLPattern, URLResolver, reverse
 
 from pyracast.accounts.models import Language, UserLanguagePreference
 from pyracast.admin import site
+from pyracast.languages import LANGUAGE_COOKIE
 from pyracast.notifications.models import NotificationSettings
 from tests.support.api import verified_admin
 from tests.support.auth_lifecycle import totp_code
@@ -26,11 +28,13 @@ from tests.support.step_up import with_proof
 
 pytestmark = pytest.mark.django_db
 CONFIRMATION = "admin/workspace/confirm.html"
-# Signing out, choosing a language and confirming with the authenticator are the console's only
-# writes that need no recent confirmation; the login route only redirects.
-UNGUARDED = {"login", "logout", "workspace_language", "workspace_confirm"}
+# Signing out and confirming with the authenticator are the console's only writes that need no
+# recent confirmation; the login route only redirects.
+UNGUARDED = {"login", "logout", "workspace_confirm"}
 SAMPLES = {"app_label": "regions", "url": "unknown/"}
 SESSION_TABLES = ('"django_session"', '"usersessions_usersession"')
+BOUND = settings.ACCOUNT_REAUTHENTICATION_TIMEOUT
+STALE = ["missing", "expired"]
 
 
 def console_routes(
@@ -71,11 +75,19 @@ def test_the_routes_that_need_no_confirmation_are_console_routes() -> None:
     assert {name for _route, name in ROUTES} >= UNGUARDED
 
 
+def stale_admin(evidence: str) -> tuple[Client, User]:
+    client, user = verified_admin(confirmed=False)
+    if evidence == "expired":
+        with_proof(client, user, "mfa", age=BOUND, reauthenticated=True, **factor_of(user))
+    return client, user
+
+
+@pytest.mark.parametrize("evidence", STALE)
 @pytest.mark.parametrize(("route", "name"), ROUTES, ids=[route for route, _ in ROUTES])
 def test_a_console_write_without_recent_mfa_evidence_is_refused_and_stores_nothing(
-    route: str, name: str
+    route: str, name: str, evidence: str
 ) -> None:
-    client, _ = verified_admin(confirmed=False)
+    client, _ = stale_admin(evidence)
     client.get("/admin/")
 
     with CaptureQueriesContext(connection) as queries:
@@ -95,9 +107,10 @@ def test_every_unsafe_method_needs_recent_mfa_evidence(method: str) -> None:
     assert refused(getattr(client, method)(reverse("admin:workspace_settings")))
 
 
-def test_a_stale_console_write_changes_nothing_and_a_confirmed_one_saves() -> None:
+@pytest.mark.parametrize("evidence", STALE)
+def test_a_stale_console_write_changes_nothing_and_a_confirmed_one_saves(evidence: str) -> None:
     NotificationSettings.objects.update_or_create(pk=1, defaults={"max_recipients": 5})
-    client, user = verified_admin(confirmed=False)
+    client, user = stale_admin(evidence)
     change = {"max_recipients": 8, "expected_max_recipients": 5}
 
     response = client.post(reverse("admin:workspace_settings"), change)
@@ -117,7 +130,6 @@ def factor_of(user: User) -> dict[str, Any]:
     return {"type": authenticator.type, "id": authenticator.pk}
 
 
-BOUND = settings.ACCOUNT_REAUTHENTICATION_TIMEOUT
 EVIDENCE: dict[str, tuple[str, float, bool, bool]] = {
     "sign-in only": ("mfa", 0, False, False),
     "confirmed now": ("mfa", 0, True, True),
@@ -131,16 +143,29 @@ EVIDENCE: dict[str, tuple[str, float, bool, bool]] = {
 @pytest.mark.parametrize("evidence", EVIDENCE)
 def test_the_console_and_the_api_agree_on_recent_mfa_evidence(evidence: str) -> None:
     method, age, reauthenticated, recent = EVIDENCE[evidence]
+    NotificationSettings.objects.update_or_create(pk=1, defaults={"max_recipients": 5})
     client, user = verified_admin(confirmed=False)
     extra = factor_of(user) if method == "mfa" else {}
+    RecoveryCodes.activate(user)
     if evidence != "sign-in only":
         with_proof(client, user, method, age=age, reauthenticated=reauthenticated, **extra)
 
     api = client.get("/api/auth/browser/v1/account/authenticators/recovery-codes")
-    console = client.post(reverse("admin:workspace_settings"), {})
+    console = client.post(
+        reverse("admin:workspace_settings"), {"max_recipients": 8, "expected_max_recipients": 5}
+    )
 
-    assert (api.status_code == 401) is not recent
-    assert refused(console) is not recent
+    if recent:
+        assert api.status_code == 200
+        assert console.status_code == 302
+        assert NotificationSettings.objects.get().max_recipients == 8
+    else:
+        assert api.status_code == 401
+        assert [error["code"] for error in api.json()["errors"]] == [
+            "mfa_reauthentication_required"
+        ]
+        assert refused(console)
+        assert NotificationSettings.objects.get().max_recipients == 5
 
 
 def test_evidence_of_a_removed_authenticator_is_not_recent() -> None:
@@ -240,15 +265,19 @@ def test_a_refused_write_offers_to_return_to_the_page_it_came_from() -> None:
     assert f'name="next" value="{origin}"'.encode() in response.content
 
 
-def test_signing_out_and_choosing_a_language_need_no_confirmation() -> None:
+def test_a_language_choice_is_a_confirmed_write_and_signing_out_needs_no_confirmation() -> None:
     client, user = verified_admin(confirmed=False)
+    choice = {"language": "tr", "next": "/admin/"}
 
-    language = client.post(
-        reverse("admin:workspace_language"), {"language": "tr", "next": "/admin/"}
-    )
+    stale = client.post(reverse("admin:workspace_language"), choice)
+    assert refused(stale)
+    assert LANGUAGE_COOKIE not in stale.cookies
+    assert not UserLanguagePreference.objects.filter(user=user).exists()
+    with_proof(client, user, "mfa", age=0, reauthenticated=True, **factor_of(user))
+    confirmed = client.post(reverse("admin:workspace_language"), choice)
     signed_out = client.post(reverse("admin:logout"))
 
-    assert language.status_code == 302
+    assert confirmed.status_code == 302
     assert UserLanguagePreference.objects.get(user=user).language == Language.TR
     assert signed_out.status_code == 302
     assert client.get("/api/session/").json()["user"] is None

@@ -228,6 +228,68 @@ test("social-only accounts confirm email before disconnecting the selected provi
     ).toHaveCount(0);
 });
 
+for (const hasPassword of [true, false]) {
+    test(`accounts with an authenticator ${hasPassword ? "and" : "but no"} password confirm a connection with the authenticator`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await page.route("**/api/session/", (route) =>
+            route.fulfill({
+                json: {
+                    user: { ...user, has_usable_password: hasPassword },
+                    csrf_token: "signed-token",
+                },
+            }),
+        );
+        await page.route("**/api/auth/browser/v1/config", (route) =>
+            route.fulfill({
+                json: {
+                    status: 200,
+                    data: { socialaccount: { providers: [{ id: "google" }] } },
+                },
+            }),
+        );
+        await page.route(
+            "**/api/auth/browser/v1/account/authenticators",
+            (route) =>
+                route.fulfill({
+                    json: { status: 200, data: [{ type: "totp" }] },
+                }),
+        );
+        let confirmed = false;
+        await page.route(
+            "**/api/auth/browser/v1/auth/2fa/reauthenticate",
+            (route) => {
+                expect(route.request().postDataJSON()).toEqual({
+                    code: "123456",
+                });
+                confirmed = true;
+                return route.fulfill({ json: { status: 200 } });
+            },
+        );
+        await page.goto("/app/?account=security");
+        const accounts = page.getByRole("region", {
+            name: "Connected accounts",
+        });
+        await accounts
+            .getByRole("button", { name: "Connect an account" })
+            .click();
+        await expect(
+            accounts.getByLabel("Current password", { exact: true }),
+        ).toHaveCount(0);
+        await accounts
+            .getByLabel("Authenticator or recovery code", { exact: true })
+            .fill("123456");
+        await accounts
+            .getByRole("button", { name: "Confirm authenticator" })
+            .click();
+        await expect(
+            accounts.getByRole("button", { name: "Connect Google" }),
+        ).toBeVisible();
+        expect(confirmed).toBe(true);
+    });
+}
+
 test("provider errors explain how to link an existing email safely", async ({
     page,
 }) => {

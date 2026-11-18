@@ -13,7 +13,6 @@ from django.test import Client, RequestFactory
 
 from tests.support.auth_lifecycle import PASSWORD
 
-# Each kind of account names the factor a step-up asks of it.
 STRONGEST = {
     "authenticator": "mfa",
     "password": "password",

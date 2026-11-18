@@ -43,10 +43,14 @@ class Terminal:
         return (answer(self.shown.getvalue()) if callable(answer) else answer) + "\n"
 
 
-def enrollment_secret(shown: str) -> str:
+def setup_link(shown: str) -> str:
     match = re.search(r"otpauth://\S+", shown)
     assert match is not None
-    return parse_qs(urlsplit(match.group(0)).query)["secret"][0]
+    return match.group(0)
+
+
+def enrollment_secret(shown: str) -> str:
+    return parse_qs(urlsplit(setup_link(shown)).query)["secret"][0]
 
 
 def run(command: str, answers: list[Answer], **options: object) -> tuple[str, Terminal]:
