@@ -677,6 +677,7 @@ a.stat:hover {
 .table .cell-fit,
 .table .cell-action {
     width: 1%;
+    max-width: none;
 }
 .table .row-title {
     position: relative;
@@ -1118,6 +1119,10 @@ a.stat:hover {
     .stats {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+}
+/* Tables stack once the main column leaves them less than about 800px: below 881px
+   without the rail, and up to 1185px beside the 256px rail. */
+@media (max-width: 880px), (min-width: 961px) and (max-width: 1185px) {
     .table-wrap {
         border: 0;
         border-radius: 0;
@@ -1166,7 +1171,7 @@ a.stat:hover {
         font-weight: 700;
     }
     .table--stack td::before {
-        flex: 0 0 calc(40% - 12px);
+        flex: 0 0 min(calc(40% - 12px), 12rem);
     }
     .table--stack td > * {
         flex: 1 1 60%;
@@ -1174,6 +1179,9 @@ a.stat:hover {
     }
     .table--stack td > .badge {
         flex: none;
+    }
+    .table--stack td > .cell {
+        min-width: auto;
     }
     .table--stack tbody th::before {
         position: absolute;
@@ -1192,12 +1200,9 @@ a.stat:hover {
     .table--stack .cell-action:empty {
         display: none;
     }
-    .table--stack .cell-action .btn {
-        width: 100%;
-    }
     .table--stack .cell-actions {
-        display: grid;
-        justify-content: stretch;
+        flex-wrap: wrap;
+        justify-content: flex-start;
     }
 }
 @media (max-width: 420px) {
@@ -1206,8 +1211,13 @@ a.stat:hover {
     }
     .form-actions .btn,
     .form-actions form,
-    .filters-actions .btn {
+    .filters-actions .btn,
+    .table--stack .cell-action .btn {
         width: 100%;
+    }
+    .table--stack .cell-actions {
+        display: grid;
+        justify-content: stretch;
     }
 }
 @media (forced-colors: active) {
