@@ -685,6 +685,15 @@ def test_hourly_backup_unit_leaves_the_release_lock_and_block_to_the_backup() ->
     assert budget > backup.HOURLY_LOCK_WAIT_SECONDS + backup.DUMP_TIMEOUT_SECONDS
 
 
+def test_a_deliberately_skipped_backup_succeeds_and_every_other_exit_fails_the_unit() -> None:
+    unit = shipped_unit("pyracast-backup.service")
+
+    # systemd counts 0 and these statuses as success; everything else leaves the unit failed.
+    assert unit["SuccessExitStatus"] == [str(backup.SKIPPED_EXIT_STATUS)]
+    assert backup.SKIPPED_EXIT_STATUS not in (0, 1, 2, 143)
+    assert text(DEPLOY / "backup.py").count("SKIPPED_EXIT_STATUS") == 2
+
+
 def test_host_paths_agree_between_scripts_units_and_helpers() -> None:
     installer = text(DEPLOY / "install-release.sh")
     application = systemd_unit("pyracast.service")
