@@ -110,6 +110,7 @@ class ExportedJob:
 class Acquisition:
     row: ExportRow
     collected_at: datetime
+    available_at: datetime
     issued_at: datetime | None
     coverage: tuple[datetime, datetime] | None
     raw_payload: dict[str, Any]
@@ -287,6 +288,8 @@ def _acquisition(row: ExportRow, now: datetime) -> Acquisition:
     values = row.values
     try:
         collected_at = _instant(values["collected_at"])
+        # Publication sets a succeeded job's snapshot availability (jobs.publish).
+        available_at = _instant(values["available_at"])
         issued_at = _optional_instant(values["issued_at"])
         coverage = _coverage(values["coverage_start"], values["coverage_end"])
         raw_payload, intervals = values["raw_payload"], values["normalized_intervals"]
@@ -307,6 +310,7 @@ def _acquisition(row: ExportRow, now: datetime) -> Acquisition:
     return Acquisition(
         row,
         collected_at,
+        available_at,
         issued_at,
         coverage,
         raw_payload,
@@ -344,7 +348,9 @@ def _differing_settings(binding: SiteBinding, rows: Iterable[ExportRow]) -> list
     )
 
 
-def _publish_forecast(snapshot: ForecastSnapshot, binding: SiteBinding, line: int) -> None:
+def _publish_forecast(
+    snapshot: ForecastSnapshot, binding: SiteBinding, line: int, published_at: datetime
+) -> None:
     data = snapshot_data(snapshot)
     try:
         payload = calculate(binding, snapshot.job.target_date, data)
@@ -358,7 +364,7 @@ def _publish_forecast(snapshot: ForecastSnapshot, binding: SiteBinding, line: in
         daily_payloads=prepare_daily_payloads(
             binding, snapshot.job.target_date, data, calculate, payload
         ),
-        published_at=snapshot.collected_at,
+        published_at=published_at,
     )
 
 
@@ -389,11 +395,12 @@ def _store(acquisition: Acquisition, binding: SiteBinding, provenance: dict[str,
         source_kind=row.source_kind,
         coverage_start=coverage_start,
         coverage_end=coverage_end,
-        available_at=acquisition.collected_at,
+        available_at=acquisition.available_at,
         weather_payload=acquisition.weather_payload,
     )
     if row.endpoint == CollectionEndpoint.FORECASTS:
-        _publish_forecast(snapshot, binding, row.line)
+        # A live forecast's result and its snapshot are published at the same moment.
+        _publish_forecast(snapshot, binding, row.line, acquisition.available_at)
 
 
 def _period(

@@ -676,9 +676,10 @@ verification and restart on the real host in about five minutes of downtime.
      --region-id REGION --binding-id BINDING --export - --dry-run < EXPORT
    ```
 
-   The export carries each snapshot's job row. Each forecast and estimated-actuals
-   snapshot becomes a native collection of the binding, its job stored as it was (slot,
-   target date, availability, retry bound, attempts, last error). The summary names per
+   The export carries each snapshot's availability and job row. Each forecast and
+   estimated-actuals snapshot becomes a native collection of the binding, available from
+   its exported time, its job stored as it was (slot, target date, availability, retry
+   bound, attempts, last error). The summary names per
    endpoint what is restored or skipped and why, and per local day whether native
    estimated actuals are complete. A live row of another site or with other settings
    refuses the whole run; a second run adds nothing. Imports and scaled copies are
