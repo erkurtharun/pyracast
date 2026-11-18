@@ -209,8 +209,6 @@ def lease_violations() -> dict[str, int]:
 
 
 def stored_violations() -> dict[str, int]:
-    """Count the rows of each constrained table that break a stored rule, in one query; only
-    the broken rules are returned."""
     query = sql.SQL(" UNION ALL ").join(
         sql.SQL("SELECT {}, count(*) FROM {} WHERE NOT ({})").format(
             sql.Literal(f"{table}: {rule}"), sql.Identifier(table), sql.SQL(rule)

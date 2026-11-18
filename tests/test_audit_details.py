@@ -4,12 +4,12 @@ from typing import Any
 
 import pytest
 from django.db import IntegrityError, transaction
-from pyracast.plants.events import PLANT_EVENT_DETAILS, record_plant_event
-from pyracast.regions.audit import AUDIT_DETAILS, record_audit
 
 from pyracast.accounts.audit import SECURITY_EVENT_DETAILS, SecurityEvent
 from pyracast.db import violated_constraint
+from pyracast.plants.events import PLANT_EVENT_DETAILS, record_plant_event
 from pyracast.plants.models import PlantEvent, PlantEventAction
+from pyracast.regions.audit import AUDIT_DETAILS, record_audit
 from pyracast.regions.models import AuditAction, AuditEvent
 from pyracast.regions.operations import request_location_change, review_location_change
 from tests.support.domain import make_system
@@ -108,6 +108,27 @@ def test_a_plant_event_with_details_outside_its_shape_is_refused(
 
     with pytest.raises(ValueError, match=str(action)):
         record_plant_event(action, plant_id=plant.pk, actor=system.member, details=details)
+    assert PlantEvent.objects.count() == stored
+
+
+@pytest.mark.parametrize(
+    "ids",
+    [[1, "2"], [True], [None], [{"id": 1}], [[1]], [1.0], 1],
+    ids=["text", "flag", "null", "object", "nested_list", "fraction", "not_a_list"],
+)
+def test_a_plant_event_with_identifiers_that_are_not_integers_is_refused(
+    ids: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    stored = PlantEvent.objects.count()
+
+    with pytest.raises(ValueError, match="production_changed"):
+        record_plant_event(
+            PlantEventAction.PRODUCTION_CHANGED,
+            plant_id=plant.pk,
+            actor=system.member,
+            details={"configuration_id": 1, "ids": ids},
+        )
     assert PlantEvent.objects.count() == stored
 
 

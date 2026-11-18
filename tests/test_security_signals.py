@@ -334,16 +334,44 @@ def test_every_writer_call_passes_only_the_details_its_events_declare() -> None:
     assert set().union(*SECURITY_EVENT_DETAILS.values()) <= LINE_KEYS
 
 
+def reported_failures(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(failure_logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(failure_logger, "propagate", False)
+
+
 def test_a_detail_its_event_does_not_declare_is_refused_and_reported(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(failure_logger, "handlers", [caplog.handler])
+    reported_failures(caplog, monkeypatch)
 
     record_security_event(SecurityEvent.LOGOUT, user_id=USER_ID, tenant_id=7)
 
-    assert {record.getMessage() for record in caplog.records} == {
+    assert [record.getMessage() for record in caplog.records] == [
         "security_line_failed event=logout error_type=ValueError"
-    }
+    ]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"tenant_id": "wrong-type", "target_id": 3},
+        {"tenant_id": 7, "target_id": {"unexpected": "object"}},
+        {"tenant_id": True, "target_id": 3},
+        {"tenant_id": 7, "target_id": 3, "user_id": "4821"},
+        {"tenant_id": 7, "target_id": 3, "client_ip": 127},
+    ],
+    ids=["text_tenant", "object_target", "flag_tenant", "text_user", "number_client_ip"],
+)
+def test_a_detail_of_another_type_is_refused_and_reported(
+    fields: dict[str, Any], caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reported_failures(caplog, monkeypatch)
+
+    record_security_event(SecurityEvent.INVITATION_ACCEPTED, **fields)
+
+    assert [record.getMessage() for record in caplog.records] == [
+        "security_line_failed event=invitation_accepted error_type=ValueError"
+    ]
 
 
 def test_failures_for_one_address_share_a_subject_that_is_not_the_address(
