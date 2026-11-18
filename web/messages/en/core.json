@@ -48,7 +48,6 @@
     },
     "Security": {
         "sessionExpired": "Your session has expired. Please sign in again.",
-        "sessionEndingSoon": "Your session ends at {time}. Save your work; you will need to sign in again.",
         "verifyAuthenticator": "Confirm with your authenticator to continue.",
         "confirmPasswordFirst": "Please confirm your password below and try again.",
         "identity": "Confirm your identity",
@@ -144,6 +143,7 @@
         "emailAddress": "Email address",
         "sendVerification": "Send verification code",
         "sessionExpired": "Your session has expired. Please sign in again.",
+        "sessionEndingSoon": "Your session ends at {time}. Save your work; you will need to sign in again.",
         "confirmIdentity": "Please confirm your identity and try again.",
         "newEmail": "New email address",
         "verifyEmail": "Verify new email",

@@ -488,6 +488,48 @@ def test_inbox_summaries_name_the_period_item_count_and_outage(
         }
 
 
+def test_resolve_and_cancel_summaries_describe_the_revision_they_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = make_request_case(monkeypatch)
+    ongoing = save_incident(*case.scope(case.system.member), **incident_values())
+    resolved = submit_incident(
+        *case.scope(case.proposer),
+        action="resolve",
+        idempotency_key=uuid4(),
+        ends_at=NOW - timedelta(minutes=30),
+        incident_id=ongoing.pk,
+        expected_revision=ongoing.revision,
+    )
+    cancelled = submit_incident(
+        *case.scope(case.proposer),
+        action="cancel",
+        idempotency_key=uuid4(),
+        incident_id=ongoing.pk,
+        expected_revision=ongoing.revision,
+    )
+    save_incident(
+        *case.scope(case.system.member),
+        incident_id=ongoing.pk,
+        expected_revision=ongoing.revision,
+        **{**incident_values(), "title": "Grid outage", "starts_at": NOW - timedelta(minutes=20)},
+    )
+    client, rows = _inbox(case)
+    for request, end, action in (
+        (resolved, NOW - timedelta(minutes=30), "resolve"),
+        (cancelled, None, "cancel"),
+    ):
+        summary = rows[request.pk]
+        assert summary["incident_action"] == action
+        assert summary["incident_title"] == "Inverter maintenance"
+        assert _moment(summary["period_start"]) == ongoing.starts_at
+        assert _moment(summary["period_end"]) == end
+        detail = client.get(case.detail_path(request)).json()
+        assert {field: detail[field] for field in TRIAGE_FIELDS} == {
+            field: summary[field] for field in TRIAGE_FIELDS
+        }
+
+
 def test_inbox_query_count_does_not_grow_with_items(monkeypatch: pytest.MonkeyPatch) -> None:
     case = make_request_case(monkeypatch)
     configuration_id = case.plant.current_configuration_id

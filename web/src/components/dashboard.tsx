@@ -259,6 +259,7 @@ function Brand() {
 }
 function Workspace({ session, user }: { session: Session; user: SessionUser }) {
     const t = useTranslations("Dashboard");
+    const locale = useLocale();
     const searchParams = useSearchParams();
     const [tenantsVersion, setTenantsVersion] = useState(0);
     const tenants = useCollection("/api/tenants/", {}, tenantsVersion, 30_000);
@@ -431,7 +432,10 @@ function Workspace({ session, user }: { session: Session; user: SessionUser }) {
                     {endingSoon && (
                         <Notice>
                             {t("sessionEndingSoon", {
-                                time: new Date(endingSoon).toLocaleTimeString(),
+                                time: new Date(endingSoon).toLocaleTimeString(
+                                    locale,
+                                    { timeStyle: "short" },
+                                ),
                             })}
                         </Notice>
                     )}

@@ -48,7 +48,6 @@
     },
     "Security": {
         "sessionExpired": "Oturumunuzun süresi doldu. Tekrar giriş yapın.",
-        "sessionEndingSoon": "Oturumunuz {time} saatinde sona erecek. Çalışmanızı kaydedin; yeniden oturum açmanız gerekecek.",
         "verifyAuthenticator": "Devam etmek için doğrulama uygulamanızla onaylayın.",
         "confirmPasswordFirst": "Aşağıda şifrenizi doğrulayıp tekrar deneyin.",
         "identity": "Kimliğinizi doğrulayın",
@@ -144,6 +143,7 @@
         "emailAddress": "E-posta adresi",
         "sendVerification": "Doğrulama kodu gönder",
         "sessionExpired": "Oturumunuzun süresi doldu. Tekrar giriş yapın.",
+        "sessionEndingSoon": "Oturumunuz {time} saatinde sona erecek. Çalışmanızı kaydedin; yeniden oturum açmanız gerekecek.",
         "confirmIdentity": "Kimliğinizi doğrulayıp tekrar deneyin.",
         "newEmail": "Yeni e-posta adresi",
         "verifyEmail": "Yeni e-postayı doğrula",

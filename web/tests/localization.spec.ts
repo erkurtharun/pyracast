@@ -445,3 +445,45 @@ test("coded forecast errors are explained in the selected language", async ({
         "Choose a completed local day for historical estimates.",
     );
 });
+
+test.describe("the session end notice", () => {
+    test.use({ timezoneId: "Europe/Istanbul" });
+    for (const [language, heading, notice] of [
+        [
+            "en",
+            "Plants",
+            "Your session ends at 10:00 PM. Save your work; you will need to sign in again.",
+        ],
+        [
+            "tr",
+            "Santraller",
+            "Oturumunuz 22:00 saatinde sona erecek. Çalışmanızı kaydedin; yeniden oturum açmanız gerekecek.",
+        ],
+    ] as const) {
+        test(`appears five minutes before the session ends in ${language}`, async ({
+            page,
+        }) => {
+            await page.clock.install({
+                time: new Date("2026-11-18T18:54:00Z"),
+            });
+            await mockLanguage(page, language);
+            await page.route("**/api/session/", (route) =>
+                route.fulfill({
+                    json: {
+                        user: { ...user, language_preference: language },
+                        csrf_token: "signed-token",
+                        language,
+                        expires_at: "2026-11-18T19:00:00Z",
+                    },
+                }),
+            );
+            await page.goto("/app/");
+            await expect(
+                page.getByRole("heading", { name: heading, exact: true }),
+            ).toBeVisible();
+            await expect(page.getByText(notice)).toHaveCount(0);
+            await page.clock.runFor(60_000);
+            await expect(page.getByText(notice)).toBeVisible();
+        });
+    }
+});

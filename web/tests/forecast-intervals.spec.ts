@@ -69,13 +69,16 @@ async function openForecast(
                       }
                     : {}),
             }));
-            const [template] = rows;
-            if (missing && template)
+            if (missing) {
+                const [template] = rows;
+                if (!template)
+                    throw new Error("The forecast fixture has no interval.");
                 rows.push({
                     ...template,
                     start: "2026-11-14T11:00:00Z",
                     end: "2026-11-14T12:00:00Z",
                 });
+            }
             const result = {
                 start: "2026-11-13T21:00:00Z",
                 end: "2026-11-14T21:00:00Z",

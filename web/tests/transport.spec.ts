@@ -31,11 +31,25 @@ function answer(...answers: ((call: Call) => Answer)[]) {
             token: new Headers(init?.headers).get("X-CSRFToken"),
             body: typeof init?.body === "string" ? init.body : undefined,
         };
+        const next = answers[Math.min(calls.length, answers.length - 1)];
         calls.push(call);
-        const next = answers.length > 1 ? answers.shift()! : answers[0]!;
+        if (!next) throw new Error("No answer is prepared for this request.");
         return next(call);
     };
 }
+
+const site = {
+    path: { tenant_id: 1 },
+    body: {
+        name: "Plant",
+        latitude: 36.9,
+        longitude: 30.7,
+        timezone: "Europe/Istanbul",
+        dc_capacity_mw: 5,
+        measurement_basis: "net_export",
+        mounting_type: "fixed",
+    },
+} as const;
 
 const signedIn = (token: string) => ({
     user: {
@@ -64,24 +78,15 @@ test("a busy session is retried once after its Retry-After", async () => {
         () => json(errorBody("session_busy", "Busy.", { retry_after: 0 }), 429),
         () => json({ id: 7 }, 201),
     );
-    const created = await api.post("/api/tenants/{tenant_id}/sites/", {
-        path: { tenant_id: 1 },
-        body: {
-            name: "Plant",
-            latitude: 36.9,
-            longitude: 30.7,
-            timezone: "Europe/Istanbul",
-            dc_capacity_mw: 5,
-            measurement_basis: "net_export",
-            mounting_type: "fixed",
-        },
-    });
+    const created = await api.post("/api/tenants/{tenant_id}/sites/", site);
     expect(created).toEqual({ id: 7 });
     expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
         "POST /api/tenants/1/sites/",
         "POST /api/tenants/1/sites/",
     ]);
-    expect(calls[1]!.body).toBe(calls[0]!.body);
+    const [first, retry] = calls.map((call) => call.body);
+    expect(first).toBe(JSON.stringify(site.body));
+    expect(retry).toBe(first);
 });
 
 test("the retry waits for the announced Retry-After", async () => {
@@ -95,11 +100,13 @@ test("the retry waits for the announced Retry-After", async () => {
     expect(calls).toHaveLength(2);
 });
 
-test("a second busy answer is reported instead of retried again", async () => {
+test("a change refused twice as busy is reported instead of sent a third time", async () => {
     answer(() =>
         json(errorBody("session_busy", "Busy.", { retry_after: 0 }), 429),
     );
-    const error = await api.get("/api/tenants/").catch((failure) => failure);
+    const error = await api
+        .post("/api/tenants/{tenant_id}/sites/", site)
+        .catch((failure) => failure);
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ status: 429, code: "session_busy" });
     expect(calls).toHaveLength(2);

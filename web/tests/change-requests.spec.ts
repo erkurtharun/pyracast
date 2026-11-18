@@ -906,47 +906,50 @@ test("the inbox label counts several updates in the plural", async ({
     ).toBeVisible();
 });
 
-function unavailableRows(
-    date: string,
+async function routeUnavailableRows(
+    page: Page,
     reasons: (string | null)[],
     role: "member" | "admin",
 ) {
-    return nativeProductionHistory(
-        date,
-        "Europe/Istanbul",
-        reasons.map((reason, index) => ({
-            starts_at: `${date}T0${8 + index}:00:00+03:00`,
-            ends_at: `${date}T0${9 + index}:00:00+03:00`,
-            effective: reading,
-            ...(role === "member"
-                ? {
-                      can_edit: false,
-                      edit_unavailable_reason: "workspace_readonly",
-                      can_propose: reason === null,
-                      proposal_unavailable_reason: reason,
-                  }
-                : {
-                      can_edit: reason === null,
-                      edit_unavailable_reason: reason,
-                  }),
-        })),
-    );
+    await page.route("**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        );
+        if (date === null) throw new Error("The production read names no day.");
+        const hour = (value: number) =>
+            `${date}T${String(value).padStart(2, "0")}:00:00+03:00`;
+        return route.fulfill({
+            json: nativeProductionHistory(
+                date,
+                "Europe/Istanbul",
+                reasons.map((reason, index) => ({
+                    starts_at: hour(8 + index),
+                    ends_at: hour(9 + index),
+                    effective: reading,
+                    ...(role === "member"
+                        ? {
+                              can_edit: false,
+                              edit_unavailable_reason: "workspace_readonly",
+                              can_propose: reason === null,
+                              proposal_unavailable_reason: reason,
+                          }
+                        : {
+                              can_edit: reason === null,
+                              edit_unavailable_reason: reason,
+                          }),
+                })),
+            ),
+        });
+    });
 }
 
 test("a member sees why an interval cannot be proposed", async ({ page }) => {
     await member(page);
-    await page.route("**/production/?*", (route) => {
-        const date = new URL(route.request().url()).searchParams.get(
-            "start_date",
-        )!;
-        return route.fulfill({
-            json: unavailableRows(
-                date,
-                [null, "interval_not_completed"],
-                "member",
-            ),
-        });
-    });
+    await routeUnavailableRows(
+        page,
+        [null, "interval_not_completed"],
+        "member",
+    );
     await openPlant(page, "Production");
     const rows = page.locator(".production-table tbody tr");
     await expect(
@@ -961,22 +964,15 @@ test("a member sees one notice when no interval of the day can be proposed", asy
     page,
 }) => {
     await member(page);
-    await page.route("**/production/?*", (route) => {
-        const date = new URL(route.request().url()).searchParams.get(
-            "start_date",
-        )!;
-        return route.fulfill({
-            json: unavailableRows(
-                date,
-                [
-                    "configuration_not_current",
-                    "observation_overlap",
-                    "configuration_not_current",
-                ],
-                "member",
-            ),
-        });
-    });
+    await routeUnavailableRows(
+        page,
+        [
+            "configuration_not_current",
+            "observation_overlap",
+            "configuration_not_current",
+        ],
+        "member",
+    );
     await openPlant(page, "Production");
     await expect(
         page.getByText(
@@ -993,18 +989,7 @@ test("an administrator sees why an interval cannot be edited", async ({
 }) => {
     await mockApi(page);
     await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
-    await page.route("**/production/?*", (route) => {
-        const date = new URL(route.request().url()).searchParams.get(
-            "start_date",
-        )!;
-        return route.fulfill({
-            json: unavailableRows(
-                date,
-                [null, "configuration_mismatch"],
-                "admin",
-            ),
-        });
-    });
+    await routeUnavailableRows(page, [null, "configuration_mismatch"], "admin");
     await openPlant(page, "Production");
     const rows = page.locator(".production-table tbody tr");
     await expect(

@@ -416,6 +416,31 @@ test("capacity inputs show the configured ceiling", async ({ page }) => {
     ).toHaveAttribute("max", "4");
 });
 
+test("an emptied resolution is refused before it is sent", async ({ page }) => {
+    const state = await workspace(page);
+    await create(page);
+    const resolutions: string[] = [];
+    page.on("request", (request) => {
+        if (request.url().endsWith("/resolve/"))
+            resolutions.push(request.url());
+    });
+    await page
+        .getByRole("button", { name: "Resolve outage", exact: true })
+        .click();
+    const resolvedAt = page.getByLabel("Resolved at (device time)", {
+        exact: true,
+    });
+    await resolvedAt.fill("");
+    await page.getByRole("button", { name: "Save resolution" }).click();
+    expect(
+        await resolvedAt.evaluate(
+            (input: HTMLInputElement) => input.validity.valueMissing,
+        ),
+    ).toBe(true);
+    expect(resolutions).toEqual([]);
+    expect(state.incident()?.revision).toBe(1);
+});
+
 test("an ongoing outage is tagged as a warning and a resolved one is labelled", async ({
     page,
 }) => {

@@ -1,9 +1,10 @@
+from datetime import datetime
 from typing import Any
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction
-from django.db.models import Count, Max, Min, QuerySet
+from django.db.models import Count, Max, Min, OuterRef, QuerySet, Subquery
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Membership, WorkspaceRole
@@ -48,17 +49,26 @@ def inbox(
 
 
 def _with_triage(rows: QuerySet[ChangeRequest]) -> QuerySet[ChangeRequest]:
+    baseline = IncidentRevision.objects.filter(
+        incident_id=OuterRef("incident_change__incident_id"),
+        revision=OuterRef("incident_change__expected_revision"),
+    ).values("snapshot")
     return rows.select_related(
         "plant__region",
         "configuration__binding",
         "proposed_by",
         "reviewed_by",
-        "incident_change__incident",
+        "incident_change",
     ).annotate(
         item_count=Count("production_items"),
         period_start=Min("production_items__starts_at"),
         period_end=Max("production_items__ends_at"),
+        baseline=Subquery(baseline),
     )
+
+
+def _moment(value: str | None) -> datetime | None:
+    return None if value is None else datetime.fromisoformat(value)
 
 
 def _triage(row: Any) -> dict[str, Any]:
@@ -73,17 +83,22 @@ def _triage(row: Any) -> dict[str, Any]:
             "incident_title": None,
         }
     change = row.incident_change
-    edits = change.action in INCIDENT_EDITS
-    target = change if edits else change.incident
+    if change.action in INCIDENT_EDITS:
+        title, starts_at, ends_at = change.title, change.starts_at, change.ends_at
+    else:
+        title, starts_at = row.baseline["title"], _moment(row.baseline["starts_at"])
+        ends_at = (
+            change.ends_at
+            if change.action == IncidentChangeAction.RESOLVE
+            else _moment(row.baseline["ends_at"])
+        )
     return {
         **triage,
         "item_count": 1,
-        "period_start": target.starts_at,
-        "period_end": change.ends_at
-        if edits or change.action == IncidentChangeAction.RESOLVE
-        else target.ends_at,
+        "period_start": starts_at,
+        "period_end": ends_at,
         "incident_action": change.action,
-        "incident_title": target.title,
+        "incident_title": title,
     }
 
 
