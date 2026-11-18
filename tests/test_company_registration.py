@@ -11,10 +11,12 @@ from django.http import HttpRequest
 from django.test import Client, override_settings
 
 from pyracast.accounts.adapters import AccountAdapter
+from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.signup import CompanySignupInput
 from tests.support.auth_lifecycle import submit
 from tests.support.company_registration import AUTH, DETAILS, PASSWORD, mailed_code, signup
+from tests.support.workspaces import invitation_token
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -293,3 +295,100 @@ def test_concurrent_signup_for_same_workspace_returns_validation_error(
         statuses = list(pool.map(register, (1, 2)))
     assert sorted(statuses) == [400, 401]
     assert User.objects.count() == Tenant.objects.count() == Membership.objects.count() == 1
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Sunfield\nEnergy",
+        "Sunfield​Energy",
+        "Sunfield‮Energy",
+        "Visit https://sunfield.test now",
+        "www.sunfield",
+        "Sunfield.energy",
+        "billing@sunfield",
+    ],
+)
+def test_workspace_names_with_control_characters_or_addresses_are_refused(name: str) -> None:
+    response = signup(Client(enforce_csrf_checks=True), {"company_name": name})
+
+    assert response.status_code == 400
+    assert response.json()["fields"].keys() == {"company_name"}
+    assert not User.objects.exists()
+    assert not Tenant.objects.exists()
+
+
+def test_workspace_name_whitespace_is_collapsed() -> None:
+    response = signup(
+        Client(enforce_csrf_checks=True), {"company_name": "  Sunfield   Enerji  A.S. "}
+    )
+
+    assert response.status_code == 401
+    assert Tenant.objects.get().name == "Sunfield Enerji A.S."
+
+
+def test_a_password_resembling_the_address_is_refused() -> None:
+    response = signup(
+        Client(enforce_csrf_checks=True),
+        {"email": "harvestmoonpanel@example.com", "password": "harvestmoonpanel"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["fields"].keys() == {"password"}
+    assert not User.objects.exists()
+
+
+def test_concurrent_signups_sharing_a_mailbox_name_both_wait_for_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidates = Barrier(2)
+    generate = AccountAdapter.generate_unique_username
+
+    def synchronized(
+        adapter: AccountAdapter, txts: list[str | None], regex: str | None = None
+    ) -> str:
+        username = generate(adapter, txts, regex)
+        candidates.wait(timeout=10)
+        return username
+
+    monkeypatch.setattr(AccountAdapter, "generate_unique_username", synchronized)
+
+    def register(domain: str) -> int:
+        try:
+            return int(
+                signup(
+                    Client(enforce_csrf_checks=True),
+                    {"email": f"info@{domain}", "company_name": f"Workspace {domain[0]}"},
+                ).status_code
+            )
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = list(pool.map(register, ("a.test", "b.test")))
+
+    assert statuses == [401, 401]
+    assert User.objects.count() == Tenant.objects.count() == 2
+
+
+@override_settings(
+    MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
+)
+def test_an_invited_signup_ignores_a_workspace_name_that_is_taken() -> None:
+    tenant = Tenant.objects.create(name="Sunfield Energy")
+    administrator = User.objects.create_user(username="administrator", email="admin@example.com")
+    Membership.objects.create(tenant=tenant, user=administrator, role=WorkspaceRole.ADMIN)
+    invite_workspace_member(administrator, tenant.pk, "guest@example.com")
+
+    response = signup(
+        Client(enforce_csrf_checks=True),
+        {
+            "email": "guest@example.com",
+            "company_name": "Sunfield Energy",
+            "invitation_token": invitation_token(),
+        },
+    )
+
+    assert response.status_code == 401
+    assert Tenant.objects.count() == 1
+    assert not Membership.objects.filter(user__email="guest@example.com").exists()

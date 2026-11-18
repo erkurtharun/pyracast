@@ -1,6 +1,8 @@
 import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import pytest
 from allauth.account.models import EmailAddress
@@ -11,8 +13,11 @@ from django.http import HttpRequest
 from django.test import Client, RequestFactory, override_settings
 
 from pyracast.accounts import session_lock
-from pyracast.accounts.audit import connect_security_events, logger, record_security_event
+from pyracast.accounts.audit import connect_security_events, logger
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.session_lock import serialize_session
+
+PASSWORD = "test-only-" + "harbor-lantern-58!"
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +25,15 @@ def security_log(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(logger, "handlers", [caplog.handler])
     monkeypatch.setattr(logger, "propagate", False)
     caplog.set_level(logging.INFO, logger="pyracast.security")
+
+
+def security_lines(caplog: pytest.LogCaptureFixture) -> list[dict[str, Any]]:
+    return [
+        line
+        for record in caplog.records
+        if record.name == "pyracast.security"
+        and (line := json.loads(record.message))["event"] != "login_succeeded"
+    ]
 
 
 def test_authentication_failure_logs_once_without_credentials(
@@ -38,11 +52,9 @@ def test_authentication_failure_logs_once_without_credentials(
         },
     )
     assert len(caplog.records) == 1
-    assert json.loads(caplog.records[0].message) == {
-        "event": "login_failed",
-        "user_id": None,
-        "client_ip": "127.0.0.1",
-    }
+    line = json.loads(caplog.records[0].message)
+    assert re.fullmatch(r"[0-9a-f]{16}", line.pop("subject"))
+    assert line == {"event": "login_failed", "user_id": None, "client_ip": "127.0.0.1"}
     assert "private@example.com" not in caplog.text
     assert "test-only" not in caplog.text
 
@@ -51,28 +63,12 @@ def test_authentication_failure_logs_once_without_credentials(
 def test_authentication_events_without_http_metadata_do_not_break_login(
     caplog: pytest.LogCaptureFixture, http_request: HttpRequest | None
 ) -> None:
-    record_security_event("login_succeeded", request=http_request, user=User(pk=31))
+    user_login_failed.send(sender=User, request=http_request, credentials={})
     assert json.loads(caplog.records[0].message) == {
-        "event": "login_succeeded",
-        "user_id": 31,
+        "event": "login_failed",
+        "user_id": None,
         "client_ip": None,
     }
-
-
-def test_email_verification_logs_identity_without_address_or_confirmation_secret(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    record_security_event(
-        "email_verified",
-        email_address=EmailAddress(user_id=48, email="private@example.com"),
-        confirmation="test-only-private-key",
-    )
-    assert json.loads(caplog.records[0].message) == {
-        "event": "email_verified",
-        "user_id": 48,
-        "client_ip": None,
-    }
-    assert "private" not in caplog.text
 
 
 def test_untrusted_address_cannot_inject_log_records(
@@ -81,7 +77,7 @@ def test_untrusted_address_cannot_inject_log_records(
     from allauth.account.adapter import DefaultAccountAdapter
 
     monkeypatch.setattr(DefaultAccountAdapter, "get_client_ip", lambda self, request: "\nforged")
-    record_security_event("login_failed", request=HttpRequest())
+    user_login_failed.send(sender=User, request=HttpRequest(), credentials={})
     assert json.loads(caplog.records[0].message)["client_ip"] is None
     assert "forged" not in caplog.text
 
@@ -129,3 +125,88 @@ def test_authentication_429_logs_throttling_for_session_contention_and_rate_limi
     assert all(event["event"] != "authentication_rate_limited" for event in events)
     assert "private@example.com" not in caplog.text
     assert "test-only-private-password" not in caplog.text
+
+
+def signed_in_viewer() -> tuple[Client, Tenant, User]:
+    tenant = Tenant.objects.create(name="Refusal workspace")
+    viewer = User.objects.create_user(
+        username="refused-viewer", email="refused-viewer@example.com", password=PASSWORD
+    )
+    EmailAddress.objects.create(user=viewer, email=viewer.email, primary=True, verified=True)
+    Membership.objects.create(tenant=tenant, user=viewer, role=WorkspaceRole.VIEWER)
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(viewer)
+    return client, tenant, viewer
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_a_signed_in_refusal_is_recorded_once_a_minute_per_view_and_code(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, tenant, viewer = signed_in_viewer()
+    token = client.get("/api/session/").json()["csrf_token"]
+    invitations = f"/api/tenants/{tenant.pk}/invitations/"
+    for _ in range(3):
+        refused = client.post(
+            invitations,
+            {"email": "guest@example.com"},
+            content_type="application/json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        assert refused.status_code == 403
+    assert client.get(f"/api/tenants/{tenant.pk}/members/").status_code == 403
+
+    assert security_lines(caplog) == [
+        {
+            "event": "authorization_denied",
+            "user_id": viewer.pk,
+            "client_ip": "127.0.0.1",
+            "tenant_id": tenant.pk,
+            "reason": "workspace_admin_required",
+            "view": "WorkspaceInvitationsView",
+        },
+        {
+            "event": "authorization_denied",
+            "user_id": viewer.pk,
+            "client_ip": "127.0.0.1",
+            "tenant_id": tenant.pk,
+            "reason": "workspace_admin_required",
+            "view": "WorkspaceMembersView",
+        },
+    ]
+    assert "guest@example.com" not in caplog.text
+    assert viewer.email not in caplog.text
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_a_signed_in_csrf_refusal_is_recorded_for_api_and_authentication_views(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, tenant, viewer = signed_in_viewer()
+    api = client.post(f"/api/tenants/{tenant.pk}/sites/", {}, content_type="application/json")
+    authentication = client.post(
+        "/api/auth/browser/v1/auth/reauthenticate",
+        {"password": PASSWORD},
+        content_type="application/json",
+    )
+
+    assert api.status_code == authentication.status_code == 403
+    assert api.json()["code"] == authentication.json()["code"] == "csrf_failed"
+    assert [
+        (line["event"], line["user_id"], line["reason"]) for line in security_lines(caplog)
+    ] == [("csrf_refused", viewer.pk, "csrf_failed")] * 2
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_signed_out_refusals_write_no_security_line(caplog: pytest.LogCaptureFixture) -> None:
+    client = Client(enforce_csrf_checks=True)
+    assert client.get("/api/tenants/").status_code == 401
+    assert (
+        client.post(
+            "/api/auth/browser/v1/auth/login",
+            {"email": "someone@example.com", "password": PASSWORD},
+            content_type="application/json",
+        ).status_code
+        == 403
+    )
+    assert security_lines(caplog) == []

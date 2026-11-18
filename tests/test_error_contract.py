@@ -303,8 +303,8 @@ CASES: dict[str, Case] = {
     ),
     "invitation_rate_limited": Case(
         429,
-        "Too many invitations were sent. Wait a minute and try again.",
-        "Çok fazla davet gönderildi. Bir dakika bekleyip tekrar deneyin.",
+        "Too many invitations were sent. Try again later.",
+        "Çok fazla davet gönderildi. Daha sonra tekrar deneyin.",
         domain("DomainError", "invitation_rate_limited", status=429, retry_after=60),
         retry_after=60,
     ),

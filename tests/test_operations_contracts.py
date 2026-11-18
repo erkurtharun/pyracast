@@ -359,6 +359,13 @@ def test_every_alert_policy_matches_a_reported_event_and_every_error_is_alerted(
     assert events["ERROR"] <= policies
 
 
+def test_the_api_writes_its_security_lines_through_a_blocking_log_path() -> None:
+    logging = compose_services()["api"]["logging"]
+
+    assert logging["driver"] == "gcplogs"
+    assert logging["options"]["mode"] == "blocking"
+
+
 def test_origin_firewall_admits_exactly_the_gateway_trusted_ipv4_ranges() -> None:
     firewall = re.search(
         r'resource "google_compute_firewall" "https" \{.*?source_ranges = \[(.*?)\]',
