@@ -73,13 +73,13 @@ class Migration(migrations.Migration):
                     "status",
                     models.CharField(
                         choices=[
-                            ("pending", "Pending"),
-                            ("running", "Running"),
-                            ("ready", "Ready"),
-                            ("insufficient", "Insufficient"),
-                            ("rejected", "Rejected"),
-                            ("failed", "Failed"),
-                            ("superseded", "Superseded"),
+                            ("pending", "pending"),
+                            ("running", "running"),
+                            ("ready", "ready"),
+                            ("insufficient", "insufficient"),
+                            ("rejected", "rejected"),
+                            ("failed", "failed"),
+                            ("superseded", "superseded"),
                         ],
                         default="pending",
                         max_length=20,
@@ -306,33 +306,7 @@ class Migration(migrations.Migration):
                         auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
                     ),
                 ),
-                (
-                    "action",
-                    models.CharField(
-                        choices=[
-                            ("submission_saved", "Submission saved"),
-                            ("configuration_created", "Configuration created"),
-                            ("plant_renamed", "Plant renamed"),
-                            ("observations_imported", "Observations imported"),
-                            ("production_changed", "Production changed"),
-                            ("epias_connected", "EPIAS connected"),
-                            ("epias_disconnected", "EPIAS disconnected"),
-                            ("calibration_requested", "Calibration requested"),
-                            ("calibration_scheduled", "Calibration scheduled"),
-                            ("calibration_completed", "Calibration completed"),
-                            ("calibration_activated", "Calibration activated"),
-                            (
-                                "calibration_automatically_activated",
-                                "Calibration automatically activated",
-                            ),
-                            ("calibration_reset", "Calibration reset"),
-                            ("calibration_automation_enabled", "Automatic calibration enabled"),
-                            ("calibration_automation_disabled", "Automatic calibration disabled"),
-                            ("calibration_automatic_skipped", "Automatic calibration skipped"),
-                        ],
-                        max_length=50,
-                    ),
-                ),
+                ("action", models.CharField(max_length=50)),
                 ("details", models.JSONField(default=dict)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 (
@@ -487,7 +461,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="plantconfiguration",
             constraint=models.CheckConstraint(
-                condition=models.Q(("measurement_basis__in", ["net_export", "ac_generation"])),
+                condition=models.Q(("measurement_basis__in", ("net_export", "ac_generation"))),
                 name="plant_measurement_basis_valid",
             ),
         ),
@@ -525,7 +499,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="plantconfiguration",
             constraint=models.CheckConstraint(
-                condition=models.Q(("mounting_type__in", ["unknown", "fixed", "tracking"])),
+                condition=models.Q(("mounting_type__in", ("unknown", "fixed", "tracking"))),
                 name="plant_mounting_type_supported",
             ),
         ),
@@ -641,7 +615,7 @@ class Migration(migrations.Migration):
                 condition=models.Q(
                     (
                         "status__in",
-                        [
+                        (
                             "pending",
                             "running",
                             "ready",
@@ -649,7 +623,7 @@ class Migration(migrations.Migration):
                             "rejected",
                             "failed",
                             "superseded",
-                        ],
+                        ),
                     )
                 ),
                 name="calibration_status_valid",
@@ -659,35 +633,6 @@ class Migration(migrations.Migration):
             model_name="calibrationactivation",
             constraint=models.UniqueConstraint(
                 fields=("id", "configuration"), name="activation_id_config_unique"
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name="plantevent",
-            constraint=models.CheckConstraint(
-                condition=models.Q(
-                    (
-                        "action__in",
-                        [
-                            "submission_saved",
-                            "configuration_created",
-                            "plant_renamed",
-                            "observations_imported",
-                            "production_changed",
-                            "epias_connected",
-                            "epias_disconnected",
-                            "calibration_requested",
-                            "calibration_scheduled",
-                            "calibration_completed",
-                            "calibration_activated",
-                            "calibration_automatically_activated",
-                            "calibration_reset",
-                            "calibration_automation_enabled",
-                            "calibration_automation_disabled",
-                            "calibration_automatic_skipped",
-                        ],
-                    )
-                ),
-                name="plantevent_action_chk",
             ),
         ),
         migrations.AddConstraint(
@@ -724,14 +669,14 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="plantsubmission",
             constraint=models.CheckConstraint(
-                condition=models.Q(("measurement_basis__in", ["net_export", "ac_generation"])),
+                condition=models.Q(("measurement_basis__in", ("net_export", "ac_generation"))),
                 name="submission_measurement_basis",
             ),
         ),
         migrations.AddConstraint(
             model_name="plantsubmission",
             constraint=models.CheckConstraint(
-                condition=models.Q(("mounting_type__in", ["unknown", "fixed", "tracking"])),
+                condition=models.Q(("mounting_type__in", ("unknown", "fixed", "tracking"))),
                 name="submission_mounting_supported",
             ),
         ),
@@ -811,7 +756,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="productionobservation",
             constraint=models.CheckConstraint(
-                condition=models.Q(("quality__in", ["valid", "outage", "curtailed", "invalid"])),
+                condition=models.Q(("quality__in", ("valid", "outage", "curtailed", "invalid"))),
                 name="plant_observation_quality_valid",
             ),
         ),

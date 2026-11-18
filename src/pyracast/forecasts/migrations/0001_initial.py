@@ -28,37 +28,10 @@ class Migration(migrations.Migration):
                         auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
                     ),
                 ),
-                (
-                    "endpoint",
-                    models.CharField(
-                        choices=[
-                            ("forecasts", "Forecasts"),
-                            ("estimated_actuals", "Estimated actuals"),
-                            ("historical_import", "Historical import"),
-                            ("scaled_forecasts", "Scaled forecasts"),
-                            ("scaled_estimated_actuals", "Scaled estimated actuals"),
-                        ],
-                        default="forecasts",
-                        max_length=30,
-                    ),
-                ),
+                ("endpoint", models.CharField(default="forecasts", max_length=30)),
                 ("scheduled_slot", models.DateTimeField()),
                 ("target_date", models.DateField()),
-                (
-                    "status",
-                    models.CharField(
-                        choices=[
-                            ("pending", "Pending"),
-                            ("running", "Running"),
-                            ("retry", "Retry"),
-                            ("succeeded", "Succeeded"),
-                            ("failed", "Failed"),
-                            ("stale", "Stale"),
-                        ],
-                        default="pending",
-                        max_length=20,
-                    ),
-                ),
+                ("status", models.CharField(default="pending", max_length=20)),
                 ("available_at", models.DateTimeField()),
                 ("retry_until", models.DateTimeField(null=True)),
                 ("lease_token", models.UUIDField(null=True)),
@@ -124,13 +97,13 @@ class Migration(migrations.Migration):
                         condition=models.Q(
                             (
                                 "phase__in",
-                                [
+                                (
                                     "collection",
                                     "notifications",
                                     "calibration",
                                     "retention",
                                     "metering",
-                                ],
+                                ),
                             )
                         ),
                         name="dispatcher_phase_valid",
@@ -151,16 +124,7 @@ class Migration(migrations.Migration):
                 ("normalized_intervals", models.JSONField()),
                 ("collected_at", models.DateTimeField()),
                 ("issued_at", models.DateTimeField(null=True)),
-                (
-                    "source_kind",
-                    models.CharField(
-                        choices=[
-                            ("forecast", "Forecast"),
-                            ("estimated_actuals", "Estimated actuals"),
-                        ],
-                        max_length=20,
-                    ),
-                ),
+                ("source_kind", models.CharField(max_length=20)),
                 ("coverage_start", models.DateTimeField(db_index=True, null=True)),
                 ("coverage_end", models.DateTimeField(db_index=True, null=True)),
                 ("available_at", models.DateTimeField(null=True)),
@@ -294,31 +258,8 @@ class Migration(migrations.Migration):
                 ),
                 ("utc_day", models.DateField()),
                 ("created_at", models.DateTimeField()),
-                (
-                    "purpose",
-                    models.CharField(
-                        choices=[
-                            ("forecast", "Forecast"),
-                            ("estimated_actuals", "Estimated actuals"),
-                            ("validation", "Validation"),
-                            ("inspect_settings", "Site settings check"),
-                            ("inspect_forecast", "Forecast check"),
-                        ],
-                        max_length=20,
-                    ),
-                ),
-                (
-                    "outcome",
-                    models.CharField(
-                        choices=[
-                            ("uncertain", "Uncertain"),
-                            ("succeeded", "Succeeded"),
-                            ("failed", "Failed"),
-                        ],
-                        default="uncertain",
-                        max_length=20,
-                    ),
-                ),
+                ("purpose", models.CharField(max_length=20)),
+                ("outcome", models.CharField(default="uncertain", max_length=20)),
                 ("correlation_id", models.UUIDField(default=uuid.uuid4, unique=True)),
                 (
                     "binding",
@@ -376,7 +317,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="forecastsnapshot",
             constraint=models.CheckConstraint(
-                condition=models.Q(("source_kind__in", ["forecast", "estimated_actuals"])),
+                condition=models.Q(("source_kind__in", ("forecast", "estimated_actuals"))),
                 name="snapshot_source_kind",
             ),
         ),
@@ -410,25 +351,7 @@ class Migration(migrations.Migration):
             model_name="collectionjob",
             constraint=models.CheckConstraint(
                 condition=models.Q(
-                    (
-                        "endpoint__in",
-                        [
-                            "forecasts",
-                            "estimated_actuals",
-                            "historical_import",
-                            "scaled_forecasts",
-                            "scaled_estimated_actuals",
-                        ],
-                    )
-                ),
-                name="collectionjob_endpoint_chk",
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name="collectionjob",
-            constraint=models.CheckConstraint(
-                condition=models.Q(
-                    ("status__in", ["pending", "running", "retry", "succeeded", "failed", "stale"])
+                    ("status__in", ("pending", "running", "retry", "succeeded", "failed", "stale"))
                 ),
                 name="collection_job_status",
             ),
@@ -502,25 +425,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="requestattempt",
             constraint=models.CheckConstraint(
-                condition=models.Q(
-                    (
-                        "purpose__in",
-                        [
-                            "forecast",
-                            "estimated_actuals",
-                            "validation",
-                            "inspect_settings",
-                            "inspect_forecast",
-                        ],
-                    )
-                ),
-                name="requestattempt_purpose_chk",
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name="requestattempt",
-            constraint=models.CheckConstraint(
-                condition=models.Q(("outcome__in", ["uncertain", "succeeded", "failed"])),
+                condition=models.Q(("outcome__in", ("uncertain", "succeeded", "failed"))),
                 name="request_attempt_outcome",
             ),
         ),

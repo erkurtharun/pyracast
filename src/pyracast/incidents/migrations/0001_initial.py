@@ -29,19 +29,7 @@ class Migration(migrations.Migration):
                         auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
                     ),
                 ),
-                (
-                    "kind",
-                    models.CharField(
-                        choices=[
-                            ("inverter", "Inverter"),
-                            ("panels", "Panels"),
-                            ("grid", "Grid"),
-                            ("other", "Other"),
-                            ("multiple", "Multiple"),
-                        ],
-                        max_length=20,
-                    ),
-                ),
+                ("kind", models.CharField(max_length=20)),
                 ("title", models.CharField(max_length=200)),
                 ("notes", models.CharField(blank=True, max_length=2000)),
                 ("starts_at", models.DateTimeField()),
@@ -144,7 +132,7 @@ class Migration(migrations.Migration):
             model_name="plantincident",
             constraint=models.CheckConstraint(
                 condition=models.Q(
-                    ("kind__in", ["inverter", "panels", "grid", "other", "multiple"])
+                    ("kind__in", ("inverter", "panels", "grid", "other", "multiple"))
                 ),
                 name="incident_kind_valid",
             ),
