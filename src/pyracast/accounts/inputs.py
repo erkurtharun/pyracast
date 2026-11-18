@@ -31,7 +31,7 @@ from django.http import HttpRequest
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authentication import recovery_identity
-from pyracast.accounts.login_limits import check_second_factor
+from pyracast.accounts.login_limits import check_second_factor, spent, throttled
 
 
 class PasswordInput(forms.Form):
@@ -54,6 +54,8 @@ class RequestPasswordResetInput(AllauthRequestPasswordResetInput):
 
     def clean_email(self) -> str:
         email: str = super().clean_email()
+        if spent(context.request, "reset_password", key=email.lower()):
+            raise throttled(context.request)
         user = recovery_identity(email)
         self.users = [] if user is None else [user]
         return email

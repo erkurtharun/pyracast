@@ -26,6 +26,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from psycopg.errors import DeadlockDetected
 
 from pyracast.accounts import inputs
+from pyracast.accounts.login_limits import spent, throttled
 from pyracast.accounts.processes import (
     AuthorityChangedError,
     StartingView,
@@ -95,8 +96,19 @@ class RequestPasswordResetView(StartingView, views.RequestPasswordResetView):
 
 class RequestReauthenticationCodeView(StartingView, views.RequestReauthenticationCodeView):
     def handle_input(self, data: Any) -> ErrorResponse | None:
-        lock_account(self.request.user.pk)
-        return super().handle_input(data)
+        # With the code budget of the typed address spent, the input reads the account unlocked
+        # and allauth refuses it there; one it admits after all (a use expired meanwhile) read
+        # its recipient unlocked and starts nothing.
+        email = data.get("email") if isinstance(data, dict) else None
+        budget_spent = isinstance(email, str) and spent(
+            self.request, "request_login_code", key=email.strip().lower()
+        )
+        if not budget_spent:
+            lock_account(self.request.user.pk)
+        refused = super().handle_input(data)
+        if budget_spent and refused is None:
+            raise throttled(self.request)
+        return refused
 
 
 class ResetPasswordView(views.ResetPasswordView):
@@ -184,6 +196,8 @@ class ReauthenticateView(views.ReauthenticateView):
 class ManageEmailView(StartingView, views.ManageEmailView):
     def handle_input(self, data: Any) -> ErrorResponse | None:
         if self.request.method == "POST":
+            if spent(self.request, "request_email_change", user=self.user):
+                raise throttled(self.request)
             lock_account(self.user.pk)
         return super().handle_input(data)
 
