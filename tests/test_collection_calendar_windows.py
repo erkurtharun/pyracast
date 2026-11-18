@@ -15,6 +15,7 @@ from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
     ForecastSnapshot,
+    HistoricalReferenceImport,
     RequestAttempt,
 )
 from pyracast.forecasts.schedule import configure_schedule
@@ -351,7 +352,18 @@ def test_newer_actuals_coverage_masks_old_valid_rows_when_planning_refresh(damag
 def test_imported_reference_cannot_suppress_native_actuals_collection() -> None:
     system = make_system(approved=True)
     snapshot = archive_actuals(system.binding.pk)
-    CollectionJob.objects.filter(pk=snapshot.job_id).update(endpoint="historical_import")
+    reference = HistoricalReferenceImport.objects.create(
+        binding=system.binding,
+        sha256="a" * 64,
+        source_name="authorized-export.json",
+        source_settings={},
+        imported_by=system.admin,
+        imported_at=MORNING,
+        interval_count=1,
+    )
+    CollectionJob.objects.filter(pk=snapshot.job_id).update(
+        endpoint="historical_import", reference_import=reference
+    )
     assert missing_actuals_window(system.binding, MORNING) is not None
 
 
