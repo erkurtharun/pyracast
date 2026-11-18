@@ -598,16 +598,30 @@ def test_workspace_console_pages_render_in_turkish_without_mail_or_provider_call
         assert header in client.get(path, HTTP_ACCEPT_LANGUAGE="tr").content.decode(), path
 
 
-def test_the_console_keeps_the_signed_in_membership_and_explains_self_removal() -> None:
+@pytest.mark.parametrize(
+    ("language", "notice"),
+    [
+        ("en", "You cannot remove your own membership from this console."),
+        ("tr", "Bu konsoldan kendi üyeliğinizi kald\u0131ramazs\u0131n\u0131z."),
+    ],
+)
+def test_the_console_keeps_the_signed_in_membership_and_explains_self_removal(
+    language: str,
+    notice: str,
+) -> None:
     tenant, _, _ = workspace()
     client, operator = verified_admin()
     Membership.objects.create(tenant=tenant, user=operator)
     url = f"/admin/workspaces/{tenant.pk}/members/{operator.pk}/removal/"
-    responses = (client.get(url), client.post(url))
+    responses = (
+        client.get(url, HTTP_ACCEPT_LANGUAGE=language),
+        client.post(url, HTTP_ACCEPT_LANGUAGE=language),
+    )
     assert [response.status_code for response in responses] == [200, 400]
     for response in responses:
         html = response.content.decode()
-        assert "You cannot remove your own membership from this console." in html
+        assert notice in html
+        assert 'class="btn btn--danger"' not in html
         assert ">Remove member</button>" not in html
         assert "The workspace administrator cannot be removed." not in html
         assert f'href="/admin/workspaces/{tenant.pk}/"' in html
