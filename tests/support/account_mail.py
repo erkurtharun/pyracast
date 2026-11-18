@@ -217,10 +217,12 @@ RECOVERY_CODES = "mfa/email/recovery_codes_generated"
 CONNECTED = "socialaccount/email/account_connected"
 DISCONNECTED = "socialaccount/email/account_disconnected"
 CODE_MINUTES = {SIGNUP_CODE: 10, CHANGE_CODE: 10, RESET_CODE: 10, LOGIN_CODE: 3}
-CONFIRMATIONS = {
-    SIGNUP_CODE: ("auth/email/verify", "key"),
-    CHANGE_CODE: ("auth/email/verify", "key"),
-    LOGIN_CODE: ("auth/reauthenticate/code/confirm", "code"),
+# Each code's confirmation: path, code field, further fields and the status of an accepted code.
+CONFIRMATIONS: dict[str, tuple[str, str, dict[str, str], int]] = {
+    SIGNUP_CODE: ("auth/email/verify", "key", {}, 200),
+    CHANGE_CODE: ("auth/email/verify", "key", {}, 200),
+    LOGIN_CODE: ("auth/reauthenticate/code/confirm", "code", {}, 200),
+    RESET_CODE: ("auth/password/reset", "key", {"password": PASSWORD + "rotated"}, 401),
 }
 ACTION_URLS = {
     EXISTS: settings.HEADLESS_FRONTEND_URLS["account_reset_password"],
@@ -266,6 +268,7 @@ STATES = (
     "signed-out",
     "pending-signup",
     "pending-provider-signup",
+    "pending-reset",
     "signed-in",
     "reauthentication-pending",
     "reauthenticated",
@@ -273,12 +276,13 @@ STATES = (
     "pending-stored-change",
 )
 PROVIDER_CHOICES = ("none", "google", "microsoft")
-ANONYMOUS = frozenset({"signed-out", "pending-signup", "pending-provider-signup"})
+ANONYMOUS = frozenset({"signed-out", "pending-signup", "pending-provider-signup", "pending-reset"})
 SIGNED = frozenset(STATES) - ANONYMOUS
 NOT_REAUTHENTICATED = frozenset({"signed-in", "reauthentication-pending"})
 PENDING_CHANGES = frozenset({"pending-change", "pending-stored-change"})
 PENDING_VERIFICATION = PENDING_CHANGES | {"pending-signup"}
 NO_VERIFICATION = frozenset(STATES) - PENDING_VERIFICATION
+TAKEN = frozenset({"other-account", "inactive-account"})
 OWN = frozenset({"own-primary", "own-verified-secondary", "own-unverified-secondary"})
 ELSEWHERE = frozenset({"other-account", "unknown", "inactive-account"})
 UNVERIFIED_SHAPES = frozenset({"unverified-new", "unverified-returning"})
@@ -441,6 +445,10 @@ NOT_APPLICABLE: tuple[tuple[str, Callable[[Combination], bool]], ...] = (
     (
         "the pending address exists only while a change is pending",
         lambda c: c.target == "pending-address" and c.state not in PENDING_CHANGES,
+    ),
+    (
+        "a reset is pending only for an account that was mailed a reset code",
+        lambda c: c.state == "pending-reset" and c.shape == "inactive",
     ),
     (
         "while a change started by PUT is pending, the stored secondary is the pending address",
@@ -841,22 +849,27 @@ def matrix() -> list[Case]:
 CASES = matrix()
 
 
+# The states whose pending code a code mailed by the endpoint replaces.
+REPLACES = {
+    "login": {"pending-signup"},
+    "provider-login": {"pending-signup"},
+    "signup": {"pending-signup"},
+    "provider-signup": {"pending-signup"},
+    "resend": PENDING_VERIFICATION,
+    "select-address": PENDING_CHANGES,
+    "add-address": PENDING_CHANGES,
+    "reauthentication-code": {"reauthentication-pending"},
+    "reset-request": {"pending-reset"},
+}
+
+
 def rotates(case: Case) -> bool:
     combination, expected = case.combination, case.expected
-    if not isinstance(expected, Mail):
-        return False
     return (
-        (combination.endpoint == "resend" and combination.state in PENDING_VERIFICATION)
-        or (combination.endpoint == "select-address" and combination.state in PENDING_CHANGES)
-        or (
-            combination.endpoint == "add-address"
-            and combination.state in PENDING_CHANGES
-            and combination.target in {"unknown", "pending-address"}
-        )
-        or (
-            combination.endpoint == "reauthentication-code"
-            and combination.state == "reauthentication-pending"
-        )
+        isinstance(expected, Mail)
+        and expected.template in CONFIRMATIONS
+        and combination.state in REPLACES.get(combination.endpoint, ())
+        and not (combination.endpoint == "add-address" and combination.target in TAKEN)
     )
 
 
@@ -1079,7 +1092,9 @@ def enter(case: Case, world: World, profile: dict[str, Any], client_class: type[
             return Session(client, "")
         if state == "signed-out":
             return Session(client, "")
-        if combination.shape in UNVERIFIED_SHAPES:
+        if state == "pending-reset":
+            assert submit(client, "auth/password/request", {"email": PRIMARY}).status_code == 401
+        elif combination.shape in UNVERIFIED_SHAPES:
             credentials = {"email": PRIMARY, "password": PASSWORD}
             assert submit(client, "auth/login", credentials).status_code == 401
         else:
@@ -1333,10 +1348,10 @@ def assert_contract(message: EmailMultiAlternatives, case: Case, since: datetime
 
 
 def assert_rotation(client: Client, expected: Mail, old: str, new: str) -> None:
-    path, field = CONFIRMATIONS[expected.template]
+    path, field, further, accepted = CONFIRMATIONS[expected.template]
     assert new != old
-    assert submit(client, path, {field: old}).status_code == 400
-    assert submit(client, path, {field: new}).status_code == 200
+    assert submit(client, path, {field: old, **further}).status_code == 400
+    assert submit(client, path, {field: new, **further}).status_code == accepted
 
 
 def run_case(

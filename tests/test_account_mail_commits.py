@@ -12,16 +12,22 @@ from tests.support.account_mail import (
     CASES,
     CHANGED_NOTICE,
     FIREFOX,
+    FRESH,
     PRIMARY,
     Combination,
     Mail,
     account,
+    browser,
     matrix_settings,
     provider_requests,
     run_case,
 )
+from tests.support.auth_lifecycle import submit
+from tests.support.company_registration import signup
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+# These committed requests show that the matrix outcome holds under real commits and the database
+# rate-limit cache; they do not show that every row's commit callbacks run in the same order.
 FAMILIES = (
     Combination("signup", "verified", "unknown", "signed-out", "none"),
     Combination("provider-signup", "verified", "other-account", "signed-out", "google"),
@@ -54,6 +60,7 @@ FAMILIES = (
     Combination("reset-request", "verified", "other-account", "signed-in", "none"),
     Combination("reset", "verified", "own-primary", "signed-out", "none"),
     Combination("password", "passwordless", "none", "reauthenticated", "none"),
+    Combination("password", "verified", "none", "reauthenticated", "none"),
     Combination(
         "reauthentication-code",
         "verified-secondary",
@@ -62,6 +69,7 @@ FAMILIES = (
         "none",
     ),
     Combination("totp-on", "verified", "none", "reauthenticated", "none"),
+    Combination("totp-off", "verified", "none", "reauthenticated", "none"),
     Combination("recovery-codes", "verified", "none", "reauthenticated", "none"),
     Combination("provider-connect", "verified", "none", "reauthenticated", "google"),
     Combination("disconnect", "passwordless-linked", "none", "reauthenticated", "microsoft"),
@@ -86,6 +94,16 @@ def test_committed_request_sends_what_the_matrix_expects(
 ) -> None:
     assert isinstance(case.expected, Mail)
     run_case(case, identity, monkeypatch, Client)
+
+
+def test_throttled_resend_is_refused_without_mail() -> None:
+    client = browser()
+    assert signup(client, {"email": FRESH, "company_name": "Throttled"}).status_code == 401
+    mail.outbox.clear()
+
+    response = submit(client, "auth/email/verify/resend", {})
+
+    assert (response.status_code, mail.outbox) == (429, [])
 
 
 def test_account_mail_waits_for_the_commit_and_is_dropped_on_rollback() -> None:
