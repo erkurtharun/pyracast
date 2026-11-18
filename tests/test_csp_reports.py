@@ -35,7 +35,8 @@ def send(body: object, content_type: str) -> Any:
 
 
 def post(body: object, content_type: str = "application/csp-report") -> int:
-    return send(body, content_type).status_code
+    status: int = send(body, content_type).status_code
+    return status
 
 
 def test_both_policies_report_their_violations_to_the_endpoint() -> None:
