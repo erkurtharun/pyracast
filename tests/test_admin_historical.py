@@ -187,6 +187,24 @@ def test_expired_preview_requires_a_new_check(monkeypatch: pytest.MonkeyPatch) -
     assert not HistoricalReferenceImport.objects.exists()
 
 
+def test_file_errors_are_messages_and_name_the_field_by_its_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = system_for_import(monkeypatch)
+    client, _ = verified_admin()
+    url = reverse("admin:workspace_historical_import", args=(system.region.pk,))
+
+    missing = client.post(url, {"action": "preview"}).content.decode()
+    refused = client.post(
+        url, {"action": "save", "file": export_file(), "preview_token": "forged"}
+    ).content.decode()
+
+    assert '<a href="#id_file">Historical Solcast file: This field is required.</a>' in missing
+    assert "<li>The preview expired or is invalid. Preview the file again.</li>" in refused
+    assert "__all__" not in missing + refused
+    assert not HistoricalReferenceImport.objects.exists()
+
+
 def test_plain_html_preview_and_save_reselect_the_same_file(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
