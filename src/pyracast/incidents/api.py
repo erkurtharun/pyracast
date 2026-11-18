@@ -5,11 +5,11 @@ from rest_framework import serializers
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from pyracast.api.serializers import InputSerializer
+from pyracast.api.serializers import FiniteFloat, InputSerializer
 from pyracast.incidents import operations
 from pyracast.incidents.models import PlantIncident
 from pyracast.plants.api import ScopedView
-from pyracast.plants.serializers import AwareDateTime, FiniteFloat
+from pyracast.plants.serializers import AwareDateTime
 
 
 class IncidentInput(InputSerializer):

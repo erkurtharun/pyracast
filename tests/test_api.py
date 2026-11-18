@@ -87,7 +87,7 @@ def test_tenant_isolation_and_read_only_ownership(customer: tuple[Client, User, 
     foreign = f"/api/tenants/{other.pk}/regions/{region.pk}/"
     assert client.get(f"{foreign}location-change-requests/").status_code == 404
     assert client.get(foreign + forecast).status_code == 404
-    assert Client().get(own + forecast).status_code == 403
+    assert Client().get(own + forecast).status_code == 401
     csrf = Client(enforce_csrf_checks=True)
     csrf.force_login(user)
     assert csrf.delete(own).status_code == 403
@@ -218,7 +218,7 @@ def test_missing_object_logs_its_model_and_answers_404(
     response = exception_handler(Region.DoesNotExist(), {})
     assert response is not None
     assert response.status_code == 404
-    assert response.data == {"code": "not_found"}
+    assert response.data == {"code": "not_found", "message": "The requested item was not found."}
     [record] = [record for record in pyracast_logs.records if record.name == "pyracast.api"]
     assert record.levelno == logging.WARNING
     assert record.getMessage() == "api_object_not_found model=Region"

@@ -1,9 +1,18 @@
 import json
 import socket
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from pyracast.languages import LANGUAGE_COOKIE, Language, negotiated_language
 
 PORT = 8080
 RETRY_AFTER_SECONDS = 60
+CODE = "maintenance"
+# The API catalog carries the same texts for ErrorCode.MAINTENANCE; a test keeps them equal.
+MESSAGES: dict[Language, str] = {
+    "en": "Pyracast is being updated. Try again in a minute; your data is safe.",
+    "tr": "Pyracast güncelleniyor. Bir dakika sonra yeniden deneyin; verileriniz güvende.",
+}
 PAGE = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -32,7 +41,20 @@ section + section {{ margin-top: 2rem; padding-top: 2rem; border-top: 1px solid 
 </body>
 </html>
 """.encode()
-API_BODY = json.dumps({"code": "maintenance"}).encode()
+
+
+def api_body(language: Language) -> bytes:
+    return json.dumps(
+        {"code": CODE, "message": MESSAGES[language], "retry_after": RETRY_AFTER_SECONDS}
+    ).encode()
+
+
+def cookie_language(header: str) -> str | None:
+    try:
+        morsel = SimpleCookie(header).get(LANGUAGE_COOKIE)
+    except CookieError:
+        return None
+    return None if morsel is None else morsel.value
 
 
 class Notice(BaseHTTPRequestHandler):
@@ -51,7 +73,12 @@ class Notice(BaseHTTPRequestHandler):
         if self.path == "/health":
             self.answer(200, "text/plain", b"ok")
         elif self.path == "/api" and "text/html" not in self.headers.get("Accept", ""):
-            self.answer(503, "application/json", API_BODY)
+            language = negotiated_language(
+                cookie_language(self.headers.get("Cookie", "")),
+                self.headers.get("Accept-Language", ""),
+                self.headers.get("CF-IPCountry"),
+            )
+            self.answer(503, "application/json", api_body(language))
         else:
             self.answer(503, "text/html; charset=utf-8", PAGE)
 

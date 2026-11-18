@@ -25,6 +25,7 @@ from pyracast.regions.operations import (
 )
 from pyracast.trash import purge_expired, restore_region, trash_region
 from tests.support.domain import NOW, FakeAdapter, System, make_system
+from tests.support.errors import raises_code
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -207,7 +208,7 @@ def test_approval_rejects_missing_technical_declaration_atomically() -> None:
     system = make_system()
     Plant.objects.create(region=system.region, name="Incomplete legacy plant")
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), NOW)
-    with pytest.raises(ValidationError, match="plant_submission_required"):
+    with raises_code("plant_submission_required"):
         approve_region(system.admin, system.region.pk, system.binding.pk, NOW)
     system.region.refresh_from_db()
     assert system.region.status == "pending"
@@ -219,7 +220,7 @@ def test_approval_rejects_missing_technical_declaration_atomically() -> None:
 def test_duplicate_locations_use_six_decimal_tenant_scoped_identity() -> None:
     system = make_system()
     site = submit_site(system.member, system.tenant.pk, **site_values())
-    with pytest.raises(ValidationError, match="location_already_exists"):
+    with raises_code("location_already_exists"):
         submit_site(system.member, system.tenant.pk, **site_values(latitude=41.1234562))
     other = Tenant.objects.create(name="Other")
     Membership.objects.create(user=system.member, tenant=other, role=WorkspaceRole.ADMIN)
@@ -238,7 +239,7 @@ def test_one_plant_per_location_and_restore_rejects_a_replacement_location() -> 
     system = make_system()
     plant = pending_plant(system)
     parent = (system.member, system.tenant.pk, system.region.pk)
-    with pytest.raises(ValidationError, match="location_already_has_plant"):
+    with raises_code("location_already_has_plant"):
         pending_plant(system)
     with pytest.raises(IntegrityError), transaction.atomic():
         Plant.objects.create(region=system.region, name="Direct")
@@ -251,7 +252,7 @@ def test_one_plant_per_location_and_restore_rejects_a_replacement_location() -> 
         longitude=29,
         timezone="Europe/Istanbul",
     )
-    with pytest.raises(ValidationError, match="location_already_exists"):
+    with raises_code("location_already_exists"):
         restore_region(*parent)
     trash_region(system.member, system.tenant.pk, replacement_region.pk)
     assert restore_region(*parent).deleted_at is None
@@ -270,7 +271,7 @@ def test_location_review_rejects_duplicate_without_changing_approval() -> None:
         longitude=30.1234562,
         timezone="UTC",
     )
-    with pytest.raises(ValidationError, match="location_already_exists"):
+    with raises_code("location_already_exists"):
         review_location_change(system.admin, change.pk, approve=True)
     system.region.refresh_from_db()
     change.refresh_from_db()

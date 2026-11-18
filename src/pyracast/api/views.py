@@ -22,7 +22,7 @@ from pyracast.api.serializers import (
 )
 from pyracast.change_requests.models import DECIDED, ChangeRequest, ChangeRequestStatus
 from pyracast.db import read_snapshot
-from pyracast.forecasts.history import OutlookRequestError, regional_outlook
+from pyracast.forecasts.history import regional_outlook
 from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import request_location_change
 
@@ -118,13 +118,10 @@ class ForecastView(APIView):
             region = member_region(cast(User, request.user), tenant_id, region_id)
             query = ForecastQuery(data=request.query_params)
             query.is_valid(raise_exception=True)
-            try:
-                result = regional_outlook(
-                    region,
-                    query.validated_data["date"],
-                    query.validated_data["data_source"],
-                    timezone.now(),
-                )
-            except OutlookRequestError as error:
-                return Response({"code": error.code}, status=400)
+            result = regional_outlook(
+                region,
+                query.validated_data["date"],
+                query.validated_data["data_source"],
+                timezone.now(),
+            )
         return Response(result)

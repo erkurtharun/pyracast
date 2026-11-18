@@ -1,5 +1,6 @@
 ﻿import { test, expect, type Page } from "./support/test";
 import { mockApi, paged } from "./support/workspace";
+import { errorBody } from "./support/errors";
 
 const run = (id: number) => ({
     id,
@@ -46,7 +47,10 @@ for (const staleError of [false, true]) {
             await barrier;
             await route.fulfill(
                 staleError
-                    ? { status: 503, json: { detail: "Old detail failed" } }
+                    ? {
+                          status: 503,
+                          json: errorBody("busy", "Old detail failed"),
+                      }
                     : { json: run(40) },
             );
         });
@@ -183,10 +187,16 @@ test("detail and activation errors remain independent", async ({ page }) => {
         route.fulfill({ json: paged([run(40)]) }),
     );
     await page.route("**/plants/21/calibrations/40/activate/", (route) =>
-        route.fulfill({ status: 503, json: { detail: "Activation failed" } }),
+        route.fulfill({
+            status: 503,
+            json: errorBody("busy", "Activation failed"),
+        }),
     );
     await page.route("**/plants/21/calibrations/40/", (route) =>
-        route.fulfill({ status: 503, json: { detail: "Detail failed" } }),
+        route.fulfill({
+            status: 503,
+            json: errorBody("busy", "Detail failed"),
+        }),
     );
     await openCalibration(page);
     await page.getByRole("button", { name: "Activate", exact: true }).click();
@@ -207,7 +217,11 @@ test("a release in progress shows the maintenance notice instead of a failure", 
         route.fulfill({
             status: 503,
             headers: { "Retry-After": "60" },
-            json: { code: "maintenance" },
+            json: errorBody(
+                "maintenance",
+                "Pyracast is being updated. Try again in a minute; your data is safe.",
+                { retry_after: 60 },
+            ),
         }),
     );
     await openCalibration(page);

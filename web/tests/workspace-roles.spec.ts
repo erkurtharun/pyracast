@@ -1,5 +1,6 @@
 import { test, expect } from "./support/test";
 import { mockApi, paged, user, tenantRow } from "./support/workspace";
+import { allauthErrorBody, errorBody } from "./support/errors";
 
 test("Turkish workspace roles and invitation labels preserve readable characters", async ({
     page,
@@ -151,7 +152,10 @@ test("workspace administrator invites a viewer and sees invitation errors", asyn
             if (email)
                 return route.fulfill({
                     status: 400,
-                    json: { detail: "An invitation is already pending." },
+                    json: errorBody(
+                        "invalid_request",
+                        "An invitation is already pending.",
+                    ),
                 });
             email = route.request().postDataJSON().email;
             return route.fulfill({
@@ -308,15 +312,18 @@ test("signed in member explicitly accepts invitation and sees actionable errors"
         if (accepted)
             return route.fulfill({ json: { tenant_id: 1, role: "viewer" } });
         return route.fulfill({
-            status: 400,
-            json: { detail: "Sign in with the invited email address." },
+            status: 403,
+            json: errorBody(
+                "invitation_email_unverified",
+                "Verify the invited email address before accepting.",
+            ),
         });
     });
     await page.goto("/app/#token=invite-secret&section=members");
     await expect(page).toHaveURL("/app/#section=members");
     await page.getByRole("button", { name: "Accept invitation" }).click();
-    await expect(page.locator(".form-errors")).toContainText(
-        "Sign in with the invited email address.",
+    await expect(page.locator(".form-errors p")).toHaveText(
+        "Verify the invited email address before accepting.",
     );
     accepted = true;
     await page.getByRole("button", { name: "Accept invitation" }).click();
@@ -329,21 +336,28 @@ test("signed in member explicitly accepts invitation and sees actionable errors"
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
 });
 
-for (const detail of [
-    "Sign in with the invited email address.",
-    "This invitation has expired.",
-]) {
+for (const [status, code, detail] of [
+    [
+        403,
+        "invitation_email_unverified",
+        "Verify the invited email address before accepting.",
+    ],
+    [400, "invitation_unavailable", "The invitation is invalid or expired."],
+] as const) {
     test(`invitation can be dismissed after: ${detail}`, async ({
         page,
     }, testInfo) => {
         await mockApi(page);
         await page.setViewportSize({ width: 320, height: 740 });
         await page.route("**/api/invitations/accept/", (route) =>
-            route.fulfill({ status: 400, json: { detail } }),
+            route.fulfill({
+                status,
+                json: errorBody(code, detail),
+            }),
         );
         await page.goto("/app/?token=invite-secret");
         await page.getByRole("button", { name: "Accept invitation" }).click();
-        await expect(page.locator(".form-errors")).toContainText(detail);
+        await expect(page.locator(".form-errors p")).toHaveText(detail);
         expect(
             await page.evaluate(
                 () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -426,10 +440,9 @@ test("anonymous expired invitation can be dismissed to restore company registrat
     await page.route("**/api/auth/browser/v1/auth/signup", (route) =>
         route.fulfill({
             status: 400,
-            json: {
-                status: 400,
-                errors: [{ message: "This invitation has expired." }],
-            },
+            json: allauthErrorBody(400, "invalid_request", [
+                { message: "This invitation has expired." },
+            ]),
         }),
     );
     await page.goto("/app/?token=expired-secret");

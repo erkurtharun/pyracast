@@ -13,15 +13,10 @@ from django.test import Client, RequestFactory, override_settings
 from django.utils import translation
 
 from pyracast.accounts.adapters import AccountAdapter
-from pyracast.accounts.language import (
-    LANGUAGE_COOKIE,
-    Language,
-    RequestLanguage,
-    browser_language,
-    save_user_language,
-)
+from pyracast.accounts.language import RequestLanguage, save_user_language
 from pyracast.accounts.models import UserLanguagePreference
 from pyracast.admin_workspace import recent_activity_context
+from pyracast.languages import LANGUAGE_COOKIE, Language, browser_language
 from pyracast.regions.models import AuditEvent
 from tests.support.admin_setup import admin_system
 from tests.support.api import verified_admin
@@ -136,7 +131,7 @@ def test_anonymous_choice_requires_csrf_and_sets_only_explicit_cookie() -> None:
 def test_unsupported_language_does_not_write(language: object) -> None:
     response = choose(Client(enforce_csrf_checks=True), language)
     assert response.status_code == 400
-    assert response.json()["code"] == "http_400"
+    assert response.json()["code"] == "invalid_request"
     assert LANGUAGE_COOKIE not in response.cookies
     assert not UserLanguagePreference.objects.exists()
 

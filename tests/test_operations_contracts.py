@@ -950,6 +950,10 @@ def test_smoke_proves_the_maintenance_notice_and_the_restricted_roles() -> None:
     assert "https://localhost:18443/app/) == 503 ]]" in smoke
     assert "https://localhost:18443/api/session/) == 503 ]]" in smoke
     assert f"retry-after: {maintenance.RETRY_AFTER_SECONDS}" in smoke
+    assert f"== '{maintenance.api_body('en').decode()}' ]]" in smoke
+    turkish = '"message": "Pyracast g\\u00fcncelleniyor.'
+    assert turkish in maintenance.api_body("tr").decode()
+    assert f"*'{turkish}'*" in smoke
     assert "INSERT INTO django_migrations" in smoke
     assert "== '42501'" in smoke
     assert "no pg_hba.conf entry" in smoke

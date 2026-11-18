@@ -39,10 +39,10 @@ def test_tenant_membership_returns_the_active_row_with_the_required_role() -> No
         tenant_membership(viewer, tenant.pk, role=WorkspaceRole.ADMIN)
     with pytest.raises(PermissionDenied, match="submit requests"):
         tenant_membership(administrator, tenant.pk, role=WorkspaceRole.VIEWER)
-    with pytest.raises(PermissionDenied, match="membership"):
+    with pytest.raises(PermissionDenied, match="not a member"):
         tenant_membership(outsider, tenant.pk)
     User.objects.filter(pk=viewer.pk).update(is_active=False)
-    with pytest.raises(PermissionDenied, match="membership"):
+    with pytest.raises(PermissionDenied, match="not a member"):
         tenant_membership(viewer, tenant.pk)
 
 

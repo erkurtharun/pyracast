@@ -1,11 +1,11 @@
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Max, Min, Q
 from django.utils import timezone
 
 from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.epias import EpiasClient
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.metering.client import get_epias_client
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.plants.models import Plant, PlantEvent
@@ -30,16 +30,16 @@ def connect_epias(
     require_platform_admin(actor)
     plant = Plant.objects.select_related("region").get(pk=plant_id, region__deleted_at__isnull=True)
     if isinstance(provider_plant_id, bool) or provider_plant_id <= 0 or not expected_eic.strip():
-        raise ValidationError("invalid_epias_plant")
+        raise DomainError(ErrorCode.INVALID_EPIAS_PLANT)
     if plant.current_configuration is None or not configuration_is_current(
         plant.current_configuration
     ):
-        raise ValidationError("configuration_unavailable")
+        raise DomainError(ErrorCode.CONFIGURATION_UNAVAILABLE)
     provider = client or get_epias_client()
     candidates = provider.list_plants()
     selected = next((p for p in candidates if p.id == provider_plant_id), None)
     if selected is None or selected.eic != expected_eic.strip():
-        raise ValidationError("epias_plant_identity_mismatch")
+        raise DomainError(ErrorCode.EPIAS_PLANT_IDENTITY_MISMATCH)
     settlement = provider.resolve_settlement_plant(selected.eic)
     with transaction.atomic():
         Region.objects.select_for_update().get(pk=plant.region_id)
@@ -50,7 +50,7 @@ def connect_epias(
             or plant.current_configuration is None
             or not configuration_is_current(plant.current_configuration)
         ):
-            raise ValidationError("configuration_unavailable")
+            raise DomainError(ErrorCode.CONFIGURATION_UNAVAILABLE)
         connection = EpiasConnection.objects.select_for_update().filter(plant=plant).first()
         if connection is None:
             connection = EpiasConnection(plant=plant, connected_by=actor)

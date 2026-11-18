@@ -27,6 +27,7 @@ from pyracast.plants.operations import (
 from pyracast.plants.production import production_history
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
+from tests.support.errors import raises_code
 from tests.support.plant_operations import make_plant, saved_actuals, snapshot_for
 from tests.support.production_history import upload
 
@@ -50,7 +51,7 @@ def test_seven_saved_days_do_not_enable_ten_and_batch_rolls_back(
     assert sum(row["can_enter"] for row in rows) == 168
     valid, _ = local_day_bounds(DAY, system.binding.timezone)
     invalid, _ = local_day_bounds(older, system.binding.timezone)
-    with pytest.raises(ValidationError, match="estimated_actuals_unavailable"):
+    with raises_code("estimated_actuals_unavailable"):
         upload(
             system,
             plant,
@@ -112,7 +113,7 @@ def test_reference_holes_disable_only_affected_slots(
     assert half["intervals"][0]["can_enter"]
     assert not half["intervals"][1]["can_enter"]
     start, _ = local_day_bounds(DAY, system.binding.timezone)
-    with pytest.raises(ValidationError, match="estimated_actuals_unavailable"):
+    with raises_code("estimated_actuals_unavailable"):
         upload(system, plant, [ObservationInput(start, start + timedelta(hours=1), 0)])
 
 

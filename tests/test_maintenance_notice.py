@@ -7,8 +7,12 @@ from email.message import Message
 from http.server import ThreadingHTTPServer
 
 import pytest
+from django.test import RequestFactory
+from django.utils import translation
 
 from pyracast import maintenance
+from pyracast.api.errors import coded, error_json
+from pyracast.errors import MESSAGES, ErrorCode
 
 
 @pytest.fixture
@@ -24,11 +28,13 @@ def origin() -> Iterator[str]:
         thread.join(timeout=5)
 
 
-def fetch(url: str, accept: str = "*/*") -> tuple[int, Message, bytes]:
+def fetch(
+    url: str, accept: str = "*/*", headers: dict[str, str] | None = None
+) -> tuple[int, Message, bytes]:
     origin, path = url.split("/", 1)
     connection = http.client.HTTPConnection(origin, timeout=5)
     try:
-        connection.request("GET", f"/{path}", headers={"Accept": accept})
+        connection.request("GET", f"/{path}", headers={"Accept": accept, **(headers or {})})
         response = connection.getresponse()
         return response.status, response.headers, response.read()
     finally:
@@ -54,7 +60,53 @@ def test_an_api_call_gets_the_api_error_body_with_a_retry_delay(origin: str, acc
     assert headers["Retry-After"] == str(maintenance.RETRY_AFTER_SECONDS)
     assert headers["Content-Type"] == "application/json"
     assert headers["Cache-Control"] == "no-store"
-    assert json.loads(body) == {"code": "maintenance"}
+    assert json.loads(body) == {
+        "code": "maintenance",
+        "message": maintenance.MESSAGES["en"],
+        "retry_after": maintenance.RETRY_AFTER_SECONDS,
+    }
+
+
+def api_answer(headers: dict[str, str]) -> tuple[int, dict[str, str], bytes]:
+    request = RequestFactory().get("/api/session/", headers=headers)
+    response = error_json(
+        request,
+        lambda: coded(ErrorCode.MAINTENANCE, 503, retry_after=maintenance.RETRY_AFTER_SECONDS),
+    )
+    return response.status_code, dict(response.headers), response.content
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"Accept-Language": "en"},
+        {"Accept-Language": "tr-TR,tr;q=0.9,en;q=0.5"},
+        {"Accept-Language": "de"},
+        {"Accept-Language": "de", "CF-IPCountry": "TR"},
+        {"Accept-Language": "tr;q=0", "CF-IPCountry": "TR"},
+        {"Cookie": "pyracast_language=tr", "Accept-Language": "en"},
+        {"Cookie": "pyracast_language=xx; other=1", "Accept-Language": "tr"},
+    ],
+)
+def test_the_notice_answers_byte_for_byte_what_the_api_would(
+    origin: str, headers: dict[str, str]
+) -> None:
+    expected_status, expected_headers, expected_body = api_answer(headers)
+
+    status, notice_headers, body = fetch(f"{origin}/api", headers=headers)
+
+    assert (status, body) == (expected_status, expected_body)
+    assert notice_headers["Retry-After"] == expected_headers["Retry-After"]
+    assert notice_headers["Content-Type"] == expected_headers["Content-Type"]
+    assert "no-store" in expected_headers["Cache-Control"]
+
+
+def test_the_notice_messages_are_the_catalogued_api_messages() -> None:
+    for language, message in maintenance.MESSAGES.items():
+        with translation.override(language):
+            assert str(MESSAGES[ErrorCode.MAINTENANCE]) == message
+    assert ErrorCode.MAINTENANCE.value == maintenance.CODE
 
 
 def test_a_navigation_to_a_backend_page_gets_the_maintenance_page(origin: str) -> None:

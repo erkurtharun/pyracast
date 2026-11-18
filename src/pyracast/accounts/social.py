@@ -24,6 +24,10 @@ from pyracast.accounts.audit import record_security_event
 from pyracast.accounts.authorization import requires_admin_mfa
 
 
+def social_callback_url() -> str:
+    return f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1"
+
+
 class UnavailableSocialAppError(SocialApp.DoesNotExist, ValueError):
     pass
 
@@ -129,7 +133,7 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
         )
 
     def get_connect_redirect_url(self, request: HttpRequest, socialaccount: SocialAccount) -> str:
-        return f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1"
+        return social_callback_url()
 
     def validate_disconnect(
         self, account: SocialAccount, accounts: QuerySet[SocialAccount]

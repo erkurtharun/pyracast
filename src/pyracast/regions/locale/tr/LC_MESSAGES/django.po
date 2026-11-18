@@ -8,13 +8,6 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
-msgid ""
-"%(field)s must be finite, nonnegative, and no greater than the known "
-"configured capacity."
-msgstr ""
-"%(field)s sonlu, sıfır veya pozitif olmalı ve bilinen yapılandırılmış "
-"kapasiteyi aşmamalıdır."
-
 msgid "%(provider)s · %(identity)s · key revision %(revision)s"
 msgstr "%(provider)s · %(identity)s · anahtar revizyonu %(revision)s"
 
@@ -27,12 +20,6 @@ msgstr ""
 
 msgid "A calibration is already pending."
 msgstr "Bekleyen bir kalibrasyon zaten var."
-
-msgid "A cancelled incident cannot be changed."
-msgstr "İptal edilmiş bir kesinti değiştirilemez."
-
-msgid "A plant configuration is required."
-msgstr "Santral yapılandırması gereklidir."
 
 msgid "A plant name of at most 200 characters is required."
 msgstr "En fazla 200 karakterlik bir santral adı girin."
@@ -48,11 +35,6 @@ msgstr "Değişiklik, seçili hesabı kullanan tüm santralleri etkiler."
 
 msgid "A timezone-aware ISO 8601 timestamp is required."
 msgstr "Saat dilimi içeren bir ISO 8601 zamanı girin."
-
-msgid ""
-"A title of at most 200 characters and notes of at most 2000 characters are "
-"required."
-msgstr "Başlık en fazla 200, notlar en fazla 2000 karakter olmalıdır."
 
 msgid "AC generation"
 msgstr "AC üretimi"
@@ -383,10 +365,6 @@ msgstr "Kısmi tahmin içeren e-postalar"
 msgid "Emails without saved forecasts"
 msgstr "Kayıtlı tahmin bulunmayan e-postalar"
 
-msgid "End must be aware, after start and no later than now."
-msgstr ""
-"Bitiş saat dilimi içermeli, başlangıçtan sonra olmalı ve şu anı aşmamalıdır."
-
 msgid "English"
 msgstr "English"
 
@@ -484,15 +462,6 @@ msgid ""
 "units/basis"
 msgstr ""
 "Yatay referansı ve eşleşen güç ile kapasite birimlerini/esasını doğruladım"
-
-msgid "Incident fields are incomplete or unsupported."
-msgstr "Kesinti alanları eksik veya desteklenmiyor."
-
-msgid "Incident periods must not overlap."
-msgstr "Kesinti dönemleri birbiriyle çakışmamalıdır."
-
-msgid "Incident revision changed."
-msgstr "Kesinti kaydı değişti. Listeyi yeniden yükleyip tekrar deneyin."
 
 msgid "Installation date"
 msgstr "Kurulum tarihi"
@@ -855,6 +824,10 @@ msgstr "Üretim girişi için güncel ve onaylı yapılandırma gereklidir."
 msgid "Production changed. Reload the latest values before saving."
 msgstr ""
 "Üretim verileri değişti. Kaydetmeden önce güncel değerleri yeniden yükleyin."
+
+msgid "Pyracast is being updated. Try again in a minute; your data is safe."
+msgstr ""
+"Pyracast güncelleniyor. Bir dakika sonra yeniden deneyin; verileriniz güvende."
 
 msgid "A production batch must stay within 31 local days."
 msgstr "Bir üretim grubu en fazla 31 yerel günü kapsayabilir."
@@ -1245,9 +1218,6 @@ msgstr "Güncel sağlayıcı bağlantısı doğrulandı. Santral artık onaylana
 msgid "The durable dispatcher recovers expired leases."
 msgstr "Kalıcı dağıtıcı, süresi dolan iş sahipliklerini kurtarır."
 
-msgid "The incident is already closed."
-msgstr "Kesinti zaten kapatılmış."
-
 msgid "The local issuance cutoff is ambiguous or does not exist."
 msgstr ""
 "Yerel yayın kesim saati belirsiz veya mevcut değil. Başka bir saat seçin."
@@ -1395,9 +1365,6 @@ msgstr "Yayımlanmamış veri"
 msgid "Unsupported data source."
 msgstr "Geçerli bir veri kaynağı seçin."
 
-msgid "Unsupported incident kind."
-msgstr "Geçerli bir kesinti türü seçin."
-
 msgid "Unsupported meter basis."
 msgstr "Geçerli bir ölçüm noktası seçin."
 
@@ -1430,13 +1397,6 @@ msgstr "1 ile 31 günlük bir aralık ve 30 veya 60 dakikalık çözünürlük s
 
 msgid "Use an existing account (shared key and quota)"
 msgstr "Mevcut hesap kullan (paylaşılan anahtar ve kota)"
-
-msgid ""
-"Use aware timestamps: start must not be in the future; end must be after "
-"start and no later than now."
-msgstr ""
-"Saat dilimi içeren zamanlar kullanın: başlangıç gelecekte olmamalı; bitiş "
-"başlangıçtan sonra olmalı ve şu anı aşmamalıdır."
 
 msgid "Use exactly 16 letters, digits or hyphens."
 msgstr "Tam olarak 16 harf, rakam veya kısa çizgi kullanın."
@@ -2025,6 +1985,145 @@ msgstr ""
 "Bir santralin alıcı listesi sınırı aşıyor, boş veya geçersiz bir adres içeriyor. "
 "Çalışma alanı yöneticisinden düzeltmesini isteyin."
 
+msgid "A title of at most 200 characters is required."
+msgstr "En fazla 200 karakterlik bir başlık gereklidir."
+
+msgid "An outage end time is required."
+msgstr "Kesinti bitiş zamanı gereklidir."
+
+msgid "Another request from this session is still running. Try again."
+msgstr "Bu oturumdan gönderilen başka bir istek hâlâ sürüyor. Tekrar deneyin."
+
+msgid "Available capacity must be a finite, nonnegative number."
+msgstr "Kullanılabilir kapasite sonlu ve negatif olmayan bir sayı olmalıdır."
+
+msgid "Available capacity must not exceed the configured capacity."
+msgstr "Kullanılabilir kapasite yapılandırılmış kapasiteyi aşmamalıdır."
+
+msgid "Check the highlighted values and try again."
+msgstr "İşaretli değerleri kontrol edip tekrar deneyin."
+
+msgid "Enter a positive EPİAŞ plant ID and the plant's EIC."
+msgstr "Pozitif bir EPİAŞ santral kimliği ve santralin EIC kodunu girin."
+
+msgid "Notes must stay within 2000 characters."
+msgstr "Notlar 2000 karakteri aşmamalıdır."
+
+msgid "Outage fields are incomplete or unsupported."
+msgstr "Kesinti alanları eksik veya desteklenmiyor."
+
+msgid "Outage periods must not overlap."
+msgstr "Kesinti dönemleri birbiriyle çakışmamalıdır."
+
+msgid "Outage times must include a time zone."
+msgstr "Kesinti zamanları saat dilimi içermelidir."
+
+msgid "Platform administrator required."
+msgstr "Platform yöneticisi yetkisi gereklidir."
+
+msgid "Send the request as JSON."
+msgstr "İsteği JSON olarak gönderin."
+
+msgid "Sign in to continue."
+msgstr "Devam etmek için oturum açın."
+
+msgid "The change collided with another change. Try again."
+msgstr "Değişiklik başka bir değişiklikle çakıştı. Tekrar deneyin."
+
+msgid "The forecast provider is limiting requests. Try again later."
+msgstr "Tahmin sağlayıcısı istekleri sınırlıyor. Daha sonra tekrar deneyin."
+
+msgid "The forecast provider is unavailable. Try again later."
+msgstr "Tahmin sağlayıcısına ulaşılamıyor. Daha sonra tekrar deneyin."
+
+msgid ""
+"The forecast provider rejected the stored credentials. Contact your "
+"administrator."
+msgstr ""
+"Tahmin sağlayıcısı kayıtlı kimlik bilgilerini reddetti. Yöneticinize "
+"başvurun."
+
+msgid "The forecast provider's daily quota is used up. Try again tomorrow."
+msgstr "Tahmin sağlayıcısının günlük kotası doldu. Yarın tekrar deneyin."
+
+msgid "The forecast sources changed while loading. Try again."
+msgstr "Tahmin kaynakları yüklenirken değişti. Tekrar deneyin."
+
+msgid "The outage changed. Reload the list and try again."
+msgstr "Kesinti kaydı değişti. Listeyi yeniden yükleyip tekrar deneyin."
+
+msgid "The outage end must be after its start."
+msgstr "Kesinti bitişi başlangıcından sonra olmalıdır."
+
+msgid "The outage end must not be in the future."
+msgstr "Kesinti bitişi gelecekte olamaz."
+
+msgid "The outage start must not be in the future."
+msgstr "Kesinti başlangıcı gelecekte olamaz."
+
+msgid "The page expired. Reload it and try again."
+msgstr "Sayfanın süresi doldu. Sayfayı yenileyip tekrar deneyin."
+
+msgid "The request conflicts with the current state. Reload and try again."
+msgstr "İstek mevcut durumla çakışıyor. Sayfayı yenileyip tekrar deneyin."
+
+msgid "Send the request body as a JSON object."
+msgstr "İstek gövdesini bir JSON nesnesi olarak gönderin."
+
+msgid "Choose a supported language."
+msgstr "Desteklenen bir dil seçin."
+
+msgid "The request could not be processed."
+msgstr "İstek işlenemedi."
+
+msgid "The request could not be verified."
+msgstr "İstek doğrulanamadı."
+
+msgid "The request took too long. Try again later."
+msgstr "İstek çok uzun sürdü. Daha sonra tekrar deneyin."
+
+msgid "The requested item was not found."
+msgstr "İstenen öğe bulunamadı."
+
+msgid "The requested response format is not available."
+msgstr "İstenen yanıt biçimi kullanılamıyor."
+
+msgid "The workspace is busy. Try again in a moment."
+msgstr "Çalışma alanı meşgul. Biraz sonra tekrar deneyin."
+
+msgid "This action is not available here."
+msgstr "Bu işlem burada kullanılamaz."
+
+msgid "This outage is already closed."
+msgstr "Bu kesinti zaten kapatılmış."
+
+msgid "This request no longer matches the plant. Review it again."
+msgstr "Bu talep artık santralle uyuşmuyor. Yeniden inceleyin."
+
+msgid "Too many invitations were sent. Wait a minute and try again."
+msgstr "Çok fazla davet gönderildi. Bir dakika bekleyip tekrar deneyin."
+
+msgid "Too many requests. Wait a moment and try again."
+msgstr "Çok fazla istek gönderildi. Biraz bekleyip tekrar deneyin."
+
+msgid "Unsupported outage kind."
+msgstr "Desteklenmeyen kesinti türü."
+
+msgid "You are not a member of this workspace."
+msgstr "Bu çalışma alanının üyesi değilsiniz."
+
+msgid "You do not have permission for this action."
+msgstr "Bu işlem için yetkiniz yok."
+
+msgid "Your session ended. Sign in again."
+msgstr "Oturumunuz sona erdi. Yeniden oturum açın."
+
+msgid "Enter a number greater than %(limit)s."
+msgstr "%(limit)s değerinden büyük bir sayı girin."
+
+msgid "Enter a number less than %(limit)s."
+msgstr "%(limit)s değerinden küçük bir sayı girin."
+
 msgid "Provider account created"
 msgstr "Sağlayıcı hesabı oluşturuldu"
 
@@ -2033,3 +2132,4 @@ msgstr "Sağlayıcı anahtarı yenilendi"
 
 msgid "Provider request pause cleared"
 msgstr "Sağlayıcı istek beklemesi kaldırıldı"
+

@@ -4,23 +4,19 @@ from math import isfinite
 from typing import Any
 
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef, Q, Subquery
 from django.utils import timezone
-from django.utils.translation import gettext, gettext_lazy
-from rest_framework.exceptions import APIException
+from django.utils.translation import gettext_lazy as _
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
+from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.regions.models import Region
 
-
-class RevisionConflict(APIException):
-    status_code = 409
-    default_detail = gettext_lazy("Incident revision changed.")
+UNZONED = _("Outage times must include a time zone.")
 
 
 @dataclass(frozen=True)
@@ -138,33 +134,28 @@ def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: da
         "available_inverter_mw",
         "available_export_mw",
     }:
-        raise ValidationError(gettext("Incident fields are incomplete or unsupported."))
-    start, end = values["starts_at"], values["ends_at"]
-    if (
-        start.utcoffset() is None
-        or start > now
-        or (end is not None and (end.utcoffset() is None or end <= start or end > now))
-    ):
-        raise ValidationError(
-            gettext(
-                "Use aware timestamps: start must not be in the future; "
-                "end must be after start and no later than now."
-            )
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST, _("Outage fields are incomplete or unsupported.")
         )
+    start, end = values["starts_at"], values["ends_at"]
+    if start.utcoffset() is None:
+        raise DomainError(ErrorCode.INVALID_REQUEST, UNZONED, field="starts_at")
+    if start > now:
+        raise DomainError(ErrorCode.INCIDENT_STARTS_IN_FUTURE, field="starts_at")
+    if end is not None:
+        _validate_end(start, end, now)
     if values["kind"] not in {"inverter", "panels", "grid", "other", "multiple"}:
-        raise ValidationError(gettext("Unsupported incident kind."))
-    if (
-        not isinstance(values["title"], str)
-        or not values["title"].strip()
-        or len(values["title"]) > 200
-        or not isinstance(values["notes"], str)
-        or len(values["notes"]) > 2000
-    ):
-        raise ValidationError(
-            gettext(
-                "A title of at most 200 characters and notes of at most "
-                "2000 characters are required."
-            )
+        raise DomainError(ErrorCode.INVALID_REQUEST, _("Unsupported outage kind."), field="kind")
+    title, notes = values["title"], values["notes"]
+    if not isinstance(title, str) or not title.strip() or len(title) > 200:
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST,
+            _("A title of at most 200 characters is required."),
+            field="title",
+        )
+    if not isinstance(notes, str) or len(notes) > 2000:
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST, _("Notes must stay within 2000 characters."), field="notes"
         )
     for field, baseline in (
         ("available_dc_mw", configuration.dc_capacity_mw),
@@ -172,20 +163,30 @@ def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: da
         ("available_export_mw", configuration.export_limit_mw),
     ):
         value = values[field]
-        if value is not None and (
+        if value is None:
+            continue
+        if (
             isinstance(value, bool)
             or not isinstance(value, (int, float))
             or not isfinite(value)
             or value < 0
-            or (baseline is not None and value > baseline)
         ):
-            raise ValidationError(
-                gettext(
-                    "%(field)s must be finite, nonnegative, "
-                    "and no greater than the known configured capacity."
-                ),
-                params={"field": field},
+            raise DomainError(
+                ErrorCode.INVALID_REQUEST,
+                _("Available capacity must be a finite, nonnegative number."),
+                field=field,
             )
+        if baseline is not None and value > baseline:
+            raise DomainError(ErrorCode.INCIDENT_CAPACITY_EXCEEDED, field=field)
+
+
+def _validate_end(start: datetime, end: datetime, now: datetime) -> None:
+    if end.utcoffset() is None:
+        raise DomainError(ErrorCode.INVALID_REQUEST, UNZONED, field="ends_at")
+    if end <= start:
+        raise DomainError(ErrorCode.INCIDENT_ENDS_BEFORE_START, field="ends_at")
+    if end > now:
+        raise DomainError(ErrorCode.INCIDENT_ENDS_IN_FUTURE, field="ends_at")
 
 
 def _record(row: PlantIncident, actor: User) -> None:
@@ -209,7 +210,7 @@ def prepare_incident(
     if incident_id is None:
         configuration = plant.current_configuration
         if configuration is None:
-            raise ValidationError(gettext("A plant configuration is required."))
+            raise DomainError(ErrorCode.CONFIGURATION_UNAVAILABLE)
         row = PlantIncident(
             plant=plant,
             declared_configuration=configuration,
@@ -222,14 +223,14 @@ def prepare_incident(
             rows = rows.select_for_update()
         row = rows.get(pk=incident_id, plant=plant)
         if expected_revision != row.revision:
-            raise RevisionConflict
+            raise ConflictError(ErrorCode.INCIDENT_REVISION_CHANGED)
         if row.cancelled_at is not None:
-            raise ValidationError(gettext("A cancelled incident cannot be changed."))
+            raise DomainError(ErrorCode.INCIDENT_CLOSED)
         configuration = (
             plant.current_configuration if row.ends_at is None else row.declared_configuration
         )
         if configuration is None:
-            raise ValidationError(gettext("A plant configuration is required."))
+            raise DomainError(ErrorCode.CONFIGURATION_UNAVAILABLE)
         row.declared_configuration = configuration
         row.revision += 1
         row.updated_by = actor
@@ -241,10 +242,8 @@ def prepare_incident(
         if values["ends_at"] is not None
         else PlantIncident.objects.filter(plant=plant, cancelled_at__isnull=True).exclude(pk=row.pk)
     )
-    from django.db.models import Q
-
     if overlap.filter(Q(ends_at__isnull=True) | Q(ends_at__gt=values["starts_at"])).exists():
-        raise ValidationError(gettext("Incident periods must not overlap."))
+        raise DomainError(ErrorCode.INCIDENT_OVERLAP, field="starts_at")
     for name, value in values.items():
         setattr(row, name, value)
     return row
@@ -290,17 +289,18 @@ def prepare_incident_finish(
         rows = rows.select_for_update()
     row = rows.get(pk=incident_id, plant=plant)
     if row.revision != expected_revision:
-        raise RevisionConflict
+        raise ConflictError(ErrorCode.INCIDENT_REVISION_CHANGED)
     if row.cancelled_at is not None or (not cancel and row.ends_at is not None):
-        raise ValidationError(gettext("The incident is already closed."))
+        raise DomainError(ErrorCode.INCIDENT_CLOSED)
     now = timezone.now()
     if cancel:
         row.cancelled_at = now
-    elif (
-        ends_at is None or ends_at.utcoffset() is None or ends_at <= row.starts_at or ends_at > now
-    ):
-        raise ValidationError(gettext("End must be aware, after start and no later than now."))
+    elif ends_at is None:
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST, _("An outage end time is required."), field="ends_at"
+        )
     else:
+        _validate_end(row.starts_at, ends_at, now)
         row.ends_at = ends_at
     row.revision += 1
     row.updated_by = actor

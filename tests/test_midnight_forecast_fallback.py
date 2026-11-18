@@ -99,11 +99,11 @@ def test_saved_actuals_calculation_failure_returns_validation_error_without_fore
     response = client.get(path, {"date": DAY.isoformat(), "data_source": "auto"})
     assert response.status_code == 400, response.content
     assert response.json() == {
-        "code": "invalid_request",
-        "detail": [
+        "code": "calculation_out_of_range",
+        "message": (
             "This forecast could not be calculated. "
             "Choose another day or contact your administrator."
-        ],
+        ),
     }
     assert RequestAttempt.objects.count() == requests
 

@@ -9,8 +9,8 @@ from django.conf import settings
 from django.db import models
 from drf_spectacular.plumbing import deep_import_string
 
-from pyracast.accounts.language import Language
 from pyracast.accounts.models import UserLanguagePreference
+from pyracast.languages import Language
 from tests.support.vocabularies import (
     COVERED_APPS,
     INPUT_VOCABULARIES,

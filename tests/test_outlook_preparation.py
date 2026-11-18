@@ -5,7 +5,6 @@ from threading import Event
 from typing import Any, cast
 
 import pytest
-from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
@@ -20,6 +19,7 @@ from pyracast.plants import incident_forecasts
 from pyracast.plants.forecasting import forecast_payload
 from pyracast.plants.history import plant_outlook
 from tests.support.domain import NOW
+from tests.support.errors import raises_code
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -160,7 +160,7 @@ def test_selection_outside_a_snapshot_rejects_a_source_revoked_between_its_reads
 
     with (
         connection.execute_wrapper(revoke_before_payload_read),
-        pytest.raises(ValidationError, match="forecast_sources_changed"),
+        raises_code("forecast_sources_changed"),
     ):
         select()
 
@@ -182,7 +182,7 @@ def test_only_contributing_forecast_rows_require_valid_native_bounds(
     older.save(update_fields=("normalized_intervals",))
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     if not shadowed:
-        with pytest.raises(ValidationError, match="calculation_out_of_range"):
+        with raises_code("calculation_out_of_range"):
             plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
         return
     outlook = plant_outlook(*scope, target_date=DAY, resolution_minutes=60)

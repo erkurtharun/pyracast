@@ -3,8 +3,10 @@ from typing import cast
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
+from django.utils.translation import gettext
 
 from pyracast.calculation import calculate
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.intraday import (
     apply_intraday_source,
     prepare_intraday_source,
@@ -35,9 +37,9 @@ def current_forecast(
 ) -> dict[str, object]:
     today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
     if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
-        raise ValidationError("Resolution must be 30 or 60 minutes.")
+        raise ValidationError(gettext("Resolution must be 30 or 60 minutes."))
     if not today <= target_date <= today + timedelta(days=14):
-        raise ValidationError("date_out_of_range")
+        raise DomainError(ErrorCode.DATE_OUT_OF_RANGE)
     configuration = (
         PlantConfiguration.objects.select_related("binding__provider_account")
         .filter(pk=plant.current_configuration_id, plant=plant, created_at__lte=now)
@@ -127,7 +129,7 @@ def _composed_forecast(
                 else None
             )
         except (ValueError, ArithmeticError, KeyError, TypeError) as exc:
-            raise ValidationError("calculation_out_of_range") from exc
+            raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from exc
         if source is not None:
             snapshots = source.snapshots
             source_kind = source.source_kind
@@ -182,7 +184,7 @@ def _composed_forecast(
                 else:
                     apply_composition(irradiance, snapshots, composition)
             except (ValueError, ArithmeticError) as exc:
-                raise ValidationError("calculation_out_of_range") from exc
+                raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from exc
             if source is None:
                 cast(dict[str, object], result["provenance"])["selection_policy"] = SELECTION_POLICY
             if historical and configuration.pk != plant.current_configuration_id:

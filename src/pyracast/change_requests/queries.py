@@ -1,7 +1,7 @@
 from typing import Any
 
 from django.contrib.auth.models import User
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction
 from django.db.models import QuerySet
 
@@ -16,7 +16,6 @@ from pyracast.change_requests.models import (
     IncidentChangeAction,
 )
 from pyracast.change_requests.operations import (
-    RequestConflictError,
     _request,
     _validate,
     visible_requests,
@@ -27,6 +26,7 @@ from pyracast.change_requests.preparation import (
     production_context,
     review_context,
 )
+from pyracast.errors import MESSAGES, ErrorCode
 from pyracast.incidents.models import IncidentRevision
 from pyracast.incidents.operations import lock_incident_plant
 
@@ -72,8 +72,13 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
     if request.status == ChangeRequestStatus.PENDING:
         try:
             _validate(actor, request, plant, lock=False)
-        except (RequestConflictError, ObjectDoesNotExist) as error:
-            conflict = {"code": "request_conflict", "detail": str(error)}
+        except (ValidationError, ObjectDoesNotExist) as error:
+            conflict = {
+                "code": ErrorCode.REQUEST_CONFLICT.value,
+                "message": " ".join(error.messages)
+                if isinstance(error, ValidationError)
+                else str(MESSAGES[ErrorCode.REQUEST_CONFLICT]),
+            }
         fingerprint = "v1:" + digest(review_context(request, plant, production_items=items))
     incident = None
     if request.kind == ChangeRequestKind.INCIDENT:

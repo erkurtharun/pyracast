@@ -2,6 +2,7 @@ import { test, expect, type Page } from "./support/test";
 import { mockApi, paged, user } from "./support/workspace";
 import { nativeProductionHistory } from "./support/native-production";
 import AxeBuilder from "@axe-core/playwright";
+import { errorBody } from "./support/errors";
 
 const reading = {
     energy_mwh: 1,
@@ -139,7 +140,14 @@ test("member submits a native production correction with a stable retry key and 
         expect(route.request().headers()["x-csrftoken"]).toBe("signed-token");
         submissions.push(route.request().postDataJSON());
         return submissions.length === 1
-            ? route.fulfill({ status: 503, json: { code: "workspace_busy" } })
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody(
+                      "busy",
+                      "The workspace is busy. Try again in a moment.",
+                      { retry_after: 1 },
+                  ),
+              })
             : route.fulfill({ status: 201, json: proposal() });
     });
     await openPlant(page, "Production");
@@ -159,7 +167,7 @@ test("member submits a native production correction with a stable retry key and 
         .getByRole("button", { name: "Send for approval", exact: true })
         .click();
     await expect(
-        editor.getByText("Another update is in progress. Try again shortly."),
+        editor.getByText("The workspace is busy. Try again in a moment."),
     ).toBeVisible();
     await editor.getByLabel("Reason for correction").fill("Checked meter");
     await editor
@@ -231,11 +239,11 @@ test("a server error shows its reference", async ({ page }) => {
     await page.route("**/change-requests/production/", (route) =>
         route.fulfill({
             status: 500,
-            json: {
-                code: "server_error",
-                message: "The server could not complete this request.",
-                request_id: "0123456789abcdef0123456789abcdef",
-            },
+            json: errorBody(
+                "server_error",
+                "The server could not complete this request.",
+                { request_id: "0123456789abcdef0123456789abcdef" },
+            ),
         }),
     );
     await openPlant(page, "Production");
@@ -419,7 +427,10 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
             item = { ...item, review_fingerprint: "context-2" };
             return route.fulfill({
                 status: 409,
-                json: { detail: "Review context changed." },
+                json: errorBody(
+                    "review_context_changed",
+                    "Review context changed.",
+                ),
             });
         }
         item = { ...item, status: "approved", can_review: false };
@@ -638,7 +649,7 @@ test("inbox loads bounded pages and requires an explicit rejection reason", asyn
         decision_reason: rejected ? "Please verify the start time" : "",
         conflict: {
             code: "request_conflict",
-            detail: "The plant configuration changed. Submit a new request.",
+            message: "The plant configuration changed. Submit a new request.",
         },
         incident: {
             action: "create",
@@ -807,7 +818,7 @@ for (const removal of ["decision", "concurrent"] as const) {
                 invalidPageRequests++;
                 return route.fulfill({
                     status: 404,
-                    json: { detail: "Invalid page." },
+                    json: errorBody("not_found", "Invalid page."),
                 });
             }
             return route.fulfill({

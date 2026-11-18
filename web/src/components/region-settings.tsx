@@ -90,43 +90,19 @@ function LocationRequests({
                 <ActionForm
                     submit={t("submitLocationRequest")}
                     onSubmit={async (data) => {
-                        try {
-                            await request<LocationChangeRequest>(
-                                `${base}location-change-requests/`,
-                                "POST",
-                                {
-                                    latitude: Number(data.get("latitude")),
-                                    longitude: Number(data.get("longitude")),
-                                    timezone: data.get("timezone"),
-                                    reason: data.get("reason"),
-                                    expected_revision: region.revision,
-                                },
-                                token,
-                            );
-                            onSubmitted();
-                        } catch (error) {
-                            const message =
-                                error instanceof Error
-                                    ? error.message
-                                    : t("requestFailed");
-                            if (message.includes("region_revision_changed"))
-                                throw new Error(t("locationChanged"), {
-                                    cause: error,
-                                });
-                            if (
-                                message.includes(
-                                    "location_change_already_pending",
-                                )
-                            )
-                                throw new Error(t("requestPending"), {
-                                    cause: error,
-                                });
-                            if (message.includes("location_unchanged"))
-                                throw new Error(t("locationUnchanged"), {
-                                    cause: error,
-                                });
-                            throw error;
-                        }
+                        await request<LocationChangeRequest>(
+                            `${base}location-change-requests/`,
+                            "POST",
+                            {
+                                latitude: Number(data.get("latitude")),
+                                longitude: Number(data.get("longitude")),
+                                timezone: data.get("timezone"),
+                                reason: data.get("reason"),
+                                expected_revision: region.revision,
+                            },
+                            token,
+                        );
+                        onSubmitted();
                     }}
                 >
                     <div className="form-grid">

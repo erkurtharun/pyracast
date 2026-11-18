@@ -8,8 +8,8 @@ import yaml
 from django.template.loader import get_template
 from django.utils import translation
 
-from pyracast.accounts.language import browser_language
 from pyracast.admin_forms import ProviderSetupForm
+from pyracast.languages import browser_language
 from scripts.translations import compile_catalogs
 
 ROOT = Path(__file__).resolve().parents[1]

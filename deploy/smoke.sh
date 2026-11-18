@@ -353,9 +353,10 @@ test -f "$temporary/release-blocked"
   --output "$temporary/notice.html" --write-out '%{http_code}' https://localhost:18443/app/) == 503 ]]
 grep -qi '^retry-after: 60' "$temporary/notice.headers"
 grep -qF '<title>Pyracast maintenance</title>' "$temporary/notice.html"
-[[ $("${tls_curl[@]}" --output "$temporary/notice.json" --write-out '%{http_code}' \
-  https://localhost:18443/api/session/) == 503 ]]
-[[ $(<"$temporary/notice.json") == '{"code": "maintenance"}' ]]
+[[ $("${tls_curl[@]}" -H 'Accept-Language: en' --output "$temporary/notice.json" \
+  --write-out '%{http_code}' https://localhost:18443/api/session/) == 503 ]]
+[[ $(<"$temporary/notice.json") == '{"code": "maintenance", "message": "Pyracast is being updated. Try again in a minute; your data is safe.", "retry_after": 60}' ]]
+[[ $("${tls_curl[@]}" -H 'Accept-Language: tr' https://localhost:18443/api/session/) == *'"message": "Pyracast g\u00fcncelleniyor.'* ]]
 "${reset_tool[@]}" abort
 test ! -e "$temporary/release-blocked"
 ready
