@@ -269,7 +269,7 @@ test("a customer manages one plant site through the real API", async ({
         .getByLabel("Resolved at (device time)", { exact: true })
         .fill(outageTimes.ends);
     await page.getByRole("button", { name: "Save resolution" }).click();
-    await expect(page.getByText("resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
         page.getByText("Estimated energy", { exact: true }),
