@@ -1,6 +1,7 @@
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from threading import Event
 from typing import Any
@@ -923,11 +924,10 @@ def test_a_provider_sign_in_whose_identity_is_connected_after_the_callback_looke
     assert session_user(client) is None
 
 
-def test_a_sign_in_refused_by_its_budget_waits_for_no_lock() -> None:
-    user = account("owner")
-    guess = {"email": OWNER, "password": "wrong-" + PASSWORD}
-    for _ in range(5):
-        assert submit(browser(), "auth/login", guess).status_code == 400
+@contextmanager
+def account_held(user: User) -> Iterator[Callable[[], bool]]:
+    # Holds the account's address rows and account row on another connection; the yielded check
+    # tells whether they are still held.
     held, release = Event(), Event()
 
     def hold_the_account() -> bool:
@@ -944,12 +944,78 @@ def test_a_sign_in_refused_by_its_budget_waits_for_no_lock() -> None:
         holder = pool.submit(hold_the_account)
         assert held.wait(timeout=10)
         try:
-            response = submit(browser(), "auth/login", {"email": OWNER, "password": PASSWORD})
-            still_held = not holder.done()
+            yield lambda: not holder.done()
         finally:
             release.set()
         assert holder.result(timeout=10)
 
+
+def error_codes(response: Any) -> list[str]:
+    return [error["code"] for error in response.json().get("errors", [])]
+
+
+def test_a_sign_in_refused_by_its_budget_waits_for_no_lock() -> None:
+    user = account("owner")
+    guess = {"email": OWNER, "password": "wrong-" + PASSWORD}
+    for _ in range(5):
+        assert submit(browser(), "auth/login", guess).status_code == 400
+
+    with account_held(user) as held:
+        response = submit(browser(), "auth/login", {"email": OWNER, "password": PASSWORD})
+        still_held = held()
+
     assert still_held
     assert response.status_code == 400
-    assert [error["code"] for error in response.json()["errors"]] == ["too_many_login_attempts"]
+    assert error_codes(response) == ["too_many_login_attempts"]
+
+
+def spent_reset(user: User) -> Client:
+    for _ in range(3):
+        assert submit(browser(), "auth/password/request", {"email": OWNER}).status_code == 401
+    return browser()
+
+
+def spent_reauthentication_code(user: User) -> Client:
+    client = signed_in(user)
+    for _ in range(3):
+        response = submit(client, "auth/reauthenticate/code/request", {"email": OWNER})
+        assert response.status_code == 200
+    return client
+
+
+def spent_address_change(user: User) -> Client:
+    client = signed_in(user, reauthenticated=True)
+    for index in range(3):
+        response = submit(client, "account/email", {"email": f"new-{index}@example.com"})
+        assert response.status_code == 200
+    return client
+
+
+SPENT_BUDGETS: dict[
+    str, tuple[Callable[[User], Client], str, dict[str, str], tuple[int, list[str]]]
+] = {
+    "reset-code": (spent_reset, "auth/password/request", {"email": OWNER}, (429, [])),
+    "reauthentication-code": (
+        spent_reauthentication_code,
+        "auth/reauthenticate/code/request",
+        {"email": OWNER},
+        (400, ["too_many_login_attempts"]),
+    ),
+    "address-change": (spent_address_change, "account/email", {"email": CHANGED}, (429, [])),
+}
+
+
+@pytest.mark.parametrize("start", SPENT_BUDGETS)
+def test_a_start_refused_by_its_budget_waits_for_no_lock(start: str) -> None:
+    spend, endpoint, data, refusal = SPENT_BUDGETS[start]
+    user = account("owner")
+    client = spend(user)
+    mail.outbox.clear()
+
+    with account_held(user) as held:
+        response = submit(client, endpoint, data)
+        still_held = held()
+
+    assert still_held
+    assert (response.status_code, error_codes(response)) == refusal
+    assert mail.outbox == []
