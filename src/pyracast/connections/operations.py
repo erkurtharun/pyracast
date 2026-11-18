@@ -17,6 +17,7 @@ from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
+    CollectionJobError,
     CollectionJobStatus,
     RequestAttempt,
     RequestOutcome,
@@ -121,7 +122,7 @@ def reserve_account_request(
     account: ProviderAccount,
     now: datetime,
     *,
-    purpose: str,
+    purpose: RequestPurpose,
     binding: SiteBinding | None = None,
     job: CollectionJob | None = None,
 ) -> RequestAttempt:
@@ -164,7 +165,11 @@ def reserve_account_request(
 
 
 def reserve_request(
-    binding: SiteBinding, now: datetime, *, purpose: str, job: CollectionJob | None = None
+    binding: SiteBinding,
+    now: datetime,
+    *,
+    purpose: RequestPurpose,
+    job: CollectionJob | None = None,
 ) -> RequestAttempt:
     return reserve_account_request(
         binding.provider_account, now, purpose=purpose, binding=binding, job=job
@@ -242,7 +247,7 @@ def validate_binding(
             if (
                 latest is not None
                 and latest.status == CollectionJobStatus.FAILED
-                and latest.last_error == "provider_authentication_failed"
+                and latest.last_error == CollectionJobError.PROVIDER_AUTHENTICATION_FAILED
             ):
                 latest.status = CollectionJobStatus.PENDING
                 latest.available_at = recovered_at

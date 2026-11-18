@@ -7,7 +7,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from pyracast.metering import operations
-from pyracast.metering.models import EpiasConnection
+from pyracast.metering.models import EpiasConnection, EpiasJobError
 from pyracast.plants.api import ScopedView
 
 
@@ -20,7 +20,7 @@ class EpiasConnectionOutput(serializers.Serializer[Any]):
     eic = serializers.CharField(allow_blank=True)
     name = serializers.CharField(allow_blank=True)
     last_success_at = serializers.DateTimeField(allow_null=True)
-    last_error = serializers.CharField(allow_blank=True)
+    last_error = serializers.ChoiceField(choices=EpiasJobError.choices, allow_blank=True)
     pending_jobs = serializers.IntegerField()
     archived_days = serializers.IntegerField()
 

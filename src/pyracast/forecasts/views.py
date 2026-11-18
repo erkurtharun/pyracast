@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from pyracast.api.serializers import InputSerializer
-from pyracast.forecasts.models import CollectionEndpoint, CollectionJobStatus
+from pyracast.forecasts.models import CollectionEndpoint, CollectionJobError, CollectionJobStatus
 from pyracast.forecasts.schedule import (
     MAX_COLLECTION_TIMES,
     configure_schedule,
@@ -33,7 +33,7 @@ class CollectionJobOutput(serializers.Serializer[dict[str, object]]):
     available_at = serializers.DateTimeField()
     retry_until = serializers.DateTimeField(allow_null=True)
     attempts = serializers.IntegerField()
-    last_error = serializers.CharField()
+    last_error = serializers.ChoiceField(choices=CollectionJobError.choices, allow_blank=True)
 
 
 class CollectionScheduleOutput(CollectionScheduleInput):

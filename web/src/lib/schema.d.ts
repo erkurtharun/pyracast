@@ -909,6 +909,36 @@ export interface components {
             | "historical_import"
             | "scaled_forecasts"
             | "scaled_estimated_actuals";
+        /**
+         * @description * `history_window_closed` - History window closed
+         *     * `attempts_exhausted` - Attempts exhausted
+         *     * `forecast_superseded` - Forecast superseded
+         *     * `history_incomplete` - History incomplete
+         *     * `history_already_archived` - History already archived
+         *     * `provider_authentication_failed` - Provider authentication failed
+         *     * `provider_throttled` - Provider throttled
+         *     * `history_budget_reserved` - History budget reserved
+         *     * `quota_exhausted` - Quota exhausted
+         *     * `provider_failure` - Provider failure
+         *     * `provider_unexpected_failure` - Provider unexpected failure
+         *     * `invalid_source_kind` - Invalid source kind
+         *     * `calculation_failure` - Calculation failure
+         * @enum {string}
+         */
+        CollectionJobErrorEnum:
+            | "history_window_closed"
+            | "attempts_exhausted"
+            | "forecast_superseded"
+            | "history_incomplete"
+            | "history_already_archived"
+            | "provider_authentication_failed"
+            | "provider_throttled"
+            | "history_budget_reserved"
+            | "quota_exhausted"
+            | "provider_failure"
+            | "provider_unexpected_failure"
+            | "invalid_source_kind"
+            | "calculation_failure";
         CollectionJobOutput: {
             id: number;
             endpoint: components["schemas"]["CollectionEndpointEnum"];
@@ -920,7 +950,9 @@ export interface components {
             /** Format: date-time */
             retry_until: string | null;
             attempts: number;
-            last_error: string;
+            last_error:
+                | components["schemas"]["CollectionJobErrorEnum"]
+                | components["schemas"]["BlankEnum"];
         };
         /**
          * @description * `pending` - Pending
@@ -1022,10 +1054,26 @@ export interface components {
             name: string;
             /** Format: date-time */
             last_success_at: string | null;
-            last_error: string;
+            last_error:
+                | components["schemas"]["EpiasJobErrorEnum"]
+                | components["schemas"]["BlankEnum"];
             pending_jobs: number;
             archived_days: number;
         };
+        /**
+         * @description * `retry_window_expired` - Retry window expired
+         *     * `attempts_exhausted` - Attempts exhausted
+         *     * `epias_provider_failure` - Epias provider failure
+         *     * `unpublished_data` - Unpublished data
+         *     * `partial_data` - Partial data
+         * @enum {string}
+         */
+        EpiasJobErrorEnum:
+            | "retry_window_expired"
+            | "attempts_exhausted"
+            | "epias_provider_failure"
+            | "unpublished_data"
+            | "partial_data";
         /**
          * @description * `pending` - Pending
          *     * `running` - Running
@@ -2070,6 +2118,36 @@ export interface components {
          * @enum {string}
          */
         SnapshotSourceKindEnum: "forecast" | "estimated_actuals";
+        /**
+         * @description * `invalid_weather_number` - Invalid weather number
+         *     * `invalid_weather_coordinates` - Invalid weather coordinates
+         *     * `invalid_weather_schema` - Invalid weather schema
+         *     * `invalid_weather_timezone` - Invalid weather timezone
+         *     * `invalid_weather_units` - Invalid weather units
+         *     * `empty_weather_response` - Empty weather response
+         *     * `invalid_weather_interval` - Invalid weather interval
+         *     * `invalid_weather_window` - Invalid weather window
+         *     * `unsafe_weather_response` - Unsafe weather response
+         *     * `invalid_weather_collection_time` - Invalid weather collection time
+         *     * `weather_request_failed` - Weather request failed
+         *     * `weather_acquisition_failed` - Weather acquisition failed
+         *     * `weather_acquisition_interrupted` - Weather acquisition interrupted
+         * @enum {string}
+         */
+        SnapshotWeatherErrorEnum:
+            | "invalid_weather_number"
+            | "invalid_weather_coordinates"
+            | "invalid_weather_schema"
+            | "invalid_weather_timezone"
+            | "invalid_weather_units"
+            | "empty_weather_response"
+            | "invalid_weather_interval"
+            | "invalid_weather_window"
+            | "unsafe_weather_response"
+            | "invalid_weather_collection_time"
+            | "weather_request_failed"
+            | "weather_acquisition_failed"
+            | "weather_acquisition_interrupted";
         TenantOutput: {
             readonly id: number;
             readonly name: string;

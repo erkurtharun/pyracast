@@ -20,6 +20,7 @@ from pyracast.metering.client import get_epias_client
 from pyracast.metering.models import (
     EpiasCollectionJob,
     EpiasConnection,
+    EpiasJobError,
     EpiasJobStatus,
     EpiasSnapshot,
     EpiasSourceKind,
@@ -118,10 +119,10 @@ def claim_epias_job(job_id: int, now: datetime) -> EpiasLease | None:
             job.status = EpiasJobStatus.SUPERSEDED
         elif job.retry_until is not None and now >= job.retry_until:
             job.status = EpiasJobStatus.FAILED
-            job.last_error = "retry_window_expired"
+            job.last_error = EpiasJobError.RETRY_WINDOW_EXPIRED
         elif not _nightly_retry(job) and job.attempts >= 3:
             job.status = EpiasJobStatus.FAILED
-            job.last_error = "attempts_exhausted"
+            job.last_error = EpiasJobError.ATTEMPTS_EXHAUSTED
         else:
             job.status = EpiasJobStatus.RUNNING
             job.attempts += 1
@@ -151,7 +152,7 @@ def _finish_failure(
     now: datetime,
     retry_after: int | None,
     *,
-    error: str = "epias_provider_failure",
+    error: EpiasJobError = EpiasJobError.PROVIDER_FAILURE,
     retryable: bool = True,
 ) -> None:
     started = time.monotonic()
@@ -262,9 +263,13 @@ def _publish(lease: EpiasLease, data: EpiasDay, now: datetime) -> bool:
                 job.last_error = ""
             elif job.source_kind == EpiasSourceKind.SETTLEMENT_INJECTION:
                 job.status = EpiasJobStatus.AWAITING_PUBLICATION
-                job.last_error = "unpublished_data" if not data.readings else "partial_data"
+                job.last_error = (
+                    EpiasJobError.UNPUBLISHED_DATA
+                    if not data.readings
+                    else EpiasJobError.PARTIAL_DATA
+                )
             else:
-                job.last_error = "partial_data"
+                job.last_error = EpiasJobError.PARTIAL_DATA
                 if job.retry_until is not None:
                     _schedule_retry(job, now, NIGHT_RETRY_DELAY)
                 else:
@@ -293,7 +298,7 @@ def run_epias_job(
     try:
         request_at = now + timedelta(seconds=time.monotonic() - started)
         if lease.job.retry_until is not None and request_at >= lease.job.retry_until:
-            _finish_failure(lease, request_at, None, error="retry_window_expired")
+            _finish_failure(lease, request_at, None, error=EpiasJobError.RETRY_WINDOW_EXPIRED)
             return False
         plant = EpiasPlant(**lease.job.provider_plant)
         if fetch is not None:
@@ -331,7 +336,7 @@ def pending_epias_ids(now: datetime, *, limit: int = 100) -> list[int]:
     )
     EpiasCollectionJob.objects.filter(eligible, retry_until__lte=now).update(
         status=EpiasJobStatus.FAILED,
-        last_error="retry_window_expired",
+        last_error=EpiasJobError.RETRY_WINDOW_EXPIRED,
         lease_token=None,
         lease_expires_at=None,
     )

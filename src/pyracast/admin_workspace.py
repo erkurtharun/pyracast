@@ -37,7 +37,7 @@ from pyracast.forecasts.models import (
     SnapshotSourceKind,
 )
 from pyracast.forecasts.monitoring import delivery_health
-from pyracast.metering.models import EpiasJobStatus
+from pyracast.metering.models import EpiasJobError, EpiasJobStatus
 from pyracast.notifications.models import NotificationSettings, PreparedMessageKind
 from pyracast.notifications.operations import recipient_limit
 from pyracast.plants.models import Plant
@@ -356,7 +356,7 @@ def recent_work_context(
             "error_label": (
                 ""
                 if row.status == EpiasJobStatus.AWAITING_PUBLICATION
-                and row.last_error == "unpublished_data"
+                and row.last_error == EpiasJobError.UNPUBLISHED_DATA
                 else row.last_error.replace("_", " ").capitalize()
             ),
             "review_url": reverse("admin:workspace_plant", args=(row.plant.region_id,))

@@ -3118,6 +3118,25 @@
                 "type": "string",
                 "description": "* `forecasts` - Forecasts\n* `estimated_actuals` - Estimated actuals\n* `historical_import` - Historical import\n* `scaled_forecasts` - Scaled forecasts\n* `scaled_estimated_actuals` - Scaled estimated actuals"
             },
+            "CollectionJobErrorEnum": {
+                "enum": [
+                    "history_window_closed",
+                    "attempts_exhausted",
+                    "forecast_superseded",
+                    "history_incomplete",
+                    "history_already_archived",
+                    "provider_authentication_failed",
+                    "provider_throttled",
+                    "history_budget_reserved",
+                    "quota_exhausted",
+                    "provider_failure",
+                    "provider_unexpected_failure",
+                    "invalid_source_kind",
+                    "calculation_failure"
+                ],
+                "type": "string",
+                "description": "* `history_window_closed` - History window closed\n* `attempts_exhausted` - Attempts exhausted\n* `forecast_superseded` - Forecast superseded\n* `history_incomplete` - History incomplete\n* `history_already_archived` - History already archived\n* `provider_authentication_failed` - Provider authentication failed\n* `provider_throttled` - Provider throttled\n* `history_budget_reserved` - History budget reserved\n* `quota_exhausted` - Quota exhausted\n* `provider_failure` - Provider failure\n* `provider_unexpected_failure` - Provider unexpected failure\n* `invalid_source_kind` - Invalid source kind\n* `calculation_failure` - Calculation failure"
+            },
             "CollectionJobOutput": {
                 "type": "object",
                 "properties": {
@@ -3147,7 +3166,14 @@
                         "type": "integer"
                     },
                     "last_error": {
-                        "type": "string"
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/CollectionJobErrorEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/BlankEnum"
+                            }
+                        ]
                     }
                 },
                 "required": [
@@ -3420,7 +3446,14 @@
                         "nullable": true
                     },
                     "last_error": {
-                        "type": "string"
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/EpiasJobErrorEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/BlankEnum"
+                            }
+                        ]
                     },
                     "pending_jobs": {
                         "type": "integer"
@@ -3442,6 +3475,17 @@
                     "provider_plant_id",
                     "settlement_plant_id"
                 ]
+            },
+            "EpiasJobErrorEnum": {
+                "enum": [
+                    "retry_window_expired",
+                    "attempts_exhausted",
+                    "epias_provider_failure",
+                    "unpublished_data",
+                    "partial_data"
+                ],
+                "type": "string",
+                "description": "* `retry_window_expired` - Retry window expired\n* `attempts_exhausted` - Attempts exhausted\n* `epias_provider_failure` - Epias provider failure\n* `unpublished_data` - Unpublished data\n* `partial_data` - Partial data"
             },
             "EpiasJobStatusEnum": {
                 "enum": [
@@ -6246,6 +6290,25 @@
                 "enum": ["forecast", "estimated_actuals"],
                 "type": "string",
                 "description": "* `forecast` - Forecast\n* `estimated_actuals` - Estimated actuals"
+            },
+            "SnapshotWeatherErrorEnum": {
+                "enum": [
+                    "invalid_weather_number",
+                    "invalid_weather_coordinates",
+                    "invalid_weather_schema",
+                    "invalid_weather_timezone",
+                    "invalid_weather_units",
+                    "empty_weather_response",
+                    "invalid_weather_interval",
+                    "invalid_weather_window",
+                    "unsafe_weather_response",
+                    "invalid_weather_collection_time",
+                    "weather_request_failed",
+                    "weather_acquisition_failed",
+                    "weather_acquisition_interrupted"
+                ],
+                "type": "string",
+                "description": "* `invalid_weather_number` - Invalid weather number\n* `invalid_weather_coordinates` - Invalid weather coordinates\n* `invalid_weather_schema` - Invalid weather schema\n* `invalid_weather_timezone` - Invalid weather timezone\n* `invalid_weather_units` - Invalid weather units\n* `empty_weather_response` - Empty weather response\n* `invalid_weather_interval` - Invalid weather interval\n* `invalid_weather_window` - Invalid weather window\n* `unsafe_weather_response` - Unsafe weather response\n* `invalid_weather_collection_time` - Invalid weather collection time\n* `weather_request_failed` - Weather request failed\n* `weather_acquisition_failed` - Weather acquisition failed\n* `weather_acquisition_interrupted` - Weather acquisition interrupted"
             },
             "TenantOutput": {
                 "type": "object",
