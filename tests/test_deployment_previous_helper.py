@@ -394,7 +394,12 @@ def test_after_a_reset_replaced_the_database_the_helper_accepts_only_its_archive
     ],
 )
 def test_only_a_replaced_session_that_the_marker_still_holds_names_an_archive(
-    tmp_path: Path, session: object, marker: str | None, expected: str | None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    session: object,
+    marker: str | None,
+    expected: str | None,
 ) -> None:
     session_path = tmp_path / "session.json"
     marker_path = tmp_path / "release-blocked"
@@ -403,5 +408,10 @@ def test_only_a_replaced_session_that_the_marker_still_holds_names_an_archive(
         session_path.write_text(content, encoding="utf-8")
     if marker is not None:
         marker_path.write_text(marker, encoding="utf-8")
+    monkeypatch.setattr(release_record, "SESSION", session_path)
+    monkeypatch.setattr(release_record, "MARKER", marker_path)
 
     assert release_record.replaced_object(session_path, marker_path) == expected
+    assert release_record.main(["--replaced-by-reset"]) == (0 if expected else 1)
+    assert capsys.readouterr().out == (f"{expected}\n" if expected else "")
+    assert release_record.main([]) == 2

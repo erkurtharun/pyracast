@@ -35,12 +35,12 @@ if [[ -L /opt/pyracast/current ]]; then previous=$(readlink -f /opt/pyracast/cur
 old=(docker compose --env-file /opt/pyracast/current/deploy/release.env -f /opt/pyracast/current/deploy/compose.yaml)
 maintenance_started=0
 resumable=0
+switched=0
+migrating=0
 promoted=0
 prerelease_object=
 record_unreadable=0
 recovery='python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json'
-verifier="$session/runtime-verifier"
-reverted=0
 begin_maintenance() {
   maintenance_started=1
   touch /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast/release-blocked \
@@ -53,27 +53,32 @@ ready() {
     --retry-all-errors --resolve "$site_address:443:127.0.0.1" "https://$site_address/health/ready/") || return $?
   [[ $response == ok ]]
 }
-# The runtime role and the release's runtime secret change together; the first change saves the
-# role's previous verifier in $verifier.
+# Sets the runtime role's password to the release's staged runtime secret, the version host.json
+# names. Only while no API or web container runs: their next connections would use another one.
 switch_runtime() {
-  python3 "$release/deploy/bootstrap_database.py" switch-runtime "$release" "$secrets" "$verifier"
+  python3 "$release/deploy/bootstrap_database.py" switch-runtime "$release" "$secrets"
 }
-# Before migrate the database still fits the previous release, which starts with its own secrets
-# once the runtime role has its previous password back.
+# Starts the previous release as pyracast.service starts it, with the secrets host.json names, so a
+# restart or reboot reproduces what runs. Before migrate the database still fits that release.
 resume_previous() {
-  if [[ -e $verifier ]]; then
-    "${old[@]}" up -d --wait --wait-timeout 180 postgres \
-      && python3 "$release/deploy/bootstrap_database.py" revert-runtime "$release" "$verifier" \
-      || return 1
-    reverted=1
-  fi
-  "${old[@]}" up -d --wait --wait-timeout 180 && ready \
+  python3 /opt/pyracast/current/deploy/runtime_secrets.py /etc/pyracast/host.json \
+    && "${old[@]}" up -d --wait --wait-timeout 180 && ready \
     && rm -f /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast
 }
 # The printed recovery commands run the helper of the release in /opt/pyracast/current; one that
 # counts the gateway as an application service (main before the notice) refuses restore beside it.
 helper_keeps_notice() {
   python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from deploy.reset_database import APPLICATION_SERVICES; sys.exit("gateway" in APPLICATION_SERVICES)' /opt/pyracast/current 2>/dev/null
+}
+stop_application() {
+  "${compose[@]}" stop -t 660 dispatcher || stopped=0
+  "${compose[@]}" stop -t 660 worker notifications || stopped=0
+  if (( notice == 1 )); then
+    "${compose[@]}" up -d --no-deps --wait --wait-timeout 180 maintenance gateway || noticed=0
+    "${compose[@]}" stop -t 100 api web || stopped=0
+  else
+    "${compose[@]}" stop -t 100 gateway maintenance api web || stopped=0
+  fi
 }
 cleanup() {
   result=$?
@@ -82,58 +87,59 @@ cleanup() {
     if (( promoted == 1 )); then
       rm -f /var/lib/pyracast/release-blocked
       echo "Release $revision is serving, but a step after promotion failed; nothing was stopped. Finish with: bash $release/deploy/install-units.sh install $release && systemctl start pyracast.service" >&2
-    elif (( resumable == 1 )) && resume_previous; then
-      echo "Release $revision failed before migrate; the previous release $previous serves again and the marker is removed." >&2
-      if (( reverted == 1 )); then
-        echo 'The runtime database password is the previous one again, but /etc/pyracast/host.json names the new runtime secret: restarting pyracast.service would start the previous release with it. Release again instead.' >&2
-      fi
     elif (( maintenance_started == 1 )); then
       blocked=1
       stopped=1
       noticed=1
-      switched=1
       notice=0
+      resume=0
       if [[ -z $previous ]] || helper_keeps_notice; then notice=1; fi
       begin_maintenance || blocked=0
-      "${compose[@]}" stop -t 660 dispatcher || stopped=0
-      "${compose[@]}" stop -t 660 worker notifications || stopped=0
-      if (( notice == 1 )); then
-        "${compose[@]}" up -d --no-deps --wait --wait-timeout 180 maintenance gateway || noticed=0
-        "${compose[@]}" stop -t 100 api web || stopped=0
+      stop_application
+      if [[ -n $previous ]] && (( switched == 0 && stopped == 1 )) && switch_runtime; then switched=1; fi
+      if (( resumable == 1 && migrating == 0 && stopped == 1 && switched == 1 )); then resume=1; fi
+      if (( resume == 1 )) && resume_previous; then
+        echo "Release $revision failed before migrate; the previous release $previous serves again, started with the secrets /etc/pyracast/host.json names, and the marker is removed." >&2
       else
-        "${compose[@]}" stop -t 100 gateway maintenance api web || stopped=0
+        if (( resume == 1 )); then
+          echo "The previous release $previous did not serve again; it is stopped again." >&2
+          stopped=1
+          noticed=1
+          begin_maintenance || blocked=0
+          stop_application
+        fi
+        if (( stopped == 1 )); then
+          echo 'Release failed during maintenance. Every stop command succeeded; the application is stopped.' >&2
+        else
+          echo "Release failed during maintenance. A stop command failed; the application may still run. Check with: ${compose[*]} ps" >&2
+        fi
+        if (( notice == 0 )); then
+          echo 'The gateway is stopped too: the recovery helper of the release in /opt/pyracast/current refuses to run beside it, so the site is unreachable until recovery.' >&2
+        elif (( noticed == 1 )); then
+          echo 'The gateway shows the maintenance notice.' >&2
+        else
+          echo "The maintenance notice did not start. Check with: ${compose[*]} ps gateway maintenance" >&2
+        fi
+        if (( blocked == 0 )); then
+          echo 'Writing /var/lib/pyracast/release-blocked failed; recreate it before recovery.' >&2
+        fi
+        if [[ -n $previous ]] && (( switched == 0 )); then
+          echo "The runtime role's password was not set to the runtime secret that /etc/pyracast/host.json names and recovery starts the release with. Once no application container runs, set it with: python3 $release/deploy/runtime_secrets.py /etc/pyracast/host.json && ${compose[*]} up -d --no-recreate --wait --wait-timeout 180 postgres && python3 $release/deploy/bootstrap_database.py switch-runtime $release $secrets" >&2
+        fi
+        if [[ -z $previous ]]; then
+          echo 'No release served before this one: fix the cause and run the release again.' >&2
+        elif reset_object=$(python3 "$release/deploy/release_record.py" --replaced-by-reset); then
+          echo "A reset replaced the database in this maintenance; recover with: $recovery restore --confirm $reset_object" >&2
+        elif (( migrating == 1 )); then
+          echo "Pre-release record: $release/prerelease-backup.json" >&2
+          echo "Release a forward fix, or recover with: $recovery restore --confirm $prerelease_object" >&2
+        elif (( record_unreadable == 1 )); then
+          echo "The pre-release record $release/prerelease-backup.json is unreadable. Recover with: $recovery abort" >&2
+        else
+          echo "Recover with: $recovery abort" >&2
+        fi
+        echo 'See "A release that fails during maintenance" in the deployment guide.' >&2
       fi
-      # abort and restore start the previous release with the runtime secret host.json names.
-      if [[ -n $previous ]]; then switch_runtime || switched=0; fi
-      if (( stopped == 1 )); then
-        echo 'Release failed during maintenance. Every stop command succeeded; the application is stopped.' >&2
-      else
-        echo "Release failed during maintenance. A stop command failed; the application may still run. Check with: ${compose[*]} ps" >&2
-      fi
-      if (( notice == 0 )); then
-        echo 'The gateway is stopped too: the recovery helper of the release in /opt/pyracast/current refuses to run beside it, so the site is unreachable until recovery.' >&2
-      elif (( noticed == 1 )); then
-        echo 'The gateway shows the maintenance notice.' >&2
-      else
-        echo "The maintenance notice did not start. Check with: ${compose[*]} ps gateway maintenance" >&2
-      fi
-      if (( blocked == 0 )); then
-        echo 'Writing /var/lib/pyracast/release-blocked failed; recreate it before recovery.' >&2
-      fi
-      if (( switched == 0 )); then
-        echo "The runtime database password was not set to the runtime secret that recovery uses. Before recovery run: ${old[*]} up -d --wait postgres && python3 $release/deploy/bootstrap_database.py switch-runtime $release $secrets $secrets/runtime-verifier" >&2
-      fi
-      if [[ -z $previous ]]; then
-        echo 'No release served before this one: fix the cause and run the release again.' >&2
-      elif [[ -n $prerelease_object ]]; then
-        echo "Pre-release record: $release/prerelease-backup.json" >&2
-        echo "Before migrate, recover with: $recovery abort. In or after migrate, with: $recovery restore --confirm $prerelease_object" >&2
-      elif (( record_unreadable == 1 )); then
-        echo "The pre-release record $release/prerelease-backup.json is unreadable. Recover with: $recovery abort" >&2
-      else
-        echo "Recover with: $recovery abort" >&2
-      fi
-      echo 'See "A release that fails during maintenance" in the deployment guide.' >&2
     fi
   fi
   rm -f -- "$migration" "${secrets:-$session}/migration.env"
@@ -230,6 +236,7 @@ if [[ -L /opt/pyracast/current ]]; then
   "${compose[@]}" stop -t 100 api web
 fi
 switch_runtime
+switched=1
 probe_database api
 # Back up the running database before a new support image can modify its data directory.
 rm -f "$release/prerelease-backup.json"
@@ -243,7 +250,7 @@ prerelease_object=$candidate
 "${compose[@]}" up -d postgres
 wait_for_database
 "${compose[@]}" up -d rabbitmq
-resumable=0
+migrating=1
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps migrate pyracast migrate --check
 # Migrate creates the ledger table with the runtime role's default privileges; converge again.

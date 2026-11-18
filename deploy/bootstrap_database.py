@@ -31,7 +31,15 @@ PROHIBITED = (
 VERIFIER = re.compile(
     r"SCRAM-SHA-256\$(\d+):([A-Za-z0-9+/=]+)\$([A-Za-z0-9+/=]+):([A-Za-z0-9+/=]+)"
 )
-MD5_VERIFIER = re.compile(r"md5[0-9a-f]{32}")
+# psql sends each statement on its own, so these take effect before an ALTER ROLE arrives: the
+# server logs no text of it, not even when it fails, and no verifier reaches the server log.
+UNLOGGED = (
+    "SET log_statement = 'none';\n"
+    "SET log_min_error_statement = 'panic';\n"
+    "SET log_min_duration_statement = -1;\n"
+    "SET log_min_duration_sample = -1;\n"
+    "SET log_transaction_sample_rate = 0;\n"
+)
 STORED_VERIFIERS = (
     "SELECT rolname || ' ' || coalesce(rolpassword, '') FROM pg_authid "
     "WHERE rolname IN ('pyracast_owner', 'pyracast_app')"
@@ -102,6 +110,10 @@ def password_statements(
     ]
 
 
+def password_script(changes: list[str]) -> str:
+    return UNLOGGED + "".join(f"{line}\n" for line in changes) if changes else ""
+
+
 def role_passwords(directory: Path, names: Mapping[str, str]) -> dict[str, str]:
     passwords = {}
     for name, role in names.items():
@@ -161,56 +173,32 @@ def converge_database(release: Path, directory: Path) -> list[str]:
     psql = psql_command(release)
     changes = password_statements(stored_verifiers(psql), passwords)
     statements = (release / "deploy/bootstrap.sql").read_text()
-    apply(psql, statements + "".join(f"{line}\n" for line in changes))
+    apply(psql, statements + password_script(changes))
     return [change.split()[2] for change in changes]
 
 
-def switch_runtime(release: Path, directory: Path, saved: Path) -> bool:
+def switch_runtime(release: Path, directory: Path) -> bool:
     passwords = role_passwords(directory, {"runtime.env": RUNTIME_ROLE})
     psql = psql_command(release)
-    previous = stored_verifiers(psql).get(RUNTIME_ROLE)
-    changes = password_statements({RUNTIME_ROLE: previous}, passwords)
-    if not changes:
-        return False
-    if not saved.exists():
-        saved.write_text(previous or "")
-    apply(psql, "".join(f"{line}\n" for line in changes))
-    return True
-
-
-def revert_runtime(release: Path, saved: Path) -> bool:
-    if not saved.exists():
-        return False
-    verifier = saved.read_text()
-    if verifier and not (VERIFIER.fullmatch(verifier) or MD5_VERIFIER.fullmatch(verifier)):
-        raise ValueError("The saved runtime password is not a PostgreSQL verifier.")
-    password = f"'{verifier}'" if verifier else "NULL"
-    apply(psql_command(release), f"ALTER ROLE {RUNTIME_ROLE} PASSWORD {password};\n")
-    saved.unlink()
-    return True
+    changes = password_statements(stored_verifiers(psql), passwords)
+    if changes:
+        apply(psql, password_script(changes))
+    return bool(changes)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     steps = parser.add_subparsers(dest="step", required=True)
-    converge = steps.add_parser("converge")
-    converge.add_argument("release", type=Path)
-    converge.add_argument("environment_directory", type=Path)
-    switch = steps.add_parser("switch-runtime")
-    switch.add_argument("release", type=Path)
-    switch.add_argument("environment_directory", type=Path)
-    switch.add_argument("saved", type=Path)
-    revert = steps.add_parser("revert-runtime")
-    revert.add_argument("release", type=Path)
-    revert.add_argument("saved", type=Path)
+    for step in ("converge", "switch-runtime"):
+        command = steps.add_parser(step)
+        command.add_argument("release", type=Path)
+        command.add_argument("environment_directory", type=Path)
     arguments = parser.parse_args()
     if arguments.step == "converge":
         for role in converge_database(arguments.release, arguments.environment_directory):
             print(role)
-    elif arguments.step == "switch-runtime":
-        switch_runtime(arguments.release, arguments.environment_directory, arguments.saved)
     else:
-        revert_runtime(arguments.release, arguments.saved)
+        switch_runtime(arguments.release, arguments.environment_directory)
 
 
 if __name__ == "__main__":

@@ -414,15 +414,19 @@ def test_the_runtime_password_switch_sets_the_secret_once_and_keeps_nothing_else
 
 
 def session_logging(database: str, script: str) -> dict[str, str]:
-    names = (
-        "log_statement",
-        "log_min_error_statement",
-        "log_min_duration_statement",
-        "log_min_duration_sample",
-        "log_transaction_sample_rate",
-    )
+    # A server that logs every statement, then what the script runs before its first password.
+    logged = {
+        "log_statement": "'all'",
+        "log_min_error_statement": "'error'",
+        "log_min_duration_statement": "0",
+        "log_min_duration_sample": "0",
+        "log_transaction_sample_rate": "1",
+    }
+    names = tuple(logged)
+    first_password = script.rindex("\n", 0, script.index(" PASSWORD 'SCRAM-SHA-256$")) + 1
     with psycopg.connect(**server_parameters(database)) as connection:
-        connection.execute(script[: script.index("ALTER ROLE")].encode())
+        connection.execute("".join(f"SET {name} = {value};" for name, value in logged.items()))
+        connection.execute(script[:first_password].removeprefix(BOOTSTRAP).encode())
         return {
             name: str(row[0])
             for name in names
