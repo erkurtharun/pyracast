@@ -656,7 +656,7 @@ INPUT_VOCABULARIES = (
         "kind",
         _submit_incident_kind,
         accepted="grid",
-        error="Unsupported incident kind.",
+        error="Unsupported outage kind.",
     ),
     InputVocabulary(
         "measurement_basis",
@@ -692,7 +692,7 @@ INPUT_VOCABULARIES = (
         "kind",
         _save_incident,
         accepted="grid",
-        error="Unsupported incident kind.",
+        error="Unsupported outage kind.",
     ),
     InputVocabulary(
         "reminder_language",
