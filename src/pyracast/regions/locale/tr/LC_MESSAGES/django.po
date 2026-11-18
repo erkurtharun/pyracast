@@ -2063,6 +2063,9 @@ msgstr "Sayfanın süresi doldu. Sayfayı yenileyip tekrar deneyin."
 msgid "The request conflicts with the current state. Reload and try again."
 msgstr "İstek mevcut durumla çakışıyor. Sayfayı yenileyip tekrar deneyin."
 
+msgid "Choose a supported language."
+msgstr "Desteklenen bir dil seçin."
+
 msgid "The request could not be processed."
 msgstr "İstek işlenemedi."
 
