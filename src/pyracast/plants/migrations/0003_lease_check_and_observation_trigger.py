@@ -5,7 +5,7 @@ from django.db import migrations, models
 from django.db.migrations.operations.base import Operation
 
 from pyracast import schema_objects
-from pyracast.db import refuse_rows, refuse_values_outside, repair_leases
+from pyracast.db import refuse_lease_breaches, refuse_rows, refuse_values_outside
 
 OPEN = ("pending", "running")
 ASSESSMENTS = [
@@ -51,7 +51,7 @@ class Migration(migrations.Migration):
     ]
 
     operations: ClassVar[list[Operation]] = [
-        repair_leases("plants.calibrationrun", ["running"]),
+        refuse_lease_breaches("plants.calibrationrun", ["running"]),
         migrations.AddConstraint(
             model_name="calibrationrun",
             constraint=models.CheckConstraint(

@@ -2,10 +2,8 @@ from collections.abc import Callable, Collection, Iterator
 from contextlib import contextmanager
 
 from django.apps.registry import Apps
-from django.contrib.postgres.functions import RandomUUID
 from django.db import connection, migrations, models, transaction
 from django.db.backends.base.schema import BaseDatabaseSchemaEditor
-from django.db.models.functions import Coalesce, Now
 from django.db.transaction import TransactionManagementError
 
 
@@ -63,41 +61,28 @@ def fire_deferred_checks(schema_editor: BaseDatabaseSchemaEditor) -> None:
     schema_editor.execute("SET CONSTRAINTS ALL IMMEDIATE")
 
 
-def lease_check(leased: Collection[str], *, kept: Collection[str] = ()) -> models.CheckConstraint:
-    """A lease is held, with both columns, by every row in a leased status; a kept status may
-    still hold the lease of its last owner; every other status holds none."""
+def _lease_rule(leased: Collection[str], kept: Collection[str]) -> models.Q:
     held = models.Q(lease_token__isnull=False, lease_expires_at__isnull=False)
     free = models.Q(lease_token__isnull=True, lease_expires_at__isnull=True)
     leased, kept = [str(status) for status in leased], [str(status) for status in kept]
-    return models.CheckConstraint(
-        condition=(held & models.Q(status__in=[*leased, *kept]))
-        | (free & ~models.Q(status__in=leased)),
-        name="%(class)s_lease_chk",
-    )
+    return (held & models.Q(status__in=[*leased, *kept])) | (free & ~models.Q(status__in=leased))
 
 
-def repair_leases(
+def lease_check(leased: Collection[str], *, kept: Collection[str] = ()) -> models.CheckConstraint:
+    """A lease is held, with both columns, by every row in a leased status; a kept status may
+    still hold the lease of its last owner; every other status holds none."""
+    return models.CheckConstraint(condition=_lease_rule(leased, kept), name="%(class)s_lease_chk")
+
+
+def refuse_lease_breaches(
     model: str, leased: Collection[str], *, kept: Collection[str] = ()
 ) -> migrations.RunPython:
-    """Bring stored leases in line with `lease_check`: other statuses drop their lease, a
-    leased row missing part of its lease gets one that expires at the migration (no worker owns
-    it, so the dispatcher reclaims it as after a crash), and a kept lease is completed or
-    dropped with its token. Only a complete lease keeps its expiry."""
-
-    def repair(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
-        rows = apps.get_model(model)._default_manager.using(schema_editor.connection.alias)
-        partial = models.Q(lease_token__isnull=True) | models.Q(lease_expires_at__isnull=True)
-        rows.exclude(status__in=[*leased, *kept]).update(lease_token=None, lease_expires_at=None)
-        rows.filter(partial, status__in=leased).update(
-            lease_token=Coalesce("lease_token", RandomUUID()), lease_expires_at=Now()
-        )
-        rows.filter(status__in=kept, lease_token__isnull=True).update(lease_expires_at=None)
-        rows.filter(
-            status__in=kept, lease_token__isnull=False, lease_expires_at__isnull=True
-        ).update(lease_expires_at=Now())
-        fire_deferred_checks(schema_editor)
-
-    return migrations.RunPython(repair, migrations.RunPython.noop)
+    return refuse_rows(
+        model,
+        lambda _: ~_lease_rule(leased, kept),
+        "both lease columns are held together, always by a leased status and otherwise only "
+        "by a kept one",
+    )
 
 
 def choices_check(

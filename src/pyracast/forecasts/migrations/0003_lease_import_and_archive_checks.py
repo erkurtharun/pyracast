@@ -1,15 +1,27 @@
 from typing import ClassVar
 
+from django.apps.registry import Apps
 from django.conf import settings
 from django.db import migrations, models
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.migrations.operations.base import Operation
 from django.db.models.functions import Abs
 from django.db.models.lookups import GreaterThan, LessThanOrEqual
 
 from pyracast import schema_objects
-from pyracast.db import refuse_rows, repair_leases
+from pyracast.db import fire_deferred_checks, refuse_lease_breaches, refuse_rows
 
 IMPORT = "historical_import"
+
+
+def release_stale_leases(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+    """Main's claim marked a running job whose lease had expired stale and kept that lease;
+    the job is finished, so the lease is dropped. No other lease shape is changed."""
+    jobs = apps.get_model("forecasts", "CollectionJob")._default_manager
+    jobs.using(schema_editor.connection.alias).filter(
+        status="stale", lease_token__isnull=False, lease_expires_at__isnull=False
+    ).update(lease_token=None, lease_expires_at=None)
+    fire_deferred_checks(schema_editor)
 
 
 def import_endpoint_mismatch(model: type[models.Model]) -> models.Q:
@@ -45,7 +57,8 @@ class Migration(migrations.Migration):
             model_name="collectionjob",
             name="unique_collection_slot",
         ),
-        repair_leases("forecasts.collectionjob", ["running"]),
+        migrations.RunPython(release_stale_leases, migrations.RunPython.noop),
+        refuse_lease_breaches("forecasts.collectionjob", ["running"]),
         migrations.AddConstraint(
             model_name="collectionjob",
             constraint=models.CheckConstraint(

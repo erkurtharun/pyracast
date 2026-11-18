@@ -4,7 +4,7 @@ from django.db import migrations, models
 from django.db.migrations.operations.base import Operation
 
 from pyracast import schema_objects
-from pyracast.db import repair_leases
+from pyracast.db import refuse_lease_breaches
 
 
 class Migration(migrations.Migration):
@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
     ]
 
     operations: ClassVar[list[Operation]] = [
-        repair_leases("metering.epiascollectionjob", ["running"]),
+        refuse_lease_breaches("metering.epiascollectionjob", ["running"]),
         migrations.AddConstraint(
             model_name="epiascollectionjob",
             constraint=models.CheckConstraint(

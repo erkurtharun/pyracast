@@ -3,7 +3,7 @@ from typing import ClassVar
 from django.db import migrations, models
 from django.db.migrations.operations.base import Operation
 
-from pyracast.db import repair_leases
+from pyracast.db import refuse_lease_breaches
 
 
 class Migration(migrations.Migration):
@@ -14,7 +14,9 @@ class Migration(migrations.Migration):
     ]
 
     operations: ClassVar[list[Operation]] = [
-        repair_leases("notifications.notificationdelivery", ["sending"], kept=["uncertain"]),
+        refuse_lease_breaches(
+            "notifications.notificationdelivery", ["sending"], kept=["uncertain"]
+        ),
         migrations.AddConstraint(
             model_name="notificationdelivery",
             constraint=models.CheckConstraint(
