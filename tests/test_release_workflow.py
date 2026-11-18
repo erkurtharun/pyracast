@@ -119,7 +119,7 @@ SCAN = "Scan every image; block every high or critical vulnerability"
 
 def triggers(name: str) -> dict[str, Any]:
     document = workflow(name)
-    found: dict[str, Any] = document.get("on", document.get(True))
+    found: dict[str, Any] = document["on"] if "on" in document else document[True]
     return found
 
 

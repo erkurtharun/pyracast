@@ -519,7 +519,9 @@ fixtures do not establish provider access or inbox delivery.
   the new release starts with; a release that fails before `migrate` starts the
   previous release with that secret too.
 - **Patching and storage:** review weekly Dependabot PRs, rebuild and test images;
-  exact image digests do not update themselves. Review Ubuntu security updates and
+  exact image digests do not update themselves. The daily `Image rescan` workflow
+  rebuilds the release images from `main` and scans them; a failed run needs an
+  image update. Review Ubuntu security updates and
   pinned Docker/Compose/PostgreSQL versions during planned maintenance. PostgreSQL
   major upgrades need a separately rehearsed dump/restore or `pg_upgrade` procedure.
   Each release keeps the serving and the previous release with their images and

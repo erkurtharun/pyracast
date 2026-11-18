@@ -2,20 +2,27 @@ import pytest
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
 from pyracast.plants.models import Plant
-from tests.support.browser import run_spec, seed_accounts, seed_other_workspace
+from tests.support.browser import (
+    Gateway,
+    run_spec,
+    seed_accounts,
+    seed_forecast_days,
+    seed_other_workspace,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
 
 def test_a_platform_administrator_creates_a_workspace_with_a_plant_and_manages_members(
-    web_origin: str,
+    web_gateway: Gateway,
 ) -> None:
     accounts = seed_accounts()
+    seed_forecast_days(accounts.system)
     other = seed_other_workspace()
 
     run_spec(
         "admin-workspaces.spec.ts",
-        web_origin,
+        web_gateway,
         BROWSER_CONSOLE_EMAIL=accounts.console.email,
         BROWSER_ADMIN_PASSWORD=accounts.password,
         BROWSER_CONSOLE_TOTP_SEED=accounts.console_totp,

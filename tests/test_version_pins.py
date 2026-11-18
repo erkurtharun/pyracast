@@ -1,9 +1,8 @@
+import os
 import re
-import shutil
-import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pytest
@@ -231,13 +230,33 @@ def test_every_action_is_pinned_to_one_commit_and_release() -> None:
     } == {}
 
 
-def tracked_files() -> list[PurePosixPath]:
-    git = shutil.which("git")
-    assert git is not None
-    listed = subprocess.run(  # noqa: S603 -- Resolved git executable with fixed arguments.
-        [git, "-C", str(ROOT), "ls-files", "-z"], capture_output=True, check=True
-    ).stdout.decode()
-    return [PurePosixPath(path) for path in listed.split("\0") if path]
+# Dependency, build and cache directories hold manifests of other projects.
+UNOWNED = frozenset(
+    {
+        ".dev",
+        ".git",
+        ".terraform",
+        ".venv",
+        "__pycache__",
+        "htmlcov",
+        "node_modules",
+        "secrets",
+        "staticfiles",
+    }
+)
+
+
+def repository_files() -> list[PurePosixPath]:
+    found: list[PurePosixPath] = []
+    for directory, subdirectories, files in os.walk(ROOT):
+        subdirectories[:] = [
+            name
+            for name in subdirectories
+            if name not in UNOWNED and not name.startswith((".next", ".mypy", ".ruff", ".pytest"))
+        ]
+        relative = Path(directory).relative_to(ROOT).as_posix()
+        found.extend(PurePosixPath(relative, name) for name in files)
+    return found
 
 
 def ecosystem(path: PurePosixPath) -> str | None:
@@ -259,7 +278,7 @@ def ecosystem(path: PurePosixPath) -> str | None:
 
 def used_ecosystems() -> set[tuple[str, str]]:
     used: set[tuple[str, str]] = set()
-    for path in tracked_files():
+    for path in repository_files():
         if (name := ecosystem(path)) is None:
             continue
         root = name == "github-actions" or path.parent == PurePosixPath(".")

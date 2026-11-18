@@ -70,7 +70,8 @@ def upload_backup(bucket: str, name: str, archive: Path) -> None:
     with archive.open("rb") as stream:
         expected = base64.b64encode(hashlib.file_digest(stream, "md5").digest()).decode()
     size = archive.stat().st_size
-    for attempt in range(3):
+    attempt = 0
+    while True:
         try:
             try:
                 with archive.open("rb") as stream:
@@ -105,6 +106,7 @@ def upload_backup(bucket: str, name: str, archive: Path) -> None:
             if attempt == 2:
                 raise
         time.sleep(2**attempt)
+        attempt += 1
 
 
 def dump_database(release: Path, archive: Path) -> None:

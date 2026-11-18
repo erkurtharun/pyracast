@@ -2,6 +2,7 @@ import base64
 import getpass
 import io
 import json
+import secrets
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
@@ -236,7 +237,7 @@ def test_secret_creation_refuses_an_empty_database_password(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("builtins.input", answer("", ""))
-    monkeypatch.setattr(create_secrets.secrets, "token_urlsafe", lambda _size: "")
+    monkeypatch.setattr(secrets, "token_urlsafe", lambda _size: "")
 
     with pytest.raises(SystemExit, match="cannot be empty"):
         create_secrets.main()

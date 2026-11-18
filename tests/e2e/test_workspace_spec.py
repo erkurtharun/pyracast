@@ -4,6 +4,7 @@ from pyracast.forecasts.models import CollectionSchedule
 from pyracast.notifications.models import ReminderSchedule
 from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
 from tests.support.browser import (
+    Gateway,
     run_spec,
     seed_accounts,
     seed_forecast_days,
@@ -13,7 +14,7 @@ from tests.support.browser import (
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
 
-def test_a_member_configures_plants_production_and_forecast_mail(web_origin: str) -> None:
+def test_a_member_configures_plants_production_and_forecast_mail(web_gateway: Gateway) -> None:
     accounts = seed_accounts()
     system = accounts.system
     days = seed_forecast_days(system)
@@ -21,7 +22,7 @@ def test_a_member_configures_plants_production_and_forecast_mail(web_origin: str
 
     run_spec(
         "workspace.spec.ts",
-        web_origin,
+        web_gateway,
         BROWSER_EMAIL=system.member.email,
         BROWSER_PASSWORD=accounts.password,
         BROWSER_NOW=days.now.isoformat(),

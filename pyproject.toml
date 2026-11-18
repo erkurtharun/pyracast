@@ -25,11 +25,10 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "django-stubs>=6.1.2",
+    "django-stubs[compatible-mypy]>=6.1.2",
     "django-stubs-ext>=6.1.2",
     "djangorestframework-stubs>=3.18.2",
     "hypothesis>=6.170.15",
-    "mypy",
     "pika>=1.4.4",
     "pip-audit",
     "polib==1.2.0",
@@ -101,10 +100,6 @@ plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
 django_settings_module = "pyracast.settings"
 
 [[tool.mypy.overrides]]
-module = ["dramatiq.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
 module = ["allauth.*"]
 follow_untyped_imports = true
 
@@ -113,7 +108,16 @@ DJANGO_SETTINGS_MODULE = "tests.settings"
 pythonpath = ["."]
 testpaths = ["tests"]
 strict = true
-addopts = ["-q", "--tb=short", "-ra", "--cov", "--cov-report=term-missing", "--cov-report=xml"]
+addopts = [
+    "-q",
+    "--tb=short",
+    "-ra",
+    "-m",
+    "not browser",
+    "--cov",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+]
 filterwarnings = ["error"]
 markers = [
     "tooling: tests of repository tooling, agents, CI and deployment scripts",
@@ -127,7 +131,7 @@ faulthandler_timeout = 300
 [tool.coverage.run]
 branch = true
 relative_files = true
-source = ["src/pyracast"]
+source = ["src/pyracast", "deploy"]
 
 [tool.coverage.report]
 fail_under = 100

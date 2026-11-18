@@ -2,6 +2,7 @@ import base64
 import hashlib
 import io
 import json
+import signal
 import subprocess
 import time
 import urllib.request
@@ -534,7 +535,7 @@ def test_a_refused_command_line_is_not_reported_as_a_failed_backup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     reports: list[str] = []
-    monkeypatch.setattr(backup.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(signal, "signal", lambda *_args: None)
     monkeypatch.setattr(backup, "report", lambda event, *_args, **_kwargs: reports.append(event))
     with pytest.raises(SystemExit) as stopped:
         backup.run(["--kind", "weekly", str(tmp_path / "host.json")])

@@ -3,6 +3,11 @@ linter: qodana-python
 withinDocker: false
 
 # Python only; qodana-js.yaml analyses web/.
+failureConditions:
+  severityThresholds:
+    critical: 0
+    high: 0
+
 profile:
   base:
     name: qodana.recommended

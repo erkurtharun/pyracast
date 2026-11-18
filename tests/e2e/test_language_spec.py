@@ -1,18 +1,19 @@
 import pytest
 
 from pyracast.accounts.models import UserLanguagePreference
-from tests.support.browser import run_spec, seed_accounts
+from tests.support.browser import Gateway, run_spec, seed_accounts, seed_forecast_days
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
 
-def test_the_account_language_follows_the_member_to_another_browser(web_origin: str) -> None:
+def test_the_account_language_follows_the_member_to_another_browser(web_gateway: Gateway) -> None:
     accounts = seed_accounts()
+    seed_forecast_days(accounts.system)
     member = accounts.system.member
 
     run_spec(
         "language.spec.ts",
-        web_origin,
+        web_gateway,
         BROWSER_EMAIL=member.email,
         BROWSER_PASSWORD=accounts.password,
     )

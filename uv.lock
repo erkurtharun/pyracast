@@ -450,6 +450,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/96/36/206be00ba6aaf21c72cf61fd38cee492c7dcf51eac72fd61a9f7ddd0f916/django_stubs-6.1.2-py3-none-any.whl", hash = "sha256:ffb6e74f54b8c1f9b2f3bc4852c5abbaa2324b2a7cb1c51854c5f95abe67165c", size = 559846, upload-time = "2026-10-05T06:47:15.889Z" },
 ]
 
+[package.optional-dependencies]
+compatible-mypy = [
+    { name = "mypy" },
+]
+
 [[package]]
 name = "django-stubs-ext"
 version = "6.1.2"
@@ -1206,11 +1211,10 @@ scientific = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "django-stubs" },
+    { name = "django-stubs", extra = ["compatible-mypy"] },
     { name = "django-stubs-ext" },
     { name = "djangorestframework-stubs" },
     { name = "hypothesis" },
-    { name = "mypy" },
     { name = "pika" },
     { name = "pip-audit" },
     { name = "polib" },
@@ -1251,11 +1255,10 @@ provides-extras = ["scientific"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "django-stubs", specifier = ">=6.1.2" },
+    { name = "django-stubs", extras = ["compatible-mypy"], specifier = ">=6.1.2" },
     { name = "django-stubs-ext", specifier = ">=6.1.2" },
     { name = "djangorestframework-stubs", specifier = ">=3.18.2" },
     { name = "hypothesis", specifier = ">=6.170.15" },
-    { name = "mypy" },
     { name = "pika", specifier = ">=1.4.4" },
     { name = "pip-audit" },
     { name = "polib", specifier = "==1.2.0" },

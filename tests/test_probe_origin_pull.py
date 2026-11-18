@@ -246,7 +246,7 @@ def test_an_entrypoint_that_refuses_the_connection_could_not_be_reached(
     def refuse(_address: tuple[str, int], *, timeout: float) -> socket.socket:
         raise ConnectionRefusedError("refused")
 
-    monkeypatch.setattr(probe_origin_pull.socket, "create_connection", refuse)
+    monkeypatch.setattr(socket, "create_connection", refuse)
 
     assert probe_origin_pull.observe("127.0.0.1", 9, SITE, None, 1.0) == (
         "could not be reached (refused)"

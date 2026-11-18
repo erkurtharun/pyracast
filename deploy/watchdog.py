@@ -1,4 +1,5 @@
 # ruff: noqa: S603 -- Fixed Docker and systemd executables with argument lists; no shell interpolation.
+import argparse
 import json
 import shutil
 import socket
@@ -6,7 +7,7 @@ import ssl
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -237,7 +238,11 @@ def supervise(run: Run, release: Path) -> dict[str, str]:
     return dict(heartbeat)
 
 
-def main() -> int:
+def main(arguments: Sequence[str] = ()) -> int:
+    argparse.ArgumentParser(
+        description="Check the production host once, restart failed application services and "
+        "report the outcome."
+    ).parse_args(arguments)
     run = Run()
     heartbeat = supervise(run, host.CURRENT_RELEASE)
     report("pyracast_watchdog_heartbeat", "INFO", **heartbeat)
@@ -245,4 +250,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

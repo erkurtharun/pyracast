@@ -3,6 +3,11 @@ linter: qodana-js
 withinDocker: false
 
 # Run as `qodana scan --only-directory web --config qodana-js.yaml`.
+failureConditions:
+  severityThresholds:
+    critical: 0
+    high: 0
+
 profile:
   base:
     name: qodana.recommended

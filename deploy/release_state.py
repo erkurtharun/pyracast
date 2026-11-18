@@ -1,4 +1,5 @@
 # ruff: noqa: S603, S607 -- Fixed docker executable with an argument list.
+import argparse
 import json
 import os
 import re
@@ -80,9 +81,18 @@ def remove_image(reference: str) -> None:
 
 
 def main(arguments: list[str]) -> int:
-    if arguments[0] == "record":
-        previous = Path(arguments[2]) if len(arguments) > 2 else None
-        record(STATE, Path(arguments[1]), previous)
+    parser = argparse.ArgumentParser(
+        description="Record the serving release, or remove the releases and images it no longer "
+        "needs."
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+    recorded = commands.add_parser("record")
+    recorded.add_argument("current", type=Path)
+    recorded.add_argument("previous", type=Path, nargs="?")
+    commands.add_parser("prune")
+    options = parser.parse_args(arguments)
+    if options.command == "record":
+        record(STATE, options.current, options.previous)
         return 0
     problems = prune(STATE, RELEASES, SECRETS, CURRENT, remove_image)
     for problem in problems:

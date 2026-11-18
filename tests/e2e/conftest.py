@@ -4,18 +4,18 @@ from typing import Any
 
 import pytest
 
-from tests.support.browser import capture_codes, live_settings, production_gateway
+from tests.support.browser import Gateway, capture_codes, live_settings, serving
 
 
 @pytest.fixture(scope="session")
-def web_origin(live_server: Any) -> Iterator[str]:
-    with production_gateway(live_server.url) as origin:
-        yield origin
+def web_gateway(live_server: Any) -> Iterator[Gateway]:
+    with serving(live_server.url) as gateway:
+        yield gateway
 
 
 @pytest.fixture(autouse=True)
-def browser_settings(web_origin: str) -> Iterator[None]:
-    with live_settings(web_origin):
+def browser_settings(web_gateway: Gateway) -> Iterator[None]:
+    with live_settings(web_gateway.origin):
         yield
 
 
