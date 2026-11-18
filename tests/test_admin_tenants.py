@@ -69,6 +69,21 @@ def test_workspace_admin_selects_only_active_members_and_transfers_permissions()
     assert Membership.objects.get(tenant=tenant, user=viewer).role == "admin"
 
 
+def test_workspace_admin_page_states_only_the_consequences_that_apply() -> None:
+    tenant, owner, _ = workspace_members()
+    client, _ = verified_admin()
+    path = f"/admin/workspaces/{tenant.pk}/administrator/"
+    page = client.get(path).content.decode()
+    assert "The current administrator becomes a viewer and pending invitations are revoked." in (
+        page
+    )
+    assert 'aria-describedby="id_administrator_helptext"' in page
+    Membership.objects.filter(user=owner).delete()
+    unassigned = client.get(path).content.decode()
+    assert "The current administrator becomes a viewer" not in unassigned
+    assert "Pending invitations are revoked." in unassigned
+
+
 def test_workspace_admin_csrf_and_method_boundaries() -> None:
     tenant, owner, viewer = workspace_members()
     client, _ = verified_admin(enforce_csrf_checks=True)
