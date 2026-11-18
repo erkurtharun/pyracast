@@ -4,7 +4,7 @@ from pyracast import health
 from pyracast.accounts.social_views import provider_callback
 from pyracast.admin import site
 from pyracast.api import error_pages
-from pyracast.api.csp_reports import csp_report
+from pyracast.api.csp_reports import CSPReportView
 from pyracast.api.session import SessionLanguageView, SessionView
 from pyracast.api.trash import RestoreRegionView, TrashedRegionsView
 from pyracast.api.views import ForecastView, LocationChangeRequestsView, RegionView, TenantsView
@@ -40,7 +40,7 @@ urlpatterns = [
         {"provider": "microsoft"},
         name="microsoft_callback",
     ),
-    path("api/csp-reports/", csp_report),
+    path("api/csp-reports/", CSPReportView.as_view()),
     path("api/session/", SessionView.as_view()),
     path("api/session/language/", SessionLanguageView.as_view()),
     path("api/", include("pyracast.notifications.urls")),

@@ -6,7 +6,7 @@ import pytest
 from django.conf import settings
 from django.test import Client
 
-from pyracast.api import csp_reports
+from pyracast.api import csp_reports, permissions
 
 URL = "/api/csp-reports/"
 
@@ -29,6 +29,17 @@ def post(body: object, content_type: str = "application/csp-report") -> int:
 
 def test_both_policies_report_their_violations_to_the_endpoint() -> None:
     assert settings.SECURE_CSP["report-uri"] == [URL]
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    ["application/csp-report; charset=utf-8", "application/reports+json; charset=utf-8"],
+)
+def test_reports_accept_mime_parameters(logged: Logged, content_type: str) -> None:
+    report = {"csp-report": {"effective-directive": "img-src"}}
+
+    assert post(report, content_type) == 204
+    assert [entry["directive"] for entry in logged()] == ["img-src"]
 
 
 def test_a_report_uri_violation_is_logged_by_origin_and_first_path_segment(
@@ -200,3 +211,18 @@ def test_a_report_needs_no_csrf_token_because_browsers_send_none() -> None:
     response = client.post(URL, b"{}", content_type="application/csp-report")
 
     assert response.status_code == 204
+
+
+def test_reporting_enforces_the_route_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        permissions,
+        "ROUTE_POLICIES",
+        {**permissions.ROUTE_POLICIES, "api/csp-reports/": {"POST": permissions.ACCOUNT}},
+    )
+
+    response = Client(enforce_csrf_checks=True).post(
+        URL, b"{}", content_type="application/csp-report"
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "permission_denied"

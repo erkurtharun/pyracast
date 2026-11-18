@@ -191,6 +191,8 @@ def test_deploy_checks_out_the_authorized_commit_rather_than_a_moving_branch() -
     for name in ("scan", "deploy"):
         checkout = jobs[name]["steps"][step_index(jobs[name], "actions/checkout")]
         assert checkout["with"]["ref"] == "${{ needs.authorize.outputs.sha }}", name
+    deploy_checkout = jobs["deploy"]["steps"][step_index(jobs["deploy"], "actions/checkout")]
+    assert deploy_checkout["with"]["repository"] == "erkurtharun/pyracast"
     assert "refs/heads/main" not in str(jobs["deploy"])
 
 

@@ -23,7 +23,7 @@ API_ROUTES = sorted(
     [
         ("api/accounts/google/login/callback/", ()),
         ("api/accounts/microsoft/login/callback/", ()),
-        ("api/csp-reports/", ()),
+        ("api/csp-reports/", ("POST",)),
         ("api/invitations/accept/", ("POST",)),
         ("api/session/", ("GET",)),
         ("api/session/language/", ("POST",)),

@@ -182,7 +182,6 @@ def test_every_framework_route_and_method_has_exactly_one_policy() -> None:
         }
         for route, view in framework_views().items()
     }
-    expected["api/csp-reports/"] = {"POST"}
     assert {route: set(methods) for route, methods in table.items()} == expected
 
 

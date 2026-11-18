@@ -4,9 +4,9 @@ from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlsplit
 
-from django.http import HttpRequest, HttpResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.http import HttpResponse
+from rest_framework.request import Request
+from rest_framework.views import APIView
 
 logger = logging.getLogger("pyracast.csp")
 MAX_REPORT_BYTES = 16 * 1024
@@ -67,28 +67,30 @@ def _violations(document: object) -> Iterator[dict[str, Any]]:
 
 # Report URLs can carry credentials and tokens, so only the blocked origin and the document's
 # first path segment are kept.
-@csrf_exempt
-@require_POST
-def csp_report(request: HttpRequest) -> HttpResponse:
-    if request.content_type in CONTENT_TYPES:
-        body = request.read(MAX_REPORT_BYTES + 1)
-        try:
-            document = json.loads(body) if len(body) <= MAX_REPORT_BYTES else None
-        except ValueError:
-            document = None
-        for count, violation in enumerate(_violations(document)):
-            if count == MAX_REPORTS:
-                break
-            logger.info(
-                "%s",
-                json.dumps(
-                    {
-                        "event": "csp_violation",
-                        "directive": str(violation["directive"] or "")[:64],
-                        "blocked": _origin(violation["blocked"])[:128],
-                        "document": _first_segment(violation["document"]),
-                        "disposition": str(violation["disposition"] or "")[:32],
-                    }
-                ),
-            )
-    return HttpResponse(status=204)
+class CSPReportView(APIView):
+    authentication_classes = ()
+    schema = None
+
+    def post(self, request: Request) -> HttpResponse:
+        if request.content_type.split(";", 1)[0].strip() in CONTENT_TYPES:
+            body = request.read(MAX_REPORT_BYTES + 1)
+            try:
+                document = json.loads(body) if len(body) <= MAX_REPORT_BYTES else None
+            except ValueError:
+                document = None
+            for count, violation in enumerate(_violations(document)):
+                if count == MAX_REPORTS:
+                    break
+                logger.info(
+                    "%s",
+                    json.dumps(
+                        {
+                            "event": "csp_violation",
+                            "directive": str(violation["directive"] or "")[:64],
+                            "blocked": _origin(violation["blocked"])[:128],
+                            "document": _first_segment(violation["document"]),
+                            "disposition": str(violation["disposition"] or "")[:32],
+                        }
+                    ),
+                )
+        return HttpResponse(status=204)
