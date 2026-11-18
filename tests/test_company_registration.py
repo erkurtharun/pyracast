@@ -1,5 +1,8 @@
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from threading import Barrier
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -11,6 +14,7 @@ from django.db import IntegrityError, connections
 from django.http import HttpRequest
 from django.test import Client, override_settings
 
+from pyracast.accounts import signup as signup_view
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
@@ -349,6 +353,151 @@ def test_a_signup_hashes_its_password_once_whether_or_not_the_address_has_an_acc
     assert response.status_code == 401
     assert hashed == [PASSWORD]
     assert User.objects.count() == 1
+
+
+@dataclass
+class AnswerClock:
+    readings: Iterator[float]
+    waits: list[float] = field(default_factory=list)
+
+    def monotonic(self) -> float:
+        return next(self.readings)
+
+    def sleep(self, seconds: float) -> None:
+        self.waits.append(seconds)
+
+
+def answer_clock(monkeypatch: pytest.MonkeyPatch, *readings: float) -> AnswerClock:
+    clock = AnswerClock(iter(readings))
+    monkeypatch.setattr(
+        signup_view, "time", SimpleNamespace(monotonic=clock.monotonic, sleep=clock.sleep)
+    )
+    return clock
+
+
+@override_settings(ACCOUNT_RATE_LIMITS={"confirm_email": "100/m/key"})
+@pytest.mark.parametrize(("elapsed", "waits"), [(0.25, [0.75]), (1.0, []), (1.75, [])])
+@pytest.mark.parametrize("address_has_account", [False, True])
+def test_a_signup_answers_after_the_minimum_time_whether_or_not_the_address_has_an_account(
+    address_has_account: bool,
+    elapsed: float,
+    waits: list[float],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if address_has_account:
+        assert signup(Client(enforce_csrf_checks=True)).status_code == 401
+    clock = answer_clock(monkeypatch, 100.0, 100.0 + elapsed)
+
+    with override_settings(PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS=1.0):
+        response = signup(Client(enforce_csrf_checks=True))
+
+    assert response.status_code == 401
+    assert clock.waits == waits
+    assert User.objects.count() == 1
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(DETAILS | {"email": "invalid"}, id="address"),
+        pytest.param(DETAILS | {"password": "aB!57mQ8nP4"}, id="password"),
+        pytest.param("not json", id="body"),
+    ],
+)
+def test_an_invalid_signup_answers_after_the_minimum_time(
+    body: dict[str, str] | str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = Client(enforce_csrf_checks=True)
+    token = client.get("/api/session/").json()["csrf_token"]
+    clock = answer_clock(monkeypatch, 100.0, 100.25)
+
+    with override_settings(PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS=1.0):
+        response = client.post(
+            AUTH + "auth/signup", body, content_type="application/json", HTTP_X_CSRFTOKEN=token
+        )
+
+    assert response.status_code == 400
+    assert clock.waits == [0.75]
+    assert not User.objects.exists()
+
+
+def test_a_failed_signup_answers_after_the_minimum_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(**kwargs: Any) -> None:
+        raise IntegrityError("membership write failed")
+
+    monkeypatch.setattr(Membership.objects, "create", fail)
+    clock = answer_clock(monkeypatch, 100.0, 100.25)
+
+    with (
+        override_settings(PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS=1.0),
+        pytest.raises(IntegrityError, match="membership write failed"),
+    ):
+        signup(Client(enforce_csrf_checks=True))
+
+    assert clock.waits == [0.75]
+
+
+@override_settings(
+    ACCOUNT_RATE_LIMITS={"signup": "1/h/ip"}, PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS=1.0
+)
+def test_a_rate_limited_signup_answers_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = answer_clock(monkeypatch, 100.0, 100.25, 200.0, 200.25)
+
+    admitted = signup(Client(enforce_csrf_checks=True))
+    refused = signup(Client(enforce_csrf_checks=True), {"email": "second@example.com"})
+
+    assert (admitted.status_code, refused.status_code) == (401, 429)
+    assert clock.waits == [0.75]
+
+
+def test_the_signup_route_answers_other_methods_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = answer_clock(monkeypatch)
+
+    with override_settings(PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS=1.0):
+        response = Client().get(AUTH + "auth/signup")
+
+    assert response.status_code == 405
+    assert clock.waits == []
+
+
+@override_settings(ACCOUNT_RATE_LIMITS={"confirm_email": "100/m/key"})
+@pytest.mark.parametrize(
+    ("address_has_account", "template"),
+    [
+        (False, "account/email/email_confirmation_signup"),
+        (True, "account/email/account_already_exists"),
+    ],
+)
+def test_a_signup_waits_after_its_records_are_committed_and_its_mail_is_handed_over(
+    address_has_account: bool, template: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if address_has_account:
+        assert signup(Client(enforce_csrf_checks=True)).status_code == 401
+    mail.outbox.clear()
+    observed: list[tuple[list[str], list[str], object]] = []
+
+    def sleep(seconds: float) -> None:
+        # The authentication cache has its own session, so it sees only committed rows.
+        with connections["auth_cache"].cursor() as cursor:
+            cursor.execute("SELECT count(*) FROM auth_user WHERE email = %s", ["owner@example.com"])
+            committed = cursor.fetchone()
+        observed.append(
+            (
+                [alias for alias in connections if connections[alias].in_atomic_block],
+                [message.extra_headers["X-Pyracast-Mail"] for message in mail.outbox],
+                committed,
+            )
+        )
+
+    readings = iter((100.0, 100.25))
+    monkeypatch.setattr(
+        signup_view, "time", SimpleNamespace(monotonic=readings.__next__, sleep=sleep)
+    )
+
+    with override_settings(PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS=1.0):
+        assert signup(Client(enforce_csrf_checks=True)).status_code == 401
+
+    assert observed == [([], [template], (1,))]
 
 
 @pytest.mark.parametrize(

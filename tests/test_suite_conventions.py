@@ -6,6 +6,8 @@ import pytest
 import yaml
 from django.conf import settings
 
+from pyracast import settings as project_settings
+
 TESTS = Path(__file__).resolve().parent
 LOCMEM = "django.core.mail.backends.locmem.EmailBackend"
 
@@ -67,6 +69,11 @@ def test_the_import_ratchet_resolves_relative_and_package_imports(tmp_path: Path
 def test_mail_is_captured_in_memory_for_every_mailer() -> None:
     assert settings.MAILERS
     assert {mailer["BACKEND"] for mailer in settings.MAILERS.values()} == {LOCMEM}
+
+
+def test_signups_answer_without_the_minimum_answer_time_in_the_suite() -> None:
+    assert project_settings.PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS == 1
+    assert settings.PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS == 0
 
 
 def _modules_matching(pattern: str) -> set[str]:
