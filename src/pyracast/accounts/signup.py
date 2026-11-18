@@ -1,7 +1,11 @@
+import time
+from http import HTTPStatus
 from typing import Any, cast
 
+from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.headless.account.inputs import SignupInput
 from allauth.headless.account.views import SignupView
+from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import (
@@ -11,7 +15,7 @@ from django.contrib.auth.password_validation import (
 )
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseBase
 
 from pyracast.accounts.inputs import PasswordInput
 
@@ -48,3 +52,24 @@ class CompanySignupInput(PasswordInput, SignupInput):
 
 class CompanySignupView(SignupView):
     input_class = {"POST": CompanySignupInput}  # noqa: RUF012 -- Allauth's view contract.
+
+    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        if request.method != "POST":
+            return super().dispatch(request, *args, **kwargs)
+        started = time.monotonic()
+        try:
+            response = super().dispatch(request, *args, **kwargs)
+        except ImmediateHttpResponse as error:
+            response = error.response
+        except Exception:
+            _wait_for_minimum_answer_time(started)
+            raise
+        if response.status_code != HTTPStatus.TOO_MANY_REQUESTS:
+            _wait_for_minimum_answer_time(started)
+        return response
+
+
+def _wait_for_minimum_answer_time(started: float) -> None:
+    remaining = settings.PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS - (time.monotonic() - started)
+    if remaining > 0:
+        time.sleep(remaining)
