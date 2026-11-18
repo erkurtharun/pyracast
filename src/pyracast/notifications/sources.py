@@ -38,7 +38,7 @@ def eligible_saved_forecasts(
         .filter(_available_by(cutoff))
         .filter(
             _available_by(delivery.scheduled_for)
-            | Q(job__scheduled_slot=delivery.scheduled_for, job__reference_import__isnull=True)
+            | Q(job__scheduled_for=delivery.scheduled_for, job__reference_import__isnull=True)
         )
         .select_related("forecastresult", "binding", "job")
         .order_by("-collected_at", "-available_at", "-pk")

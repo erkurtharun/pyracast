@@ -59,12 +59,12 @@ def test_production_source_reports_connection_and_archive_status(
     assert "meter_basis" not in connected
     assert EpiasCollectionJob.objects.filter(source_kind="realtime_generation").count() == 90
     assert EpiasCollectionJob.objects.filter(source_kind="settlement_injection").count() == 12
-    job = EpiasCollectionJob.objects.order_by("-target_day").first()
+    job = EpiasCollectionJob.objects.order_by("-target_date").first()
     assert job is not None
-    stamp = datetime.combine(job.target_day, time(), ZoneInfo("Europe/Istanbul"))
+    stamp = datetime.combine(job.target_date, time(), ZoneInfo("Europe/Istanbul"))
     data = EpiasDay(
         PLANT,
-        job.target_day,
+        job.target_date,
         (
             EpiasReading(stamp, "00:00", Decimal(0), Decimal(0)),
             EpiasReading(stamp + timedelta(hours=1), "01:00", None, None),

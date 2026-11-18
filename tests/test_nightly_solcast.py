@@ -59,7 +59,7 @@ def test_night_history_uses_local_window_independent_of_forecast_clocks(
     assert CollectionJob.objects.filter(endpoint="estimated_actuals").exists() is created
     if created:
         job = CollectionJob.objects.get(endpoint="estimated_actuals")
-        assert job.scheduled_slot == NIGHT - timedelta(hours=3)
+        assert job.scheduled_for == NIGHT - timedelta(hours=3)
         assert job.retry_until == NIGHT + timedelta(hours=6)
         assert job.target_date == NIGHT.date() - timedelta(days=1)
         enqueue_due(now + timedelta(seconds=1))
@@ -107,14 +107,14 @@ def test_partial_history_is_immutable_available_and_retried_with_fresh_acquisiti
 def test_midnight_rollout_reuses_existing_three_am_history_slot(status: str) -> None:
     make_system(approved=True)
     job = history_job()
-    CollectionJob.objects.filter(pk=job.pk).update(scheduled_slot=NIGHT, status=status)
+    CollectionJob.objects.filter(pk=job.pk).update(scheduled_for=NIGHT, status=status)
     if status == "succeeded":
         CollectionJob.objects.filter(pk=job.pk).update(status="pending")
         assert collect(job.pk, HistoricalFixture(NIGHT), no_calculation, NIGHT)
     enqueue_due(NIGHT + timedelta(minutes=1))
     assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
     job.refresh_from_db()
-    assert job.scheduled_slot == NIGHT
+    assert job.scheduled_for == NIGHT
     assert job.status == status
 
 
@@ -253,7 +253,7 @@ def test_night_retry_budget_preserves_all_future_forecast_slots() -> None:
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=4)
     yesterday_evening = NOW + timedelta(hours=2)
     enqueue_due(yesterday_evening)
-    evening_job = CollectionJob.objects.get(endpoint="forecasts", scheduled_slot=yesterday_evening)
+    evening_job = CollectionJob.objects.get(endpoint="forecasts", scheduled_for=yesterday_evening)
     assert collect(
         evening_job.pk, HistoricalFixture(yesterday_evening), calculate, yesterday_evening
     )
@@ -263,7 +263,7 @@ def test_night_retry_budget_preserves_all_future_forecast_slots() -> None:
         binding=system.binding,
         endpoint="estimated_actuals",
         target_date=job.target_date,
-        scheduled_slot=NIGHT + timedelta(minutes=30),
+        scheduled_for=NIGHT + timedelta(minutes=30),
         available_at=NIGHT + timedelta(minutes=30),
         retry_until=NIGHT + timedelta(hours=6),
     )
@@ -274,7 +274,7 @@ def test_night_retry_budget_preserves_all_future_forecast_slots() -> None:
     for hour in [6, 13, 15]:
         now = NIGHT.replace(hour=hour)
         enqueue_due(now)
-        forecast = CollectionJob.objects.get(endpoint="forecasts", scheduled_slot=now)
+        forecast = CollectionJob.objects.get(endpoint="forecasts", scheduled_for=now)
         assert collect(forecast.pk, HistoricalFixture(now), calculate, now)
     assert RequestAttempt.objects.filter(utc_day=NIGHT.date()).count() == 4
 
@@ -350,7 +350,7 @@ def test_shared_account_protects_slots_on_both_local_dates_within_utc_day() -> N
     CollectionJob.objects.create(
         binding=binding,
         endpoint="forecasts",
-        scheduled_slot=NOW,
+        scheduled_for=NOW,
         target_date=NOW.date() + timedelta(days=1),
         available_at=NOW,
         status="succeeded",
@@ -505,7 +505,7 @@ def test_inactive_collection_does_not_block_shared_account_history_budget(inacti
         CollectionJob.objects.create(
             binding=inactive_binding,
             endpoint="forecasts",
-            scheduled_slot=NIGHT + timedelta(hours=1),
+            scheduled_for=NIGHT + timedelta(hours=1),
             target_date=NIGHT.date() + timedelta(days=1),
             available_at=NIGHT,
         )

@@ -27,9 +27,12 @@ class Tenant(models.Model):
     class Meta:
         constraints = (
             models.CheckConstraint(
-                condition=~models.Q(name__regex=r"^\s*$"), name="workspace_name_not_blank"
+                condition=~models.Q(name__regex=r"^\s*$"), name="%(class)s_name_chk"
             ),
         )
+
+    def __str__(self) -> str:
+        return self.name
 
 
 class Membership(models.Model):
@@ -39,13 +42,13 @@ class Membership(models.Model):
 
     class Meta:
         constraints = (
-            models.UniqueConstraint(fields=("tenant", "user"), name="unique_tenant_membership"),
+            models.UniqueConstraint(fields=("tenant", "user"), name="%(class)s_tenant_user_uniq"),
             models.UniqueConstraint(
                 fields=("tenant",),
                 condition=models.Q(role=WorkspaceRole.ADMIN),
-                name="one_workspace_admin",
+                name="%(class)s_tenant_administrator_uniq",
             ),
-            choices_check("role", WorkspaceRole, name="valid_workspace_role"),
+            choices_check("role", WorkspaceRole),
         )
 
 
@@ -141,4 +144,4 @@ class UserLanguagePreference(models.Model):
     language = models.CharField(max_length=2, choices=Language)
 
     class Meta:
-        constraints = (choices_check("language", Language, name="supported_user_language"),)
+        constraints = (choices_check("language", Language),)

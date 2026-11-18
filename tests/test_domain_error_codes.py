@@ -120,7 +120,7 @@ def test_location_change_refusals_answer_their_own_codes() -> None:
     ("updates", "field"),
     [
         ({"dc_capacity_mw": 0}, "dc_capacity_mw"),
-        ({"surface_azimuth": 360}, "surface_azimuth"),
+        ({"surface_azimuth_degrees": 360}, "surface_azimuth_degrees"),
         ({"latitude": True}, "latitude"),
         ({"timezone": "Mars/Olympus"}, "timezone"),
         ({"mounting_type": "tracking"}, "mounting_type"),
@@ -135,8 +135,8 @@ def test_site_input_errors_name_the_rejected_field(updates: dict[str, Any], fiel
         "timezone": "Europe/Istanbul",
         "dc_capacity_mw": 120,
         "mounting_type": "fixed",
-        "surface_tilt": 25,
-        "surface_azimuth": 180,
+        "surface_tilt_degrees": 25,
+        "surface_azimuth_degrees": 180,
     }
     response = post(
         signed_in(system.member), f"/api/tenants/{system.tenant.pk}/sites/", {**site, **updates}

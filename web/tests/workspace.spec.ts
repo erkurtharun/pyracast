@@ -83,8 +83,8 @@ test("one plant request saves location and technical details before approval", a
             inverter_capacity_mw: 100,
             export_limit_mw: null,
             mounting_type: "fixed",
-            surface_tilt: 0,
-            surface_azimuth: 180,
+            surface_tilt_degrees: 0,
+            surface_azimuth_degrees: 180,
         });
         return route.fallback();
     });
@@ -146,8 +146,8 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
         current_configuration: {
             ...plant.current_configuration,
             mounting_type: "fixed",
-            surface_tilt: 33,
-            surface_azimuth: 180,
+            surface_tilt_degrees: 33,
+            surface_azimuth_degrees: 180,
         },
     };
     const bodies: Record<string, unknown>[] = [];
@@ -193,8 +193,8 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
     await expect(page.getByText(/1 valid observations ready/)).toHaveCount(0);
     expect(bodies[0]).toMatchObject({
         mounting_type: "fixed",
-        surface_tilt: 0,
-        surface_azimuth: 180,
+        surface_tilt_degrees: 0,
+        surface_azimuth_degrees: 180,
         dc_capacity_mw: 5,
         inverter_capacity_mw: 4,
         export_limit_mw: null,
@@ -208,8 +208,8 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
     await expect.poll(() => bodies.length).toBe(2);
     expect(bodies[1]).toMatchObject({
         mounting_type: "tracking",
-        surface_tilt: null,
-        surface_azimuth: null,
+        surface_tilt_degrees: null,
+        surface_azimuth_degrees: null,
     });
 });
 
@@ -491,7 +491,7 @@ test("region collection schedule validates and saves distinct local times", asyn
                 id: 1,
                 endpoint: "forecasts",
                 status: "failed",
-                scheduled_slot: "2026-01-01T07:00:00Z",
+                scheduled_for: "2026-01-01T07:00:00Z",
                 available_at: "2026-01-01T07:00:00Z",
                 attempts: 1,
                 last_error: "provider_failure",
@@ -500,7 +500,7 @@ test("region collection schedule validates and saves distinct local times", asyn
                 id: 2,
                 endpoint: "estimated_actuals",
                 status: "succeeded",
-                scheduled_slot: "2026-01-01T07:00:00Z",
+                scheduled_for: "2026-01-01T07:00:00Z",
                 available_at: "2026-01-01T07:00:00Z",
                 attempts: 2,
                 last_error: "quota_exhausted",
@@ -509,7 +509,7 @@ test("region collection schedule validates and saves distinct local times", asyn
                 id: 3,
                 endpoint: "estimated_actuals",
                 status: "succeeded",
-                scheduled_slot: "2026-01-01T00:00:00Z",
+                scheduled_for: "2026-01-01T00:00:00Z",
                 available_at: "2026-01-01T00:00:00Z",
                 attempts: 1,
                 last_error: "history_incomplete",

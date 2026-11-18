@@ -42,9 +42,11 @@ class TrashedRegionsView(GenericAPIView[Region]):
     serializer_class = TrashedRegionOutput
 
     def get_queryset(self) -> QuerySet[Region]:
-        return Region.objects.filter(
-            tenant_id=self.kwargs["tenant_id"], deleted_at__isnull=False
-        ).order_by("deleted_at", "id")
+        return (
+            Region.objects.trashed()
+            .filter(tenant_id=self.kwargs["tenant_id"])
+            .order_by("deleted_at", "id")
+        )
 
     @extend_schema(responses=TrashedRegionOutput(many=True))
     def get(self, _request: Request, **_kwargs: Any) -> Response:

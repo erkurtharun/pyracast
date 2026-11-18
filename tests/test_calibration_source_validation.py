@@ -142,11 +142,11 @@ def test_real_fit_distinguishes_imported_product_from_current_hobby_validation(
     )
     imported = HistoricalReferenceImport.objects.create(
         binding=system.binding,
-        sha256="a" * 64,
+        content_sha256="a" * 64,
         source_name="authorized-export.json",
         source_settings=asdict(source_settings()),
         imported_by=system.admin,
-        imported_at=NOW,
+        created_at=NOW,
         interval_count=37 * 48 if imported_days == "all" else 48,
     )
     observations = []
@@ -156,7 +156,7 @@ def test_real_fit_distinguishes_imported_product_from_current_hobby_validation(
         if imported_days == "all" or (imported_days == "one_holdout_day" and offset == 36):
             snapshot.job.reference_import = imported
             snapshot.job.endpoint = "historical_import"
-            snapshot.job.scheduled_slot = NOW
+            snapshot.job.scheduled_for = NOW
             snapshot.job.save()
             snapshot.collected_at = snapshot.available_at = NOW
             stored_again(snapshot)
@@ -216,7 +216,7 @@ def test_real_fit_distinguishes_imported_product_from_current_hobby_validation(
         assert source["source_product"] == "historical_rooftop_pv"
         assert source["reference_import"] == {
             "id": imported.pk,
-            "sha256": imported.sha256,
+            "sha256": imported.content_sha256,
             "source_name": "authorized-export.json",
             "source_settings": imported.source_settings,
             "imported_at": NOW.isoformat(),

@@ -29,13 +29,13 @@ def prepare_cohorts(
     assert plant.current_configuration_id is not None
     imported = HistoricalReferenceImport.objects.create(
         binding=system.binding,
-        sha256="a" * 64,
+        content_sha256="a" * 64,
         source_name="authorized-export.json",
         source_settings={"product": "historical_rooftop_pv"}
         | ({"settings_matched": settings_matched} if settings_matched is not None else {})
         | ({"upload_provenance": {"file_product": file_product}} if file_product else {}),
         imported_by=system.admin,
-        imported_at=NOW,
+        created_at=NOW,
         interval_count=historical * 48,
     )
     observations = []

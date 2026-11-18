@@ -117,9 +117,7 @@ def historical_import(
 ) -> HttpResponse:
     if request.method not in {"GET", "POST"}:
         return HttpResponseNotAllowed(("GET", "POST"))
-    region = get_object_or_404(
-        Region.objects.select_related("tenant"), pk=object_id, deleted_at__isnull=True
-    )
+    region = get_object_or_404(Region.objects.active().select_related("tenant"), pk=object_id)
     binding = (
         SiteBinding.objects.select_related("provider_account", "region")
         .filter(region=region, region_revision=region.revision, pk=region.approved_binding_id or 0)

@@ -131,7 +131,7 @@ def _copy_snapshot(
     job = CollectionJob.objects.create(
         binding=target,
         endpoint="scaled_" + source.job.endpoint,
-        scheduled_slot=source.job.scheduled_slot,
+        scheduled_for=source.job.scheduled_for,
         target_date=source.job.target_date,
         status=CollectionJobStatus.SUCCEEDED,
         available_at=moment,
@@ -180,9 +180,7 @@ def normalize_reference_capacity(
     if not reference or len(reference) > 1000:
         raise ValidationError("A bounded capacity-only equivalence authorization is required.")
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         target = SiteBinding.objects.select_related("provider_account").get(
             pk=target_binding_id, region=region
         )

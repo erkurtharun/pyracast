@@ -18,7 +18,7 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.recipients import effective_recipients as effective_recipients
 from pyracast.notifications.recipients import recipient_memberships
-from pyracast.regions.models import Region, RegionStatus
+from pyracast.regions.models import Region, RegionStatus, active_region
 
 RECIPIENT_MAX_LENGTH = 254
 
@@ -35,8 +35,8 @@ def validate_recipient(address: str) -> None:
 def invalid_reminder_recipient_count() -> int:
     invalid = 0
     for schedule in ReminderSchedule.objects.filter(
+        active_region("region__"),
         enabled=True,
-        region__deleted_at__isnull=True,
         region__status=RegionStatus.APPROVED,
         region__approved_binding__provider_account__enabled=True,
     ).select_related("region"):
@@ -78,7 +78,7 @@ def get_reminder_schedule(
     actor: User, tenant_id: int, region_id: int, now: datetime
 ) -> ReminderSchedule:
     tenant_membership(actor, tenant_id)
-    region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
+    region = Region.objects.active().get(pk=region_id, tenant_id=tenant_id)
     return ReminderSchedule.objects.filter(region=region).first() or ReminderSchedule(
         region=region, effective_from=now, language=translation.get_language()
     )
@@ -107,9 +107,7 @@ def configure_reminders(
         addresses = normalize_recipients(
             recipients if recipients or include_workspace_members else [actor.email]
         )
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         schedule, created = ReminderSchedule.objects.get_or_create(
             region=region, defaults={"effective_from": now}
         )

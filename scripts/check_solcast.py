@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, cast
 import django
 import httpx
 
+from pyracast.regions.models import active_region
+
 if TYPE_CHECKING:
     from pyracast.connections.models import SiteBinding
 
@@ -78,8 +80,8 @@ def capture(
     if not output.is_relative_to(workspace):
         raise ValueError("Output must stay within the current working directory.")
     binding = SiteBinding.objects.get(
+        active_region("region__"),
         pk=binding.pk,
-        region__deleted_at__isnull=True,
         region_revision=F("region__revision"),
     )
     site_id = binding.site_id

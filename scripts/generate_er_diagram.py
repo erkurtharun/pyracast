@@ -33,6 +33,7 @@ _MIGRATION_TRIGGER = re.compile(
     r"CREATE TRIGGER (\w+) ([^;]+?) ON (\w+) ([^;]+?)\s*(?:;|$)", re.IGNORECASE
 )
 _MIGRATION_VALIDATION = re.compile(r"VALIDATE CONSTRAINT (\w+)", re.IGNORECASE)
+_MIGRATION_RENAME = re.compile(r"ALTER TABLE (\w+) RENAME CONSTRAINT (\w+) TO (\w+)", re.IGNORECASE)
 
 type Field = models.Field[Any, Any]
 type Rules = dict[str, list[tuple[str, str]]]
@@ -185,6 +186,10 @@ def migration_rules(script: str) -> Rules:
     # Unread DDL would leave the document silently incomplete.
     if len(found) != len(_MIGRATION_DDL.findall(script)):
         raise ValueError("A RunSQL migration changes the schema in a way this script cannot read.")
+    renamed = {(table, old): new for table, old, new in _MIGRATION_RENAME.findall(script)}
+    found = [(table, renamed.pop((table, name), name), sql) for table, name, sql in found]
+    if renamed:
+        raise ValueError(f"A RunSQL migration renames constraints it never created: {renamed}.")
     grouped: Rules = {}
     for table_name, name, sql in found:
         grouped.setdefault(table_name, []).append((name, sql))
@@ -311,8 +316,9 @@ def render(groups: tuple[App, ...]) -> str:
         f"Foreign keys from model fields are `{connection.ops.deferrable_sql().strip()}`.",
         "Composite foreign keys and triggers exist only in `RunSQL` migrations; they are read",
         "from the migration files and listed with the constraints of their table as written",
-        "there, not drawn as relationships. Schema changes made by migration Python code are",
-        "not visible to this document, and `django_migrations` has no model and is not shown.",
+        "there, under their latest name, not drawn as relationships. Schema changes made by",
+        "migration Python code are not visible to this document, and `django_migrations` has",
+        "no model and is not shown.",
         "",
         "## Overview",
         "",

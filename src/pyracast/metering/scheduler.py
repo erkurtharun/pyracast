@@ -11,7 +11,7 @@ from pyracast.epias import EpiasError
 from pyracast.forecasts.models import CollectionSchedule
 from pyracast.metering.client import get_epias_client
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSourceKind
-from pyracast.plants.models import Plant
+from pyracast.plants.models import Plant, active_plant
 from pyracast.plants.operations import configuration_is_current
 from pyracast.regions.models import Region
 
@@ -74,7 +74,7 @@ def enqueue_connection(
                 connection=connection,
                 connection_revision=connection.revision,
                 configuration=configuration,
-                target_day=today - timedelta(days=1),
+                target_date=today - timedelta(days=1),
                 source_kind=EpiasSourceKind.REALTIME_GENERATION,
                 scheduled_for__gte=scheduled_for,
                 scheduled_for__lt=retry_until,
@@ -93,7 +93,7 @@ def enqueue_connection(
             plant=plant,
             connection_revision=connection.revision,
             configuration=configuration,
-            target_day=today - timedelta(days=offset),
+            target_date=today - timedelta(days=offset),
             source_kind=EpiasSourceKind.REALTIME_GENERATION,
             scheduled_for=scheduled_for,
             defaults={
@@ -103,7 +103,7 @@ def enqueue_connection(
                     "name": connection.name,
                     "short_name": "",
                 },
-                "next_attempt_at": now,
+                "available_at": now,
                 "retry_until": retry_until if not initial or offset == 1 else None,
             },
         )
@@ -135,7 +135,7 @@ def enqueue_connection(
                 connection_revision=connection.revision,
                 configuration=configuration,
                 source_kind=EpiasSourceKind.SETTLEMENT_INJECTION,
-                target_day=month_start,
+                target_date=month_start,
                 scheduled_for=scheduled_for,
                 defaults={
                     "period_end_day": month_end,
@@ -145,7 +145,7 @@ def enqueue_connection(
                         "name": connection.name,
                         "short_name": "",
                     },
-                    "next_attempt_at": now,
+                    "available_at": now,
                     "retry_until": None if initial else retry_until,
                 },
             )
@@ -161,8 +161,8 @@ def enqueue_due_epias_jobs(*, now: datetime | None = None) -> list[int]:
         raise ValidationError("An aware timestamp is required.")
     identifiers = []
     for connection in EpiasConnection.objects.filter(
+        active_plant("plant__"),
         enabled=True,
-        plant__region__deleted_at__isnull=True,
     ).select_related("plant"):
         check_settlement = (
             connection.settlement_plant_id is None
@@ -211,7 +211,7 @@ def enqueue_due_epias_jobs(*, now: datetime | None = None) -> list[int]:
                             connection_revision=current.revision,
                             configuration=configuration,
                             source_kind=EpiasSourceKind.SETTLEMENT_INJECTION,
-                            target_day=oldest_month,
+                            target_date=oldest_month,
                             period_end_day=oldest_month_end,
                             provider_plant__id=current.settlement_plant_id,
                             provider_plant__eic=current.eic,
@@ -224,7 +224,7 @@ def enqueue_due_epias_jobs(*, now: datetime | None = None) -> list[int]:
                             connection_revision=current.revision,
                             configuration=configuration,
                             source_kind=EpiasSourceKind.REALTIME_GENERATION,
-                            target_day=oldest_day,
+                            target_date=oldest_day,
                             scheduled_for=initial_slot,
                         ).exists()
                     ):

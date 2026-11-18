@@ -81,7 +81,7 @@ def _installed() -> set[str]:
 
 def _job_and_attempt(system: System) -> tuple[CollectionJob, RequestAttempt]:
     job = CollectionJob.objects.create(
-        binding=system.binding, scheduled_slot=SLOT, target_date=SLOT.date(), available_at=SLOT
+        binding=system.binding, scheduled_for=SLOT, target_date=SLOT.date(), available_at=SLOT
     )
     attempt = RequestAttempt.objects.create(
         provider_account=system.account,

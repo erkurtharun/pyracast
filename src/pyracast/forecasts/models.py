@@ -98,7 +98,10 @@ class DispatcherStatus(models.Model):
     published = models.PositiveIntegerField(null=True)
 
     class Meta:
-        constraints = (choices_check("phase", DispatcherPhase, name="dispatcher_phase_valid"),)
+        constraints = (choices_check("phase", DispatcherPhase),)
+
+    def __str__(self) -> str:
+        return self.phase
 
 
 class CollectionSchedule(models.Model):
@@ -110,20 +113,18 @@ class CollectionSchedule(models.Model):
 
 class HistoricalReferenceImport(models.Model):
     binding = models.ForeignKey(SiteBinding, on_delete=models.PROTECT)
-    sha256 = models.CharField(max_length=64)
+    content_sha256 = models.CharField(max_length=64)
     source_name = models.CharField(max_length=255)
     source_settings = models.JSONField()
     imported_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
-    imported_at = models.DateTimeField()
+    created_at = models.DateTimeField()
     interval_count = models.PositiveIntegerField()
 
     class Meta:
         constraints = (
+            models.UniqueConstraint(fields=("id", "binding"), name="%(class)s_id_binding_uniq"),
             models.UniqueConstraint(
-                fields=("id", "binding"), name="reference_import_binding_identity"
-            ),
-            models.UniqueConstraint(
-                fields=("binding", "sha256"), name="unique_historical_reference_import"
+                fields=("binding", "content_sha256"), name="%(class)s_binding_content_sha256_uniq"
             ),
         )
 
@@ -136,7 +137,7 @@ class CollectionJob(models.Model):
     endpoint = models.CharField(
         max_length=30, choices=CollectionEndpoint, default=CollectionEndpoint.FORECASTS
     )
-    scheduled_slot = models.DateTimeField()
+    scheduled_for = models.DateTimeField()
     target_date = models.DateField()
     status = models.CharField(
         max_length=20, choices=CollectionJobStatus, default=CollectionJobStatus.PENDING
@@ -160,15 +161,13 @@ class CollectionJob(models.Model):
                         CollectionJobStatus.RUNNING,
                     )
                 ),
-                name="collection_dispatch_due",
+                name="%(class)s_due_idx",
             ),
         )
         constraints = (
-            models.UniqueConstraint(
-                fields=("id", "binding"), name="collection_job_binding_identity"
-            ),
+            models.UniqueConstraint(fields=("id", "binding"), name="%(class)s_id_binding_uniq"),
             choices_check("endpoint", CollectionEndpoint),
-            choices_check("status", CollectionJobStatus, name="collection_job_status"),
+            choices_check("status", CollectionJobStatus),
             choices_check("last_error", CollectionJobError, blank=True),
             lease_check((CollectionJobStatus.RUNNING,)),
             models.CheckConstraint(
@@ -189,19 +188,23 @@ class CollectionJob(models.Model):
             # Imports and scaled copies take their slot from their source, so only native
             # acquisitions own one slot per binding and endpoint.
             models.UniqueConstraint(
-                fields=("binding", "endpoint", "scheduled_slot"),
+                fields=("binding", "endpoint", "scheduled_for"),
                 condition=models.Q(
                     endpoint__in=(
                         CollectionEndpoint.FORECASTS,
                         CollectionEndpoint.ESTIMATED_ACTUALS,
                     )
                 ),
-                name="%(class)s_binding_endpoint_scheduled_slot_uniq",
+                name="%(class)s_binding_endpoint_scheduled_for_uniq",
             ),
             models.UniqueConstraint(
-                fields=("reference_import", "target_date"), name="unique_import_reference_day"
+                fields=("reference_import", "target_date"),
+                name="%(class)s_reference_import_target_date_uniq",
             ),
         )
+
+    def __str__(self) -> str:
+        return f"{self.endpoint} {self.target_date} of binding {self.binding_id}"
 
 
 class RequestAttempt(models.Model):
@@ -220,14 +223,17 @@ class RequestAttempt(models.Model):
         constraints = (
             models.CheckConstraint(
                 condition=models.Q(job__isnull=True) | models.Q(binding__isnull=False),
-                name="request_job_requires_binding",
+                name="%(class)s_job_binding_chk",
             ),
             choices_check("purpose", RequestPurpose),
-            choices_check("outcome", RequestOutcome, name="request_attempt_outcome"),
+            choices_check("outcome", RequestOutcome),
         )
         indexes = (
-            models.Index(fields=("provider_account", "utc_day"), name="request_account_day"),
+            models.Index(fields=("provider_account", "utc_day"), name="%(class)s_account_day_idx"),
         )
+
+    def __str__(self) -> str:
+        return f"{self.purpose} request {self.pk}: {self.outcome}"
 
 
 class ForecastSnapshot(models.Model):
@@ -250,11 +256,11 @@ class ForecastSnapshot(models.Model):
         indexes = (
             models.Index(
                 fields=("binding", "source_kind", "-collected_at", "-available_at", "-id"),
-                name="snapshot_binding_source_age",
+                name="%(class)s_latest_idx",
             ),
         )
         constraints = (
-            models.UniqueConstraint(fields=("id", "binding"), name="snapshot_binding_identity"),
+            models.UniqueConstraint(fields=("id", "binding"), name="%(class)s_id_binding_uniq"),
             models.CheckConstraint(
                 condition=(
                     models.Q(coverage_start__isnull=True, coverage_end__isnull=True)
@@ -264,11 +270,14 @@ class ForecastSnapshot(models.Model):
                         coverage_end__gt=models.F("coverage_start"),
                     )
                 ),
-                name="snapshot_coverage_bounds",
+                name="%(class)s_coverage_chk",
             ),
-            choices_check("source_kind", SnapshotSourceKind, name="snapshot_source_kind"),
+            choices_check("source_kind", SnapshotSourceKind),
             choices_check("weather_error", SnapshotWeatherError, blank=True),
         )
+
+    def __str__(self) -> str:
+        return f"{self.source_kind} snapshot {self.pk} of binding {self.binding_id}"
 
 
 class ForecastResult(models.Model):
@@ -276,6 +285,9 @@ class ForecastResult(models.Model):
     payload = models.JSONField()
     daily_payloads = models.JSONField(default=dict)
     published_at = models.DateTimeField()
+
+    def __str__(self) -> str:
+        return f"Result of snapshot {self.snapshot_id}"
 
 
 class ReferenceCapacityNormalization(models.Model):
@@ -297,23 +309,23 @@ class ReferenceCapacityNormalization(models.Model):
         constraints = (
             models.CheckConstraint(
                 condition=~models.Q(snapshot=models.F("source_snapshot")),
-                name="normalization_distinct_source",
+                name="%(class)s_source_snapshot_chk",
             ),
             models.CheckConstraint(
                 condition=models.Q(source_capacity_kw__gt=0, source_capacity_kw__lt=float("inf")),
-                name="normalization_source_capacity",
+                name="%(class)s_source_capacity_kw_chk",
             ),
             models.CheckConstraint(
                 condition=models.Q(target_capacity_kw__gt=0, target_capacity_kw__lt=float("inf")),
-                name="normalization_target_capacity",
+                name="%(class)s_target_capacity_kw_chk",
             ),
             models.UniqueConstraint(
                 fields=("source_snapshot", "target_binding"),
-                name="unique_reference_capacity_normalization",
+                name="%(class)s_source_target_uniq",
             ),
             models.CheckConstraint(
                 condition=models.Q(factor__gt=0, factor__lt=float("inf")),
-                name="finite_positive_reference_scale",
+                name="%(class)s_factor_finite_chk",
             ),
             # The writer stores target / source; Python and PostgreSQL divide float8 identically
             # (IEEE 754), so the stored factor is the exact quotient at every capacity.

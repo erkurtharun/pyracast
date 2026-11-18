@@ -36,5 +36,5 @@ class Command(BaseCommand):
             raise CommandError("Historical reference import failed: " + str(exc)) from exc
         return (
             f"Historical reference import {record.pk}: {record.interval_count} native intervals; "
-            f"SHA256 {record.sha256}; acquired {record.imported_at.isoformat()}"
+            f"SHA256 {record.content_sha256}; acquired {record.created_at.isoformat()}"
         )

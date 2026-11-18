@@ -27,7 +27,7 @@ def test_stub_queue_duplicate_delivery_is_idempotent(monkeypatch: pytest.MonkeyP
     make_system(approved=True)
     job = CollectionJob.objects.get()
     monkeypatch.setattr(
-        runtime, "datetime", MagicMock(now=MagicMock(return_value=job.scheduled_slot))
+        runtime, "datetime", MagicMock(now=MagicMock(return_value=job.scheduled_for))
     )
     broker = StubBroker()
     actor = runtime.make_actor(broker)

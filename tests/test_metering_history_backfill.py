@@ -22,7 +22,7 @@ def test_existing_three_month_settlement_bootstrap_upgrades_once_without_more_re
 ) -> None:
     link_settlement(monkeypatch)
     EpiasCollectionJob.objects.filter(
-        source_kind="settlement_injection", target_day__lt=date(2026, 8, 1)
+        source_kind="settlement_injection", target_date__lt=date(2026, 8, 1)
     ).delete()
     original = set(EpiasCollectionJob.objects.values_list("pk", flat=True))
     assert len(original) == 93
@@ -41,7 +41,7 @@ def test_existing_initial_month_at_a_different_slot_does_not_duplicate_the_archi
 ) -> None:
     link_settlement(monkeypatch)
     oldest = EpiasCollectionJob.objects.filter(source_kind="settlement_injection").earliest(
-        "target_day"
+        "target_date"
     )
     oldest.scheduled_for = NOW + timedelta(minutes=1)
     oldest.save(update_fields=("scheduled_for",))
@@ -57,7 +57,7 @@ def test_initial_history_covers_ninety_completed_market_days_once(
     jobs = EpiasCollectionJob.objects.order_by("pk")
     initial_ids = list(jobs.values_list("pk", flat=True))
     assert len(initial_ids) == 90
-    assert set(jobs.values_list("target_day", flat=True)) == {
+    assert set(jobs.values_list("target_date", flat=True)) == {
         NOW.date() - timedelta(days=offset) for offset in range(1, 91)
     }
     assert set(jobs.values_list("scheduled_for", flat=True)) == {linked.updated_at}
@@ -84,7 +84,7 @@ def test_configuration_revision_enqueues_its_own_ninety_day_history(
     assert jobs.filter(configuration_id=prior_configuration_id).count() == 90
     current_jobs = jobs.filter(configuration_id=revised.current_configuration_id)
     assert current_jobs.count() == 90
-    assert set(current_jobs.values_list("target_day", flat=True)) == {
+    assert set(current_jobs.values_list("target_date", flat=True)) == {
         NOW.date() - timedelta(days=offset) for offset in range(1, 91)
     }
     enqueue_due_epias_jobs(now=NOW + timedelta(minutes=1))
@@ -95,7 +95,7 @@ def test_existing_seven_day_connection_backfills_once_with_concurrent_schedulers
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     connected(monkeypatch)
-    EpiasCollectionJob.objects.filter(target_day__lt=NOW.date() - timedelta(days=7)).delete()
+    EpiasCollectionJob.objects.filter(target_date__lt=NOW.date() - timedelta(days=7)).delete()
     assert EpiasCollectionJob.objects.count() == 7
     barrier = Barrier(2)
     dispatch_at = NEXT_NIGHT
@@ -135,8 +135,8 @@ def test_initial_settlement_covers_twelve_complete_months_without_extending_real
     assert EpiasCollectionJob.objects.filter(source_kind="realtime_generation").count() == 90
     assert list(
         EpiasCollectionJob.objects.filter(source_kind="settlement_injection")
-        .order_by("target_day")
-        .values_list("target_day", "period_end_day")
+        .order_by("target_date")
+        .values_list("target_date", "period_end_day")
     ) == [
         (date(year, month, 1), date(year, month, monthrange(year, month)[1]))
         for year, month in [
@@ -151,6 +151,6 @@ def test_initial_settlement_covers_twelve_complete_months_without_extending_real
     assert EpiasCollectionJob.objects.count() == 102
     assert all(
         job.period_end_day is not None
-        and 28 <= (job.period_end_day - job.target_day).days + 1 <= 31
+        and 28 <= (job.period_end_day - job.target_date).days + 1 <= 31
         for job in EpiasCollectionJob.objects.filter(source_kind="settlement_injection")
     )

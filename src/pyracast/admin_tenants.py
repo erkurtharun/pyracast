@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, Exists, OuterRef, Q, QuerySet, Subquery
+from django.db.models import Count, Exists, OuterRef, QuerySet, Subquery
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest, QueryDict
 from django.utils import timezone
@@ -28,7 +28,7 @@ from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.admin_workspace import summarize_plant, workspace_regions
 from pyracast.errors import ConflictError, ErrorCode
 from pyracast.plants.models import Plant
-from pyracast.regions.models import RegionStatus
+from pyracast.regions.models import RegionStatus, active_region
 
 if TYPE_CHECKING:
     from django_stubs_ext import StrPromise
@@ -231,9 +231,7 @@ def tenant_list_context(query: str, page: str) -> dict[str, Any]:
     administrator = Membership.objects.filter(tenant_id=OuterRef("pk"), role=WorkspaceRole.ADMIN)
     tenants = Tenant.objects.annotate(
         member_count=Count("membership", distinct=True),
-        plant_count=Count(
-            "region__plant", filter=Q(region__deleted_at__isnull=True), distinct=True
-        ),
+        plant_count=Count("region__plant", filter=active_region("region__"), distinct=True),
         administrator_email=Subquery(administrator.values("user__email")[:1]),
         administrator_username=Subquery(administrator.values("user__username")[:1]),
         administrator_invited=Exists(

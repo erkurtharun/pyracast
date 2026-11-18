@@ -199,7 +199,7 @@ function InboxPage({
                                 : ""}
                         </p>
                         <Triage item={item} />
-                        <SubmissionTime value={item.submitted_at} />
+                        <SubmissionTime value={item.created_at} />
                         <button
                             className="button secondary"
                             aria-expanded={opened === item.id}

@@ -285,7 +285,7 @@ def test_interrupted_metering_is_unhealthy_even_with_recent_forecasts_and_health
     recent_forecast(system)
     for phase in DispatcherPhase.values:
         record_dispatch_phase(phase, NOW)
-    EpiasCollectionJob.objects.update(next_attempt_at=NOW + timedelta(hours=1))
+    EpiasCollectionJob.objects.update(available_at=NOW + timedelta(hours=1))
     assert delivery_health(NOW, timedelta(minutes=5))["healthy"] is True
     job = EpiasCollectionJob.objects.first()
     assert job is not None

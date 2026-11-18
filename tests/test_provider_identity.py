@@ -57,7 +57,10 @@ def test_raw_provider_variants_share_one_account_and_quota(
     reserve_account_request(existing, NOW, purpose=RequestPurpose.VALIDATION)
     with pytest.raises(QuotaExceededError):
         reserve_account_request(duplicate, NOW, purpose=RequestPurpose.VALIDATION)
-    with pytest.raises(IntegrityError, match="canonical_provider_account"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="provideraccount_provider_external_account_id_uniq"),
+        transaction.atomic(),
+    ):
         ProviderAccount.objects.create(
             provider="fixture",
             external_account_id=equivalent,
@@ -129,7 +132,7 @@ def test_account_index_uses_builtin_unicode_collation() -> None:
             "FROM pg_index i JOIN pg_class x ON x.oid = i.indexrelid "
             "CROSS JOIN LATERAL unnest(i.indcollation) AS k(collation_oid) "
             "JOIN pg_collation c ON c.oid = k.collation_oid "
-            "WHERE x.relname = 'canonical_provider_account'"
+            "WHERE x.relname = 'provideraccount_provider_external_account_id_uniq'"
         )
         assert cursor.fetchall() == [
             ("pg_unicode_fast", "b", True, True),

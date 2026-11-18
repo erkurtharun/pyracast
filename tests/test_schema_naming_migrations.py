@@ -1,3 +1,4 @@
+import json
 import re
 from collections.abc import Iterator
 from datetime import timedelta
@@ -163,7 +164,7 @@ def project_rows() -> dict[str, list[dict[str, Any]]]:
             cursor.execute(
                 sql.SQL("SELECT to_jsonb(stored) FROM {} AS stored").format(sql.Identifier(table))
             )
-            rows[table] = sorted((row for (row,) in cursor.fetchall()), key=repr)
+            rows[table] = sorted((json.loads(row) for (row,) in cursor.fetchall()), key=repr)
     return rows
 
 

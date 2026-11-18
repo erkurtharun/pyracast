@@ -21,7 +21,7 @@ from pyracast.regions.models import Region
 
 
 def member_plant(plant_id: int, actor: User) -> Plant:
-    plant = Plant.objects.select_related("region").get(pk=plant_id, region__deleted_at__isnull=True)
+    plant = Plant.objects.active().select_related("region").get(pk=plant_id)
     tenant_membership(actor, plant.region.tenant_id)
     return plant
 
@@ -35,7 +35,7 @@ def connect_epias(
     client: EpiasClient | None = None,
 ) -> EpiasConnection:
     require_platform_admin(actor)
-    plant = Plant.objects.select_related("region").get(pk=plant_id, region__deleted_at__isnull=True)
+    plant = Plant.objects.active().select_related("region").get(pk=plant_id)
     if isinstance(provider_plant_id, bool) or provider_plant_id <= 0 or not expected_eic.strip():
         raise DomainError(ErrorCode.INVALID_EPIAS_PLANT)
     if plant.current_configuration is None or not configuration_is_current(
@@ -93,7 +93,7 @@ def connect_epias(
 
 def disconnect_epias(plant_id: int, *, actor: User) -> None:
     require_platform_admin(actor)
-    plant = Plant.objects.select_related("region").get(pk=plant_id, region__deleted_at__isnull=True)
+    plant = Plant.objects.active().select_related("region").get(pk=plant_id)
     with transaction.atomic():
         Region.objects.select_for_update().get(pk=plant.region_id)
         Plant.objects.select_for_update().get(pk=plant.pk)
@@ -144,7 +144,7 @@ def epias_connection_status(connection: EpiasConnection | None) -> dict[str, obj
     snapshots = EpiasSnapshot.objects.filter(_source_identity(connection), connection=connection)
     populated = snapshots.exclude(readings=[])
     settlement_dates = populated.filter(source_kind=EpiasSourceKind.SETTLEMENT_INJECTION).aggregate(
-        first=Min("target_day"), last=Max("target_day")
+        first=Min("target_date"), last=Max("target_date")
     )
     latest = populated.order_by("-available_at", "-pk").first()
     last_job = jobs.order_by("-scheduled_for", "-pk").first()
@@ -161,7 +161,7 @@ def epias_connection_status(connection: EpiasConnection | None) -> dict[str, obj
         "pending_jobs": jobs.filter(
             status__in=(EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING)
         ).count(),
-        "archived_days": populated.values("target_day").distinct().count(),
+        "archived_days": populated.values("target_date").distinct().count(),
     }
 
 

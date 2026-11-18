@@ -159,16 +159,16 @@ def test_database_enforces_mounting_and_angle_contract() -> None:
     plant = Plant.objects.create(region=system.region, name="Geometry")
     invalid: list[dict[str, Any]] = [
         {"mounting_type": "dual_axis"},
-        {"mounting_type": "unknown", "surface_tilt": 0},
-        {"mounting_type": "tracking", "surface_azimuth": 180},
-        {"mounting_type": "fixed", "surface_tilt": -1},
-        {"mounting_type": "fixed", "surface_tilt": 91},
-        {"mounting_type": "fixed", "surface_tilt": float("nan")},
-        {"mounting_type": "fixed", "surface_tilt": float("inf")},
-        {"mounting_type": "fixed", "surface_azimuth": -1},
-        {"mounting_type": "fixed", "surface_azimuth": 360},
-        {"mounting_type": "fixed", "surface_azimuth": float("nan")},
-        {"mounting_type": "fixed", "surface_azimuth": float("inf")},
+        {"mounting_type": "unknown", "surface_tilt_degrees": 0},
+        {"mounting_type": "tracking", "surface_azimuth_degrees": 180},
+        {"mounting_type": "fixed", "surface_tilt_degrees": -1},
+        {"mounting_type": "fixed", "surface_tilt_degrees": 91},
+        {"mounting_type": "fixed", "surface_tilt_degrees": float("nan")},
+        {"mounting_type": "fixed", "surface_tilt_degrees": float("inf")},
+        {"mounting_type": "fixed", "surface_azimuth_degrees": -1},
+        {"mounting_type": "fixed", "surface_azimuth_degrees": 360},
+        {"mounting_type": "fixed", "surface_azimuth_degrees": float("nan")},
+        {"mounting_type": "fixed", "surface_azimuth_degrees": float("inf")},
     ]
     for values in invalid:
         with pytest.raises(IntegrityError), transaction.atomic():
@@ -189,7 +189,7 @@ def test_database_enforces_mounting_and_angle_contract() -> None:
         dc_capacity_mw=1,
         created_by=system.member,
         mounting_type="fixed",
-        surface_tilt=0,
-        surface_azimuth=0,
+        surface_tilt_degrees=0,
+        surface_azimuth_degrees=0,
     )
-    assert (configuration.surface_tilt, configuration.surface_azimuth) == (0, 0)
+    assert (configuration.surface_tilt_degrees, configuration.surface_azimuth_degrees) == (0, 0)

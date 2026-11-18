@@ -107,7 +107,7 @@ def test_reservations_reject_mismatched_account_binding_and_job() -> None:
         )
     job = CollectionJob.objects.create(
         binding=system.binding,
-        scheduled_slot=NOW,
+        scheduled_for=NOW,
         target_date=NOW.date(),
         available_at=NOW,
     )

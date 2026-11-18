@@ -28,7 +28,7 @@ function proposal(id = 1) {
         incident_action: null,
         incident_title: null,
         proposed_by: { id: 2, name: "Member" },
-        submitted_at: "2026-11-09T12:00:00Z",
+        created_at: "2026-11-09T12:00:00Z",
         reason: "Verified meter reading",
         reviewed_by: null,
         closed_at: null,
@@ -132,7 +132,7 @@ test("member submits a native production correction with a stable retry key and 
                               quality: "valid",
                               source: "meter",
                               recorded_by_id: 2,
-                              recorded_at: `${date}T09:00:00Z`,
+                              created_at: `${date}T09:00:00Z`,
                               supersedes_id: null,
                               is_reverted: false,
                           }

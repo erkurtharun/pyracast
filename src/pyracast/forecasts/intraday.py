@@ -133,7 +133,7 @@ def native_actual_snapshots(
 ) -> list[ForecastSnapshot]:
     eligible = _actuals_available_by(knowledge_cutoff)
     if actuals_grace_until is not None:
-        eligible |= Q(job__scheduled_slot=knowledge_cutoff) & _actuals_available_by(
+        eligible |= Q(job__scheduled_for=knowledge_cutoff) & _actuals_available_by(
             actuals_grace_until
         )
     return covering_snapshots(

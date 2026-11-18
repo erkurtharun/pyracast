@@ -79,7 +79,7 @@ def test_configuration_rejects_binding_from_another_region(
 ) -> None:
     _, first, second = owners
     with (
-        pytest.raises(IntegrityError, match="configuration_binding_region_fk"),
+        pytest.raises(IntegrityError, match="plantconfiguration_binding_region_fk"),
         transaction.atomic(),
     ):
         PlantConfiguration.objects.filter(pk=first.pk).update(binding=second.binding)
@@ -139,9 +139,9 @@ def test_epias_job_requires_connection_and_configuration_to_share_plant(
         "configuration": first,
         "connection_revision": 1,
         "provider_plant": {},
-        "target_day": NOW.date(),
+        "target_date": NOW.date(),
         "scheduled_for": NOW,
-        "next_attempt_at": NOW,
+        "available_at": NOW,
     }
     job = EpiasCollectionJob.objects.create(**values)
     with pytest.raises(IntegrityError, match=r"epias_job_.*_plant_fk"), transaction.atomic():  # noqa: PT012 -- deferred FK checks both child and parent mutations at commit.
@@ -168,11 +168,11 @@ def test_database_rejects_configuration_from_another_tenant(
 ) -> None:
     system, first, second = owners
     constraint = {
-        "current": "plant_current_config_owner_fk",
-        "observation": "observation_config_owner_fk",
-        "calibration": "calibration_config_owner_fk",
-        "activation": "activation_config_owner_fk",
-        "incident": "incident_declared_config_owner_fk",
+        "current": "plant_current_configuration_fk",
+        "observation": "productionobservation_configuration_plant_fk",
+        "calibration": "calibrationrun_configuration_plant_fk",
+        "activation": "calibrationactivation_configuration_plant_fk",
+        "incident": "plantincident_declared_configuration_plant_fk",
     }[record]
     with pytest.raises(IntegrityError, match=constraint), transaction.atomic():  # noqa: PT012 -- commit checks the selected write.
         match record:
@@ -214,8 +214,8 @@ def test_database_rejects_calibration_from_another_configuration(
     system, first, second = owners
     run = calibration(second)
     constraint = {
-        "activation": "activation_calibration_config_fk",
-        "comparison": "calibration_comparison_config_fk",
+        "activation": "calibrationactivation_calibration_configuration_fk",
+        "comparison": "calibrationrun_comparison_activation_configuration_fk",
     }[record]
     with pytest.raises(IntegrityError, match=constraint), transaction.atomic():  # noqa: PT012 -- commit checks the selected write.
         match record:
@@ -238,7 +238,10 @@ def test_database_rechecks_parent_configuration_ownership(
 ) -> None:
     _, first, second = owners
     Plant.objects.filter(pk=first.plant_id).update(current_configuration=first)
-    with pytest.raises(IntegrityError, match="plant_current_config_owner_fk"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="plant_current_configuration_fk"),
+        transaction.atomic(),
+    ):
         PlantConfiguration.objects.filter(pk=first.pk).update(plant=second.plant, revision=2)
 
 
@@ -251,9 +254,9 @@ def test_database_rechecks_parent_configuration_ownership(
         {"export_limit_mw": -1},
         {"measurement_basis": "unknown"},
         {"mounting_type": "dual_axis"},
-        {"mounting_type": "fixed", "surface_tilt": float("nan")},
-        {"mounting_type": "fixed", "surface_azimuth": 360},
-        {"mounting_type": "tracking", "surface_tilt": 30},
+        {"mounting_type": "fixed", "surface_tilt_degrees": float("nan")},
+        {"mounting_type": "fixed", "surface_azimuth_degrees": 360},
+        {"mounting_type": "tracking", "surface_tilt_degrees": 30},
     ],
 )
 def test_database_rejects_invalid_customer_declaration(
@@ -285,16 +288,16 @@ def test_epias_archive_keeps_job_configuration_and_connection_lineage(
         configuration=first,
         connection_revision=1,
         provider_plant={},
-        target_day=NOW.date(),
+        target_date=NOW.date(),
         scheduled_for=NOW,
-        next_attempt_at=NOW,
+        available_at=NOW,
     )
     fields = dict(
         job=job,
         attempt=1,
         connection=linked,
         configuration=first,
-        target_day=NOW.date(),
+        target_date=NOW.date(),
         collected_at=NOW,
         available_at=NOW,
         raw_payload={},
@@ -303,7 +306,7 @@ def test_epias_archive_keeps_job_configuration_and_connection_lineage(
     )
     for changed in ({"configuration": second}, {"connection": other_linked}):
         with (
-            pytest.raises(IntegrityError, match="epias_snapshot_job_lineage_fk"),
+            pytest.raises(IntegrityError, match="epiassnapshot_job_connection_configuration_fk"),
             transaction.atomic(),
         ):
             EpiasSnapshot.objects.create(**(fields | changed))
@@ -311,7 +314,10 @@ def test_epias_archive_keeps_job_configuration_and_connection_lineage(
     for parent in (job, linked, first):
         with pytest.raises(ProtectedError):
             parent.delete()
-    with pytest.raises(IntegrityError, match="epias_snapshot_job_lineage_fk"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="epiassnapshot_job_connection_configuration_fk"),
+        transaction.atomic(),
+    ):
         EpiasCollectionJob.objects.filter(pk=job.pk).update(configuration=second)
     assert EpiasSnapshot.objects.get(pk=snapshot.pk).content_sha256 == "a" * 64
 
@@ -322,9 +328,9 @@ def test_lineage_constraints_are_validated_and_deferred() -> None:
             "SELECT conname, convalidated, condeferrable, condeferred FROM pg_constraint "
             "WHERE conname IN (%s, %s, %s)",
             [
-                "plant_current_config_owner_fk",
-                "incident_declared_config_owner_fk",
-                "epias_snapshot_job_lineage_fk",
+                "plant_current_configuration_fk",
+                "plantincident_declared_configuration_plant_fk",
+                "epiassnapshot_job_connection_configuration_fk",
             ],
         )
         rows = cursor.fetchall()
@@ -347,9 +353,9 @@ def test_authorized_retention_purge_removes_epias_archive_explicitly(
         configuration=first,
         connection_revision=1,
         provider_plant={},
-        target_day=NOW.date(),
+        target_date=NOW.date(),
         scheduled_for=NOW,
-        next_attempt_at=NOW,
+        available_at=NOW,
         status="succeeded",
     )
     EpiasSnapshot.objects.create(
@@ -357,7 +363,7 @@ def test_authorized_retention_purge_removes_epias_archive_explicitly(
         attempt=1,
         connection=linked,
         configuration=first,
-        target_day=NOW.date(),
+        target_date=NOW.date(),
         collected_at=NOW,
         available_at=NOW,
         raw_payload={},
@@ -377,5 +383,8 @@ def test_calibration_preserves_its_configuration_binding(
 ) -> None:
     _, first, second = owners
     run = calibration(first)
-    with pytest.raises(IntegrityError, match="calibration_config_binding_fk"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="calibrationrun_configuration_binding_fk"),
+        transaction.atomic(),
+    ):
         CalibrationRun.objects.filter(pk=run.pk).update(binding=second.binding)

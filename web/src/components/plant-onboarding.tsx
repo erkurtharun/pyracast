@@ -281,11 +281,11 @@ export function PlantOnboarding({
                                         ? t("geometry", {
                                               tilt:
                                                   reviewNumber(
-                                                      review.surface_tilt,
+                                                      review.surface_tilt_degrees,
                                                   ) || t("unknownGeometry"),
                                               azimuth:
                                                   reviewNumber(
-                                                      review.surface_azimuth,
+                                                      review.surface_azimuth_degrees,
                                                   ) || t("unknownGeometry"),
                                           })
                                         : ""}

@@ -48,6 +48,7 @@ from pyracast.regions.models import (
     Region,
     RegionLocationChangeRequest,
     RegionStatus,
+    active_region,
 )
 from pyracast.regions.operations import review_location_change, transition_region
 
@@ -97,7 +98,7 @@ def workspace_regions() -> QuerySet[WithAnnotations[Region, WorkspaceAnnotations
         forecastresult__isnull=False,
     ).order_by("-collected_at", "-pk")
     return (
-        Region.objects.filter(deleted_at__isnull=True)
+        Region.objects.active()
         .select_related("tenant")
         .annotate(
             workspace_plant_name=Subquery(
@@ -206,7 +207,7 @@ def overview_context() -> dict[str, Any]:
     )
     counts["total"] = sum(counts.values())
     counts["location_changes"] = RegionLocationChangeRequest.objects.filter(
-        status=LocationChangeStatus.PENDING, region__deleted_at__isnull=True
+        active_region("region__"), status=LocationChangeStatus.PENDING
     ).count()
     return {
         "counts": counts,
@@ -227,7 +228,7 @@ def overview_context() -> dict[str, Any]:
                 "review_url": reverse("admin:workspace_plant", args=(change.region_id,)),
             }
             for change in RegionLocationChangeRequest.objects.filter(
-                status=LocationChangeStatus.PENDING, region__deleted_at__isnull=True
+                active_region("region__"), status=LocationChangeStatus.PENDING
             )
             .select_related("region__tenant")
             .order_by("created_at", "pk")[:6]
@@ -239,7 +240,7 @@ def overview_context() -> dict[str, Any]:
 def recent_activity_context(
     region_id: int | None = None, *, limit: int = 5
 ) -> list[dict[str, Any]]:
-    events = AuditEvent.objects.filter(region__deleted_at__isnull=True, region__isnull=False)
+    events = AuditEvent.objects.filter(active_region("region__"), region__isnull=False)
     if region_id is not None:
         events = events.filter(region_id=region_id)
     return [
@@ -294,7 +295,7 @@ def recent_work_context(
             else _("Past estimates"),
             "target_date": row.target_date,
             "status_label": row.status.replace("_", " ").capitalize(),
-            "scheduled_for": row.scheduled_slot,
+            "scheduled_for": row.scheduled_for,
             "last_error": row.last_error,
             "error_label": row.last_error.replace("_", " ").capitalize(),
             "attempts": row.attempts,
@@ -343,10 +344,10 @@ def recent_work_context(
                 if row.source_kind == "realtime_generation"
                 else _("Settlement production")
             ),
-            "target_day": row.target_day,
+            "target_date": row.target_date,
             "period_end_day": row.period_end_day,
             "scheduled_for": row.scheduled_for,
-            "next_attempt_at": row.next_attempt_at,
+            "available_at": row.available_at,
             "status": row.status,
             "status_label": (
                 _("Waiting for provider publication")
@@ -449,11 +450,11 @@ class ReviewDecisionForm(forms.Form):
         data = self.cleaned_data
         with transaction.atomic():
             if data["action"] == "approve_location":
-                tenant_id = Region.objects.values_list("tenant_id", flat=True).get(
-                    pk=region_id, deleted_at__isnull=True
+                tenant_id = (
+                    Region.objects.active().values_list("tenant_id", flat=True).get(pk=region_id)
                 )
                 Tenant.objects.select_for_update().get(pk=tenant_id)
-            region = Region.objects.select_for_update().get(pk=region_id, deleted_at__isnull=True)
+            region = Region.objects.active().select_for_update().get(pk=region_id)
             if (
                 region.revision != data["expected_revision"]
                 or region.status != data["expected_status"]

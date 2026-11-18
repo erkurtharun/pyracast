@@ -20,7 +20,7 @@ def nightly_job(monkeypatch: pytest.MonkeyPatch) -> EpiasCollectionJob:
     connected(monkeypatch)
     identifiers = enqueue_due_epias_jobs(now=NEXT_NIGHT)
     return EpiasCollectionJob.objects.get(
-        pk__in=identifiers, target_day=NEXT_NIGHT.date() - timedelta(days=1)
+        pk__in=identifiers, target_date=NEXT_NIGHT.date() - timedelta(days=1)
     )
 
 
@@ -33,7 +33,7 @@ def test_initial_yesterday_collection_uses_the_remaining_night_window(
     monkeypatch.setattr("django.utils.timezone.now", lambda: now)
     linked = connect(plant, system.admin, SettlementClient())
     jobs = EpiasCollectionJob.objects.filter(connection=linked, connection_revision=linked.revision)
-    latest = jobs.get(source_kind="realtime_generation", target_day=now.date() - timedelta(days=1))
+    latest = jobs.get(source_kind="realtime_generation", target_date=now.date() - timedelta(days=1))
     assert latest.scheduled_for == now
     assert latest.retry_until == NEXT_NIGHT + timedelta(hours=6)
     assert jobs.exclude(pk=latest.pk).count() == 101
@@ -57,7 +57,7 @@ def test_initial_backfill_outside_an_enabled_night_keeps_its_independent_budget(
     jobs = EpiasCollectionJob.objects.filter(connection=linked, connection_revision=linked.revision)
     assert jobs.count() == 90
     assert not jobs.filter(retry_until__isnull=False).exists()
-    latest = jobs.latest("target_day")
+    latest = jobs.latest("target_date")
     assert run_epias_job(latest.pk, fetch=day_data, now=now)
 
 
@@ -72,7 +72,7 @@ def test_initial_yesterday_partial_data_can_recover_after_three_attempts(
     job = EpiasCollectionJob.objects.get(
         connection=linked,
         connection_revision=linked.revision,
-        target_day=now.date() - timedelta(days=1),
+        target_date=now.date() - timedelta(days=1),
     )
 
     def partial(plant: EpiasPlant, day: date) -> EpiasDay:
@@ -84,8 +84,8 @@ def test_initial_yesterday_partial_data_can_recover_after_three_attempts(
         job.refresh_from_db()
         assert job.status == "pending"
         assert job.attempts == attempt
-        assert job.next_attempt_at == now + timedelta(minutes=30)
-        now = job.next_attempt_at
+        assert job.available_at == now + timedelta(minutes=30)
+        now = job.available_at
     assert run_epias_job(job.pk, fetch=day_data, now=now)
     job.refresh_from_db()
     assert job.status == "succeeded"
@@ -109,8 +109,8 @@ def test_midnight_slot_and_nine_am_deadline_are_independent_of_forecasts(
     assert enqueue_due_epias_jobs(now=midnight + timedelta(seconds=1)) == identifiers
     jobs = EpiasCollectionJob.objects.filter(pk__in=identifiers)
     assert set(jobs.values_list("scheduled_for", flat=True)) == {midnight}
-    nightly = jobs.get(target_day=NEXT_NIGHT.date() - timedelta(days=1))
-    assert nightly.target_day == NEXT_NIGHT.date() - timedelta(days=1)
+    nightly = jobs.get(target_date=NEXT_NIGHT.date() - timedelta(days=1))
+    assert nightly.target_date == NEXT_NIGHT.date() - timedelta(days=1)
     assert nightly.retry_until == NEXT_NIGHT + timedelta(hours=6)
     assert set(jobs.values_list("retry_until", flat=True)) == {NEXT_NIGHT + timedelta(hours=6)}
     assert enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(hours=6)) == []
@@ -136,7 +136,7 @@ def test_forecast_time_edit_during_night_preserves_production_collection(
     original_ids = enqueue_due_epias_jobs(now=midnight) if completed else []
     if completed:
         previous = EpiasCollectionJob.objects.get(
-            pk__in=original_ids, target_day=NEXT_NIGHT.date() - timedelta(days=1)
+            pk__in=original_ids, target_date=NEXT_NIGHT.date() - timedelta(days=1)
         )
         assert run_epias_job(previous.pk, fetch=day_data, now=midnight)
     schedule.times = ["00:28", "08:45", "10:00"]
@@ -150,7 +150,7 @@ def test_forecast_time_edit_during_night_preserves_production_collection(
     if completed:
         assert identifiers == original_ids
     job = EpiasCollectionJob.objects.get(
-        pk__in=identifiers, target_day=NEXT_NIGHT.date() - timedelta(days=1)
+        pk__in=identifiers, target_date=NEXT_NIGHT.date() - timedelta(days=1)
     )
     assert job.scheduled_for == midnight
     assert job.retry_until == NEXT_NIGHT + timedelta(hours=6)
@@ -207,11 +207,11 @@ def test_nightly_missing_data_retries_every_half_hour_through_morning(
         assert not run_epias_job(job.pk, fetch=partial, now=now)
         job.refresh_from_db()
         assert job.attempts == attempt
-        assert job.next_attempt_at == now + timedelta(minutes=30)
+        assert job.available_at == now + timedelta(minutes=30)
         assert job.status == ("pending" if attempt < 12 else "failed")
         assert EpiasSnapshot.objects.filter(job=job).count() == attempt
         assert not run_epias_job(job.pk, fetch=partial, now=now + timedelta(minutes=29))
-        now = job.next_attempt_at
+        now = job.available_at
     assert job.pk not in pending_epias_ids(now)
     assert not run_epias_job(job.pk, fetch=partial, now=now)
     assert not EpiasSnapshot.objects.filter(job=job, complete=True).exists()
@@ -230,7 +230,7 @@ def test_nightly_transport_failures_honor_half_hour_and_longer_retry_after(
     assert not run_epias_job(job.pk, fetch=fail, now=NEXT_NIGHT)
     job.refresh_from_db()
     minimum = NEXT_NIGHT + timedelta(seconds=max(1800, retry_after or 0))
-    assert minimum <= job.next_attempt_at < minimum + timedelta(seconds=31)
+    assert minimum <= job.available_at < minimum + timedelta(seconds=31)
     assert job.status == ("failed" if retry_after == 86400 else "pending")
     assert job.last_error == "epias_provider_failure"
     assert not EpiasSnapshot.objects.filter(job=job).exists()
@@ -244,7 +244,7 @@ def test_older_daily_reconciliation_retains_three_attempt_cap(
     job = EpiasCollectionJob.objects.get(
         connection=job.connection,
         scheduled_for=NEXT_NIGHT - timedelta(hours=3),
-        target_day=job.target_day - timedelta(days=1),
+        target_date=job.target_date - timedelta(days=1),
     )
     monkeypatch.setattr("pyracast.metering.jobs.time.monotonic", lambda: 0.0)
 
@@ -259,11 +259,11 @@ def test_older_daily_reconciliation_retains_three_attempt_cap(
         job.refresh_from_db()
         assert job.attempts == attempt
         if transport:
-            assert now + timedelta(minutes=30) <= job.next_attempt_at < now + timedelta(minutes=31)
+            assert now + timedelta(minutes=30) <= job.available_at < now + timedelta(minutes=31)
         else:
-            assert job.next_attempt_at == now + timedelta(minutes=30)
+            assert job.available_at == now + timedelta(minutes=30)
         assert job.status == ("pending" if attempt < 3 else "failed")
-        now = job.next_attempt_at
+        now = job.available_at
     assert not run_epias_job(job.pk, fetch=fetch, now=now)
 
 

@@ -21,7 +21,7 @@ from pyracast.notifications.operations import (
 )
 from pyracast.notifications.recipients import pin_recipient_memberships
 from pyracast.notifications.schedule import local_slot
-from pyracast.regions.models import Region
+from pyracast.regions.models import Region, active_region
 
 MAX_LATENESS = timedelta(hours=2)
 PREPARATION_GRACE = timedelta(minutes=15)
@@ -40,7 +40,7 @@ def enqueue_due(now: datetime) -> list[int]:
     ids: list[int] = []
     failures = 0
     for schedule in ReminderSchedule.objects.filter(
-        enabled=True, region__deleted_at__isnull=True
+        active_region("region__"), enabled=True
     ).select_related("region__approved_binding__provider_account"):
         try:
             ids.extend(_enqueue_schedule(schedule, now))

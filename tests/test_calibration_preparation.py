@@ -203,11 +203,11 @@ def test_current_source_transition_refits_once_but_identical_native_reacquisitio
     if old_source == "historical_import":
         old_snapshot.job.reference_import = HistoricalReferenceImport.objects.create(
             binding=system.binding,
-            sha256="a" * 64,
+            content_sha256="a" * 64,
             source_name="authorized-export.json",
             source_settings={"product": "historical_rooftop_pv"},
             imported_by=system.admin,
-            imported_at=old_snapshot.collected_at,
+            created_at=old_snapshot.collected_at,
             interval_count=48,
         )
     old_snapshot.job.endpoint = old_source
@@ -221,7 +221,7 @@ def test_current_source_transition_refits_once_but_identical_native_reacquisitio
     assert native.normalized_intervals == old_snapshot.normalized_intervals
     current_run = prepare_calibration(plant.pk)
     assert current_run is not None
-    assert current_run.input_fingerprint != historical_run.input_fingerprint
+    assert current_run.input_sha256 != historical_run.input_sha256
     assert current_run.reference_snapshot_ids is not None
     assert current_run.reference_snapshot_ids[target.isoformat()] == native.pk
     current_run.status, current_run.completed_at = "rejected", NOW
@@ -250,7 +250,7 @@ def test_reference_selection_policy_upgrade_refits_unchanged_values_once(
     monkeypatch.setattr(measurements, "HISTORY_SELECTION_POLICY", HISTORY_SELECTION_POLICY)
     current = prepare_calibration(plant.pk)
     assert current is not None
-    assert current.input_fingerprint != previous.input_fingerprint
+    assert current.input_sha256 != previous.input_sha256
     assert current.reference_snapshot_ids == previous.reference_snapshot_ids
     current.status, current.completed_at = "rejected", NOW
     current.result = {"policy_version": POLICY_VERSION}
@@ -353,7 +353,7 @@ def test_new_observations_during_active_run_are_queued_once_after_completion(
     selected = {entry["observation_id"] for entry in first.dataset_manifest["observations"]}
     assert not selected.intersection(new_ids)
     assert max(selected) <= first.observation_id_cutoff
-    assert all(row.recorded_at == first.cutoff_at for row in ProductionObservation.objects.all())
+    assert all(row.created_at == first.cutoff_at for row in ProductionObservation.objects.all())
     assert training.run_calibration(second.pk, NOW + timedelta(seconds=1))
     second.refresh_from_db()
     selected = {entry["observation_id"] for entry in second.dataset_manifest["observations"]}
@@ -404,7 +404,7 @@ def test_legacy_run_without_watermark_preserves_timestamp_cutoff(
     last_new = new_rows.order_by("-pk").first()
     assert first_new is not None
     assert last_new is not None
-    assert first_new.recorded_at == run.cutoff_at
+    assert first_new.created_at == run.cutoff_at
     last_new.delete()
     monkeypatch.setattr(timezone, "now", lambda: run.cutoff_at + timedelta(seconds=1))
     last_new.save()

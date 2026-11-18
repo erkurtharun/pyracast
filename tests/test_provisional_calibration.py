@@ -128,7 +128,7 @@ def test_provisional_fit_freezes_sources_then_settlement_prepares_a_new_candidat
     assert replacement is not None
     assert replacement.pk != run.pk
     assert replacement.production_snapshot_ids == [snapshot.pk for snapshot in settled]
-    assert replacement.input_fingerprint != run.input_fingerprint
+    assert replacement.input_sha256 != run.input_sha256
     assert run_calibration(replacement.pk, moment)
     replacement.refresh_from_db()
     assert replacement.status == "ready"
@@ -191,7 +191,7 @@ def test_last_publication_prepares_once_when_seven_daylight_days_become_matched(
             binding=configuration.binding,
             target_date=last_day,
             endpoint="estimated_actuals",
-            scheduled_slot=dispatch,
+            scheduled_for=dispatch,
             available_at=dispatch,
         )
         lease = claim(job.pk, dispatch)
@@ -224,9 +224,9 @@ def test_last_publication_prepares_once_when_seven_daylight_days_become_matched(
             configuration=configuration,
             connection_revision=connection.revision,
             provider_plant={"id": 2, "eic": "EIC", "name": "Plant", "short_name": "Plant"},
-            target_day=last_day,
+            target_date=last_day,
             scheduled_for=dispatch,
-            next_attempt_at=dispatch,
+            available_at=dispatch,
         )
 
         def fetch(provider: EpiasPlant, day: date) -> EpiasDay:
@@ -366,10 +366,10 @@ def test_empty_settlement_correction_automatically_prepares_provisional_fallback
     old_digest = run.dataset_sha256
     last_day = FIRST_DAY + timedelta(days=7)
     realtime = EpiasSnapshot.objects.get(
-        configuration=configuration, target_day=last_day, source_kind="realtime_generation"
+        configuration=configuration, target_date=last_day, source_kind="realtime_generation"
     )
     old_settlement = EpiasSnapshot.objects.get(
-        configuration=configuration, target_day=last_day, source_kind="settlement_injection"
+        configuration=configuration, target_date=last_day, source_kind="settlement_injection"
     )
     dispatch = NOW - timedelta(seconds=1)
     job = EpiasCollectionJob.objects.create(
@@ -379,9 +379,9 @@ def test_empty_settlement_correction_automatically_prepares_provisional_fallback
         connection_revision=connection.revision,
         source_kind="settlement_injection",
         provider_plant={"id": 77, "eic": "EIC", "name": "Plant", "short_name": "Plant"},
-        target_day=last_day,
+        target_date=last_day,
         scheduled_for=dispatch,
-        next_attempt_at=dispatch,
+        available_at=dispatch,
     )
 
     def fetch(provider: EpiasPlant, day: date) -> EpiasDay:
@@ -397,7 +397,7 @@ def test_empty_settlement_correction_automatically_prepares_provisional_fallback
     assert empty.readings == []
     replacement = CalibrationRun.objects.get(status="pending")
     assert replacement.pk != run.pk
-    assert replacement.input_fingerprint != run.input_fingerprint
+    assert replacement.input_sha256 != run.input_sha256
     assert realtime.pk in replacement.production_snapshot_ids
     assert old_settlement.pk not in replacement.production_snapshot_ids
     assert empty.pk not in replacement.production_snapshot_ids

@@ -67,18 +67,18 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
                     endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
                     reference_import__isnull=True,
                     target_date=today - timedelta(days=1),
-                    scheduled_slot__gte=window[0],
-                    scheduled_slot__lt=window[1],
+                    scheduled_for__gte=window[0],
+                    scheduled_for__lt=window[1],
                     retry_until=window[1],
                 )
-                .order_by("scheduled_slot", "pk")
+                .order_by("scheduled_for", "pk")
                 .first()
             )
             if history is None:
                 history, _ = CollectionJob.objects.get_or_create(
                     binding=binding,
                     endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
-                    scheduled_slot=window[0],
+                    scheduled_for=window[0],
                     defaults={
                         "target_date": today - timedelta(days=1),
                         "available_at": now,
@@ -89,7 +89,7 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
                 binding=binding,
                 endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
                 target_date=today - timedelta(days=1),
-                scheduled_slot__gte=window[0],
+                scheduled_for__gte=window[0],
                 retry_until=window[1],
                 status=CollectionJobStatus.STALE,
                 forecastsnapshot__isnull=True,
@@ -106,7 +106,7 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
         CollectionJob.objects.filter(
             binding=binding,
             endpoint=CollectionEndpoint.FORECASTS,
-            scheduled_slot__lt=slot,
+            scheduled_for__lt=slot,
             status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY),
         ).update(
             status=CollectionJobStatus.STALE,
@@ -117,7 +117,7 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
         job, _ = CollectionJob.objects.get_or_create(
             binding=binding,
             endpoint=CollectionEndpoint.FORECASTS,
-            scheduled_slot=slot,
+            scheduled_for=slot,
             defaults={
                 "target_date": slot.astimezone(zone).date() + timedelta(days=1),
                 "available_at": now,
@@ -134,7 +134,7 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
             history, _ = CollectionJob.objects.get_or_create(
                 binding=binding,
                 endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
-                scheduled_slot=slot,
+                scheduled_for=slot,
                 defaults={
                     "target_date": slot.astimezone(zone).date(),
                     "available_at": now,
@@ -151,9 +151,7 @@ def enqueue_due(now: datetime, cutoff_hour: int | None = None) -> list[int]:
     cutoff: time = settings.PYRACAST_CUTOFF_LOCAL if cutoff_hour is None else time(cutoff_hour)
     jobs: list[int] = []
     failed_region_ids: list[int] = []
-    for region_id in Region.objects.filter(status="approved", deleted_at__isnull=True).values_list(
-        "pk", flat=True
-    ):
+    for region_id in Region.objects.active().filter(status="approved").values_list("pk", flat=True):
         try:
             jobs.extend(_enqueue_region(region_id, now, cutoff))
         except Exception as exc:

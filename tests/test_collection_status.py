@@ -43,7 +43,7 @@ def test_collection_status_reports_the_plants_own_collection_only() -> None:
     other_job = CollectionJob.objects.create(
         binding=other_binding,
         target_date=NOW.date() + timedelta(days=1),
-        scheduled_slot=moment + timedelta(hours=1),
+        scheduled_for=moment + timedelta(hours=1),
         available_at=moment,
     )
     original = CollectionJob.objects.get(binding=system.binding)
@@ -54,14 +54,14 @@ def test_collection_status_reports_the_plants_own_collection_only() -> None:
         CollectionJob.objects.create(
             binding=system.binding,
             target_date=NOW.date() + timedelta(days=offset + 1),
-            scheduled_slot=moment + timedelta(minutes=offset),
+            scheduled_for=moment + timedelta(minutes=offset),
             available_at=moment,
         )
     for job, binding in ((original, system.binding), (other_job, other_binding)):
         collected_job = CollectionJob.objects.create(
             binding=binding,
             target_date=job.target_date,
-            scheduled_slot=job.scheduled_slot - timedelta(days=1),
+            scheduled_for=job.scheduled_for - timedelta(days=1),
             available_at=moment - timedelta(days=1),
             status="succeeded",
         )
@@ -83,7 +83,7 @@ def test_collection_status_reports_the_plants_own_collection_only() -> None:
     jobs = payload["recent_jobs"]
     assert isinstance(jobs, list)
     assert len(jobs) == 6
-    assert jobs[0]["scheduled_slot"] == moment + timedelta(minutes=6)
+    assert jobs[0]["scheduled_for"] == moment + timedelta(minutes=6)
     assert all(row["id"] != original.pk for row in jobs)
     assert all(row["id"] != other_job.pk for row in jobs)
     client = Client()
@@ -119,11 +119,11 @@ def test_last_success_reports_native_collection_independently_of_operator_import
     reference = (
         HistoricalReferenceImport.objects.create(
             binding=system.binding,
-            sha256="a" * 64,
+            content_sha256="a" * 64,
             source_name="authorized-export.json",
             source_settings={},
             imported_by=system.admin,
-            imported_at=NOW,
+            created_at=NOW,
             interval_count=1,
         )
         if endpoint == "historical_import"
@@ -134,7 +134,7 @@ def test_last_success_reports_native_collection_independently_of_operator_import
         reference_import=reference,
         endpoint=endpoint,
         target_date=NOW.date(),
-        scheduled_slot=NOW + timedelta(hours=1),
+        scheduled_for=NOW + timedelta(hours=1),
         available_at=NOW + timedelta(hours=1),
         status="succeeded",
     )
@@ -177,7 +177,7 @@ def test_next_collection_is_the_earliest_queued_job_forecast_slot_or_nightly_win
     assert next_collection(later) == morning + timedelta(hours=6)
     assert next_collection(morning + timedelta(hours=7)) == morning + timedelta(hours=15)
     retry_at = later + timedelta(minutes=30)
-    CollectionJob.objects.filter(endpoint="forecasts", scheduled_slot=morning).update(
+    CollectionJob.objects.filter(endpoint="forecasts", scheduled_for=morning).update(
         status="retry", available_at=retry_at
     )
     assert next_collection(later) == retry_at

@@ -72,7 +72,7 @@ def collection(
     unique_slot = NOW - timedelta(days=30, seconds=CollectionJob.objects.count())
     return CollectionJob.objects.create(
         binding=binding,
-        scheduled_slot=scheduled or unique_slot,
+        scheduled_for=scheduled or unique_slot,
         target_date=NOW.date(),
         available_at=available,
         status=status,
@@ -266,9 +266,9 @@ def test_metering_filters_match_counter_boundaries_and_find_failures_behind_new_
             configuration=template.configuration,
             connection_revision=epias.revision,
             provider_plant={},
-            target_day=NOW.date() - timedelta(days=EpiasCollectionJob.objects.count()),
+            target_date=NOW.date() - timedelta(days=EpiasCollectionJob.objects.count()),
             scheduled_for=scheduled,
-            next_attempt_at=available,
+            available_at=available,
             status=status,
             lease_token=None if lease is None else uuid.uuid4(),
             lease_expires_at=lease,

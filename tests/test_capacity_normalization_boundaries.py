@@ -62,11 +62,11 @@ def test_historical_exports_cannot_be_reclassified_as_native_by_normalization(
     source = actual_snapshot_for(system, date(2026, 11, 7))
     source.job.reference_import = HistoricalReferenceImport.objects.create(
         binding=system.binding,
-        sha256="a" * 64,
+        content_sha256="a" * 64,
         source_name="history.json",
         source_settings={"product": "historical_rooftop_pv"},
         imported_by=system.admin,
-        imported_at=NOW,
+        created_at=NOW,
         interval_count=48,
     )
     source.job.endpoint = "historical_import"

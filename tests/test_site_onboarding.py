@@ -41,8 +41,8 @@ def site_values(**updates: Any) -> dict[str, Any]:
         "export_limit_mw": 100,
         "measurement_basis": "net_export",
         "mounting_type": "fixed",
-        "surface_tilt": 25,
-        "surface_azimuth": 180,
+        "surface_tilt_degrees": 25,
+        "surface_azimuth_degrees": 180,
         **updates,
     }
 
@@ -88,7 +88,7 @@ def test_site_api_rejects_invalid_values_and_cross_tenant_access_atomically() ->
     client = Client()
     client.force_login(system.member)
     base = f"/api/tenants/{system.tenant.pk}/sites/"
-    for updates in ({"dc_capacity_mw": 0}, {"surface_tilt": 91}, {"secret": "unaccepted"}):
+    for updates in ({"dc_capacity_mw": 0}, {"surface_tilt_degrees": 91}, {"secret": "unaccepted"}):
         response = client.post(base, site_values(**updates), content_type="application/json")
         assert response.status_code == 400
     assert Region.objects.count() == 1

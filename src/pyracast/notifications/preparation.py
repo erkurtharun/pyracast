@@ -34,7 +34,7 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
             binding=binding,
             endpoint__in=(CollectionEndpoint.FORECASTS, CollectionEndpoint.ESTIMATED_ACTUALS),
             reference_import__isnull=True,
-            scheduled_slot=delivery.scheduled_for,
+            scheduled_for=delivery.scheduled_for,
         )
     )
     job = next(

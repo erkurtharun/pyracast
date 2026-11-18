@@ -121,7 +121,7 @@ class ChangeRequestSummaryOutput(serializers.Serializer[dict[str, Any]]):
     configuration_id = serializers.IntegerField()
     proposed_by = UserOutput()
     reason = serializers.CharField(allow_blank=True)
-    submitted_at = serializers.DateTimeField()
+    created_at = serializers.DateTimeField()
     reviewed_by = UserOutput(allow_null=True)
     closed_at = serializers.DateTimeField(allow_null=True)
     decision_reason = serializers.CharField(allow_blank=True)

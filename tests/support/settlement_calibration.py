@@ -25,9 +25,9 @@ def settlement(
         connection_revision=connection.revision,
         provider_plant=identity,
         source_kind=source_kind,
-        target_day=day,
+        target_date=day,
         scheduled_for=stamp,
-        next_attempt_at=stamp,
+        available_at=stamp,
         status="succeeded",
     )
     readings = [
@@ -43,7 +43,7 @@ def settlement(
         attempt=1,
         connection=connection,
         configuration=configuration,
-        target_day=day,
+        target_date=day,
         source_kind=source_kind,
         provider_plant=identity,
         collected_at=stamp,

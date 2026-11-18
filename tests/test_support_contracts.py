@@ -79,7 +79,7 @@ def test_recent_forecast_uses_the_requested_binding_job() -> None:
     system = make_system(approved=True)
     _, binding = sibling(system)
     other_job = CollectionJob.objects.create(
-        binding=binding, target_date=NOW.date(), scheduled_slot=NOW, available_at=NOW
+        binding=binding, target_date=NOW.date(), scheduled_for=NOW, available_at=NOW
     )
 
     snapshot = recent_forecast(system)

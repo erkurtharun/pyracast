@@ -71,7 +71,7 @@ NATIVE_SLOT_RULE = (
     " FROM forecasts_collectionjob AS other WHERE other.id <> forecasts_collectionjob.id"
     " AND other.binding_id = forecasts_collectionjob.binding_id"
     " AND other.endpoint = forecasts_collectionjob.endpoint"
-    " AND other.scheduled_slot = forecasts_collectionjob.scheduled_slot)"
+    " AND other.scheduled_for = forecasts_collectionjob.scheduled_for)"
 )
 BINDING_REVISION_RULE = (
     "NOT EXISTS (SELECT 1 FROM connections_sitebinding AS other"

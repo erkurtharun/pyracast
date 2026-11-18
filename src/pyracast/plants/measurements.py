@@ -122,13 +122,13 @@ def latest_measurement_day(
     days = (
         _current_production(configuration, cutoff, policy)
         .filter(
-            target_day__lte=(completed_before - timedelta(microseconds=1))
+            target_date__lte=(completed_before - timedelta(microseconds=1))
             .astimezone(TIMEZONE)
             .date()
         )
-        .order_by("-target_day", "-collected_at", "-available_at", "-pk")
-        .distinct("target_day")
-        .values_list("target_day", flat=True)
+        .order_by("-target_date", "-collected_at", "-available_at", "-pk")
+        .distinct("target_date")
+        .values_list("target_date", flat=True)
         .iterator(chunk_size=100)
     )
     seen: set[date] = set()
@@ -225,7 +225,7 @@ def _select_measurement_sources(
     policy: str = MEASUREMENT_POLICY,
 ) -> MeasurementSelection:
     rows = [
-        Measurement(r.starts_at, r.ends_at, r.energy_mwh, r.quality, r.source, r.pk, r.recorded_at)
+        Measurement(r.starts_at, r.ends_at, r.energy_mwh, r.quality, r.source, r.pk, r.created_at)
         for r in overlapping_manual
         if r.starts_at >= start and r.ends_at <= end
     ]
@@ -291,11 +291,11 @@ def select_provider_measurements(
         )
     snapshots = (
         snapshots.filter(
-            target_day__gte=start.astimezone(TIMEZONE).date(),
-            target_day__lte=(end - timedelta(microseconds=1)).astimezone(TIMEZONE).date(),
+            target_date__gte=start.astimezone(TIMEZONE).date(),
+            target_date__lte=(end - timedelta(microseconds=1)).astimezone(TIMEZONE).date(),
         )
-        .order_by("target_day", "source_kind", "-collected_at", "-available_at", "-pk")
-        .distinct("target_day", "source_kind")
+        .order_by("target_date", "source_kind", "-collected_at", "-available_at", "-pk")
+        .distinct("target_date", "source_kind")
     )
     selected = sorted(
         snapshots.select_related("job").defer("raw_payload"),
@@ -316,7 +316,7 @@ def select_provider_measurements(
     used = {row.snapshot.pk for row in provider_rows.values() if row.snapshot is not None}
     return sorted(provider_rows.values(), key=lambda r: r.starts_at), [
         snapshot.pk
-        for snapshot in sorted(selected, key=lambda s: (s.target_day, s.pk))
+        for snapshot in sorted(selected, key=lambda s: (s.target_date, s.pk))
         if snapshot.pk in used
     ]
 
@@ -343,7 +343,7 @@ def _provider_measurements(
             begin.utcoffset() is None
             or finish.utcoffset() is None
             or finish - begin != timedelta(hours=1)
-            or local_begin.date() != snapshot.target_day
+            or local_begin.date() != snapshot.target_date
             or any((local_begin.minute, local_begin.second, local_begin.microsecond))
             or begin < start
             or finish > end

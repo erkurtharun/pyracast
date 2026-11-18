@@ -32,8 +32,8 @@ def site_values(**changes: str) -> dict[str, str]:
         "export_limit_mw": "",
         "measurement_basis": "net_export",
         "mounting_type": "fixed",
-        "surface_tilt": "25",
-        "surface_azimuth": "180",
+        "surface_tilt_degrees": "25",
+        "surface_azimuth_degrees": "180",
         **changes,
     }
 
@@ -65,8 +65,8 @@ def test_adding_a_plant_lands_on_its_page_with_the_next_step() -> None:
         submission.inverter_capacity_mw,
         submission.export_limit_mw,
         submission.mounting_type,
-        submission.surface_tilt,
-        submission.surface_azimuth,
+        submission.surface_tilt_degrees,
+        submission.surface_azimuth_degrees,
         submission.submitted_by,
     ) == (12.5, 10, None, "fixed", 25, 180, operator)
     html = client.get(response["Location"]).content.decode()
@@ -84,7 +84,11 @@ def test_adding_a_plant_lands_on_its_page_with_the_next_step() -> None:
         ({"latitude": "91"}, "latitude", "Ensure this value is less than or equal to 90."),
         ({"dc_capacity_mw": "0"}, "dc_capacity_mw", "Enter a number greater than 0."),
         ({"dc_capacity_mw": ""}, "dc_capacity_mw", "This field is required."),
-        ({"surface_azimuth": "360"}, "surface_azimuth", "Enter a number less than 360."),
+        (
+            {"surface_azimuth_degrees": "360"},
+            "surface_azimuth_degrees",
+            "Enter a number less than 360.",
+        ),
         (
             {"mounting_type": "tracking"},
             "mounting_type",
@@ -145,8 +149,8 @@ def details(client: Client, region: Region, **changes: str) -> dict[str, str]:
         "export_limit_mw": "100",
         "measurement_basis": "net_export",
         "mounting_type": "unknown",
-        "surface_tilt": "",
-        "surface_azimuth": "",
+        "surface_tilt_degrees": "",
+        "surface_azimuth_degrees": "",
         "reason": "",
         "expected_version": version.group(1),
         **changes,
@@ -319,13 +323,17 @@ def test_a_stale_details_page_asks_for_a_reload_and_a_plant_in_review_updates_it
             dc_capacity_mw="7",
             export_limit_mw="",
             mounting_type="fixed",
-            surface_tilt="30",
-            surface_azimuth="170",
+            surface_tilt_degrees="30",
+            surface_azimuth_degrees="170",
         ),
     )
     assert saved.status_code == 302
     submission = PlantSubmission.objects.get(plant=plant)
-    assert (submission.dc_capacity_mw, submission.surface_tilt, submission.surface_azimuth) == (
+    assert (
+        submission.dc_capacity_mw,
+        submission.surface_tilt_degrees,
+        submission.surface_azimuth_degrees,
+    ) == (
         7,
         30,
         170,

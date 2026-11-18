@@ -188,7 +188,7 @@ async function setup(page: Page) {
                                   quality: "valid",
                                   source: "meter",
                                   recorded_by_id: user.id,
-                                  recorded_at: "2026-01-08T05:00:00Z",
+                                  created_at: "2026-01-08T05:00:00Z",
                                   supersedes_id: null,
                                   is_reverted: false,
                               }

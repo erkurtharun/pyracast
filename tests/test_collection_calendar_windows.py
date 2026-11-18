@@ -96,7 +96,7 @@ def archive_actuals(binding_id: int, *, missing_after: datetime | None = None) -
         binding_id=binding_id,
         endpoint="estimated_actuals",
         target_date=date(2026, 11, 14),
-        scheduled_slot=MORNING - timedelta(hours=1),
+        scheduled_for=MORNING - timedelta(hours=1),
         available_at=MORNING - timedelta(hours=1),
         status="succeeded",
     )
@@ -117,7 +117,7 @@ def actual_job(binding_id: int) -> CollectionJob:
     return CollectionJob.objects.create(
         binding_id=binding_id,
         endpoint="estimated_actuals",
-        scheduled_slot=MORNING,
+        scheduled_for=MORNING,
         target_date=MORNING.date(),
         available_at=MORNING,
         retry_until=MORNING + timedelta(minutes=15),
@@ -203,7 +203,7 @@ def test_same_slot_pair_is_durable_and_concurrent_redelivery_uses_one_actuals_re
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: dispatch(), range(2)))
     assert results[0] == results[1]
-    pair = CollectionJob.objects.get(endpoint="estimated_actuals", scheduled_slot=MORNING)
+    pair = CollectionJob.objects.get(endpoint="estimated_actuals", scheduled_for=MORNING)
     assert pair.target_date == date(2026, 11, 15)
     assert pair.retry_until == MORNING + timedelta(minutes=15)
     entered, release = Event(), Event()
@@ -279,7 +279,7 @@ def test_removing_forecast_clock_cancels_only_its_paired_actuals_job() -> None:
     night = CollectionJob.objects.create(
         binding=system.binding,
         endpoint="estimated_actuals",
-        scheduled_slot=MORNING.replace(hour=0, minute=0),
+        scheduled_for=MORNING.replace(hour=0, minute=0),
         target_date=MORNING.date() - timedelta(days=1),
         available_at=MORNING,
     )
@@ -355,11 +355,11 @@ def test_imported_reference_cannot_suppress_native_actuals_collection() -> None:
     snapshot = archive_actuals(system.binding.pk)
     reference = HistoricalReferenceImport.objects.create(
         binding=system.binding,
-        sha256="a" * 64,
+        content_sha256="a" * 64,
         source_name="authorized-export.json",
         source_settings={},
         imported_by=system.admin,
-        imported_at=MORNING,
+        created_at=MORNING,
         interval_count=1,
     )
     CollectionJob.objects.filter(pk=snapshot.job_id).update(
@@ -413,7 +413,7 @@ def test_separate_actuals_jobs_cannot_hold_the_same_binding_lease_concurrently()
     night = CollectionJob.objects.create(
         binding=system.binding,
         endpoint="estimated_actuals",
-        scheduled_slot=MORNING - timedelta(minutes=30),
+        scheduled_for=MORNING - timedelta(minutes=30),
         target_date=MORNING.date() - timedelta(days=1),
         available_at=MORNING,
         retry_until=MORNING + timedelta(minutes=15),

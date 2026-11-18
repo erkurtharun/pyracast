@@ -12,8 +12,8 @@ type Configuration = Pick<
     | "export_limit_mw"
     | "measurement_basis"
     | "mounting_type"
-    | "surface_tilt"
-    | "surface_azimuth"
+    | "surface_tilt_degrees"
+    | "surface_azimuth_degrees"
 >;
 
 function choice<T extends string>(
@@ -46,9 +46,10 @@ export function configurationInput(data: FormData) {
             "ac_generation",
         ]),
         mounting_type: mounting,
-        surface_tilt: mounting === "fixed" ? optional("surface_tilt") : null,
-        surface_azimuth:
-            mounting === "fixed" ? optional("surface_azimuth") : null,
+        surface_tilt_degrees:
+            mounting === "fixed" ? optional("surface_tilt_degrees") : null,
+        surface_azimuth_degrees:
+            mounting === "fixed" ? optional("surface_azimuth_degrees") : null,
     };
 }
 
@@ -128,26 +129,27 @@ export function PlantConfigurationFields({
                     <>
                         <Field
                             label={t("surfaceTiltDegreesOptional")}
-                            name="surface_tilt"
+                            name="surface_tilt_degrees"
                             type="number"
                             step="any"
                             min={0}
                             max={90}
                             required={false}
                             defaultValue={
-                                configuration?.surface_tilt ?? undefined
+                                configuration?.surface_tilt_degrees ?? undefined
                             }
                         />
                         <label className="field">
                             {t("surfaceAzimuthDegreesOptional")}
                             <input
-                                name="surface_azimuth"
+                                name="surface_azimuth_degrees"
                                 type="number"
                                 step="any"
                                 min={0}
                                 max={360}
                                 defaultValue={
-                                    configuration?.surface_azimuth ?? undefined
+                                    configuration?.surface_azimuth_degrees ??
+                                    undefined
                                 }
                                 onChange={(event) =>
                                     event.currentTarget.setCustomValidity(

@@ -342,7 +342,7 @@ def test_restart_collapses_missed_forecast_slots_to_latest_due_slot() -> None:
     forecasts = CollectionJob.objects.filter(pk__in=identifiers, endpoint="forecasts")
     assert forecasts.count() == 1
     latest = forecasts.get()
-    assert latest.scheduled_slot == NOW + timedelta(hours=2)
+    assert latest.scheduled_for == NOW + timedelta(hours=2)
     assert latest.available_at == recovered_at
     first_job.refresh_from_db()
     assert (first_job.status, first_job.last_error) == ("stale", "forecast_superseded")

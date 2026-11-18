@@ -43,7 +43,7 @@ class PlantIncident(models.Model):
     class Meta:
         constraints = (
             ExclusionConstraint(
-                name="incident_no_overlap",
+                name="%(class)s_plant_interval_excl",
                 expressions=(
                     ("plant", RangeOperators.EQUAL),
                     (TsTzRange("starts_at", "ends_at", RangeBoundary()), RangeOperators.OVERLAPS),
@@ -52,23 +52,23 @@ class PlantIncident(models.Model):
             ),
             models.CheckConstraint(
                 condition=Q(ends_at__isnull=True) | Q(ends_at__gt=F("starts_at")),
-                name="incident_valid_interval",
+                name="%(class)s_ends_at_chk",
             ),
-            choices_check("kind", IncidentKind, name="incident_kind_valid"),
+            choices_check("kind", IncidentKind),
             models.CheckConstraint(
                 condition=Q(available_dc_mw__isnull=True)
                 | Q(available_dc_mw__gte=0, available_dc_mw__lt=float("inf")),
-                name="incident_dc_finite",
+                name="%(class)s_available_dc_mw_chk",
             ),
             models.CheckConstraint(
                 condition=Q(available_inverter_mw__isnull=True)
                 | Q(available_inverter_mw__gte=0, available_inverter_mw__lt=float("inf")),
-                name="incident_inverter_finite",
+                name="%(class)s_available_inverter_mw_chk",
             ),
             models.CheckConstraint(
                 condition=Q(available_export_mw__isnull=True)
                 | Q(available_export_mw__gte=0, available_export_mw__lt=float("inf")),
-                name="incident_export_finite",
+                name="%(class)s_available_export_mw_chk",
             ),
         )
 
@@ -77,12 +77,12 @@ class IncidentRevision(models.Model):
     incident = models.ForeignKey(PlantIncident, on_delete=models.PROTECT, related_name="revisions")
     revision = models.PositiveIntegerField()
     snapshot = models.JSONField()
-    recorded_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
 
     class Meta:
         constraints = (
             models.UniqueConstraint(
-                fields=("incident", "revision"), name="incident_revision_unique"
+                fields=("incident", "revision"), name="%(class)s_incident_revision_uniq"
             ),
         )

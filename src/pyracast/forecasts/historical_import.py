@@ -179,9 +179,7 @@ def import_historical_reference(
     if any(interval.end > moment for interval in power.intervals):
         raise ValidationError("Historical input cannot contain future or incomplete intervals.")
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         binding = SiteBinding.objects.get(pk=binding_id, region=region)
         account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
         binding = SiteBinding.objects.select_for_update().get(pk=binding.pk)
@@ -202,7 +200,7 @@ def _archive_historical_reference(
     moment: datetime,
 ) -> HistoricalReferenceImport:
     previous = HistoricalReferenceImport.objects.filter(
-        binding=binding, sha256=power.sha256
+        binding=binding, content_sha256=power.sha256
     ).first()
     if previous is not None:
         if previous.source_settings != source_settings:
@@ -210,11 +208,11 @@ def _archive_historical_reference(
         return previous
     record = HistoricalReferenceImport.objects.create(
         binding=binding,
-        sha256=power.sha256,
+        content_sha256=power.sha256,
         source_name=source_name,
         source_settings=source_settings,
         imported_by=actor,
-        imported_at=moment,
+        created_at=moment,
         interval_count=len(power.intervals),
     )
     for day, indexes in _day_indexes(power, ZoneInfo(binding.timezone)).items():
@@ -222,7 +220,7 @@ def _archive_historical_reference(
             binding=binding,
             reference_import=record,
             endpoint=CollectionEndpoint.HISTORICAL_IMPORT,
-            scheduled_slot=moment,
+            scheduled_for=moment,
             target_date=day,
             status=CollectionJobStatus.SUCCEEDED,
             available_at=moment,

@@ -165,7 +165,7 @@ def production_history(
         plant=plant,
         starts_at__lt=range_end,
         ends_at__gt=range_start,
-        recorded_at__lte=now,
+        created_at__lte=now,
     ).order_by("starts_at", "id")
     providers, effective = selected.selection.providers, selected.selection.effective
     current = configuration is not None and configuration_is_current(configuration)

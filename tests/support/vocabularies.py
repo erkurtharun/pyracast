@@ -248,7 +248,7 @@ def _dispatcher_status(monkeypatch: pytest.MonkeyPatch) -> models.Model:
 def _collection_job(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     return CollectionJob.objects.create(
         binding=make_system().binding,
-        scheduled_slot=NOW,
+        scheduled_for=NOW,
         target_date=NOW.date(),
         available_at=NOW,
     )
@@ -739,7 +739,7 @@ FREE_TEXT = frozenset(
         ("change_requests.ProductionChangeItem", "source"),
         ("change_requests.IncidentChange", "title"),
         ("change_requests.IncidentChange", "notes"),
-        ("forecasts.HistoricalReferenceImport", "sha256"),
+        ("forecasts.HistoricalReferenceImport", "content_sha256"),
         ("forecasts.HistoricalReferenceImport", "source_name"),
         ("forecasts.ReferenceCapacityNormalization", "authorization_reference"),
         ("metering.EpiasConnection", "eic"),
@@ -750,7 +750,7 @@ FREE_TEXT = frozenset(
         ("plants.Plant", "name"),
         ("plants.ProductionObservation", "source"),
         ("plants.CalibrationRun", "measurement_selection_policy"),
-        ("plants.CalibrationRun", "input_fingerprint"),
+        ("plants.CalibrationRun", "input_sha256"),
         ("plants.CalibrationRun", "dataset_sha256"),
         ("plants.ForecastIssuance", "model_version"),
         ("incidents.PlantIncident", "title"),

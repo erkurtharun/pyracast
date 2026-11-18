@@ -21,7 +21,7 @@ def test_environment_reference_is_rejected_even_when_the_variable_exists(
 @pytest.mark.django_db
 def test_database_rejects_unencrypted_provider_keys(provider: str, value: str) -> None:
     with (
-        pytest.raises(IntegrityError, match="provider_account_encrypted_api_key"),
+        pytest.raises(IntegrityError, match="provideraccount_encrypted_api_key_chk"),
         transaction.atomic(),
     ):
         ProviderAccount.objects.create(

@@ -56,7 +56,7 @@ def test_manual_cooldown_reset_wakes_only_the_previously_throttled_job() -> None
     assert not collect(job.pk, FakeAdapter(fail), calculate, NOW)
     CollectionJob.objects.create(
         binding=system.binding,
-        scheduled_slot=NOW + timedelta(seconds=2),
+        scheduled_for=NOW + timedelta(seconds=2),
         target_date=job.target_date,
         available_at=NOW + timedelta(hours=2),
         status="retry",

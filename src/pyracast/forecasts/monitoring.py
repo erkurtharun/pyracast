@@ -21,7 +21,8 @@ from pyracast.notifications.models import (
     PreparedMessageKind,
 )
 from pyracast.notifications.operations import invalid_reminder_recipient_count
-from pyracast.regions.models import Region
+from pyracast.plants.models import active_plant
+from pyracast.regions.models import Region, active_region
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,7 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         or phase.last_error
     ]
     collections = CollectionJob.objects.filter(
+        active_region("binding__region__"),
         Q(
             status__in=(
                 CollectionJobStatus.PENDING,
@@ -73,10 +75,10 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
                 CollectionJobStatus.RUNNING,
             )
         )
-        | Q(status=CollectionJobStatus.FAILED, scheduled_slot__gte=recent),
-        binding__region__deleted_at__isnull=True,
+        | Q(status=CollectionJobStatus.FAILED, scheduled_for__gte=recent),
     )
     deliveries = NotificationDelivery.objects.filter(
+        active_region("schedule__region__"),
         Q(
             status__in=(
                 NotificationDeliveryStatus.PENDING,
@@ -85,17 +87,18 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
             )
         )
         | Q(scheduled_for__gte=recent),
-        schedule__region__deleted_at__isnull=True,
     )
     accounts = ProviderAccount.objects.filter(
         enabled=True,
-        pk__in=Region.objects.filter(status="approved", deleted_at__isnull=True).values(
-            "approved_binding__provider_account_id"
-        ),
+        pk__in=Region.objects.active()
+        .filter(status="approved")
+        .values("approved_binding__provider_account_id"),
     )
-    active_regions = Region.objects.filter(
-        status="approved", deleted_at__isnull=True, approved_binding__provider_account__enabled=True
-    ).exclude(collectionschedule__enabled=False)
+    active_regions = (
+        Region.objects.active()
+        .filter(status="approved", approved_binding__provider_account__enabled=True)
+        .exclude(collectionschedule__enabled=False)
+    )
     latest_forecast = (
         ForecastSnapshot.objects.filter(
             binding_id=OuterRef("approved_binding_id"),
@@ -110,9 +113,9 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         Q(latest_acquisition__isnull=True) | Q(latest_acquisition__lt=now - timedelta(hours=26))
     )
     metering = EpiasCollectionJob.objects.filter(
+        active_plant("plant__"),
         Q(status__in=(EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING))
         | Q(status=EpiasJobStatus.FAILED, scheduled_for__gte=recent),
-        plant__region__deleted_at__isnull=True,
     )
     notification_counts = deliveries.aggregate(
         overdue_notifications=Count("pk", filter=waiting_jobs & Q(available_at__lt=cutoff)),
@@ -193,13 +196,13 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
             overdue_collections=Count("pk", filter=waiting_jobs & Q(available_at__lt=cutoff)),
             interrupted_collections=Count("pk", filter=interrupted_jobs),
             failed_collections=Count(
-                "pk", filter=Q(status=CollectionJobStatus.FAILED, scheduled_slot__gte=recent)
+                "pk", filter=Q(status=CollectionJobStatus.FAILED, scheduled_for__gte=recent)
             ),
         ),
         **notification_counts,
         **metering.aggregate(
             overdue_metering=Count(
-                "pk", filter=Q(status=EpiasJobStatus.PENDING, next_attempt_at__lt=cutoff)
+                "pk", filter=Q(status=EpiasJobStatus.PENDING, available_at__lt=cutoff)
             ),
             interrupted_metering=Count("pk", filter=interrupted_jobs),
             failed_metering=Count(

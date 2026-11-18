@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import math
 import time
 import uuid
@@ -54,7 +54,7 @@ from pyracast.forecasts.timing import (
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import Plant
 from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
-from pyracast.regions.models import Region
+from pyracast.regions.models import Region, active_region
 from pyracast.weather import OpenMeteoProvider, WeatherError, serialize_weather
 
 if TYPE_CHECKING:
@@ -174,7 +174,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         if (
             job.endpoint == CollectionEndpoint.FORECASTS
             and latest_slot is not None
-            and latest_slot > job.scheduled_slot
+            and latest_slot > job.scheduled_for
         ):
             job.status = CollectionJobStatus.STALE
             job.last_error = CollectionJobError.FORECAST_SUPERSEDED
@@ -192,17 +192,17 @@ def claim(job_id: int, now: datetime) -> Lease | None:
                         or (
                             job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
                             and job.target_date
-                            == job.scheduled_slot.astimezone(ZoneInfo(binding.timezone)).date()
+                            == job.scheduled_for.astimezone(ZoneInfo(binding.timezone)).date()
                         )
                     )
-                    and job.scheduled_slot.astimezone(ZoneInfo(binding.region.timezone)).strftime(
+                    and job.scheduled_for.astimezone(ZoneInfo(binding.region.timezone)).strftime(
                         "%H:%M"
                     )
                     not in (timing.times if timing is not None else ())
                     # Approval creates one immediate acquisition outside existing clocks.
                     and (
                         job.endpoint != CollectionEndpoint.FORECASTS
-                        or job.scheduled_slot < schedule.effective_from
+                        or job.scheduled_for < schedule.effective_from
                         or job.pk != approval_id
                     )
                 )
@@ -223,7 +223,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         if job.retry_until is not None:
             job.available_at = now + (
                 LEASE_DURATION
-                if job.retry_until <= job.scheduled_slot + INTRADAY_HISTORY_WINDOW
+                if job.retry_until <= job.scheduled_for + INTRADAY_HISTORY_WINDOW
                 else NIGHT_RETRY_DELAY
             )
         job.save(
@@ -253,7 +253,7 @@ def retry(
         if not retryable:
             job.status = CollectionJobStatus.FAILED
         elif job.retry_until is not None:
-            intraday = job.retry_until <= job.scheduled_slot + INTRADAY_HISTORY_WINDOW
+            intraday = job.retry_until <= job.scheduled_for + INTRADAY_HISTORY_WINDOW
             job.available_at = next_retry_at(
                 now,
                 job.attempts,
@@ -392,7 +392,7 @@ def publish(
                     CollectionJob.objects.get_or_create(
                         binding=binding,
                         endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
-                        scheduled_slot=available,
+                        scheduled_for=available,
                         defaults={
                             "target_date": job.target_date,
                             "available_at": available,
@@ -669,13 +669,13 @@ def collect(
 def pending_job_ids(now: datetime, limit: int = 100) -> list[int]:
     return list(
         CollectionJob.objects.filter(
+            active_region("binding__region__"),
             Q(available_at__lte=now)
             | Q(
                 status=CollectionJobStatus.RETRY,
                 last_error=CollectionJobError.PROVIDER_THROTTLED,
                 binding__provider_account__request_blocked_until__isnull=True,
             ),
-            binding__region__deleted_at__isnull=True,
         )
         .filter(
             Q(status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY))

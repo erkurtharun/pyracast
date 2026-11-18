@@ -38,7 +38,7 @@ def test_operator_workflow_and_permissions(tmp_path: Path, monkeypatch: pytest.M
     initial_configuration = plant.current_configuration
     assert initial_configuration is not None
     assert initial_configuration.mounting_type == "unknown"
-    assert initial_configuration.surface_tilt is None
+    assert initial_configuration.surface_tilt_degrees is None
     assert f"Plant {plant.pk}" in out.getvalue()
     assert plant.current_configuration_id is not None
     call_command(
@@ -49,15 +49,15 @@ def test_operator_workflow_and_permissions(tmp_path: Path, monkeypatch: pytest.M
         name="Revised",
         dc_capacity_mw=2.0,
         mounting_type="fixed",
-        surface_tilt=25,
-        surface_azimuth=180,
+        surface_tilt_degrees=25,
+        surface_azimuth_degrees=180,
         stdout=out,
     )
     plant.refresh_from_db()
     assert plant.current_configuration is not None
     assert plant.current_configuration.mounting_type == "fixed"
-    assert plant.current_configuration.surface_tilt == 25
-    assert plant.current_configuration.surface_azimuth == 180
+    assert plant.current_configuration.surface_tilt_degrees == 25
+    assert plant.current_configuration.surface_azimuth_degrees == 180
     config_id = plant.current_configuration_id
     assert config_id is not None
     csv_path = tmp_path / "meter.csv"

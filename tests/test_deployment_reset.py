@@ -832,7 +832,7 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_job_binding_and_pl
             job = CollectionJob.objects.create(
                 binding=binding,
                 endpoint=endpoint,
-                scheduled_slot=collected,
+                scheduled_for=collected,
                 target_date=collected.date(),
                 available_at=collected,
             )

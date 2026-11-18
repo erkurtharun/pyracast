@@ -59,7 +59,7 @@ def saved(
 ) -> ForecastSnapshot:
     job = CollectionJob.objects.create(
         binding=system.binding,
-        scheduled_slot=when - timedelta(minutes=1),
+        scheduled_for=when - timedelta(minutes=1),
         target_date=when.date() + timedelta(days=1),
         available_at=when,
         status="succeeded",

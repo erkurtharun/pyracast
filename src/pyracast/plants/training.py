@@ -28,6 +28,7 @@ from pyracast.plants.models import (
     Plant,
     PlantConfiguration,
     PlantEventAction,
+    active_plant,
 )
 from pyracast.plants.numerics import (
     FitResult,
@@ -279,9 +280,9 @@ def pending_calibration_ids(now: datetime, limit: int = 100) -> list[int]:
         raise ValidationError("Use an aware timestamp and a limit between 1 and 1000.")
     return list(
         CalibrationRun.objects.filter(
+            active_plant("plant__"),
             Q(status=CalibrationStatus.PENDING)
             | Q(status=CalibrationStatus.RUNNING, lease_expires_at__lte=now),
-            plant__region__deleted_at__isnull=True,
         )
         .order_by("created_at", "pk")
         .values_list("pk", flat=True)[:limit]

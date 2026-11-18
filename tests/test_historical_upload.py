@@ -358,8 +358,8 @@ def test_upload_preserves_declared_provenance_availability_and_idempotence(
     content = document(metadata={"latitude": 40, "unit": "kW"})
     record = upload(system, content)
     assert upload(system, content) == record
-    assert record.imported_at == NOW
-    assert record.sha256 == sha256(content).hexdigest()
+    assert record.created_at == NOW
+    assert record.content_sha256 == sha256(content).hexdigest()
     assert record.source_settings["settings_matched"]
     provenance = record.source_settings["upload_provenance"]
     assert provenance["file_verified_fields"] == ["latitude", "unit"]

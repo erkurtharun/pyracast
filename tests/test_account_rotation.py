@@ -189,7 +189,7 @@ def test_concurrent_rotations_have_serial_credential_revisions_and_audits() -> N
 def test_audit_event_database_constraint_requires_exactly_one_target(targets: str) -> None:
     system = make_system()
 
-    with pytest.raises(IntegrityError, match="audit_exactly_one_target"), transaction.atomic():
+    with pytest.raises(IntegrityError, match="auditevent_target_chk"), transaction.atomic():
         AuditEvent.objects.create(
             actor=system.admin,
             region=system.region if targets == "both" else None,

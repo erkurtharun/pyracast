@@ -33,7 +33,7 @@ from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.recipients import permitted_recipients
 from pyracast.notifications.scheduler import MAX_LATENESS, slot_recipients
-from pyracast.regions.models import Region
+from pyracast.regions.models import Region, active_region
 
 LEASE_DURATION = timedelta(minutes=5)
 logger = logging.getLogger(__name__)
@@ -268,7 +268,7 @@ def process_notification(
 def pending_notification_ids(now: datetime, limit: int = 100) -> list[int]:
     return list(
         NotificationDelivery.objects.filter(
-            available_at__lte=now, schedule__region__deleted_at__isnull=True
+            active_region("schedule__region__"), available_at__lte=now
         )
         .filter(
             Q(status__in=(NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY))

@@ -290,7 +290,7 @@ def test_one_delivery_per_reminder_slot_prevents_duplicate_dispatch() -> None:
     assert enqueue_due(SLOT) == [first.pk]
     assert not process_notification(first.pk, SLOT)
     with (
-        pytest.raises(IntegrityError, match="unique_reminder_group_slot"),
+        pytest.raises(IntegrityError, match="notificationdelivery_schedule_scheduled_for_uniq"),
         transaction.atomic(),
     ):
         NotificationDelivery.objects.create(

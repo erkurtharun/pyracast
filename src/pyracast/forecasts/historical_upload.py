@@ -426,9 +426,7 @@ def import_historical_upload(
         content, filename, source_timezone=source_timezone, period=period
     )
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         if expected_configuration_ids is not None:
             configurations = tuple(
                 Plant.objects.select_for_update()

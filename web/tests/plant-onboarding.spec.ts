@@ -53,8 +53,8 @@ test("an older pending submission cannot replace a saved technical update", asyn
         id: 1,
         dc_capacity_mw: 5,
         mounting_type: "unknown",
-        surface_tilt: null,
-        surface_azimuth: null,
+        surface_tilt_degrees: null,
+        surface_azimuth_degrees: null,
     };
     const pending = { ...plant, current_configuration: null, submission };
     let requestStarted!: () => void;
@@ -169,8 +169,8 @@ for (const section of ["Forecast", "Settings"] as const) {
                 ...plant.current_configuration,
                 id: 1,
                 mounting_type: "unknown",
-                surface_tilt: null,
-                surface_azimuth: null,
+                surface_tilt_degrees: null,
+                surface_azimuth_degrees: null,
             },
         };
         const currentPlant = () =>

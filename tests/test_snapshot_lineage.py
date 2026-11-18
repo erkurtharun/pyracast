@@ -34,11 +34,14 @@ def test_snapshot_and_normalization_share_the_target_job_binding() -> None:
     job = CollectionJob.objects.create(
         binding=target,
         endpoint="scaled_forecasts",
-        scheduled_slot=NOW,
+        scheduled_for=NOW,
         target_date=NOW.date(),
         available_at=NOW,
     )
-    with pytest.raises(IntegrityError, match="snapshot_job_binding_fk"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="forecastsnapshot_job_binding_fk"),
+        transaction.atomic(),
+    ):
         ForecastSnapshot.objects.create(
             job=job,
             binding=system.binding,
@@ -66,19 +69,27 @@ def test_snapshot_and_normalization_share_the_target_job_binding() -> None:
         created_at=NOW,
     )
     with (
-        pytest.raises(IntegrityError, match="normalization_snapshot_binding_fk"),
+        pytest.raises(
+            IntegrityError, match="referencecapacitynormalization_snapshot_target_binding_fk"
+        ),
         transaction.atomic(),
     ):
         ReferenceCapacityNormalization.objects.create(target_binding=system.binding, **values)
     record = ReferenceCapacityNormalization.objects.create(target_binding=target, **values)
-    with pytest.raises(IntegrityError, match="normalization_distinct_source"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="referencecapacitynormalization_source_snapshot_chk"),
+        transaction.atomic(),
+    ):
         ReferenceCapacityNormalization.objects.filter(pk=record.pk).update(source_snapshot=snapshot)
-    with pytest.raises(IntegrityError, match="snapshot_job_binding_fk"), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="forecastsnapshot_job_binding_fk"),
+        transaction.atomic(),
+    ):
         CollectionJob.objects.filter(pk=job.pk).update(binding=system.binding)
     other_job = CollectionJob.objects.create(
         binding=target,
         endpoint="scaled_forecasts",
-        scheduled_slot=NOW + timedelta(minutes=1),
+        scheduled_for=NOW + timedelta(minutes=1),
         target_date=NOW.date(),
         available_at=NOW,
     )
@@ -92,7 +103,7 @@ def test_snapshot_and_normalization_share_the_target_job_binding() -> None:
     )
     values["snapshot"] = other_snapshot
     with (
-        pytest.raises(IntegrityError, match="unique_reference_capacity_normalization"),
+        pytest.raises(IntegrityError, match="referencecapacitynormalization_source_target_uniq"),
         transaction.atomic(),
     ):
         ReferenceCapacityNormalization.objects.create(target_binding=target, **values)
@@ -101,13 +112,29 @@ def test_snapshot_and_normalization_share_the_target_job_binding() -> None:
 @pytest.mark.parametrize(
     ("field", "value", "constraint"),
     [
-        ("source_capacity_kw", 0, "normalization_source_capacity"),
-        ("source_capacity_kw", -1, "normalization_source_capacity"),
-        ("source_capacity_kw", float("inf"), "normalization_source_capacity"),
-        ("source_capacity_kw", float("nan"), "normalization_source_capacity"),
-        ("target_capacity_kw", 0, "normalization_target_capacity"),
-        ("target_capacity_kw", float("inf"), "normalization_target_capacity"),
-        ("target_capacity_kw", float("nan"), "normalization_target_capacity"),
+        ("source_capacity_kw", 0, "referencecapacitynormalization_source_capacity_kw_chk"),
+        ("source_capacity_kw", -1, "referencecapacitynormalization_source_capacity_kw_chk"),
+        (
+            "source_capacity_kw",
+            float("inf"),
+            "referencecapacitynormalization_source_capacity_kw_chk",
+        ),
+        (
+            "source_capacity_kw",
+            float("nan"),
+            "referencecapacitynormalization_source_capacity_kw_chk",
+        ),
+        ("target_capacity_kw", 0, "referencecapacitynormalization_target_capacity_kw_chk"),
+        (
+            "target_capacity_kw",
+            float("inf"),
+            "referencecapacitynormalization_target_capacity_kw_chk",
+        ),
+        (
+            "target_capacity_kw",
+            float("nan"),
+            "referencecapacitynormalization_target_capacity_kw_chk",
+        ),
     ],
 )
 def test_normalization_preserves_finite_positive_capacity_provenance(
@@ -126,7 +153,7 @@ def test_normalization_preserves_finite_positive_capacity_provenance(
     job = CollectionJob.objects.create(
         binding=system.binding,
         endpoint="scaled_forecasts",
-        scheduled_slot=NOW,
+        scheduled_for=NOW,
         target_date=NOW.date(),
         available_at=NOW,
     )

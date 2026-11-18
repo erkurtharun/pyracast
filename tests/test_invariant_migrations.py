@@ -139,7 +139,7 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     collection = list(CollectionJob.objects.order_by("pk"))
     released = CollectionJob.objects.create(
         binding=system.binding,
-        scheduled_slot=NOW + timedelta(hours=1),
+        scheduled_for=NOW + timedelta(hours=1),
         target_date=NOW.date(),
         available_at=NOW,
     )
@@ -403,7 +403,7 @@ def _delivery(system: System) -> NotificationDelivery:
 def _collection_job(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     system = make_system()
     return CollectionJob.objects.create(
-        binding=system.binding, scheduled_slot=NOW, target_date=NOW.date(), available_at=NOW
+        binding=system.binding, scheduled_for=NOW, target_date=NOW.date(), available_at=NOW
     )
 
 
@@ -504,18 +504,18 @@ def test_collection_migration_refuses_reference_imports_of_another_shape(
     system = make_system()
     record = HistoricalReferenceImport.objects.create(
         binding=system.binding,
-        sha256="a" * 64,
+        content_sha256="a" * 64,
         source_name="fixture",
         source_settings={},
         imported_by=system.admin,
-        imported_at=NOW,
+        created_at=NOW,
         interval_count=1,
     )
     job = CollectionJob.objects.create(
         binding=system.binding,
         reference_import=record,
         endpoint="historical_import",
-        scheduled_slot=NOW,
+        scheduled_for=NOW,
         target_date=NOW.date(),
         available_at=NOW,
         status="succeeded",

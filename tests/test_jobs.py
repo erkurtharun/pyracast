@@ -307,7 +307,7 @@ def test_scheduler_deduplicates_local_cutoff_and_recovers_missed_slot() -> None:
     assert len(jobs) == 2
     assert jobs[:1] == enqueue_due(NOW + timedelta(hours=1))
     scheduled = CollectionJob.objects.get(pk=jobs[0])
-    assert scheduled.scheduled_slot == NOW
+    assert scheduled.scheduled_for == NOW
     assert scheduled.target_date.isoformat() == "2026-11-10"
     assert enqueue_due(NOW + timedelta(hours=20)) == jobs[:1]
     next_day = enqueue_due(NOW + timedelta(days=1))
@@ -328,7 +328,7 @@ def test_scheduler_ignores_unvalidated_bindings_and_future_first_slots() -> None
     first = CollectionJob.objects.create(
         binding=system.binding,
         target_date=first_slot.date() + timedelta(days=1),
-        scheduled_slot=first_slot,
+        scheduled_for=first_slot,
         available_at=first_slot,
     )
     assert enqueue_due(NOW) == []
@@ -408,7 +408,7 @@ def test_publication_rejects_snapshot_from_another_job() -> None:
     first = CollectionJob.objects.get()
     other = CollectionJob.objects.create(
         binding=system.binding,
-        scheduled_slot=NOW + timedelta(days=1),
+        scheduled_for=NOW + timedelta(days=1),
         target_date=first.target_date + timedelta(days=1),
         available_at=NOW,
     )

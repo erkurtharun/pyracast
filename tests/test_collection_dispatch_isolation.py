@@ -97,10 +97,10 @@ def test_contended_region_does_not_suppress_another_tenants_due_collection(
         with connection.cursor() as cursor:
             cursor.execute("SELECT set_config('lock_timeout', %s, false)", [original_timeout[0]])
     assert CollectionJob.objects.filter(
-        binding=binding, scheduled_slot=NOW + timedelta(days=1)
+        binding=binding, scheduled_for=NOW + timedelta(days=1)
     ).exists()
     assert not CollectionJob.objects.filter(
-        binding=system.binding, scheduled_slot=NOW + timedelta(days=1)
+        binding=system.binding, scheduled_for=NOW + timedelta(days=1)
     ).exists()
     assert "error_type=OperationalError" in caplog.text
 

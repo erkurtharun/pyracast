@@ -50,15 +50,18 @@ class PlantInput(InputSerializer):
     mounting_type = serializers.ChoiceField(
         choices=MountingType.choices, default=MountingType.UNKNOWN
     )
-    surface_tilt = FiniteFloat(
+    surface_tilt_degrees = FiniteFloat(
         min_value=0, max_value=90, allow_null=True, required=False, default=None
     )
-    surface_azimuth = FiniteFloat(
+    surface_azimuth_degrees = FiniteFloat(
         min_value=0, below=360, allow_null=True, required=False, default=None
     )
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        angles = attrs.get("surface_tilt") is not None or attrs.get("surface_azimuth") is not None
+        angles = (
+            attrs.get("surface_tilt_degrees") is not None
+            or attrs.get("surface_azimuth_degrees") is not None
+        )
         if angles and attrs.get("mounting_type") != "fixed":
             raise serializers.ValidationError(
                 {"mounting_type": [gettext("Only fixed mounting permits surface angles.")]}
@@ -80,8 +83,8 @@ class ConfigurationOutput(serializers.ModelSerializer[PlantConfiguration]):
             "export_limit_mw",
             "measurement_basis",
             "mounting_type",
-            "surface_tilt",
-            "surface_azimuth",
+            "surface_tilt_degrees",
+            "surface_azimuth_degrees",
             "created_at",
         )
         read_only_fields = fields
@@ -97,8 +100,8 @@ class PlantSubmissionOutput(serializers.ModelSerializer[PlantSubmission]):
             "export_limit_mw",
             "measurement_basis",
             "mounting_type",
-            "surface_tilt",
-            "surface_azimuth",
+            "surface_tilt_degrees",
+            "surface_azimuth_degrees",
             "created_at",
         )
         read_only_fields = fields
@@ -201,7 +204,7 @@ class ObservationOutput(serializers.ModelSerializer[ProductionObservation]):
             "quality",
             "source",
             "recorded_by_id",
-            "recorded_at",
+            "created_at",
             "supersedes_id",
             "is_reverted",
         )
