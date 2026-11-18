@@ -163,7 +163,7 @@ def enclosing_names(tree: ast.Module) -> dict[int, str]:
 
 
 def old_style_sites() -> list[str]:
-    sites = []
+    sites: list[str] = []
     for path, tree in modules():
         names = enclosing_names(tree)
         lines = (
