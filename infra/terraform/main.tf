@@ -38,6 +38,12 @@ resource "google_compute_subnetwork" "application" {
   network                  = google_compute_network.application.id
   ip_cidr_range            = "10.20.0.0/24"
   private_ip_google_access = true
+
+  log_config {
+    aggregation_interval = "INTERVAL_10_MIN"
+    flow_sampling        = 0.5
+    metadata             = "INCLUDE_ALL_METADATA"
+  }
 }
 
 resource "google_compute_address" "application" {
@@ -158,9 +164,16 @@ resource "google_storage_bucket" "backup" {
   force_destroy               = false
   labels                      = local.labels
 
+  versioning {
+    enabled = true
+  }
+
+  # Age counts from each generation's creation: a live backup becomes noncurrent at seven days
+  # and a later lifecycle run deletes it, as it deletes a backup deleted or replaced earlier.
   lifecycle_rule {
     condition {
-      age = 7
+      age        = 7
+      with_state = "ANY"
     }
     action {
       type = "Delete"

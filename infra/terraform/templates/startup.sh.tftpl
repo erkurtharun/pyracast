@@ -59,6 +59,8 @@ if ! grep --quiet --fixed-strings "UUID=$data_uuid /var/lib/pyracast " /etc/fsta
   echo "UUID=$data_uuid /var/lib/pyracast ext4 defaults,nodev,nosuid 0 2" >>/etc/fstab
 fi
 mountpoint --quiet /var/lib/pyracast || mount /var/lib/pyracast
+# Holds the release lock and marker: only root may create or replace entries in it.
+install -d -o root -g root -m 0755 /var/lib/pyracast
 install -d -o 999 -g 999 -m 0750 /var/lib/pyracast/rabbitmq
 install -d -o 70 -g 70 -m 0700 /var/lib/pyracast/postgres
 install -d -o 10001 -g 10001 -m 0750 /var/lib/pyracast/gateway
@@ -95,10 +97,11 @@ RemainAfterExit=yes
 WorkingDirectory=/opt/pyracast/current
 RuntimeDirectory=pyracast
 RuntimeDirectoryMode=0700
+UMask=0077
 ExecStartPre=/usr/local/sbin/pyracast-network-guard
 ExecStartPre=/usr/bin/python3 /opt/pyracast/current/deploy/runtime_secrets.py /etc/pyracast/host.json
 ExecStart=/usr/bin/docker compose --env-file deploy/release.env -f deploy/compose.yaml up --detach --wait --wait-timeout 180
-ExecStop=/usr/bin/flock /run/lock/pyracast-release.lock /usr/bin/docker compose --env-file deploy/release.env -f deploy/compose.yaml stop --timeout 660
+ExecStop=/usr/bin/flock /var/lib/pyracast/release.lock /usr/bin/docker compose --env-file deploy/release.env -f deploy/compose.yaml stop --timeout 660
 TimeoutStartSec=300
 TimeoutStopSec=960
 

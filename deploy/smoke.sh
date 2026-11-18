@@ -501,7 +501,7 @@ application_running() {
 }
 ready() { [[ $("${secure_curl[@]}" https://localhost:18443/health/ready/) == ok ]]; }
 "${reset_tool[@]}" prepare
-test -f "$temporary/release-blocked"
+[[ -f "$temporary/release-blocked" ]]
 [[ -z $(application_running) ]]
 [[ $("${tls_curl[@]}" -H 'Accept: text/html' --dump-header "$temporary/notice.headers" \
   --output "$temporary/notice.html" --write-out '%{http_code}' https://localhost:18443/app/) == 503 ]]
@@ -512,7 +512,7 @@ grep -qF '<title>Pyracast maintenance</title>' "$temporary/notice.html"
 [[ $(<"$temporary/notice.json") == '{"code": "maintenance", "message": "Pyracast is being updated. Try again in a minute; your data is safe.", "retry_after": 60}' ]]
 [[ $("${tls_curl[@]}" -H 'Accept-Language: tr' https://localhost:18443/api/session/) == *'"message": "Pyracast g\u00fcncelleniyor.'* ]]
 "${reset_tool[@]}" abort
-test ! -e "$temporary/release-blocked"
+[[ ! -e "$temporary/release-blocked" ]]
 ready
 "${reset_tool[@]}" prepare | tee "$temporary/prepare.log"
 object=$(sed -n 's|^  Object:  gs://smoke-backups/||p' "$temporary/prepare.log")
@@ -524,7 +524,7 @@ grep -qxF '  Solcast snapshots: 0' "$temporary/prepare.log"
 cmp "$temporary/bucket/$solcast" "$temporary/reset/${solcast##*/}"
 [[ -z $(gzip -dc "$temporary/reset/${solcast##*/}") ]]
 "${reset_tool[@]}" reset --confirm "$object"
-test -f "$temporary/release-blocked"
+[[ -f "$temporary/release-blocked" ]]
 refused=0
 "${reset_tool[@]}" abort || refused=$?
 [[ $refused == 2 ]]
@@ -532,7 +532,7 @@ refused=0
   "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'") == 0 ]]
 # The installer's pre-release dump and migrate run from zero under the restricted owner.
 "${compose[@]}" exec -T postgres pg_dump -U postgres -d pyracast --format=custom --compress=zstd:3 > "$temporary/empty.dump"
-test -s "$temporary/empty.dump"
+[[ -s "$temporary/empty.dump" ]]
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps migrate pyracast migrate --check
 "${compose[@]}" up -d --wait --wait-timeout 180
@@ -556,7 +556,7 @@ PY
 "${compose[@]}" stop -t 660 worker notifications
 "${compose[@]}" stop -t 100 api web
 "${reset_tool[@]}" restore --confirm "$object"
-test ! -e "$temporary/release-blocked"
+[[ ! -e "$temporary/release-blocked" ]]
 ready
 "${compose[@]}" exec -T api python - <<'PY'
 import django
