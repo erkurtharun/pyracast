@@ -97,7 +97,8 @@ def test_shutdown_finishes_active_work_and_closes_broker(
                 command.Command().handle(threads=1, queues=["default"], stop_file=root / "stop")
             else:
                 command.make_actor = MagicMock()
-                command.purge_expired = lambda: record("ready")
+                command.purge_expired = lambda now: record("ready")
+                command.sweep_accounts = MagicMock()
                 command.dispatch = MagicMock()
                 command.dispatch_calibrations = MagicMock()
                 command.dispatch_notifications = MagicMock()

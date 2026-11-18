@@ -48,6 +48,10 @@ def connect_identity_recovery() -> None:
     )
 
 
+def social_callback_url() -> str:
+    return f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1"
+
+
 def record_social_refusal(
     request: HttpRequest, provider: str, reason: str, user: User | None = None
 ) -> None:
@@ -223,7 +227,7 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
         )
 
     def get_connect_redirect_url(self, request: HttpRequest, socialaccount: SocialAccount) -> str:
-        return str(settings.PYRACAST_SOCIAL_CALLBACK_URL)
+        return social_callback_url()
 
     def validate_disconnect(
         self, account: SocialAccount, accounts: QuerySet[SocialAccount]

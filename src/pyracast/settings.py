@@ -171,14 +171,13 @@ HEADLESS_CLIENTS = ("browser",)
 PYRACAST_PUBLIC_ORIGIN = os.environ.get("PYRACAST_PUBLIC_ORIGIN", "http://127.0.0.1:3000").rstrip(
     "/"
 )
-PYRACAST_SOCIAL_CALLBACK_URL = f"{PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1"
 HEADLESS_FRONTEND_URLS = {
     "account_login": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_confirm_email": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_reset_password": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_reset_password_from_key": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_signup": f"{PYRACAST_PUBLIC_ORIGIN}/app/?signup=1",
-    "socialaccount_login_error": PYRACAST_SOCIAL_CALLBACK_URL,
+    "socialaccount_login_error": f"{PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1",
 }
 MFA_SUPPORTED_TYPES = ["totp", "recovery_codes"]
 MFA_ADAPTER = "pyracast.accounts.mfa.MFAAdapter"

@@ -1,11 +1,11 @@
 import sys
 
-from django.conf import settings
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect
 from django.urls import Resolver404, ResolverMatch, resolve
 from django.utils.cache import patch_cache_control
 from django.views import csrf, defaults
 
+from pyracast.accounts.social import social_callback_url
 from pyracast.api.errors import api_error, coded, error_json, record_refused
 from pyracast.errors import ErrorCode
 
@@ -72,7 +72,5 @@ def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:
         return _private(csrf.csrf_failure(request, reason))
     name = match.url_name if match else None
     if name in PROVIDER_NAVIGATIONS and request.headers.get("Sec-Fetch-Mode") == "navigate":
-        return _private(
-            HttpResponseRedirect(f"{settings.PYRACAST_SOCIAL_CALLBACK_URL}&error=expired_form")
-        )
+        return _private(HttpResponseRedirect(f"{social_callback_url()}&error=expired_form"))
     return error_json(request, lambda: coded(ErrorCode.CSRF_FAILED, 403))

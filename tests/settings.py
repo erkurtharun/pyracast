@@ -41,7 +41,6 @@ SECRET_KEY = "test-only-not-a-deployment-secret"  # noqa: S105
 ALLOWED_HOSTS = ["testserver", "localhost", "127.0.0.1"]
 SECURE_SSL_REDIRECT = False
 PYRACAST_PUBLIC_ORIGIN = "https://testserver"
-PYRACAST_SOCIAL_CALLBACK_URL = f"{PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1"
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS = 0.0
 SESSION_COOKIE_NAME = "sessionid"

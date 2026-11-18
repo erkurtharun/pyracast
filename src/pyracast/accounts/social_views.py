@@ -36,7 +36,11 @@ from django.template.loader import render_to_string
 from django.views.decorators.http import require_GET
 
 from pyracast.accounts.processes import PROVIDER_SIGNUP_SESSION_KEY, lock_account, starting
-from pyracast.accounts.social import locked_social_user, record_social_refusal
+from pyracast.accounts.social import (
+    locked_social_user,
+    record_social_refusal,
+    social_callback_url,
+)
 from pyracast.db import violated_constraint
 
 # A provider sign-up whose identity (Django's generated name for allauth's unique provider and
@@ -99,7 +103,7 @@ class ProviderSignupView(AllauthProviderSignupView):
 
 class RedirectToProviderView(AllauthRedirectToProviderView):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        callback = settings.PYRACAST_SOCIAL_CALLBACK_URL
+        callback = social_callback_url()
         refused = HttpResponseRedirect(f"{callback}&error=invalid_request")
         if request.POST.get("callback_url") != callback:
             return refused
@@ -188,7 +192,7 @@ def provider_callback(request: HttpRequest, provider: str) -> HttpResponseBase:
     if provider not in settings.SOCIALACCOUNT_PROVIDERS:
         user = request.user if request.user.is_authenticated else None
         record_social_refusal(request, provider, "provider_disabled", user)
-        callback = settings.PYRACAST_SOCIAL_CALLBACK_URL
+        callback = social_callback_url()
         return HttpResponseRedirect(f"{callback}&error=provider_unavailable")
     callback = google_callback if provider == "google" else microsoft_callback
     return starting(request, lambda: cast(HttpResponseBase, callback(request)))
