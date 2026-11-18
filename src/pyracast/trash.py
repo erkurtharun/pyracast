@@ -39,6 +39,7 @@ from pyracast.plants.models import (
     PlantEvent,
     ProductionObservation,
 )
+from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 from pyracast.regions.operations import require_available_location
 
@@ -96,7 +97,7 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
             lease_token=None,
             lease_expires_at=None,
         )
-        AuditEvent.objects.create(
+        record_audit(
             actor=actor, region=region, action=AuditAction.REGION_TRASHED, revision=region.revision
         )
         return region
@@ -126,7 +127,7 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
         )
         CollectionSchedule.objects.filter(region=region).update(effective_from=now)
         ReminderSchedule.objects.filter(region=region).update(effective_from=now)
-        AuditEvent.objects.create(
+        record_audit(
             actor=actor, region=region, action=AuditAction.REGION_RESTORED, revision=region.revision
         )
         return region

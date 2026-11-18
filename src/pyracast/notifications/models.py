@@ -6,9 +6,18 @@ from django.db import models
 
 from pyracast.accounts.models import Language
 from pyracast.connections.models import SiteBinding
-from pyracast.db import choices_check, lease_check
+from pyracast.db import TEXT_ITEMS, choices_check, json_shape_check, lease_check
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.regions.models import Region
+
+# A pinned address maps to the ids of the memberships it belonged to.
+MEMBERSHIP_ITEMS = (
+    'strict $.* ? (@.type() != "array"'
+    ' || exists(@[*] ? (@.type() != "number" || @ < 1 || @.floor() != @)))'
+)
+TIME_ITEMS = (
+    'strict $[*] ? (@.type() != "string" || !(@ like_regex "^([01][0-9]|2[0-3]):[0-5][0-9]$"))'
+)
 
 
 class NotificationSettings(models.Model):
@@ -53,6 +62,9 @@ class ReminderSchedule(models.Model):
         constraints = (
             models.UniqueConstraint(fields=("region",), name="one_reminder_schedule_per_region"),
             choices_check("language", Language, name="reminder_schedule_language_valid"),
+            json_shape_check("recipients", "array", TEXT_ITEMS),
+            json_shape_check("recipient_memberships", "object", MEMBERSHIP_ITEMS),
+            json_shape_check("times", "array", TIME_ITEMS),
         )
 
 
@@ -170,6 +182,9 @@ class NotificationDelivery(models.Model):
             lease_check(
                 (NotificationDeliveryStatus.SENDING,), kept=(NotificationDeliveryStatus.UNCERTAIN,)
             ),
+            json_shape_check("recipients", "array", TEXT_ITEMS),
+            json_shape_check("recipient_memberships", "object", MEMBERSHIP_ITEMS),
+            json_shape_check("revoked_recipients", "array", TEXT_ITEMS),
         )
         indexes = (
             models.Index(

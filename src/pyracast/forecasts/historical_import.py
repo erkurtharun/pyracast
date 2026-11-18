@@ -24,7 +24,8 @@ from pyracast.forecasts.models import (
     SnapshotSourceKind,
 )
 from pyracast.irradiance.pairs import PowerFile, load_power
-from pyracast.regions.models import AuditAction, AuditEvent, Region
+from pyracast.regions.audit import record_audit
+from pyracast.regions.models import AuditAction, Region
 
 
 @dataclass(frozen=True)
@@ -253,7 +254,7 @@ def _archive_historical_reference(
             coverage_start=power.intervals[indexes[0]].start,
             coverage_end=power.intervals[indexes[-1]].end,
         )
-    AuditEvent.objects.create(
+    record_audit(
         actor=actor,
         region=region,
         action=AuditAction.HISTORICAL_REFERENCE_IMPORTED,

@@ -20,6 +20,7 @@ from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import SnapshotSourceKind
 from pyracast.plants.availability import interval_is_covered, reference_intervals
+from pyracast.plants.events import record_plant_event
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 from pyracast.plants.models import (
     CONFIGURATION_PARAMETERS,
@@ -32,7 +33,6 @@ from pyracast.plants.models import (
     ObservationQuality,
     Plant,
     PlantConfiguration,
-    PlantEvent,
     PlantEventAction,
     PlantSubmission,
     ProductionObservation,
@@ -40,7 +40,8 @@ from pyracast.plants.models import (
 from pyracast.plants.numerics import POLICY_VERSION, PowerInterval
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.transfer import calibration_matches_transfer
-from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
+from pyracast.regions.audit import record_audit
+from pyracast.regions.models import AuditAction, Region, RegionStatus
 
 
 @dataclass(frozen=True)
@@ -153,8 +154,8 @@ def _save_configuration(actor: User, plant: Plant, values: dict[str, object]) ->
         lease_token=None,
         lease_expires_at=None,
     )
-    PlantEvent.objects.create(
-        plant=plant,
+    record_plant_event(
+        plant_id=plant.pk,
         actor=actor,
         action=PlantEventAction.CONFIGURATION_CREATED,
         details={"configuration_id": configuration.pk},
@@ -171,8 +172,8 @@ def _rename(actor: User, plant: Plant, region: Region, name: str) -> None:
     name = name.strip()
     if plant.name == name:
         return
-    PlantEvent.objects.create(
-        plant=plant,
+    record_plant_event(
+        plant_id=plant.pk,
         actor=actor,
         action=PlantEventAction.PLANT_RENAMED,
         details={"old": plant.name, "new": name},
@@ -182,7 +183,7 @@ def _rename(actor: User, plant: Plant, region: Region, name: str) -> None:
     if region.name != name:
         region.name = name
         region.save(update_fields=("name",))
-        AuditEvent.objects.create(
+        record_audit(
             actor=actor, region=region, action=AuditAction.REGION_RENAMED, revision=region.revision
         )
 
@@ -314,9 +315,7 @@ def _save_plant_parameters(
         PlantSubmission.objects.update_or_create(
             plant=plant, defaults={**parameters, "submitted_by": actor}
         )
-        PlantEvent.objects.create(
-            plant=plant, actor=actor, action=PlantEventAction.SUBMISSION_SAVED
-        )
+        record_plant_event(plant_id=plant.pk, actor=actor, action=PlantEventAction.SUBMISSION_SAVED)
         return
     values = {"binding": _binding(region), **parameters}
     _rename(actor, plant, region, name)
@@ -446,8 +445,8 @@ def import_observations(
             ids.append(saved.pk)
             created += 1
         if created:
-            PlantEvent.objects.create(
-                plant=plant,
+            record_plant_event(
+                plant_id=plant.pk,
                 actor=actor,
                 action=PlantEventAction.OBSERVATIONS_IMPORTED,
                 details={"configuration_id": configuration.pk, "created": created, "ids": ids},
@@ -531,8 +530,8 @@ def request_calibration(
             incident_revision_ids=incidents,
             input_fingerprint=fingerprint,
         )
-        PlantEvent.objects.create(
-            plant=plant,
+        record_plant_event(
+            plant_id=plant.pk,
             actor=actor,
             action=PlantEventAction.CALIBRATION_REQUESTED,
             details={"calibration_id": run.pk},
@@ -553,8 +552,8 @@ def _activate(
     activation = CalibrationActivation.objects.create(
         plant=plant, configuration=configuration, calibration=run, actor=actor
     )
-    PlantEvent.objects.create(
-        plant=plant,
+    record_plant_event(
+        plant_id=plant.pk,
         actor=actor,
         action=(
             PlantEventAction.CALIBRATION_AUTOMATICALLY_ACTIVATED

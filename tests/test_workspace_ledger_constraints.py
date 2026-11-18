@@ -236,8 +236,8 @@ def test_the_database_keeps_one_open_invitation_per_address_and_one_for_the_admi
 @pytest.mark.parametrize(
     "closed",
     [
-        lambda: {"accepted_at": timezone.now()},
-        lambda: {"revoked_at": timezone.now(), "expires_at": timezone.now()},
+        lambda now: {"accepted_at": now},
+        lambda now: {"revoked_at": now, "expires_at": now},
     ],
     ids=["accepted", "revoked"],
 )
@@ -248,7 +248,7 @@ def test_a_closed_invitation_leaves_its_address_free_for_a_new_one(
     invitation = stored_invitation(
         tenant, administrator, "guest@example.com", role=WorkspaceRole.ADMIN
     )
-    WorkspaceInvitation.objects.filter(pk=invitation.pk).update(**closed())
+    WorkspaceInvitation.objects.filter(pk=invitation.pk).update(**closed(timezone.now()))
 
     stored_invitation(tenant, administrator, "guest@example.com", role=WorkspaceRole.ADMIN)
 

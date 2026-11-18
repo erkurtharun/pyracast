@@ -430,7 +430,7 @@ def test_stale_region_filter_uses_successful_published_current_binding_forecast_
     assert not matches.filter(pk__in=[boundary.pk, latest_valid.pk]).exists()
 
 
-@pytest.mark.parametrize("recipients", [["invalid"], [None], 42])
+@pytest.mark.parametrize("recipients", [["invalid"], ["recipient@example.com", "invalid"]])
 def test_invalid_recipient_filter_matches_validation_and_current_enabled_region_scope(
     recipients: object,
 ) -> None:

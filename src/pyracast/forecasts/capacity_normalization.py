@@ -22,7 +22,8 @@ from pyracast.forecasts.models import (
     SnapshotSourceKind,
 )
 from pyracast.forecasts.sources import snapshot_data
-from pyracast.regions.models import AuditAction, AuditEvent, Region
+from pyracast.regions.audit import record_audit
+from pyracast.regions.models import AuditAction, Region
 
 NORMALIZATION_POLICY = "authorized-reference-capacity-scale-v1"
 
@@ -232,7 +233,7 @@ def normalize_reference_capacity(
             ids.append(copied.pk)
             changed = True
         if changed:
-            AuditEvent.objects.create(
+            record_audit(
                 actor=actor,
                 region=region,
                 action=AuditAction.REFERENCE_CAPACITY_NORMALIZED,

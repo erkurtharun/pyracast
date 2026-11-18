@@ -64,7 +64,7 @@ def slot_recipients(schedule: ReminderSchedule, limit: int) -> tuple[list[str], 
         recipients = effective_recipients(schedule)
         for address in recipients:
             validate_recipient(address)
-    except ValidationError, TypeError:
+    except ValidationError:
         return [], NotificationDeliveryError.INVALID_RECIPIENT
     if not recipients:
         return [], NotificationDeliveryError.NO_RECIPIENTS

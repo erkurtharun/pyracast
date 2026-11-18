@@ -116,6 +116,37 @@ LINE_KEYS = frozenset(
         "provider",
     }
 )
+# The details each event may carry beside event, user and client IP; a line with any other
+# detail is refused. A signalled event carries what allauth reports about the step, and of
+# those only a failed sign-in names an address.
+SIGNALLED_DETAILS = frozenset({"method", "authenticator_type", "provider"})
+WORKSPACE_DETAILS = frozenset({"tenant_id", "target_id"})
+REFUSAL_DETAILS = frozenset({"tenant_id", "reason", "view"})
+SECURITY_EVENT_DETAILS: Mapping[SecurityEvent, frozenset[str]] = {
+    **dict.fromkeys(SIGNAL_EVENTS.values(), SIGNALLED_DETAILS),
+    SecurityEvent.LOGIN_FAILED: SIGNALLED_DETAILS | {"subject"},
+    SecurityEvent.REAUTHENTICATION_FAILED: SIGNALLED_DETAILS,
+    SecurityEvent.LOGIN_REFUSED: frozenset({"reason"}),
+    SecurityEvent.LOGIN_LOCKED: frozenset({"subject"}),
+    SecurityEvent.SESSION_EXPIRED: frozenset({"reason"}),
+    SecurityEvent.RESET_REQUESTED: frozenset({"subject"}),
+    SecurityEvent.CURRENT_CREDENTIAL_REFUSED: frozenset(),
+    SecurityEvent.AUTHENTICATOR_UNREADABLE: frozenset(),
+    SecurityEvent.SECOND_FACTOR_LOCKED: frozenset(),
+    SecurityEvent.SOCIAL_LOGIN_REFUSED: frozenset({"provider", "reason"}),
+    SecurityEvent.ADMIN_MFA_PROVISIONED: frozenset(),
+    SecurityEvent.INVALID_PROXY_HEADERS: frozenset(),
+    SecurityEvent.AUTHENTICATION_REQUEST_THROTTLED: frozenset(),
+    SecurityEvent.AUTHORIZATION_DENIED: REFUSAL_DETAILS,
+    SecurityEvent.CSRF_REFUSED: REFUSAL_DETAILS,
+    SecurityEvent.INVITATION_SENT: WORKSPACE_DETAILS | {"subject"},
+    SecurityEvent.INVITATION_LIMITED: frozenset({"tenant_id", "subject", "reason"}),
+    SecurityEvent.INVITATION_REVOKED: WORKSPACE_DETAILS,
+    SecurityEvent.INVITATION_ACCEPTED: WORKSPACE_DETAILS,
+    SecurityEvent.INVITATION_DENIED: WORKSPACE_DETAILS | {"reason"},
+    SecurityEvent.WORKSPACE_MEMBER_REMOVED: WORKSPACE_DETAILS,
+    SecurityEvent.WORKSPACE_ADMIN_REASSIGNED: WORKSPACE_DETAILS,
+}
 
 
 def redacted_key(address: str) -> str:
@@ -169,13 +200,15 @@ def record_security_event(
             "authenticator_type": authenticator_type,
             "provider": provider,
         }
+        carried = {key: value for key, value in details.items() if value is not None}
+        if undeclared := carried.keys() - SECURITY_EVENT_DETAILS[event]:
+            raise ValueError(f"{event} declares no {', '.join(sorted(undeclared))}.")
         line = {
             "event": event.value,
             "user_id": user_id,
             "client_ip": _client_ip(request, client_ip),
         }
-        line |= {key: value for key, value in details.items() if value is not None}
-        logger.info("%s", json.dumps(line, sort_keys=True))
+        logger.info("%s", json.dumps(line | carried, sort_keys=True))
 
 
 def record_on_commit(event: SecurityEvent, **fields: Any) -> None:

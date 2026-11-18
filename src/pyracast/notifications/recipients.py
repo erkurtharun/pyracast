@@ -59,10 +59,6 @@ def active_memberships(tenant_id: int) -> set[int]:
 
 
 def effective_recipients(schedule: ReminderSchedule) -> list[str]:
-    if not isinstance(schedule.recipients, list) or any(
-        not isinstance(address, str) for address in schedule.recipients
-    ):
-        raise TypeError("Reminder recipients must be a list of email addresses.")
     active = (
         active_memberships(schedule.region.tenant_id) if schedule.recipient_memberships else set()
     )

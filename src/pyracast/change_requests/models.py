@@ -94,6 +94,10 @@ class ChangeRequest(models.Model):
                 ),
                 name="change_request_review_state",
             ),
+            models.CheckConstraint(
+                condition=~Q(status=ChangeRequestStatus.REJECTED) | ~Q(decision_reason=""),
+                name="%(class)s_decision_reason_chk",
+            ),
         )
         indexes = (models.Index(fields=("plant", "status", "submitted_at")),)
 
@@ -195,6 +199,12 @@ class IncidentChange(models.Model):
             models.CheckConstraint(
                 condition=~Q(action=IncidentChangeAction.RESOLVE) | Q(ends_at__isnull=False),
                 name="proposal_incident_end_required",
+            ),
+            models.CheckConstraint(
+                condition=Q(starts_at__isnull=True)
+                | Q(ends_at__isnull=True)
+                | Q(ends_at__gt=F("starts_at")),
+                name="%(class)s_ends_at_chk",
             ),
             choices_check("action", IncidentChangeAction),
             choices_check("kind", IncidentKind, blank=True),

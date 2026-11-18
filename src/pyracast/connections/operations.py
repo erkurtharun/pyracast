@@ -30,7 +30,8 @@ from pyracast.forecasts.models import (
     RequestPurpose,
 )
 from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
-from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
+from pyracast.regions.audit import record_audit
+from pyracast.regions.models import AuditAction, Region, RegionStatus
 
 
 class QuotaExceededError(Exception):
@@ -98,7 +99,7 @@ def create_account(
             raise ValidationError("This account already exists. Select the existing account.")
         if created:
             account.refresh_from_db(fields=("provider", "external_account_id"))
-            AuditEvent.objects.create(
+            record_audit(
                 actor=actor,
                 provider_account=account,
                 action=AuditAction.PROVIDER_ACCOUNT_CREATED,
@@ -116,7 +117,7 @@ def rotate_secret(actor: User, account_id: int, api_key: str) -> None:
         account.encrypted_api_key = encrypted_api_key
         account.credential_revision += 1
         account.save(update_fields=("encrypted_api_key", "credential_revision"))
-        AuditEvent.objects.create(
+        record_audit(
             actor=actor,
             provider_account=account,
             action=AuditAction.PROVIDER_SECRET_ROTATED,
@@ -273,10 +274,11 @@ def validate_binding(
                 )
         attempt.outcome = RequestOutcome.SUCCEEDED
         attempt.save(update_fields=("outcome",))
-        AuditEvent.objects.create(
+        record_audit(
             actor=actor,
             region=region,
             action=AuditAction.CONNECTION_VALIDATED,
             revision=region.revision,
+            details={"binding_id": binding.pk},
         )
     return binding

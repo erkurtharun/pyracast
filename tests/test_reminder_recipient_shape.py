@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -39,7 +40,7 @@ def refusal(rows: models.QuerySet[Any], **changes: object) -> str | None:
     return violated_constraint(raised.value)
 
 
-def cases(field: str, values: list[tuple[str, object]]) -> list[Any]:
+def cases(field: str, values: Sequence[tuple[str, object]]) -> list[Any]:
     return [pytest.param(field, value, id=f"{field}-{name}") for name, value in values]
 
 

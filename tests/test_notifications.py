@@ -784,7 +784,6 @@ def test_retry_row_survives_a_recipient_addition() -> None:
     [
         ("limit", "recipient_limit_exceeded"),
         ("removed", "no_recipients"),
-        ("malformed", "invalid_recipient"),
         ("invalid", "invalid_recipient"),
     ],
 )
@@ -799,8 +798,6 @@ def test_queued_delivery_records_recipient_problem_found_by_the_worker(
         NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
     elif change == "removed":
         reconfigure(system, ["c@example.com"])
-    elif change == "malformed":
-        ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[None])
     else:
         ReminderSchedule.objects.filter(pk=schedule.pk).update(
             recipients=["a@example.com", "not-an-address"]

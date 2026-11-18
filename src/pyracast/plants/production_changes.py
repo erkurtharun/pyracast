@@ -12,12 +12,12 @@ from django.utils.translation import gettext
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
 from pyracast.errors import ConflictError, ErrorCode
+from pyracast.plants.events import record_plant_event
 from pyracast.plants.measurements import select_measurements, select_provider_measurements
 from pyracast.plants.models import (
     ObservationQuality,
     Plant,
     PlantConfiguration,
-    PlantEvent,
     PlantEventAction,
     ProductionObservation,
 )
@@ -199,7 +199,7 @@ def change_production(
             ids.append(saved.pk)
             created += 1
         if created:
-            PlantEvent.objects.create(
+            record_plant_event(
                 plant_id=plant_id,
                 actor=actor,
                 action=PlantEventAction.PRODUCTION_CHANGED,

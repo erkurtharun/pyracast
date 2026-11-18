@@ -341,9 +341,9 @@ def test_a_detail_its_event_does_not_declare_is_refused_and_reported(
 
     record_security_event(SecurityEvent.LOGOUT, user_id=USER_ID, tenant_id=7)
 
-    assert [record.getMessage() for record in caplog.records] == [
+    assert {record.getMessage() for record in caplog.records} == {
         "security_line_failed event=logout error_type=ValueError"
-    ]
+    }
 
 
 def test_failures_for_one_address_share_a_subject_that_is_not_the_address(

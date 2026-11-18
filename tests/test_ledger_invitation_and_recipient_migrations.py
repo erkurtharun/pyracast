@@ -108,9 +108,10 @@ def broken_rules() -> dict[str, int]:
     }
 
 
-def previous_invitations() -> models.Manager[Any]:
+def previous_invitations() -> models.Manager[models.Model]:
     state = MigrationExecutor(connection).loader.project_state(PREVIOUS["accounts"])
-    return state.apps.get_model("accounts", "WorkspaceInvitation")._default_manager
+    model: type[models.Model] = state.apps.get_model("accounts", "WorkspaceInvitation")
+    return model._default_manager
 
 
 def invited(

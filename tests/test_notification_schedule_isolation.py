@@ -83,18 +83,14 @@ def test_request_and_application_reject_oversized_recipients_without_changing_sc
     assert schedule.recipients == ["default@example.com"]
 
 
-@pytest.mark.parametrize("stored", ["oversized", "malformed"])
 def test_invalid_saved_recipient_records_a_skipped_slot_without_blocking_another_tenant(
-    stored: str,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     system, broken = configured()
     healthy = another_tenant_schedule(system)
     address = recipient(255)
-    ReminderSchedule.objects.filter(pk=broken.pk).update(
-        recipients=[address] if stored == "oversized" else [None]
-    )
+    ReminderSchedule.objects.filter(pk=broken.pk).update(recipients=[address])
     actor = MagicMock()
     logger = logging.getLogger("test.notifications.scheduler")
     monkeypatch.setattr("pyracast.notifications.scheduler.logger", logger)
@@ -109,7 +105,7 @@ def test_invalid_saved_recipient_records_a_skipped_slot_without_blocking_another
     assert (paused.recipients, paused.recipient_memberships, paused.snapshot_id) == ([], {}, None)
     actor.send.assert_called_once_with(deliveries[0].pk)
     broken.refresh_from_db()
-    assert broken.recipients == ([address] if stored == "oversized" else [None])
+    assert broken.recipients == [address]
     assert address not in caplog.text
     assert f"schedule_id={broken.pk} reason=invalid_recipient" in caplog.text
     assert invalid_reminder_recipient_count() == 1
@@ -168,7 +164,6 @@ def test_invalid_recipient_health_count_only_includes_current_approved_schedules
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
     assert invalid_reminder_recipient_count() == 0
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=True)
-    ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[None])
     assert invalid_reminder_recipient_count() == 1
 
 
