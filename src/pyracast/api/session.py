@@ -9,7 +9,6 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
-from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -77,8 +76,6 @@ def session_output(request: Request) -> dict[str, Any]:
 @extend_schema(auth=[])
 @method_decorator(never_cache, name="dispatch")
 class SessionView(APIView):
-    permission_classes = (AllowAny,)
-
     @extend_schema(responses=SessionOutput)
     def get(self, request: Request) -> Response:
         return Response(session_output(request))
@@ -92,8 +89,6 @@ class LanguageInput(InputSerializer):
 @method_decorator(never_cache, name="dispatch")
 @method_decorator(csrf_protect, name="dispatch")
 class SessionLanguageView(APIView):
-    permission_classes = (AllowAny,)
-
     @extend_schema(request=LanguageInput, responses=SessionOutput)
     def post(self, request: Request) -> Response:
         payload = LanguageInput(data=request.data)
