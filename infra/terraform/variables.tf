@@ -115,6 +115,28 @@ variable "database_secret_version" {
   }
 }
 
+variable "migration_secret_version" {
+  description = "Numeric Secret Manager version of the migration secret that releases read."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.migration_secret_version >= 1 && floor(var.migration_secret_version) == var.migration_secret_version
+    error_message = "Pin a positive integer migration secret version."
+  }
+}
+
+variable "origin_pull_ca" {
+  description = "PEM certificates of the authority that issued the edge's origin-pull client certificate; empty accepts any edge handshake."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.origin_pull_ca == "" || (startswith(var.origin_pull_ca, "-----BEGIN CERTIFICATE-----") && !strcontains(var.origin_pull_ca, "PRIVATE KEY"))
+    error_message = "Provide only the PEM certificates of the origin-pull authority, never a key."
+  }
+}
+
 variable "github_repository" {
   description = "Repository name used to bind the exact release workflow. Numeric IDs are the identity boundary."
   type        = string

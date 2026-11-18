@@ -10,10 +10,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: production-release
-  cancel-in-progress: false
-
 jobs:
   authorize:
     if: >-
@@ -27,78 +23,78 @@ jobs:
       actions: read
       deployments: read
     outputs:
-      sha: ${{ steps.authorize.outputs.sha }}
-      ci_run_id: ${{ steps.authorize.outputs.ci_run_id }}
-      ci_run_attempt: ${{ steps.authorize.outputs.ci_run_attempt }}
-      artifact_id: ${{ steps.authorize.outputs.artifact_id }}
+      authorized: ${{ steps.decision.outputs.authorized }}
+      sha: ${{ steps.decision.outputs.sha }}
+      ci_run_id: ${{ steps.decision.outputs.ci_run_id }}
+      ci_run_attempt: ${{ steps.decision.outputs.ci_run_attempt }}
+      artifact_id: ${{ steps.decision.outputs.artifact_id }}
       release: ${{ steps.classify.outputs.release }}
     steps:
-      - name: Authorize the current main commit against its exact CI run
-        id: authorize
+      # The default ref is main (workflow_run, or a dispatch on main), never a fork's code. A main
+      # that moves after this clone leaves the authorized commit out of it; classification then
+      # fails and the release goes ahead.
+      - name: Check out main with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Collect the CI run of the current main commit
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          SONAR_ENABLED: ${{ vars.SONAR_ENABLED }}
         with:
           script: |
+            const fs = require('fs');
             const repository = context.repo;
             const { data: workflow } = await github.rest.actions.getWorkflow({
               ...repository, workflow_id: 'ci.yml',
             });
             const { data: main } = await github.rest.repos.getBranch({ ...repository, branch: 'main' });
-            const sha = main.commit.sha;
-            if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Invalid main SHA');
-            // The production deployment record carries the dispatch-time commit; it must be the one deployed.
-            if (context.eventName === 'workflow_dispatch' && context.sha !== sha) {
-              throw new Error('Main advanced after the dispatch; dispatch Release again');
-            }
-            let run;
+            let run = null;
             if (context.eventName === 'workflow_run') {
               ({ data: run } = await github.rest.actions.getWorkflowRun({
                 ...repository, run_id: context.payload.workflow_run.id,
               }));
             } else {
               const { data } = await github.rest.actions.listWorkflowRuns({
-                ...repository, workflow_id: workflow.id, branch: 'main', head_sha: sha, per_page: 100,
+                ...repository, workflow_id: workflow.id, branch: 'main', head_sha: main.commit.sha, per_page: 100,
               });
               run = data.workflow_runs.find(candidate =>
-                ['push', 'workflow_dispatch'].includes(candidate.event) && candidate.conclusion === 'success');
+                ['push', 'workflow_dispatch'].includes(candidate.event) && candidate.conclusion === 'success') ?? null;
             }
-            if (!run || run.workflow_id !== workflow.id || run.path !== '.github/workflows/ci.yml' ||
-                run.repository.full_name !== `${repository.owner}/${repository.repo}` ||
-                run.head_repository?.full_name !== `${repository.owner}/${repository.repo}` ||
-                !['push', 'workflow_dispatch'].includes(run.event) || run.head_branch !== 'main' ||
-                run.head_sha !== sha || run.status !== 'completed' || run.conclusion !== 'success') {
-              throw new Error('Only the current main SHA with successful repository CI may be released');
-            }
-            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+            const jobs = run ? await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
               ...repository, run_id: run.id, filter: 'latest', per_page: 100,
-            });
-            const required = ['Deployment configuration and containers', 'Dependency audit',
-              'Verify (ubuntu-latest)', 'Verify (windows-latest)',
-              'Web (ubuntu-latest)', 'Web (windows-latest)',
-              'Scientific (ubuntu-latest)', 'Scientific (windows-latest)'];
-            if (process.env.SONAR_ENABLED === 'true') required.push('Sonar quality gate');
-            if (required.some(name => !jobs.some(job => job.name === name && job.conclusion === 'success'))) {
-              throw new Error('Every required CI job must pass for this run');
-            }
-            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+            }) : [];
+            const artifacts = run ? await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
               ...repository, run_id: run.id, per_page: 100,
-            });
-            const candidates = artifacts.filter(artifact =>
-              artifact.name === `release-images-${sha}-${run.run_attempt}` && !artifact.expired &&
-              artifact.workflow_run?.head_sha === sha);
-            if (candidates.length !== 1) throw new Error('Run CI again to produce an unexpired image artifact');
-            core.setOutput('sha', sha);
-            core.setOutput('ci_run_id', run.id);
-            core.setOutput('ci_run_attempt', run.run_attempt);
-            core.setOutput('artifact_id', candidates[0].id);
-            await core.summary.addRaw(`Authorized main commit ${sha} using CI run ${run.id}.`).write();
+            }) : [];
+            const facts = {
+              event: context.eventName,
+              event_sha: context.sha,
+              main_sha: main.commit.sha,
+              repository: `${repository.owner}/${repository.repo}`,
+              workflow_id: workflow.id,
+              run: run && {
+                id: run.id, run_attempt: run.run_attempt, workflow_id: run.workflow_id, path: run.path,
+                repository: run.repository.full_name, head_repository: run.head_repository?.full_name ?? null,
+                event: run.event, head_branch: run.head_branch, head_sha: run.head_sha,
+                status: run.status, conclusion: run.conclusion,
+              },
+              jobs: jobs.map(job => ({ name: job.name, conclusion: job.conclusion })),
+              artifacts: artifacts.map(artifact => ({
+                id: artifact.id, name: artifact.name, expired: artifact.expired,
+                head_sha: artifact.workflow_run?.head_sha ?? null,
+              })),
+            };
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/release-facts.json`, JSON.stringify(facts));
+      - name: Authorize the current main commit against its exact CI run
+        id: decision
+        run: python3 deploy/release_authorization.py authorize "$RUNNER_TEMP/release-facts.json"
       # The classification steps only ever narrow the release to a skip; each of them failing
       # leaves the release output unset, and deploy runs unless it is exactly 'false'.
       # A newest deployment (by created_at) whose newest status is not success leaves production
       # in doubt, so only the newest deployment can serve as the baseline, never an older one.
       - name: Find the commit of the newest production deployment when it succeeded
         id: deployed
+        if: steps.decision.outputs.authorized == 'true'
         continue-on-error: true
         timeout-minutes: 1
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -126,34 +122,84 @@ jobs:
             } catch (error) {
               core.warning(`Deployment record unavailable; releasing: ${error.message}`);
             }
-      # The default ref is main (workflow_run, or a dispatch on main), never a fork's code. The
-      # full-history clone fetches main after authorize, so it contains the authorized commit,
-      # which the classifier receives as its argument whatever commit is checked out.
-      - name: Check out main with full history
-        continue-on-error: true
-        timeout-minutes: 3
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
       - name: Classify the changes since the deployed commit
         id: classify
+        if: steps.decision.outputs.authorized == 'true'
         continue-on-error: true
         timeout-minutes: 1
         env:
           DEPLOYED_SHA: ${{ steps.deployed.outputs.sha }}
-          RELEASE_SHA: ${{ steps.authorize.outputs.sha }}
+          RELEASE_SHA: ${{ steps.decision.outputs.sha }}
         run: python3 deploy/release_scope.py "$GITHUB_EVENT_NAME" "$DEPLOYED_SHA" "$RELEASE_SHA"
 
-  deploy:
+  scan:
     needs: authorize
-    if: needs.authorize.outputs.release != 'false'
+    if: needs.authorize.outputs.authorized == 'true' && needs.authorize.outputs.release != 'false'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    environment: production
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: read
+    env:
+      RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
+    outputs:
+      current: ${{ steps.current.outputs.current }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.authorize.outputs.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.7
+      - name: Download images from the exact authorized CI run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.authorize.outputs.artifact_id }}
+          path: ${{ runner.temp }}/release-images
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.authorize.outputs.ci_run_id }}
+          digest-mismatch: error
+      - name: Verify source, run and immutable archive contents
+        env:
+          CI_RUN_ID: ${{ needs.authorize.outputs.ci_run_id }}
+          CI_RUN_ATTEMPT: ${{ needs.authorize.outputs.ci_run_attempt }}
+        run: >-
+          uv run --no-project --python 3.15.2 python deploy/ci_images.py verify
+          "$RUNNER_TEMP/release-images" "$RELEASE_SHA" "$CI_RUN_ID" "$CI_RUN_ATTEMPT"
+      - name: Load the verified images
+        run: bash deploy/oci-images.sh load "$RUNNER_TEMP/release-images" "$RELEASE_SHA"
+      - name: Scan every image; block every high or critical vulnerability
+        run: |
+          POSTGRES_IMAGE=$(docker image inspect pyracast-postgres:ci --format '{{.Id}}')
+          [[ "$POSTGRES_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
+          bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE"
+      - name: Read the current main commit
+        id: main
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { data } = await github.rest.repos.getBranch({ ...context.repo, branch: 'main' });
+            core.setOutput('sha', data.commit.sha);
+      - name: Skip a release that main has moved past
+        id: current
+        env:
+          MAIN_SHA: ${{ steps.main.outputs.sha }}
+        run: python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA"
+
+  deploy:
+    needs: [authorize, scan]
+    if: needs.scan.outputs.current == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    concurrency:
+      group: production-release
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: write
       id-token: write
     env:
       RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
@@ -162,16 +208,22 @@ jobs:
       GCP_INSTANCE: ${{ vars.GCP_INSTANCE }}
       GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
       GCP_MIGRATION_SECRET: ${{ vars.GCP_MIGRATION_SECRET }}
+      GCP_MIGRATION_SECRET_VERSION: ${{ vars.GCP_MIGRATION_SECRET_VERSION }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          repository: erkurtharun/pyracast
           ref: refs/heads/main
+          fetch-depth: 0
           persist-credentials: false
+      - name: Move to the authorized commit, which must be on main
+        run: |
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$RELEASE_SHA" HEAD
+          git checkout --detach "$RELEASE_SHA"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: 0.13.7
-      - name: Confirm the trusted branch still matches the CI-authorized commit
-        run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
       - name: Download images from the exact authorized CI run
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -200,6 +252,9 @@ jobs:
           [[ "$GCP_ARTIFACT_REPOSITORY" =~ ^[a-z0-9-]+-docker\.pkg\.dev/[a-z0-9-]+/[a-z0-9_-]+$ ]]
           [[ "$GCP_INSTANCE" =~ ^[a-z][a-z0-9-]*$ ]]
           [[ "$GCP_ZONE" =~ ^[a-z0-9-]+$ ]]
+          [[ -z $GCP_MIGRATION_SECRET_VERSION || $GCP_MIGRATION_SECRET_VERSION =~ ^[1-9][0-9]*$ ]] \
+            || { echo 'GCP_MIGRATION_SECRET_VERSION must be a positive Secret Manager version number.'; exit 1; }
+          echo "Migration secret version: ${GCP_MIGRATION_SECRET_VERSION:-latest}" >> "$GITHUB_STEP_SUMMARY"
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         id: google-auth
         with:
@@ -218,64 +273,73 @@ jobs:
         env:
           REGISTRY_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
         run: bash deploy/oci-images.sh publish "$RUNNER_TEMP/release-images" "$RELEASE_SHA" "$GCP_ARTIFACT_REPOSITORY"
-      - name: Scan backend; block every high or critical vulnerability
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          version: v0.76.2
-          image-ref: ${{ env.BACKEND_IMAGE }}
-          scanners: vuln
-          severity: HIGH,CRITICAL
-          ignore-unfixed: false
-          exit-code: '1'
-          cache: false
-      - name: Scan web; block every high or critical vulnerability
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          version: v0.76.2
-          image-ref: ${{ env.WEB_IMAGE }}
-          scanners: vuln
-          severity: HIGH,CRITICAL
-          ignore-unfixed: false
-          exit-code: '1'
-          cache: false
-      - name: Scan the exact gateway, PostgreSQL and public support images
-        run: bash deploy/scan-support.sh "$GATEWAY_IMAGE" "$POSTGRES_IMAGE"
-      - name: Smoke test the exact published images
-        run: bash deploy/smoke.sh "$BACKEND_IMAGE" "$WEB_IMAGE" "$GATEWAY_IMAGE" "$POSTGRES_IMAGE"
-      - name: Refuse a superseded release before changing production
+      - name: Read the current main commit
+        id: main
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const { data } = await github.rest.repos.getBranch({ ...context.repo, branch: 'main' });
-            if (data.commit.sha !== process.env.RELEASE_SHA) throw new Error('Main advanced; release the new passing CI commit');
+            core.setOutput('sha', data.commit.sha);
+      - name: Decide whether main has moved past this release
+        id: current
+        env:
+          MAIN_SHA: ${{ steps.main.outputs.sha }}
+        run: python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA"
+      # A successful job here records a production deployment that the next release classifies its
+      # changes against, so a release that installs nothing ends cancelled, never successful.
+      - name: Cancel a release that main has moved past
+        if: steps.current.outputs.current != 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await github.rest.actions.cancelWorkflowRun({ ...context.repo, run_id: context.runId });
+            await new Promise(resolve => setTimeout(resolve, 300000));
+            core.setFailed('The release was not cancelled; nothing was transferred.');
+      # The installer runs in a transient systemd unit, so a cancelled job or a dropped tunnel only
+      # stops following it; a lost connection (ssh status 255) follows the same unit again.
       - name: Transfer the verified release and deploy through IAP
         run: |
           set -euo pipefail
           umask 077
           stage="/run/pyracast-release-$RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          unit="${stage#/run/}.service"
           local_stage="$(mktemp -d)"
+          ssh=(gcloud compute ssh "$GCP_INSTANCE" --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE"
+            --tunnel-through-iap --ssh-key-expire-after=1h --quiet)
           cleanup() {
             rm -f "$local_stage/migration.json" "$local_stage/release.tar.gz"
             rmdir "$local_stage"
-            gcloud compute ssh "$GCP_INSTANCE" --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \
-              --tunnel-through-iap --ssh-key-expire-after=1h --quiet --command="sudo rm -rf -- '$stage'" || true
+            "${ssh[@]}" --command="if sudo systemctl is-active --quiet '$unit'; then echo 'The release unit $unit still runs; its stage stays until the host restarts.'; else sudo rm -rf -- '$stage'; fi" || true
           }
           trap cleanup EXIT
           git archive --format=tar.gz --output="$local_stage/release.tar.gz" "$RELEASE_SHA" deploy
-          gcloud secrets versions access latest --secret="$GCP_MIGRATION_SECRET" \
+          gcloud secrets versions access "${GCP_MIGRATION_SECRET_VERSION:-latest}" --secret="$GCP_MIGRATION_SECRET" \
             --project="$GCP_PROJECT_ID" --out-file="$local_stage/migration.json"
-          gcloud compute ssh "$GCP_INSTANCE" --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \
-            --tunnel-through-iap --ssh-key-expire-after=1h --quiet --command="umask 077; sudo install -d -m 0700 -o \"\$(id -u)\" -g \"\$(id -g)\" '$stage' && mkdir '$stage/bundle'"
+          "${ssh[@]}" --command="umask 077; sudo install -d -m 0700 -o \"\$(id -u)\" -g \"\$(id -g)\" '$stage' && mkdir '$stage/bundle'"
           gcloud compute scp "$local_stage/release.tar.gz" "$local_stage/migration.json" "$GCP_INSTANCE:$stage/" \
             --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap --ssh-key-expire-after=1h --quiet
-          gcloud compute ssh "$GCP_INSTANCE" --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \
-            --tunnel-through-iap --ssh-key-expire-after=1h --quiet \
-            --command="tar -xzf '$stage/release.tar.gz' -C '$stage/bundle' && sudo bash '$stage/bundle/deploy/install-release.sh' '$RELEASE_SHA' '$BACKEND_IMAGE' '$WEB_IMAGE' '$GATEWAY_IMAGE' '$POSTGRES_IMAGE' '$stage/bundle' '$stage/migration.json'"
+          status=0
+          "${ssh[@]}" --command="tar -xzf '$stage/release.tar.gz' -C '$stage/bundle' && sudo python3 '$stage/bundle/deploy/release_unit.py' start '$stage' '$RELEASE_SHA' '$BACKEND_IMAGE' '$WEB_IMAGE' '$GATEWAY_IMAGE' '$POSTGRES_IMAGE'" || status=$?
+          attempt=0
+          while (( status == 255 && attempt < 30 )); do
+            attempt=$((attempt + 1))
+            echo "The connection to the host was lost; following the release unit again ($attempt)."
+            sleep 20
+            status=0
+            "${ssh[@]}" --command="sudo python3 '$stage/bundle/deploy/release_unit.py' follow '$stage'" || status=$?
+          done
+          trap - EXIT
+          cleanup
+          exit "$status"
       - name: Protect the verified deployed digests from registry cleanup
         run: python3 deploy/pin_release_images.py published
       - name: Record the deployed digests
         run: |
           printf 'Released %s\n\nBackend: %s\n\nWeb: %s\n\nGateway: %s\n\nPostgreSQL: %s\n' "$RELEASE_SHA" "$BACKEND_IMAGE" "$WEB_IMAGE" "$GATEWAY_IMAGE" "$POSTGRES_IMAGE" >> "$GITHUB_STEP_SUMMARY"
+      - name: Probe the public origin through the edge
+        env:
+          PYRACAST_PUBLIC_ORIGIN: ${{ vars.PYRACAST_PUBLIC_ORIGIN }}
+        run: python3 deploy/probe_origin.py "$PYRACAST_PUBLIC_ORIGIN"
 
   cleanup:
     needs: [authorize, deploy]

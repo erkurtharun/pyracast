@@ -140,3 +140,40 @@ def test_main_serves_on_the_container_address(monkeypatch: pytest.MonkeyPatch) -
     maintenance.main(port=0)
 
     assert served[0][0] == "127.0.0.1"
+
+
+def refusal_answer(headers: dict[str, str]) -> tuple[int, dict[str, str], bytes]:
+    request = RequestFactory().post("/api/tenants/1/sites/", headers=headers)
+    response = error_json(request, lambda: coded(ErrorCode.REQUEST_TOO_LARGE, 413))
+    return response.status_code, dict(response.headers), response.content
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"Accept-Language": "tr-TR,tr;q=0.9,en;q=0.5"},
+        {"Accept-Language": "de", "CF-IPCountry": "TR"},
+        {"Cookie": "pyracast_language=tr", "Accept-Language": "en"},
+        {"Cookie": "pyracast_language=en", "Accept-Language": "tr", "Accept": "text/html"},
+    ],
+)
+def test_a_body_over_the_gateway_limit_gets_the_api_error_body(
+    origin: str, headers: dict[str, str]
+) -> None:
+    expected_status, expected_headers, expected_body = refusal_answer(headers)
+
+    status, notice_headers, body = fetch(f"{origin}/api/413", headers=headers)
+
+    assert (status, body) == (expected_status, expected_body) == (413, expected_body)
+    assert notice_headers["Content-Type"] == expected_headers["Content-Type"]
+    assert notice_headers["Cache-Control"] == "no-store"
+    assert "Retry-After" not in notice_headers
+    assert json.loads(body)["code"] == "request_too_large"
+
+
+def test_the_refusal_messages_are_the_catalogued_api_messages() -> None:
+    for language, message in maintenance.TOO_LARGE_MESSAGES.items():
+        with translation.override(language):
+            assert str(MESSAGES[ErrorCode.REQUEST_TOO_LARGE]) == message
+    assert ErrorCode.REQUEST_TOO_LARGE.value == maintenance.TOO_LARGE_CODE

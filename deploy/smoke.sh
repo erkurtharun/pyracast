@@ -13,7 +13,7 @@ cleanup() {
   exit "$result"
 }
 export SITE_ADDRESS=localhost ACME_EMAIL=smoke@example.com
-export HTTP_BIND=127.0.0.1:18080 HTTPS_BIND=127.0.0.1:18443
+export HTTP_BIND=127.0.0.1:18080 HTTPS_BIND=127.0.0.1:18443 LOCAL_HTTPS_BIND=127.0.0.1:18444
 export RUNTIME_ENV_FILE="$temporary/runtime.env" BROKER_ENV_FILE="$temporary/broker.env"
 export MIGRATION_ENV_FILE="$temporary/migration.env" DATABASE_ENV_FILE="$temporary/database.env"
 cat > "$RUNTIME_ENV_FILE" <<'ENV'
@@ -151,21 +151,49 @@ curl --silent --ssl-revoke-best-effort --output /dev/null https://localhost:1844
 [[ $untrusted_status == 60 ]]
 "${secure_curl[@]}" https://localhost:18443/static/admin/css/base.css >/dev/null
 [[ $("${secure_curl[@]}" https://localhost:18443/health/ready/) == ok ]]
-headers=$("${secure_curl[@]}" --head https://localhost:18443/)
-[[ ${headers,,} == *'strict-transport-security: max-age=31536000'* ]]
-[[ ${headers,,} == *'x-content-type-options: nosniff'* ]]
-[[ ${headers,,} == *'referrer-policy: same-origin'* ]]
+[[ $("${secure_curl[@]}" https://localhost:18444/health/ready/) == ok ]]
+# The gateway owns the transport headers; each appears once with exactly this value.
+exact_headers() {
+  local headers expected
+  headers=$("${secure_curl[@]}" --output /dev/null --dump-header - "https://localhost:18443$1")
+  headers=${headers,,}
+  headers=${headers//$'\r'/}
+  for expected in \
+    'strict-transport-security: max-age=31536000' \
+    'x-content-type-options: nosniff' \
+    'permissions-policy: camera=(), microphone=(), geolocation=()' \
+    'cross-origin-opener-policy: same-origin' \
+    'referrer-policy: same-origin'; do
+    [[ $(grep -c "^${expected%%:*}:" <<<"$headers") == 1 ]]
+    grep -qxF "$expected" <<<"$headers"
+  done
+  if grep -q '^server:' <<<"$headers"; then return 1; fi
+}
+exact_headers /
+exact_headers /app/
+exact_headers /api/session/
+exact_headers /admin/login/
+exact_headers /health/live/
 [[ $(curl --silent --show-error --output /dev/null --write-out '%{redirect_url}' \
   http://localhost:18080/) == https://localhost:18443/ ]]
-[[ $(head -c 8388609 /dev/zero | "${tls_curl[@]}" \
-  --data-binary @- --output /dev/null --write-out '%{http_code}' \
-  https://localhost:18443/health/ready/) == 413 ]]
+# Each router refuses one byte over its body limit; the API answers with its error body.
+too_large() {
+  head -c "$1" /dev/zero | "${tls_curl[@]}" --data-binary @- --output "$temporary/too-large" \
+    --write-out '%{http_code}' "https://localhost:18443$2"
+}
+[[ $(too_large 2621441 /api/session/) == 413 ]]
+[[ $(<"$temporary/too-large") == '{"code": "request_too_large", "message": "The request is too large to be accepted."}' ]]
+[[ $(too_large 2621441 /api/auth/browser/v1/config) == 413 ]]
+[[ $(<"$temporary/too-large") == '{"code": "request_too_large", "message": "The request is too large to be accepted."}' ]]
+[[ $(too_large 8388609 /admin/login/) == 413 ]]
+[[ $(too_large 1048577 /health/ready/) == 413 ]]
+[[ $(too_large 1048577 /) == 413 ]]
 [[ $("${secure_curl[@]}" -H 'X-Real-IP: invalid' -H 'X-Forwarded-Proto: http' \
   -H 'X-Forwarded-For: invalid' -H 'Forwarded: for=invalid' https://localhost:18443/health/ready/) == ok ]]
 [[ $("${secure_curl[@]}" -H 'X_Real_IP: invalid' -H 'X_Forwarded_Proto: http' \
   -H 'X_Forwarded_For: invalid' https://localhost:18443/health/ready/) == ok ]]
 "${secure_curl[@]}" -H 'X-Real-IP: invalid' -H 'X_Real_IP: invalid' \
-  -H 'X.Real.IP: invalid' \
+  -H 'X.Real.IP: invalid' -H 'X-Pyracast-Client-IP: 127.0.0.1' \
   -H 'X-Forwarded-Proto: http' -H 'X_Forwarded_Proto: http' \
   -H 'X.Forwarded.Proto: http' \
   -H 'X-Forwarded-For: invalid' -H 'X_Forwarded_For: invalid' \
@@ -179,7 +207,8 @@ ipaddress.ip_address(headers["x-real-ip"])
 for address in headers["x-forwarded-for"].split(","):
     ipaddress.ip_address(address.strip())
 assert not {"forwarded", "x_real_ip", "x_forwarded_proto", "x_forwarded_for",
-            "x.real.ip", "x.forwarded.proto", "x.forwarded.for"} & headers.keys(), headers
+            "x.real.ip", "x.forwarded.proto", "x.forwarded.for",
+            "x-pyracast-client-ip"} & headers.keys(), headers
 '
 # The internal network gives the probe an actual socket peer in a trusted Cloudflare range.
 cloudflare_headers=$("${compose[@]}" exec -T --env "SMOKE_CA=$(cat "$temporary/ca.pem")" header-probe python - <<'PY'
@@ -207,15 +236,105 @@ import django
 django.setup()
 from django.http import HttpResponse
 from django.test import RequestFactory
-from pyracast.accounts.middleware import TrustedProxyHeaders
+from pyracast.proxy import TrustedProxyHeaders
 headers = {key.lower(): value for key, value in json.load(sys.stdin).items()}
 assert headers["x-forwarded-for"].split(",")[-1].strip() == "173.245.48.3", headers
 request = RequestFactory().get("/", REMOTE_ADDR="172.30.80.2", **{
     "HTTP_" + key.upper().replace("-", "_"): value for key, value in headers.items()})
 TrustedProxyHeaders(lambda request: HttpResponse())(request)
-assert request.META["HTTP_X_REAL_IP"] == "198.51.100.7", request.META
+assert request.META["HTTP_X_PYRACAST_CLIENT_IP"] == "198.51.100.7", request.META
 assert "HTTP_CF_CONNECTING_IP" not in request.META
 '
+# Each router keeps its own rate and in-flight budget for each client, keyed by the edge's address;
+# a held request is one whose body never arrives.
+"${compose[@]}" exec -T --env "SMOKE_CA=$(cat "$temporary/ca.pem")" \
+  --env RATE_AVERAGE=20 --env RATE_BURST=100 --env SIGN_IN_AVERAGE=0.5 --env SIGN_IN_BURST=20 --env IN_FLIGHT=32 header-probe python - <<'PY'
+import http.client
+import os
+import socket
+import ssl
+import time
+context = ssl.create_default_context(cadata=os.environ['SMOKE_CA'])
+ROUTERS = {
+    'backend': '/health/live/',
+    'api': '/api/session/',
+    'authentication': '/api/auth/browser/v1/config',
+    'admin': '/admin',
+    'frontend': '/robots.txt',
+}
+
+def connect():
+    connection = http.client.HTTPSConnection('localhost', 8443, timeout=10)
+    connection.sock = context.wrap_socket(
+        socket.create_connection(('173.245.48.2', 8443), timeout=10), server_hostname='localhost')
+    return connection
+
+def statuses(path, client, count):
+    connection = connect()
+    seen = []
+    for _ in range(count):
+        connection.request('GET', path, headers={'Host': 'localhost', 'X-Forwarded-For': client})
+        response = connection.getresponse()
+        response.read()
+        seen.append(response.status)
+        if response.will_close:
+            connection.close()
+            connection = connect()
+    connection.close()
+    return seen
+
+def admitted_before_refusal(path, client):
+    connection = connect()
+    admitted = 0
+    started = time.monotonic()
+    while True:
+        connection.request('GET', path, headers={'Host': 'localhost', 'X-Forwarded-For': client})
+        response = connection.getresponse()
+        response.read()
+        if response.status == 429:
+            break
+        assert response.status < 500 and admitted < 1000, (path, response.status, admitted)
+        admitted += 1
+        if response.will_close:
+            connection.close()
+            connection = connect()
+    connection.close()
+    return admitted, time.monotonic() - started
+
+for router, path in ROUTERS.items():
+    prefix = 'SIGN_IN' if router == 'authentication' else 'RATE'
+    burst, average = int(os.environ[f'{prefix}_BURST']), float(os.environ[f'{prefix}_AVERAGE'])
+    admitted, elapsed = admitted_before_refusal(path, '198.51.100.21')
+    assert burst <= admitted <= burst + average * elapsed + 1, (router, admitted, elapsed)
+assert statuses('/health/live/', '198.51.100.22', 1) == [200]
+
+def held(path, client):
+    secure = context.wrap_socket(
+        socket.create_connection(('173.245.48.2', 8443), timeout=10), server_hostname='localhost')
+    secure.sendall(f'POST {path} HTTP/1.1\r\nHost: localhost\r\nX-Forwarded-For: {client}\r\n'
+                   'Content-Type: application/json\r\nContent-Length: 2\r\n\r\n'.encode())
+    return secure
+
+def eventually(path, client, refused):
+    deadline = time.monotonic() + 10
+    while ((status := statuses(path, client, 1)[0]) == 429) != refused and time.monotonic() < deadline:
+        time.sleep(0.1)
+    return status
+
+# The authentication router's rate refuses one client before its in-flight budget fills.
+held_paths = [path for router, path in ROUTERS.items() if router != 'authentication']
+holding = []
+for path in held_paths:
+    assert statuses(path, '198.51.100.25', 1) != [429], path
+    holding.append([held(path, '198.51.100.25') for _ in range(int(os.environ['IN_FLIGHT']))])
+    assert eventually(path, '198.51.100.25', refused=True) == 429, path
+assert statuses('/api/session/', '198.51.100.26', 1) == [200]
+for path, sockets in zip(held_paths, holding):
+    sockets.pop().close()
+    assert eventually(path, '198.51.100.25', refused=False) != 429, path
+    for secure in sockets:
+        secure.close()
+PY
 [[ $(docker inspect --format '{{.Config.User}}' "$("${compose[@]}" ps -q gateway)") == 10001:10001 ]]
 "${compose[@]}" exec -T api python -c '
 import django
@@ -459,4 +578,85 @@ except ProgrammingError:
 else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission after the restore')
 PY
-echo 'Production containers, TLS routing, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles and access rules, fixture queue publication, graceful idle shutdown, the maintenance notice, and database reset and restore passed.'
+# Authenticated Origin Pulls: once the host names the edge's authority, a handshake needs its certificate.
+"${compose[@]}" run --rm -T --no-deps --entrypoint python api - > "$temporary/edge.json" <<'PY'
+import datetime
+import json
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+now = datetime.datetime.now(datetime.UTC)
+
+def issue(name):
+    authority_key = ec.generate_private_key(ec.SECP256R1())
+    authority_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f'{name} CA')])
+    authority = (x509.CertificateBuilder().subject_name(authority_name).issuer_name(authority_name)
+          .public_key(authority_key.public_key()).serial_number(x509.random_serial_number())
+          .not_valid_before(now - datetime.timedelta(minutes=1))
+          .not_valid_after(now + datetime.timedelta(days=1))
+          .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+          .sign(authority_key, hashes.SHA256()))
+    key = ec.generate_private_key(ec.SECP256R1())
+    certificate = (x509.CertificateBuilder()
+          .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)]))
+          .issuer_name(authority.subject).public_key(key.public_key())
+          .serial_number(x509.random_serial_number())
+          .not_valid_before(now - datetime.timedelta(minutes=1))
+          .not_valid_after(now + datetime.timedelta(days=1))
+          .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
+          .sign(authority_key, hashes.SHA256()))
+    return (authority.public_bytes(serialization.Encoding.PEM).decode(),
+            certificate.public_bytes(serialization.Encoding.PEM).decode(),
+            key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                              serialization.NoEncryption()).decode())
+
+authority, certificate, key = issue('Pyracast smoke edge')
+_, stranger_certificate, stranger_key = issue('Pyracast smoke stranger')
+print(json.dumps({'authority': authority, 'certificate': certificate, 'key': key,
+                  'stranger_certificate': stranger_certificate, 'stranger_key': stranger_key}))
+PY
+for part in authority certificate key stranger_certificate stranger_key; do
+  jq -er ".$part" "$temporary/edge.json" > "$temporary/edge-$part.pem"
+done
+chmod 644 "$temporary/edge-authority.pem"
+edge_authority="$temporary/edge-authority.pem"
+if command -v cygpath >/dev/null; then edge_authority=$(cygpath -m "$edge_authority"); fi
+edge=(--cert "$temporary/edge-certificate.pem" --key "$temporary/edge-key.pem")
+stranger=(--cert "$temporary/edge-stranger_certificate.pem" --key "$temporary/edge-stranger_key.pem")
+# curl reports a handshake the gateway refuses as 35 (connect) or 56 (receive), never as an HTTP error.
+refused_handshake() {
+  local status=0
+  "${secure_curl[@]}" --http1.1 --output /dev/null "$@" https://localhost:18443/health/ready/ 2>/dev/null \
+    || status=$?
+  [[ $status == 35 || $status == 56 ]]
+}
+ORIGIN_PULL=required ORIGIN_PULL_CA="$edge_authority" \
+  "${compose[@]}" up -d --no-deps --wait --wait-timeout 120 gateway
+[[ $("${secure_curl[@]}" --retry 10 --retry-delay 1 --retry-all-errors \
+  "${edge[@]}" https://localhost:18443/health/ready/) == ok ]]
+refused_handshake
+refused_handshake "${stranger[@]}"
+[[ $("${secure_curl[@]}" "${edge[@]}" https://localhost:18443/health/ready/) == ok ]]
+# Host-local probes keep working without the edge's certificate on the loopback entrypoint.
+[[ $("${secure_curl[@]}" https://localhost:18444/health/ready/) == ok ]]
+probe_origin_pull=(uv run --no-project --python 3.15.2 python
+  "$root/deploy/probe_origin_pull.py" localhost --port 18443 --cafile "$temporary/ca.pem")
+"${probe_origin_pull[@]}" --attempts 1
+# An authority Traefik cannot load leaves the public routers unbuilt; only the loopback one serves.
+printf -- '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n' > "$temporary/edge-invalid.pem"
+chmod 644 "$temporary/edge-invalid.pem"
+invalid_authority="$temporary/edge-invalid.pem"
+if command -v cygpath >/dev/null; then invalid_authority=$(cygpath -m "$invalid_authority"); fi
+ORIGIN_PULL=required ORIGIN_PULL_CA="$invalid_authority" \
+  "${compose[@]}" up -d --no-deps --wait --wait-timeout 120 gateway
+[[ $("${secure_curl[@]}" --retry 10 --retry-delay 1 --retry-all-errors \
+  https://localhost:18444/health/ready/) == ok ]]
+refused=0
+observed=$("${probe_origin_pull[@]}" --attempts 3 --interval 1 2>&1) || refused=$?
+[[ $refused == 1 && $observed == *'closed the connection during the handshake'* ]]
+refused_handshake "${edge[@]}"
+"${compose[@]}" up -d --no-deps --wait --wait-timeout 120 gateway
+ready
+echo 'Production containers, TLS routing, exact gateway headers, body, rate and in-flight limits, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles and access rules, fixture queue publication, graceful idle shutdown, the maintenance notice, database reset and restore, and Authenticated Origin Pulls with an accepted and a rejected authority passed.'

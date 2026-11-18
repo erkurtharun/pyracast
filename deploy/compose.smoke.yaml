@@ -20,12 +20,14 @@ services:
     environment:
       TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_TO: :18443
       TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS_CERTRESOLVER: !reset null
+      TRAEFIK_ENTRYPOINTS_LOCAL_HTTP_TLS_CERTRESOLVER: !reset null
       TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_EMAIL: !reset null
       TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_STORAGE: !reset null
       TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_HTTPCHALLENGE_ENTRYPOINT: !reset null
     volumes: !override
       - ./routes.yml:/etc/traefik/dynamic/routes.yml:ro
       - ./tls.smoke.yml:/etc/traefik/dynamic/tls.yml:ro
+      - ${ORIGIN_PULL_CA:-./origin-pull-off.pem}:/etc/traefik/origin-pull-ca.pem:ro
       - smoke-certificates:/certificates:ro
       - smoke-gateway:/data
   header-probe:

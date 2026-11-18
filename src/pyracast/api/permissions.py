@@ -48,6 +48,7 @@ ADMIN = Policy(Access.ADMIN)
 
 # Keys are Django route patterns; a framework view whose route or method is missing is refused.
 ROUTE_POLICIES: Mapping[str, Mapping[str, Policy]] = {
+    "api/csp-reports/": {"POST": PUBLIC},
     "api/session/": {"GET": PUBLIC},
     "api/session/language/": {"POST": PUBLIC},
     "api/tenants/": {"GET": ACCOUNT},

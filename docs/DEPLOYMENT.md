@@ -57,13 +57,44 @@ enabled; Traefik negotiates it through ALPN. Cloudflare's
 applies to visitors, not origin connections.
 
 Traefik accepts forwarded headers only from the published Cloudflare networks.
-Django trusts only the gateway's fixed container address, then resolves the
-gateway-appended peer and the client immediately before a trusted Cloudflare edge.
-It ignores a visitor-supplied prefix and removes raw forwarding/Cloudflare identity
-headers before application code. Direct origin requests cannot select a client IP
-by sending `X-Forwarded-For` or `CF-Connecting-IP`. Review changes to the official
+Django trusts only the gateway's fixed container address; `pyracast/proxy.py`
+resolves the client the Cloudflare edge appended, removes every forwarding and
+Cloudflare identity header and hands the result to the application in an internal
+header the gateway strips from every request. Review changes to the official
 [IPv4](https://www.cloudflare.com/ips-v4) and [IPv6](https://www.cloudflare.com/ips-v6)
 lists against both `deploy/compose.yaml` and the Terraform ingress rules.
+
+`deploy/routes.yml` gives each client (the address Cloudflare appended) a request-rate
+and a concurrent-request budget per router, with a tighter rate on `/api/auth/`. Traefik
+builds a separate limiter for every router, including each router's copy on the
+loopback entrypoint, so a client that spends one router's budget keeps its budget on
+the others. Each router also limits the body size; an API body over its limit gets the
+API error body `request_too_large`. Rate and concurrency refusals are plain 429 answers. The gateway owns HSTS, `nosniff`, `Permissions-Policy`
+and `Cross-Origin-Opener-Policy`; the applications own CSP, `Referrer-Policy` and cache
+control, and both CSPs report violations to `/api/csp-reports/`.
+
+Authenticated Origin Pulls stay off until the host names the authority of the edge's
+client certificate. To enable them: create a CA and a client certificate it signs,
+upload the certificate to Cloudflare as a zone-level Authenticated Origin Pulls
+certificate and turn the feature on (the edge then presents it; nothing changes yet),
+then set `origin_pull_ca` in `terraform.tfvars` to the CA's PEM, apply, run the startup
+script to refresh `/etc/pyracast/host.json` and release. Before maintenance the installer
+refuses a value with no certificate or with any PEM block that does not load as an
+X.509 certificate. Host-local probes (release readiness, watchdog, reset tool) use the
+loopback-only port 8443, which never asks for the edge's certificate, so a release that
+requires origin pulls is ready only when `deploy/probe_origin_pull.py` also sees port
+443 refuse a TLS 1.3 handshake without a client certificate (alert
+`certificate_required`). Traefik closes that handshake instead when it rejects the TLS
+option and completes it when its routers are missing. The probe first runs right after
+the new gateway starts, so either outcome fails the release as a failure before
+`migrate` does: the previous release serves again. The probe proves that the origin
+asks for a certificate, not that the edge's certificate is signed by this authority: a
+valid but wrong authority gives a successful release that Cloudflare cannot reach. So
+check at once that the site still answers through Cloudflare, and go back if it does
+not; on the VM,
+`python3 /opt/pyracast/current/deploy/probe_origin_pull.py DOMAIN` reports the refusal.
+To go back, set `origin_pull_ca = ""`, apply, refresh `host.json` and release; the
+edge certificate can stay.
 
 `deploy/gateway/` builds upstream Traefik as a pinned Go tool, verifying module
 checksums. Review dependency updates with the container build and HTTPS smoke
@@ -74,11 +105,12 @@ Go installation:
 docker build --target lockfiles --output type=local,dest=deploy/gateway deploy/gateway
 ```
 
-CI and Release scan the exact backend, web, gateway, RabbitMQ and PostgreSQL
-images. All HIGH/CRITICAL findings block deployment, including unfixed findings;
-there are no vulnerability exceptions. Support-image checks also require package
-inventory and a scan matching the selected immutable image identity. Scan results
-reflect the vulnerability database at verification time.
+CI scans the exact backend, web, gateway, RabbitMQ and PostgreSQL images before
+merge, and Release scans them again from the verified archives before any cloud
+credential exists. All HIGH/CRITICAL findings block deployment, including unfixed
+findings; there are no vulnerability exceptions. Every scan must also carry a package
+inventory and match the selected immutable image identity. Scan results reflect the
+vulnerability database at verification time.
 
 `deploy/postgres/Dockerfile` uses stable PostgreSQL 18.7 on Alpine 3.24, with the
 unused root privilege-switching helper removed. PostgreSQL always runs as UID/GID
@@ -293,25 +325,39 @@ sign-in project, not the internal Gmail sender project.
 
 In GitHub, create **Settings → Environments → production**. Restrict deployment
 branches to `main`; enable required reviewers if you want a human release gate.
-Protect `main` with pull requests and the existing Windows/Ubuntu CI checks.
-The workflow independently requires successful CI for the exact current `main`
-commit; a failed test, stale commit, fork or pull-request run cannot deploy.
+Protect `main` with the `CI result` check, which passes only when every other CI job
+passed or, for Sonar alone, was skipped. The workflow independently requires that check of the exact current `main`
+commit's CI run; a failed test, stale commit, fork or pull-request run cannot deploy.
 
 Use `terraform -chdir=infra/terraform output -json github_environment_variables`
-to obtain the nonsecret values. Add them as **production environment variables**.
+to obtain the nonsecret values. Add the `GCP_*` values as **production environment
+variables**, configuring the optional variables only after the prerequisites below.
 `GCP_MIGRATION_SECRET` is the short secret ID (for example `pyracast-migration`)
-passed to `gcloud --secret`, without a `projects/.../secrets/` prefix.
+passed to `gcloud --secret`, without a `projects/.../secrets/` prefix. Set
+`migration_secret_version` in Terraform to the enabled version of that secret before
+adding `GCP_MIGRATION_SECRET_VERSION`; without that variable releases read `latest`.
+`PYRACAST_PUBLIC_ORIGIN` makes each release request `/api/session/` and `/app/`
+through Cloudflare after the install (without it the run warns that it did not); add
+it once a request from a GitHub runner reaches the site without a challenge.
 Add **`GCP_DEPLOY_ENABLED=true` as a repository variable**, because the initial
 authorization job runs before entering the production environment.
 
 Run **Actions → Release → Run workflow → main** after CI is green. Subsequent
 successful `main` CI runs trigger it automatically. The workflow:
 
-1. Verifies the image artifact from that exact successful CI run, then publishes
-   its backend, web, gateway and PostgreSQL images without rebuilding. OCI digests,
-   SBOM and provenance are preserved; all four release references are immutable.
-2. Rejects HIGH/CRITICAL image vulnerabilities and tests the exact image digests.
-3. Transfers the release through IAP using a short-lived OIDC identity.
+1. Verifies the image artifact from that exact successful CI run, whose CI already
+   tested these exact images, and scans it again before any cloud credential exists,
+   rejecting HIGH/CRITICAL vulnerabilities. A run whose commit `main` has moved past
+   ends as a skip; only the deploy job waits for another release, and it checks `main`
+   again just before the transfer. A run that `main` passes after the scan's check
+   therefore ends cancelled, not skipped, and transfers nothing.
+2. Publishes the backend, web, gateway and PostgreSQL images without rebuilding. OCI
+   digests, SBOM and provenance are preserved; all four release references are
+   immutable.
+3. Transfers the release through IAP using a short-lived OIDC identity and starts the
+   installer in the transient unit `pyracast-release-<sha>-<run>-<attempt>.service`,
+   so a cancelled job or a dropped tunnel does not stop it; the job follows its journal
+   (`journalctl -u` that unit) and reconnects.
 4. Checks configuration, that containers cannot reach the metadata server, database
    provisioning and the owner's access, the migration plan, that every stored secret
    decrypts with the release's staged secrets (`check_secrets` in the new image) and
@@ -431,8 +477,9 @@ fixtures do not establish provider access or inbox delivery.
   fix or explicit database restore; moving an image tag does not undo a database.
 - **Backups:** the host's hourly timer uploads a custom-format PostgreSQL dump to
   the private backup bucket; each release requires another successful dump before
-  migration. The hourly backup waits up to ten minutes for the release lock and
-  reports `pyracast_backup_skipped` when a release keeps the lock or stays blocked;
+  migration, which `backup.py --kind prerelease` takes only under the release lock its
+  installer passes (`--lock-fd`). The hourly backup waits up to ten minutes for the
+  release lock and reports `pyracast_backup_skipped` when a release keeps the lock or stays blocked;
   that skip exits 75, which `pyracast-backup.service` counts as success, while any
   other failure leaves the unit failed.
   Hourly backups and releases exclude each other through that lock from the dump to
@@ -708,10 +755,12 @@ statement and finds no verifier or password in that log, applies migrations unde
 owner, provisions again, checks that
 the runtime role can neither create tables nor write the migration ledger and that
 the superuser cannot sign in over TCP, checks frontend/API/static
-routing and forged proxy headers, including a simulated Cloudflare socket peer
-with a forged forwarding prefix, publishes one synthetic forecast through the
-real RabbitMQ worker, and exercises dispatcher and idle worker stop. Through the
-gateway it also checks the anonymous `/api/session/` JSON shape, that a
+routing, forged proxy headers (also from a simulated Cloudflare peer), the exact
+gateway headers, each router's body limit, and that each router refuses one client at
+its own rate budget (and each but the `/api/auth/` router at its own in-flight budget)
+while the next router still grants that client its whole budget, publishes one
+synthetic forecast through the real RabbitMQ worker, and exercises dispatcher and
+idle worker stop. Through the gateway it also checks the anonymous `/api/session/` JSON shape, that a
 wrong-password sign-in gets the normal 400 `email_password_mismatch` refusal and
 that the `/app/` workspace app shell loads.
 On those rows it runs `reset_database.py` `prepare`, checks that the gateway then
@@ -720,14 +769,19 @@ answers 503 with `Retry-After` (the maintenance page for a navigation, the
 `reset`, a refused `abort`, a pre-release dump of the empty database, `migrate` from zero under the
 restricted owner and a start; then the stop a failed release leaves and `restore`,
 after which ownership, privileges, stored rows and a stored password are back and
-the site is ready. `deploy/test-release.sh` runs the installer against a model of which
+the site is ready; last it requires the edge certificate, and the origin-pull probe
+passes with the edge's authority and fails with one Traefik cannot load while the
+loopback port still answers. `deploy/test-release.sh` runs the installer against a model of which
 secret each release starts with and which one the runtime role's password matches. It
 proves that a failure before `migrate` starts the previous release with the secret
 `host.json` names, that no password change happens while API or web run or after a
 failed stop, that the printed password command works after `/run` is emptied, that a
 reset session keeps its marker and is recovered with its own archive, that a second
 release in the same maintenance and a kill during `migrate` keep the first recovery
-point, and that pruning keeps the previous release.
+point, that pruning keeps the previous release, that a release whose job is
+cancelled during `migrate` still completes and can be followed again, and that a
+release whose public port does not enforce required origin pulls resumes the previous
+release.
 `tests/test_deployment_previous_helper.py` runs each recovery the installer prints
 through the current helper and the one on `main` before the maintenance notice,
 against a model of the database, and counts it only when the previous release serves
@@ -736,9 +790,9 @@ again.
 `infra/terraform` and the workflows restate in agreement: worker queues, the
 watchdog and drain service lists, the shipped units and host paths, stop grace
 periods, alert event names,
-Cloudflare ranges, the gateway trust anchor, router prefixes, timeouts, the
-body limit, the CI jobs the release waits for, Gmail constants and `host.json`
-keys. Change those values together with that test.
+Cloudflare ranges, the gateway trust anchor, router prefixes, limits and header
+owners, timeouts, the CI result job, Gmail constants and `host.json` keys. Change
+those values together with that test.
 It does not prove GCP IAM, backup upload/restore, the metadata firewall itself (each
 release probes it before maintenance), public
 DNS, ACME, Cloud Logging or live Gmail/SMTP/provider behavior. `compose.smoke.yaml` is test
@@ -747,7 +801,7 @@ configuration only. Never apply it to a production Compose project.
 CI also retains native Windows and Ubuntu quality, browser, scientific and package
 checks and validates Terraform without provisioning resources. BuildKit caches
 each image separately; PRs can read the main cache but cannot publish or deploy.
-Superseded CI runs are cancelled; production releases remain serialized.
+Superseded CI runs are cancelled; production deployments remain serialized.
 An automatic release whose changes since the newest `production` deployment,
 when that deployment succeeded, lie only in unshipped paths (`docs/`, backend
 and web tests, `scripts/`, agent, scanner and Dependabot configuration, the root

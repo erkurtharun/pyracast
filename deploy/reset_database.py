@@ -29,6 +29,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from deploy.backup import compose_command, upload_backup
+from deploy.host import LOCAL_HTTPS_PORT
 from deploy.operations_log import access_token
 
 # The installer's drain order (contract-tested): the producer, the consumers, then the servers
@@ -386,8 +387,8 @@ def site_ready(host: Host, attempts: int) -> bool:
             "180",
             "--retry-all-errors",
             "--resolve",
-            f"{site}:443:127.0.0.1",
-            f"https://{site}/health/ready/",
+            f"{site}:{LOCAL_HTTPS_PORT}:127.0.0.1",
+            f"https://{site}:{LOCAL_HTTPS_PORT}/health/ready/",
         ],
         capture_output=True,
         text=True,

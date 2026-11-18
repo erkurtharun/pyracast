@@ -60,6 +60,7 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     request_timeout: true,
     provider_authentication_failed: true,
     maintenance: true,
+    request_too_large: true,
     forecast_sources_changed: true,
     configuration_unavailable: true,
     location_already_has_plant: true,

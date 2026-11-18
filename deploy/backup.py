@@ -28,6 +28,11 @@ from deploy.operations_log import access_token, report
 HOURLY_LOCK_WAIT_SECONDS = 600
 DUMP_TIMEOUT_SECONDS = 1200
 SKIPPED_EXIT_STATUS = 75
+REFUSED_EXIT_STATUS = 2
+
+
+class ReleaseLockNotHeldError(Exception):
+    pass
 
 
 def compose_command(release: Path) -> list[str]:
@@ -170,11 +175,15 @@ def store_backup(release: Path, bucket: str, kind: str, archive: Path) -> str:
     return name
 
 
-def create_backup(release: Path, bucket: str, kind: str, directory: Path) -> str | None:
+def create_backup(
+    release: Path, bucket: str, kind: str, directory: Path, lock_descriptor: int | None = None
+) -> str | None:
     started = time.monotonic()
     archive = directory / "database.dump"
     if kind == "prerelease":
-        # The installer already holds the release lock; a second lock request would wait forever.
+        # The installer holds the release lock and passes it; a second request would wait forever.
+        if lock_descriptor is None or not host.holds_release_lock(lock_descriptor):
+            raise ReleaseLockNotHeldError
         name = store_backup(release, bucket, kind, archive)
     else:
         # Dump, upload and pointer stay under one lock, so the pointer always names the newest dump.
@@ -335,6 +344,7 @@ def main(arguments: list[str] | None = None) -> int:
     parser.add_argument("host_config", type=Path)
     parser.add_argument("--release-dir", type=Path, default=host.CURRENT_RELEASE)
     parser.add_argument("--kind", choices=("hourly", "prerelease"), default="hourly")
+    parser.add_argument("--lock-fd", type=int)
     parser.add_argument("--rehearse", metavar="OBJECT")
     options = parser.parse_args(arguments)
     config = json.loads(options.host_config.read_text())
@@ -345,7 +355,19 @@ def main(arguments: list[str] | None = None) -> int:
         directory = Path(temporary)
         if options.rehearse:
             rehearse_restore(options.release_dir, bucket, options.rehearse, directory)
-        elif create_backup(options.release_dir, bucket, options.kind, directory) is None:
+            return 0
+        try:
+            name = create_backup(
+                options.release_dir, bucket, options.kind, directory, options.lock_fd
+            )
+        except ReleaseLockNotHeldError:
+            print(
+                "Refused: a prerelease backup runs only inside a release, which passes the "
+                "release lock it holds with --lock-fd. Nothing was dumped.",
+                file=sys.stderr,
+            )
+            return REFUSED_EXIT_STATUS
+        if name is None:
             return SKIPPED_EXIT_STATUS
     return 0
 

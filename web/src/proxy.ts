@@ -14,9 +14,10 @@ export function proxy(request: NextRequest) {
         "font-src 'self'",
         `connect-src 'self'${development ? " ws:" : ""}`,
         "object-src 'none'",
-        "base-uri 'self'",
+        "base-uri 'none'",
         "form-action 'self'",
         "frame-ancestors 'none'",
+        "report-uri /api/csp-reports/",
     ].join("; ");
     const route = publicRoute(request.nextUrl.pathname);
     // Read the slash from the raw URL: nextUrl may normalize it under trailingSlash.

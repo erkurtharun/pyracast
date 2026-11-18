@@ -826,6 +826,9 @@ msgid "Pyracast is being updated. Try again in a minute; your data is safe."
 msgstr ""
 "Pyracast güncelleniyor. Bir dakika sonra yeniden deneyin; verileriniz güvende."
 
+msgid "The request is too large to be accepted."
+msgstr "İstek kabul edilemeyecek kadar büyük."
+
 msgid "A production batch must stay within 31 local days."
 msgstr "Bir üretim grubu en fazla 31 yerel günü kapsayabilir."
 

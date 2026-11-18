@@ -124,12 +124,12 @@ jobs:
           done
           uv run --no-project --python 3.15.2 python deploy/ci_images.py prepare "$RUNNER_TEMP/release-images" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
           bash deploy/oci-images.sh load "$RUNNER_TEMP/release-images" "$GITHUB_SHA"
-      - name: Scan gateway, RabbitMQ and PostgreSQL
+      - name: Scan every image; block every high or critical vulnerability
         run: |
           POSTGRES_IMAGE=$(docker image inspect pyracast-postgres:ci --format '{{.Id}}')
           [[ "$POSTGRES_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "POSTGRES_IMAGE=$POSTGRES_IMAGE" >> "$GITHUB_ENV"
-          bash deploy/scan-support.sh pyracast-gateway:ci "$POSTGRES_IMAGE"
+          bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE"
       - name: Exercise the production images and Compose boundary
         run: bash deploy/smoke.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE"
       - name: Retain tested main images for the release
@@ -202,6 +202,7 @@ jobs:
           PYTEST_ADDOPTS: --junitxml=test-results/pytest.xml --durations=25
         run: >-
           uv run --locked --no-sync --no-build python scripts/check.py
+          ${{ env.TEST_SHARD != '1' && '--tests-only' || '' }}
           --shard ${{ env.TEST_SHARD }}/4 --shard-output "${{ runner.temp }}/windows-shard-${{ env.TEST_SHARD }}"
       - name: Upload test timings
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -342,6 +343,7 @@ jobs:
         if: runner.os == 'Linux'
         working-directory: web
       - name: Audit web dependencies against dated exceptions
+        if: runner.os == 'Linux'
         run: uv run --locked --no-sync --no-build python scripts/npm_audit.py web
       - name: Exercise browser against Django and PostgreSQL
         run: uv run --locked --no-sync --no-build python -m pytest tests/test_browser.py -n 1 --no-cov
@@ -458,3 +460,18 @@ jobs:
           args: >-
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
+
+  ci_result:
+    name: CI result
+    needs: [deployment, verify_ubuntu, verify_windows_shards, verify_windows, web_ubuntu, web_windows, scientific, audit, sonar]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require every CI job
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci_result.py

@@ -49,7 +49,8 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    ports: ["${HTTP_BIND:-0.0.0.0:80}:8080", "${HTTPS_BIND:-0.0.0.0:443}:8443"]
+    # Host-local probes use the loopback entrypoint, which never asks for the edge's certificate.
+    ports: ["${HTTP_BIND:-0.0.0.0:80}:8080", "${HTTPS_BIND:-0.0.0.0:443}:8443", "${LOCAL_HTTPS_BIND:-127.0.0.1:8443}:8444"]
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:?Set the public DNS hostname}
       TRAEFIK_GLOBAL_CHECKNEWVERSION: "false"
@@ -65,10 +66,14 @@ services:
       TRAEFIK_ENTRYPOINTS_WEBSECURE_FORWARDEDHEADERS_TRUSTEDIPS: *cloudflare-proxies
       TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS: "true"
       TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS_CERTRESOLVER: letsencrypt
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS_OPTIONS: edge@file
       TRAEFIK_ENTRYPOINTS_WEBSECURE_TRANSPORT_RESPONDINGTIMEOUTS_READTIMEOUT: 30s
       TRAEFIK_ENTRYPOINTS_WEBSECURE_TRANSPORT_RESPONDINGTIMEOUTS_WRITETIMEOUT: 120s
       TRAEFIK_ENTRYPOINTS_WEBSECURE_TRANSPORT_RESPONDINGTIMEOUTS_IDLETIMEOUT: 120s
       TRAEFIK_ENTRYPOINTS_WEBSECURE_TRANSPORT_LIFECYCLE_GRACETIMEOUT: 30s
+      TRAEFIK_ENTRYPOINTS_LOCAL_ADDRESS: :8444
+      TRAEFIK_ENTRYPOINTS_LOCAL_HTTP_TLS: "true"
+      TRAEFIK_ENTRYPOINTS_LOCAL_HTTP_TLS_CERTRESOLVER: letsencrypt
       TRAEFIK_ENTRYPOINTS_HEALTH_ADDRESS: :8082
       TRAEFIK_PING: "true"
       TRAEFIK_PING_ENTRYPOINT: health
@@ -78,8 +83,10 @@ services:
       TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_EMAIL: ${ACME_EMAIL:?Set a certificate contact email}
       TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_STORAGE: /data/acme.json
       TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_HTTPCHALLENGE_ENTRYPOINT: web
+      ORIGIN_PULL: ${ORIGIN_PULL:-off}
     volumes:
       - ./routes.yml:/etc/traefik/dynamic/routes.yml:ro
+      - ${ORIGIN_PULL_CA:-./origin-pull-off.pem}:/etc/traefik/origin-pull-ca.pem:ro
       - ${DATA_ROOT:-/var/lib/pyracast}/gateway:/data
     tmpfs: ["/tmp:uid=10001,gid=10001,mode=0700,size=32m"]
     networks:
