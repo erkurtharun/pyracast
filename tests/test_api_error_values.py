@@ -113,3 +113,31 @@ def test_unmapped_client_status_has_a_localized_contract_without_a_length_header
         "code": "bad_request",
         "message": "The request could not be processed.",
     }
+
+
+def test_error_bodies_beyond_the_parse_bound_are_left_alone() -> None:
+    from django.http import HttpResponse
+    from django.test import RequestFactory
+
+    from pyracast.api.errors import with_error_contract
+
+    content = json.dumps({"status": 400, "padding": "x" * 1_000_000}).encode()
+    response = HttpResponse(content, status=400, content_type="application/json")
+    result = with_error_contract(RequestFactory().get("/api/example/"), response)
+    assert result.content == content
+
+
+def test_rewritten_error_bodies_drop_the_stale_entity_tag() -> None:
+    from django.http import HttpResponse, HttpResponseNotAllowed
+    from django.test import RequestFactory
+
+    from pyracast.api.errors import refuse_in_place, with_error_contract
+    from pyracast.errors import ErrorCode
+
+    request = RequestFactory().get("/api/example/")
+    rewritten = HttpResponse('{"status": 400}', status=400, content_type="application/json")
+    rewritten["ETag"] = '"before"'
+    assert "ETag" not in with_error_contract(request, rewritten)
+    refused = HttpResponseNotAllowed(["GET"])
+    refused["ETag"] = '"before"'
+    assert "ETag" not in refuse_in_place(request, refused, ErrorCode.METHOD_NOT_ALLOWED)
