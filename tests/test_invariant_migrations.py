@@ -136,10 +136,8 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     NotificationDelivery.objects.filter(pk=delivery.pk).update(
         status="uncertain", lease_token=token
     )
-    ProviderAccount.objects.filter(pk=system.account.pk).update(
-        daily_quota=12, credential_revision=0, authentication_failed_revision=3
-    )
-    SiteBinding.objects.filter(pk=system.binding.pk).update(validated_credential_revision=None)
+    stored_account = ProviderAccount.objects.values().get(pk=system.account.pk)
+    stored_binding = SiteBinding.objects.values().get(pk=system.binding.pk)
 
     forward()
 
@@ -161,19 +159,52 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     delivery.refresh_from_db()
     assert (delivery.status, delivery.lease_token) == ("uncertain", token)
     assert delivery.lease_expires_at is not None
-    account = ProviderAccount.objects.get(pk=system.account.pk)
-    assert (
-        account.daily_quota,
-        account.credential_revision,
-        account.authentication_failed_revision,
-    ) == (10, 1, None)
-    binding = SiteBinding.objects.get(pk=system.binding.pk)
-    assert (binding.validated_at, binding.validated_credential_revision) == (None, None)
+    assert ProviderAccount.objects.values().get(pk=system.account.pk) == stored_account
+    assert SiteBinding.objects.values().get(pk=system.binding.pk) == stored_binding
     assert violations("connections_provideraccount", PROVIDER_ACCOUNT_RULE) == 0
     assert violations("connections_sitebinding", SITE_BINDING_RULE) == 0
 
     migrate(*PREVIOUS.values())
     assert _installed() == (set(), set())
+
+
+@pytest.mark.usefixtures("leaf")
+@pytest.mark.parametrize(
+    ("model", "values", "rule"),
+    [
+        (ProviderAccount, {"daily_quota": 0}, "daily quota"),
+        (ProviderAccount, {"daily_quota": 11}, "daily quota"),
+        (ProviderAccount, {"credential_revision": 0}, "credential revision"),
+        (ProviderAccount, {"authentication_failed_revision": 0}, "authentication failure"),
+        (
+            ProviderAccount,
+            {"authentication_failed_revision": F("credential_revision") + 1},
+            "authentication failure",
+        ),
+        (SiteBinding, {"validated_at": None}, "validation"),
+        (SiteBinding, {"validated_credential_revision": None}, "validation"),
+    ],
+)
+def test_provider_migration_refuses_accounts_and_bindings_no_writer_produces(
+    model: type[ProviderAccount | SiteBinding], values: dict[str, object], rule: str
+) -> None:
+    system = make_system(approved=True)
+    row = system.account if model is ProviderAccount else system.binding
+    rows = model._default_manager.filter(pk=row.pk)
+    stored = rows.values().get()
+    migrate(PREVIOUS["connections"])
+    rows.update(**values)
+    changed = rows.values().get()
+    table = model._meta.db_table
+
+    with pytest.raises(ValueError, match=rf"{table} holds 1 row.*{rule}"):
+        forward()
+
+    assert not checks(table) & NEW_CHECKS[table]
+    assert rows.values().get() == changed
+    rows.update(**{field: stored[field] for field in values})
+    forward()
+    assert NEW_CHECKS[table] <= checks(table)
 
 
 def _delivery(system: System) -> NotificationDelivery:
