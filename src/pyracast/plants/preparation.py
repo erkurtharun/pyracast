@@ -11,6 +11,7 @@ from django.db.models import Exists, F, OuterRef, Q, Value
 from django.db.models.functions import Coalesce, Least
 from django.utils import timezone
 
+from pyracast.accounts.models import Tenant
 from pyracast.background.failures import ItemsFailedError, isolate
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.irradiance import local_day_bounds
@@ -242,12 +243,17 @@ def _prepare_each(plant_ids: list[int], now: datetime | None) -> list[Calibratio
 
 
 def _prepare_requested(plant_id: int, now: datetime | None) -> CalibrationRun | None:
+    from pyracast.plants.automation import retry_failed_promotion
+
     moment = now or timezone.now()
     with transaction.atomic():
-        region_id = Plant.objects.filter(pk=plant_id).values_list("region_id", flat=True).first()
-        if region_id is None:
+        identity = (
+            Plant.objects.filter(pk=plant_id).values_list("region_id", "region__tenant_id").first()
+        )
+        if identity is None:
             return None
-        Region.objects.select_for_update().get(pk=region_id)
+        Tenant.objects.select_for_update().get(pk=identity[1])
+        Region.objects.select_for_update().get(pk=identity[0])
         due_at = (
             Plant.objects.select_for_update()
             .filter(pk=plant_id)
@@ -261,6 +267,8 @@ def _prepare_requested(plant_id: int, now: datetime | None) -> CalibrationRun | 
         ):
             return None
         run = prepare_calibration(plant_id, now)
+        if run is None:
+            retry_failed_promotion(plant_id, moment)
         Plant.objects.filter(pk=plant_id).update(calibration_preparation_due_at=None)
         return run
 

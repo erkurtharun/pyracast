@@ -60,8 +60,8 @@ def _authorized(plant: Plant, *, lock: bool = False) -> bool:
     return members.exists()
 
 
-def automation_status(plant: Plant) -> dict[str, Any]:
-    last = (
+def _last_attempt(plant: Plant) -> PlantEvent | None:
+    return (
         PlantEvent.objects.filter(
             plant=plant,
             details__configuration_id=plant.current_configuration_id,
@@ -73,6 +73,10 @@ def automation_status(plant: Plant) -> dict[str, Any]:
         .order_by("-created_at", "-pk")
         .first()
     )
+
+
+def automation_status(plant: Plant) -> dict[str, Any]:
+    last = _last_attempt(plant)
     return {
         "enabled": plant.automatic_calibration_enabled,
         "authorized": _authorized(plant),
@@ -281,6 +285,16 @@ def promote_automatic_calibration(plant: Plant, run: CalibrationRun, now: dateti
         return False
     _activate(None, plant, run.configuration, run)
     return True
+
+
+def retry_failed_promotion(plant_id: int, now: datetime) -> None:
+    """Promote again a candidate whose promotion raised; the caller holds the plant lock."""
+    plant = Plant.objects.select_related("region").get(pk=plant_id)
+    last = _last_attempt(plant) if plant.automatic_calibration_enabled else None
+    if last is None or last.details.get("reason") != "promotion_failed":
+        return
+    run = CalibrationRun.objects.get(pk=last.details["calibration_id"], plant=plant)
+    promote_automatic_calibration(plant, run, now)
 
 
 def prepare_due_calibrations(now: datetime, limit: int = 100) -> list[int]:

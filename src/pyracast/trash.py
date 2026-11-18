@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 from functools import partial
+from itertools import takewhile
 from typing import Any
 
 from django.conf import settings
@@ -57,6 +58,7 @@ from pyracast.regions.operations import require_available_location
 RETENTION = timedelta(days=30)
 PURGE_BATCH_SIZE = 100
 PURGE_CHUNK_SIZE = 500
+PURGE_STATEMENT_BUDGET = 200
 
 logger = logging.getLogger(__name__)
 _deferrals = Deferrals(BACK_OFF)
@@ -148,7 +150,21 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
         return region
 
 
-def _delete(queryset: QuerySet[Any]) -> None:
+class _BudgetSpentError(Exception):
+    pass
+
+
+class _Budget:
+    def __init__(self, statements: int) -> None:
+        self.statements = statements
+
+    def spend(self) -> None:
+        if self.statements <= 0:
+            raise _BudgetSpentError
+        self.statements -= 1
+
+
+def _delete(queryset: QuerySet[Any], budget: _Budget) -> None:
     """Delete in primary-key chunks without Django's collector, which reads whole rows.
 
     Every dependant must be deleted first, including Django-level cascades; the deferred
@@ -156,38 +172,52 @@ def _delete(queryset: QuerySet[Any]) -> None:
     """
     manager = queryset.model._default_manager
     while identifiers := list(queryset.values_list("pk", flat=True)[:PURGE_CHUNK_SIZE]):
+        budget.spend()
         manager.filter(pk__in=identifiers)._raw_delete(queryset.db)
 
 
-def _purge_epias_history(plant: Plant) -> None:
-    _delete(EpiasSnapshot.objects.filter(connection__plant=plant))
-    _delete(EpiasCollectionJob.objects.filter(connection__plant=plant))
-    _delete(EpiasConnection.objects.filter(plant=plant))
+def _detach(queryset: QuerySet[Any], budget: _Budget, **values: None) -> None:
+    """The queryset must stop matching a row once its references are cleared."""
+    manager = queryset.model._default_manager
+    while identifiers := list(queryset.values_list("pk", flat=True)[:PURGE_CHUNK_SIZE]):
+        budget.spend()
+        manager.filter(pk__in=identifiers).update(**values)
 
 
-def _purge_plant(plant: Plant) -> None:
+def _purge_epias_history(plant: Plant, budget: _Budget) -> None:
+    _delete(EpiasSnapshot.objects.filter(connection__plant=plant), budget)
+    _delete(EpiasCollectionJob.objects.filter(connection__plant=plant), budget)
+    _delete(EpiasConnection.objects.filter(plant=plant), budget)
+
+
+def _purge_plant(plant: Plant, budget: _Budget) -> None:
     from pyracast.change_requests.models import ChangeRequest, IncidentChange, ProductionChangeItem
 
-    _delete(ProductionChangeItem.objects.filter(request__plant=plant))
-    _delete(IncidentChange.objects.filter(request__plant=plant))
-    _delete(ChangeRequest.objects.filter(plant=plant))
-    _delete(IncidentRevision.objects.filter(incident__plant=plant))
-    _delete(PlantIncident.objects.filter(plant=plant))
-    _delete(ForecastIssuance.objects.filter(plant=plant))
-    CalibrationRun.objects.filter(plant=plant).update(comparison_activation=None)
-    _delete(CalibrationActivation.objects.filter(plant=plant))
-    _delete(CalibrationRun.objects.filter(plant=plant))
-    _delete(ProductionObservation.objects.filter(plant=plant))
-    _purge_epias_history(plant)
-    _delete(PlantEvent.objects.filter(plant=plant))
+    _delete(ProductionChangeItem.objects.filter(request__plant=plant), budget)
+    _delete(IncidentChange.objects.filter(request__plant=plant), budget)
+    _delete(ChangeRequest.objects.filter(plant=plant), budget)
+    _delete(IncidentRevision.objects.filter(incident__plant=plant), budget)
+    _delete(PlantIncident.objects.filter(plant=plant), budget)
+    _delete(ForecastIssuance.objects.filter(plant=plant), budget)
+    _detach(
+        CalibrationRun.objects.filter(plant=plant, comparison_activation__isnull=False),
+        budget,
+        comparison_activation=None,
+    )
+    _delete(CalibrationActivation.objects.filter(plant=plant), budget)
+    _delete(CalibrationRun.objects.filter(plant=plant), budget)
+    _delete(ProductionObservation.objects.filter(plant=plant), budget)
+    _purge_epias_history(plant, budget)
+    _delete(PlantEvent.objects.filter(plant=plant), budget)
     plant.current_configuration = None
     plant.save(update_fields=("current_configuration",))
-    _delete(PlantSubmission.objects.filter(plant=plant))
-    _delete(PlantConfiguration.objects.filter(plant=plant))
-    _delete(Plant.objects.filter(pk=plant.pk))
+    _delete(PlantSubmission.objects.filter(plant=plant), budget)
+    _delete(PlantConfiguration.objects.filter(plant=plant), budget)
+    _delete(Plant.objects.filter(pk=plant.pk), budget)
 
 
-def _purge_region(region: Region, plants: list[Plant]) -> None:
+def _purge_region(region: Region, plants: list[Plant], budget: _Budget) -> None:
+    """Delete children before parents, so every committed prefix of the purge is consistent."""
     accounts = ProviderAccount.objects.filter(sitebinding__region=region).order_by("pk").distinct()
     list(
         ProviderAccount.objects.select_for_update()
@@ -196,28 +226,33 @@ def _purge_region(region: Region, plants: list[Plant]) -> None:
         .values_list("pk", flat=True)
     )
     for plant in plants:
-        _purge_plant(plant)
-    _delete(NotificationDelivery.objects.filter(schedule__region=region))
-    _delete(ReminderSchedule.objects.filter(region=region))
-    _delete(CollectionSchedule.objects.filter(region=region))
-    RequestAttempt.objects.filter(
-        Q(binding__region=region) | Q(job__binding__region=region)
-    ).update(job=None, binding=None)
-    _delete(ReferenceCapacityNormalization.objects.filter(target_binding__region=region))
-    _delete(ForecastResult.objects.filter(snapshot__job__binding__region=region))
-    _delete(ForecastSnapshot.objects.filter(job__binding__region=region))
-    _delete(CollectionJob.objects.filter(binding__region=region))
-    _delete(HistoricalReferenceImport.objects.filter(binding__region=region))
+        _purge_plant(plant, budget)
+    _delete(NotificationDelivery.objects.filter(schedule__region=region), budget)
+    _delete(ReminderSchedule.objects.filter(region=region), budget)
+    _delete(CollectionSchedule.objects.filter(region=region), budget)
+    _detach(
+        RequestAttempt.objects.filter(Q(binding__region=region) | Q(job__binding__region=region)),
+        budget,
+        job=None,
+        binding=None,
+    )
+    _delete(ReferenceCapacityNormalization.objects.filter(target_binding__region=region), budget)
+    _delete(ForecastResult.objects.filter(snapshot__job__binding__region=region), budget)
+    _delete(ForecastSnapshot.objects.filter(job__binding__region=region), budget)
+    _delete(CollectionJob.objects.filter(binding__region=region), budget)
+    _delete(HistoricalReferenceImport.objects.filter(binding__region=region), budget)
     region.status = RegionStatus.PENDING
     region.approved_binding = None
     region.save(update_fields=("status", "approved_binding"))
-    _delete(SiteBinding.objects.filter(region=region))
-    _delete(AuditEvent.objects.filter(region=region))
-    _delete(RegionLocationChangeRequest.objects.filter(region=region))
-    _delete(Region.objects.filter(pk=region.pk))
+    _delete(SiteBinding.objects.filter(region=region), budget)
+    _delete(AuditEvent.objects.filter(region=region), budget)
+    _delete(RegionLocationChangeRequest.objects.filter(region=region), budget)
+    _delete(Region.objects.filter(pk=region.pk), budget)
 
 
 def purge_expired(now: datetime | None = None) -> dict[str, int]:
+    """Purge expired regions within one statement budget; a region that exceeds it resumes
+    on the next call."""
     moment = timezone.now() if now is None else now
     if moment.utcoffset() is None:
         raise ValidationError("An aware timestamp is required.")
@@ -228,9 +263,10 @@ def purge_expired(now: datetime | None = None) -> dict[str, int]:
         .order_by("pk")
         .values_list("pk", flat=True)[:PURGE_BATCH_SIZE]
     )
+    budget = _Budget(PURGE_STATEMENT_BUDGET)
     purged = isolate(
-        regions,
-        partial(_purge_expired_region, cutoff=cutoff),
+        takewhile(lambda _: budget.statements > 0, regions),
+        partial(_purge_expired_region, cutoff=cutoff, budget=budget),
         logger=logger,
         event="retention_purge_failed",
         name=lambda region_id: f"region:{region_id}",
@@ -240,13 +276,21 @@ def purge_expired(now: datetime | None = None) -> dict[str, int]:
     return {"regions": len(done), "plants": sum(done)}
 
 
-def _purge_expired_region(region_id: int, cutoff: datetime) -> int | None:
+def _purge_expired_region(region_id: int, cutoff: datetime, budget: _Budget) -> int | None:
     with transaction.atomic():
         region = (
             Region.objects.select_for_update().filter(pk=region_id, deleted_at__lte=cutoff).first()
         )
         if region is None:
             return None
+        # A partly purged region must never be restored, even by a clock behind this one.
+        sealed = cutoff - RETENTION
+        if region.deleted_at is not None and region.deleted_at > sealed:
+            region.deleted_at = sealed
+            region.save(update_fields=("deleted_at",))
         plants = list(Plant.objects.select_for_update().filter(region=region).order_by("pk"))
-        _purge_region(region, plants)
+        try:
+            _purge_region(region, plants, budget)
+        except _BudgetSpentError:
+            return None
         return len(plants)

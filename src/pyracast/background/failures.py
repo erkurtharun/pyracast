@@ -59,9 +59,10 @@ def isolate[T, R](
     name: Callable[[T], str],
     back_off: Callable[[T], object],
 ) -> list[R]:
-    """Run each item outside a transaction; a failing item is logged and backed off.
+    """Log and back off a failing item, then go on; raise ItemsFailedError after the last one.
 
-    Raises ItemsFailedError after the last item when any item failed.
+    The caller runs this outside any transaction and gives each item its own, so a failure
+    rolls back only that item.
     """
     results: list[R] = []
     failed = 0
