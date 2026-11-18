@@ -30,6 +30,18 @@ from tests.support.company_registration import signup
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 CODE = re.compile(r"^\s*([A-Z0-9]{4}-[A-Z0-9]{4}|[0-9]{6})\s*$", re.MULTILINE)
 PENDING = {"id": "verify_email", "is_pending": True}
+CONFLICT = {
+    "en": "The request conflicts with the current state. Reload and try again.",
+    "tr": "\u0130stek mevcut durumla çak\u0131ş\u0131yor. Sayfay\u0131 yenileyip tekrar deneyin.",
+}
+BUSY = {
+    "en": "The workspace is busy. Try again in a moment.",
+    "tr": "Çal\u0131şma alan\u0131 meşgul. Biraz sonra tekrar deneyin.",
+}
+THROTTLED = {
+    "en": "Too many requests. Wait a moment and try again.",
+    "tr": "Çok fazla istek gönderildi. Biraz bekleyip tekrar deneyin.",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -40,8 +52,9 @@ def local_mail() -> Iterator[None]:
         yield
 
 
-def browser() -> Client:
-    return Client(enforce_csrf_checks=True)
+def browser(language: str | None = None) -> Client:
+    headers = {} if language is None else {"Accept-Language": language}
+    return Client(enforce_csrf_checks=True, headers=headers)
 
 
 def mailed_code() -> str:
@@ -65,16 +78,16 @@ def answer(response: Any) -> tuple[int, Any]:
     return response.status_code, response.json()
 
 
-def signed_in(user: User) -> Client:
-    client = browser()
+def signed_in(user: User, language: str | None = None) -> Client:
+    client = browser(language)
     credentials = {"email": user.email, "password": PASSWORD}
     assert submit(client, "auth/login", credentials).status_code == 200
     assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     return client
 
 
-def pending_signup() -> tuple[Client, str]:
-    client = browser()
+def pending_signup(language: str | None = None) -> tuple[Client, str]:
+    client = browser(language)
     assert signup(client).status_code == 401
     return client, mailed_code()
 
@@ -92,26 +105,40 @@ def assert_signed_out_without_pending_verification(client: Client) -> None:
     assert PENDING not in client.get(AUTH + "auth/session").json()["data"]["flows"]
 
 
+@pytest.mark.parametrize("language", ["en", "tr"])
 @pytest.mark.parametrize("authenticated", [False, True])
-def test_verification_without_a_pending_process_answers_conflict(authenticated: bool) -> None:
-    client = signed_in(member()) if authenticated else browser()
+@pytest.mark.parametrize(
+    ("endpoint", "data"),
+    [
+        ("auth/email/verify", {"key": "1234-5678"}),
+        ("auth/email/verify/resend", {}),
+        ("auth/password/reset", {"key": "1234-5678", "password": PASSWORD + "reset"}),
+    ],
+)
+def test_endpoints_without_a_pending_process_answer_conflict(
+    endpoint: str, data: dict[str, str], authenticated: bool, language: str
+) -> None:
+    client = signed_in(member(), language) if authenticated else browser(language)
 
-    response = submit(client, "auth/email/verify", {"key": "1234-5678"})
+    response = submit(client, endpoint, data)
 
-    assert answer(response) == (409, {"status": 409})
+    conflict = {"status": 409, "code": "conflict", "message": CONFLICT[language]}
+    assert answer(response) == (409, conflict)
     assert mail.outbox == []
     assert PENDING not in client.get(AUTH + "auth/session").json()["data"].get("flows", [])
 
 
+@pytest.mark.parametrize("language", ["en", "tr"])
 @pytest.mark.parametrize("authenticated", [False, True])
 def test_resend_rate_limit_mails_nothing_and_allows_a_later_retry(
-    authenticated: bool, monkeypatch: pytest.MonkeyPatch
+    authenticated: bool, language: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    client, _ = change_pending(member()) if authenticated else pending_signup()
+    client, _ = change_pending(member(), language) if authenticated else pending_signup(language)
 
     response = submit(client, "auth/email/verify/resend", {})
 
-    assert answer(response) == (429, {"status": 429})
+    throttled = {"status": 429, "code": "throttled", "message": THROTTLED[language]}
+    assert answer(response) == (429, throttled)
     assert mail.outbox == []
     one_minute_later(monkeypatch)
     assert submit(client, "auth/email/verify/resend", {}).status_code == 200
@@ -148,8 +175,8 @@ def test_signup_resend_for_an_address_verified_meanwhile_mails_nothing(
     assert_signed_out_without_pending_verification(client)
 
 
-def change_pending(user: User) -> tuple[Client, str]:
-    client = signed_in(user)
+def change_pending(user: User, language: str | None = None) -> tuple[Client, str]:
+    client = signed_in(user, language)
     assert submit(client, "account/email", {"email": "new@example.com"}).status_code == 200
     return client, mailed_code()
 
@@ -527,7 +554,7 @@ def test_verification_never_writes_over_an_address_reassigned_before_completion(
 
     response = verify(client, code)
 
-    assert answer(response) == (409, {"status": 409})
+    assert answer(response) == answer(verify(browser(), code))
     assert mail.outbox == []
     assert_signed_out_without_pending_verification(client)
     assert EmailAddress.objects.filter(
@@ -564,6 +591,12 @@ def lost_connection() -> None:
     raise OperationalError("server closed the connection")
 
 
+def lock_timeout() -> None:
+    error = OperationalError("canceling statement due to lock timeout")
+    error.__cause__ = psycopg.errors.LockNotAvailable("canceling statement due to lock timeout")
+    raise error
+
+
 FAILURES: dict[str, Callable[[], None]] = {
     "unique-rule": verified_elsewhere,
     "row-gone": missing_row,
@@ -592,7 +625,7 @@ def test_failed_verification_writes_nothing_and_discards_the_process(
 
     response = verify(client, code)
 
-    assert answer(response) == (409, {"status": 409})
+    assert answer(response) == answer(verify(browser(), code))
     assert mail.outbox == []
     assert not EmailAddress.objects.get(email="owner@example.com").verified
     assert_signed_out_without_pending_verification(client)
@@ -610,19 +643,22 @@ def test_failed_reset_writes_nothing_and_discards_the_process(
 
     response = submit(client, "auth/password/reset", reset)
 
-    assert answer(response) == (409, {"status": 409})
+    nothing_pending = answer(submit(browser(), "auth/password/reset", reset))
+    assert answer(response) == nothing_pending
     assert mail.outbox == []
     user.refresh_from_db()
     assert user.check_password(PASSWORD)
-    assert answer(submit(client, "auth/password/reset", reset)) == (409, {"status": 409})
+    assert answer(submit(client, "auth/password/reset", reset)) == nothing_pending
 
 
-def pending_completion(owner: type) -> tuple[Client, str, dict[str, str]]:
+def pending_completion(
+    owner: type, language: str | None = None
+) -> tuple[Client, str, dict[str, str]]:
     if owner is EmailVerificationProcess:
-        client, key = pending_signup()
+        client, key = pending_signup(language)
         return client, "auth/email/verify", {"key": key}
     user = member()
-    client = browser()
+    client = browser(language)
     assert submit(client, "auth/password/request", {"email": user.email}).status_code == 401
     return client, "auth/password/reset", {"key": mailed_code(), "password": PASSWORD + "reset"}
 
@@ -644,3 +680,20 @@ def test_completion_does_not_answer_other_database_errors_as_conflicts(
 
     with pytest.raises(error):
         submit(client, endpoint, data)
+
+
+@pytest.mark.parametrize("language", ["en", "tr"])
+@pytest.mark.parametrize("owner", [EmailVerificationProcess, PasswordResetVerificationProcess])
+def test_completion_past_the_lock_timeout_answers_busy(
+    owner: type, language: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, endpoint, data = pending_completion(owner, language)
+    client.raise_request_exception = False
+    fail_after(monkeypatch, owner, lock_timeout)
+
+    response = submit(client, endpoint, data)
+
+    busy = {"code": "busy", "message": BUSY[language], "retry_after": 1}
+    assert answer(response) == (503, busy)
+    assert response["Retry-After"] == "1"
+    assert mail.outbox == []
