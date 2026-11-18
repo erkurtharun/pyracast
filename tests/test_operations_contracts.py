@@ -20,7 +20,6 @@ from deploy import (
     authorize_gmail,
     backup,
     host,
-    release_record,
     release_state,
     reset_database,
     runtime_secrets,
@@ -766,39 +765,66 @@ def test_reset_tool_stops_the_application_in_the_installers_drain_order() -> Non
     assert [(int(timeout), group) for timeout, group in reset_database.STOP_ORDER] == drain
 
 
-def test_failed_maintenance_names_the_recorded_prerelease_object_for_the_reset_tool() -> None:
+def test_an_upgrade_records_the_maintenance_recovery_point_right_before_migrate() -> None:
     script = text(DEPLOY / "install-release.sh")
-    deployment = text(ROOT / "docs" / "DEPLOYMENT.md")
-    tool = "python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json"
-    record = f'"$release/{release_record.RECORD}"'
-    dump = script.index("--kind prerelease")
-
-    assert script.index(record) < dump < script.index(record, dump)
-    assert script.index(record, dump) < script.index("run --rm --no-deps migrate\n")
-    assert f"recovery='{tool}'" in script
-    assert "$recovery abort" in script
-    assert "$recovery restore --confirm $prerelease_object" in script
-    assert f"{tool} abort" in deployment
-    assert f"{tool} restore --confirm OBJECT" in deployment
-    assert f"/opt/pyracast/releases/<sha>-<hash>/{release_record.RECORD}" in deployment
-    assert "last-backup.json` and run" not in deployment
-
-
-def test_installer_takes_the_recorded_object_only_from_the_validating_reader() -> None:
-    script = text(DEPLOY / "install-release.sh")
-    reader = (
-        f'if ! candidate=$(python3 "$release/deploy/release_record.py" '
-        f'"$release/{release_record.RECORD}"); then'
+    record = script.index(
+        "if [[ -n $previous ]]; then\n"
+        '  python3 "$release/deploy/release_record.py" /etc/pyracast/host.json record '
+        f'"$release/{host.PRERELEASE_RECORD}"\n'
+        "  recorded=1\n"
+        "fi\n"
+        '"${compose[@]}" run --rm --no-deps migrate\n'
     )
 
-    assert re.findall(r"prerelease_object=\S*", script) == [
-        "prerelease_object=",
-        "prerelease_object=$candidate",
-    ]
-    assert reader in script
-    assert script.index(reader) < script.index("prerelease_object=$candidate")
-    assert script.count(release_record.RECORD) == script.count(f"$release/{release_record.RECORD}")
-    assert '["object"]' not in script
+    assert script.index("--kind prerelease") < script.index('"${compose[@]}" up -d rabbitmq')
+    assert script.index('"${compose[@]}" up -d rabbitmq') < record
+    assert script.count("release_record.py") == 2
+    assert script.count(host.PRERELEASE_RECORD) == 2
+    assert (
+        f'rm -f "$release/{host.PRERELEASE_RECORD}"' in script[: script.index("--kind prerelease")]
+    )
+
+
+def test_every_printed_recovery_reads_the_maintenance_session() -> None:
+    script = text(DEPLOY / "install-release.sh")
+    path = failure_path()
+    printed = (
+        '  elif ! python3 "$release/deploy/release_record.py" /etc/pyracast/host.json recovery >&2;'
+        " then\n"
+    )
+
+    assert printed in path
+    assert path.index("No release served before this one") < path.index(printed)
+    for retired in (
+        "$recovery",
+        "prerelease_object",
+        "record_unreadable",
+        "migrating",
+        "candidate",
+    ):
+        assert retired not in script
+    assert "restore --confirm" not in script
+    assert " abort" not in script
+
+
+def test_the_printed_recovery_runs_the_helper_in_current_with_the_host_configuration(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "host.json"
+    config.write_text('{"backup_bucket": "pyracast-backups", "runtime_secret_version": "1"}')
+    deployment = text(ROOT / "docs" / "DEPLOYMENT.md")
+    tool = "python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json"
+
+    loaded = reset_database.load_host(config)
+
+    assert (loaded.config, loaded.release, loaded.marker) == (
+        config,
+        host.CURRENT_RELEASE,
+        host.RELEASE_BLOCKED,
+    )
+    assert f"{tool} abort" in deployment
+    assert f"{tool} restore --confirm OBJECT" in deployment
+    assert "last-backup.json` and run" not in deployment
 
 
 def test_a_release_that_cannot_get_the_lock_says_nothing_changed() -> None:
@@ -937,7 +963,7 @@ def test_the_failure_path_switches_and_resumes_only_after_every_stop_succeeded()
     stops = path.index("stop_application\n")
     switch = path.index("(( switched == 0 && stopped == 1 )) && switch_runtime")
     decided = path.index(
-        "if (( resumable == 1 && migrating == 0 && stopped == 1 && switched == 1 )); then resume=1"
+        "if (( resumable == 1 && recorded == 0 && stopped == 1 && switched == 1 )); then resume=1"
     )
     resume = path.index("(( resume == 1 )) && resume_previous")
 
@@ -966,7 +992,8 @@ def test_a_failure_before_migrate_resumes_the_previous_release() -> None:
     migrate = script.index('"${compose[@]}" run --rm --no-deps migrate\n')
 
     assert script.index("resumable=1") < script.index("--kind prerelease") < migrate
-    assert script.rindex("migrating=1", 0, migrate) > script.index('"${compose[@]}" up -d rabbitmq')
+    assert script.rindex("recorded=1", 0, migrate) > script.index('"${compose[@]}" up -d rabbitmq')
+    assert re.findall(r"recorded=\d", script) == ["recorded=0", "recorded=1"]
     assert "if [[ -e /var/lib/pyracast/release-blocked ]]; then blocked_before=1; fi" in script
 
 

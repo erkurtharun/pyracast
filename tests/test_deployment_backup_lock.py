@@ -183,7 +183,7 @@ def test_prerelease_backup_records_its_object_in_the_release_directory(
         backup_host.release, "private-backups", "prerelease", backup_host.directory
     )
 
-    record = backup_host.release / release_record.RECORD
+    record = backup_host.release / host.PRERELEASE_RECORD
     assert json.loads(record.read_text()) == {"object": name}
     assert [path.name for path in backup_host.release.iterdir()] == [record.name]
 
@@ -295,12 +295,10 @@ VALID = "postgres/2026/11/18/20261118T010203Z-prerelease-0123456789abcdef.dump"
     ],
 )
 def test_release_record_yields_only_a_valid_object_name(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], content: str | None, expected: str | None
+    tmp_path: Path, content: str | None, expected: str | None
 ) -> None:
-    record = tmp_path / release_record.RECORD
+    record = tmp_path / host.PRERELEASE_RECORD
     if content is not None:
         record.write_text(content, encoding="utf-8")
 
     assert release_record.object_name(record) == expected
-    assert release_record.main([str(record)]) == (0 if expected else 1)
-    assert capsys.readouterr().out == (f"{expected}\n" if expected else "")

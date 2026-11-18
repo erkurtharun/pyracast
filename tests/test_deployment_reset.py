@@ -664,7 +664,8 @@ def test_abort_refuses_once_the_database_was_replaced(
     name = prepared(host, uploads)
     reset_database.reset(host, name)
     calls = len(commands.calls)
-    with pytest.raises(RefusedError, match=f"restore --confirm {name}"):
+    changed = f"the database changed in this maintenance.* restore --confirm {name}"
+    with pytest.raises(RefusedError, match=changed):
         reset_database.abort(host)
     assert commands.calls[calls:] == []
     assert host.marker.exists()
@@ -1127,7 +1128,8 @@ def test_restore_refuses_another_object_once_reset_replaced_the_database(
     name = prepared(host, uploads)
     reset_database.reset(host, name)
     calls = len(commands.calls)
-    with pytest.raises(RefusedError, match=f"only {name} holds its data"):
+    changed = f"the database changed in this maintenance; only {name} holds the data"
+    with pytest.raises(RefusedError, match=changed):
         reset_database.restore(host, FOREIGN_OBJECT)
     assert commands.destructive_calls()[-1][-1] == "CREATE DATABASE pyracast"
     assert not any("pg_restore" in call for call in commands.calls[calls:])

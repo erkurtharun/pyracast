@@ -8,11 +8,15 @@ fi
 trap 'cat /result /calls >&2' ERR
 mkdir -p /mock-bin /fixture/deploy /etc/pyracast /etc/systemd/system /var/lib/pyracast /opt/pyracast/releases /run/lock
 cat >/etc/pyracast/host.json <<'JSON'
-{"domain":"example.com","acme_email":"ops@example.com","backup_bucket":"pyracast-backups"}
+{"domain":"example.com","acme_email":"ops@example.com","backup_bucket":"pyracast-backups","runtime_secret_version":"1"}
 JSON
 printf 'name: fixture\n' >/fixture/deploy/compose.yaml
-touch /fixture/deploy/runtime_secrets.py /fixture/deploy/bootstrap_database.py /fixture/deploy/backup.py
-cp /source/install-units.sh /source/release_record.py /source/release_state.py /fixture/deploy/
+touch /fixture/deploy/runtime_secrets.py /fixture/deploy/bootstrap_database.py
+# The installer records and reads the maintenance session with the release's own helpers; the
+# python3 mock still answers every backup.py call.
+cp /source/__init__.py /source/backup.py /source/host.py /source/operations_log.py \
+  /source/reset_database.py /source/install-units.sh /source/release_record.py \
+  /source/release_state.py /fixture/deploy/
 cp -R /source/systemd /fixture/deploy/
 units=(pyracast-backup.service pyracast-backup.timer pyracast-watchdog.service pyracast-watchdog.timer)
 # State model: host.json names the runtime secret "new-runtime"; the serving release staged the
@@ -44,10 +48,11 @@ elif [[ ${1:-} == */bootstrap_database.py || ${1:-} == */backup.py ]]; then
     test ! -e /support-changed || exit 91
     touch /backup-entered
     case "$MODE" in backup|first-backup|resume-failed|maintenance-backup) exit 45 ;; esac
+    if [[ $MODE == retry-backup && $RUN == 2 ]]; then exit 45; fi
     if [[ $MODE == killed-backup ]]; then kill -KILL "$PPID"; exit 0; fi
     touch /backup-complete
     release_dir=$(sed -n 's/.* --release-dir \([^ ]*\) .*/\1/p' <<<"$*")
-    object=postgres/fixture-prerelease.dump
+    object=postgres/fixture-prerelease-$RUN.dump
     if [[ $MODE == *record-invalid ]]; then object='postgres/x.dump; touch /record-injected'; fi
     printf '{"object": "%s"}\n' "$object" >"$release_dir/prerelease-backup.json"
   fi
@@ -122,7 +127,7 @@ case "$MODE:$*" in
     ;;
   support-rabbit:*' up -d rabbitmq' | resume-unready:*' up -d rabbitmq') exit 42 ;;
   support-postgres:*' up -d postgres') exit 46 ;;
-  migration:*' run --rm --no-deps migrate' | maintenance-migration:*' run --rm --no-deps migrate' | maintenance-replaced:*' run --rm --no-deps migrate' | legacy-migration:*' run --rm --no-deps migrate') exit 43 ;;
+  migration:*' run --rm --no-deps migrate' | maintenance-migration:*' run --rm --no-deps migrate' | maintenance-replaced:*' run --rm --no-deps migrate' | maintenance-prepared:*' run --rm --no-deps migrate' | legacy-migration:*' run --rm --no-deps migrate' | retry-*:*' run --rm --no-deps migrate') exit 43 ;;
   health:*'releases/'*' up -d --wait --wait-timeout 180') exit 44 ;;
   killed:*' run --rm --no-deps migrate')
     test -f /var/lib/pyracast/release-blocked || exit 90
@@ -229,17 +234,32 @@ units_installed() {
 }
 
 tool='python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json'
-for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready stop-failed switch maintenance-backup migration legacy-migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-replaced maintenance-record-invalid record-invalid; do
-  export MODE
+session=/var/lib/pyracast/reset/session.json
+# The maintenance session holds the marker's identity and names $1 as the database's recovery point.
+session_names() {
+  /usr/local/bin/python3 - "$session" /var/lib/pyracast/release-blocked "$1" <<'PY'
+import json
+import sys
+from pathlib import Path
+session = json.loads(Path(sys.argv[1]).read_text())
+marker = Path(sys.argv[2]).read_text().strip()
+assert marker, 'The marker holds no identity'
+assert session == {'marker': marker, 'object': sys.argv[3], 'release': 'old', 'replaced': True}, session
+PY
+}
+for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready stop-failed switch maintenance-backup migration legacy-migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-replaced maintenance-prepared maintenance-record-invalid record-invalid retry-migration retry-backup; do
+  export MODE RUN=1
   rm -rf /opt/pyracast/current /opt/pyracast/current.next /opt/pyracast/releases/* /run/pyracast /var/lib/pyracast/reset
   rm -f /var/lib/pyracast/release-blocked /var/lib/pyracast/release-state.json /migration-entered /backup-entered /backup-complete /support-changed /database-initialized
-  rm -f /role /app-running /resumed-with /switched-while-running
+  rm -f /role /app-running /resumed-with /switched-while-running /first-session.json
   # deploy/reset_database.py leaves its session identity in the marker and the site stopped.
   if [[ $MODE == maintenance-* ]]; then printf 'reset-session\n' >/var/lib/pyracast/release-blocked; fi
-  if [[ $MODE == maintenance-replaced ]]; then
+  if [[ $MODE == maintenance-replaced || $MODE == maintenance-prepared ]]; then
     mkdir -p /var/lib/pyracast/reset
-    printf '{"marker": "reset-session", "object": "postgres/reset-archive.dump", "release": "old", "replaced": true}\n' \
-      >/var/lib/pyracast/reset/session.json
+    replaced=false
+    if [[ $MODE == maintenance-replaced ]]; then replaced=true; fi
+    printf '{"marker": "reset-session", "object": "postgres/reset-archive.dump", "release": "old", "replaced": %s}\n' "$replaced" \
+      >"$session"
   fi
   mkdir -p /opt/pyracast/releases/old/deploy /run/pyracast
   if [[ $MODE == prune ]]; then
@@ -288,6 +308,21 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
   else
     result=$?
   fi
+  if [[ $MODE == retry-* ]]; then
+    # The first run failed in migrate; a second release runs in the same maintenance.
+    test "$result" == 43
+    session_names postgres/fixture-prerelease-1.dump
+    cp "$session" /first-session.json
+    rm -f /migration-entered /backup-entered /backup-complete /support-changed
+    printf '{"PGUSER":"owner","PGPASSWORD":"password"}\n' >/migration.json
+    RUN=2
+    : >/calls
+    if run_release >/result 2>&1; then
+      result=0
+    else
+      result=$?
+    fi
+  fi
   test ! -e /switched-while-running
   if [[ $MODE == lock-timeout ]]; then
     test "$result" == 1
@@ -305,9 +340,14 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
     test "$result" == 137
     if [[ $MODE == killed ]]; then
       test -f /migration-entered
+      # The session names this run's dump before migrate starts, and the recovery reads it.
+      session_names postgres/fixture-prerelease-1.dump
+      /usr/local/bin/python3 "$new_release/deploy/release_record.py" /etc/pyracast/host.json recovery >/recovery
+      grep -Fxq "Release a forward fix, or recover with: $tool restore --confirm postgres/fixture-prerelease-1.dump" /recovery
     else
       test -f /backup-entered
       test ! -e /support-changed
+      test ! -e "$session"
     fi
     test -f /var/lib/pyracast/release-blocked
     test "$(readlink /opt/pyracast/current)" == /opt/pyracast/releases/old
@@ -387,13 +427,14 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
         if grep -q 'reset_database.py' /result; then exit 1; fi
         absent ' run --rm --no-deps migrate$'
         absent 'release_state.py'
+        test ! -e "$session"
         test ! -e /record-injected
         if grep -Fq 'record-injected' /result; then exit 1; fi
         units_untouched
         ;;
-      first-backup|resume-failed|resume-unready|stop-failed|switch|maintenance-backup|maintenance-record-invalid|migration|maintenance-migration|maintenance-replaced|legacy-migration|health|tls|response)
+      first-backup|resume-failed|resume-unready|stop-failed|switch|maintenance-backup|maintenance-record-invalid|migration|maintenance-migration|maintenance-replaced|maintenance-prepared|legacy-migration|health|tls|response|retry-*)
         case "$MODE" in
-          first-backup|resume-failed|maintenance-backup) test "$result" == 45 ;;
+          first-backup|resume-failed|maintenance-backup|retry-backup) test "$result" == 45 ;;
           maintenance-record-invalid)
             test "$result" == 1
             test ! -e /record-injected
@@ -402,31 +443,43 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
           resume-unready) test "$result" == 42 ;;
           stop-failed) test "$result" == 47 ;;
           switch) test "$result" == 59 ;;
-          migration|maintenance-migration|maintenance-replaced|legacy-migration) test "$result" == 43 ;;
+          migration|maintenance-migration|maintenance-replaced|maintenance-prepared|legacy-migration|retry-migration) test "$result" == 43 ;;
           health) test "$result" == 44 ;;
           tls) test "$result" == 60 ;;
           response) test "$result" == 1 ;;
         esac
         test -f /var/lib/pyracast/release-blocked
         test ! -e /app-running
+        # The recovery is the one the session of this maintenance gives; exactly one is printed.
         case "$MODE" in
           first-*)
             grep -Fq 'No release served before this one' /result
             if grep -q 'reset_database.py' /result; then exit 1; fi
             ;;
-          maintenance-replaced)
-            grep -Fxq "A reset replaced the database in this maintenance; recover with: $tool restore --confirm postgres/reset-archive.dump" /result
-            if grep -Fq -e "$tool abort" -e fixture-prerelease /result; then exit 1; fi
+          maintenance-replaced|maintenance-prepared)
+            session_names postgres/reset-archive.dump
+            grep -Fxq "Release a forward fix, or recover with: $tool restore --confirm postgres/reset-archive.dump" /result
             ;;
-          migration|maintenance-migration|legacy-migration|health|tls|response)
-            grep -Fxq "Release a forward fix, or recover with: $tool restore --confirm postgres/fixture-prerelease.dump" /result
-            if grep -Fq "$tool abort" /result; then exit 1; fi
+          migration|maintenance-migration|legacy-migration|health|tls|response|retry-*)
+            session_names postgres/fixture-prerelease-1.dump
+            grep -Fxq "Release a forward fix, or recover with: $tool restore --confirm postgres/fixture-prerelease-1.dump" /result
             ;;
           *)
-            grep -Fq "Recover with: $tool abort" /result
-            if grep -q 'restore --confirm' /result; then exit 1; fi
+            test ! -e "$session"
+            grep -Fxq "The database is unchanged in this maintenance. Recover with: $tool abort" /result
             ;;
         esac
+        if [[ $MODE != first-* ]]; then test "$(grep -c 'reset_database.py' /result)" == 1; fi
+        if [[ $MODE == retry-* ]]; then
+          # The second run kept the first run's recovery point; the helper refuses the second dump.
+          cmp /first-session.json "$session"
+          refused=0
+          /usr/local/bin/python3 "$new_release/deploy/reset_database.py" /etc/pyracast/host.json \
+            restore --confirm postgres/fixture-prerelease-2.dump 2>/refused || refused=$?
+          test "$refused" == 2
+          grep -Fq "restore --confirm postgres/fixture-prerelease-1.dump" /refused
+          cmp /first-session.json "$session"
+        fi
         case "$MODE" in
           stop-failed|switch)
             # A failed stop leaves the password alone; a failed switch leaves it as it was.
