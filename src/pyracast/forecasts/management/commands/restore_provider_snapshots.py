@@ -9,6 +9,7 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from pyracast.background.failures import failure_origin, log_failure
 from pyracast.forecasts.snapshot_restore import (
+    RECORDED_SETTINGS,
     EndpointSummary,
     Outcome,
     RestoreRefusedError,
@@ -18,7 +19,7 @@ from pyracast.forecasts.snapshot_restore import (
 
 logger = logging.getLogger(__name__)
 
-# Output names no path, exception message or export value: each can hold the site id.
+# A refusal names no path, exception message or export value: each can hold the site id.
 REFUSALS: tuple[tuple[type[Exception], str], ...] = (
     (User.DoesNotExist, "The user does not exist."),
     (ObjectDoesNotExist, "The region or binding does not exist in that tenant."),
@@ -71,6 +72,11 @@ def _report(summary: RestoreSummary) -> list[str]:
     lines = [
         f"Provider snapshot restore for binding {summary.binding_id}: {summary.rows} export "
         f"rows, SHA-256 {summary.export_sha256}.",
+        *(
+            f"Accepted recorded difference in {item.name}: export {', '.join(item.exported)}; "
+            f"binding {item.binding}."
+            for item in summary.accepted
+        ),
         *(_endpoint_line(item, dry_run=summary.dry_run) for item in summary.endpoints),
     ]
     if summary.days:
@@ -102,6 +108,15 @@ class Command(BaseCommand):
             help="Path of the export (plain or gzip JSON lines), or - for standard input.",
         )
         parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument(
+            "--accept-recorded-difference",
+            action="append",
+            choices=RECORDED_SETTINGS,
+            default=[],
+            dest="accepted",
+            metavar="NAME",
+            help="Accept that the binding records this provider site setting differently.",
+        )
 
     def handle(self, *args: Any, **options: Any) -> str:
         binding_id = options["binding_id"]
@@ -116,6 +131,7 @@ class Command(BaseCommand):
                 binding_id,
                 content,
                 dry_run=options["dry_run"],
+                accepted=options["accepted"],
             )
         except (ObjectDoesNotExist, PermissionDenied, RestoreRefusedError, OSError) as exc:
             logger.warning(
@@ -132,11 +148,12 @@ class Command(BaseCommand):
             ) from None
         logger.info(
             "provider_snapshot_restore_finished binding_id=%s dry_run=%s restored=%s skipped=%s "
-            "export_sha256=%s",
+            "export_sha256=%s accepted=%s",
             binding_id,
             summary.dry_run,
             summary.restored,
             summary.rows - summary.restored,
             summary.export_sha256,
+            ",".join(item.name for item in summary.accepted),
         )
         return "\n".join(_report(summary))

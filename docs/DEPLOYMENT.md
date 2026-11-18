@@ -689,7 +689,11 @@ verification and restart on the real host in about five minutes of downtime.
    bound, attempts, last error). The summary names per
    endpoint what is restored or skipped and why, and per local day whether native
    estimated actuals are complete. A live row of another site or with other settings
-   refuses the whole run; a second run adds nothing. Imports and scaled copies are
+   refuses the whole run, naming the settings; a second run adds nothing. When the
+   provider site is the same and only its installation date was entered differently on
+   the new binding, add `--accept-recorded-difference installation_date` to both runs:
+   the summary and each restored row record both values. Never accept it when the
+   provider site's settings really changed. Imports and scaled copies are
    skipped: import the source file again, and normalize the reference capacity again
    from the restored source binding.
 10. Once your off-host copies show the printed SHA-256 values, delete the archives
