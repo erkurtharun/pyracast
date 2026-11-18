@@ -304,8 +304,6 @@ DURING: dict[str, tuple[Start, type[Any], Callable[[User], None]]] = {
         ConfirmReauthenticationCodeInput,
         removes(SECOND),
     ),
-    "second-factor/password-changed": (second_factor, SecondFactorInput, password_changed),
-    "second-factor/deleted": (second_factor, SecondFactorInput, deleted),
 }
 
 
@@ -369,6 +367,39 @@ def committed_first(changes: Changes) -> bool:
     [(committed, future)] = changes
     future.result(timeout=10)
     return committed
+
+
+CODE_CHECK_CHANGES: dict[str, tuple[Callable[[User], None], Callable[[User], bool]]] = {
+    "password-changed": (
+        password_changed,
+        lambda user: User.objects.get(pk=user.pk).check_password(PASSWORD + "changed"),
+    ),
+    "deleted": (deleted, lambda user: not User.objects.filter(pk=user.pk).exists()),
+}
+
+
+@pytest.mark.parametrize("case", CODE_CHECK_CHANGES)
+def test_a_change_started_while_a_second_factor_is_checked_waits_and_ends_the_sign_in(
+    case: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change, applied = CODE_CHECK_CHANGES[case]
+    pending = second_factor(monkeypatch)
+    changes = changing(
+        monkeypatch,
+        SecondFactorInput,
+        "clean",
+        lambda: change(User.objects.get(pk=pending.user.pk)),
+        after=True,
+    )
+
+    response = submit(pending.client, pending.endpoint, pending.data)
+    waited = not committed_first(changes)
+
+    assert response.status_code == 200
+    assert applied(pending.user)
+    assert mail.outbox == []
+    assert session_user(pending.client) is None
+    assert waited
 
 
 SECOND_FACTOR_STARTS: dict[str, tuple[type[Any], str]] = {
@@ -746,6 +777,24 @@ def test_a_change_of_a_field_outside_the_credential_state_keeps_a_pending_step(
 
     assert response.status_code == 200
     assert session_user(pending.client) == pending.user.pk
+
+
+def test_a_second_factor_completed_with_a_migrated_recovery_code_signs_in() -> None:
+    user = account("owner")
+    with_totp(user)
+    Authenticator.objects.create(
+        user=user,
+        type=Authenticator.Type.RECOVERY_CODES,
+        data={"migrated_codes": [encrypt("12345678"), encrypt("87654321")]},
+    )
+    client = browser()
+    assert submit(client, "auth/login", {"email": OWNER, "password": PASSWORD}).status_code == 401
+
+    response = submit(client, "auth/2fa/authenticate", {"code": "12345678"})
+
+    assert response.status_code == 200
+    assert session_user(client) == user.pk
+    assert RecoveryCodes(recovery_codes(user)).get_unused_codes() == ["87654321"]
 
 
 def test_a_password_change_started_while_a_reset_code_is_requested_waits_and_ends_the_code(
