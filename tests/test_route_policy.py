@@ -98,7 +98,7 @@ INVALID, NOT_FOUND = (400, "invalid_request"), (404, "not_found")
 NO_CONFIGURATION = (400, "configuration_unavailable")
 # Admitted roles' answers with a real tenant, region and plant, other ids absent and body {}.
 ANSWERS: dict[str, dict[str, tuple[int, str | None]]] = {
-    "api/csp-reports/": {"POST": NO_CONTENT},
+    "api/csp-reports/": {"POST": (415, "unsupported_media_type")},
     "api/session/": {"GET": OK},
     "api/session/language/": {"POST": INVALID},
     "api/tenants/": {"GET": OK},
