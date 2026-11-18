@@ -29,7 +29,7 @@ from allauth.mfa.models import Authenticator
 from allauth.mfa.totp.internal import auth as totp_auth
 from django import forms
 from django.contrib.auth.models import User
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxLengthValidator
 from django.http import HttpRequest
 
@@ -132,17 +132,7 @@ class SecondFactorCode(BaseAuthenticateForm):
         ):
             if not main or authenticator.type == Authenticator.Type.TOTP:
                 main = authenticator
-            try:
-                valid = authenticator.wrap().validate_code(code)
-            except PermissionDenied:
-                record_security_event(
-                    SecurityEvent.AUTHENTICATOR_UNREADABLE,
-                    request=context.request,
-                    user_id=self.user.pk,
-                    authenticator_type=authenticator.type,
-                )
-                raise
-            if valid:
+            if authenticator.wrap().validate_code(code):
                 authenticator.user = self.user
                 self.authenticator = authenticator
                 return code

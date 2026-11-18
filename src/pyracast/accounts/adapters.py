@@ -13,7 +13,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, transaction
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from django.utils import translation
 from django.utils.translation import gettext_lazy
 
@@ -22,6 +22,7 @@ from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.language import user_language
 from pyracast.accounts.login_limits import reserve_address_failure, reserve_client_failure
 from pyracast.accounts.security import normalize_client_ip
+from pyracast.accounts.social import record_social_refusal
 from pyracast.db import violated_constraint
 from pyracast.mail.errors import DeliveryUncertainError, NotSentError
 from pyracast.mail.send import send
@@ -99,6 +100,18 @@ class AccountAdapter(DefaultAccountAdapter):
         if user is not None and self._client_failure is not None:
             self._client_failure.rollback()
         return user
+
+    def pre_login(
+        self, request: HttpRequest, user: AbstractBaseUser, **kwargs: Any
+    ) -> HttpResponse | None:
+        # allauth refuses an inactive account here. The authentication backend refuses an
+        # inactive password sign-in earlier, so only a provider sign-in arrives inactive.
+        sociallogin = (kwargs.get("signal_kwargs") or {}).get("sociallogin")
+        if not user.is_active and sociallogin is not None:
+            record_social_refusal(
+                request, sociallogin.account.provider, "inactive", cast(User, user)
+            )
+        return super().pre_login(request, user, **kwargs)
 
     def generate_unique_username(self, txts: list[str | None], regex: str | None = None) -> str:
         # A random part before allauth's uniqueness check keeps concurrent sign-ups with one
