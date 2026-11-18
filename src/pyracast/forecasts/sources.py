@@ -1,3 +1,4 @@
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Literal, cast
 
@@ -6,6 +7,7 @@ from django.db.models import Q, QuerySet
 from pyracast.connections.contracts import ProviderData
 from pyracast.errors import BusyError, ErrorCode
 from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot, SnapshotWeatherError
+from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import SourceKind
 from pyracast.weather import WeatherError, restore_weather
 
@@ -71,7 +73,7 @@ def covering_snapshots(
 
 
 def snapshot_data(
-    snapshot: ForecastSnapshot, *, intervals: list[dict[str, object]] | None = None
+    snapshot: ForecastSnapshot, *, intervals: Iterable[Mapping[str, object]] | None = None
 ) -> ProviderData:
     weather = None
     weather_error: SnapshotWeatherError | Literal[""] = (
@@ -84,7 +86,9 @@ def snapshot_data(
             weather_error = SnapshotWeatherError(exc.code)
     return ProviderData(
         raw_payload=snapshot.raw_payload,
-        intervals=snapshot.normalized_intervals if intervals is None else intervals,
+        intervals=NormalizedInterval.from_rows(
+            snapshot.normalized_intervals if intervals is None else intervals
+        ),
         issued_at=snapshot.issued_at,
         collected_at=snapshot.collected_at,
         source_kind=cast(SourceKind, snapshot.source_kind),

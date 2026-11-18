@@ -150,7 +150,7 @@ def test_unsupported_and_mismatched_history_are_bounded_failures() -> None:
 
     class Mismatched(HistoricalFixture):
         def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
-            return ProviderData({}, [], source_kind="forecast")
+            return ProviderData({}, (), source_kind="forecast")
 
     assert not collect(history.pk, Mismatched(), no_calculation, history.available_at)
     history.refresh_from_db()
@@ -491,7 +491,7 @@ def test_empty_initial_actuals_response_does_not_finish_backfill() -> None:
     class Empty(HistoricalFixture):
         def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
             return ProviderData(
-                {"estimated_actuals": []}, [], collected_at=NIGHT, source_kind="estimated_actuals"
+                {"estimated_actuals": []}, (), collected_at=NIGHT, source_kind="estimated_actuals"
             )
 
     assert collect(first.pk, Empty(), no_calculation, NIGHT)

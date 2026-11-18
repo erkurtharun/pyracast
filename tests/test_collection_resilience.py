@@ -388,7 +388,7 @@ def test_new_slot_preserves_in_flight_response_and_completed_history() -> None:
     identifiers = enqueue_due(acquired_at)
     original.refresh_from_db()
     assert original.status == "running"
-    snapshot = persist_snapshot(lease, ProviderData({}, []), acquired_at)
+    snapshot = persist_snapshot(lease, ProviderData({}, ()), acquired_at)
     assert snapshot is not None
     assert publish(lease, snapshot, {}, acquired_at)
     assert identifiers != [original.pk]

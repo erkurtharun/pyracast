@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from threading import Barrier
 from types import SimpleNamespace
@@ -210,15 +211,17 @@ def test_incomplete_history_schedules_another_immutable_request(damage: str) -> 
     class Damaged(HistoricalFixture):
         def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
             data = super().fetch_history(binding, target_date, days)
+            intervals = list(data.intervals)
             if damage == "empty":
-                data.intervals.clear()
+                intervals.clear()
             elif damage == "gap":
-                del data.intervals[-24]
+                del intervals[-24]
             elif damage == "overlap":
-                data.intervals.append(data.intervals[-24])
+                intervals.append(intervals[-24])
             else:
-                data.intervals[-24]["power_kw"] = None if damage == "missing" else -1
-            return data
+                power = None if damage == "missing" else -1
+                intervals[-24] = replace(intervals[-24], power_kw=power)
+            return replace(data, intervals=tuple(intervals))
 
     assert collect(job.pk, Damaged(NIGHT), no_calculation, NIGHT)
     assert CollectionJob.objects.filter(endpoint="estimated_actuals", status="pending").count() == 1
@@ -232,7 +235,7 @@ def test_final_partial_history_does_not_schedule_past_morning() -> None:
 
     class Empty(HistoricalFixture):
         def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
-            return ProviderData({}, [], collected_at=late, source_kind="estimated_actuals")
+            return ProviderData({}, (), collected_at=late, source_kind="estimated_actuals")
 
     assert collect(job.pk, Empty(late), no_calculation, late)
     assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
@@ -435,7 +438,7 @@ def test_reenabling_collection_recovers_partial_history_retry_without_shortening
                     times=[],
                     now=NIGHT,
                 )
-            return ProviderData({}, [], collected_at=NIGHT, source_kind="estimated_actuals")
+            return ProviderData({}, (), collected_at=NIGHT, source_kind="estimated_actuals")
 
     assert collect(parent.pk, Empty(NIGHT), no_calculation, NIGHT)
     child = CollectionJob.objects.get(endpoint="estimated_actuals", forecastsnapshot__isnull=True)

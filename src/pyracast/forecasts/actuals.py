@@ -23,6 +23,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     SnapshotSourceKind,
 )
+from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_composition import (
     ForecastComposition,
@@ -224,7 +225,7 @@ def archived_actual_irradiance(
         target_date,
         ProviderData(
             source.snapshot.raw_payload,
-            list(source.intervals),
+            NormalizedInterval.from_rows(source.intervals),
             source.snapshot.issued_at,
             source.snapshot.collected_at,
             source_kind="estimated_actuals",

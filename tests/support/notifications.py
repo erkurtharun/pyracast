@@ -14,6 +14,7 @@ from pyracast.forecasts.models import (
     ForecastResult,
     ForecastSnapshot,
 )
+from pyracast.intervals import NormalizedInterval
 from pyracast.notifications.models import (
     NotificationDelivery,
     ReminderSchedule,
@@ -90,7 +91,7 @@ def saved(
 def cache_saved_days(snapshot: ForecastSnapshot, when: datetime = NOW) -> None:
     data = ProviderData(
         snapshot.raw_payload,
-        snapshot.normalized_intervals,
+        NormalizedInterval.from_rows(snapshot.normalized_intervals),
         snapshot.issued_at,
         snapshot.collected_at,
         source_kind="forecast",

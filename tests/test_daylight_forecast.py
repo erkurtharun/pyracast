@@ -6,6 +6,7 @@ import pytest
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_composition import ForecastVintage, compose_forecasts
 from pyracast.plants.numerics import PowerInterval, forecast
@@ -46,7 +47,9 @@ def test_nigde_separates_daylight_validity_from_source_and_night_gaps(
     result = calculate(
         nigde_binding,
         date(2026, 11, 14),
-        ProviderData({}, rows, collected_at=start + timedelta(minutes=8)),
+        ProviderData(
+            {}, NormalizedInterval.from_rows(rows), collected_at=start + timedelta(minutes=8)
+        ),
     )
     assert result["complete"] is False
     assert result["energy_kwh_m2"] is None
@@ -86,7 +89,11 @@ def test_irradiance_input_coverage_excludes_missing_or_invalid_power(
         for index in range(48)
         if not (index == 24 and missing == "absent")
     ]
-    result = calculate(nigde_binding, start.date(), ProviderData({}, rows, collected_at=start))
+    result = calculate(
+        nigde_binding,
+        start.date(),
+        ProviderData({}, NormalizedInterval.from_rows(rows), collected_at=start),
+    )
     summary = cast(dict[str, Any], result["daylight"])
     assert summary["input_coverage_seconds"] == pytest.approx(36601.476925 - 1800)
     assert summary["input_coverage_fraction"] == pytest.approx(1 - 1800 / 36601.476925)
@@ -107,7 +114,11 @@ def test_irradiance_zero_boundary_power_keeps_complete_input_and_partial_ghi(
         }
         for index in range(22)
     ]
-    result = calculate(nigde_binding, start.date(), ProviderData({}, rows, collected_at=start))
+    result = calculate(
+        nigde_binding,
+        start.date(),
+        ProviderData({}, NormalizedInterval.from_rows(rows), collected_at=start),
+    )
     summary = cast(dict[str, Any], result["daylight"])
     assert summary["input_coverage_seconds"] == pytest.approx(36601.476925)
     assert summary["input_coverage_fraction"] == 1
@@ -156,7 +167,7 @@ def test_irradiance_input_coverage_uses_owned_pieces_and_preserves_authoritative
     result = calculate(
         nigde_binding,
         start.date(),
-        ProviderData({}, list(composition.intervals), collected_at=start),
+        ProviderData({}, NormalizedInterval.from_rows(composition.intervals), collected_at=start),
     )
     summary = cast(dict[str, Any], result["daylight"])
     assert summary["input_coverage_seconds"] == pytest.approx(36601.476925 - 2700)
@@ -174,13 +185,15 @@ def test_irradiance_polar_night_has_no_input_coverage_fraction(nigde_binding: Si
         start.date(),
         ProviderData(
             {},
-            [
-                {
-                    "start": (start - timedelta(days=1)).isoformat(),
-                    "end": (start + timedelta(days=1)).isoformat(),
-                    "power_kw": 0,
-                }
-            ],
+            NormalizedInterval.from_rows(
+                [
+                    {
+                        "start": (start - timedelta(days=1)).isoformat(),
+                        "end": (start + timedelta(days=1)).isoformat(),
+                        "power_kw": 0,
+                    }
+                ]
+            ),
             collected_at=start,
         ),
     )

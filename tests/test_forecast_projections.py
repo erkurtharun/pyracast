@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from json import dumps, loads
 from typing import cast
@@ -10,6 +11,7 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, ForecastResult, ForecastSnapshot
 from pyracast.forecasts.projections import prepare_daily_payloads, saved_day_payload
+from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
 from tests.support.domain import NOW, FakeAdapter, make_system
 
@@ -17,14 +19,16 @@ from tests.support.domain import NOW, FakeAdapter, make_system
 def source_data() -> ProviderData:
     return ProviderData(
         {},
-        [
-            {
-                "start": (NOW + timedelta(hours=hour)).isoformat(),
-                "end": (NOW + timedelta(hours=hour + 1)).isoformat(),
-                "power_kw": 0.5,
-            }
-            for hour in range(72)
-        ],
+        NormalizedInterval.from_rows(
+            [
+                {
+                    "start": (NOW + timedelta(hours=hour)).isoformat(),
+                    "end": (NOW + timedelta(hours=hour + 1)).isoformat(),
+                    "power_kw": 0.5,
+                }
+                for hour in range(72)
+            ]
+        ),
         collected_at=NOW,
     )
 
@@ -80,17 +84,13 @@ def test_saved_projection_survives_calculator_failure_after_acquisition(
 def test_supplemental_failure_preserves_other_days_and_bounds_the_horizon() -> None:
     snapshot = saved_snapshot()
     data = source_data()
-    data.intervals.extend(
-        [
-            {},
-            {"start": "invalid", "end": NOW.isoformat()},
-            {"start": "2026-11-09T13:00:00", "end": NOW.isoformat()},
-            {"start": NOW.isoformat(), "end": NOW.isoformat()},
-            {
-                "start": (NOW + timedelta(days=30)).isoformat(),
-                "end": (NOW + timedelta(days=31)).isoformat(),
-            },
-        ]
+    data = replace(
+        data,
+        intervals=(
+            *data.intervals,
+            NormalizedInterval(NOW, NOW, None),
+            NormalizedInterval(NOW + timedelta(days=30), NOW + timedelta(days=31), None),
+        ),
     )
 
     def project(binding: SiteBinding, day: date, data: ProviderData) -> dict[str, object]:
@@ -108,7 +108,7 @@ def test_supplemental_failure_preserves_other_days_and_bounds_the_horizon() -> N
     assert set(results) == {"2026-11-09", "2026-11-10"}
     assert results["2026-11-10"]["energy_kwh_m2"] == 12
     assert prepare_daily_payloads(
-        snapshot.binding, date(2026, 11, 10), ProviderData({}, []), project, {}
+        snapshot.binding, date(2026, 11, 10), ProviderData({}, ()), project, {}
     ) == {"2026-11-10": {}}
 
 
@@ -184,7 +184,14 @@ def test_invalid_interval_is_not_delivered(key: str, value: object) -> None:
 def test_missing_irradiance_retains_a_valid_partial_result() -> None:
     snapshot = saved_snapshot()
     data = source_data()
-    data.intervals[20]["power_kw"] = None
+    data = replace(
+        data,
+        intervals=(
+            *data.intervals[:20],
+            replace(data.intervals[20], power_kw=None),
+            *data.intervals[21:],
+        ),
+    )
     day = date(2026, 11, 10)
     snapshot.forecastresult.daily_payloads[day.isoformat()] = calculate(snapshot.binding, day, data)
     result = saved_day_payload(snapshot, day)
@@ -242,14 +249,16 @@ def test_saved_day_validation_preserves_dst_day_length() -> None:
     start = datetime(2026, 10, 24, 23, tzinfo=UTC)
     data = ProviderData(
         {},
-        [
-            {
-                "start": (start + timedelta(hours=hour)).isoformat(),
-                "end": (start + timedelta(hours=hour + 1)).isoformat(),
-                "power_kw": 0.5,
-            }
-            for hour in range(25)
-        ],
+        NormalizedInterval.from_rows(
+            [
+                {
+                    "start": (start + timedelta(hours=hour)).isoformat(),
+                    "end": (start + timedelta(hours=hour + 1)).isoformat(),
+                    "power_kw": 0.5,
+                }
+                for hour in range(25)
+            ]
+        ),
         collected_at=start,
     )
     day = date(2026, 10, 25)
@@ -279,19 +288,20 @@ def test_nonround_calculated_intervals_survive_saved_json_validation(
     snapshot.binding.timezone = zone
     start, end = local_day_bounds(day, zone)
     left = start - timedelta(minutes=17, microseconds=321)
-    data = ProviderData({}, [], collected_at=left)
+    intervals: list[NormalizedInterval] = []
+    first = left
     while left < end:
         right = left + timedelta(minutes=37, seconds=13, microseconds=123456)
-        index = len(data.intervals)
-        data.intervals.append(
-            {
-                "start": left.isoformat(),
-                "end": right.isoformat(),
-                "power_kw": None if missing and index == 3 else 0.123456789 + index / 311,
-            }
+        index = len(intervals)
+        intervals.append(
+            NormalizedInterval(
+                left, right, None if missing and index == 3 else 0.123456789 + index / 311
+            )
         )
         left = right
-    payload = calculate(snapshot.binding, day, data)
+    payload = calculate(
+        snapshot.binding, day, ProviderData({}, tuple(intervals), collected_at=first)
+    )
     snapshot.forecastresult.daily_payloads = {day.isoformat(): loads(dumps(payload))}
     snapshot.forecastresult.payload = {}
     result = saved_day_payload(snapshot, day)
@@ -309,7 +319,9 @@ def test_spring_clock_change_still_prepares_only_three_local_dates() -> None:
     start = datetime(2026, 3, 27, 23, 30, tzinfo=UTC)
     data = ProviderData(
         {},
-        [{"start": start.isoformat(), "end": (start + timedelta(hours=72)).isoformat()}],
+        NormalizedInterval.from_rows(
+            [{"start": start.isoformat(), "end": (start + timedelta(hours=72)).isoformat()}]
+        ),
         collected_at=start,
     )
 

@@ -5,13 +5,14 @@ from typing import Literal, Protocol, runtime_checkable
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import SnapshotWeatherError
+from pyracast.intervals import NormalizedInterval
 from pyracast.weather import WeatherData
 
 
 @dataclass(frozen=True)
 class ProviderData:
     raw_payload: dict[str, object]
-    intervals: list[dict[str, object]]
+    intervals: tuple[NormalizedInterval, ...]
     issued_at: datetime | None = None
     collected_at: datetime | None = None
     source_kind: Literal["forecast", "estimated_actuals"] = "forecast"

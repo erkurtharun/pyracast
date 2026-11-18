@@ -4,7 +4,7 @@ import time
 import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
@@ -303,20 +303,16 @@ def persist_snapshot(lease: Lease, data: ProviderData, now: datetime) -> Forecas
             defaults={
                 "binding": job.binding,
                 "raw_payload": data.raw_payload,
-                "normalized_intervals": data.intervals,
+                "normalized_intervals": [interval.to_row() for interval in data.intervals],
                 "collected_at": data.collected_at or now,
                 "issued_at": data.issued_at,
                 "source_kind": data.source_kind,
                 "weather_payload": serialize_weather(data.weather) if data.weather else None,
                 "weather_error": data.weather_error,
                 "coverage_start": min(
-                    (datetime.fromisoformat(cast(str, row["start"])) for row in data.intervals),
-                    default=None,
+                    (interval.start for interval in data.intervals), default=None
                 ),
-                "coverage_end": max(
-                    (datetime.fromisoformat(cast(str, row["end"])) for row in data.intervals),
-                    default=None,
-                ),
+                "coverage_end": max((interval.end for interval in data.intervals), default=None),
             },
         )
         return snapshot
@@ -442,12 +438,9 @@ def fetch_history(
         end = min(end, now)
     return ProviderData(
         data.raw_payload,
-        [
-            row
-            for row in data.intervals
-            if datetime.fromisoformat(cast(str, row["start"])) < end
-            and datetime.fromisoformat(cast(str, row["end"])) > start
-        ],
+        tuple(
+            interval for interval in data.intervals if interval.start < end and interval.end > start
+        ),
         data.issued_at,
         data.collected_at,
         data.source_kind,
@@ -456,13 +449,8 @@ def fetch_history(
 
 def _attach_weather(lease: Lease, data: ProviderData, provider: OpenMeteoProvider) -> ProviderData:
     day_start, day_end = local_day_bounds(lease.target_date, lease.binding.timezone)
-    start = min(
-        (datetime.fromisoformat(cast(str, row["start"])) for row in data.intervals),
-        default=day_start,
-    )
-    end = max(
-        (datetime.fromisoformat(cast(str, row["end"])) for row in data.intervals), default=day_end
-    )
+    start = min((interval.start for interval in data.intervals), default=day_start)
+    end = max((interval.end for interval in data.intervals), default=day_end)
     try:
         weather = provider.fetch(lease.binding.latitude, lease.binding.longitude, start, end)
     except WeatherError as exc:
@@ -639,8 +627,8 @@ def collect(
         return False
     if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS:
         return publish(lease, snapshot, {}, now + timedelta(seconds=time.monotonic() - started))
-    data = snapshot_data(snapshot)
     try:
+        data = snapshot_data(snapshot)
         payload = calculator(lease.binding, lease.target_date, data)
         prepared_issuances = prepare_forecast_issuances(snapshot)
     except Exception as exc:

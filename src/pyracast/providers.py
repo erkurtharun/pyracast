@@ -17,27 +17,26 @@ from pyracast.connections.contracts import (
 )
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.secrets import decrypt_api_key
+from pyracast.intervals import NormalizedInterval, Sunlight
 from pyracast.irradiance import local_day_bounds
 from pyracast.provider_retry import retry_after_seconds, retryable_status
 
 
 def clip_provider_data(data: ProviderData, start: datetime, end: datetime) -> ProviderData:
-    intervals: list[dict[str, object]] = []
-    for row in data.intervals:
-        left = datetime.fromisoformat(cast(str, row["start"]))
-        right = datetime.fromisoformat(cast(str, row["end"]))
-        if left >= end or right <= start:
+    intervals: list[NormalizedInterval] = []
+    for interval in data.intervals:
+        if interval.start >= end or interval.end <= start:
             continue
-        clipped = row.copy()
-        if left < start or right > end:
-            clipped.update(
-                original_start=row.get("original_start", row["start"]),
-                original_end=row.get("original_end", row["end"]),
-                start=max(left, start).isoformat(),
-                end=min(right, end).isoformat(),
+        if interval.start < start or interval.end > end:
+            interval = replace(
+                interval,
+                original_start=interval.original_start or interval.start,
+                original_end=interval.original_end or interval.end,
+                start=max(interval.start, start),
+                end=min(interval.end, end),
             )
-        intervals.append(clipped)
-    return replace(data, intervals=intervals)
+        intervals.append(interval)
+    return replace(data, intervals=tuple(intervals))
 
 
 def normalize_payload(
@@ -50,7 +49,7 @@ def normalize_payload(
         raise ProviderError("invalid_provider_endpoint", retryable=False)
     if not isinstance(payload, dict) or not isinstance(payload.get(endpoint), list):
         raise ProviderError("invalid_provider_schema", retryable=False)
-    intervals: list[dict[str, object]] = []
+    intervals: list[NormalizedInterval] = []
     for row in payload[endpoint]:
         if not isinstance(row, dict) or row.get("period") != "PT30M":
             raise ProviderError("invalid_provider_interval", retryable=False)
@@ -69,14 +68,7 @@ def normalize_payload(
             start = end - timedelta(minutes=30)
         except KeyError, TypeError, ValueError, OverflowError:
             raise ProviderError("invalid_provider_interval", retryable=False) from None
-        intervals.append(
-            {
-                "start": start.isoformat(),
-                "end": end.isoformat(),
-                "power_kw": power,
-                "sunlight": "unknown",
-            }
-        )
+        intervals.append(NormalizedInterval(start, end, power))
     try:
         json.dumps(payload, allow_nan=False)
     except TypeError, ValueError:
@@ -84,7 +76,7 @@ def normalize_payload(
     # The Hobby response does not promise an issue timestamp or P50 semantics.
     return ProviderData(
         raw_payload=payload.copy(),
-        intervals=intervals,
+        intervals=tuple(intervals),
         collected_at=collected_at if collected_at is not None else datetime.now(UTC),
         source_kind="forecast" if endpoint == "forecasts" else "estimated_actuals",
     )
@@ -114,7 +106,7 @@ class FixtureProvider(ProviderAdapter, HistoryAdapter):
         start = datetime.combine(target_date, datetime.min.time(), zone).astimezone(UTC)
         stop = datetime.combine(target_date + timedelta(days=1), datetime.min.time(), zone)
         rows: list[dict[str, object]] = []
-        sunlight: list[str] = []
+        sunlight: list[Sunlight] = []
         while start < stop.astimezone(UTC):
             hour = (start + timedelta(minutes=15)).astimezone(zone).hour
             day = 6 <= hour < 18
@@ -128,12 +120,16 @@ class FixtureProvider(ProviderAdapter, HistoryAdapter):
             sunlight.append("day" if day else "night")
             start += timedelta(minutes=30)
         result = normalize_payload({"forecasts": rows, "synthetic": True})
-        for interval, light in zip(result.intervals, sunlight, strict=True):
-            interval["sunlight"] = light
-        return result
+        return replace(
+            result,
+            intervals=tuple(
+                replace(interval, sunlight=light)
+                for interval, light in zip(result.intervals, sunlight, strict=True)
+            ),
+        )
 
     def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
-        intervals: list[dict[str, object]] = []
+        intervals: list[NormalizedInterval] = []
         rows: list[object] = []
         for offset in reversed(range(days)):
             data = self.fetch(binding, target_date - timedelta(days=offset))
@@ -141,7 +137,7 @@ class FixtureProvider(ProviderAdapter, HistoryAdapter):
             rows.extend(cast(list[object], data.raw_payload["forecasts"]))
         return ProviderData(
             {"estimated_actuals": rows, "synthetic": True},
-            intervals,
+            tuple(intervals),
             collected_at=datetime.now(UTC),
             source_kind="estimated_actuals",
         )

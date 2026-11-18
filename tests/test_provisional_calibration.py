@@ -12,6 +12,7 @@ from pyracast.connections.contracts import ProviderData
 from pyracast.epias import TIMEZONE, EpiasDay, EpiasPlant, EpiasReading
 from pyracast.forecasts.jobs import claim, persist_snapshot, publish
 from pyracast.forecasts.models import CollectionJob
+from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
@@ -198,14 +199,16 @@ def test_last_publication_prepares_once_when_seven_daylight_days_become_matched(
         assert lease is not None
         data = ProviderData(
             {"fixture": "estimated_actuals"},
-            [
-                {
-                    "start": (start + timedelta(minutes=30 * step)).isoformat(),
-                    "end": (start + timedelta(minutes=30 * (step + 1))).isoformat(),
-                    "power_kw": 0.4,
-                }
-                for step in range(48)
-            ],
+            NormalizedInterval.from_rows(
+                [
+                    {
+                        "start": (start + timedelta(minutes=30 * step)).isoformat(),
+                        "end": (start + timedelta(minutes=30 * (step + 1))).isoformat(),
+                        "power_kw": 0.4,
+                    }
+                    for step in range(48)
+                ]
+            ),
             collected_at=dispatch,
             source_kind="estimated_actuals",
         )

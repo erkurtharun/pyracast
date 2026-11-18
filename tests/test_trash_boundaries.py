@@ -68,7 +68,7 @@ def test_region_trash_prevents_inflight_publication_and_new_jobs(
     job = CollectionJob.objects.get()
     lease = claim(job.pk, NOW)
     assert lease is not None
-    snapshot = persist_snapshot(lease, ProviderData({}, []), NOW)
+    snapshot = persist_snapshot(lease, ProviderData({}, ()), NOW)
     assert snapshot is not None
     trash_region(system.member, system.tenant.pk, system.region.pk)
     assert not publish(lease, snapshot, {}, NOW)

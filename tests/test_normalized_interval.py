@@ -44,6 +44,7 @@ def test_a_stored_row_without_sunlight_reads_as_unknown() -> None:
     [
         ({"start": None}, "timestamps must be ISO strings"),
         ({"end": 5}, "timestamps must be ISO strings"),
+        ({"start": "2026-11-09T10:00:00"}, "UTC offset"),
         ({"power_kw": "1"}, "power must be numeric"),
         ({"power_kw": True}, "power must be numeric"),
         ({"sunlight": "dusk"}, "sunlight classification"),

@@ -320,8 +320,8 @@ def test_captured_forecast_fixture_preserves_documented_intervals_and_missing_is
     assert normalized.issued_at is None
     assert normalized.raw_payload == payload
     assert len(normalized.intervals) == 97
-    assert normalized.intervals[0]["end"] == "2026-11-09T15:30:00+00:00"
-    assert normalized.intervals[-1]["end"] == "2026-11-11T15:30:00+00:00"
+    assert normalized.intervals[0].end.isoformat() == "2026-11-09T15:30:00+00:00"
+    assert normalized.intervals[-1].end.isoformat() == "2026-11-11T15:30:00+00:00"
     assert all("ghi" not in row for row in payload["forecasts"])
 
 

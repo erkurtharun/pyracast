@@ -175,7 +175,7 @@ def test_a_stored_weather_error_is_read_back_as_its_member() -> None:
 
 class HistoricalFixture(FakeAdapter):
     def fetch_history(self, binding: SiteBinding, target_date: object, days: int) -> ProviderData:
-        return ProviderData({}, [], collected_at=NOW, source_kind="estimated_actuals")
+        return ProviderData({}, (), collected_at=NOW, source_kind="estimated_actuals")
 
 
 @pytest.mark.parametrize(
