@@ -4,7 +4,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, HttpR
 from django.utils.cache import patch_cache_control
 
 from pyracast.accounts.audit import record_security_event
-from pyracast.api.errors import coded, error_json, refuse_in_place, with_error_contract
+from pyracast.api.errors import refuse_in_place, with_error_contract
 from pyracast.errors import ErrorCode
 
 
@@ -18,9 +18,7 @@ class PrivateAPIResponses:
             return response
         if isinstance(response, HttpResponseNotAllowed):
             # Django method guards and allauth views refuse without a body.
-            refusal = error_json(request, lambda: coded(ErrorCode.METHOD_NOT_ALLOWED, 405))
-            refusal["Allow"] = response["Allow"]
-            response = refusal
+            response = refuse_in_place(request, response, ErrorCode.METHOD_NOT_ALLOWED)
         elif isinstance(response, HttpResponseBadRequest) and not response.content:
             # allauth refuses a malformed or non-object JSON body without one.
             response = refuse_in_place(request, response, ErrorCode.BAD_REQUEST)
