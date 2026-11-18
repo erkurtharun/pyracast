@@ -11,7 +11,8 @@ import unicodedata
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-ROLES = {"runtime.env": "pyracast_app", "migration.env": "pyracast_owner"}
+RUNTIME_ROLE = "pyracast_app"
+ROLES = {"runtime.env": RUNTIME_ROLE, "migration.env": "pyracast_owner"}
 # PostgreSQL's default. The client computes the verifier the server would, so the plaintext never
 # reaches the server or its logs.
 ITERATIONS = 4096
@@ -30,6 +31,7 @@ PROHIBITED = (
 VERIFIER = re.compile(
     r"SCRAM-SHA-256\$(\d+):([A-Za-z0-9+/=]+)\$([A-Za-z0-9+/=]+):([A-Za-z0-9+/=]+)"
 )
+MD5_VERIFIER = re.compile(r"md5[0-9a-f]{32}")
 STORED_VERIFIERS = (
     "SELECT rolname || ' ' || coalesce(rolpassword, '') FROM pg_authid "
     "WHERE rolname IN ('pyracast_owner', 'pyracast_app')"
@@ -100,14 +102,18 @@ def password_statements(
     ]
 
 
-def converge_database(release: Path, directory: Path) -> list[str]:
+def role_passwords(directory: Path, names: Mapping[str, str]) -> dict[str, str]:
     passwords = {}
-    for name, role in ROLES.items():
+    for name, role in names.items():
         values = read_environment(directory / name)
         if values.get("PGUSER") != role:
             raise ValueError("Database role names must match the provisioning definition.")
         passwords[role] = values["PGPASSWORD"]
-    psql = [
+    return passwords
+
+
+def psql_command(release: Path) -> list[str]:
+    return [
         "docker",
         "compose",
         "--env-file",
@@ -126,16 +132,19 @@ def converge_database(release: Path, directory: Path) -> list[str]:
         "-d",
         "pyracast",
     ]
+
+
+def stored_verifiers(psql: list[str]) -> dict[str, str | None]:
     listed = subprocess.run(
         [*psql, "-Atc", STORED_VERIFIERS], check=True, capture_output=True, text=True
     )
-    stored = {
+    return {
         role: verifier or None
         for role, _, verifier in (line.partition(" ") for line in listed.stdout.splitlines())
     }
-    changes = password_statements(stored, passwords)
-    statements = (release / "deploy/bootstrap.sql").read_text()
-    statements += "".join(f"{line}\n" for line in changes)
+
+
+def apply(psql: list[str], statements: str) -> None:
     subprocess.run(
         [*psql, "--single-transaction"],
         input=statements,
@@ -143,16 +152,65 @@ def converge_database(release: Path, directory: Path) -> list[str]:
         check=True,
         capture_output=True,
     )
+
+
+def converge_database(release: Path, directory: Path) -> list[str]:
+    # The runtime role's password changes in switch_runtime, once the serving release stopped.
+    passwords = role_passwords(directory, ROLES)
+    del passwords[RUNTIME_ROLE]
+    psql = psql_command(release)
+    changes = password_statements(stored_verifiers(psql), passwords)
+    statements = (release / "deploy/bootstrap.sql").read_text()
+    apply(psql, statements + "".join(f"{line}\n" for line in changes))
     return [change.split()[2] for change in changes]
+
+
+def switch_runtime(release: Path, directory: Path, saved: Path) -> bool:
+    passwords = role_passwords(directory, {"runtime.env": RUNTIME_ROLE})
+    psql = psql_command(release)
+    previous = stored_verifiers(psql).get(RUNTIME_ROLE)
+    changes = password_statements({RUNTIME_ROLE: previous}, passwords)
+    if not changes:
+        return False
+    if not saved.exists():
+        saved.write_text(previous or "")
+    apply(psql, "".join(f"{line}\n" for line in changes))
+    return True
+
+
+def revert_runtime(release: Path, saved: Path) -> bool:
+    if not saved.exists():
+        return False
+    verifier = saved.read_text()
+    if verifier and not (VERIFIER.fullmatch(verifier) or MD5_VERIFIER.fullmatch(verifier)):
+        raise ValueError("The saved runtime password is not a PostgreSQL verifier.")
+    password = f"'{verifier}'" if verifier else "NULL"
+    apply(psql_command(release), f"ALTER ROLE {RUNTIME_ROLE} PASSWORD {password};\n")
+    saved.unlink()
+    return True
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("release", type=Path)
-    parser.add_argument("environment_directory", type=Path)
+    steps = parser.add_subparsers(dest="step", required=True)
+    converge = steps.add_parser("converge")
+    converge.add_argument("release", type=Path)
+    converge.add_argument("environment_directory", type=Path)
+    switch = steps.add_parser("switch-runtime")
+    switch.add_argument("release", type=Path)
+    switch.add_argument("environment_directory", type=Path)
+    switch.add_argument("saved", type=Path)
+    revert = steps.add_parser("revert-runtime")
+    revert.add_argument("release", type=Path)
+    revert.add_argument("saved", type=Path)
     arguments = parser.parse_args()
-    for role in converge_database(arguments.release, arguments.environment_directory):
-        print(role)
+    if arguments.step == "converge":
+        for role in converge_database(arguments.release, arguments.environment_directory):
+            print(role)
+    elif arguments.step == "switch-runtime":
+        switch_runtime(arguments.release, arguments.environment_directory, arguments.saved)
+    else:
+        revert_runtime(arguments.release, arguments.saved)
 
 
 if __name__ == "__main__":

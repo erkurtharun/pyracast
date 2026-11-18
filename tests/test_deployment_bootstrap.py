@@ -291,7 +291,7 @@ def test_converge_applies_the_definition_in_one_transaction_without_plaintext(
     assert script is not None
     assert script.startswith(BOOTSTRAP)
     assert script.count("ALTER ROLE pyracast_owner PASSWORD 'SCRAM-SHA-256$4096:") == 1
-    assert "ALTER ROLE pyracast_app" not in script
+    assert "ALTER ROLE pyracast_app PASSWORD" not in script
     assert "secret" not in script.replace("SECRET", "")
     assert not any("secret" in argument for command, _ in psql.calls for argument in command)
 

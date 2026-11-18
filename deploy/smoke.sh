@@ -101,11 +101,25 @@ mkdir -p "$temporary/deploy"
 "${compose[@]}" config > "$temporary/deploy/compose.yaml"
 : > "$temporary/deploy/release.env"
 cp "$root/deploy/bootstrap.sql" "$temporary/deploy/bootstrap.sql"
-converge=(uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py" "$temporary" "$temporary")
-"${converge[@]}"
-"${converge[@]}"
+bootstrap=(uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py")
+"${bootstrap[@]}" converge "$temporary" "$temporary"
+"${bootstrap[@]}" converge "$temporary" "$temporary"
+"${bootstrap[@]}" switch-runtime "$temporary" "$temporary" "$temporary/runtime-verifier"
+runtime_connects() {
+  "${compose[@]}" run --rm --no-deps api python -c \
+    'import django; django.setup(); from django.db import connection; connection.ensure_connection()'
+}
+runtime_connects
+# A release that switched the runtime password and failed before migrate gives the previous one back.
+mkdir "$temporary/rotated"
+printf 'PGUSER=pyracast_app\nPGPASSWORD=smoke-rotated\n' > "$temporary/rotated/runtime.env"
+"${bootstrap[@]}" switch-runtime "$temporary" "$temporary/rotated" "$temporary/rotated/verifier"
+if runtime_connects; then exit 1; fi
+"${bootstrap[@]}" revert-runtime "$temporary" "$temporary/rotated/verifier"
+test ! -e "$temporary/rotated/verifier"
+runtime_connects
 "${compose[@]}" run --rm --no-deps migrate
-"${converge[@]}"
+"${bootstrap[@]}" converge "$temporary" "$temporary"
 "${compose[@]}" run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING
 "${compose[@]}" up -d --wait --wait-timeout 180
 # The ephemeral CA has no revocation service; Schannel still verifies its chain and hostname.

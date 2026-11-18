@@ -1011,6 +1011,12 @@ def test_smoke_proves_the_maintenance_notice_and_the_restricted_roles() -> None:
     turkish = '"message": "Pyracast g\\u00fcncelleniyor.'
     assert turkish in maintenance.api_body("tr").decode()
     assert f"*'{turkish}'*" in smoke
+    switched = smoke.index('"${bootstrap[@]}" switch-runtime "$temporary" "$temporary/rotated"')
+    refused = smoke.index("if runtime_connects; then exit 1; fi", switched)
+    reverted = smoke.index('"${bootstrap[@]}" revert-runtime "$temporary"', refused)
+    assert smoke.index("\nruntime_connects\n", reverted) < smoke.index(
+        "run --rm --no-deps migrate\n"
+    )
     assert "INSERT INTO django_migrations" in smoke
     assert "== '42501'" in smoke
     assert "no pg_hba.conf entry" in smoke
