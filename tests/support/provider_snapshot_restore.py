@@ -26,6 +26,8 @@ from tests.support.plant_operations import half_hours
 SITE = "SITE-7Q3X"
 OTHER_SITE = "SITE-OTHER-2"
 ZONE = "Europe/Istanbul"
+# The export writes JSON text unescaped, so a payload can hold this line separator.
+SEPARATOR = chr(0x2028)
 # The binding columns that give stored provider numbers their meaning, as the restore compares them.
 SETTINGS = (
     "capacity_kw",
@@ -78,10 +80,19 @@ def acquisition(
     *,
     rows: list[dict[str, Any]] | None = None,
     weather_payload: dict[str, Any] | None = None,
+    note: str | None = None,
 ) -> ForecastSnapshot:
     """A published acquisition as the collection, an import or a normalization stores it."""
     rows = half_hours(start, end, 0.5) if rows is None else rows
     kind = "forecast" if endpoint.endswith("forecasts") else "estimated_actuals"
+    payload: dict[str, Any] = {
+        "forecasts" if kind == "forecast" else "estimated_actuals": [
+            {"period_end": row["end"], "period": "PT30M", "pv_estimate": row["power_kw"]}
+            for row in rows
+        ]
+    }
+    if note is not None:
+        payload["note"] = note
     reference = (
         HistoricalReferenceImport.objects.create(
             binding=binding,
@@ -107,12 +118,7 @@ def acquisition(
     return ForecastSnapshot.objects.create(
         job=job,
         binding=binding,
-        raw_payload={
-            "forecasts" if kind == "forecast" else "estimated_actuals": [
-                {"period_end": row["end"], "period": "PT30M", "pv_estimate": row["power_kw"]}
-                for row in rows
-            ]
-        },
+        raw_payload=payload,
         normalized_intervals=rows,
         collected_at=collected_at,
         issued_at=None,
@@ -156,7 +162,13 @@ def collections_before_reset(system: System) -> BeforeReset:
     rows = half_hours(lookback_start, lookback_end, 0.5)
     rows[-1]["power_kw"] = None
     lookback = acquisition(
-        before, "estimated_actuals", lookback_end, lookback_start, lookback_end, rows=rows
+        before,
+        "estimated_actuals",
+        lookback_end,
+        lookback_start,
+        lookback_end,
+        rows=rows,
+        note="line" + SEPARATOR + "separator",
     )
     night_bounds = (
         (lookback_end, datetime(2026, 11, 5, 21, tzinfo=UTC)),

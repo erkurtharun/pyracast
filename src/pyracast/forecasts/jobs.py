@@ -11,7 +11,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 
-from pyracast.collection_window import NIGHT_RETRY_DELAY
+from pyracast.collection_window import INTRADAY_HISTORY_WINDOW, NIGHT_RETRY_DELAY
 from pyracast.connections.contracts import (
     Calculator,
     HistoryAdapter,
@@ -234,7 +234,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         if job.retry_until is not None:
             job.available_at = now + (
                 LEASE_DURATION
-                if job.retry_until <= job.scheduled_slot + timedelta(minutes=15)
+                if job.retry_until <= job.scheduled_slot + INTRADAY_HISTORY_WINDOW
                 else NIGHT_RETRY_DELAY
             )
         job.save(
@@ -264,7 +264,7 @@ def retry(
         if not retryable:
             job.status = CollectionJobStatus.FAILED
         elif job.retry_until is not None:
-            intraday = job.retry_until <= job.scheduled_slot + timedelta(minutes=15)
+            intraday = job.retry_until <= job.scheduled_slot + INTRADAY_HISTORY_WINDOW
             job.available_at = next_retry_at(
                 now,
                 job.attempts,

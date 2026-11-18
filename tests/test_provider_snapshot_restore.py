@@ -1,3 +1,4 @@
+import gzip
 import io
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -31,6 +32,7 @@ from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
 from tests.support.invariants import archived_rows, rewritten_archive_rows
 from tests.support.provider_snapshot_restore import (
+    SEPARATOR,
     SETTINGS,
     SITE,
     ZONE,
@@ -46,7 +48,7 @@ from tests.support.provider_snapshot_restore import (
     restore_system,
 )
 
-pytestmark = pytest.mark.django_db
+pytestmark = pytest.mark.django_db(transaction=True)
 
 KEY = "test-only-solcast-key"
 
@@ -139,6 +141,8 @@ def test_restored_rows_keep_the_acquisition_and_take_the_live_job_shape(
 
     original = before.lookback
     copy = restored_copy(system.binding, original)
+    assert SEPARATOR.encode() in gzip.decompress(before.content)
+    assert copy.raw_payload["note"] == "line" + SEPARATOR + "separator"
     assert copy.raw_payload == {
         **original.raw_payload,
         "snapshot_restore": {
@@ -605,9 +609,39 @@ def test_an_export_without_live_actuals_has_no_day_report(
     ]
 
 
+def test_a_live_acquisition_without_intervals_keeps_its_missing_coverage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    before = collections_before_reset(system)
+    empty = next(row for row in export_rows(before.content) if row["id"] == before.lookback.pk)
+    empty.update(normalized_intervals=[], coverage_start=None, coverage_end=None)
+
+    summary = restore(system, encode_rows([empty]))
+
+    assert outcomes(summary) == {"estimated_actuals": {"restored": 1}}
+    assert [item.period for item in summary.endpoints] == [None]
+    assert summary.days == ()
+    copy = restored_copy(system.binding, before.lookback)
+    assert (copy.normalized_intervals, copy.coverage_start, copy.coverage_end) == ([], None, None)
+
+
+def test_a_declared_installation_date_matches_the_same_exported_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    SiteBinding.objects.filter(pk=system.binding.pk).update(installation_date=date(2025, 3, 1))
+    system.binding.refresh_from_db()
+    before = collections_before_reset(system)
+    assert {row["binding"]["installation_date"] for row in export_rows(before.content)} == {
+        "2025-03-01"
+    }
+
+    assert restore(system, before.content).restored == 6
+
+
 def test_restored_actuals_request_calibration_preparation_after_commit(
     monkeypatch: pytest.MonkeyPatch,
-    django_capture_on_commit_callbacks: Any,
 ) -> None:
     system = restore_system(monkeypatch)
     plant = create_plant(
@@ -615,23 +649,25 @@ def test_restored_actuals_request_calibration_preparation_after_commit(
     )
     before = collections_before_reset(system)
     observed: list[int] = []
-    monkeypatch.setattr("pyracast.plants.preparation.prepare_calibration", observed.append)
+
+    def prepare(plant_id: int) -> None:
+        assert not connection.in_atomic_block
+        assert restored_count(system) == 6
+        observed.append(plant_id)
+
+    monkeypatch.setattr("pyracast.plants.preparation.prepare_calibration", prepare)
     forecasts = encode_rows(
         [row for row in export_rows(before.content) if row["endpoint"] == "forecasts"]
     )
 
-    with django_capture_on_commit_callbacks(execute=True) as callbacks:
-        restore(system, before.content, dry_run=True)
-        restore(system, forecasts)
-    assert callbacks == []
-    with django_capture_on_commit_callbacks(execute=True) as callbacks:
-        restore(system, before.content)
-    assert len(callbacks) == 1
+    restore(system, before.content, dry_run=True)
+    restore(system, forecasts)
+    assert observed == []
+    restore(system, before.content)
     assert observed == [plant.pk]
     assert not ForecastIssuance.objects.exists()
 
 
-@pytest.mark.django_db(transaction=True)
 def test_concurrent_restores_store_each_snapshot_once(monkeypatch: pytest.MonkeyPatch) -> None:
     system = restore_system(monkeypatch)
     before = collections_before_reset(system)
@@ -727,12 +763,36 @@ def test_command_restores_from_standard_input_and_prints_no_site_or_secret(
         if record.name == "pyracast.forecasts.snapshot_restore"
     ]
     assert messages == [
-        f"provider_snapshots_restored binding_id={system.binding.pk} dry_run={dry_run} "
+        f"provider_snapshot_restore_finished binding_id={system.binding.pk} dry_run={dry_run} "
         f"restored={restored} skipped={skipped} export_sha256={digest}"
         for dry_run, restored, skipped in ((True, 6, 3), (False, 6, 3), (False, 0, 9))
     ]
     assert SITE not in pyracast_logs.text
     assert KEY not in pyracast_logs.text
+
+
+def test_command_reports_forecasts_alone_without_a_day_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    system = restore_system(monkeypatch)
+    before = collections_before_reset(system)
+    path = tmp_path / "forecasts.jsonl.gz"
+    path.write_bytes(
+        encode_rows([row for row in export_rows(before.content) if row["endpoint"] == "forecasts"])
+    )
+    output = StringIO()
+
+    call_command(
+        "restore_provider_snapshots",
+        *command_arguments(system, str(path)),
+        "--dry-run",
+        stdout=output,
+    )
+
+    assert output.getvalue().splitlines()[1:] == [
+        "forecasts: 2 to restore; covers 2026-11-04T21:00:00+00:00 to 2026-11-08T21:00:00+00:00.",
+        "Dry run: nothing was written.",
+    ]
 
 
 def test_command_reports_refusals_without_writing(

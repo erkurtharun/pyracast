@@ -579,8 +579,8 @@ observations, EPIAS data, calibrations, outages, change requests, reminders, aud
 events and rate-limit counters. The owner enters the provider account again and
 customers sign up again; if the provider key was used that UTC day, the first plant
 is approved the next day. **What is kept:** host configuration, Secret Manager
-secrets, certificates, and the archive and Solcast export of step 1 (nothing is loaded
-back from the export). A restore starts the release in
+secrets, certificates, and the archive and Solcast export of step 1; step 9 loads the
+export's live Solcast collections back. A restore starts the release in
 `/opt/pyracast/current` only after its `migrate --check` passes on the restored data.
 
 Run each command on the VM through IAP after `sudo -i`, inside `tmux`. A dry run of
@@ -615,7 +615,7 @@ verification and restart on the real host in about five minutes of downtime.
    `==> Checking that the release in /opt/pyracast/current has every migration it needs applied`,
    `==> Starting the release in /opt/pyracast/current` and
    `The previous release serves again and the marker is removed.` After a dry run,
-   copy and verify its archive as in step 3 before deleting it in step 9.
+   copy and verify its archive as in step 3 before deleting it in step 10.
 3. Copy both objects, the archive and the Solcast export, off the host and out of
    the bucket's seven-day lifecycle, on your own machine:
    `gcloud storage cp gs://BUCKET/OBJECT gs://BUCKET/EXPORT .`, then check that
@@ -665,12 +665,29 @@ verification and restart on the real host in about five minutes of downtime.
    service" above.
 8. The watchdog may report `last_verified_backup_older_than_90_minutes` once after
    a long maintenance, until the next hourly backup.
-9. Once your off-host copies show the printed SHA-256 values, delete the archives
-   and exports on the host; they hold every erased row:
+9. The provider's live endpoint reaches back only seven days. Once the plant's Solcast
+   binding is approved again with the same site and settings and its historical file is
+   imported, restore the export's live collections from `/opt/pyracast/current`, first
+   with `--dry-run`, then without it (`EXPORT` is the export of step 1 or your copy):
 
    ```bash
-   rm -rf /var/lib/pyracast/reset
+   docker compose --env-file deploy/release.env -f deploy/compose.yaml exec -T api \
+     pyracast restore_provider_snapshots --username YOUR_ADMIN --tenant-id TENANT \
+     --region-id REGION --binding-id BINDING --export - --dry-run < EXPORT
    ```
+
+   Each forecast and estimated-actuals snapshot of that site becomes a native
+   collection of the binding at its original collection time. The summary names per
+   endpoint what is restored or skipped and why, and per local day whether native
+   estimated actuals are complete. A differing setting refuses the whole run; a second
+   run adds nothing. Imports and scaled copies are skipped: import their source file
+   again.
+10. Once your off-host copies show the printed SHA-256 values, delete the archives
+    and exports on the host; they hold every erased row:
+
+    ```bash
+    rm -rf /var/lib/pyracast/reset
+    ```
 
 An interrupted `prepare` is recovered with `abort`, then `prepare` again; running
 `prepare` while the marker exists refuses and names that `abort`. An interrupted
