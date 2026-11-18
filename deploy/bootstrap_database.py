@@ -31,14 +31,13 @@ PROHIBITED = (
 VERIFIER = re.compile(
     r"SCRAM-SHA-256\$(\d+):([A-Za-z0-9+/=]+)\$([A-Za-z0-9+/=]+):([A-Za-z0-9+/=]+)"
 )
-# psql sends each statement on its own, so these take effect before an ALTER ROLE arrives: the
-# server logs no text of it, not even when it fails, and no verifier reaches the server log.
+# Startup options of the psql session: they hold before its first transaction, whose sampling
+# PostgreSQL decides at BEGIN, so no statement text, parse tree or failing statement with a
+# verifier reaches the server log, whatever the server configuration sets.
 UNLOGGED = (
-    "SET log_statement = 'none';\n"
-    "SET log_min_error_statement = 'panic';\n"
-    "SET log_min_duration_statement = -1;\n"
-    "SET log_min_duration_sample = -1;\n"
-    "SET log_transaction_sample_rate = 0;\n"
+    "-c log_statement=none -c log_min_error_statement=panic -c log_min_duration_statement=-1 "
+    "-c log_min_duration_sample=-1 -c log_transaction_sample_rate=0 -c debug_print_parse=off "
+    "-c debug_print_rewritten=off -c debug_print_plan=off"
 )
 STORED_VERIFIERS = (
     "SELECT rolname || ' ' || coalesce(rolpassword, '') FROM pg_authid "
@@ -110,10 +109,6 @@ def password_statements(
     ]
 
 
-def password_script(changes: list[str]) -> str:
-    return UNLOGGED + "".join(f"{line}\n" for line in changes) if changes else ""
-
-
 def role_passwords(directory: Path, names: Mapping[str, str]) -> dict[str, str]:
     passwords = {}
     for name, role in names.items():
@@ -142,7 +137,7 @@ def psql_command(release: Path) -> list[str]:
         "-U",
         "postgres",
         "-d",
-        "pyracast",
+        f"dbname=pyracast options='{UNLOGGED}'",
     ]
 
 
@@ -173,7 +168,7 @@ def converge_database(release: Path, directory: Path) -> list[str]:
     psql = psql_command(release)
     changes = password_statements(stored_verifiers(psql), passwords)
     statements = (release / "deploy/bootstrap.sql").read_text()
-    apply(psql, statements + password_script(changes))
+    apply(psql, statements + "".join(f"{change}\n" for change in changes))
     return [change.split()[2] for change in changes]
 
 
@@ -182,7 +177,7 @@ def switch_runtime(release: Path, directory: Path) -> bool:
     psql = psql_command(release)
     changes = password_statements(stored_verifiers(psql), passwords)
     if changes:
-        apply(psql, password_script(changes))
+        apply(psql, "".join(f"{change}\n" for change in changes))
     return bool(changes)
 
 
