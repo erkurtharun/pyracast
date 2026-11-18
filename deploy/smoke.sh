@@ -101,10 +101,11 @@ mkdir -p "$temporary/deploy"
 "${compose[@]}" config > "$temporary/deploy/compose.yaml"
 : > "$temporary/deploy/release.env"
 cp "$root/deploy/bootstrap.sql" "$temporary/deploy/bootstrap.sql"
-uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py" "$temporary" --environment-directory "$temporary"
-# Bootstrap must also succeed on an initialized database.
-uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py" "$temporary" --environment-directory "$temporary"
+converge=(uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py" "$temporary" "$temporary")
+"${converge[@]}"
+"${converge[@]}"
 "${compose[@]}" run --rm --no-deps migrate
+"${converge[@]}"
 "${compose[@]}" run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING
 "${compose[@]}" up -d --wait --wait-timeout 180
 # The ephemeral CA has no revocation service; Schannel still verifies its chain and hostname.
@@ -193,6 +194,7 @@ with translation.override("tr"):
 import os
 import time
 import django
+import psycopg
 django.setup()
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
@@ -215,6 +217,20 @@ except ProgrammingError:
     pass
 else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission')
+try:
+    with connection.cursor() as cursor:
+        cursor.execute("INSERT INTO django_migrations (app, name, applied) VALUES ('smoke', 'smoke', now())")
+except ProgrammingError:
+    pass
+else:
+    raise SystemExit('Runtime role can write the migration ledger')
+try:
+    psycopg.connect(host='postgres', dbname='pyracast', user='postgres',
+                    password='smoke-bootstrap-only', connect_timeout=5).close()
+except psycopg.OperationalError as error:
+    assert 'no pg_hba.conf entry' in str(error), error
+else:
+    raise SystemExit('The PostgreSQL superuser can sign in over TCP')
 actor = User.objects.create_superuser(username='container-smoke', email='smoke@example.com',
                                       password='container-smoke-password')
 EmailAddress.objects.create(user=actor, email=actor.email, primary=True, verified=True)
@@ -327,12 +343,20 @@ raise SystemExit(reset_database.main([str(temporary / 'host.json'), *sys.argv[3:
 PY
 reset_tool=(uv run --no-project --python 3.15.2 python "$temporary/reset_tool.py" "$root" "$temporary")
 application_running() {
-  "${compose[@]}" ps --services --status running gateway api web dispatcher worker notifications
+  "${compose[@]}" ps --services --status running api web dispatcher worker notifications
 }
 ready() { [[ $("${secure_curl[@]}" https://localhost:18443/health/ready/) == ok ]]; }
 "${reset_tool[@]}" prepare
 test -f "$temporary/release-blocked"
 [[ -z $(application_running) ]]
+# The gateway answers with the maintenance notice while the application is stopped.
+[[ $("${tls_curl[@]}" -H 'Accept: text/html' --dump-header "$temporary/notice.headers" \
+  --output "$temporary/notice.html" --write-out '%{http_code}' https://localhost:18443/app/) == 503 ]]
+grep -qi '^retry-after: 60' "$temporary/notice.headers"
+grep -qF '<title>Pyracast maintenance</title>' "$temporary/notice.html"
+[[ $("${tls_curl[@]}" --output "$temporary/notice.json" --write-out '%{http_code}' \
+  https://localhost:18443/api/session/) == 503 ]]
+[[ $(<"$temporary/notice.json") == '{"code": "maintenance"}' ]]
 "${reset_tool[@]}" abort
 test ! -e "$temporary/release-blocked"
 ready
@@ -376,7 +400,7 @@ PY
 # A release that fails after maintenance began leaves the application stopped; restore recovers it.
 "${compose[@]}" stop -t 660 dispatcher
 "${compose[@]}" stop -t 660 worker notifications
-"${compose[@]}" stop -t 100 gateway api web
+"${compose[@]}" stop -t 100 api web
 "${reset_tool[@]}" restore --confirm "$object"
 test ! -e "$temporary/release-blocked"
 ready
@@ -400,4 +424,4 @@ except ProgrammingError:
 else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission after the restore')
 PY
-echo 'Production containers, TLS routing, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles, fixture queue publication, graceful idle shutdown, and database reset and restore passed.'
+echo 'Production containers, TLS routing, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles and access rules, fixture queue publication, graceful idle shutdown, the maintenance notice, and database reset and restore passed.'

@@ -16,6 +16,7 @@ import pytest
         "pin_release_images.py",
         "release_record.py",
         "release_scope.py",
+        "release_state.py",
         "reset_database.py",
         "runtime_secrets.py",
         "watchdog.py",

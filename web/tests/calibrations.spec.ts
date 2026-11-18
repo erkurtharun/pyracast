@@ -196,6 +196,31 @@ test("detail and activation errors remain independent", async ({ page }) => {
     await expect(page.getByText("Activation failed")).toBeVisible();
 });
 
+test("a release in progress shows the maintenance notice instead of a failure", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/plants/21/calibrations/", (route) =>
+        route.fulfill({ json: paged([run(40)]) }),
+    );
+    await page.route("**/plants/21/calibrations/40/activate/", (route) =>
+        route.fulfill({
+            status: 503,
+            headers: { "Retry-After": "60" },
+            json: { code: "maintenance" },
+        }),
+    );
+    await openCalibration(page);
+    await page.getByRole("button", { name: "Activate", exact: true }).click();
+    await expect(
+        page.getByText(
+            "Pyracast is being updated. Try again in a minute; your data is safe.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+    await expect(page.getByText(/Request failed/)).toHaveCount(0);
+});
+
 test("automatic calibration can be enabled before a fit and disabled without resetting", async ({
     page,
 }) => {

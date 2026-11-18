@@ -163,7 +163,7 @@ def test_mfa_and_admin_read_only_boundaries(customer: tuple[Client, User, Tenant
         (ObjectDoesNotExist(), 404),
         (ValidationError("invalid"), 400),
         (QuotaExceededError(), 429),
-        (ProviderError("secret"), 502),
+        (ProviderError("secret"), 503),
         (APIValidationError("invalid"), 400),
     ],
 )
