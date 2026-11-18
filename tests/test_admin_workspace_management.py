@@ -220,51 +220,56 @@ def test_workspace_creation_invites_its_administrator_in_the_chosen_language() -
     assert "Invitation pending" in html
 
 
-def test_workspace_name_violations_are_form_errors_that_keep_the_values(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_workspace_creation_allows_a_name_another_workspace_already_has() -> None:
+    client, operator = verified_admin()
+    existing = Tenant.objects.create(name="Shared workspace")
+    response = client.post(
+        "/admin/workspaces/new/",
+        {"name": " Shared workspace ", "administrator_email": "boss@example.com", "language": "en"},
+    )
+    assert response.status_code == 302
+    created = Tenant.objects.exclude(pk=existing.pk).get()
+    assert created.name == existing.name
+    assert response["Location"] == f"/admin/workspaces/{created.pk}/"
+    invitation = WorkspaceInvitation.objects.get()
+    assert (invitation.tenant, invitation.email, invitation.role) == (
+        created,
+        "boss@example.com",
+        WorkspaceRole.ADMIN,
+    )
+    entry = LogEntry.objects.get()
+    assert (entry.object_id, entry.action_flag, entry.user) == (str(created.pk), ADDITION, operator)
+    assert Tenant.objects.count() == 2
+
+
+def test_a_blank_workspace_name_is_a_field_error_and_keeps_the_other_values() -> None:
     client, _ = verified_admin()
-    Tenant.objects.create(name="Taken")
-    values = {"name": " TAKEN ", "administrator_email": "boss@example.com", "language": "en"}
-    taken = client.post("/admin/workspaces/new/", values)
-    assert taken.status_code == 400
-    html = taken.content.decode()
-    assert "This workspace name is already in use." in html
+    response = client.post(
+        "/admin/workspaces/new/",
+        {"name": "   ", "administrator_email": "boss@example.com", "language": "en"},
+    )
+    assert response.status_code == 400
+    html = response.content.decode()
+    assert "This field is required." in html
     assert 'value="boss@example.com"' in html
     assert "data-error-summary" in html
     assert 'href="#id_name"' in html
-    blank = client.post("/admin/workspaces/new/", {**values, "name": "   "})
-    assert blank.status_code == 400
-    assert "This field is required." in blank.content.decode()
-
-    monkeypatch.setattr(
-        "pyracast.admin_tenants.WorkspaceForm.validate_constraints", lambda form: None
-    )
-    raced = client.post("/admin/workspaces/new/", values)
-    assert raced.status_code == 400
-    assert "This workspace name is already in use." in raced.content.decode()
-    monkeypatch.setattr(Tenant, "validate_constraints", lambda tenant, exclude=None: None)
-    collided = client.post("/admin/workspaces/new/", values)
-    assert collided.status_code == 400
-    assert "The change collided with another change. Try again." in collided.content.decode()
-    assert Tenant.objects.count() == 1
+    assert not Tenant.objects.exists()
     assert not WorkspaceInvitation.objects.exists()
     assert not LogEntry.objects.exists()
 
 
-def test_workspace_rename_is_logged_and_refuses_a_stale_page() -> None:
+def test_workspace_rename_allows_a_shared_name_is_logged_and_refuses_a_stale_page() -> None:
     tenant, _, _ = workspace()
-    Tenant.objects.create(name="Taken")
+    existing = Tenant.objects.create(name="Sunny workspace")
     client, operator = verified_admin()
     url = f"/admin/workspaces/{tenant.pk}/name/"
     assert client.get(url).content.decode().count('value="Solar workspace"') == 2
-    taken = client.post(url, {"name": "taken", "expected_name": "Solar workspace"})
-    assert taken.status_code == 400
-    assert "This workspace name is already in use." in taken.content.decode()
     renamed = client.post(url, {"name": "Sunny workspace", "expected_name": "Solar workspace"})
     assert renamed.status_code == 302
     assert renamed["Location"] == f"/admin/workspaces/{tenant.pk}/"
-    assert Tenant.objects.get(pk=tenant.pk).name == "Sunny workspace"
+    assert Tenant.objects.get(pk=tenant.pk).name == existing.name
+    assert Tenant.objects.filter(name="Sunny workspace").count() == 2
     entry = LogEntry.objects.get()
     assert (entry.action_flag, entry.user, entry.change_message) == (
         CHANGE,
@@ -351,9 +356,7 @@ def test_invitation_refusals_are_form_errors_that_keep_the_values() -> None:
     assert client.post(url, {"email": "guest@example.com", "language": "en"}).status_code == 302
     limited = client.post(url, {"email": "guest@example.com", "language": "en"})
     assert limited.status_code == 400
-    assert "Too many invitations were sent. Wait a minute and try again." in (
-        limited.content.decode()
-    )
+    assert "Too many invitations were sent. Try again later." in (limited.content.decode())
     assert WorkspaceInvitation.objects.count() == 1
 
 

@@ -50,7 +50,7 @@ def test_invitation_role_migration_keeps_existing_invitations_as_viewer_invitati
         created_by=sender,
         expires_at=timezone.now() + timedelta(days=1),
     )
-    MigrationExecutor(connection).migrate([("accounts", "0001_initial")])
+    MigrationExecutor(connection).migrate([("accounts", "0002_workspace_names_need_not_be_unique")])
     assert "role" not in _columns()
 
     MigrationExecutor(connection).migrate(MigrationExecutor(connection).loader.graph.leaf_nodes())

@@ -1,3 +1,5 @@
+import json
+import logging
 from collections.abc import Callable
 
 import pytest
@@ -8,6 +10,7 @@ from django.core.exceptions import PermissionDenied
 from django.test import Client
 from django.utils import timezone
 
+from pyracast.accounts.audit import logger
 from pyracast.accounts.invitations import accept_workspace_invitation, invite_workspace_member
 from pyracast.accounts.models import (
     Membership,
@@ -122,7 +125,11 @@ def test_accepting_an_administrator_invitation_raises_an_existing_viewer(
 
 def test_an_administrator_invitation_is_unavailable_once_the_workspace_has_an_administrator(
     unadministered: tuple[Tenant, User],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(logger, "handlers", [caplog.handler])
+    caplog.set_level(logging.INFO, logger="pyracast.security")
     tenant, platform = unadministered
     invite_workspace_member(
         platform, tenant.pk, "late@example.com", role=WorkspaceRole.ADMIN, platform=True
@@ -137,6 +144,22 @@ def test_an_administrator_invitation_is_unavailable_once_the_workspace_has_an_ad
     assert not Membership.objects.filter(user=late).exists()
     assert WorkspaceInvitation.objects.get().accepted_at is None
     assert not WorkspaceAdminChange.objects.exists()
+    denied = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.name == "pyracast.security"
+        and json.loads(record.message)["event"] == "invitation_denied"
+    ]
+    assert denied == [
+        {
+            "event": "invitation_denied",
+            "user_id": late.pk,
+            "client_ip": None,
+            "tenant_id": tenant.pk,
+            "target_id": WorkspaceInvitation.objects.get().pk,
+            "reason": "administrator_exists",
+        }
+    ]
 
 
 def outcome(operation: Callable[[], object]) -> Callable[[], str]:
