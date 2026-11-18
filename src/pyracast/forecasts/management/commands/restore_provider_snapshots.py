@@ -33,6 +33,7 @@ REMEDIES = {
 }
 PHRASES = {
     Outcome.ALREADY_RESTORED: "already restored",
+    Outcome.OPEN_AT_APPROVAL: "skipped, retry window still open at approval",
     Outcome.SLOT_TAKEN: "skipped, slot held by another collection",
     Outcome.OTHER_PROVIDER: "skipped, another provider",
 }

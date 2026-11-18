@@ -80,6 +80,7 @@ class RestoreRefusedError(ValidationError):
 class Outcome(StrEnum):
     RESTORED = "restored"
     ALREADY_RESTORED = "already_restored"
+    OPEN_AT_APPROVAL = "open_at_approval"
     SLOT_TAKEN = "slot_taken"
     OTHER_PROVIDER = "other_provider"
     NOT_LIVE = "not_live"
@@ -498,7 +499,11 @@ def _restore_rows(
     }
     for item in acquisitions:
         key = (item.row.endpoint, item.job.scheduled_slot)
-        if key in restored:
+        # A retry window still open at approval belongs to the binding's own schedule: the
+        # scheduler's nightly lookup would take a restored job of it for tonight's collection.
+        if item.job.retry_until is not None and item.job.retry_until > approval_slot:
+            outcome = Outcome.OPEN_AT_APPROVAL
+        elif key in restored:
             outcome = Outcome.ALREADY_RESTORED
         elif key in taken:
             outcome = Outcome.SLOT_TAKEN
