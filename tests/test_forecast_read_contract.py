@@ -234,14 +234,50 @@ def test_each_forecast_read_sends_exactly_its_envelope(monkeypatch: pytest.Monke
     assert archived["snapshot_id"] == snapshot.pk
 
 
+def documented(name: str) -> tuple[set[str], set[str]]:
+    component = json.loads(OPENAPI.read_text(encoding="utf-8"))["components"]["schemas"][name]
+    return set(component.get("required", ())), set(component["properties"])
+
+
+def test_the_performance_read_sends_exactly_its_documented_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
+    client = client_for(system.member)
+    period = {"start_date": DAY.isoformat(), "end_date": DAY.isoformat()}
+    required, declared = documented("PerformanceOutput")
+    day_required, day_declared = documented("PerformanceDay")
+    for comparison in ("archived_forecast", "historical_model"):
+        response = client.get(
+            plant_path(system, plant, "performance"), {**period, "comparison": comparison}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body) == required == declared
+        assert body["timezone"] == system.binding.timezone
+        assert body["plant_id"] == plant.pk
+        assert [day["date"] for day in body["days"]] == [DAY.isoformat()]
+        assert day_required <= set(body["days"][0]) <= day_declared
+
+
 def test_forecast_envelopes_share_one_documented_vocabulary() -> None:
     schema = json.loads(OPENAPI.read_text(encoding="utf-8"))
     components = schema["components"]["schemas"]
     region, plant = components["ForecastOutput"], components["PlantForecastOutput"]
+    performance = components["PerformanceOutput"]
     assert set(region["properties"]) == REGION_ENVELOPE
     assert set(plant["properties"]) == PLANT_ENVELOPE | {"issuance_id", "snapshot_id"}
     for field in ENVELOPE:
         assert region["properties"][field] == plant["properties"][field]
+    assert set(performance["properties"]) & set(plant["properties"]) == {
+        "timezone",
+        "plant_id",
+        "configuration_id",
+    }
+    for field in ("timezone", "plant_id", "configuration_id"):
+        assert performance["properties"][field] == plant["properties"][field]
     assert components[region["properties"]["freshness"]["$ref"].rsplit("/", 1)[1]]["enum"] == [
         "fresh",
         "stale",

@@ -62,10 +62,13 @@ def test_each_user_has_a_budget_of_their_own() -> None:
 
 def test_refused_requests_spend_no_budget() -> None:
     system = make_system()
-    outsider = signed_in(User.objects.create_user(username="outsider"))
+    user = User.objects.create_user(username="outsider")
+    client = signed_in(user)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
     params = {"date": timezone.now().date().isoformat()}
     with one_forecast_a_minute():
-        assert outsider.get(path, params).status_code == 403
-        assert outsider.get(path, params).status_code == 403
-        assert signed_in(system.member).get(path, params).status_code == 200
+        assert client.get(path, params).status_code == 403
+        assert client.get(path, params).status_code == 403
+        Membership.objects.create(user=user, tenant=system.tenant, role=WorkspaceRole.VIEWER)
+        assert client.get(path, params).status_code == 200
+        assert client.get(path, params).status_code == 429
