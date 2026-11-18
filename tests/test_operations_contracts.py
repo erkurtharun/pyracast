@@ -495,9 +495,7 @@ def test_each_router_admits_its_largest_body_and_the_smoke_probes_one_byte_over(
         (routed_router(path), int(size))
         for size, path in re.findall(r"\$\(too_large (\d+) (\S+)\)", smoke)
     }
-    assert probed == {(router, body_limit(router) + 1) for router in routers()} - {
-        ("authentication", body_limit("authentication") + 1)
-    }
+    assert probed == {(router, body_limit(router) + 1) for router in routers()}
 
 
 def test_ci_job_names_apply_matrix_include_and_exclude() -> None:
@@ -1155,14 +1153,22 @@ def test_every_router_limits_each_client_by_the_address_the_edge_appended() -> N
     assert per_second(middleware("authentication-rate")["rateLimit"]) < per_second(
         middleware("client-rate")["rateLimit"]
     )
-    assert middleware("client-in-flight")["inFlightReq"]["amount"] > 0
+    amount = middleware("client-in-flight")["inFlightReq"]["amount"]
+    assert f"--env IN_FLIGHT={amount} header-probe" in text(DEPLOY / "smoke.sh")
     assert routers()["authentication"]["priority"] > routers()["api"]["priority"]
 
 
 def test_a_body_over_the_api_limit_is_refused_with_the_api_error_body() -> None:
     errors = middleware("api-refusals")["errors"]
+    smoke = text(DEPLOY / "smoke.sh")
+    body = '{"code": "request_too_large", "message": "The request is too large to be accepted."}'
 
     assert errors == {"status": ["413"], "service": "maintenance", "query": "/api/413"}
+    for path in ("/api/session/", "/api/auth/browser/v1/config"):
+        assert (
+            f"[[ $(too_large {body_limit('api') + 1} {path}) == 413 ]]\n"
+            f"[[ $(<\"$temporary/too-large\") == '{body}' ]]\n"
+        ) in smoke, path
     assert not [
         name
         for name, router in routers().items()
@@ -1231,6 +1237,14 @@ def test_the_origin_requires_the_edge_certificate_only_once_the_host_names_its_a
     assert re.search(r'variable "origin_pull_ca" \{.*?default\s*=\s*""', variables, re.S)
     assert "ORIGIN_PULL=required" in smoke
     assert smoke.index("ORIGIN_PULL=required") > smoke.index("restore --confirm")
+    required = smoke[smoke.index("ORIGIN_PULL=required") :]
+    proven = required.index('"${edge[@]}" https://localhost:18443/health/ready/) == ok ]]')
+    assert proven < required.index("\nrefused_handshake\n")
+    assert proven < required.index('\nrefused_handshake "${stranger[@]}"\n')
+    assert required.rindex('"${edge[@]}" https://localhost:18443/health/ready/) == ok ]]') > (
+        required.index('\nrefused_handshake "${stranger[@]}"\n')
+    )
+    assert "[[ $status == 35 || $status == 56 ]]" in smoke
 
 
 def test_the_prerelease_backup_proves_it_runs_under_the_installers_lock() -> None:

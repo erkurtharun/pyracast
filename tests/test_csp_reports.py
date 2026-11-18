@@ -31,11 +31,13 @@ def test_both_policies_report_their_violations_to_the_endpoint() -> None:
     assert settings.SECURE_CSP["report-uri"] == [URL]
 
 
-def test_a_report_uri_violation_is_logged_without_paths_or_queries(logged: Logged) -> None:
+def test_a_report_uri_violation_is_logged_by_origin_and_first_path_segment(
+    logged: Logged,
+) -> None:
     report = {
         "csp-report": {
-            "document-uri": "https://pyracast.example/invitations/accept/?key=secret#x",
-            "blocked-uri": "https://cdn.example/script.js?token=secret",
+            "document-uri": "https://user:secret@pyracast.example/invitations/accept/?key=secret#x",
+            "blocked-uri": "https://user:secret@cdn.example/script.js?token=secret",
             "effective-directive": "script-src-elem",
             "violated-directive": "script-src-elem",
             "disposition": "enforce",
@@ -49,10 +51,57 @@ def test_a_report_uri_violation_is_logged_without_paths_or_queries(logged: Logge
             "event": "csp_violation",
             "directive": "script-src-elem",
             "blocked": "https://cdn.example",
-            "document": "/invitations/accept/",
+            "document": "/invitations/",
             "disposition": "enforce",
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("blocked", "origin"),
+    [
+        ("https://cdn.example:8443/x", "https://cdn.example:8443"),
+        ("https://user:secret@CDN.example:8443/x", "https://cdn.example:8443"),
+        ("https://[2001:db8::1]:8443/x", "https://[2001:db8::1]:8443"),
+        ("wss://user@socket.example/x", "wss://socket.example"),
+    ],
+)
+def test_a_blocked_url_is_logged_as_its_origin_without_credentials(
+    logged: Logged, blocked: str, origin: str
+) -> None:
+    report = {"csp-report": {"effective-directive": "connect-src", "blocked-uri": blocked}}
+
+    assert post(report) == 204
+    assert [entry["blocked"] for entry in logged()] == [origin]
+
+
+@pytest.mark.parametrize(
+    ("document", "route"),
+    [
+        ("https://pyracast.example/", "/"),
+        ("https://pyracast.example/app", "/app/"),
+        ("https://pyracast.example/admin/regions/region/3/change/", "/admin/"),
+        ("https://pyracast.example/reset/key/secret-token/", "/reset/"),
+        ("about:blank", ""),
+        ("https://[", ""),
+        ("https://[x]/", ""),
+    ],
+)
+def test_a_document_is_logged_by_its_first_path_segment(
+    logged: Logged, document: str, route: str
+) -> None:
+    report = {"csp-report": {"effective-directive": "img-src", "document-uri": document}}
+
+    assert post(report) == 204
+    assert [entry["document"] for entry in logged()] == [route]
+
+
+@pytest.mark.parametrize("url", ["https://[", "https://[x]/", "https://cdn.example:port/"])
+def test_a_malformed_blocked_url_is_logged_as_unreadable(logged: Logged, url: str) -> None:
+    report = {"csp-report": {"effective-directive": "img-src", "blocked-uri": url}}
+
+    assert post(report) == 204
+    assert [entry["blocked"] for entry in logged()] == [""]
 
 
 def test_reporting_api_batches_log_only_their_csp_violations(logged: Logged) -> None:

@@ -113,6 +113,31 @@ def test_ci_scans_all_five_images_before_merge() -> None:
     assert not (ROOT / "deploy" / "scan-support.sh").exists()
 
 
+def test_the_serialized_deploy_cancels_a_release_main_moved_past_just_before_the_transfer() -> None:
+    deploy = release_jobs()["deploy"]
+    steps = deploy["steps"]
+    read = step(deploy, "Read the current main commit")
+    current = step(deploy, "Decide whether main has moved past this release")
+    cancel = step(deploy, "Cancel a release that main has moved past")
+    transfer = step(deploy, TRANSFER)
+
+    assert "getBranch" in read["with"]["script"]
+    assert current["env"] == {"MAIN_SHA": "${{ steps.main.outputs.sha }}"}
+    assert current["run"] == (
+        'python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA"'
+    )
+    assert cancel["if"] == "steps.current.outputs.current != 'true'"
+    assert "cancelWorkflowRun" in cancel["with"]["script"]
+    assert "core.setFailed" in cancel["with"]["script"]
+    assert [steps.index(read), steps.index(current), steps.index(cancel)] == [
+        steps.index(transfer) - 3,
+        steps.index(transfer) - 2,
+        steps.index(transfer) - 1,
+    ]
+    assert "if" not in transfer
+    assert deploy["permissions"]["actions"] == "write"
+
+
 def test_the_installer_runs_in_a_transient_unit_that_the_job_only_follows() -> None:
     deploy = release_jobs()["deploy"]
     transfer = step(deploy, TRANSFER)["run"]
@@ -148,12 +173,12 @@ def test_the_migration_secret_version_is_pinned_when_configured_and_numeric() ->
     )
 
 
-def test_the_public_origin_is_probed_after_the_install_once_configured() -> None:
+def test_every_release_probes_the_public_origin_or_warns_that_none_is_set() -> None:
     deploy = release_jobs()["deploy"]
     probe = step(deploy, "Probe the public origin through the edge")
     outputs = (ROOT / "infra" / "terraform" / "outputs.tf").read_text(encoding="utf-8")
 
-    assert probe["if"] == "vars.PYRACAST_PUBLIC_ORIGIN != ''"
+    assert "if" not in probe
     assert probe["env"] == {"PYRACAST_PUBLIC_ORIGIN": "${{ vars.PYRACAST_PUBLIC_ORIGIN }}"}
     assert probe["run"] == 'python3 deploy/probe_origin.py "$PYRACAST_PUBLIC_ORIGIN"'
     assert deploy["steps"].index(probe) > deploy["steps"].index(step(deploy, TRANSFER))

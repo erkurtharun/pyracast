@@ -128,6 +128,20 @@ def test_main_fails_a_broken_origin(
     assert capsys.readouterr().err == "The public origin failed its probe: /app/ answered 500\n"
 
 
+def test_main_warns_that_an_unset_origin_was_not_probed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fetch(url: str) -> tuple[int, bytes]:
+        raise AssertionError(url)
+
+    monkeypatch.setattr(probe_origin, "fetch", fetch)
+
+    assert probe_origin.main([""]) == 0
+    assert capsys.readouterr().out == (
+        "::warning::PYRACAST_PUBLIC_ORIGIN is not set; the public origin was not probed.\n"
+    )
+
+
 def test_main_refuses_an_invalid_origin(capsys: pytest.CaptureFixture[str]) -> None:
     assert probe_origin.main(["http://pyracast.example"]) == 2
     assert "PYRACAST_PUBLIC_ORIGIN" in capsys.readouterr().err
