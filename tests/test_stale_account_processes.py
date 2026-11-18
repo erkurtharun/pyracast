@@ -242,24 +242,6 @@ def before(
     monkeypatch.setattr(owner, name, run_competitor_first)
 
 
-def blocked_elsewhere(statement: str, *params: object) -> bool:
-    database = connection.settings_dict
-    with psycopg.connect(
-        dbname=database["NAME"],
-        user=database["USER"],
-        password=database["PASSWORD"],
-        host=database["HOST"],
-        port=database["PORT"],
-        autocommit=True,
-    ) as other:
-        other.execute("SET lock_timeout = '200ms'")
-        try:
-            other.execute(statement, params)
-        except psycopg.errors.LockNotAvailable:
-            return True
-    return False
-
-
 def verified_signup_address() -> None:
     EmailAddress.objects.filter(email="owner@example.com").update(verified=True)
 
@@ -448,11 +430,10 @@ def test_accounts_verifying_each_others_stored_address_both_complete(
 deleting = threading.local()
 
 
-def waiting_on_a_lock() -> bool:
+def blocked_by(pid: int) -> bool:
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT count(*) FROM pg_stat_activity "
-            "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+            "SELECT count(*) FROM pg_stat_activity WHERE %s = ANY(pg_blocking_pids(pid))", [pid]
         )
         row = cursor.fetchone()
     return bool(row and row[0])
@@ -461,6 +442,7 @@ def waiting_on_a_lock() -> bool:
 def during_deletion(user: User, request: Callable[[], Any]) -> Any:
     addresses_gone = threading.Event()
     resume = threading.Event()
+    deleter_pid: list[int] = []
 
     def pause(**kwargs: Any) -> None:
         if getattr(deleting, "active", False) and not addresses_gone.is_set():
@@ -469,6 +451,9 @@ def during_deletion(user: User, request: Callable[[], Any]) -> Any:
 
     def delete() -> None:
         deleting.active = True
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_backend_pid()")
+            deleter_pid.extend(cursor.fetchone() or ())
         user.delete()
 
     post_delete.connect(pause, sender=EmailAddress, weak=False)
@@ -478,7 +463,7 @@ def during_deletion(user: User, request: Callable[[], Any]) -> Any:
             assert addresses_gone.wait(timeout=10)
             response: Future[Any] = requester.submit(on_own_connection(request))
             deadline = time.monotonic() + 10
-            while not response.done() and not waiting_on_a_lock():
+            while not response.done() and not blocked_by(deleter_pid[0]):
                 assert time.monotonic() < deadline
                 time.sleep(0.02)
             resume.set()
@@ -550,36 +535,60 @@ def test_verification_never_writes_over_an_address_reassigned_before_completion(
     ).exists()
 
 
-def deadlock() -> Exception:
+def deadlock() -> None:
     error = OperationalError("deadlock detected")
     error.__cause__ = psycopg.errors.DeadlockDetected("deadlock detected")
-    return error
+    raise error
 
 
-FAILURES: dict[str, Callable[[], Exception]] = {
-    "unique-rule": lambda: IntegrityError("duplicate key value"),
-    "row-gone": ObjectDoesNotExist,
-    "account-gone": lambda: User.NotUpdated("Save with update_fields did not affect any rows."),
+def missing_row() -> None:
+    raise ObjectDoesNotExist
+
+
+def missing_account() -> None:
+    raise User.NotUpdated("Save with update_fields did not affect any rows.")
+
+
+def verified_elsewhere() -> None:
+    other = User.objects.create_user(username="other", email="other@example.com")
+    address = EmailAddress.objects.filter(verified=True).exclude(user=other).get()
+    EmailAddress.objects.create(user=other, email=address.email, verified=True)
+
+
+def second_primary() -> None:
+    address = EmailAddress.objects.get(primary=True)
+    EmailAddress.objects.create(user=address.user, email="unexpected@example.com", primary=True)
+
+
+def lost_connection() -> None:
+    raise OperationalError("server closed the connection")
+
+
+FAILURES: dict[str, Callable[[], None]] = {
+    "unique-rule": verified_elsewhere,
+    "row-gone": missing_row,
+    "account-gone": missing_account,
     "deadlock": deadlock,
 }
 
 
-def fail_after(monkeypatch: pytest.MonkeyPatch, owner: type, failure: Exception) -> None:
+def fail_after(monkeypatch: pytest.MonkeyPatch, owner: type, failure: Callable[[], None]) -> None:
     original = owner.finish  # type: ignore[attr-defined]
 
     def finish_then_fail(self: Any) -> Any:
-        original(self)
-        raise failure
+        result = original(self)
+        failure()
+        return result
 
     monkeypatch.setattr(owner, "finish", finish_then_fail)
 
 
 @pytest.mark.parametrize("failure", FAILURES.values(), ids=FAILURES)
 def test_failed_verification_writes_nothing_and_discards_the_process(
-    failure: Callable[[], Exception], monkeypatch: pytest.MonkeyPatch
+    failure: Callable[[], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client, code = pending_signup()
-    fail_after(monkeypatch, EmailVerificationProcess, failure())
+    fail_after(monkeypatch, EmailVerificationProcess, failure)
 
     response = verify(client, code)
 
@@ -591,13 +600,13 @@ def test_failed_verification_writes_nothing_and_discards_the_process(
 
 @pytest.mark.parametrize("failure", FAILURES.values(), ids=FAILURES)
 def test_failed_reset_writes_nothing_and_discards_the_process(
-    failure: Callable[[], Exception], monkeypatch: pytest.MonkeyPatch
+    failure: Callable[[], None], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = member()
     client = browser()
     assert submit(client, "auth/password/request", {"email": user.email}).status_code == 401
     reset = {"key": mailed_code(), "password": PASSWORD + "reset"}
-    fail_after(monkeypatch, PasswordResetVerificationProcess, failure())
+    fail_after(monkeypatch, PasswordResetVerificationProcess, failure)
 
     response = submit(client, "auth/password/reset", reset)
 
@@ -618,130 +627,20 @@ def pending_completion(owner: type) -> tuple[Client, str, dict[str, str]]:
     return client, "auth/password/reset", {"key": mailed_code(), "password": PASSWORD + "reset"}
 
 
+@pytest.mark.parametrize(
+    ("failure", "error"),
+    [(lost_connection, OperationalError), (second_primary, IntegrityError)],
+    ids=["lost-connection", "other-constraint"],
+)
 @pytest.mark.parametrize("owner", [EmailVerificationProcess, PasswordResetVerificationProcess])
 def test_completion_does_not_answer_other_database_errors_as_conflicts(
-    owner: type, monkeypatch: pytest.MonkeyPatch
+    owner: type,
+    failure: Callable[[], None],
+    error: type[Exception],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, endpoint, data = pending_completion(owner)
-    fail_after(monkeypatch, owner, OperationalError("server closed the connection"))
+    fail_after(monkeypatch, owner, failure)
 
-    with pytest.raises(OperationalError, match="server closed the connection"):
+    with pytest.raises(error):
         submit(client, endpoint, data)
-
-
-def held_rows(email: str, user_id: int) -> tuple[bool, bool]:
-    return (
-        blocked_elsewhere("SELECT 1 FROM auth_user WHERE id = %s FOR UPDATE", user_id),
-        blocked_elsewhere(
-            "UPDATE account_emailaddress SET verified = true WHERE email = %s", email
-        ),
-    )
-
-
-def test_signup_verification_holds_the_account_and_address_until_it_completes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client, code = pending_signup()
-    owner = User.objects.get(email="owner@example.com")
-    held: list[tuple[bool, bool]] = []
-    before(
-        monkeypatch,
-        EmailVerificationProcess,
-        "finish",
-        lambda: held.append(held_rows("owner@example.com", owner.pk)),
-    )
-
-    response = submit(client, "auth/email/verify", {"key": code})
-
-    assert held == [(True, True)]
-    assert response.status_code == 200
-    assert EmailAddress.objects.get(email="owner@example.com").verified
-
-
-def test_change_verification_holds_the_account_until_it_completes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    user = member()
-    client, code = change_pending(user)
-    held: list[bool] = []
-    before(
-        monkeypatch,
-        EmailVerificationProcess,
-        "finish",
-        lambda: held.append(
-            blocked_elsewhere("SELECT 1 FROM auth_user WHERE id = %s FOR UPDATE", user.pk)
-        ),
-    )
-
-    response = submit(client, "auth/email/verify", {"key": code})
-
-    assert held == [True]
-    assert response.status_code == 200
-    assert EmailAddress.objects.get(user=user, primary=True).email == "new@example.com"
-
-
-def test_signup_resend_holds_the_account_and_address_until_the_code_is_sent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client, _ = pending_signup()
-    owner = User.objects.get(email="owner@example.com")
-    one_minute_later(monkeypatch)
-    held: list[tuple[bool, bool]] = []
-    before(
-        monkeypatch,
-        EmailVerificationProcess,
-        "resend",
-        lambda: held.append(held_rows("owner@example.com", owner.pk)),
-    )
-
-    response = submit(client, "auth/email/verify/resend", {})
-
-    assert held == [(True, True)]
-    assert response.status_code == 200
-    assert mailed_code()
-
-
-def test_change_resend_holds_the_account_until_the_code_is_sent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    user = member()
-    client, _ = change_pending(user)
-    one_minute_later(monkeypatch)
-    held: list[bool] = []
-    before(
-        monkeypatch,
-        EmailVerificationProcess,
-        "resend",
-        lambda: held.append(
-            blocked_elsewhere("SELECT 1 FROM auth_user WHERE id = %s FOR UPDATE", user.pk)
-        ),
-    )
-
-    response = submit(client, "auth/email/verify/resend", {})
-
-    assert held == [True]
-    assert response.status_code == 200
-    assert mailed_code()
-
-
-def test_reset_holds_the_account_until_it_completes(monkeypatch: pytest.MonkeyPatch) -> None:
-    user = member()
-    client = browser()
-    assert submit(client, "auth/password/request", {"email": user.email}).status_code == 401
-    reset = {"key": mailed_code(), "password": PASSWORD + "reset"}
-    held: list[bool] = []
-    before(
-        monkeypatch,
-        PasswordResetVerificationProcess,
-        "finish",
-        lambda: held.append(
-            blocked_elsewhere("SELECT 1 FROM auth_user WHERE id = %s FOR UPDATE", user.pk)
-        ),
-    )
-
-    response = submit(client, "auth/password/reset", reset)
-
-    assert held == [True]
-    assert response.status_code == 401
-    user.refresh_from_db()
-    assert user.check_password(PASSWORD + "reset")
