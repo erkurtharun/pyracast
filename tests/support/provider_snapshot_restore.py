@@ -32,7 +32,7 @@ COLLECTION_DELAY = timedelta(seconds=4)
 # The job columns a restored job takes from the exported job row.
 JOB_FIELDS = (
     "endpoint",
-    "scheduled_slot",
+    "scheduled_for",
     "target_date",
     "status",
     "available_at",
@@ -139,11 +139,11 @@ def acquisition(
     reference = (
         HistoricalReferenceImport.objects.create(
             binding=binding,
-            sha256="0" * 64,
+            content_sha256="0" * 64,
             source_name="before-reset.json",
             source_settings={},
             imported_by=User.objects.get(username="admin"),
-            imported_at=collected_at,
+            created_at=collected_at,
             interval_count=len(rows),
         )
         if endpoint == "historical_import"
@@ -153,7 +153,7 @@ def acquisition(
         binding=binding,
         reference_import=reference,
         endpoint=endpoint,
-        scheduled_slot=slot,
+        scheduled_for=slot,
         target_date=target_date,
         status="succeeded",
         available_at=slot if available_at is None else available_at,
@@ -335,7 +335,7 @@ def replacement_binding(system: System, *, approved_at: datetime = NOW) -> SiteB
     CollectionJob.objects.create(
         binding=fresh,
         endpoint="forecasts",
-        scheduled_slot=approved_at,
+        scheduled_for=approved_at,
         target_date=approved_at.astimezone(ZoneInfo(ZONE)).date() + timedelta(days=1),
         available_at=approved_at,
     )

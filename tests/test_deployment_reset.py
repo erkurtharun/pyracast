@@ -866,8 +866,8 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_job_binding_and_pl
     for job, snapshot in zip(jobs, snapshots[:2], strict=True):
         assert set(job) == columns
         assert job["id"] == snapshot.job_id
-        assert {key: job[key] for key in ("scheduled_slot", "target_date", "status")} == {
-            "scheduled_slot": "2026-11-09T13:00:00+00:00",
+        assert {key: job[key] for key in ("scheduled_for", "target_date", "status")} == {
+            "scheduled_for": "2026-11-09T13:00:00+00:00",
             "target_date": "2026-11-09",
             "status": "pending",
         }

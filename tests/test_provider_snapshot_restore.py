@@ -133,7 +133,7 @@ def test_restored_export_serves_native_actuals_beside_the_historical_import(
     before = collections_before_reset(system)
     approval = CollectionJob.objects.get(binding=system.binding)
     live = collections_after_reset(system, tmp_path)
-    assert approval.scheduled_slot <= live.job.scheduled_slot < live.collected_at
+    assert approval.scheduled_for <= live.job.scheduled_for < live.collected_at
     later = NOW + timedelta(hours=1)
     monkeypatch.setattr(timezone, "now", lambda: later)
     binding = system.binding
@@ -258,7 +258,7 @@ def test_restored_actuals_are_admitted_at_their_slot_as_the_exported_ones(
     for original in before.actuals:
         copy = restored_copy(system.binding, original)
         slot, start, end = (
-            original.job.scheduled_slot,
+            original.job.scheduled_for,
             original.coverage_start,
             original.coverage_end,
         )
@@ -402,7 +402,7 @@ def test_a_collection_whose_retry_window_was_open_at_approval_is_left_to_the_bin
     CollectionJob.objects.create(
         binding=erased,
         endpoint="estimated_actuals",
-        scheduled_slot=follow_up,
+        scheduled_for=follow_up,
         target_date=date(2026, 11, 9),
         available_at=follow_up,
         retry_until=window_end,
@@ -435,13 +435,13 @@ def test_a_collection_not_before_the_approval_collection_refuses_the_run(
     rows = export_rows(before.content)
     line = next(number for number, row in enumerate(rows, 1) if row["id"] == before.lookback.pk)
     rows[line - 1].update(collected_at=NOW.isoformat())
-    rows[line - 1]["job"].update(scheduled_slot=NOW.isoformat())
+    rows[line - 1]["job"].update(scheduled_for=NOW.isoformat())
 
     with pytest.raises(ValidationError) as refused:
         restore(system, encode_rows(rows))
 
     assert refused.value.messages == [
-        f"Export line {line} is not before the binding's approval collection: job.scheduled_slot."
+        f"Export line {line} is not before the binding's approval collection: job.scheduled_for."
     ]
     assert restored_count(system) == 0
 
@@ -543,11 +543,11 @@ def test_a_slot_that_holds_a_native_collection_is_skipped_and_kept(
 ) -> None:
     system = restore_system(monkeypatch)
     before = collections_before_reset(system)
-    slot = before.forecasts[0].job.scheduled_slot
+    slot = before.forecasts[0].job.scheduled_for
     held = CollectionJob.objects.create(
         binding=system.binding,
         endpoint="forecasts",
-        scheduled_slot=slot,
+        scheduled_for=slot,
         target_date=date(2026, 11, 6),
         available_at=slot,
     )
@@ -563,7 +563,7 @@ def test_a_slot_that_holds_a_native_collection_is_skipped_and_kept(
     ).exists()
     assert (
         CollectionJob.objects.filter(
-            binding=system.binding, endpoint="forecasts", scheduled_slot=slot
+            binding=system.binding, endpoint="forecasts", scheduled_for=slot
         ).get()
         == held
     )
@@ -575,7 +575,7 @@ def test_an_acquisition_the_binding_already_holds_at_the_slot_is_skipped_and_kep
     system = restore_system(monkeypatch)
     before = collections_before_reset(system)
     original = before.forecasts[0]
-    slot = original.job.scheduled_slot
+    slot = original.job.scheduled_for
     held = acquisition(
         system.binding,
         "forecasts",
@@ -590,7 +590,7 @@ def test_an_acquisition_the_binding_already_holds_at_the_slot_is_skipped_and_kep
     assert outcomes(summary)["forecasts"] == {"restored": 2, "slot_taken": 1}
     assert list(
         ForecastSnapshot.objects.filter(
-            binding=system.binding, job__endpoint="forecasts", job__scheduled_slot=slot
+            binding=system.binding, job__endpoint="forecasts", job__scheduled_for=slot
         ).values_list("pk", flat=True)
     ) == [held.pk]
     assert not ForecastSnapshot.objects.filter(
@@ -607,9 +607,7 @@ def test_a_reused_snapshot_id_of_another_export_is_restored(
     original = before.forecasts[0]
     reused = next(row for row in export_rows(before.content) if row["id"] == original.pk)
     reused["collected_at"] = (original.collected_at + timedelta(hours=12)).isoformat()
-    reused["job"]["scheduled_slot"] = (
-        original.job.scheduled_slot + timedelta(hours=12)
-    ).isoformat()
+    reused["job"]["scheduled_for"] = (original.job.scheduled_for + timedelta(hours=12)).isoformat()
 
     summary = restore(system, encode_rows([reused]))
 
@@ -1029,9 +1027,9 @@ def test_an_invalid_live_acquisition_refuses_the_run(
         ("endpoint", "forecasts"),
         ("status", "pending"),
         ("reference_import_id", 1),
-        ("scheduled_slot", DROP),
-        ("scheduled_slot", "2026-11-05T07:00:05+00:00"),
-        ("scheduled_slot", "2026-11-05T07:00:00"),
+        ("scheduled_for", DROP),
+        ("scheduled_for", "2026-11-05T07:00:05+00:00"),
+        ("scheduled_for", "2026-11-05T07:00:00"),
         ("target_date", "2026-11-31"),
         ("target_date", 20261105),
         ("available_at", None),
