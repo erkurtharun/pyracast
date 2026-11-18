@@ -3,7 +3,7 @@ import hashlib
 import json
 import zlib
 from collections import Counter, defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from enum import StrEnum
@@ -19,7 +19,6 @@ from django.utils import timezone
 
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.calculation import calculate
-from pyracast.collection_window import INTRADAY_HISTORY_WINDOW, nightly_window
 from pyracast.connections.models import Provider, ProviderAccount, SiteBinding
 from pyracast.forecasts.actuals import select_archived_actual_source
 from pyracast.forecasts.coverage import intervals_cover_day
@@ -30,6 +29,7 @@ from pyracast.forecasts.historical_import import (
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
+    CollectionJobError,
     CollectionJobStatus,
     ForecastResult,
     ForecastSnapshot,
@@ -67,6 +67,7 @@ SOURCE_LABELS: dict[str, str] = {
     CollectionEndpoint.HISTORICAL_IMPORT: "historical import",
     CollectionEndpoint.SCALED_ESTIMATED_ACTUALS: "scaled copy",
 }
+JOB_KEY = "job"
 _MISSING = object()
 
 
@@ -90,6 +91,16 @@ class ExportRow:
 
 
 @dataclass(frozen=True)
+class ExportedJob:
+    scheduled_slot: datetime
+    target_date: date
+    available_at: datetime
+    retry_until: datetime | None
+    attempts: int
+    last_error: str
+
+
+@dataclass(frozen=True)
 class Acquisition:
     row: ExportRow
     collected_at: datetime
@@ -98,6 +109,7 @@ class Acquisition:
     raw_payload: dict[str, Any]
     intervals: list[Any]
     weather_payload: dict[str, Any] | None
+    job: ExportedJob
 
 
 @dataclass(frozen=True)
@@ -200,32 +212,102 @@ def _valid_interval(row: object) -> bool:
     )
 
 
+def _expected(expected: object, value: object) -> object:
+    if not _same(value, expected):
+        raise ValueError("A succeeded live job holds another value")
+    return value
+
+
+def _slot(collected_at: datetime, value: object) -> datetime:
+    slot = _instant(value)
+    if slot > collected_at:
+        raise ValueError("A job collects at or after its slot")
+    return slot
+
+
+def _day(value: object) -> date:
+    if not isinstance(value, str):
+        raise TypeError("An ISO date is required")
+    return date.fromisoformat(value)
+
+
+def _attempts(value: object) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError("A count of attempts is required")
+    return value
+
+
+def _job_error(value: object) -> str:
+    if not isinstance(value, str) or (value and value not in CollectionJobError.values):
+        raise ValueError("A collection job error is required")
+    return value
+
+
+def _job_value[T](row: ExportRow, job: dict[str, Any], name: str, parse: Callable[[Any], T]) -> T:
+    try:
+        return parse(job[name])
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise ValidationError(
+            f"Export line {row.line} does not hold a succeeded live job: {JOB_KEY}.{name}."
+        ) from error
+
+
+def _exported_job(row: ExportRow, collected_at: datetime) -> ExportedJob:
+    # Id, binding and creation time belong to the erased database and are not taken.
+    job = row.values.get(JOB_KEY)
+    if not isinstance(job, dict):
+        raise ValidationError(
+            f"Export line {row.line} does not hold a succeeded live job: {JOB_KEY}."
+        )
+    for name, expected in (
+        ("endpoint", row.endpoint),
+        ("status", CollectionJobStatus.SUCCEEDED),
+        ("reference_import_id", None),
+        ("lease_token", None),
+        ("lease_expires_at", None),
+    ):
+        _job_value(row, job, name, partial(_expected, expected))
+    return ExportedJob(
+        _job_value(row, job, "scheduled_slot", partial(_slot, collected_at)),
+        _job_value(row, job, "target_date", _day),
+        _job_value(row, job, "available_at", _instant),
+        _job_value(row, job, "retry_until", _optional_instant),
+        _job_value(row, job, "attempts", _attempts),
+        _job_value(row, job, "last_error", _job_error),
+    )
+
+
 def _acquisition(row: ExportRow, now: datetime) -> Acquisition:
     values = row.values
     try:
-        acquisition = Acquisition(
-            row,
-            _instant(values["collected_at"]),
-            _optional_instant(values["issued_at"]),
-            _coverage(values["coverage_start"], values["coverage_end"]),
-            values["raw_payload"],
-            values["normalized_intervals"],
-            values["weather_payload"],
-        )
+        collected_at = _instant(values["collected_at"])
+        issued_at = _optional_instant(values["issued_at"])
+        coverage = _coverage(values["coverage_start"], values["coverage_end"])
+        raw_payload, intervals = values["raw_payload"], values["normalized_intervals"]
+        weather_payload = values["weather_payload"]
         if (
             row.source_kind != LIVE_KINDS[row.endpoint]
-            or acquisition.collected_at > now
-            or not isinstance(acquisition.raw_payload, dict)
-            or not isinstance(acquisition.intervals, list)
-            or not all(_valid_interval(interval) for interval in acquisition.intervals)
-            or not isinstance(acquisition.weather_payload, dict | None)
+            or collected_at > now
+            or not isinstance(raw_payload, dict)
+            or not isinstance(intervals, list)
+            or not all(_valid_interval(interval) for interval in intervals)
+            or not isinstance(weather_payload, dict | None)
         ):
             raise ValueError("The row is not a restorable live acquisition")
     except (KeyError, TypeError, ValueError, OverflowError) as error:
         raise ValidationError(
             f"Export line {row.line} does not hold a restorable live acquisition."
         ) from error
-    return acquisition
+    return Acquisition(
+        row,
+        collected_at,
+        issued_at,
+        coverage,
+        raw_payload,
+        intervals,
+        weather_payload,
+        _exported_job(row, collected_at),
+    )
 
 
 def _skipped(row: ExportRow, binding: SiteBinding) -> Outcome | None:
@@ -256,19 +338,6 @@ def _differing_settings(binding: SiteBinding, rows: Iterable[ExportRow]) -> list
     )
 
 
-def _job_schedule(endpoint: str, slot: datetime, zone: str) -> tuple[date, datetime | None]:
-    # The export carries no job slot, so the collection time is the slot. From it the rules of
-    # forecasts/scheduler.py give a forecast the next local day, a collection inside the nightly
-    # window the previous day until the window closes, and any other its own day.
-    day = slot.astimezone(ZoneInfo(zone)).date()
-    if endpoint == CollectionEndpoint.FORECASTS:
-        return day + timedelta(days=1), None
-    night = nightly_window(day, zone)
-    if night is not None and night[0] <= slot < night[1]:
-        return day - timedelta(days=1), night[1]
-    return day, slot + INTRADAY_HISTORY_WINDOW
-
-
 def _publish_forecast(snapshot: ForecastSnapshot, binding: SiteBinding, line: int) -> None:
     data = snapshot_data(snapshot)
     try:
@@ -285,20 +354,18 @@ def _publish_forecast(snapshot: ForecastSnapshot, binding: SiteBinding, line: in
     )
 
 
-def _store(
-    acquisition: Acquisition, binding: SiteBinding, zone: str, provenance: dict[str, object]
-) -> None:
-    row, slot = acquisition.row, acquisition.collected_at
-    target_date, retry_until = _job_schedule(row.endpoint, slot, zone)
+def _store(acquisition: Acquisition, binding: SiteBinding, provenance: dict[str, object]) -> None:
+    row, exported = acquisition.row, acquisition.job
     job = CollectionJob.objects.create(
         binding=binding,
         endpoint=row.endpoint,
-        scheduled_slot=slot,
-        target_date=target_date,
+        scheduled_slot=exported.scheduled_slot,
+        target_date=exported.target_date,
         status=CollectionJobStatus.SUCCEEDED,
-        available_at=slot,
-        retry_until=retry_until,
-        attempts=1,
+        available_at=exported.available_at,
+        retry_until=exported.retry_until,
+        attempts=exported.attempts,
+        last_error=exported.last_error,
     )
     coverage_start, coverage_end = acquisition.coverage or (None, None)
     record = {**provenance, "snapshot_id": row.snapshot_id}
@@ -309,12 +376,12 @@ def _store(
         binding=binding,
         raw_payload={**acquisition.raw_payload, PROVENANCE_KEY: record},
         normalized_intervals=acquisition.intervals,
-        collected_at=slot,
+        collected_at=acquisition.collected_at,
         issued_at=acquisition.issued_at,
         source_kind=row.source_kind,
         coverage_start=coverage_start,
         coverage_end=coverage_end,
-        available_at=slot,
+        available_at=acquisition.collected_at,
         weather_payload=acquisition.weather_payload,
     )
     if row.endpoint == CollectionEndpoint.FORECASTS:
@@ -356,7 +423,6 @@ def _day_states(
 
 def _restore_rows(
     actor: User,
-    region: Region,
     binding: SiteBinding,
     rows: tuple[ExportRow, ...],
     digest: str,
@@ -381,20 +447,20 @@ def _restore_rows(
         (_acquisition(row, moment) for row in matching),
         key=lambda item: (item.collected_at, item.row.snapshot_id),
     )
-    # An acquisition is its endpoint and collection time: snapshot ids restart with each
-    # database, and a restored job's slot is its collection time.
-    times = [item.collected_at for item in acquisitions]
-    held = ForecastSnapshot.objects.filter(
-        binding=binding, job__endpoint__in=tuple(LIVE_KINDS), collected_at__in=times
-    )
+    # An acquisition is its endpoint and job slot, the binding's unique collection slot;
+    # snapshot ids restart with each database.
+    slots = [item.job.scheduled_slot for item in acquisitions]
     restored = set(
-        held.filter(raw_payload__has_key=PROVENANCE_KEY).values_list(
-            "job__endpoint", "collected_at"
-        )
+        ForecastSnapshot.objects.filter(
+            binding=binding,
+            job__endpoint__in=tuple(LIVE_KINDS),
+            job__scheduled_slot__in=slots,
+            raw_payload__has_key=PROVENANCE_KEY,
+        ).values_list("job__endpoint", "job__scheduled_slot")
     )
-    taken = set(held.values_list("job__endpoint", "collected_at")) | set(
+    taken = set(
         CollectionJob.objects.filter(
-            binding=binding, endpoint__in=tuple(LIVE_KINDS), scheduled_slot__in=times
+            binding=binding, endpoint__in=tuple(LIVE_KINDS), scheduled_slot__in=slots
         ).values_list("endpoint", "scheduled_slot")
     )
     provenance: dict[str, object] = {
@@ -403,13 +469,13 @@ def _restore_rows(
         "restored_at": moment.isoformat(),
     }
     for item in acquisitions:
-        key = (item.row.endpoint, item.collected_at)
+        key = (item.row.endpoint, item.job.scheduled_slot)
         if key in restored:
             outcome = Outcome.ALREADY_RESTORED
         elif key in taken:
             outcome = Outcome.SLOT_TAKEN
         else:
-            _store(item, binding, region.timezone, provenance)
+            _store(item, binding, provenance)
             restored.add(key)
             taken.add(key)
             outcome = Outcome.RESTORED
@@ -461,7 +527,6 @@ def restore_provider_snapshots(
         _validate_authorized_binding(binding)
         summary = _restore_rows(
             actor,
-            region,
             binding,
             rows,
             hashlib.sha256(content).hexdigest(),
