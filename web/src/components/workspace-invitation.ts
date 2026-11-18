@@ -3,6 +3,8 @@ import { useSyncExternalStore } from "react";
 
 const storageKey = "pyracast.workspaceInvitation";
 const listeners = new Set<() => void>();
+// Browser privacy settings can disable session storage; this page load then keeps the token in memory.
+let pending: string | null = null;
 
 function notify() {
     for (const listener of listeners) listener();
@@ -15,7 +17,16 @@ function subscribe(listener: () => void) {
     };
 }
 
+function persist(write: (storage: Storage) => void) {
+    try {
+        write(window.sessionStorage);
+    } catch {
+        return;
+    }
+}
+
 export function storedInvitation() {
+    if (pending !== null) return pending;
     try {
         return window.sessionStorage.getItem(storageKey);
     } catch {
@@ -24,20 +35,14 @@ export function storedInvitation() {
 }
 
 export function storeInvitation(token: string) {
-    try {
-        window.sessionStorage.setItem(storageKey, token);
-    } catch {
-        // Browser privacy settings can disable session storage.
-    }
+    pending = token;
+    persist((storage) => storage.setItem(storageKey, token));
     notify();
 }
 
 export function clearWorkspaceInvitation() {
-    try {
-        window.sessionStorage.removeItem(storageKey);
-    } catch {
-        // Browser privacy settings can disable session storage.
-    }
+    pending = null;
+    persist((storage) => storage.removeItem(storageKey));
     notify();
 }
 

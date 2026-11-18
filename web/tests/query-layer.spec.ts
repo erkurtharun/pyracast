@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "./support/test";
-import { mockApi, paged, region, tenantRow } from "./support/workspace";
+import { mockApi, paged, plant, region, tenantRow } from "./support/workspace";
 import { errorBody } from "./support/errors";
 
 const FIVE_MINUTES = 5 * 60_000;
@@ -48,6 +48,15 @@ async function openPlant(page: Page, section?: string) {
 const generation = (page: Page) =>
     page.locator(".stat", { hasText: "Estimated energy" });
 
+async function expectChart(page: Page) {
+    await expect(generation(page)).toContainText("237.773");
+    const columns = page
+        .getByRole("img", { name: /^Power by interval/ })
+        .locator(".chart-column");
+    await expect(columns).toHaveCount(1);
+    await expect(columns.first()).toHaveAttribute("title", /237\.773 MW/);
+}
+
 test("a failing second forecast poll keeps the chart on screen", async ({
     page,
 }) => {
@@ -63,7 +72,7 @@ test("a failing second forecast poll keeps the chart on screen", async ({
             : route.fulfill({ json: forecast(237.773) }),
     );
     await openPlant(page);
-    await expect(generation(page)).toContainText("237.773");
+    await expectChart(page);
     fail = true;
     await page.clock.runFor(30_000);
     await expect(
@@ -71,7 +80,7 @@ test("a failing second forecast poll keeps the chart on screen", async ({
             hasText: "Could not refresh",
         }),
     ).toContainText("Forecast service is busy.");
-    await expect(generation(page)).toContainText("237.773");
+    await expectChart(page);
     fail = false;
     await page.getByRole("button", { name: "Try again", exact: true }).click();
     await expect(
@@ -79,7 +88,7 @@ test("a failing second forecast poll keeps the chart on screen", async ({
             hasText: "Could not refresh",
         }),
     ).toHaveCount(0);
-    await expect(generation(page)).toContainText("237.773");
+    await expectChart(page);
 });
 
 test("a hidden tab makes no request", async ({ page }) => {
@@ -165,3 +174,49 @@ for (const screen of [
         expect(requests.value).toBeLessThanOrEqual(25);
     });
 }
+
+test("a portfolio of 101 plants over three pages keeps the request budget while it polls", async ({
+    page,
+}) => {
+    await page.clock.install({ time: new Date("2026-11-19T12:00:00Z") });
+    await mockApi(page);
+    const sites = Array.from({ length: 101 }, (_, index) =>
+        index === 0
+            ? { ...region, plant }
+            : {
+                  ...region,
+                  id: 100 + index,
+                  name: `Site ${index}`,
+                  plant: { ...plant, id: 1000 + index, name: `Array ${index}` },
+              },
+    );
+    let siteReads = 0;
+    await page.route(
+        (url) => url.pathname === "/api/tenants/1/sites/",
+        (route) => {
+            siteReads++;
+            const number = Number(
+                new URL(route.request().url()).searchParams.get("page") ?? "1",
+            );
+            return route.fulfill({
+                json: {
+                    count: sites.length,
+                    next:
+                        number < 3
+                            ? `/api/tenants/1/sites/?page=${number + 1}`
+                            : null,
+                    previous: null,
+                    results: sites.slice((number - 1) * 50, number * 50),
+                },
+            });
+        },
+    );
+    const requests = countApiRequests(page);
+    await page.goto("/app/");
+    await expect(page.getByRole("button", { name: /Array 100/ })).toBeVisible();
+    await expect(page.locator(".region-card")).toHaveCount(101);
+    expect(siteReads).toBe(3);
+    await page.clock.runFor(FIVE_MINUTES);
+    expect(siteReads).toBeGreaterThan(3);
+    expect(requests.value).toBeLessThanOrEqual(25);
+});

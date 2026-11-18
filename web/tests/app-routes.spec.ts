@@ -63,6 +63,47 @@ test("refresh and Back keep the workspace, the view and the forecast date", asyn
     await expect(page.getByRole("heading", { name: /Plants/ })).toBeVisible();
 });
 
+test("refresh and Back keep the production day and the plant sub-views", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(new Date("2026-11-19T12:00:00Z"));
+    await mockApi(page);
+    await page.goto("/app/w/1/plants/11/production/");
+    const day = page.getByLabel("Day", { exact: true });
+    const current = (name: string) =>
+        expect(page.getByRole("button", { name, exact: true })).toHaveAttribute(
+            "aria-current",
+            "page",
+        );
+    await expect(day).toHaveValue("2026-11-18");
+    await day.fill("2026-11-10");
+    await expect(page).toHaveURL(
+        "/app/w/1/plants/11/production/?date=2026-11-10",
+    );
+    await page.getByRole("button", { name: "Comparison", exact: true }).click();
+    await expect(page).toHaveURL(
+        "/app/w/1/plants/11/production/?date=2026-11-10&view=comparison",
+    );
+    await page.reload();
+    await current("Comparison");
+    await page.getByRole("button", { name: "Actuals", exact: true }).click();
+    await expect(page).toHaveURL(
+        "/app/w/1/plants/11/production/?date=2026-11-10",
+    );
+    await expect(day).toHaveValue("2026-11-10");
+    await page.getByRole("button", { name: "Forecast", exact: true }).click();
+    await expect(page).toHaveURL("/app/w/1/plants/11/forecast/");
+    await page.goBack();
+    await expect(day).toHaveValue("2026-11-10");
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Email reminders", exact: true })
+        .click();
+    await expect(page).toHaveURL("/app/w/1/plants/11/settings/?view=reminders");
+    await page.reload();
+    await current("Email reminders");
+});
+
 test("the workspace lives in the address and survives a reload", async ({
     page,
 }) => {
@@ -164,6 +205,42 @@ test("an invitation link opens the acceptance screen and drops the token from th
     ).toBeVisible();
     await expect(page).toHaveURL("/app/invitation/");
 });
+
+for (const anonymous of [false, true])
+    test(`an invitation survives blocked session storage ${anonymous ? "through sign-in" : "when signed in"}`, async ({
+        page,
+    }) => {
+        await page.addInitScript(() => {
+            Storage.prototype.setItem = () => {
+                throw new DOMException("Blocked", "SecurityError");
+            };
+        });
+        await mockApi(page, { anonymous });
+        await page.goto("/app/invitation/#token=invite-secret");
+        await expect(page).toHaveURL("/app/invitation/");
+        if (anonymous) {
+            await expect(
+                page.getByRole("button", {
+                    name: "Cancel invitation",
+                    exact: true,
+                }),
+            ).toBeVisible();
+            await page
+                .getByLabel("Email", { exact: true })
+                .fill("solar@example.test");
+            await page
+                .getByLabel("Password", { exact: true })
+                .fill("Test-only-cobalt-79!");
+            await page
+                .locator("form")
+                .getByRole("button", { name: "Sign in" })
+                .click();
+        }
+        await expect(
+            page.getByRole("heading", { name: "Join workspace" }),
+        ).toBeVisible();
+        await expect(page).toHaveURL("/app/invitation/");
+    });
 
 test("a sign-out or another account never shows the previous account's cached plants", async ({
     page,

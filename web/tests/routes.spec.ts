@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
 import {
-    forecastAddress,
     isPlantSection,
+    plantAddress,
+    plantView,
     routeId,
     routes,
     screenOf,
@@ -32,6 +33,24 @@ test("every application screen has one address built in one place", () => {
     expect(routes.plant(5, 11, "forecast", { view: "generation" })).toBe(
         "/app/w/5/plants/11/forecast/",
     );
+    expect(
+        routes.plant(5, 11, "production", {
+            date: "2026-11-18",
+            view: "comparison",
+        }),
+    ).toBe("/app/w/5/plants/11/production/?date=2026-11-18&view=comparison");
+    expect(routes.plant(5, 11, "production", { view: "actuals" })).toBe(
+        "/app/w/5/plants/11/production/",
+    );
+    expect(
+        routes.plant(5, 11, "settings", {
+            date: "2026-11-18",
+            view: "collection",
+        }),
+    ).toBe("/app/w/5/plants/11/settings/?view=collection");
+    expect(
+        routes.plant(5, 11, "calibration", { date: "2026-11-18", view: "x" }),
+    ).toBe("/app/w/5/plants/11/calibration/");
 });
 
 test("the screen of an address names the active navigation entry", () => {
@@ -61,14 +80,34 @@ test("route segments accept only positive ids and known plant sections", () => {
         expect(isPlantSection(section)).toBe(false);
 });
 
-test("the forecast address keeps only a valid date and view", () => {
+test("a plant address keeps only a valid date and a view of its section", () => {
+    const query = (value: string) => new URLSearchParams(value);
     expect(
-        forecastAddress(
-            new URLSearchParams("date=2026-11-20&view=irradiance&extra=1"),
+        plantAddress(
+            "forecast",
+            query("date=2026-11-20&view=irradiance&extra=1"),
         ),
     ).toEqual({ date: "2026-11-20", view: "irradiance" });
     expect(
-        forecastAddress(new URLSearchParams("date=2026-13-40&view=chart")),
+        plantAddress("forecast", query("date=2026-13-40&view=chart")),
     ).toEqual({});
-    expect(forecastAddress(new URLSearchParams("date=20261120"))).toEqual({});
+    expect(plantAddress("forecast", query("date=20261120"))).toEqual({});
+    expect(
+        plantAddress("production", query("date=2026-11-18&view=comparison")),
+    ).toEqual({ date: "2026-11-18", view: "comparison" });
+    expect(plantAddress("production", query("view=irradiance"))).toEqual({});
+    expect(
+        plantAddress("settings", query("date=2026-11-18&view=collection")),
+    ).toEqual({ view: "collection" });
+    expect(
+        plantAddress("calibration", query("date=2026-11-18&view=actuals")),
+    ).toEqual({});
+});
+
+test("a plant view falls back to the first view of its section", () => {
+    expect(plantView("forecast", {})).toBe("generation");
+    expect(plantView("forecast", { view: "comparison" })).toBe("generation");
+    expect(plantView("production", { view: "comparison" })).toBe("comparison");
+    expect(plantView("settings", {})).toBe("configuration");
+    expect(plantView("settings", { view: "reminders" })).toBe("reminders");
 });

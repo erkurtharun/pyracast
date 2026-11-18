@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { QueryClient } from "@tanstack/react-query";
 import { keys } from "../src/lib/api/keys";
-import { fetchList } from "../src/lib/api/query";
+import { fetchList, pollInterval } from "../src/lib/api/query";
 
 const sites = "/api/tenants/{tenant_id}/sites/";
 const forecast =
@@ -105,13 +105,23 @@ test("a list follows its pages and shows a row repeated on the next page once", 
             results: [{ id: 2 }, { id: 3 }],
         },
     );
-    const list = await fetchList<{ id: number }>("/api/tenants/5/sites/");
+    const { value: list, requests } = await fetchList<{ id: number }>(
+        "/api/tenants/5/sites/",
+    );
     expect(urls).toEqual([
         "/api/tenants/5/sites/",
         "/api/tenants/5/sites/?page=2",
     ]);
+    expect(requests).toBe(2);
     expect(list.results.map((row) => row.id)).toEqual([1, 2, 3]);
     expect(list.next).toBeNull();
+});
+
+test("a poll of a list over several pages waits that many periods", () => {
+    expect(pollInterval(30_000)).toBe(30_000);
+    expect(pollInterval(30_000, 1)).toBe(30_000);
+    expect(pollInterval(30_000, 3)).toBe(90_000);
+    expect(pollInterval(false, 3)).toBe(false);
 });
 
 test("a list refuses a next page outside the API or one already read", async () => {

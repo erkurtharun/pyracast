@@ -26,9 +26,13 @@ export const cadence = {
     background: 120_000,
 } as const;
 
+// A list read over several pages polls that many times less often, so its request rate stays one per period.
+export function pollInterval(poll: number | false, requests = 1) {
+    return poll && poll * requests;
+}
+
 export function createQueryClient() {
     return new QueryClient({
-        // A navigation that remounts a screen reuses data read within the last two seconds.
         defaultOptions: { queries: { retry: false, staleTime: 2_000 } },
     });
 }
@@ -36,8 +40,9 @@ export function createQueryClient() {
 export const QueryOwner = createContext<number | undefined>(undefined);
 
 type Page<T> = { results: T[]; next: string | null };
+type Fetched<T> = { value: T; requests: number };
 
-export async function fetchList<T>(url: string): Promise<Page<T>> {
+export async function fetchList<T>(url: string): Promise<Fetched<Page<T>>> {
     const first = await send<Page<T>>({ method: "GET", url });
     const rows = new Map<unknown, T>();
     const add = (results: T[]) => {
@@ -62,7 +67,10 @@ export async function fetchList<T>(url: string): Promise<Page<T>> {
         add(answer.results);
         next = answer.next;
     }
-    return { ...first, results: [...rows.values()], next: null };
+    return {
+        value: { ...first, results: [...rows.values()], next: null },
+        requests: visited.size,
+    };
 }
 
 export type Loaded<T> = {
@@ -87,7 +95,7 @@ function useLoaded<T>(
     path: string,
     options: object,
     { poll = false }: Polling,
-    read: (url: string) => Promise<T>,
+    read: (url: string) => Promise<Fetched<T>>,
 ): Loaded<T> {
     const owner = useOwner();
     const locale = useLocale();
@@ -95,7 +103,9 @@ function useLoaded<T>(
     const query = useQuery({
         queryKey: keys.request(owner, path, options, locale),
         queryFn: () => read(url),
-        refetchInterval: poll,
+        select: (fetched) => fetched.value,
+        refetchInterval: (query) =>
+            pollInterval(poll, query.state.data?.requests),
     });
     const denied =
         query.error instanceof ApiError &&
@@ -119,9 +129,10 @@ export function useApiQuery<P extends PathFor<"get">>(
     options: RequestOptions<P, "get">,
     polling: Polling = {},
 ) {
-    return useLoaded(path, options, polling, (url) =>
-        send<Answer<P, "get">>({ method: "GET", url }),
-    );
+    return useLoaded(path, options, polling, async (url) => ({
+        value: await send<Answer<P, "get">>({ method: "GET", url }),
+        requests: 1,
+    }));
 }
 
 export function useApiList<P extends ListPath>(
@@ -133,7 +144,7 @@ export function useApiList<P extends ListPath>(
         path,
         options,
         polling,
-        (url) => fetchList(url) as Promise<Answer<P, "get">>,
+        (url) => fetchList(url) as Promise<Fetched<Answer<P, "get">>>,
     );
 }
 

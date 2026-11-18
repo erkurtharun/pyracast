@@ -165,11 +165,15 @@ export function ProductionHistory({
     scope,
     configuration,
     timezone,
+    day: requestedDay,
+    onDay,
     onSaved,
 }: {
     scope: PlantScope;
     configuration?: number;
     timezone: string;
+    day?: string;
+    onDay: (day: string) => void;
     onSaved: () => Promise<unknown>;
 }) {
     const t = useTranslations("ProductionHistory");
@@ -178,7 +182,8 @@ export function ProductionHistory({
     const proposals = useTranslations("ChangeRequests");
     const proposalKey = useProposalKey();
     const yesterday = localDay(timezone, -1);
-    const [date, setDate] = useState(yesterday);
+    const date =
+        requestedDay && requestedDay <= yesterday ? requestedDay : yesterday;
     const [showFullDay, setShowFullDay] = useState(false);
     const [editor, setEditor] = useState<Editor>({ status: "closed" });
     const [message, setMessage] = useState("");
@@ -258,7 +263,7 @@ export function ProductionHistory({
 
     function selectDate(value: string) {
         if (!value || value > yesterday || saving) return;
-        setDate(value);
+        onDay(value);
         setEditor({ status: "closed" });
         setMessage("");
     }

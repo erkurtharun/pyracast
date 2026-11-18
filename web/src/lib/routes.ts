@@ -6,8 +6,19 @@ export const plantSections = [
     "settings",
 ] as const;
 export type PlantSection = (typeof plantSections)[number];
-export type ForecastView = "generation" | "irradiance";
-export type ForecastAddress = { date?: string; view?: ForecastView };
+export const plantViews = {
+    forecast: ["generation", "irradiance"],
+    production: ["actuals", "comparison"],
+    settings: ["configuration", "location", "collection", "reminders"],
+} as const;
+type ViewSection = keyof typeof plantViews;
+export type PlantView<S extends ViewSection> = (typeof plantViews)[S][number];
+export type PlantAddress = { date?: string; view?: string };
+const datedSections: readonly PlantSection[] = ["forecast", "production"];
+
+function viewsOf(section: PlantSection): readonly string[] {
+    return section in plantViews ? plantViews[section as ViewSection] : [];
+}
 
 const workspace = (tenant: number) => `/app/w/${tenant}/`;
 
@@ -27,11 +38,13 @@ export const routes = {
         tenant: number,
         site: number,
         section: PlantSection = "forecast",
-        { date, view }: ForecastAddress = {},
+        { date, view }: PlantAddress = {},
     ) {
         const query = new URLSearchParams();
-        if (date) query.set("date", date);
-        if (view === "irradiance") query.set("view", view);
+        if (date && datedSections.includes(section)) query.set("date", date);
+        const views = viewsOf(section);
+        if (view && view !== views[0] && views.includes(view))
+            query.set("view", view);
         const search = query.toString();
         return `${workspace(tenant)}plants/${site}/${section}/${search ? `?${search}` : ""}`;
     },
@@ -66,11 +79,24 @@ function isDay(value: string) {
     return !Number.isNaN(day.getTime()) && day.toISOString().startsWith(value);
 }
 
-export function forecastAddress(params: URLSearchParams): ForecastAddress {
+export function plantAddress(
+    section: PlantSection,
+    params: URLSearchParams,
+): PlantAddress {
     const date = params.get("date");
     const view = params.get("view");
     return {
-        ...(date && isDay(date) ? { date } : {}),
-        ...(view === "generation" || view === "irradiance" ? { view } : {}),
+        ...(date && isDay(date) && datedSections.includes(section)
+            ? { date }
+            : {}),
+        ...(view && viewsOf(section).includes(view) ? { view } : {}),
     };
+}
+
+export function plantView<S extends ViewSection>(
+    section: S,
+    { view }: PlantAddress,
+): PlantView<S> {
+    const views: readonly string[] = plantViews[section];
+    return (view && views.includes(view) ? view : views[0]) as PlantView<S>;
 }

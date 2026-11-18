@@ -3,7 +3,7 @@ import { useTranslations } from "next-intl";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { cadence, useApiList, useRefresh } from "@/lib/api/query";
-import { forecastAddress, isPlantSection, routes } from "@/lib/routes";
+import { isPlantSection, plantAddress, routes } from "@/lib/routes";
 import { PlantOnboarding } from "./plant-onboarding";
 import { PlantWorkspace } from "./plant-workspace";
 import { Notice, RefreshFailed } from "./ui";
@@ -22,8 +22,11 @@ export function PlantSite({
     const refresh = useRefresh();
     const canManage = useCanManageWorkspace();
     const { tenant } = useWorkspace();
-    const { section } = useParams<{ section?: string }>();
-    const address = forecastAddress(useSearchParams());
+    const params = useParams<{ section?: string }>();
+    const section = isPlantSection(params.section)
+        ? params.section
+        : "forecast";
+    const address = plantAddress(section, useSearchParams());
     const sites = useApiList(
         "/api/tenants/{tenant_id}/sites/",
         { path: { tenant_id: tenant.id } },
@@ -45,7 +48,7 @@ export function PlantSite({
                     }}
                     region={site}
                     timezone={site.timezone}
-                    section={isPlantSection(section) ? section : "forecast"}
+                    section={section}
                     address={address}
                 />
                 {children}

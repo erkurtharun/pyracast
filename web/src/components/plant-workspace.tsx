@@ -11,9 +11,9 @@ import type { Forecast, Plant, PlantScope, Region } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { cadence, useApiQuery, useRefresh, type Loaded } from "@/lib/api/query";
 import {
+    plantView,
     routes,
-    type ForecastAddress,
-    type ForecastView,
+    type PlantAddress,
     type PlantSection,
 } from "@/lib/routes";
 import { Calibrations } from "./calibrations";
@@ -42,7 +42,7 @@ export function PlantWorkspace({
     timezone: string;
     region: Region;
     section: PlantSection;
-    address: ForecastAddress;
+    address: PlantAddress;
 }) {
     const t = useTranslations("PlantWorkspace");
     const format = useFormatter();
@@ -50,10 +50,10 @@ export function PlantWorkspace({
     const router = useRouter();
     const refresh = useRefresh();
     const date = address.date ?? localDay(timezone, 1);
-    const forecastView = address.view ?? "generation";
-    const [productionView, setProductionView] = useState("production"),
-        [settingsView, setSettingsView] = useState("configuration"),
-        [resolution, setResolution] = useState("60"),
+    const forecastView = plantView("forecast", address);
+    const productionView = plantView("production", address);
+    const settingsView = plantView("settings", address);
+    const [resolution, setResolution] = useState("60"),
         [source, setSource] = useState<DataSource>("auto");
     const [savedPlant, setSavedPlant] = useState<Plant>();
     const currentPlant = latestPlant(plant, savedPlant);
@@ -65,17 +65,17 @@ export function PlantWorkspace({
                 scope.tenant_id,
                 scope.region_id,
                 next,
-                next === "forecast" ? address : {},
+                next === tab ? address : {},
             ),
         );
-    const showForecast = (next: { date?: string; view?: ForecastView }) =>
+    const show = (next: PlantAddress) =>
         router.replace(
-            routes.plant(scope.tenant_id, scope.region_id, "forecast", {
-                date: next.date ?? address.date,
-                view: next.view ?? forecastView,
+            routes.plant(scope.tenant_id, scope.region_id, tab, {
+                ...address,
+                ...next,
             }),
         );
-    const setDate = (next: string) => showForecast({ date: next });
+    const setDate = (next: string) => show({ date: next });
     const changed = () => refresh.workspace(scope.tenant_id);
     const today = localDay(timezone);
     const configuration = currentPlant.current_configuration;
@@ -154,7 +154,7 @@ export function PlantWorkspace({
                                     forecastView === key ? "page" : undefined
                                 }
                                 onClick={() => {
-                                    showForecast({ view: key });
+                                    show({ view: key });
                                     if (
                                         key === "irradiance" &&
                                         source === "archived_forecast"
@@ -282,7 +282,7 @@ export function PlantWorkspace({
                                 aria-current={
                                     settingsView === key ? "page" : undefined
                                 }
-                                onClick={() => setSettingsView(key)}
+                                onClick={() => show({ view: key })}
                             >
                                 {label}
                             </button>
@@ -349,7 +349,7 @@ export function PlantWorkspace({
                     <nav className="subnav" aria-label={t("productionViews")}>
                         {(
                             [
-                                ["production", t("actuals")],
+                                ["actuals", t("actuals")],
                                 ["comparison", t("comparison")],
                             ] as const
                         ).map(([key, label]) => (
@@ -361,7 +361,7 @@ export function PlantWorkspace({
                                 aria-current={
                                     productionView === key ? "page" : undefined
                                 }
-                                onClick={() => setProductionView(key)}
+                                onClick={() => show({ view: key })}
                             >
                                 {label}
                             </button>
@@ -379,6 +379,8 @@ export function PlantWorkspace({
                             scope={scope}
                             configuration={configuration?.id}
                             timezone={timezone}
+                            day={address.date}
+                            onDay={setDate}
                             onSaved={changed}
                         />
                     )}
