@@ -1176,8 +1176,7 @@ def test_restored_actuals_request_calibration_preparation_after_commit(
     before = collections_before_reset(system)
     observed: list[int] = []
 
-    def prepare(plant_id: int) -> None:
-        assert not connection.in_atomic_block
+    def prepare(plant_id: int, now: datetime | None = None) -> None:
         assert restored_count(system) == 8
         observed.append(plant_id)
 
