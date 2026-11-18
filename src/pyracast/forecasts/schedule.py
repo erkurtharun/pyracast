@@ -26,9 +26,13 @@ from pyracast.forecasts.models import (
     CollectionSchedule,
     ForecastSnapshot,
 )
-from pyracast.forecasts.timing import effective_forecast_schedule, next_forecast_slot
+from pyracast.forecasts.timing import (
+    approval_job,
+    effective_forecast_schedule,
+    next_forecast_slot,
+)
 from pyracast.regions.audit import record_audit
-from pyracast.regions.models import AuditAction, Region
+from pyracast.regions.models import AuditAction, AuditEvent, Region
 
 MAX_COLLECTION_TIMES = 1440
 
@@ -123,19 +127,16 @@ def _next_collection_at(schedule: CollectionSchedule, now: datetime) -> datetime
         or not binding_is_current(binding, schedule.region)
     ):
         return None
-    jobs = CollectionJob.objects.filter(binding=binding)
+    _, first_slot = approval_job(binding.pk) or (None, None)
     timing = effective_forecast_schedule(
-        first_slot=jobs.filter(endpoint=CollectionEndpoint.FORECASTS, reference_import__isnull=True)
-        .order_by("scheduled_slot")
-        .values_list("scheduled_slot", flat=True)
-        .first(),
+        first_slot=first_slot,
         schedule=schedule,
         daily_quota=binding.provider_account.daily_quota,
     )
     if timing is None:
         return None
-    queued = jobs.filter(
-        status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY)
+    queued = CollectionJob.objects.filter(
+        binding=binding, status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY)
     ).aggregate(next=Min("available_at"))
     zone = schedule.region.timezone
     planned = next_forecast_slot(now, zone, timing.times, timing.effective_from)

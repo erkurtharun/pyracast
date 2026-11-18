@@ -46,7 +46,11 @@ from pyracast.forecasts.models import (
 )
 from pyracast.forecasts.projections import prepare_daily_payloads
 from pyracast.forecasts.sources import snapshot_data
-from pyracast.forecasts.timing import effective_forecast_schedule, latest_forecast_slot
+from pyracast.forecasts.timing import (
+    approval_job,
+    effective_forecast_schedule,
+    latest_forecast_slot,
+)
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import Plant
 from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
@@ -156,16 +160,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             pk=job.binding_id
         )
         schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
-        first_slot = (
-            CollectionJob.objects.filter(
-                binding=binding,
-                endpoint=CollectionEndpoint.FORECASTS,
-                reference_import__isnull=True,
-            )
-            .order_by("scheduled_slot", "pk")
-            .values_list("scheduled_slot", flat=True)
-            .first()
-        )
+        approval_id, first_slot = approval_job(binding.pk) or (None, None)
         timing = effective_forecast_schedule(
             first_slot=first_slot,
             schedule=schedule,
@@ -208,13 +203,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
                     and (
                         job.endpoint != CollectionEndpoint.FORECASTS
                         or job.scheduled_slot < schedule.effective_from
-                        or job.pk
-                        != CollectionJob.objects.filter(
-                            binding=binding, endpoint=CollectionEndpoint.FORECASTS
-                        )
-                        .order_by("scheduled_slot", "pk")
-                        .values_list("pk", flat=True)
-                        .first()
+                        or job.pk != approval_id
                     )
                 )
             )

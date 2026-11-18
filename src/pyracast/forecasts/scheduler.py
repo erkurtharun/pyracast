@@ -17,7 +17,11 @@ from pyracast.forecasts.models import (
     CollectionJobStatus,
     CollectionSchedule,
 )
-from pyracast.forecasts.timing import effective_forecast_schedule, latest_forecast_slot
+from pyracast.forecasts.timing import (
+    approval_job,
+    effective_forecast_schedule,
+    latest_forecast_slot,
+)
 from pyracast.regions.models import Region
 
 logger = logging.getLogger(__name__)
@@ -43,16 +47,7 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
         binding = region.approved_binding
         if binding is None or binding.validated_at is None or not binding_is_current(binding):
             return jobs
-        first_slot = (
-            CollectionJob.objects.filter(
-                binding=binding,
-                endpoint=CollectionEndpoint.FORECASTS,
-                reference_import__isnull=True,
-            )
-            .order_by("scheduled_slot")
-            .values_list("scheduled_slot", flat=True)
-            .first()
-        )
+        _, first_slot = approval_job(binding.pk) or (None, None)
         schedule = CollectionSchedule.objects.filter(region=region).first()
         timing = effective_forecast_schedule(
             first_slot=first_slot,

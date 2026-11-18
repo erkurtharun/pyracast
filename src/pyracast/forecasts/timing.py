@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 
 from pyracast.collection_window import SLOT_SEARCH_DAYS
-from pyracast.forecasts.models import CollectionSchedule
+from pyracast.forecasts.models import CollectionEndpoint, CollectionJob, CollectionSchedule
 from pyracast.notifications.schedule import local_slot
 
 
@@ -14,6 +14,18 @@ from pyracast.notifications.schedule import local_slot
 class ForecastTiming:
     times: tuple[str, ...]
     effective_from: datetime
+
+
+def approval_job(binding_id: int) -> tuple[int, datetime] | None:
+    # Approval creates a binding's first forecasts job (regions.operations.approve_region)
+    # and the binding's schedule starts at its slot. Restored collections are created later
+    # with earlier slots, so creation order, not the slot, finds it.
+    return (
+        CollectionJob.objects.filter(binding_id=binding_id, endpoint=CollectionEndpoint.FORECASTS)
+        .order_by("created_at", "pk")
+        .values_list("pk", "scheduled_slot")
+        .first()
+    )
 
 
 def effective_forecast_schedule(

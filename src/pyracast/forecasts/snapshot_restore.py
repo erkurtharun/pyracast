@@ -37,6 +37,7 @@ from pyracast.forecasts.models import (
 )
 from pyracast.forecasts.projections import prepare_daily_payloads
 from pyracast.forecasts.sources import snapshot_data
+from pyracast.forecasts.timing import approval_job
 from pyracast.regions.models import Region
 
 # Sibling of the provider's keys in raw_payload; no reader depends on it. A row that was
@@ -447,6 +448,19 @@ def _restore_rows(
         (_acquisition(row, moment) for row in matching),
         key=lambda item: (item.collected_at, item.row.snapshot_id),
     )
+    # The binding's own schedule starts at its approval collection; restored ones lie before.
+    _, approval_slot = approval_job(binding.pk) or (None, None)
+    if approval_slot is None:
+        raise ValidationError("The binding holds no approval collection.")
+    later = min(
+        (item.row.line for item in acquisitions if item.job.scheduled_slot >= approval_slot),
+        default=None,
+    )
+    if later is not None:
+        raise ValidationError(
+            f"Export line {later} is not before the binding's approval collection: "
+            f"{JOB_KEY}.scheduled_slot."
+        )
     # An acquisition is its endpoint and job slot, the binding's unique collection slot;
     # snapshot ids restart with each database.
     slots = [item.job.scheduled_slot for item in acquisitions]
