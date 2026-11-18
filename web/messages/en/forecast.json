@@ -297,6 +297,8 @@
         "the_candidate_did_not_have_enough_eligible": "The candidate did not have enough eligible data.",
         "the_candidate_could_not_be_evaluated": "The candidate could not be evaluated.",
         "the_candidate_was_superseded_by_newer_data": "The candidate was superseded by newer data.",
+        "the_calibration_could_not_be_prepared": "The calibration could not be prepared. It will be retried.",
+        "the_candidate_could_not_be_promoted": "The candidate could not be promoted. It will be checked again.",
         "automatic_calibration": "Automatic calibration",
         "automatic_calibration_enabled": "Automatic calibration enabled",
         "enabled": "Enabled",

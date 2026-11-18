@@ -14,6 +14,7 @@ from pyracast.forecasts.models import DispatcherStatus
 from pyracast.metering import scheduler as metering_scheduler
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection
 from pyracast.metering.scheduler import enqueue_due_epias_jobs
+from pyracast.plants import automation
 from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
 from pyracast.plants.operations import request_calibration
 from pyracast.plants.preparation import prepare_calibration
@@ -94,7 +95,7 @@ def test_one_dispatch_run_publishes_other_plants_and_backs_off_a_failing_plant(
     assert "private preparation detail" not in pyracast_logs.text
 
     dispatch_once(monkeypatch)
-    assert attempts == [failing.pk, healthy.pk, healthy.pk]
+    assert attempts == [failing.pk, healthy.pk]
 
 
 def test_a_failing_region_purge_does_not_stop_later_regions_and_is_deferred(
@@ -217,3 +218,13 @@ def test_a_failed_settlement_lookup_is_retried_after_a_short_delay(
     assert len(lists) == 1
     enqueue_due_epias_jobs(now=failed_at + timedelta(hours=1))
     assert len(lists) == 2
+
+
+def test_a_due_check_backs_off_only_a_plant_that_is_still_automated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    automation._defer_due_check((plant.pk, plant.region_id, system.tenant.pk), NOW)
+    plant.refresh_from_db()
+    assert plant.next_calibration_check_at is None
+    assert not PlantEvent.objects.filter(plant=plant).exists()

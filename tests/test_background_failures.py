@@ -1,9 +1,12 @@
 import logging
+from datetime import timedelta
+from unittest.mock import MagicMock
 
 import pytest
 
 from pyracast.accounts.security import normalize_client_ip
-from pyracast.background.failures import log_failure
+from pyracast.background.failures import Deferrals, ItemsFailedError, isolate, log_failure
+from tests.support.domain import NOW
 
 logger = logging.getLogger("pyracast.tests")
 
@@ -78,3 +81,37 @@ def test_log_failure_honours_suppressed_context_and_stops_at_cycles(
         "suppressed_context error_type=KeyError origin=unknown",
         "cyclic_context error_type=LookupError origin=unknown",
     ]
+
+
+def test_a_failed_back_off_is_logged_and_the_remaining_items_still_run(
+    pyracast_logs: pytest.LogCaptureFixture,
+) -> None:
+    def operation(item: int) -> int:
+        if item == 1:
+            raise ValueError("secret item")
+        return item * 10
+
+    def back_off(item: int) -> None:
+        raise LookupError("secret back-off")
+
+    with pytest.raises(ItemsFailedError, match="1 item") as raised:
+        isolate([1, 2], operation, logger=logger, event="phase_failed", name=str, back_off=back_off)
+    assert raised.value.count == 1
+    messages = [record.getMessage() for record in pyracast_logs.records]
+    assert [message.split(" error_type")[0] for message in messages] == [
+        "phase_failed item=1",
+        "back_off_failed item=1",
+    ]
+    assert "secret" not in pyracast_logs.text
+    back = MagicMock()
+    assert isolate([2, 3], operation, logger=logger, event="e", name=str, back_off=back) == [20, 30]
+    back.assert_not_called()
+
+
+def test_deferrals_hold_only_items_that_failed_within_the_delay() -> None:
+    deferrals = Deferrals(timedelta(minutes=15))
+    deferrals.defer(7, NOW)
+    deferrals.defer(8, NOW + timedelta(minutes=10))
+    assert deferrals.active(NOW + timedelta(minutes=14)) == [7, 8]
+    assert deferrals.active(NOW + timedelta(minutes=15)) == [8]
+    assert deferrals.active(NOW + timedelta(minutes=25)) == []

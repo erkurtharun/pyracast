@@ -281,9 +281,9 @@ def _publish(lease: EpiasLease, data: EpiasDay, now: datetime) -> bool:
         job.lease_expires_at = None
         job.save()
         if job.status != EpiasJobStatus.SUPERSEDED:
-            from pyracast.plants.preparation import prepare_calibration
+            from pyracast.plants.preparation import request_preparation
 
-            prepare_calibration(job.connection.plant_id)
+            request_preparation([job.connection.plant_id])
         return job.status == EpiasJobStatus.SUCCEEDED
 
 

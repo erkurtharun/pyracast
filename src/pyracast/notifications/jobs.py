@@ -14,6 +14,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
+from pyracast.background.failures import log_failure
 from pyracast.mail.errors import (
     DeliveryUncertainError,
     MailFailure,
@@ -179,11 +180,7 @@ def process_notification(
         except DatabaseError:
             raise
         except Exception as error:
-            logger.warning(
-                "notification_preparation_failed delivery_id=%s error_type=%s",
-                delivery.pk,
-                type(error).__name__,
-            )
+            log_failure(logger, "notification_preparation_failed", error, delivery_id=delivery.pk)
             prepared_at = now
             delivery.snapshot_id = None
             if frozen is not None:
@@ -238,11 +235,12 @@ def process_notification(
         status, error_code = NotificationDeliveryStatus.UNCERTAIN, MailFailure.OUTCOME_UNCERTAIN
         logger.warning("notification_delivery_uncertain delivery_id=%s", delivery_id)
     except Exception as error:
-        logger.warning(
-            "notification_send_failed delivery_id=%s error_type=%s transmitting=%s",
-            delivery_id,
-            type(error).__name__,
-            transmitting,
+        log_failure(
+            logger,
+            "notification_send_failed",
+            error,
+            delivery_id=delivery_id,
+            transmitting=transmitting,
         )
         if transmitting:
             status, error_code = NotificationDeliveryStatus.UNCERTAIN, MailFailure.OUTCOME_UNCERTAIN

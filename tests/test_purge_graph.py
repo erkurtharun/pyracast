@@ -20,6 +20,8 @@ ROOTS = frozenset(
 PURGED = frozenset(
     {
         "change_requests.ChangeRequest",
+        "change_requests.IncidentChange",
+        "change_requests.ProductionChangeItem",
         "connections.SiteBinding",
         "forecasts.CollectionJob",
         "forecasts.CollectionSchedule",
@@ -40,16 +42,10 @@ PURGED = frozenset(
         "plants.Plant",
         "plants.PlantConfiguration",
         "plants.PlantEvent",
+        "plants.PlantSubmission",
         "plants.ProductionObservation",
         "regions.AuditEvent",
         "regions.Region",
-    }
-)
-CASCADED = frozenset(
-    {
-        "change_requests.IncidentChange",
-        "change_requests.ProductionChangeItem",
-        "plants.PlantSubmission",
         "regions.RegionLocationChangeRequest",
     }
 )
@@ -82,8 +78,10 @@ def _dependants() -> set[str]:
 def _deleted_by_name() -> set[str]:
     names: set[str] = set()
     for node in ast.walk(ast.parse(inspect.getsource(trash))):
-        if isinstance(node, ast.Attribute) and node.attr == "delete":
-            value = node.value
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id != "_delete":
+                continue
+            value = node.args[0]
             while isinstance(value, ast.Call | ast.Attribute):
                 value = value.func if isinstance(value, ast.Call) else value.value
             if isinstance(value, ast.Name):
@@ -93,19 +91,9 @@ def _deleted_by_name() -> set[str]:
 
 
 def test_every_model_that_depends_on_a_purged_row_has_one_purge_rule() -> None:
-    rules = (PURGED, CASCADED, DETACHED)
-
-    assert _dependants() == PURGED | CASCADED | DETACHED
-    assert sum(len(rule) for rule in rules) == len(PURGED | CASCADED | DETACHED)
+    assert _dependants() == PURGED | DETACHED
+    assert PURGED.isdisjoint(DETACHED)
 
 
 def test_the_purge_deletes_exactly_the_models_named_for_it() -> None:
-    assert _deleted_by_name() == PURGED - {"plants.Plant", "regions.Region"} | {"plant", "region"}
-
-
-def test_cascaded_models_reach_a_purged_parent_through_a_cascade() -> None:
-    for label in CASCADED:
-        cascades = {
-            target for target, rule in _references(apps.get_model(label)) if rule == "CASCADE"
-        }
-        assert cascades & PURGED, label
+    assert _deleted_by_name() == PURGED

@@ -62,6 +62,8 @@ function AutomationStatus({
         candidate_insufficient: t("the_candidate_did_not_have_enough_eligible"),
         candidate_failed: t("the_candidate_could_not_be_evaluated"),
         candidate_superseded: t("the_candidate_was_superseded_by_newer_data"),
+        preparation_failed: t("the_calibration_could_not_be_prepared"),
+        promotion_failed: t("the_candidate_could_not_be_promoted"),
     };
 
     const [pending, setPending] = useState(false);

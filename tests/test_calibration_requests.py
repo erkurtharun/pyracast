@@ -61,6 +61,7 @@ def committed_request(plant_id: int) -> datetime | None:
         psycopg.connect(**connection.get_connection_params(), autocommit=True) as other,
         other.cursor() as cursor,
     ):
+        cursor.execute("SET TIME ZONE 'UTC'")
         cursor.execute(
             "SELECT calibration_preparation_due_at FROM plants_plant WHERE id = %s", (plant_id,)
         )
@@ -207,3 +208,14 @@ def test_migration_requests_preparation_for_every_configured_plant(
             "SELECT id, calibration_preparation_due_at IS NOT NULL FROM plants_plant ORDER BY id"
         )
         assert cursor.fetchall() == [(configured.pk, True), (unconfigured.pk, False)]
+
+
+def test_a_request_is_prepared_only_while_it_is_due(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, plant = make_plant(monkeypatch)
+    assert preparation._prepare_requested(plant.pk + 1000, NOW) is None
+    assert preparation._prepare_requested(plant.pk, NOW) is None
+    later = NOW + timedelta(hours=1)
+    Plant.objects.filter(pk=plant.pk).update(calibration_preparation_due_at=later)
+    assert preparation._prepare_requested(plant.pk, NOW) is None
+    assert committed_request(plant.pk) == later
+    assert not CalibrationRun.objects.exists()

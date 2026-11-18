@@ -4,9 +4,10 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 
+from pyracast.background import failures
+from pyracast.background.failures import ItemsFailedError
 from pyracast.notifications import runtime
 from pyracast.notifications.operations import normalize_recipients
-from pyracast.notifications.scheduler import NotificationSchedulingError
 from pyracast.notifications.serializers import ReminderInput
 from tests.support.notification_recipient_validation import recipient
 
@@ -45,15 +46,16 @@ def test_exact_delivery_storage_limit_is_accepted_at_both_boundaries() -> None:
 def test_pending_messages_are_dispatched_before_a_scheduling_failure_is_reported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    schedule = MagicMock(side_effect=NotificationSchedulingError("One schedule failed."))
+    schedule = MagicMock(side_effect=ItemsFailedError(1))
     pending = MagicMock(return_value=[11, 12])
     close_connections = MagicMock()
     actor = MagicMock()
     monkeypatch.setattr(runtime, "enqueue_due", schedule)
     monkeypatch.setattr(runtime, "pending_notification_ids", pending)
-    monkeypatch.setattr(runtime, "close_old_connections", close_connections)
-    with pytest.raises(NotificationSchedulingError):
+    monkeypatch.setattr(failures, "close_old_connections", close_connections)
+    with pytest.raises(ItemsFailedError) as raised:
         runtime.dispatch_notifications(actor)
+    assert raised.value.published == 2
     assert schedule.call_args == pending.call_args
     assert actor.send.call_args_list == [call(11), call(12)]
     close_connections.assert_called_once()

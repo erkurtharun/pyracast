@@ -122,6 +122,8 @@ class Plant(models.Model):
         settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="+"
     )
     next_calibration_check_at = models.DateTimeField(null=True, db_index=True)
+    # A durable request for calibration preparation: due from this time, null when none is open.
+    calibration_preparation_due_at = models.DateTimeField(null=True, blank=True)
 
     objects = PlantQuerySet.as_manager()
 

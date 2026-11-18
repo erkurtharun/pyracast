@@ -673,6 +673,7 @@ erDiagram
         integer automatic_calibration_enabled_by_id FK "nullable; references auth_user.id"
         bigint region_id FK "references regions_region.id"
         bigint current_configuration_id FK "nullable; references plants_plantconfiguration.id"
+        timestamp_with_time_zone calibration_preparation_due_at "nullable"
     }
     plants_plantconfiguration {
         bigint id PK

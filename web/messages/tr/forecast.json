@@ -297,6 +297,8 @@
         "the_candidate_did_not_have_enough_eligible": "Aday için yeterli uygun veri yoktu.",
         "the_candidate_could_not_be_evaluated": "Aday değerlendirilemedi.",
         "the_candidate_was_superseded_by_newer_data": "Adayın yerini daha yeni veriler aldı.",
+        "the_calibration_could_not_be_prepared": "Kalibrasyon hazırlanamadı. Yeniden denenecek.",
+        "the_candidate_could_not_be_promoted": "Aday etkinleştirilemedi. Yeniden kontrol edilecek.",
         "automatic_calibration": "Otomatik kalibrasyon",
         "automatic_calibration_enabled": "Otomatik kalibrasyon etkin",
         "enabled": "Etkin",

@@ -1,14 +1,18 @@
+import logging
 from datetime import datetime, timedelta
+from functools import partial
+from typing import Any
 
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 from django.utils import timezone
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
+from pyracast.background.failures import BACK_OFF, Deferrals, isolate
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.models import (
@@ -37,14 +41,25 @@ from pyracast.plants.models import (
     Plant,
     PlantConfiguration,
     PlantEvent,
+    PlantSubmission,
     ProductionObservation,
 )
 from pyracast.regions.audit import record_audit
-from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
+from pyracast.regions.models import (
+    AuditAction,
+    AuditEvent,
+    Region,
+    RegionLocationChangeRequest,
+    RegionStatus,
+)
 from pyracast.regions.operations import require_available_location
 
 RETENTION = timedelta(days=30)
 PURGE_BATCH_SIZE = 100
+PURGE_CHUNK_SIZE = 500
+
+logger = logging.getLogger(__name__)
+_deferrals = Deferrals(BACK_OFF)
 
 
 def _restore_deadline(deleted_at: datetime | None, now: datetime) -> None:
@@ -133,29 +148,43 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
         return region
 
 
+def _delete(queryset: QuerySet[Any]) -> None:
+    """Delete in primary-key chunks without Django's collector, which reads whole rows.
+
+    Every dependant must be deleted first, including Django-level cascades; the deferred
+    foreign keys reject a forgotten one when the purge transaction commits.
+    """
+    manager = queryset.model._default_manager
+    while identifiers := list(queryset.values_list("pk", flat=True)[:PURGE_CHUNK_SIZE]):
+        manager.filter(pk__in=identifiers)._raw_delete(queryset.db)
+
+
 def _purge_epias_history(plant: Plant) -> None:
-    EpiasSnapshot.objects.filter(connection__plant=plant).delete()
-    EpiasCollectionJob.objects.filter(connection__plant=plant).delete()
-    EpiasConnection.objects.filter(plant=plant).delete()
+    _delete(EpiasSnapshot.objects.filter(connection__plant=plant))
+    _delete(EpiasCollectionJob.objects.filter(connection__plant=plant))
+    _delete(EpiasConnection.objects.filter(plant=plant))
 
 
 def _purge_plant(plant: Plant) -> None:
-    from pyracast.change_requests.models import ChangeRequest
+    from pyracast.change_requests.models import ChangeRequest, IncidentChange, ProductionChangeItem
 
-    ChangeRequest.objects.filter(plant=plant).delete()
-    IncidentRevision.objects.filter(incident__plant=plant).delete()
-    PlantIncident.objects.filter(plant=plant).delete()
-    ForecastIssuance.objects.filter(plant=plant).delete()
+    _delete(ProductionChangeItem.objects.filter(request__plant=plant))
+    _delete(IncidentChange.objects.filter(request__plant=plant))
+    _delete(ChangeRequest.objects.filter(plant=plant))
+    _delete(IncidentRevision.objects.filter(incident__plant=plant))
+    _delete(PlantIncident.objects.filter(plant=plant))
+    _delete(ForecastIssuance.objects.filter(plant=plant))
     CalibrationRun.objects.filter(plant=plant).update(comparison_activation=None)
-    CalibrationActivation.objects.filter(plant=plant).delete()
-    CalibrationRun.objects.filter(plant=plant).delete()
-    ProductionObservation.objects.filter(plant=plant).delete()
+    _delete(CalibrationActivation.objects.filter(plant=plant))
+    _delete(CalibrationRun.objects.filter(plant=plant))
+    _delete(ProductionObservation.objects.filter(plant=plant))
     _purge_epias_history(plant)
-    PlantEvent.objects.filter(plant=plant).delete()
+    _delete(PlantEvent.objects.filter(plant=plant))
     plant.current_configuration = None
     plant.save(update_fields=("current_configuration",))
-    PlantConfiguration.objects.filter(plant=plant).delete()
-    plant.delete()
+    _delete(PlantSubmission.objects.filter(plant=plant))
+    _delete(PlantConfiguration.objects.filter(plant=plant))
+    _delete(Plant.objects.filter(pk=plant.pk))
 
 
 def _purge_region(region: Region, plants: list[Plant]) -> None:
@@ -164,26 +193,28 @@ def _purge_region(region: Region, plants: list[Plant]) -> None:
         ProviderAccount.objects.select_for_update()
         .filter(pk__in=accounts.values("pk"))
         .order_by("pk")
+        .values_list("pk", flat=True)
     )
     for plant in plants:
         _purge_plant(plant)
-    NotificationDelivery.objects.filter(schedule__region=region).delete()
-    ReminderSchedule.objects.filter(region=region).delete()
-    CollectionSchedule.objects.filter(region=region).delete()
+    _delete(NotificationDelivery.objects.filter(schedule__region=region))
+    _delete(ReminderSchedule.objects.filter(region=region))
+    _delete(CollectionSchedule.objects.filter(region=region))
     RequestAttempt.objects.filter(
         Q(binding__region=region) | Q(job__binding__region=region)
     ).update(job=None, binding=None)
-    ReferenceCapacityNormalization.objects.filter(target_binding__region=region).delete()
-    ForecastResult.objects.filter(snapshot__job__binding__region=region).delete()
-    ForecastSnapshot.objects.filter(job__binding__region=region).delete()
-    CollectionJob.objects.filter(binding__region=region).delete()
-    HistoricalReferenceImport.objects.filter(binding__region=region).delete()
+    _delete(ReferenceCapacityNormalization.objects.filter(target_binding__region=region))
+    _delete(ForecastResult.objects.filter(snapshot__job__binding__region=region))
+    _delete(ForecastSnapshot.objects.filter(job__binding__region=region))
+    _delete(CollectionJob.objects.filter(binding__region=region))
+    _delete(HistoricalReferenceImport.objects.filter(binding__region=region))
     region.status = RegionStatus.PENDING
     region.approved_binding = None
     region.save(update_fields=("status", "approved_binding"))
-    SiteBinding.objects.filter(region=region).delete()
-    AuditEvent.objects.filter(region=region).delete()
-    region.delete()
+    _delete(SiteBinding.objects.filter(region=region))
+    _delete(AuditEvent.objects.filter(region=region))
+    _delete(RegionLocationChangeRequest.objects.filter(region=region))
+    _delete(Region.objects.filter(pk=region.pk))
 
 
 def purge_expired(now: datetime | None = None) -> dict[str, int]:
@@ -191,23 +222,31 @@ def purge_expired(now: datetime | None = None) -> dict[str, int]:
     if moment.utcoffset() is None:
         raise ValidationError("An aware timestamp is required.")
     cutoff = moment - RETENTION
-    counts = {"regions": 0, "plants": 0}
     regions = list(
         Region.objects.filter(deleted_at__lte=cutoff)
+        .exclude(pk__in=_deferrals.active(moment))
         .order_by("pk")
         .values_list("pk", flat=True)[:PURGE_BATCH_SIZE]
     )
-    for region_id in regions:
-        with transaction.atomic():
-            region = (
-                Region.objects.select_for_update()
-                .filter(pk=region_id, deleted_at__lte=cutoff)
-                .first()
-            )
-            if region is None:
-                continue
-            plants = list(Plant.objects.select_for_update().filter(region=region).order_by("pk"))
-            _purge_region(region, plants)
-            counts["regions"] += 1
-            counts["plants"] += len(plants)
-    return counts
+    purged = isolate(
+        regions,
+        partial(_purge_expired_region, cutoff=cutoff),
+        logger=logger,
+        event="retention_purge_failed",
+        name=lambda region_id: f"region:{region_id}",
+        back_off=lambda region_id: _deferrals.defer(region_id, moment),
+    )
+    done = [plants for plants in purged if plants is not None]
+    return {"regions": len(done), "plants": sum(done)}
+
+
+def _purge_expired_region(region_id: int, cutoff: datetime) -> int | None:
+    with transaction.atomic():
+        region = (
+            Region.objects.select_for_update().filter(pk=region_id, deleted_at__lte=cutoff).first()
+        )
+        if region is None:
+            return None
+        plants = list(Plant.objects.select_for_update().filter(region=region).order_by("pk"))
+        _purge_region(region, plants)
+        return len(plants)

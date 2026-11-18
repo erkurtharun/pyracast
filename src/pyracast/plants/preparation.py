@@ -1,11 +1,17 @@
+import logging
 from collections import defaultdict
+from collections.abc import Iterable
+from contextlib import suppress
 from datetime import date, datetime, timedelta
+from functools import partial
 from zoneinfo import ZoneInfo
 
-from django.db import transaction
-from django.db.models import Q
+from django.db import models, transaction
+from django.db.models import Exists, F, OuterRef, Q, Value
+from django.db.models.functions import Coalesce, Least
 from django.utils import timezone
 
+from pyracast.background.failures import ItemsFailedError, isolate
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
@@ -26,6 +32,7 @@ from pyracast.plants.models import (
     PlantConfiguration,
     PlantEventAction,
     ProductionObservation,
+    active_plant,
 )
 from pyracast.plants.numerics import (
     POLICY_VERSION,
@@ -37,6 +44,10 @@ from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
 
 AUTOMATIC_POOL_DAYS = 60
+PREPARATION_RETRY_DELAY = timedelta(hours=1)
+OPEN_RUN = (CalibrationStatus.PENDING, CalibrationStatus.RUNNING)
+
+logger = logging.getLogger(__name__)
 
 
 def _matched_days(
@@ -91,9 +102,7 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
         configuration = plant.current_configuration
         if configuration is None or not binding_is_current(configuration.binding):
             return None
-        if CalibrationRun.objects.filter(
-            plant=plant, status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING)
-        ).exists():
+        if CalibrationRun.objects.filter(plant=plant, status__in=OPEN_RUN).exists():
             return None
         moment = timezone.now() if now is None else max(now, timezone.now())
         today = moment.astimezone(ZoneInfo(configuration.binding.timezone)).date()
@@ -179,3 +188,84 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             details={"calibration_id": run.pk, "observation_id_cutoff": watermark},
         )
         return run
+
+
+def request_preparation(plant_ids: Iterable[int], now: datetime | None = None) -> None:
+    """Record in the caller's transaction that these plants need preparation.
+
+    One attempt runs after commit; the calibration dispatch phase prepares what is left.
+    """
+    identifiers = list(plant_ids)
+    if not identifiers:
+        return
+    moment = Value(now or timezone.now(), output_field=models.DateTimeField())
+    Plant.objects.filter(pk__in=identifiers).update(
+        calibration_preparation_due_at=Least(
+            Coalesce(F("calibration_preparation_due_at"), moment), moment
+        )
+    )
+    transaction.on_commit(partial(_prepare_after_commit, identifiers, now))
+
+
+def request_region_preparation(region_id: int) -> None:
+    request_preparation(
+        Plant.objects.filter(region_id=region_id, current_configuration__isnull=False).values_list(
+            "pk", flat=True
+        )
+    )
+
+
+def _prepare_after_commit(plant_ids: list[int], now: datetime | None) -> None:
+    with suppress(ItemsFailedError):
+        _prepare_each(plant_ids, now)
+
+
+def prepare_requested_calibrations(now: datetime, limit: int = 100) -> list[int]:
+    due = (
+        Plant.objects.filter(active_plant(), calibration_preparation_due_at__lte=now)
+        .exclude(Exists(CalibrationRun.objects.filter(plant=OuterRef("pk"), status__in=OPEN_RUN)))
+        .order_by("calibration_preparation_due_at", "pk")
+        .values_list("pk", flat=True)[:limit]
+    )
+    return [run.pk for run in _prepare_each(list(due), now) if run is not None]
+
+
+def _prepare_each(plant_ids: list[int], now: datetime | None) -> list[CalibrationRun | None]:
+    return isolate(
+        plant_ids,
+        partial(_prepare_requested, now=now),
+        logger=logger,
+        event="calibration_preparation_failed",
+        name=lambda plant_id: f"plant:{plant_id}",
+        back_off=partial(_defer_request, now=now),
+    )
+
+
+def _prepare_requested(plant_id: int, now: datetime | None) -> CalibrationRun | None:
+    moment = now or timezone.now()
+    with transaction.atomic():
+        region_id = Plant.objects.filter(pk=plant_id).values_list("region_id", flat=True).first()
+        if region_id is None:
+            return None
+        Region.objects.select_for_update().get(pk=region_id)
+        due_at = (
+            Plant.objects.select_for_update()
+            .filter(pk=plant_id)
+            .values_list("calibration_preparation_due_at", flat=True)
+            .first()
+        )
+        if (
+            due_at is None
+            or due_at > moment
+            or CalibrationRun.objects.filter(plant_id=plant_id, status__in=OPEN_RUN).exists()
+        ):
+            return None
+        run = prepare_calibration(plant_id, now)
+        Plant.objects.filter(pk=plant_id).update(calibration_preparation_due_at=None)
+        return run
+
+
+def _defer_request(plant_id: int, now: datetime | None) -> None:
+    Plant.objects.filter(pk=plant_id, calibration_preparation_due_at__isnull=False).update(
+        calibration_preparation_due_at=(now or timezone.now()) + PREPARATION_RETRY_DELAY
+    )

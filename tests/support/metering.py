@@ -38,6 +38,10 @@ class FixtureClient:
     def resolve_settlement_plant(self, eic: str) -> EpiasPlant | None:
         return None
 
+    def list_settlement_plants(self) -> tuple[EpiasPlant, ...]:
+        assert not connection.in_atomic_block
+        return ()
+
     def fetch_day(self, plant: EpiasPlant, day: date) -> EpiasDay:
         assert not connection.in_atomic_block
         return day_data(plant, day)

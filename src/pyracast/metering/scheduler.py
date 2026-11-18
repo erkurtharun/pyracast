@@ -1,13 +1,17 @@
+import logging
 from calendar import monthrange
 from datetime import date, datetime, timedelta
+from functools import partial
+from itertools import chain
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from pyracast.background.failures import BACK_OFF, Deferrals, isolate, log_failure
 from pyracast.collection_window import nightly_window
-from pyracast.epias import EpiasError
+from pyracast.epias import EpiasError, EpiasPlant
 from pyracast.forecasts.models import CollectionSchedule
 from pyracast.metering.client import get_epias_client
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSourceKind
@@ -17,6 +21,11 @@ from pyracast.regions.models import Region
 
 MARKET_ZONE = ZoneInfo("Europe/Istanbul")
 INITIAL_SETTLEMENT_MONTHS = 12
+SETTLEMENT_RECHECK = timedelta(days=1)
+SETTLEMENT_RETRY = timedelta(hours=1)
+
+logger = logging.getLogger(__name__)
+_deferrals = Deferrals(BACK_OFF)
 
 
 def _daily_window(connection: EpiasConnection, now: datetime) -> tuple[datetime, datetime] | None:
@@ -155,87 +164,124 @@ def enqueue_connection(
     return jobs
 
 
+class _SettlementDirectory:
+    """Downloads the EPIAS settlement plant list at most once per scheduler run."""
+
+    def __init__(self, now: datetime) -> None:
+        self._now = now
+        self._plants: tuple[EpiasPlant, ...] | None = None
+        self._failed = False
+
+    def resolve(self, eic: str | None) -> tuple[int | None, datetime]:
+        """Return the settlement id and check stamp; a failed list stamps a short retry."""
+        plants = self._load()
+        if plants is None:
+            return None, self._now - SETTLEMENT_RECHECK + SETTLEMENT_RETRY
+        matches = [plant.id for plant in plants if plant.eic == eic]
+        return (matches[0] if len(matches) == 1 else None), self._now
+
+    def _load(self) -> tuple[EpiasPlant, ...] | None:
+        if self._plants is None and not self._failed:
+            try:
+                self._plants = get_epias_client().list_settlement_plants()
+            except EpiasError as error:
+                self._failed = True
+                log_failure(logger, "epias_settlement_lookup_failed", error, code=error.args[0])
+        return self._plants
+
+
 def enqueue_due_epias_jobs(*, now: datetime | None = None) -> list[int]:
     now = now or timezone.now()
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
-    identifiers = []
-    for connection in EpiasConnection.objects.filter(
-        active_plant("plant__"),
-        enabled=True,
-    ).select_related("plant"):
-        check_settlement = (
-            connection.settlement_plant_id is None
-            and (
-                connection.settlement_checked_at is None
-                or connection.settlement_checked_at <= now - timedelta(days=1)
-            )
-            and connection.plant.current_configuration is not None
-            and configuration_is_current(connection.plant.current_configuration)
-            and _daily_window(connection, now) is not None
+    connections = list(
+        EpiasConnection.objects.filter(active_plant("plant__"), enabled=True)
+        .exclude(pk__in=_deferrals.active(now))
+        .select_related("plant")
+        .order_by("pk")
+    )
+    batches = isolate(
+        connections,
+        partial(_enqueue_due_connection, now=now, directory=_SettlementDirectory(now)),
+        logger=logger,
+        event="metering_connection_failed",
+        name=lambda connection: f"connection:{connection.pk}",
+        back_off=lambda connection: _deferrals.defer(connection.pk, now),
+    )
+    return list(dict.fromkeys(chain.from_iterable(batches)))
+
+
+def _settlement_due(connection: EpiasConnection, now: datetime) -> bool:
+    return (
+        connection.settlement_plant_id is None
+        and (
+            connection.settlement_checked_at is None
+            or connection.settlement_checked_at <= now - SETTLEMENT_RECHECK
         )
-        settlement_id = _resolve_settlement_id(connection) if check_settlement else None
-        with transaction.atomic():
-            region = (
-                Region.objects.select_for_update().filter(pk=connection.plant.region_id).first()
+        and connection.plant.current_configuration is not None
+        and configuration_is_current(connection.plant.current_configuration)
+        and _daily_window(connection, now) is not None
+    )
+
+
+def _enqueue_due_connection(
+    connection: EpiasConnection, now: datetime, directory: _SettlementDirectory
+) -> list[int]:
+    check_settlement = _settlement_due(connection, now)
+    settlement_id, checked_at = (
+        directory.resolve(connection.eic) if check_settlement else (None, now)
+    )
+    identifiers: list[int] = []
+    with transaction.atomic():
+        region = Region.objects.select_for_update().filter(pk=connection.plant.region_id).first()
+        if region is None:
+            return identifiers
+        plant = Plant.objects.select_for_update().get(pk=connection.plant_id)
+        current = EpiasConnection.objects.select_for_update().filter(pk=connection.pk).first()
+        if current is None:
+            return identifiers
+        if (
+            check_settlement
+            and current.revision == connection.revision
+            and current.eic == connection.eic
+            and current.settlement_plant_id is None
+        ):
+            current.settlement_plant_id = settlement_id
+            current.settlement_checked_at = checked_at
+            current.save(update_fields=("settlement_plant_id", "settlement_checked_at"))
+        configuration = plant.current_configuration
+        if configuration is not None and current.enabled:
+            initial_slot = max(current.updated_at, configuration.created_at)
+            initial_day = initial_slot.astimezone(MARKET_ZONE).date()
+            oldest_day = initial_day - timedelta(days=90)
+            first_month = initial_day.year * 12 + initial_day.month - 1 - INITIAL_SETTLEMENT_MONTHS
+            year, month = divmod(first_month, 12)
+            oldest_month = date(year, month + 1, 1)
+            oldest_month_end = date(year, month + 1, monthrange(year, month + 1)[1])
+            missing_settlement = (
+                connection.settlement_plant_id is not None
+                and not EpiasCollectionJob.objects.filter(
+                    connection=current,
+                    connection_revision=current.revision,
+                    configuration=configuration,
+                    source_kind=EpiasSourceKind.SETTLEMENT_INJECTION,
+                    target_date=oldest_month,
+                    period_end_day=oldest_month_end,
+                    provider_plant__id=current.settlement_plant_id,
+                    provider_plant__eic=current.eic,
+                ).exists()
             )
-            if region is None:
-                continue
-            plant = Plant.objects.select_for_update().get(pk=connection.plant_id)
-            current = EpiasConnection.objects.select_for_update().filter(pk=connection.pk).first()
-            if current is not None:
-                if (
-                    check_settlement
-                    and current.revision == connection.revision
-                    and current.eic == connection.eic
-                    and current.settlement_plant_id is None
-                ):
-                    current.settlement_plant_id = settlement_id
-                    current.settlement_checked_at = now
-                    current.save(update_fields=("settlement_plant_id", "settlement_checked_at"))
-                configuration = plant.current_configuration
-                if configuration is not None and current.enabled:
-                    initial_slot = max(current.updated_at, configuration.created_at)
-                    initial_day = initial_slot.astimezone(MARKET_ZONE).date()
-                    oldest_day = initial_day - timedelta(days=90)
-                    first_month = (
-                        initial_day.year * 12 + initial_day.month - 1 - INITIAL_SETTLEMENT_MONTHS
-                    )
-                    year, month = divmod(first_month, 12)
-                    oldest_month = date(year, month + 1, 1)
-                    oldest_month_end = date(year, month + 1, monthrange(year, month + 1)[1])
-                    missing_settlement = (
-                        connection.settlement_plant_id is not None
-                        and not EpiasCollectionJob.objects.filter(
-                            connection=current,
-                            connection_revision=current.revision,
-                            configuration=configuration,
-                            source_kind=EpiasSourceKind.SETTLEMENT_INJECTION,
-                            target_date=oldest_month,
-                            period_end_day=oldest_month_end,
-                            provider_plant__id=current.settlement_plant_id,
-                            provider_plant__eic=current.eic,
-                        ).exists()
-                    )
-                    if (
-                        missing_settlement
-                        or not EpiasCollectionJob.objects.filter(
-                            connection=current,
-                            connection_revision=current.revision,
-                            configuration=configuration,
-                            source_kind=EpiasSourceKind.REALTIME_GENERATION,
-                            target_date=oldest_day,
-                            scheduled_for=initial_slot,
-                        ).exists()
-                    ):
-                        identifiers.extend(enqueue_connection(current, now, initial=True))
-                identifiers.extend(enqueue_connection(current, now))
-    return list(dict.fromkeys(identifiers))
-
-
-def _resolve_settlement_id(connection: EpiasConnection) -> int | None:
-    try:
-        selected = get_epias_client().resolve_settlement_plant(connection.eic)
-    except EpiasError:
-        return None
-    return selected.id if selected else None
+            if (
+                missing_settlement
+                or not EpiasCollectionJob.objects.filter(
+                    connection=current,
+                    connection_revision=current.revision,
+                    configuration=configuration,
+                    source_kind=EpiasSourceKind.REALTIME_GENERATION,
+                    target_date=oldest_day,
+                    scheduled_for=initial_slot,
+                ).exists()
+            ):
+                identifiers.extend(enqueue_connection(current, now, initial=True))
+        identifiers.extend(enqueue_connection(current, now))
+    return identifiers

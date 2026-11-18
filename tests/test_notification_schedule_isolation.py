@@ -12,13 +12,14 @@ from django.db.models import QuerySet
 from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.background.failures import ItemsFailedError
 from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import validate_binding
 from pyracast.notifications import runtime
 from pyracast.notifications import scheduler as notification_scheduler
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.operations import configure_reminders, invalid_reminder_recipient_count
-from pyracast.notifications.scheduler import NotificationSchedulingError, enqueue_due
+from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import Region
 from pyracast.regions.operations import approve_region, configure_binding, submit_region
 from tests.support.domain import NOW, FakeAdapter, System
@@ -135,7 +136,7 @@ def test_slot_database_failure_rolls_back_its_recipients_before_another_tenant_c
         return original(queryset, **kwargs)
 
     monkeypatch.setattr(QuerySet, "create", create)
-    with pytest.raises(NotificationSchedulingError):
+    with pytest.raises(ItemsFailedError):
         enqueue_due(SLOT)
     assert not NotificationDelivery.objects.filter(schedule=broken).exists()
     assert NotificationDelivery.objects.filter(schedule=healthy, status="pending").count() == 1
@@ -190,7 +191,7 @@ def test_a_terminated_connection_is_recovered_before_processing_another_tenant(
         return original(schedule, now)
 
     monkeypatch.setattr(notification_scheduler, "_enqueue_schedule", interrupt)
-    with pytest.raises(NotificationSchedulingError, match="1 email reminder"):
+    with pytest.raises(ItemsFailedError, match="1 item"):
         enqueue_due(SLOT)
     assert not NotificationDelivery.objects.filter(schedule=broken).exists()
     assert NotificationDelivery.objects.filter(schedule=healthy, status="pending").count() == 1

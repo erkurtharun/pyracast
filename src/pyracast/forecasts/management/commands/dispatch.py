@@ -11,7 +11,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from pyracast.accounts.retention import sweep_accounts
-from pyracast.background.failures import log_failure
+from pyracast.background.failures import ItemsFailedError, log_failure
 from pyracast.forecasts.monitoring import PhaseOutcome, record_dispatch_phase
 from pyracast.metering.runtime import dispatch_epias, make_epias_actor
 from pyracast.notifications.runtime import dispatch_notifications, make_notification_actor
@@ -76,6 +76,10 @@ class Command(BaseCommand):
                         try:
                             close_old_connections()
                             outcome = operation()
+                        except ItemsFailedError as error:
+                            outcome = PhaseOutcome(
+                                published=error.published, error=f"items_failed:{error.count}"
+                            )
                         except Exception as error:
                             log_failure(logger, "dispatch_phase_failed", error, phase=name)
                             outcome = PhaseOutcome(error=type(error).__name__)
@@ -100,11 +104,7 @@ class Command(BaseCommand):
                             )
                         except Exception as error:
                             failures.append("monitoring")
-                            logger.error(
-                                "dispatch_monitoring_failed phase=%s error_type=%s",
-                                name,
-                                type(error).__name__,
-                            )
+                            log_failure(logger, "dispatch_monitoring_failed", error, phase=name)
                     if failures and not options["loop"]:
                         raise CommandError("Failed dispatch phase(s): " + ", ".join(failures))
                     if not options["loop"] or shutdown.wait(interval):
