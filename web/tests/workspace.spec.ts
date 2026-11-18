@@ -1331,13 +1331,6 @@ test("recycle bin confirms deletion and restores a plant site with associated da
             await route.fulfill({
                 json: paged(deleted ? [] : [{ ...region, plant }]),
             });
-        } else if (
-            path === "/api/tenants/1/regions/11/plants/" &&
-            route.request().method() === "GET"
-        ) {
-            await route.fulfill({
-                json: paged([plant]),
-            });
         } else if (path.includes("/trash/")) {
             const ownList = path.endsWith("/trash/regions/");
             await route.fulfill({
@@ -1583,7 +1576,7 @@ test("a session that ends while the tab is open returns to sign in with a notice
     await page.goto("/app/");
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     ended = true;
-    await page.clock.fastForward(30_000);
+    await page.clock.fastForward(120_000);
     await expect(
         page.getByText("Your session has expired. Please sign in again."),
     ).toBeVisible();

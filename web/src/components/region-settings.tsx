@@ -3,7 +3,8 @@ import { useTranslations, useFormatter } from "next-intl";
 import { useState } from "react";
 import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
-import { ActionForm, Field, Notice, Tag, useCollection } from "./ui";
+import { useApiList, useRefresh } from "@/lib/api/query";
+import { ActionForm, Field, Notice, Tag } from "./ui";
 
 export function RegionSettings({
     region,
@@ -13,7 +14,7 @@ export function RegionSettings({
     scope: RegionScope;
 }) {
     const t = useTranslations("RegionSettings");
-
+    const refresh = useRefresh();
     const [version, setVersion] = useState(0);
     return (
         <section className="panel">
@@ -24,7 +25,10 @@ export function RegionSettings({
                     key={version}
                     region={region}
                     scope={scope}
-                    onSubmitted={() => setVersion((value) => value + 1)}
+                    onSubmitted={async () => {
+                        await refresh.workspace(scope.tenant_id);
+                        setVersion((value) => value + 1);
+                    }}
                 />
             </details>
         </section>
@@ -43,7 +47,7 @@ function LocationRequests({
     const t = useTranslations("RegionSettings");
     const format = useFormatter();
 
-    const requests = useCollection(
+    const requests = useApiList(
         "/api/tenants/{tenant_id}/regions/{region_id}/location-change-requests/",
         {
             path: scope,

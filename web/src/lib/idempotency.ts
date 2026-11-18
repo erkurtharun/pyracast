@@ -1,10 +1,4 @@
-"use client";
-import { createContext, useContext, useRef } from "react";
-
-export const ChangeRequestUpdates = createContext(() => {});
-export function useChangeRequestUpdates() {
-    return useContext(ChangeRequestUpdates);
-}
+import { useRef } from "react";
 
 export function useProposalKey() {
     const attempt = useRef<{ payload: string; key: string } | null>(null);

@@ -764,7 +764,7 @@ test("production polling pauses during editing and hidden documents and retains 
     ).toHaveCount(0);
 });
 
-test("a late production poll cannot replace a newer saved response", async ({
+test("a held production poll is not overlapped by the next one", async ({
     page,
 }) => {
     await page.clock.install({ time: new Date("2026-11-10T12:00:00Z") });
@@ -785,15 +785,13 @@ test("a late production poll cannot replace a newer saved response", async ({
     await expect.poll(() => polls).toBe(1);
     await expect(row(page, "08:00–09:00")).toContainText("1 Settlement");
     await page.clock.fastForward(30_000);
-    await expect(row(page, "08:00–09:00")).toContainText("5 Settlement");
-    const lateResponse = page.waitForResponse(
-        async (response) =>
-            response.url().includes("/production/?") &&
-            (await response.json()).intervals[0].effective.energy_mwh === 4,
-    );
-    release();
-    await (await lateResponse).finished();
     await page.clock.runFor(20);
+    expect(polls).toBe(1);
+    await expect(row(page, "08:00–09:00")).toContainText("1 Settlement");
+    release();
+    await expect(row(page, "08:00–09:00")).toContainText("4 Settlement");
+    await page.clock.fastForward(30_000);
+    await expect.poll(() => polls).toBe(2);
     await expect(row(page, "08:00–09:00")).toContainText("5 Settlement");
 });
 

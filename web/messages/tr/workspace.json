@@ -118,8 +118,8 @@
     "RegionWorkspace": {
         "allPlants": "Tüm santraller",
         "loadingPlant": "Santral yükleniyor...",
-        "refreshFailed": "Santral yenilenemedi. Kayıtlı bilgiler gösteriliyor. {error}",
-        "plantUnavailable": "Tesis kurulumu bekleniyor."
+        "plantUnavailable": "Tesis kurulumu bekleniyor.",
+        "siteUnavailable": "Bu santral kullanılamıyor."
     },
     "Reminders": {
         "preparing": "Hazırlanıyor",

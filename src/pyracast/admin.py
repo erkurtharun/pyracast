@@ -114,7 +114,7 @@ class PlatformAdminSite(admin.AdminSite):
             *self.workspace_urls(),
             path(
                 "password_change/",
-                self.admin_view(RedirectView.as_view(url="/app/?account=security")),
+                self.admin_view(RedirectView.as_view(url="/app/account/")),
                 name="password_change",
             ),
             *[

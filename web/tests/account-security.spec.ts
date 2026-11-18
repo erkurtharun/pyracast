@@ -26,7 +26,7 @@ test("an expired account session returns to sign in instead of asking for reauth
             });
         },
     );
-    await page.goto("/app/?workspace=customer");
+    await page.goto("/app/w/");
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("button", { name: "Set up authenticator" }).click();
     await expect(
@@ -83,7 +83,7 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
                 },
             }),
     );
-    await page.goto("/app/?workspace=customer");
+    await page.goto("/app/w/");
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("button", { name: "Show recovery codes" }).click();
     await expect(

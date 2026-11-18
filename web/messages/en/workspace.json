@@ -118,8 +118,8 @@
     "RegionWorkspace": {
         "allPlants": "All plants",
         "loadingPlant": "Loading plant...",
-        "refreshFailed": "Unable to refresh this plant. Showing saved details. {error}",
-        "plantUnavailable": "Plant setup is pending."
+        "plantUnavailable": "Plant setup is pending.",
+        "siteUnavailable": "This plant is not available."
     },
     "Reminders": {
         "preparing": "Preparing",

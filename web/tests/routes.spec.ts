@@ -4,10 +4,14 @@ import {
     isPlantSection,
     routeId,
     routes,
+    screenOf,
 } from "../src/lib/routes";
 
 test("every application screen has one address built in one place", () => {
     expect(routes.entry()).toBe("/app/");
+    expect(routes.signIn("tr")).toBe("/app/?language=tr");
+    expect(routes.signUp("en")).toBe("/app/?signup=1&language=en");
+    expect(routes.socialCallback()).toBe("/app/?social_callback=1");
     expect(routes.account()).toBe("/app/account/");
     expect(routes.invitation()).toBe("/app/invitation/");
     expect(routes.workspaces()).toBe("/app/w/");
@@ -28,6 +32,17 @@ test("every application screen has one address built in one place", () => {
     expect(routes.plant(5, 11, "forecast", { view: "generation" })).toBe(
         "/app/w/5/plants/11/forecast/",
     );
+});
+
+test("the screen of an address names the active navigation entry", () => {
+    expect(screenOf("/app/account/")).toBe("account");
+    expect(screenOf("/app/w/5/")).toBe("portfolio");
+    expect(screenOf("/app/w/5/plants/11/forecast/")).toBe("plant");
+    expect(screenOf("/app/w/5/members/")).toBe("members");
+    expect(screenOf("/app/w/5/inbox/")).toBe("inbox");
+    expect(screenOf("/app/w/5/trash/")).toBe("trash");
+    expect(screenOf("/app/w/")).toBe("other");
+    expect(screenOf("/app/w/5/unknown/")).toBe("other");
 });
 
 test("route segments accept only positive ids and known plant sections", () => {

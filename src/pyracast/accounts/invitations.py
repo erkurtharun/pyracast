@@ -170,7 +170,7 @@ def invite_workspace_member(
         address=email,
     )
     tenant = Tenant.objects.get(pk=tenant_id)
-    link = f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/#token={token}"
+    link = f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/invitation/#token={token}"
     with translation.override(language or user_language(actor) or translation.get_language()):
         context = {
             "workspace": tenant.name,

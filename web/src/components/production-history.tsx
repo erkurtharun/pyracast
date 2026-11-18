@@ -1,9 +1,10 @@
 "use client";
 import { useLocale, useTranslations } from "next-intl";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
-import { api, buildUrl } from "@/lib/api/client";
-import { send } from "@/lib/api/lane";
+import { api } from "@/lib/api/client";
+import { cadence, useApiQuery } from "@/lib/api/query";
+import { useProposalKey } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
 import { dataIntervalRange, intervalTimeFormatter } from "@/lib/intervals";
 import { QUALITIES, qualityOf, type Quality } from "@/lib/production";
@@ -11,27 +12,13 @@ import { CsvDownload } from "./csv-download";
 import { localDay } from "./data-source";
 import { ProductionImport } from "./production-import";
 import { ScrollRegion } from "./scroll-region";
-import { Notice, useResource } from "./ui";
+import { Notice } from "./ui";
 import { useCanManageWorkspace } from "./workspace-access";
-import {
-    useChangeRequestUpdates,
-    useProposalKey,
-} from "./change-request-updates";
 
 type History = components["schemas"]["ProductionHistoryOutput"];
 type Interval = components["schemas"]["ProductionIntervalOutput"];
 type ChangeRow = components["schemas"]["ProductionChangeRow"];
 
-type Loaded =
-    | { status: "loading" }
-    | { status: "error"; query: string; revision: number; error: string }
-    | {
-          status: "ready";
-          query: string;
-          revision: number;
-          history: History;
-          warning?: string;
-      };
 type Editor =
     | { status: "closed" }
     | {
@@ -183,111 +170,42 @@ export function ProductionHistory({
     scope: PlantScope;
     configuration?: number;
     timezone: string;
-    onSaved: () => void;
+    onSaved: () => Promise<unknown>;
 }) {
     const t = useTranslations("ProductionHistory");
     const locale = useLocale();
     const canManage = useCanManageWorkspace();
     const proposals = useTranslations("ChangeRequests");
     const proposalKey = useProposalKey();
-    const requestsChanged = useChangeRequestUpdates();
     const yesterday = localDay(timezone, -1);
     const [date, setDate] = useState(yesterday);
     const [showFullDay, setShowFullDay] = useState(false);
-    const [revision, setRevision] = useState(0);
-    const [loaded, setLoaded] = useState<Loaded>({ status: "loading" });
     const [editor, setEditor] = useState<Editor>({ status: "closed" });
     const [message, setMessage] = useState("");
     const editButtons = useRef(new Map<string, HTMLButtonElement>());
     const pendingFocus = useRef<string | null>(null);
     const summaryRef = useRef<HTMLDivElement>(null);
-    const readSequence = useRef(0);
-    const nextReadSequence = useCallback(() => ++readSequence.current, []);
-    const editorClosed = useRef(true);
-    useEffect(() => {
-        editorClosed.current = editor.status === "closed";
-    }, [editor.status]);
-    const connection = useResource(
+    const connection = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production-source/",
         { path: scope },
-        revision,
     );
-    const query = buildUrl(
+    const reading = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/",
         {
             path: scope,
             query: { start_date: date, end_date: date, native_intervals: true },
         },
+        { poll: editor.status === "closed" ? cadence.live : false },
     );
-    useEffect(() => {
-        let current = true;
-        const load = () => {
-            const sequence = nextReadSequence();
-            send<History>({ method: "GET", url: query }).then(
-                (history) => {
-                    if (current && sequence === readSequence.current) {
-                        setLoaded({
-                            status: "ready",
-                            query,
-                            revision,
-                            history,
-                        });
-                        setEditor((previous) =>
-                            reconcileEditor(
-                                previous,
-                                history,
-                                t("interval_changed"),
-                            ),
-                        );
-                    }
-                },
-                (error: Error) => {
-                    if (current && sequence === readSequence.current) {
-                        setLoaded((previous) =>
-                            previous.status === "ready" &&
-                            previous.query === query
-                                ? {
-                                      ...previous,
-                                      revision,
-                                      warning: error.message,
-                                  }
-                                : {
-                                      status: "error",
-                                      query,
-                                      revision,
-                                      error: error.message,
-                                  },
-                        );
-                        setEditor((previous) =>
-                            previous.status === "reloading"
-                                ? {
-                                      ...previous,
-                                      status: "failed",
-                                      error: error.message,
-                                  }
-                                : previous,
-                        );
-                    }
-                },
-            );
-        };
-        load();
-        const timer = window.setInterval(() => {
-            if (document.visibilityState === "visible" && editorClosed.current)
-                load();
-        }, 30_000);
-        return () => {
-            current = false;
-            nextReadSequence();
-            window.clearInterval(timer);
-        };
-    }, [nextReadSequence, query, revision, t]);
-    const current =
-        loaded.status !== "loading" &&
-        loaded.query === query &&
-        loaded.revision === revision;
-    const history =
-        current && loaded.status === "ready" ? loaded.history : undefined;
+    const [reconciledAt, setReconciledAt] = useState(0);
+    if (reading.data && reading.updatedAt !== reconciledAt) {
+        const fresh = reading.data;
+        setReconciledAt(reading.updatedAt);
+        setEditor((previous) =>
+            reconcileEditor(previous, fresh, t("interval_changed")),
+        );
+    }
+    const history = reading.data;
     useEffect(() => {
         if (editor.status !== "closed" || !history || !pendingFocus.current)
             return;
@@ -347,12 +265,9 @@ export function ProductionHistory({
     async function reloadEditor() {
         if (editor.status === "closed" || saving) return;
         const attempt = editor;
-        const sequence = nextReadSequence();
         setEditor({ ...attempt, status: "reloading" });
         try {
-            const updated = await send<History>({ method: "GET", url: query });
-            if (sequence !== readSequence.current) return;
-            setLoaded({ status: "ready", query, revision, history: updated });
+            const updated = await reading.reload();
             const row = updated.intervals.find(
                 (row) => key(row) === attempt.key,
             );
@@ -372,7 +287,6 @@ export function ProductionHistory({
                 });
             }
         } catch (error) {
-            if (sequence !== readSequence.current) return;
             setEditor((current) =>
                 current.status === "orphaned" && current.key === attempt.key
                     ? current
@@ -471,7 +385,6 @@ export function ProductionHistory({
                     },
                 );
                 proposalKey.reset();
-                requestsChanged();
             }
             pendingFocus.current = attempt.key;
             setEditor({ status: "closed" });
@@ -482,8 +395,7 @@ export function ProductionHistory({
                         : t("saved")
                     : proposals("submitted"),
             );
-            setRevision((value) => value + 1);
-            onSaved();
+            await onSaved();
         } catch (error) {
             setEditor((current) =>
                 current.status === "orphaned" && current.key === attempt.key
@@ -510,7 +422,7 @@ export function ProductionHistory({
             type="button"
             aria-label={t("refresh")}
             disabled={saving || editor.status !== "closed"}
-            onClick={() => setRevision((value) => value + 1)}
+            onClick={reading.retry}
         >
             <span aria-hidden="true">↻</span>
         </button>
@@ -565,9 +477,9 @@ export function ProductionHistory({
                 {!history && refreshButton}
             </div>
             {message && <Notice>{message}</Notice>}
-            {current && loaded.status === "ready" && loaded.warning && (
+            {history && reading.error && (
                 <Notice error>
-                    {t("refresh_failed", { error: loaded.warning })}
+                    {t("refresh_failed", { error: reading.error })}
                 </Notice>
             )}
             {editor.status === "orphaned" && (
@@ -592,10 +504,10 @@ export function ProductionHistory({
                     </button>
                 </div>
             )}
-            {!current ? (
+            {reading.loading ? (
                 <p role="status">{t("loading_production_history")}</p>
-            ) : loaded.status === "error" ? (
-                <Notice error>{loaded.error}</Notice>
+            ) : !history ? (
+                <Notice error>{reading.error}</Notice>
             ) : (
                 history && (
                     <>
@@ -1136,10 +1048,7 @@ export function ProductionHistory({
                         scope={scope}
                         configuration={configuration}
                         timezone={timezone}
-                        onSaved={() => {
-                            setRevision((value) => value + 1);
-                            onSaved();
-                        }}
+                        onSaved={onSaved}
                     />
                 </details>
             )}

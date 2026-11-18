@@ -267,8 +267,8 @@ test("invitation signup preserves token without creating another workspace", asy
             },
         });
     });
-    await page.goto("/invitations/accept#token=invite-secret");
-    await expect(page).toHaveURL("/invitations/accept");
+    await page.goto("/app/invitation/#token=invite-secret");
+    await expect(page).toHaveURL("/app/invitation/");
     await page.reload();
     await page
         .getByRole("button", { name: "Create account", exact: true })
@@ -296,7 +296,7 @@ test("invitation signup preserves token without creating another workspace", asy
     await expect(
         page.getByRole("button", { name: "Accept invitation" }),
     ).toBeVisible();
-    await expect(page).toHaveURL("/invitations/accept");
+    await expect(page).toHaveURL("/app/invitation/");
 });
 
 test("signed in member explicitly accepts invitation and sees actionable errors", async ({
@@ -319,15 +319,15 @@ test("signed in member explicitly accepts invitation and sees actionable errors"
             ),
         });
     });
-    await page.goto("/app/#token=invite-secret&section=members");
-    await expect(page).toHaveURL("/app/#section=members");
+    await page.goto("/app/invitation/#token=invite-secret");
+    await expect(page).toHaveURL("/app/invitation/");
     await page.getByRole("button", { name: "Accept invitation" }).click();
     await expect(page.locator(".form-errors p")).toHaveText(
         "Verify the invited email address before accepting.",
     );
     accepted = true;
     await page.getByRole("button", { name: "Accept invitation" }).click();
-    await expect(page).toHaveURL("/app/?workspace=customer");
+    await expect(page).toHaveURL("/app/w/1/");
     expect(
         await page.evaluate(() =>
             sessionStorage.getItem("pyracast.workspaceInvitation"),
@@ -355,7 +355,7 @@ for (const [status, code, detail] of [
                 json: errorBody(code, detail),
             }),
         );
-        await page.goto("/app/?token=invite-secret");
+        await page.goto("/app/invitation/#token=invite-secret");
         await page.getByRole("button", { name: "Accept invitation" }).click();
         await expect(page.locator(".form-errors p")).toHaveText(detail);
         expect(
@@ -368,7 +368,7 @@ for (const [status, code, detail] of [
             fullPage: true,
         });
         await page.getByRole("button", { name: "Cancel", exact: true }).click();
-        await expect(page).toHaveURL("/app/?workspace=customer");
+        await expect(page).toHaveURL("/app/w/1/");
         await expect(
             page.getByRole("heading", { name: "Plants" }),
         ).toBeVisible();
@@ -411,7 +411,7 @@ test("switching invited account signs out with CSRF and preserves invitation thr
         }
         return route.fallback();
     });
-    await page.goto("/app/?token=invite-secret");
+    await page.goto("/app/invitation/#token=invite-secret");
     await page
         .getByRole("button", { name: "Use another account", exact: true })
         .click();
@@ -438,7 +438,7 @@ test("switching invited account signs out with CSRF and preserves invitation thr
     await expect(
         page.getByRole("button", { name: "Accept invitation", exact: true }),
     ).toBeVisible();
-    await expect(page).toHaveURL("/app/");
+    await expect(page).toHaveURL("/app/invitation/");
     expect(
         await page.evaluate(() =>
             sessionStorage.getItem("pyracast.workspaceInvitation"),
@@ -458,7 +458,7 @@ test("anonymous expired invitation can be dismissed to restore company registrat
             ]),
         }),
     );
-    await page.goto("/app/?token=expired-secret");
+    await page.goto("/app/invitation/#token=expired-secret");
     await page
         .getByRole("button", { name: "Create account", exact: true })
         .click();
@@ -479,7 +479,7 @@ test("anonymous expired invitation can be dismissed to restore company registrat
     await page
         .getByRole("button", { name: "Cancel invitation", exact: true })
         .click();
-    await expect(page).toHaveURL("/app/?workspace=customer");
+    await expect(page).toHaveURL("/app/w/");
     expect(
         await page.evaluate(() =>
             sessionStorage.getItem("pyracast.workspaceInvitation"),

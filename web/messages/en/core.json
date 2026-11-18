@@ -151,7 +151,6 @@
         "loadingWorkspaces": "Loading your workspaces…",
         "noWorkspace": "No workspace yet",
         "contactAdmin": "Contact your administrator for access.",
-        "refreshFailed": "Unable to refresh plants. Showing saved details.",
         "portfolio": "Your solar portfolio",
         "closeForm": "Close form",
         "addPlant": "+ Add a plant",
@@ -175,10 +174,10 @@
         "members": "Members",
         "readOnly": "Member · changes require approval",
         "inbox": "Inbox",
-        "inboxCount": "Inbox, {count, plural, one {# update} other {# updates}}"
+        "inboxCount": "Inbox, {count, plural, one {# update} other {# updates}}",
+        "workspaceUnavailable": "This workspace is not available to your account."
     },
     "Common": {
-        "invalidPage": "The server returned an invalid next page.",
         "unexpected": "Something went wrong.",
         "saveFailed": "We couldn’t save your changes",
         "saving": "Saving…",
@@ -209,7 +208,9 @@
             "skipped": "skipped",
             "uncertain": "uncertain",
             "superseded": "superseded"
-        }
+        },
+        "refreshFailed": "Could not refresh; showing data from {time}.",
+        "retry": "Try again"
     },
     "AppError": {
         "title": "This page could not be displayed",
@@ -227,7 +228,8 @@
         "reference": "Reference: {reference}",
         "network": "Could not reach the server. Check your connection and try again.",
         "unconfirmed": "The server did not confirm the change. Reload to check whether it was saved.",
-        "stillSignedIn": "You are still signed in. Sign out again."
+        "stillSignedIn": "You are still signed in. Sign out again.",
+        "invalidPage": "The server returned an invalid next page."
     },
     "ProductionCsv": {
         "size": "Choose a CSV no larger than 2 MiB.",

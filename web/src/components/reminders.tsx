@@ -6,7 +6,8 @@ import type { components } from "@/lib/schema";
 import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { isLanguage } from "@/i18n/language";
-import { ActionForm, Empty, Notice, Tag, useResource } from "./ui";
+import { useApiQuery, useRefresh } from "@/lib/api/query";
+import { ActionForm, Empty, Notice, Tag } from "./ui";
 type ReminderSchedule = components["schemas"]["ReminderOutput"];
 function useRowFocus(rows: { id: number }[]) {
     const prefix = useId();
@@ -261,12 +262,16 @@ type ReminderProps = {
 };
 
 export function Reminders(props: ReminderProps) {
+    const refresh = useRefresh();
     const [version, setVersion] = useState(0);
     return (
         <ReminderSettings
             key={`${props.scope.region_id}-${version}`}
             {...props}
-            onSaved={() => setVersion((current) => current + 1)}
+            onSaved={async () => {
+                await refresh.workspace(props.scope.tenant_id);
+                setVersion((current) => current + 1);
+            }}
         />
     );
 }
@@ -320,7 +325,7 @@ function ReminderSettings({
         no_saved_forecast: t("noSavedForecast"),
     };
 
-    const resource = useResource(
+    const resource = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/reminders/",
         { path: scope },
     );

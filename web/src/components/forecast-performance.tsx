@@ -6,7 +6,8 @@ import { useState, type FormEvent } from "react";
 import { localDay } from "./data-source";
 import type { PlantScope } from "@/lib/api";
 import type { RequestOptions } from "@/lib/api/client";
-import { Notice, Stat, useResource } from "./ui";
+import { useApiQuery } from "@/lib/api/query";
+import { Notice, Stat } from "./ui";
 import { CsvDownload } from "./csv-download";
 
 type PerformanceQuery = RequestOptions<
@@ -160,7 +161,7 @@ function PerformanceResults({
         invalid_forecast_data: t("saved_reference_data_is_invalid"),
     };
 
-    const resource = useResource(
+    const resource = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/performance/",
         {
             path: scope,

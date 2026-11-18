@@ -4,10 +4,11 @@ import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { Calibration, PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
+import { cadence, useApiList, useRefresh } from "@/lib/api/query";
 import { CalibrationAutomationPanel } from "./calibration-automation";
 import { CsvDownload } from "./csv-download";
 import { ScrollRegion } from "./scroll-region";
-import { Empty, JsonDetails, Notice, Stat, Tag, useCollection } from "./ui";
+import { Empty, JsonDetails, Notice, RefreshFailed, Stat, Tag } from "./ui";
 
 type DetailState =
     | { status: "idle" | "loading" }
@@ -19,11 +20,9 @@ type ActionState =
 
 export function Calibrations({
     scope,
-    productionRevision,
     currentConfigurationId,
 }: {
     scope: PlantScope;
-    productionRevision: number;
     currentConfigurationId: number | null;
 }) {
     const t = useTranslations("Calibrations");
@@ -38,8 +37,9 @@ export function Calibrations({
                     value: locale === "en" ? value.replaceAll("_", " ") : value,
                 });
 
-    const [version, setVersion] = useState(0),
-        [automationPending, setAutomationPending] = useState(false),
+    const refresh = useRefresh();
+    const changed = () => refresh.workspace(scope.tenant_id);
+    const [automationPending, setAutomationPending] = useState(false),
         [detail, setDetail] = useState<DetailState>({ status: "idle" }),
         [actionState, setActionState] = useState<ActionState>({
             status: "idle",
@@ -52,11 +52,10 @@ export function Calibrations({
             sequence.current++;
         };
     }, [scope.plant_id]);
-    const resource = useCollection(
+    const resource = useApiList(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/",
         { path: scope },
-        version + productionRevision,
-        30_000,
+        { poll: cadence.steady },
     );
     async function action(run: () => Promise<unknown>) {
         if (!canManage) return;
@@ -64,7 +63,7 @@ export function Calibrations({
         try {
             await run();
             setActionState({ status: "success" });
-            setVersion((current) => current + 1);
+            await changed();
         } catch (error) {
             setActionState({
                 status: "error",
@@ -92,10 +91,9 @@ export function Calibrations({
             <CalibrationAutomationPanel
                 key={scope.plant_id}
                 scope={scope}
-                refresh={version + productionRevision}
                 disabled={actionState.status === "pending"}
                 onPendingChange={setAutomationPending}
-                onChanged={() => setVersion((current) => current + 1)}
+                onChanged={changed}
             />
             <section className="panel">
                 <div className="section-heading">
@@ -104,21 +102,19 @@ export function Calibrations({
                         <p className="fine">{t("selection_effect")}</p>
                     </div>
                     <div className="button-group">
-                        {resource.data &&
-                            !resource.loading &&
-                            !resource.error && (
-                                <CsvDownload
-                                    label={t("download_calibration_csv")}
-                                    filename="calibrations"
-                                    records={resource.data.results}
-                                />
-                            )}
+                        {resource.data && (
+                            <CsvDownload
+                                label={t("download_calibration_csv")}
+                                filename="calibrations"
+                                records={resource.data.results}
+                            />
+                        )}
                         <button
                             className="button secondary"
                             onClick={() => {
                                 if (actionState.status !== "pending")
                                     setActionState({ status: "idle" });
-                                setVersion((current) => current + 1);
+                                void changed();
                             }}
                         >
                             {t("refresh")}
@@ -156,11 +152,12 @@ export function Calibrations({
                         )}
                     </Notice>
                 )}
+                <RefreshFailed resource={resource} />
                 {resource.loading ? (
                     <p role="status">{t("loading_calibration_runs")}</p>
-                ) : resource.error ? (
+                ) : !resource.data ? (
                     <Notice error>{resource.error}</Notice>
-                ) : resource.data?.results.length ? (
+                ) : resource.data.results.length ? (
                     <ScrollRegion label={t("calibration_runs")}>
                         <table>
                             <caption className="sr-only">

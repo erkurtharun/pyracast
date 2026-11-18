@@ -2,46 +2,40 @@ import { test, expect } from "./support/test";
 import { mockApi, paged, plant, region } from "./support/workspace";
 import { errorBody } from "./support/errors";
 
-for (const endpoint of ["sites", "plants"] as const) {
-    test(`a temporary ${endpoint} refresh failure preserves an open technical draft`, async ({
-        page,
-    }) => {
-        await page.clock.install();
-        await mockApi(page);
-        let fail = false;
-        const url =
-            endpoint === "sites" ? "**/sites/" : "**/regions/11/plants/";
-        const message = `${endpoint} refresh temporarily failed.`;
-        await page.route(url, (route) =>
-            fail
-                ? route.fulfill({
-                      status: 503,
-                      json: errorBody("busy", message),
-                  })
-                : route.fallback(),
-        );
-        await page.goto("/app/");
-        await page.getByRole("button", { name: /East array/ }).click();
-        await page
-            .getByRole("button", { name: "Settings", exact: true })
-            .click();
-        await page.getByLabel("DC nameplate capacity (MW)").fill("6.25");
-        fail = true;
-        await page.clock.fastForward(30_000);
-        await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
-            "6.25",
-        );
-        await expect(page.locator("main").getByRole("alert")).toContainText(
-            message,
-        );
-        fail = false;
-        await page.clock.fastForward(30_000);
-        await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
-        await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
-            "6.25",
-        );
-    });
-}
+test("a temporary site refresh failure preserves an open technical draft", async ({
+    page,
+}) => {
+    await page.clock.install();
+    await mockApi(page);
+    let fail = false;
+    const message = "Site refresh temporarily failed.";
+    await page.route("**/sites/", (route) =>
+        fail
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", message),
+              })
+            : route.fallback(),
+    );
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByLabel("DC nameplate capacity (MW)").fill("6.25");
+    fail = true;
+    await page.clock.fastForward(120_000);
+    await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
+        "6.25",
+    );
+    await expect(page.locator("main").getByRole("alert")).toContainText(
+        message,
+    );
+    fail = false;
+    await page.clock.fastForward(120_000);
+    await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
+    await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
+        "6.25",
+    );
+});
 
 test("an older pending submission cannot replace a saved technical update", async ({
     page,
@@ -67,12 +61,7 @@ test("an older pending submission cannot replace a saved technical update", asyn
     });
     let hold = false;
     let serverCapacity = 5;
-    await page.route("**/sites/", (route) =>
-        route.fulfill({
-            json: paged([{ ...region, status: "pending", plant: pending }]),
-        }),
-    );
-    await page.route("**/regions/11/plants/", async (route) => {
+    await page.route("**/sites/", async (route) => {
         const snapshot = {
             ...pending,
             submission: { ...submission, dc_capacity_mw: serverCapacity },
@@ -81,7 +70,9 @@ test("an older pending submission cannot replace a saved technical update", asyn
             requestStarted();
             await gate;
         }
-        await route.fulfill({ json: paged([snapshot]) });
+        await route.fulfill({
+            json: paged([{ ...region, status: "pending", plant: snapshot }]),
+        });
     });
     await page.route("**/plants/21/", (route) =>
         route.fulfill({
@@ -96,11 +87,11 @@ test("an older pending submission cannot replace a saved technical update", asyn
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByLabel("DC nameplate capacity (MW)").fill("6.25");
     hold = true;
-    await page.clock.fastForward(30_000);
+    await page.clock.fastForward(120_000);
     await observed;
     await page.getByRole("button", { name: "Save configuration" }).click();
     const capacity = page.getByLabel("DC nameplate capacity (MW)");
-    const refreshed = page.waitForResponse("**/regions/11/plants/");
+    const refreshed = page.waitForResponse("**/sites/");
     try {
         await expect(capacity).toHaveValue("6.25");
     } finally {
@@ -122,8 +113,8 @@ test("an older pending submission cannot replace a saved technical update", asyn
     await expect(capacity).toHaveValue("6.25");
     hold = false;
     serverCapacity = 6.25;
-    const confirmed = page.waitForResponse("**/regions/11/plants/");
-    await page.clock.fastForward(30_000);
+    const confirmed = page.waitForResponse("**/sites/");
+    await page.clock.fastForward(120_000);
     await (await confirmed).finished();
     await page.evaluate(
         () =>
@@ -134,8 +125,8 @@ test("an older pending submission cannot replace a saved technical update", asyn
             ),
     );
     serverCapacity = 7;
-    const updated = page.waitForResponse("**/regions/11/plants/");
-    await page.clock.fastForward(30_000);
+    const updated = page.waitForResponse("**/sites/");
+    await page.clock.fastForward(120_000);
     await (await updated).finished();
     await page.getByRole("button", { name: "Location", exact: true }).click();
     await page
@@ -154,7 +145,6 @@ for (const section of ["Forecast", "Settings"] as const) {
         let approved = false;
         let writes = 0;
         let siteReads = 0;
-        let plantReads = 0;
         const mutations: string[] = [];
         page.on("request", (request) => {
             const path = new URL(request.url()).pathname;
@@ -198,10 +188,6 @@ for (const section of ["Forecast", "Settings"] as const) {
                 ),
             });
         });
-        await page.route("**/regions/11/plants/", (route) => {
-            plantReads++;
-            return route.fulfill({ json: paged([currentPlant()]) });
-        });
         await page.route("**/plants/21/forecast/**", (route) =>
             route.fulfill({
                 json: {
@@ -242,7 +228,7 @@ for (const section of ["Forecast", "Settings"] as const) {
             await page.getByLabel("DC nameplate capacity (MW)").fill("6.25");
         }
         approved = true;
-        await page.clock.fastForward(30_000);
+        await page.clock.fastForward(120_000);
         await expect(page.locator(".plant-identity .tag")).toHaveText(
             "approved",
         );
@@ -267,7 +253,6 @@ for (const section of ["Forecast", "Settings"] as const) {
             page.getByRole("button", { name: "Production", exact: true }),
         ).toBeEnabled();
         expect(siteReads).toBeGreaterThanOrEqual(2);
-        expect(plantReads).toBeGreaterThanOrEqual(2);
         expect(writes).toBe(1);
         expect(mutations).toEqual(["POST /api/tenants/1/sites/"]);
     });
@@ -332,18 +317,20 @@ test("an existing location without a plant offers complete setup", async ({
     page,
 }) => {
     await mockApi(page);
+    let created = false;
     await page.route("**/sites/", (route) =>
-        route.fulfill({ json: paged([{ ...region, plant: null }]) }),
+        route.fulfill({
+            json: paged([{ ...region, plant: created ? plant : null }]),
+        }),
     );
-    await page.route("**/regions/11/plants/", async (route) => {
-        if (route.request().method() === "POST") {
-            expect(route.request().postDataJSON()).toMatchObject({
-                name: region.name,
-                dc_capacity_mw: 5,
-            });
-            return route.fulfill({ json: plant });
-        }
-        return route.fulfill({ json: paged([]) });
+    await page.route("**/regions/11/plants/", (route) => {
+        expect(route.request().method()).toBe("POST");
+        expect(route.request().postDataJSON()).toMatchObject({
+            name: region.name,
+            dc_capacity_mw: 5,
+        });
+        created = true;
+        return route.fulfill({ json: plant });
     });
     await page.goto("/app/");
     await page.getByRole("button", { name: /Complete setup/ }).click();
@@ -393,7 +380,7 @@ test("portfolio filters span all pages and a plant section survives refresh", as
     await expect(page.locator(".region-card")).toHaveCount(1);
     await page.locator(".region-card").click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await expect(page).toHaveURL(/#plant-11\/settings$/);
+    await expect(page).toHaveURL("/app/w/1/plants/11/settings/");
     await page.reload();
     await expect(
         page.getByRole("button", { name: "Settings", exact: true }),

@@ -793,7 +793,7 @@ test("mobile platform administrator can reach administration and customer naviga
 }) => {
     await page.setViewportSize({ width: 320, height: 740 });
     await mockApi(page, { admin: true });
-    await page.goto("/app/?workspace=customer");
+    await page.goto("/app/w/");
     const navigation = page.getByRole("navigation", {
         name: "Main navigation",
     });

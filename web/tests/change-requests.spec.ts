@@ -791,7 +791,7 @@ test("workspace and current role changes clear review controls and previous tena
         page.getByRole("button", { name: "Approve and apply", exact: true }),
     ).toBeVisible();
     role = "viewer";
-    await page.clock.runFor(30_001);
+    await page.clock.runFor(120_001);
     await expect(
         page.getByRole("button", { name: "Approve and apply", exact: true }),
     ).toHaveCount(0);

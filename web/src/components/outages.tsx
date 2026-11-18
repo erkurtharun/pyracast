@@ -3,14 +3,12 @@ import { useCanManageWorkspace } from "./workspace-access";
 import { useTranslations, useLocale, useFormatter } from "next-intl";
 
 import { useState } from "react";
-import {
-    useChangeRequestUpdates,
-    useProposalKey,
-} from "./change-request-updates";
 import type { Plant, PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
+import { useApiList } from "@/lib/api/query";
+import { useProposalKey } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
-import { ActionForm, Field, Notice, Select, Tag, useCollection } from "./ui";
+import { ActionForm, Field, Notice, Select, Tag } from "./ui";
 import { CsvDownload } from "./csv-download";
 
 type Outage = components["schemas"]["IncidentOutput"];
@@ -55,14 +53,13 @@ export function Outages({
 }: {
     scope: PlantScope;
     timezone: string;
-    onChanged: () => void;
+    onChanged: () => Promise<unknown>;
     configuration?: Configuration | null;
 }) {
     const t = useTranslations("Outages");
     const canManage = useCanManageWorkspace();
     const proposals = useTranslations("ChangeRequests");
     const proposalKey = useProposalKey();
-    const requestsChanged = useChangeRequestUpdates();
     const [submitted, setSubmitted] = useState(false);
     async function propose(payload: IncidentRequest) {
         await api.post(
@@ -77,7 +74,7 @@ export function Outages({
         );
         proposalKey.reset();
         setSubmitted(true);
-        requestsChanged();
+        await onChanged();
     }
     const locale = useLocale();
     const formatNumber = useFormatter();
@@ -89,13 +86,11 @@ export function Outages({
         multiple: t("multipleFaults"),
     };
 
-    const [revision, setRevision] = useState(0);
     const [editor, setEditor] = useState<Outage | "new" | null>(null);
     const [resolving, setResolving] = useState<number | null>(null);
-    const resource = useCollection(
+    const resource = useApiList(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/",
         { path: scope },
-        revision,
     );
     const statusTag = (status: string) =>
         status === "active"
@@ -119,10 +114,7 @@ export function Outages({
     const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const format = (value: string) =>
         new Date(value).toLocaleString(locale, { timeZone: deviceTimezone });
-    const changed = () => {
-        setRevision((value) => value + 1);
-        onChanged();
-    };
+    const changed = onChanged;
     return (
         <section className="panel">
             <div className="section-heading">

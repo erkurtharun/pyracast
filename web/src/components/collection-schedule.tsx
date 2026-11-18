@@ -1,10 +1,11 @@
 "use client";
 import { useTranslations, useLocale } from "next-intl";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { components } from "@/lib/schema";
 import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
-import { ActionForm, Notice, Stat } from "./ui";
+import { cadence, useApiQuery, useRefresh } from "@/lib/api/query";
+import { ActionForm, Notice, RefreshFailed, Stat } from "./ui";
 
 type Schedule = components["schemas"]["CollectionScheduleOutput"];
 
@@ -17,52 +18,28 @@ export function CollectionSchedule({
 }) {
     const t = useTranslations("CollectionSchedule");
     const { tenant_id, region_id } = scope;
-
-    const [version, setVersion] = useState(0);
-    const [data, setData] = useState<Schedule>();
-    const [error, setError] = useState("");
-    useEffect(() => {
-        let active = true;
-        let sequence = 0;
-        const load = () => {
-            const requestSequence = ++sequence;
-            api.get(
-                "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/",
-                { path: { tenant_id, region_id } },
-            )
-                .then((result) => {
-                    if (active && requestSequence === sequence) {
-                        setData(result);
-                        setError("");
-                    }
-                })
-                .catch((failure: Error) => {
-                    if (active && requestSequence === sequence)
-                        setError(failure.message);
-                });
-        };
-        load();
-        const timer = setInterval(load, 30_000);
-        return () => {
-            active = false;
-            clearInterval(timer);
-        };
-    }, [tenant_id, region_id, version]);
+    const refresh = useRefresh();
+    const schedule = useApiQuery(
+        "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/",
+        { path: { tenant_id, region_id } },
+        { poll: cadence.live },
+    );
+    const data = schedule.data;
     if (!data)
-        return error ? (
-            <Notice error>{error}</Notice>
+        return schedule.error ? (
+            <Notice error>{schedule.error}</Notice>
         ) : (
             <p role="status">{t("loadingCollectionSchedule")}</p>
         );
     return (
         <>
-            {error && <Notice error>{error}</Notice>}
+            <RefreshFailed resource={schedule} />
             <ScheduleEditor
                 key={JSON.stringify([data.enabled, data.times])}
                 data={data}
                 scope={scope}
                 region={region}
-                onSaved={() => setVersion((current) => current + 1)}
+                onSaved={() => refresh.workspace(tenant_id)}
             />
         </>
     );

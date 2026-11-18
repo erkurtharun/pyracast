@@ -1,10 +1,11 @@
 import { homeCopy, type PublicLanguage } from "./home-copy";
 import { SiteShell } from "./site-shell";
+import { routes } from "@/lib/routes";
 import styles from "./public-site.module.css";
 
 export function HomePage({ language }: { language: PublicLanguage }) {
     const copy = homeCopy[language];
-    const signupHref = `/app/?signup=1&language=${language}`;
+    const signupHref = routes.signUp(language);
     return (
         <SiteShell language={language}>
             <main id="main-content" tabIndex={-1}>

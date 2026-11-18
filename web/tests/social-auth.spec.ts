@@ -199,7 +199,7 @@ test("social-only accounts confirm email before disconnecting the selected provi
             return route.fulfill({ json: { status: 200 } });
         },
     );
-    await page.goto("/app/?account=security");
+    await page.goto("/app/account/");
     await page
         .getByRole("button", { name: "Disconnect solar@example.test" })
         .click();
@@ -271,7 +271,7 @@ test("a social-only user can set the first password and follows the required sig
             });
         },
     );
-    await page.goto("/app/?account=security");
+    await page.goto("/app/account/");
     await page
         .getByRole("heading", { name: "Set a password", exact: true })
         .click();
@@ -312,7 +312,7 @@ test("social-only MFA setup requests email confirmation rather than an unavailab
                 json: { status: 401, meta: { is_authenticated: true } },
             }),
     );
-    await page.goto("/app/?account=security");
+    await page.goto("/app/account/");
     await page.getByRole("button", { name: "Set up authenticator" }).click();
     await expect(
         page.getByRole("heading", { name: "Confirm with email" }),
@@ -352,7 +352,7 @@ test("expired initial-password sessions never report that the password was saved
             });
         },
     );
-    await page.goto("/app/?account=security");
+    await page.goto("/app/account/");
     await page
         .getByRole("heading", { name: "Set a password", exact: true })
         .click();
@@ -476,8 +476,8 @@ test("connecting returns to account settings and consumes an expired-confirmatio
     await mockApi(page);
     await page.addInitScript(() => {
         if (
-            location.search.includes("social_callback") &&
-            !location.search.includes("account=")
+            location.pathname === "/app/" &&
+            location.search.includes("social_callback")
         )
             sessionStorage.setItem("pyracast.socialConnect", "1");
     });
