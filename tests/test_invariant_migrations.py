@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Callable, Iterator
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from django.db import models
@@ -15,10 +15,11 @@ from pyracast.forecasts.models import (
 )
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
-from pyracast.plants.models import CalibrationRun
+from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
 from tests.support.capacity_normalization import normalize, scaled_system
 from tests.support.domain import NOW, System, make_system
 from tests.support.invariants import (
+    OBSERVATION_LINEAGE_RULE,
     PROVIDER_ACCOUNT_RULE,
     SITE_BINDING_RULE,
     lease_violations,
@@ -123,6 +124,9 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     epias = EpiasCollectionJob.objects.order_by("pk")[0]
     run = request_run(system, plant)
     delivery = _delivery(system)
+    original = _observation(system, plant, NOW - timedelta(days=2))
+    ProductionObservation.objects.filter(pk=original.pk).update(is_current=False)
+    correction = _observation(system, plant, NOW - timedelta(days=2), supersedes=original)
     migrate(*PREVIOUS.values())
     assert _installed() == (set(), set())
     token = uuid.uuid4()
@@ -163,9 +167,52 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     assert SiteBinding.objects.values().get(pk=system.binding.pk) == stored_binding
     assert violations("connections_provideraccount", PROVIDER_ACCOUNT_RULE) == 0
     assert violations("connections_sitebinding", SITE_BINDING_RULE) == 0
+    assert ProductionObservation.objects.get(pk=correction.pk).supersedes_id == original.pk
+    assert violations("plants_productionobservation", OBSERVATION_LINEAGE_RULE) == 0
 
     migrate(*PREVIOUS.values())
     assert _installed() == (set(), set())
+
+
+def _observation(
+    system: System, plant: Plant, start: datetime, **values: object
+) -> ProductionObservation:
+    return ProductionObservation.objects.create(
+        plant=plant,
+        configuration_id=plant.current_configuration_id,
+        starts_at=start,
+        ends_at=start + timedelta(hours=1),
+        energy_mwh=1,
+        source="manual",
+        recorded_by=system.member,
+        **values,
+    )
+
+
+@pytest.mark.usefixtures("leaf")
+def test_observation_migration_refuses_a_revision_of_another_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    start = NOW - timedelta(days=2)
+    earlier = _observation(system, plant, start)
+    later = _observation(system, plant, start + timedelta(hours=1))
+    migrate(PREVIOUS["plants"])
+    linked = ProductionObservation.objects.filter(pk=later.pk)
+    linked.update(supersedes=earlier)
+    assert violations("plants_productionobservation", OBSERVATION_LINEAGE_RULE) == 1
+
+    with pytest.raises(
+        ValueError, match=r"plants_productionobservation holds 1 row.*same plant and interval"
+    ):
+        forward()
+
+    assert "productionobservation_revision_guard" not in triggers()
+    assert linked.get().supersedes_id == earlier.pk
+    linked.update(supersedes=None)
+    forward()
+    assert "productionobservation_revision_guard" in triggers()
+    assert violations("plants_productionobservation", OBSERVATION_LINEAGE_RULE) == 0
 
 
 @pytest.mark.usefixtures("leaf")

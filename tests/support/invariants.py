@@ -38,6 +38,13 @@ PROVIDER_ACCOUNT_RULE = (
     " OR authentication_failed_revision BETWEEN 1 AND credential_revision)"
 )
 SITE_BINDING_RULE = "(validated_at IS NULL) = (validated_credential_revision IS NULL)"
+OBSERVATION_LINEAGE_RULE = (
+    "supersedes_id IS NULL OR EXISTS (SELECT 1 FROM plants_productionobservation AS previous"
+    " WHERE previous.id = plants_productionobservation.supersedes_id"
+    " AND previous.plant_id = plants_productionobservation.plant_id"
+    " AND previous.starts_at = plants_productionobservation.starts_at"
+    " AND previous.ends_at = plants_productionobservation.ends_at)"
+)
 
 
 def violations(table: str, rule: str) -> int:
