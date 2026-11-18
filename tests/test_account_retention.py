@@ -205,6 +205,38 @@ def test_an_invitation_to_a_workspace_being_reclaimed_waits_and_finds_it_gone(
     assert not WorkspaceInvitation.objects.exists()
 
 
+def test_a_signup_that_signed_in_after_selection_keeps_its_invitation_while_it_is_swept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = signup_account("owner")
+    tenant = workspace(user)
+    verified(user)
+    signed_in_once(user)
+    invitations: list[Future[None]] = []
+    lock = retention._lock
+
+    def invite() -> None:
+        invite_workspace_member(User.objects.get(pk=user.pk), tenant.pk, "guest@example.com")
+
+    def invited_once_the_account_is_locked(rows: Any) -> list[Any]:
+        locked = lock(rows)
+        if rows.model is User and not invitations:
+            invitations.append(alongside(invite))
+        return locked
+
+    monkeypatch.setattr(retention, "_lock", invited_once_the_account_is_locked)
+
+    with override_settings(MAILERS=LOCAL_MAIL):
+        reclaimed = retention.reclaim_signup(user.pk, timezone.now() - retention.ABANDONED_AFTER)
+        invitations[0].result(timeout=10)
+
+    assert not reclaimed
+    assert User.objects.filter(pk=user.pk).exists()
+    assert list(WorkspaceInvitation.objects.values_list("tenant_id", "created_by_id")) == [
+        (tenant.pk, user.pk)
+    ]
+
+
 def test_a_verification_completing_while_its_signup_is_reclaimed_keeps_the_account(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
