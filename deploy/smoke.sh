@@ -110,24 +110,33 @@ runtime_connects() {
     'import django; django.setup(); from django.db import connection; connection.ensure_connection()'
 }
 runtime_connects
-# Switches log no statement text even while the server logs every statement.
+# Password changes log nothing even while the server logs, samples and parses every statement.
 superuser=("${compose[@]}" exec -T postgres psql -X -v ON_ERROR_STOP=1 -U postgres -d pyracast)
-"${superuser[@]}" -c "ALTER SYSTEM SET log_statement = 'all'" -c 'SELECT pg_reload_conf()'
+logging=(log_statement log_min_duration_statement log_transaction_sample_rate debug_print_parse)
+"${superuser[@]}" -c "ALTER SYSTEM SET log_statement = 'all'" \
+  -c 'ALTER SYSTEM SET log_min_duration_statement = 0' \
+  -c 'ALTER SYSTEM SET log_transaction_sample_rate = 1' \
+  -c 'ALTER SYSTEM SET debug_print_parse = on' -c 'SELECT pg_reload_conf()'
 for attempt in {1..10}; do
   if [[ $("${superuser[@]}" -Atc 'SHOW log_statement') == all ]]; then break; fi
   (( attempt < 10 )) && sleep 1
 done
+"${superuser[@]}" -Atc "SELECT 'smoke-logged-probe'"
 mkdir "$temporary/rotated"
 printf 'PGUSER=pyracast_app\nPGPASSWORD=smoke-rotated\n' > "$temporary/rotated/runtime.env"
+printf 'PGUSER=pyracast_owner\nPGPASSWORD=smoke-owner-rotated\n' > "$temporary/rotated/migration.env"
+"${bootstrap[@]}" converge "$temporary" "$temporary/rotated"
+"${bootstrap[@]}" converge "$temporary" "$temporary"
 "${bootstrap[@]}" switch-runtime "$temporary" "$temporary/rotated"
 if runtime_connects; then exit 1; fi
 "${bootstrap[@]}" switch-runtime "$temporary" "$temporary"
-"${superuser[@]}" -c 'ALTER SYSTEM RESET log_statement' -c 'SELECT pg_reload_conf()'
+for name in "${logging[@]}"; do "${superuser[@]}" -c "ALTER SYSTEM RESET $name"; done
+"${superuser[@]}" -c 'SELECT pg_reload_conf()'
 runtime_connects
 database_log=$("${compose[@]}" logs --no-log-prefix postgres)
-[[ $database_log == *'FROM pg_authid'* ]]
+[[ $database_log == *smoke-logged-probe* ]]
 [[ $database_log != *SCRAM-SHA-256* && $database_log != *smoke-rotated* ]]
-[[ $database_log != *'ALTER ROLE pyracast_app'* ]]
+[[ $database_log != *smoke-owner-rotated* && $database_log != *'ALTER ROLE pyracast_'* ]]
 "${compose[@]}" run --rm --no-deps migrate
 "${bootstrap[@]}" converge "$temporary" "$temporary"
 "${compose[@]}" run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING

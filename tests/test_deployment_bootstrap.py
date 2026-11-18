@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 import uuid
@@ -10,6 +11,7 @@ import psycopg
 import pytest
 from django.conf import settings
 from psycopg import sql
+from psycopg.conninfo import conninfo_to_dict
 
 from deploy import bootstrap_database, reset_database
 
@@ -348,35 +350,54 @@ def test_bootstrap_is_one_idempotent_definition_without_its_own_transaction() ->
 
 
 class ServerPsql:
+    # psql opens its session with the startup options of its -d connection string, and -1 sends
+    # BEGIN before the script and COMMIT after it. Records each log line the server sends it.
     def __init__(self, database: str) -> None:
         self.database = database
+        self.commands: list[list[str]] = []
         self.scripts: list[str] = []
+        self.emitted: list[str] = []
+
+    def record(self, diagnostic: psycopg.errors.Diagnostic) -> None:
+        self.emitted.append(diagnostic.message_primary or "")
 
     def __call__(
         self, command: list[str], *, input: str | None = None, **options: Any
     ) -> subprocess.CompletedProcess[str]:
-        with psycopg.connect(**server_parameters(self.database)) as connection:
+        self.commands.append(command)
+        target = command[command.index("-d") + 1]
+        startup = conninfo_to_dict(target).get("options") if "=" in target else None
+        parameters = server_parameters(self.database) | ({"options": startup} if startup else {})
+        with psycopg.connect(**parameters, autocommit=True) as connection:
+            connection.add_notice_handler(self.record)
             if input is None:
                 rows = connection.execute(command[-1].encode()).fetchall()
                 stdout = "".join(f"{row[0]}\n" for row in rows)
                 return subprocess.CompletedProcess(command, 0, stdout=stdout)
             self.scripts.append(input)
+            single = "--single-transaction" in command
+            if single:
+                connection.execute("BEGIN")
             connection.execute(input.encode())
+            if single:
+                connection.execute("COMMIT")
         return subprocess.CompletedProcess(command, 0, stdout="")
 
 
-def runtime_verifier(database: str) -> str | None:
+def role_verifier(database: str, role: str = bootstrap_database.RUNTIME_ROLE) -> str | None:
     with psycopg.connect(**server_parameters(database)) as connection:
         (verifier,) = connection.execute(
-            "SELECT rolpassword FROM pg_authid WHERE rolname = 'pyracast_app'"
+            "SELECT rolpassword FROM pg_authid WHERE rolname = %s", (role,)
         ).fetchone() or (None,)
     return verifier
 
 
-def set_runtime_verifier(database: str, verifier: str | None) -> None:
+def set_role_verifier(
+    database: str, verifier: str | None, role: str = bootstrap_database.RUNTIME_ROLE
+) -> None:
     with psycopg.connect(**server_parameters(database), autocommit=True) as connection:
         connection.execute(
-            sql.SQL("ALTER ROLE pyracast_app PASSWORD {}").format(sql.Literal(verifier))
+            sql.SQL("ALTER ROLE {} PASSWORD {}").format(sql.Identifier(role), sql.Literal(verifier))
         )
 
 
@@ -384,20 +405,18 @@ def set_runtime_verifier(database: str, verifier: str | None) -> None:
 def runtime_role(scratch_database: str) -> Iterator[str]:
     provision(scratch_database)
     with cluster_roles():
-        original = runtime_verifier(scratch_database)
+        original = role_verifier(scratch_database)
         try:
             yield scratch_database
         finally:
-            set_runtime_verifier(scratch_database, original)
+            set_role_verifier(scratch_database, original)
 
 
 @pytest.mark.parametrize("previous", [None, "previous-runtime-password"])
 def test_the_runtime_password_switch_sets_the_secret_once_and_keeps_nothing_else(
     runtime_role: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, previous: str | None
 ) -> None:
-    set_runtime_verifier(
-        runtime_role, previous and bootstrap_database.scram_verifier(previous, SALT)
-    )
+    set_role_verifier(runtime_role, previous and bootstrap_database.scram_verifier(previous, SALT))
     environment(tmp_path / "secrets")
     psql = ServerPsql(runtime_role)
     monkeypatch.setattr(subprocess, "run", psql)
@@ -405,45 +424,64 @@ def test_the_runtime_password_switch_sets_the_secret_once_and_keeps_nothing_else
     before = sorted(tmp_path.rglob("*"))
 
     assert bootstrap_database.switch_runtime(target, tmp_path / "secrets")
-    switched = runtime_verifier(runtime_role)
+    switched = role_verifier(runtime_role)
     assert bootstrap_database.scram_matches(switched, "app-secret")
     assert not bootstrap_database.switch_runtime(target, tmp_path / "secrets")
-    assert runtime_verifier(runtime_role) == switched
+    assert role_verifier(runtime_role) == switched
     assert sorted(tmp_path.rglob("*")) == before
     assert not any("app-secret" in script for script in psql.scripts)
 
 
-def session_logging(database: str, script: str) -> dict[str, str]:
-    # A server that logs every statement, then what the script runs before its first password.
-    logged = {
-        "log_statement": "'all'",
-        "log_min_error_statement": "'error'",
-        "log_min_duration_statement": "0",
-        "log_min_duration_sample": "0",
-        "log_transaction_sample_rate": "1",
-    }
-    names = tuple(logged)
-    first_password = script.rindex("\n", 0, script.index(" PASSWORD 'SCRAM-SHA-256$")) + 1
-    with psycopg.connect(**server_parameters(database)) as connection:
-        connection.execute("".join(f"SET {name} = {value};" for name, value in logged.items()))
-        connection.execute(script[:first_password].removeprefix(BOOTSTRAP).encode())
-        return {
-            name: str(row[0])
-            for name in names
-            if (
-                row := connection.execute(
-                    sql.SQL("SHOW {}").format(sql.Identifier(name))
-                ).fetchone()
+# Sessions inherit these from the database, as they would from postgresql.conf or ALTER SYSTEM;
+# client_min_messages sends each log line the server writes for a session to its client too.
+INHERITED_LOGGING = {
+    "log_statement": "all",
+    "log_min_duration_statement": "0",
+    "log_min_duration_sample": "0",
+    "log_transaction_sample_rate": "1",
+    "debug_print_parse": "on",
+    "client_min_messages": "log",
+}
+
+
+@pytest.fixture
+def logging_database(scratch_database: str) -> Iterator[str]:
+    provision(scratch_database)
+    with psycopg.connect(**server_parameters("postgres"), autocommit=True) as server:
+        for name, value in INHERITED_LOGGING.items():
+            server.execute(
+                sql.SQL("ALTER DATABASE {} SET {} = {}").format(
+                    sql.Identifier(scratch_database), sql.Identifier(name), sql.Literal(value)
+                )
             )
-        }
+    with cluster_roles():
+        roles = bootstrap_database.ROLES.values()
+        originals = {role: role_verifier(scratch_database, role) for role in roles}
+        try:
+            yield scratch_database
+        finally:
+            for role, verifier in originals.items():
+                set_role_verifier(scratch_database, verifier, role)
 
 
-@pytest.mark.parametrize("step", ["converge", "switch"])
+@pytest.mark.parametrize(
+    ("step", "role", "secret"),
+    [("converge", "pyracast_owner", "owner-secret"), ("switch", "pyracast_app", "app-secret")],
+)
 def test_password_changes_run_in_a_session_whose_statements_postgresql_never_logs(
-    scratch_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str
+    logging_database: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    step: str,
+    role: str,
+    secret: str,
 ) -> None:
+    control = ServerPsql(logging_database)
+    control(["psql", "-d", "pyracast", "-Atc", "SELECT 'logged-control'"])
+    assert any("logged-control" in line for line in control.emitted)
+    set_role_verifier(logging_database, None, role)
     environment(tmp_path / "secrets")
-    psql = Psql("pyracast_owner\npyracast_app\n")
+    psql = ServerPsql(logging_database)
     monkeypatch.setattr(subprocess, "run", psql)
     target = release(tmp_path / "release")
 
@@ -452,17 +490,10 @@ def test_password_changes_run_in_a_session_whose_statements_postgresql_never_log
     else:
         bootstrap_database.switch_runtime(target, tmp_path / "secrets")
 
-    script = psql.calls[-1][1]
-    assert script is not None
-    assert "ALTER ROLE" in script
-    assert session_logging(scratch_database, script) == {
-        "log_statement": "none",
-        "log_min_error_statement": "panic",
-        "log_min_duration_statement": "-1",
-        "log_min_duration_sample": "-1",
-        "log_transaction_sample_rate": "0",
-    }
-    assert not any("SCRAM" in argument for command, _ in psql.calls for argument in command)
+    assert bootstrap_database.scram_matches(role_verifier(logging_database, role), secret)
+    leaked = re.compile("scram|secret", re.IGNORECASE)
+    assert [line for line in psql.emitted if leaked.search(line)] == []
+    assert not any("SCRAM" in argument for command in psql.commands for argument in command)
 
 
 def test_switch_refuses_a_runtime_role_outside_the_definition(
