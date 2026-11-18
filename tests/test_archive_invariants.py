@@ -284,7 +284,9 @@ def test_a_capacity_normalization_stores_the_factor_of_its_capacities(
     rows = ReferenceCapacityNormalization.objects.all()
 
     with (
-        pytest.raises(IntegrityError, match="referencecapacitynormalization_factor_chk"),
+        pytest.raises(
+            IntegrityError, match="referencecapacitynormalization_target_over_source_chk"
+        ),
         transaction.atomic(),
     ):
         rows.update(factor=F("factor") * 2)

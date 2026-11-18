@@ -1,5 +1,6 @@
 from typing import ClassVar
 
+import django.db.models.expressions
 from django.db import migrations, models
 from django.db.migrations.operations.base import Operation
 
@@ -173,6 +174,21 @@ class Migration(migrations.Migration):
             item=models.CheckConstraint(
                 condition=models.Q(("factor__gt", 0), ("factor__lt", float("inf"))),
                 name="referencecapacitynormalization_factor_finite_chk",
+            ),
+        ),
+        RenameInPlace(
+            model_name="referencecapacitynormalization",
+            old_name="referencecapacitynormalization_factor_chk",
+            item=models.CheckConstraint(
+                condition=models.Q(
+                    (
+                        "factor",
+                        django.db.models.expressions.CombinedExpression(
+                            models.F("target_capacity_kw"), "/", models.F("source_capacity_kw")
+                        ),
+                    )
+                ),
+                name="referencecapacitynormalization_target_over_source_chk",
             ),
         ),
         RenameInPlace(

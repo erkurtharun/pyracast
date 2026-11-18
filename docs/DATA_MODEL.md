@@ -591,13 +591,13 @@ erDiagram
 
 #### `forecasts_referencecapacitynormalization`
 
-- `referencecapacitynormalization_factor_chk`: `CHECK ("factor" = ("target_capacity_kw" / "source_capacity_kw"))`
 - `referencecapacitynormalization_factor_finite_chk`: `CHECK (("factor" > 0.0 AND "factor" < 'Infinity'::float8))`
 - `referencecapacitynormalization_snapshot_target_binding_fk`: `FOREIGN KEY (snapshot_id, target_binding_id) REFERENCES forecasts_forecastsnapshot (id, binding_id) DEFERRABLE INITIALLY DEFERRED`
 - `referencecapacitynormalization_source_capacity_kw_chk`: `CHECK (("source_capacity_kw" > 0.0 AND "source_capacity_kw" < 'Infinity'::float8))`
 - `referencecapacitynormalization_source_snapshot_chk`: `CHECK (NOT ("snapshot_id" = ("source_snapshot_id")))`
 - `referencecapacitynormalization_source_target_uniq`: `UNIQUE ("source_snapshot_id", "target_binding_id")`
 - `referencecapacitynormalization_target_capacity_kw_chk`: `CHECK (("target_capacity_kw" > 0.0 AND "target_capacity_kw" < 'Infinity'::float8))`
+- `referencecapacitynormalization_target_over_source_chk`: `CHECK ("factor" = ("target_capacity_kw" / "source_capacity_kw"))`
 
 #### `forecasts_requestattempt`
 

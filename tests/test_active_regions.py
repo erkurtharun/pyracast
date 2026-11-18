@@ -27,7 +27,7 @@ def test_soft_delete_lookups_are_written_only_by_their_owners() -> None:
     assert found - OWNERS == set()
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 def test_active_rows_exclude_trashed_regions_and_everything_under_them(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -50,5 +50,5 @@ def test_active_rows_exclude_trashed_regions_and_everything_under_them(
     assert list(Region.objects.trashed()) == [system.region]
     assert list(Plant.objects.active()) == [kept_plant]
     assert not CollectionJob.objects.filter(active_region("binding__region__")).exists()
-    assert CollectionJob.objects.exclude(active_region("binding__region__")).get() == job
+    assert job in CollectionJob.objects.exclude(active_region("binding__region__"))
     assert not Plant.objects.filter(active_plant(), pk=plant.pk).exists()

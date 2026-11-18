@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
 from typing import Any
@@ -7,6 +8,7 @@ import pytest
 from django.db import connection, models
 from django.db.migrations.executor import MigrationExecutor
 from django.db.models import F
+from psycopg import sql
 
 from pyracast.accounts.models import (
     Membership,
@@ -157,6 +159,18 @@ def stored(rows: models.QuerySet[Any]) -> list[dict[str, Any]]:
     return list(rows.order_by("pk").values())
 
 
+def stored_rows(rows: models.QuerySet[Any]) -> list[dict[str, Any]]:
+    """The rows under the column names of the migrated state."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            sql.SQL(
+                "SELECT to_jsonb(stored) FROM {} AS stored WHERE id = ANY(%s) ORDER BY id"
+            ).format(sql.Identifier(rows.model._meta.db_table)),
+            [list(rows.values_list("pk", flat=True))],
+        )
+        return [json.loads(row) for (row,) in cursor.fetchall()]
+
+
 @pytest.mark.usefixtures("leaf")
 def test_migrations_close_superseded_invitations_and_keep_every_valid_row(
     monkeypatch: pytest.MonkeyPatch,
@@ -173,6 +187,16 @@ def test_migrations_close_superseded_invitations_and_keep_every_valid_row(
         administrator=member,
         previous_administrator=case.proposer,
     )
+    kept = {
+        rows.model: stored(rows)
+        for rows in (
+            ChangeRequest.objects.all(),
+            IncidentChange.objects.all(),
+            ReminderSchedule.objects.all(),
+            NotificationDelivery.objects.all(),
+            WorkspaceAdminChange.objects.all(),
+        )
+    }
     migrate(*PREVIOUS.values())
     assert all(installed(table) == set() for table in NEW)
     # Main's writers end an invitation by moving its deadline, at the latest when a newer
@@ -190,16 +214,6 @@ def test_migrations_close_superseded_invitations_and_keep_every_valid_row(
     )
     accepted = invited(case, "a@example.com", START, START + WEEK, accepted_at=START)
     alone = invited(case, "e@example.com", START, START + timedelta(days=1))
-    kept = {
-        rows.model: stored(rows)
-        for rows in (
-            ChangeRequest.objects.all(),
-            IncidentChange.objects.all(),
-            ReminderSchedule.objects.all(),
-            NotificationDelivery.objects.all(),
-            WorkspaceAdminChange.objects.all(),
-        )
-    }
     invitations = stored(previous_invitations().all())
 
     forward()
@@ -279,15 +293,13 @@ def unchanged_administrator(case: RequestCase) -> models.QuerySet[Any]:
 
 
 def rejected_without_reason(case: RequestCase) -> models.QuerySet[Any]:
-    request = production_request(case)
-    reject_request(case.system.member, case.system.tenant.pk, request.pk, reason="Wrong")
-    rows = ChangeRequest.objects.filter(pk=request.pk)
+    rows = ChangeRequest.objects.filter(plant=case.plant, status="rejected")
     rows.update(decision_reason="")
     return rows
 
 
 def incident_ending_at_its_start(case: RequestCase) -> models.QuerySet[Any]:
-    rows = IncidentChange.objects.filter(request=incident_request(case))
+    rows = IncidentChange.objects.filter(request__plant=case.plant)
     rows.update(ends_at=F("starts_at"))
     return rows
 
@@ -398,15 +410,19 @@ def test_migrations_refuse_rows_no_writer_stores_and_change_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     case = make_request_case(monkeypatch)
+    # The current models write change requests only under the current column names.
+    rejected = production_request(case)
+    reject_request(case.system.member, case.system.tenant.pk, rejected.pk, reason="Wrong")
+    incident_request(case)
     migrate(*PREVIOUS.values())
     rows = write(case)
-    kept = stored(rows)
+    kept = stored_rows(rows)
 
     with pytest.raises(ValueError, match=refusal):
         forward()
 
     assert installed(table) == set()
-    assert stored(rows) == kept
+    assert stored_rows(rows) == kept
     rows.update(**correction)
     forward()
     assert installed(table) == NEW[table]

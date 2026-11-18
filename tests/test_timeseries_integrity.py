@@ -144,7 +144,7 @@ def test_epias_job_requires_connection_and_configuration_to_share_plant(
         "available_at": NOW,
     }
     job = EpiasCollectionJob.objects.create(**values)
-    with pytest.raises(IntegrityError, match=r"epias_job_.*_plant_fk"), transaction.atomic():  # noqa: PT012 -- deferred FK checks both child and parent mutations at commit.
+    with pytest.raises(IntegrityError, match=r"collectionjob_\w+_plant_fk"), transaction.atomic():  # noqa: PT012 -- deferred FK checks both child and parent mutations at commit.
         match change:
             case "create":
                 EpiasCollectionJob.objects.create(**(values | {"configuration": second}))

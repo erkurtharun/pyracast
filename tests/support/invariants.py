@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 from typing import Any
 
 from django.db import connection, models, transaction
@@ -208,12 +209,12 @@ def lease_violations() -> dict[str, int]:
     return {table: violations(table, rule) for table, rule in LEASE_RULES.items()}
 
 
-def stored_violations() -> dict[str, int]:
+def stored_violations(rules: Sequence[tuple[str, str]] = STORED_RULES) -> dict[str, int]:
     query = sql.SQL(" UNION ALL ").join(
         sql.SQL("SELECT {}, count(*) FROM {} WHERE NOT ({})").format(
             sql.Literal(f"{table}: {rule}"), sql.Identifier(table), sql.SQL(rule)
         )
-        for table, rule in STORED_RULES
+        for table, rule in rules
     )
     with connection.cursor() as cursor:
         cursor.execute(query)

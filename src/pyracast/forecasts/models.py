@@ -329,8 +329,10 @@ class ReferenceCapacityNormalization(models.Model):
             ),
             # The writer stores target / source; Python and PostgreSQL divide float8 identically
             # (IEEE 754), so the stored factor is the exact quotient at every capacity.
+            # PostgreSQL tests CHECK constraints in name order: this name sorts after the
+            # capacity checks, which reject the zero this division would raise on.
             models.CheckConstraint(
                 condition=models.Q(factor=F("target_capacity_kw") / F("source_capacity_kw")),
-                name="%(class)s_factor_chk",
+                name="%(class)s_target_over_source_chk",
             ),
         )
