@@ -6,7 +6,8 @@ from django.db import connection, models
 from django.db.migrations.executor import MigrationExecutor
 
 from pyracast.change_requests.models import IncidentChange, ProductionChangeItem
-from pyracast.forecasts.models import CollectionJob, RequestAttempt
+from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, RequestAttempt
+from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.plants.models import CalibrationRun, PlantConfiguration, PlantEvent
 from tests.support.change_request_boundaries import (
@@ -16,8 +17,10 @@ from tests.support.change_request_boundaries import (
     production_request,
 )
 from tests.support.domain import NOW, System, make_system
+from tests.support.epias_api import archive_source
 from tests.support.incident_calibration import incident
-from tests.support.plant_operations import make_plant
+from tests.support.metering import connected
+from tests.support.plant_operations import make_plant, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -34,6 +37,9 @@ INITIAL = {
 NEW_CHECKS = {
     ("forecasts_collectionjob", "endpoint"): "collectionjob_endpoint_chk",
     ("forecasts_requestattempt", "purpose"): "requestattempt_purpose_chk",
+    ("forecasts_collectionjob", "last_error"): "collectionjob_last_error_chk",
+    ("forecasts_forecastsnapshot", "weather_error"): "forecastsnapshot_weather_error_chk",
+    ("metering_epiascollectionjob", "last_error"): "epiascollectionjob_last_error_chk",
     ("plants_plantevent", "action"): "plantevent_action_chk",
     ("plants_calibrationrun", "last_error"): "calibrationrun_last_error_chk",
     (
@@ -107,6 +113,14 @@ def _job(monkeypatch: pytest.MonkeyPatch) -> models.Model:
 
 def _attempt(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     return _job_and_attempt(make_system())[1]
+
+
+def _snapshot(monkeypatch: pytest.MonkeyPatch) -> ForecastSnapshot:
+    return snapshot_for(make_system(), NOW.date())
+
+
+def _epias_job(monkeypatch: pytest.MonkeyPatch) -> EpiasCollectionJob:
+    return archive_source(connected(monkeypatch)[2], "realtime_generation", {0: "1"}).job
 
 
 def _plant_event(monkeypatch: pytest.MonkeyPatch) -> PlantEvent:
@@ -204,6 +218,9 @@ def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
     [
         (_job, "endpoint", "legacy_endpoint", INITIAL["forecasts"]),
         (_attempt, "purpose", "operator", INITIAL["forecasts"]),
+        (_job, "last_error", "provider_timeout", INITIAL["forecasts"]),
+        (_snapshot, "weather_error", "weather_timeout", INITIAL["forecasts"]),
+        (_epias_job, "last_error", "upstream_error", INITIAL["metering"]),
         (_plant_event, "action", "legacy_action", INITIAL["plants"]),
         (_calibration_run, "last_error", "ValueError", INITIAL["plants"]),
         (_production_item, "baseline_source_kind", "provider", INITIAL["change_requests"]),

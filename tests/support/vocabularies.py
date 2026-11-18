@@ -370,11 +370,16 @@ STORED_VOCABULARIES = (
     StoredVocabulary(DispatcherStatus, "phase", _dispatcher_status),
     StoredVocabulary(CollectionJob, "endpoint", _collection_job),
     StoredVocabulary(CollectionJob, "status", _collection_job),
+    StoredVocabulary(CollectionJob, "last_error", _collection_job, retired=("old_worker",)),
     StoredVocabulary(RequestAttempt, "purpose", _request_attempt, retired=("operator",)),
     StoredVocabulary(RequestAttempt, "outcome", _request_attempt),
     StoredVocabulary(ForecastSnapshot, "source_kind", _forecast_snapshot),
+    StoredVocabulary(
+        ForecastSnapshot, "weather_error", _forecast_snapshot, retired=("weather_timeout",)
+    ),
     StoredVocabulary(EpiasCollectionJob, "source_kind", _epias_job),
     StoredVocabulary(EpiasCollectionJob, "status", _epias_job, retired=("retry",)),
+    StoredVocabulary(EpiasCollectionJob, "last_error", _epias_job, retired=("upstream_error",)),
     StoredVocabulary(EpiasSnapshot, "source_kind", _epias_snapshot),
     StoredVocabulary(PlantSubmission, "measurement_basis", _plant_submission),
     StoredVocabulary(PlantSubmission, "mounting_type", _plant_submission),
@@ -548,7 +553,7 @@ def _configure_reminders(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], obj
 
 def _reserve_request(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
     account = make_system().account
-    return lambda purpose: reserve_account_request(account, NOW, purpose=purpose)
+    return lambda purpose: reserve_account_request(account, NOW, purpose=cast(Any, purpose))
 
 
 PLANT_DATA: dict[str, object] = {"name": "Plant", "dc_capacity_mw": 1}
@@ -751,12 +756,5 @@ FREE_TEXT = frozenset(
         ("incidents.PlantIncident", "notes"),
     }
 )
-# Codes raised by provider, weather, EPIAS and mail adapters and exception class names: an open set.
-FAILURE_CODES = frozenset(
-    {
-        ("forecasts.DispatcherStatus", "last_error"),
-        ("forecasts.CollectionJob", "last_error"),
-        ("forecasts.ForecastSnapshot", "weather_error"),
-        ("metering.EpiasCollectionJob", "last_error"),
-    }
-)
+# Exception class names and counted region failures written by the dispatcher: an open set.
+FAILURE_CODES = frozenset({("forecasts.DispatcherStatus", "last_error")})
