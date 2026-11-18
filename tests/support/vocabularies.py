@@ -382,6 +382,7 @@ STORED_VOCABULARIES = (
     StoredVocabulary(PlantConfiguration, "mounting_type", _plant_configuration),
     StoredVocabulary(ProductionObservation, "quality", _observation),
     StoredVocabulary(CalibrationRun, "status", _calibration_run),
+    StoredVocabulary(CalibrationRun, "last_error", _calibration_run, retired=("ValueError",)),
     StoredVocabulary(PlantEvent, "action", _plant_event),
     StoredVocabulary(PlantIncident, "kind", _plant_incident),
     StoredVocabulary(ReminderSchedule, "language", _reminder_schedule),
@@ -757,6 +758,5 @@ FAILURE_CODES = frozenset(
         ("forecasts.CollectionJob", "last_error"),
         ("forecasts.ForecastSnapshot", "weather_error"),
         ("metering.EpiasCollectionJob", "last_error"),
-        ("plants.CalibrationRun", "last_error"),
     }
 )

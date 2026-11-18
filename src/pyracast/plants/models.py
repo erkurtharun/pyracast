@@ -38,6 +38,12 @@ class CalibrationStatus(models.TextChoices):
     SUPERSEDED = "superseded", "Superseded"
 
 
+class CalibrationError(models.TextChoices):
+    ATTEMPT_LIMIT = "attempt_limit", "Attempt limit reached"
+    INVALID_CUTOFF = "invalid_cutoff", "Invalid cutoff"
+    INVALID_CALIBRATION_DATA = "invalid_calibration_data", "Invalid calibration data"
+
+
 class PlantEventAction(models.TextChoices):
     SUBMISSION_SAVED = "submission_saved", "Submission saved"
     CONFIGURATION_CREATED = "configuration_created", "Configuration created"
@@ -306,10 +312,11 @@ class CalibrationRun(models.Model):
     lease_token = models.UUIDField(null=True)
     lease_expires_at = models.DateTimeField(null=True)
     attempts = models.PositiveIntegerField(default=0)
-    last_error = models.CharField(max_length=200, default="")
+    last_error = models.CharField(max_length=200, choices=CalibrationError, blank=True, default="")
 
     class Meta:
         constraints = (
+            choices_check("last_error", CalibrationError, blank=True),
             models.UniqueConstraint(
                 fields=("plant",),
                 condition=Q(status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING)),

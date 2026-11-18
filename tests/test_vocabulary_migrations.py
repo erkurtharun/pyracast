@@ -8,7 +8,7 @@ from django.db.migrations.executor import MigrationExecutor
 from pyracast.change_requests.models import IncidentChange, ProductionChangeItem
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
-from pyracast.plants.models import PlantEvent
+from pyracast.plants.models import CalibrationRun, PlantConfiguration, PlantEvent
 from tests.support.change_request_boundaries import (
     RequestCase,
     incident_request,
@@ -35,6 +35,7 @@ NEW_CHECKS = {
     ("forecasts_collectionjob", "endpoint"): "collectionjob_endpoint_chk",
     ("forecasts_requestattempt", "purpose"): "requestattempt_purpose_chk",
     ("plants_plantevent", "action"): "plantevent_action_chk",
+    ("plants_calibrationrun", "last_error"): "calibrationrun_last_error_chk",
     (
         "change_requests_productionchangeitem",
         "baseline_source_kind",
@@ -110,6 +111,21 @@ def _attempt(monkeypatch: pytest.MonkeyPatch) -> models.Model:
 
 def _plant_event(monkeypatch: pytest.MonkeyPatch) -> PlantEvent:
     return PlantEvent.objects.filter(plant=make_plant(monkeypatch)[1]).earliest("pk")
+
+
+def _calibration_run(monkeypatch: pytest.MonkeyPatch) -> CalibrationRun:
+    system, plant = make_plant(monkeypatch)
+    return CalibrationRun.objects.create(
+        plant=plant,
+        configuration=PlantConfiguration.objects.get(plant=plant),
+        binding=system.binding,
+        requested_by=system.member,
+        window_start=NOW.date() - timedelta(days=7),
+        window_end=NOW.date() - timedelta(days=1),
+        cutoff_at=NOW,
+        status="failed",
+        last_error="attempt_limit",
+    )
 
 
 def _production_item(monkeypatch: pytest.MonkeyPatch) -> ProductionChangeItem:
@@ -189,6 +205,7 @@ def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
         (_job, "endpoint", "legacy_endpoint", INITIAL["forecasts"]),
         (_attempt, "purpose", "operator", INITIAL["forecasts"]),
         (_plant_event, "action", "legacy_action", INITIAL["plants"]),
+        (_calibration_run, "last_error", "ValueError", INITIAL["plants"]),
         (_production_item, "baseline_source_kind", "provider", INITIAL["change_requests"]),
         (_incident_change, "kind", "legacy_kind", INITIAL["change_requests"]),
         (_delivery, "last_error", "smtp_failure", INITIAL["notifications"]),

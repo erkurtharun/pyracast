@@ -755,6 +755,14 @@ export interface components {
                 | components["schemas"]["AutomaticCalibrationAttemptOutput"]
                 | null;
         };
+        /**
+         * @description * `attempt_limit` - Attempt limit reached
+         *     * `invalid_cutoff` - Invalid cutoff
+         *     * `invalid_calibration_data` - Invalid calibration data
+         * @enum {string}
+         */
+        CalibrationErrorEnum:
+            "attempt_limit" | "invalid_cutoff" | "invalid_calibration_data";
         CalibrationInput: {
             configuration_id: number;
             /** Format: date */

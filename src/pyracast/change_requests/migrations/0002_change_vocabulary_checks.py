@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
     dependencies: ClassVar = [
         ("change_requests", "0001_initial"),
         ("incidents", "0002_incident_kind_choices"),
-        ("plants", "0002_plant_event_action_check"),
+        ("plants", "0002_plant_event_action_and_calibration_error_checks"),
     ]
 
     operations: ClassVar[list[Operation]] = [

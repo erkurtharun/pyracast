@@ -22,6 +22,7 @@ from pyracast.metering.models import (
     EpiasConnection,
     EpiasJobStatus,
     EpiasSnapshot,
+    EpiasSourceKind,
 )
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import configuration_is_current
@@ -67,12 +68,12 @@ def _current(job: EpiasCollectionJob) -> bool:
     return (
         connection.enabled
         and connection.revision == job.connection_revision
-        and job.source_kind in {"realtime_generation", "settlement_injection"}
+        and job.source_kind in EpiasSourceKind.values
         and job.provider_plant.get("eic") == connection.eic
         and job.provider_plant.get("id")
         == (
             connection.settlement_plant_id
-            if job.source_kind == "settlement_injection"
+            if job.source_kind == EpiasSourceKind.SETTLEMENT_INJECTION
             else connection.provider_plant_id
         )
         and connection.plant.current_configuration_id == job.configuration_id
@@ -89,7 +90,7 @@ def _current(job: EpiasCollectionJob) -> bool:
 def _nightly_retry(job: EpiasCollectionJob) -> bool:
     return (
         job.retry_until is not None
-        and job.source_kind == "realtime_generation"
+        and job.source_kind == EpiasSourceKind.REALTIME_GENERATION
         and job.target_day == job.scheduled_for.astimezone(TIMEZONE).date() - timedelta(days=1)
     )
 
@@ -198,7 +199,7 @@ def _publish(lease: EpiasLease, data: EpiasDay, now: datetime) -> bool:
         target_day = lease.job.target_day + timedelta(days=offset)
         rows = [row for row in data.readings if row.timestamp.date() == target_day]
         day_raw = raw
-        if lease.job.source_kind == "settlement_injection":
+        if lease.job.source_kind == EpiasSourceKind.SETTLEMENT_INJECTION:
             day_raw = {
                 "items": [
                     item
@@ -259,7 +260,7 @@ def _publish(lease: EpiasLease, data: EpiasDay, now: datetime) -> bool:
             if complete:
                 job.status = EpiasJobStatus.SUCCEEDED
                 job.last_error = ""
-            elif job.source_kind == "settlement_injection":
+            elif job.source_kind == EpiasSourceKind.SETTLEMENT_INJECTION:
                 job.status = EpiasJobStatus.AWAITING_PUBLICATION
                 job.last_error = "unpublished_data" if not data.readings else "partial_data"
             else:
@@ -297,7 +298,7 @@ def run_epias_job(
         plant = EpiasPlant(**lease.job.provider_plant)
         if fetch is not None:
             data = fetch(plant, lease.job.target_day)
-        elif lease.job.source_kind == "settlement_injection":
+        elif lease.job.source_kind == EpiasSourceKind.SETTLEMENT_INJECTION:
             data = get_epias_client().fetch_settlement(
                 plant, lease.job.target_day, lease.job.period_end_day or lease.job.target_day
             )

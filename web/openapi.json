@@ -2683,6 +2683,15 @@
                     "next_check_at"
                 ]
             },
+            "CalibrationErrorEnum": {
+                "enum": [
+                    "attempt_limit",
+                    "invalid_cutoff",
+                    "invalid_calibration_data"
+                ],
+                "type": "string",
+                "description": "* `attempt_limit` - Attempt limit reached\n* `invalid_cutoff` - Invalid cutoff\n* `invalid_calibration_data` - Invalid calibration data"
+            },
             "CalibrationInput": {
                 "type": "object",
                 "properties": {

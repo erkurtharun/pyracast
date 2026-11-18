@@ -21,6 +21,7 @@ from pyracast.plants.forecasting import power_limit
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import (
+    CalibrationError,
     CalibrationRun,
     CalibrationStatus,
     Plant,
@@ -89,7 +90,11 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
             run.status = CalibrationStatus.SUPERSEDED
         elif run.attempts >= MAX_ATTEMPTS or run.cutoff_at > now:
             run.status = CalibrationStatus.FAILED
-            run.last_error = "attempt_limit" if run.attempts >= MAX_ATTEMPTS else "invalid_cutoff"
+            run.last_error = (
+                CalibrationError.ATTEMPT_LIMIT
+                if run.attempts >= MAX_ATTEMPTS
+                else CalibrationError.INVALID_CUTOFF
+            )
             logger.warning("calibration_run_failed run=%s reason=%s", run.pk, run.last_error)
         else:
             token = uuid.uuid4()
@@ -194,7 +199,7 @@ def _fail(lease: _Lease, now: datetime) -> None:
             CalibrationStatus.FAILED if run.attempts >= MAX_ATTEMPTS else CalibrationStatus.PENDING
         )
         run.completed_at = now if run.status == CalibrationStatus.FAILED else None
-        run.last_error = "invalid_calibration_data"
+        run.last_error = CalibrationError.INVALID_CALIBRATION_DATA
         run.lease_token = None
         run.lease_expires_at = None
         run.save(

@@ -251,6 +251,7 @@ SPECTACULAR_SETTINGS = {
         "ObservationQualityEnum": "pyracast.plants.models.ObservationQuality",
         "CalibrationStatusEnum": "pyracast.plants.models.CalibrationStatus",
         "PlantEventActionEnum": "pyracast.plants.models.PlantEventAction",
+        "CalibrationErrorEnum": "pyracast.plants.models.CalibrationError",
         "IncidentKindEnum": "pyracast.incidents.models.IncidentKind",
         "NotificationDeliveryStatusEnum": (
             "pyracast.notifications.models.NotificationDeliveryStatus"
