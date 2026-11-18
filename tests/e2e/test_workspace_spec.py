@@ -43,8 +43,8 @@ def test_a_member_configures_plants_production_and_forecast_mail(web_gateway: Ga
     assert configuration.export_limit_mw is None
     assert configuration.revision == 2
     assert configuration.mounting_type == "fixed"
-    assert configuration.surface_tilt == 33
-    assert configuration.surface_azimuth == 180
+    assert configuration.surface_tilt_degrees == 33
+    assert configuration.surface_azimuth_degrees == 180
     system.region.refresh_from_db()
     assert system.region.deleted_at is None
     revisions = list(ProductionObservation.objects.filter(plant=plant).order_by("id"))
