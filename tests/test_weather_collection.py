@@ -18,6 +18,7 @@ from pyracast.forecasts.models import (
     ForecastResult,
     ForecastSnapshot,
     RequestAttempt,
+    SnapshotWeatherError,
 )
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.providers import FixtureProvider
@@ -158,7 +159,18 @@ def test_invalid_saved_weather_does_not_remove_the_primary_source(payload: objec
     data = snapshot_data(source)
     assert data.raw_payload == {"original": True}
     assert data.weather is None
-    assert data.weather_error == "invalid_weather_schema"
+    assert data.weather_error is SnapshotWeatherError.INVALID_SCHEMA
+
+
+def test_a_stored_weather_error_is_read_back_as_its_member() -> None:
+    source = ForecastSnapshot(
+        raw_payload={},
+        normalized_intervals=[],
+        source_kind="forecast",
+        collected_at=NOW,
+        weather_error="weather_request_failed",
+    )
+    assert snapshot_data(source).weather_error is SnapshotWeatherError.REQUEST_FAILED
 
 
 class HistoricalFixture(FakeAdapter):
