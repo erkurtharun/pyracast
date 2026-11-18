@@ -637,13 +637,13 @@ again. The log names the state and prints its recovery:
 | State | Marker | `current` | Runtime password | Running | Recovery |
 | --- | --- | --- | --- | --- | --- |
 | Refused before the lock, or the lock timed out | unchanged | unchanged | unchanged | unchanged | none |
-| Preflight (staging, images, checks, provisioning, plan, `check_secrets`) | none added | previous | unchanged | previous release, untouched | fix the cause and release again |
+| Preflight (staging, images, checks, provisioning, plan, `check_secrets`), or a first installation before its marker | none added | unchanged | unchanged | unchanged: the previous release, nothing on a first installation, or what an earlier maintenance left | fix the cause and release again; an earlier maintenance's recovery still applies |
 | Before `migrate`, resumed | removed | previous | `host.json`'s | previous release | fix the cause and release again |
 | Before `migrate`, otherwise | yes | previous | `host.json`'s | PostgreSQL, RabbitMQ, the notice | `abort` |
 | In or after `migrate` | yes | previous | `host.json`'s | PostgreSQL, RabbitMQ, the notice | a forward fix, or `restore --confirm` this run's pre-release dump |
 | A reset replaced the database in this maintenance | session identity | previous | `host.json`'s | PostgreSQL, RabbitMQ, the notice | `restore --confirm` the reset's archive (step 6 above) |
-| A stop or the password change failed | yes | previous | as the run left it | what `docker compose ... ps` lists | stop it, run the password command below, then the row's recovery |
-| First installation | yes | none | `host.json`'s, or not set yet | PostgreSQL, the notice | fix the cause and release again |
+| A stop or the password change failed, at any stage: this row applies before the rows above | yes | previous | as the run left it | what `docker compose ... ps` lists | stop it, run the password command below, then the recovery of the stage's row |
+| First installation, after its marker | yes | none | `host.json`'s, or not set yet | PostgreSQL, the notice | fix the cause and release again |
 | After promotion | removed | new | `host.json`'s | new release | the printed command that finishes the release |
 | Killed or rebooted after the marker, before promotion | yes | previous | `host.json`'s once the run changed it | after a reboot PostgreSQL and RabbitMQ | release again; or stop the application, run the password command, then `abort` or `restore` |
 | Killed after `current` moved | yes | new | `host.json`'s | the new release, or after a reboot support only | `bash /opt/pyracast/current/deploy/install-units.sh install /opt/pyracast/current && rm /var/lib/pyracast/release-blocked && systemctl start pyracast.service` |
@@ -685,8 +685,8 @@ release's directory and images for a reviewed rollback.
 `deploy/smoke.sh BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE` runs the actual production Compose
 services with disposable PostgreSQL, volumes and locally issued TLS certificates.
 HTTPS checks validate the certificate chain and hostname. It provisions the database
-twice, changes the runtime role's password while the server logs every statement and
-finds no verifier or password in that log, applies migrations under the restricted
+twice, changes both roles' passwords while the server logs, samples and parses every
+statement and finds no verifier or password in that log, applies migrations under the restricted
 owner, provisions again, checks that
 the runtime role can neither create tables nor write the migration ledger and that
 the superuser cannot sign in over TCP, checks frontend/API/static
