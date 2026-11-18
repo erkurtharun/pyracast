@@ -312,7 +312,8 @@ h3 {
     border-radius: var(--radius);
     background: var(--white);
 }
-.panel--narrow {
+.panel--narrow,
+.form-page {
     max-width: 640px;
 }
 .panel-head {
@@ -668,6 +669,12 @@ a.stat:hover {
 .cell-action {
     text-align: right;
 }
+.cell-actions {
+    display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
 
 .health-checks {
     display: grid;
@@ -732,6 +739,16 @@ a.stat:hover {
 .callout--danger {
     border-color: var(--danger);
     background: var(--danger-soft);
+}
+[data-error-summary] {
+    margin-bottom: 24px;
+}
+.error-summary {
+    display: grid;
+    gap: 4px;
+    margin-top: 8px;
+    padding-left: 20px;
+    list-style: disc;
 }
 
 .form {
@@ -811,6 +828,21 @@ a.stat:hover {
 .field .helptext {
     color: var(--muted);
     font-size: 14px;
+}
+.field fieldset {
+    display: grid;
+    gap: 6px;
+}
+.field legend {
+    padding: 0;
+    font-weight: 600;
+}
+.field fieldset label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    font-weight: 400;
 }
 .field input:not([type="checkbox"]):not([type="radio"]),
 .field select,
@@ -1085,6 +1117,9 @@ a.stat:hover {
     }
     .table--stack .cell-action .btn {
         width: 100%;
+    }
+    .table--stack .cell-actions {
+        display: grid;
     }
 }
 @media (max-width: 420px) {

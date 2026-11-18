@@ -162,8 +162,8 @@ def test_details_of_an_approved_plant_are_saved_as_a_new_configuration() -> None
     response = client.post(url, details(client, system.region, dc_capacity_mw="140"))
     assert response.status_code == 302
     assert response["Location"] == f"/admin/plants/{system.region.pk}/"
-    plant.refresh_from_db()
-    configuration = PlantConfiguration.objects.get(pk=plant.current_configuration_id)
+    configuration = Plant.objects.get(pk=plant.pk).current_configuration
+    assert configuration is not None
     assert (configuration.revision, configuration.dc_capacity_mw, configuration.created_by) == (
         2,
         140,
@@ -209,7 +209,7 @@ def test_a_location_correction_returns_the_plant_to_review_with_both_audit_event
     assert set(
         AuditEvent.objects.filter(region=region, actor=operator).values_list("action", flat=True)
     ) >= {AuditAction.LOCATION_CHANGE_REQUESTED, AuditAction.LOCATION_CHANGE_APPROVED}
-    assert PlantConfiguration.objects.get(pk=plant.current_configuration_id).revision == 1
+    assert PlantConfiguration.objects.get(plant=plant).revision == 1
     html = client.get(response["Location"]).content.decode()
     assert "The plant is back in review with its corrected location." in html
 

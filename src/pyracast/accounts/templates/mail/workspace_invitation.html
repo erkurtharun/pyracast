@@ -6,5 +6,5 @@
 <p style="margin:0 0 12px;">{% blocktranslate %}You are invited to {{ workspace }}.{% endblocktranslate %}</p>
 <p style="margin:0;">{% blocktranslate %}Sign in or create an account with {{ email }}, then verify your email to accept the invitation.{% endblocktranslate %}</p>
 {% translate "Review invitation" as label %}{% include "mail/action_link.html" with action_label=label %}
-<p style="margin:20px 0 0;color:#526370;font-size:14px;">{% translate "This invitation expires in seven days and grants read-only workspace access." %}</p>
+<p style="margin:20px 0 0;color:#526370;font-size:14px;">{% if administrator %}{% translate "This invitation expires in seven days and makes you the workspace administrator." %}{% else %}{% translate "This invitation expires in seven days and grants read-only workspace access." %}{% endif %}</p>
 {% endblock %}

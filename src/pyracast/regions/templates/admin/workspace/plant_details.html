@@ -1,0 +1,16 @@
+{% extends "admin/workspace/form.html" %}
+{% load i18n %}
+{% block backlink %}<a class="back-link" href="{% url 'admin:workspace_plant' region.pk %}">{{ plant.name }}</a>{% endblock %}
+{% block lead %}<p class="lead">{{ plant.name }} · <a href="{% url 'admin:workspace_tenant' region.tenant_id %}">{{ region.tenant.name }}</a></p>{% endblock %}
+{% block notes %}
+  <section class="panel" aria-labelledby="consequences-title">
+    <div class="panel-head"><h2 id="consequences-title">{% translate "Before saving" %}</h2></div>
+    <ul class="plain-list">
+      <li>{% translate "Saving a changed location starts a new review. The plant awaits approval again and its provider connection must be set up, validated and approved." %}</li>
+      <li>{% translate "Changed technical details of an approved plant are saved as a new configuration revision and turn off automatic calibration." %}</li>
+    </ul>
+  </section>
+{% endblock %}
+{% block fields %}{% include "admin/workspace/site_fields.html" %}{% endblock %}
+{% block submit %}{% translate "Save changes" %}{% endblock %}
+{% block cancel %}{% url 'admin:workspace_plant' region.pk %}{% endblock %}

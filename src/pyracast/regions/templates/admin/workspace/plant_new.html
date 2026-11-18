@@ -1,0 +1,7 @@
+{% extends "admin/workspace/form.html" %}
+{% load i18n %}
+{% block backlink %}<a class="back-link" href="{% url 'admin:workspace_tenant' tenant.pk %}">{{ tenant.name }}</a>{% endblock %}
+{% block lead %}<p class="lead">{% translate "The plant starts in review. After saving, set up its provider connection, then validate and approve it." %}</p>{% endblock %}
+{% block fields %}{% include "admin/workspace/site_fields.html" %}{% endblock %}
+{% block submit %}{% translate "Add plant" %}{% endblock %}
+{% block cancel %}{% url 'admin:workspace_tenant' tenant.pk %}{% endblock %}

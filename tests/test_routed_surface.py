@@ -107,11 +107,20 @@ CONSOLE_ROUTES = sorted(
         "admin/plants/",
         "admin/plants/<int:object_id>/",
         "admin/plants/<int:object_id>/decision/",
+        "admin/plants/<int:object_id>/details/",
         "admin/plants/<int:object_id>/historical-import/",
         "admin/r/<path:content_type_id>/<path:object_id>/",
         "admin/settings/",
         "admin/workspaces/",
+        "admin/workspaces/new/",
         "admin/workspaces/<int:tenant_id>/",
+        "admin/workspaces/<int:tenant_id>/administrator/",
+        "admin/workspaces/<int:tenant_id>/invitations/new/",
+        "admin/workspaces/<int:tenant_id>/invitations/<int:invitation_id>/reissue/",
+        "admin/workspaces/<int:tenant_id>/invitations/<int:invitation_id>/revocation/",
+        "admin/workspaces/<int:tenant_id>/members/<int:user_id>/removal/",
+        "admin/workspaces/<int:tenant_id>/name/",
+        "admin/workspaces/<int:tenant_id>/plants/new/",
     ]
 )
 RECORD_BROWSER_MODELS = {

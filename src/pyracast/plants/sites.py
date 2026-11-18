@@ -11,6 +11,10 @@ from pyracast.regions.operations import submit_region
 
 def site_queryset(actor: User, tenant_id: int) -> QuerySet[Region]:
     tenant_membership(actor, tenant_id)
+    return tenant_sites(tenant_id)
+
+
+def tenant_sites(tenant_id: int) -> QuerySet[Region]:
     return (
         Region.objects.filter(tenant_id=tenant_id, deleted_at__isnull=True)
         .prefetch_related(
@@ -39,6 +43,7 @@ def submit_site(
     mounting_type: str = "unknown",
     surface_tilt: float | None = None,
     surface_azimuth: float | None = None,
+    platform: bool = False,
 ) -> Region:
     with transaction.atomic():
         region = submit_region(
@@ -48,6 +53,7 @@ def submit_site(
             latitude=latitude,
             longitude=longitude,
             timezone=timezone,
+            platform=platform,
         )
         create_plant(
             actor,
@@ -61,5 +67,6 @@ def submit_site(
             mounting_type=mounting_type,
             surface_tilt=surface_tilt,
             surface_azimuth=surface_azimuth,
+            platform=platform,
         )
-        return site_queryset(actor, tenant_id).get(pk=region.pk)
+        return tenant_sites(tenant_id).get(pk=region.pk)

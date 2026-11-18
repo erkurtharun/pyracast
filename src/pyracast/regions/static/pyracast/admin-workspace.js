@@ -44,3 +44,32 @@ if (setupForm instanceof HTMLFormElement) {
     syncAccountGroups();
   }
 }
+
+const coordinatePair = /^\s*(-?\d+(?:\.\d+)?)\s*(?:[,;]\s*|\s+)(-?\d+(?:\.\d+)?)\s*$/;
+document.querySelectorAll("[data-coordinate-pair]").forEach((latitude) => {
+  if (!(latitude instanceof HTMLInputElement) || !latitude.form) return;
+  const longitude = latitude.form.elements.namedItem(latitude.dataset.coordinatePair);
+  if (!(longitude instanceof HTMLInputElement)) return;
+  latitude.addEventListener("paste", (event) => {
+    const pair = coordinatePair.exec(event.clipboardData?.getData("text") ?? "");
+    if (!pair) return;
+    event.preventDefault();
+    latitude.value = pair[1];
+    longitude.value = pair[2];
+  });
+});
+
+document.querySelectorAll("[data-mounting]").forEach((mounting) => {
+  if (!(mounting instanceof HTMLSelectElement) || !mounting.form) return;
+  const groups = mounting.form.querySelectorAll("[data-fixed-mounting]");
+  const syncAngles = () => {
+    groups.forEach((group) => {
+      group.hidden = mounting.value !== "fixed" && !group.querySelector(".errorlist");
+      group.querySelectorAll("input").forEach((field) => {
+        field.disabled = group.hidden;
+      });
+    });
+  };
+  mounting.addEventListener("change", syncAngles);
+  syncAngles();
+});

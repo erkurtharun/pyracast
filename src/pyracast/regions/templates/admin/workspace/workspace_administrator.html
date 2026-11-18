@@ -1,0 +1,14 @@
+{% extends "admin/workspace/form.html" %}
+{% load i18n %}
+{% block backlink %}<a class="back-link" href="{% url 'admin:workspace_tenant' tenant.pk %}">{{ tenant.name }}</a>{% endblock %}
+{% block lead %}<p class="lead">{% translate "The administrator can invite members and edit this workspace. Other members have read-only access." %}</p>{% endblock %}
+{% block notes %}
+  <p class="callout">{% translate "The current administrator becomes a viewer and pending invitations are revoked." %}</p>
+  {% if has_automatic_calibration %}<p class="callout">{% translate "After a change, the new administrator must enable automatic calibration again." %}</p>{% endif %}
+{% endblock %}
+{% block fields %}
+  {% include "admin/workspace/field.html" with field=form.administrator %}
+  <p class="row-meta">{% translate "Only active members can be chosen." %}</p>
+{% endblock %}
+{% block submit %}{% translate "Change administrator" %}{% endblock %}
+{% block cancel %}{% url 'admin:workspace_tenant' tenant.pk %}{% endblock %}

@@ -6,4 +6,4 @@
 
 {{ action_url }}
 
-{% translate "This invitation expires in seven days and grants read-only workspace access." %}{% endautoescape %}
+{% if administrator %}{% translate "This invitation expires in seven days and makes you the workspace administrator." %}{% else %}{% translate "This invitation expires in seven days and grants read-only workspace access." %}{% endif %}{% endautoescape %}

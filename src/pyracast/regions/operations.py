@@ -10,8 +10,8 @@ from django.utils import timezone as django_timezone
 from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
 
-from pyracast.accounts.authorization import require_platform_admin, tenant_membership
-from pyracast.accounts.models import Tenant, WorkspaceRole
+from pyracast.accounts.authorization import authorize_workspace_admin, require_platform_admin
+from pyracast.accounts.models import Tenant
 from pyracast.connections.models import PowerBasis, Provider, ProviderAccount, SiteBinding
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.forecasts.models import CollectionJob
@@ -77,6 +77,7 @@ def submit_region(
     latitude: float,
     longitude: float,
     timezone: str,
+    platform: bool = False,
 ) -> Region:
     validate_location(latitude, longitude, timezone)
     if not name.strip() or len(name) > 200:
@@ -86,7 +87,7 @@ def submit_region(
             field="name",
         )
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
+        authorize_workspace_admin(actor, tenant_id, platform=platform)
         require_available_location(tenant_id, latitude, longitude)
         return Region.objects.create(
             tenant_id=tenant_id,
@@ -107,13 +108,14 @@ def request_location_change(
     longitude: float,
     timezone: str,
     reason: str = "",
+    platform: bool = False,
 ) -> RegionLocationChangeRequest:
     validate_location(latitude, longitude, timezone)
     latitude, longitude = canonical_coordinate(latitude), canonical_coordinate(longitude)
     if len(reason) > 1000:
         raise ValidationError(gettext("A reason of at most 1000 characters is required."))
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
+        authorize_workspace_admin(actor, tenant_id, platform=platform)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -149,6 +151,40 @@ def request_location_change(
             revision=region.revision,
         )
         return change
+
+
+def correct_location(
+    actor: User,
+    region_id: int,
+    *,
+    expected_revision: int,
+    latitude: float,
+    longitude: float,
+    timezone: str,
+    reason: str = "",
+) -> RegionLocationChangeRequest:
+    require_platform_admin(actor)
+    with transaction.atomic():
+        tenant_id = Region.objects.values_list("tenant_id", flat=True).get(
+            pk=region_id, deleted_at__isnull=True
+        )
+        Tenant.objects.select_for_update().get(pk=tenant_id)
+        if RegionLocationChangeRequest.objects.filter(
+            region_id=region_id, status=LocationChangeStatus.PENDING
+        ).exists():
+            raise ConflictError(ErrorCode.LOCATION_CHANGE_ALREADY_PENDING)
+        change = request_location_change(
+            actor,
+            region_id,
+            tenant_id,
+            expected_revision=expected_revision,
+            latitude=latitude,
+            longitude=longitude,
+            timezone=timezone,
+            reason=reason,
+            platform=True,
+        )
+        return review_location_change(actor, change.pk, approve=True)
 
 
 def review_location_change(

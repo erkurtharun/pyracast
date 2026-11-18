@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 from django.core.exceptions import PermissionDenied
 
@@ -60,7 +62,7 @@ def test_location_correction_refusals_change_nothing() -> None:
             longitude=29,
             timezone="UTC",
         )
-    refusals = {
+    refusals: dict[str, dict[str, Any]] = {
         "location_unchanged": {"latitude": 40, "longitude": 29, "timezone": "Europe/Istanbul"},
         "region_revision_changed": {
             "expected_revision": revision + 1,

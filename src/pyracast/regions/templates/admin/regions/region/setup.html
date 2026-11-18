@@ -5,7 +5,7 @@
 {% block backlink %}<a class="back-link" href="{% url 'admin:workspace_plants' %}">{% translate "Back to plants" %}</a>{% endblock %}
 {% block heading %}{% firstof plant_summary.plant_name region.name %}{% endblock %}
 {% block lead %}
-  <p class="lead">{{ region.tenant.name }}{% if plant_summary.plant_name and plant_summary.plant_name != region.name %} · {{ region.name }}{% endif %}</p>
+  <p class="lead"><a href="{% url 'admin:workspace_tenant' region.tenant_id %}">{{ region.tenant.name }}</a>{% if plant_summary.plant_name and plant_summary.plant_name != region.name %} · {{ region.name }}{% endif %}</p>
   <dl class="state-strip">
     <div><dt>{% translate "Review" %}</dt><dd><span class="badge badge--{{ region.status|slugify }}">{% if region.status == "pending" %}{% translate "Awaiting approval" %}{% else %}{% translate region.status|capfirst %}{% endif %}</span></dd></div>
     <div><dt>{% translate "Connection" %}</dt><dd>{% if plant_summary %}<span class="badge badge--{{ plant_summary.connection|slugify }}">{% translate plant_summary.connection %}</span>{% elif binding %}<span class="badge">{% translate binding.health|capfirst %}</span>{% else %}<span class="badge badge--not-configured">{% translate "Not configured" %}</span>{% endif %}</dd></div>
@@ -82,8 +82,8 @@
     </section>
   {% endif %}
 
-  <section class="panel" aria-labelledby="customer-title">
-    <div class="panel-head"><h2 id="customer-title">{% translate "Customer declaration" %}</h2></div>
+  <section class="panel" aria-labelledby="details-title">
+    <div class="panel-head"><h2 id="details-title">{% translate "Plant details" %}</h2>{% if plants %}<a class="btn btn--quiet" href="{% url 'admin:workspace_plant_details' region.pk %}">{% translate "Edit details" %}</a>{% endif %}</div>
     <dl class="facts">
       <div><dt>{% translate "Company" %}</dt><dd>{{ region.tenant.name }}</dd></div>
       <div><dt>{% translate "Plant location" %}</dt><dd>{{ region.name }} · {{ region.latitude }}°, {{ region.longitude }}°</dd></div>

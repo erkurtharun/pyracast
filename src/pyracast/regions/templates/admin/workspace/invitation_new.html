@@ -1,0 +1,11 @@
+{% extends "admin/workspace/form.html" %}
+{% load i18n %}
+{% block backlink %}<a class="back-link" href="{% url 'admin:workspace_tenant' tenant.pk %}">{{ tenant.name }}</a>{% endblock %}
+{% block lead %}<p class="lead">{% translate "The invitation is valid for seven days and can be accepted only with this email address." %}</p>{% endblock %}
+{% block fields %}
+  {% include "admin/workspace/field.html" with field=form.email %}
+  {% if offers_administrator %}{% include "admin/workspace/field.html" with field=form.role %}{% endif %}
+  {% include "admin/workspace/field.html" with field=form.language %}
+{% endblock %}
+{% block submit %}{% translate "Send invitation" %}{% endblock %}
+{% block cancel %}{% url 'admin:workspace_tenant' tenant.pk %}{% endblock %}

@@ -1,3 +1,4 @@
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from django.contrib import admin, messages
@@ -19,12 +20,13 @@ from django.views.decorators.debug import sensitive_post_parameters, sensitive_v
 from django.views.generic import RedirectView
 from rest_framework.exceptions import ValidationError as APIValidationError
 
+from pyracast import admin_tenant_views as workspace_views
 from pyracast.accounts.authorization import has_platform_admin_session
 from pyracast.accounts.language import save_user_language, set_language_cookie
 from pyracast.accounts.models import Tenant
 from pyracast.admin_forms import BindingActionForm, EpiasConnectionForm, ProviderSetupForm
 from pyracast.admin_historical import historical_import
-from pyracast.admin_tenants import WorkspaceAdministratorForm, tenant_list_context
+from pyracast.admin_sites import new_plant, plant_details_page
 from pyracast.admin_workspace import (
     ReviewDecisionForm,
     operations_context,
@@ -97,14 +99,14 @@ class PlatformAdminSite(admin.AdminSite):
                 self.admin_view(self.decision),
                 name="workspace_decision",
             ),
+            path(
+                "plants/<int:object_id>/details/",
+                self.admin_view(partial(plant_details_page, site=self)),
+                name="workspace_plant_details",
+            ),
             path("operations/", self.admin_view(self.operations), name="workspace_operations"),
             path("settings/", self.admin_view(self.settings), name="workspace_settings"),
-            path("workspaces/", self.admin_view(self.tenants), name="workspace_tenants"),
-            path(
-                "workspaces/<int:tenant_id>/",
-                self.admin_view(self.tenant),
-                name="workspace_tenant",
-            ),
+            *self.workspace_urls(),
             path(
                 "password_change/",
                 self.admin_view(RedirectView.as_view(url="/app/?account=security")),
@@ -117,6 +119,50 @@ class PlatformAdminSite(admin.AdminSite):
             ],
         ]
 
+    def workspace_urls(self) -> list[URLPattern]:
+        workspace = "workspaces/<int:tenant_id>/"
+        routes = (
+            ("workspaces/", partial(workspace_views.workspaces, site=self), "workspace_tenants"),
+            (
+                "workspaces/new/",
+                partial(workspace_views.new_workspace, site=self),
+                "workspace_tenant_new",
+            ),
+            (workspace, partial(workspace_views.workspace, site=self), "workspace_tenant"),
+            (
+                f"{workspace}name/",
+                partial(workspace_views.workspace_name, site=self),
+                "workspace_tenant_name",
+            ),
+            (
+                f"{workspace}administrator/",
+                partial(workspace_views.workspace_administrator, site=self),
+                "workspace_tenant_administrator",
+            ),
+            (
+                f"{workspace}invitations/new/",
+                partial(workspace_views.new_invitation, site=self),
+                "workspace_invitation_new",
+            ),
+            (
+                f"{workspace}invitations/<int:invitation_id>/reissue/",
+                workspace_views.invitation_reissue,
+                "workspace_invitation_reissue",
+            ),
+            (
+                f"{workspace}invitations/<int:invitation_id>/revocation/",
+                workspace_views.invitation_revocation,
+                "workspace_invitation_revocation",
+            ),
+            (
+                f"{workspace}members/<int:user_id>/removal/",
+                partial(workspace_views.member_removal, site=self),
+                "workspace_member_removal",
+            ),
+            (f"{workspace}plants/new/", partial(new_plant, site=self), "workspace_plant_new"),
+        )
+        return [path(route, self.admin_view(view), name=name) for route, view, name in routes]
+
     def workspace_response(
         self,
         request: HttpRequest,
@@ -125,10 +171,11 @@ class PlatformAdminSite(admin.AdminSite):
         context: dict[str, Any],
         *,
         status: int = 200,
+        template: str | None = None,
     ) -> TemplateResponse:
         return TemplateResponse(
             request,
-            f"admin/workspace/{section}.html",
+            f"admin/workspace/{template or section}.html",
             {
                 **self.each_context(request),
                 "workspace_section": section,
@@ -189,48 +236,6 @@ class PlatformAdminSite(admin.AdminSite):
             "settings",
             _("Settings"),
             context,
-            status=400 if request.method == "POST" else 200,
-        )
-
-    def tenants(self, request: HttpRequest) -> HttpResponse:
-        if request.method != "GET":
-            return HttpResponseNotAllowed(("GET",))
-        return self.workspace_response(
-            request,
-            "tenants",
-            _("Workspaces"),
-            tenant_list_context(
-                request.GET.get("q", "").strip()[:200], request.GET.get("page", "1")
-            ),
-        )
-
-    def tenant(self, request: HttpRequest, tenant_id: int) -> HttpResponse:
-        if request.method not in {"GET", "POST"}:
-            return HttpResponseNotAllowed(("GET", "POST"))
-        tenant = get_object_or_404(Tenant, pk=tenant_id)
-        form = WorkspaceAdministratorForm(
-            tenant, request.POST if request.method == "POST" else None
-        )
-        if request.method == "POST" and form.is_valid():
-            try:
-                form.apply(cast(User, request.user))
-            except ValidationError as error:
-                form.add_error(None, error)
-            else:
-                messages.success(request, _("Workspace administrator updated."))
-                return redirect("admin:workspace_tenant", tenant_id=tenant_id)
-        return self.workspace_response(
-            request,
-            "tenant",
-            tenant.name,
-            {
-                "tenant": tenant,
-                "administrator_form": form,
-                "has_automatic_calibration": Plant.objects.filter(
-                    region__tenant=tenant,
-                    automatic_calibration_enabled=True,
-                ).exists(),
-            },
             status=400 if request.method == "POST" else 200,
         )
 

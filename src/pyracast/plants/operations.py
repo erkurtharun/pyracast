@@ -11,7 +11,7 @@ from django.db.models import Max
 from django.utils import timezone
 from django.utils.translation import gettext
 
-from pyracast.accounts.authorization import tenant_membership
+from pyracast.accounts.authorization import authorize_workspace_admin, tenant_membership
 from pyracast.accounts.models import WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.errors import DomainError, ErrorCode
@@ -200,6 +200,7 @@ def create_plant(
     mounting_type: str = MountingType.UNKNOWN,
     surface_tilt: float | None = None,
     surface_azimuth: float | None = None,
+    platform: bool = False,
 ) -> Plant:
     _validate_configuration(
         name,
@@ -212,7 +213,7 @@ def create_plant(
         surface_azimuth,
     )
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
+        authorize_workspace_admin(actor, tenant_id, platform=platform)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -249,6 +250,7 @@ def revise_plant(
     mounting_type: str = MountingType.UNKNOWN,
     surface_tilt: float | None = None,
     surface_azimuth: float | None = None,
+    platform: bool = False,
 ) -> Plant:
     _validate_configuration(
         name,
@@ -261,7 +263,7 @@ def revise_plant(
         surface_azimuth,
     )
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
+        authorize_workspace_admin(actor, tenant_id, platform=platform)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )

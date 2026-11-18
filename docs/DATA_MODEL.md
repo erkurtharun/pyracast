@@ -228,6 +228,7 @@ erDiagram
         varchar_9 delivery_status
         integer created_by_id FK "references auth_user.id"
         bigint tenant_id FK "references accounts_tenant.id"
+        varchar_6 role
     }
     accounts_workspacememberremoval {
         bigint id PK
@@ -274,6 +275,7 @@ erDiagram
 #### `accounts_workspaceinvitation`
 
 - `workspaceinvitation_delivery_status_chk`: `CHECK ("delivery_status" IN ('pending', 'sent', 'failed', 'uncertain'))`
+- `workspaceinvitation_role_chk`: `CHECK ("role" IN ('admin', 'viewer'))`
 
 ## regions (`pyracast.regions`)
 

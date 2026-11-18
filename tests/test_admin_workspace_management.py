@@ -15,6 +15,7 @@ from pyracast.accounts.models import (
     WorkspaceMemberRemoval,
     WorkspaceRole,
 )
+from pyracast.mail.errors import NotSentError
 from pyracast.plants.sites import submit_site
 from pyracast.regions.models import Region
 from tests.support.api import verified_admin
@@ -330,6 +331,43 @@ def test_invitation_refusals_are_form_errors_that_keep_the_values() -> None:
         limited.content.decode()
     )
     assert WorkspaceInvitation.objects.count() == 1
+
+
+@pytest.mark.parametrize(
+    ("failure", "status", "label", "notice"),
+    [
+        (
+            NotSentError("relay refused"),
+            "failed",
+            "Not sent",
+            "The invitation to guest@example.com could not be sent.",
+        ),
+        (
+            TimeoutError("relay silent"),
+            "uncertain",
+            "Delivery unknown",
+            "The invitation to guest@example.com may not have been delivered.",
+        ),
+    ],
+)
+def test_an_undelivered_invitation_is_reported_with_its_delivery_state(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception, status: str, label: str, notice: str
+) -> None:
+    tenant, _, _ = workspace()
+    client, _ = verified_admin()
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise failure
+
+    monkeypatch.setattr("pyracast.accounts.invitations.send", fail)
+    response = client.post(
+        f"/admin/workspaces/{tenant.pk}/invitations/new/",
+        {"email": "guest@example.com", "language": "en"},
+    )
+    html = client.get(response["Location"]).content.decode()
+    assert notice in html
+    assert f'<span class="badge badge--{status}">{label}</span>' in html
+    assert WorkspaceInvitation.objects.get().delivery_status == status
 
 
 def test_pending_invitations_are_reissued_and_revoked_from_the_workspace_page() -> None:
