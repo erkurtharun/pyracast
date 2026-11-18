@@ -223,6 +223,13 @@ def test_a_confirmation_returns_only_to_a_console_page(
     assert response["Location"] == reverse("admin:index")
 
 
+@pytest.mark.parametrize("method", ["put", "delete"])
+def test_the_confirmation_answers_only_get_and_post(method: str) -> None:
+    client, _ = verified_admin(confirmed=False)
+
+    assert getattr(client, method)(reverse("admin:workspace_confirm")).status_code == 405
+
+
 def test_a_refused_write_offers_to_return_to_the_page_it_came_from() -> None:
     client, _ = verified_admin(confirmed=False)
     origin = reverse("admin:workspace_settings")

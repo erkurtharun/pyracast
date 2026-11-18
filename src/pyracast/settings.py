@@ -66,7 +66,6 @@ MIDDLEWARE = [
     "pyracast.accounts.language.RequestLanguage",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
-    "pyracast.accounts.middleware.PrivilegedAuthenticatorEnrollment",
     "allauth.account.middleware.AccountMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",

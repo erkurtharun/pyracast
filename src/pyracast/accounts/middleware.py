@@ -2,31 +2,11 @@ import time
 from collections.abc import Callable
 
 from django.contrib.auth import logout
-from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
-from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.session_cookie import lapse
 from pyracast.accounts.sessions import activity_refresh_due, expiry_reason, record_activity
-
-
-class PrivilegedAuthenticatorEnrollment:
-    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
-        self.get_response = get_response
-
-    def __call__(self, request: HttpRequest) -> HttpResponse:
-        user = request.user
-        if (
-            request.path.rstrip("/") == "/api/auth/browser/v1/account/authenticators/totp"
-            and request.method in {"GET", "POST"}
-            and user.is_authenticated
-            and requires_admin_mfa(user)
-        ):
-            raise PermissionDenied(
-                "Administrator authenticators require trusted operator provisioning."
-            )
-        return self.get_response(request)
 
 
 class SessionLifetime:

@@ -8,7 +8,7 @@ import {
 test("an MFA administrator reviews plants and operations on desktop and mobile under CSP", async ({
     page,
 }, testInfo) => {
-    test.setTimeout(120_000);
+    test.setTimeout(160_000);
     const violations = await recordCspViolations(page);
     await page.setViewportSize({ width: 1440, height: 1000 });
     await signInToConsole(

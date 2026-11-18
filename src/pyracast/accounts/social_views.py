@@ -41,6 +41,7 @@ from pyracast.accounts.social import (
     record_social_refusal,
     social_callback_url,
 )
+from pyracast.accounts.step_up import StepUpAnswers
 from pyracast.db import violated_constraint
 
 # A provider sign-up whose identity (Django's generated name for allauth's unique provider and
@@ -151,7 +152,7 @@ class RedirectToProviderView(AllauthRedirectToProviderView):
         return continuation
 
 
-class ManageProvidersView(AllauthManageProvidersView):
+class ManageProvidersView(StepUpAnswers, AllauthManageProvidersView):
     @classmethod
     def respond_provider_accounts(cls, request: HttpRequest) -> SocialAccountsResponse:
         accounts = list(SocialAccount.objects.filter(user=cast(User, request.user)))

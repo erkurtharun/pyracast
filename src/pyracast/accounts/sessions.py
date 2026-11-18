@@ -86,24 +86,31 @@ def _hold_account(user_id: Any) -> None:
 
 
 @transaction.atomic
-def revoke_other_sessions(request: HttpRequest, user: AbstractBaseUser, trigger: str) -> None:
-    _hold_account(user.pk)
+def end_sessions(
+    user_id: Any, trigger: str, *, keep: str | None = None, request: HttpRequest | None = None
+) -> int:
+    _hold_account(user_id)
     keys = list(
-        UserSession.objects.filter(user_id=user.pk)
-        .exclude(session_key=request.session.session_key)
+        UserSession.objects.filter(user_id=user_id)
+        .exclude(session_key=keep)
         .values_list("session_key", flat=True)
     )
     if not keys:
-        return
+        return 0
     Session.objects.filter(session_key__in=keys).delete()
     UserSession.objects.filter(session_key__in=keys).delete()
     record_security_event(
         SecurityEvent.SESSIONS_REVOKED,
         request=request,
-        user_id=user.pk,
+        user_id=user_id,
         reason=trigger,
         count=len(keys),
     )
+    return len(keys)
+
+
+def revoke_other_sessions(request: HttpRequest, user: AbstractBaseUser, trigger: str) -> None:
+    end_sessions(user.pk, trigger, keep=request.session.session_key, request=request)
 
 
 def _revoking(trigger: str) -> Callable[..., None]:

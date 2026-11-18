@@ -59,9 +59,22 @@ export async function signInToConsole(
     await expect(
         page.getByRole("heading", { name: "Two-factor authentication" }),
     ).toBeVisible();
+    const signInPeriod = Math.floor(Date.now() / 30_000);
     await page
         .getByLabel("Authenticator or recovery code")
         .fill(totp(totpSeed));
     await page.getByRole("button", { name: "Verify code" }).click();
+    await expect(page).toHaveURL("/admin/");
+    // Console writes need a confirmation after sign-in, and a code is accepted only once.
+    await expect
+        .poll(() => Math.floor(Date.now() / 30_000), { timeout: 35_000 })
+        .toBeGreaterThan(signInPeriod);
+    await page
+        .getByRole("link", { name: "Confirm with your authenticator" })
+        .click();
+    await page
+        .getByLabel("Authenticator or recovery code")
+        .fill(totp(totpSeed));
+    await page.getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page).toHaveURL("/admin/");
 }

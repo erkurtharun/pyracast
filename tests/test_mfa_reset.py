@@ -84,6 +84,7 @@ def test_a_reset_removes_every_factor_ends_every_session_and_tells_the_account(
     bystander = customer() if make is administrator else administrator()
     with_factors(bystander)
     kept = session_of(bystander)
+    signed_in = len(events())
 
     shown, terminal = run("reset_mfa", [user.email.upper()], email=user.email, reason="lost_device")
 
@@ -93,11 +94,12 @@ def test_a_reset_removes_every_factor_ends_every_session_and_tells_the_account(
     assert kept.get("/api/session/").json()["user"]["id"] == bystander.pk
     assert terminal.asked == 1
     assert f"Removed 2 second factors and ended 2 sessions of {user.email}." in shown
-    assert [(line["event"], line.get("reason"), line.get("count")) for line in events()] == [
+    written = events()[signed_in:]
+    assert [(line["event"], line.get("reason"), line.get("count")) for line in written] == [
         ("sessions_revoked", "mfa_reset", 2),
         ("mfa_reset_by_operator", "lost_device", 2),
     ]
-    assert all(line["user_id"] == user.pk for line in events())
+    assert all(line["user_id"] == user.pk for line in written)
     [message] = mail.outbox
     assert message.to == [user.email]
     assert message.extra_headers["X-Pyracast-Mail"] == "account/email/second_factor_reset"
@@ -131,6 +133,7 @@ def test_a_dry_run_changes_nothing_and_asks_nothing(
     with_factors(user)
     client = session_of(user)
     before = state(user)
+    signed_in = len(events())
 
     shown, terminal = run("reset_mfa", [], email=user.email, reason="lost_device", dry_run=True)
 
@@ -141,7 +144,7 @@ def test_a_dry_run_changes_nothing_and_asks_nothing(
         f"Dry run: would remove 2 second factors and end 1 session of {user.email}. "
         "Nothing was changed."
     )
-    assert events() == []
+    assert events()[signed_in:] == []
     assert mail.outbox == []
 
 
@@ -197,13 +200,14 @@ def test_a_reset_needs_the_address_typed_again(
     with_factors(user)
     client = session_of(user)
     before = state(user)
+    signed_in = len(events())
 
     message, _terminal = refusal(user.email, [answer])
 
     assert message == "The confirmation does not match the address. Nothing was changed."
     assert state(user) == before
     assert client.get("/api/session/").json()["user"]["id"] == user.pk
-    assert events() == []
+    assert events()[signed_in:] == []
     assert mail.outbox == []
 
 

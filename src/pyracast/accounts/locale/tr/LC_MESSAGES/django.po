@@ -41,11 +41,6 @@ msgstr "Çalışma alanı adları web veya e-posta adresi içeremez."
 msgid "A workspace name is required."
 msgstr "Çalışma alanı adı gereklidir."
 
-msgid "Verify an authenticator before managing two-factor authentication."
-msgstr ""
-"İki adımlı doğrulamayı yönetmeden önce doğrulayıcı uygulamanızla kimliğinizi"
-" doğrulayın."
-
 msgid "Or copy this link into your browser:"
 msgstr "Ya da bu bağlantıyı tarayıcınıza kopyalayın:"
 
@@ -280,3 +275,22 @@ msgid ""
 "administrator."
 msgstr ""
 "Bu davet yedi gün sonra sona erer ve sizi çalışma alanının yöneticisi yapar."
+
+msgid "Confirm with your authenticator to continue."
+msgstr "Devam etmek için doğrulama uygulamanızla onaylayın."
+
+msgid "Confirm your password to continue."
+msgstr "Devam etmek için şifrenizi onaylayın."
+
+msgid "Confirm with a code sent to your email address to continue."
+msgstr "Devam etmek için e-posta adresinize gönderilen kodla onaylayın."
+
+msgid "Your second factor was reset"
+msgstr "İki adımlı doğrulamanız sıfırlandı"
+
+msgid ""
+"An operator removed the second factors of your Pyracast account and ended its"
+" sessions."
+msgstr ""
+"Bir operatör Pyracast hesabınızın iki adımlı doğrulama yöntemlerini kaldırdı "
+"ve oturumlarını sonlandırdı."

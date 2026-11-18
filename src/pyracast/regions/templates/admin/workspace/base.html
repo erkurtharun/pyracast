@@ -102,6 +102,9 @@
           {% endfor %}
         </div>
       {% endif %}
+      {% if confirmation_needed and workspace_section != "confirm" %}
+        <p class="notice notice--warning" role="status">{% translate "Changes need a recent confirmation with your authenticator." %} <a href="{% url 'admin:workspace_confirm' %}?next={{ request.get_full_path|urlencode:'' }}">{% translate "Confirm with your authenticator" %}</a></p>
+      {% endif %}
       {% block content %}{% endblock %}
     </main>
   </div>

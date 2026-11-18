@@ -15,8 +15,8 @@ from django.db import connections
 from django.http import HttpRequest
 from django.test import Client, RequestFactory, override_settings
 
-from pyracast.accounts import mfa_views
-from pyracast.accounts.mfa_views import recently_reauthenticated_with_mfa
+from pyracast.accounts import step_up
+from pyracast.accounts.security import has_mfa_evidence
 from tests.support.admin_mfa_bootstrap import TEST_PASSWORD
 from tests.support.admin_recovery_security import AUTH, RECOVERY, authenticated_account, submit
 
@@ -89,7 +89,7 @@ def test_invalid_mfa_reauthentication_timestamp_cannot_authorize_recovery_codes(
     record = get_authentication_records(request, user)[0]
     record["reauthenticated"] = True
     record["at"] = invalid_at
-    assert not recently_reauthenticated_with_mfa(request)
+    assert not has_mfa_evidence(request, recent=True)
 
 
 def test_deleted_mfa_factor_cannot_authorize_recovery_codes() -> None:
@@ -99,7 +99,7 @@ def test_deleted_mfa_factor_cannot_authorize_recovery_codes() -> None:
     request.session = client.session
     get_authentication_records(request, user)[0]["reauthenticated"] = True
     Authenticator.objects.filter(user=user).delete()
-    assert not recently_reauthenticated_with_mfa(request)
+    assert not has_mfa_evidence(request, recent=True)
 
 
 def test_mfa_reauthentication_is_bound_to_current_account() -> None:
@@ -108,16 +108,16 @@ def test_mfa_reauthentication_is_bound_to_current_account() -> None:
     request.user = user
     request.session = client.session
     get_authentication_records(request, user)[0]["reauthenticated"] = True
-    assert recently_reauthenticated_with_mfa(request)
+    assert has_mfa_evidence(request, recent=True)
     request.user = User.objects.create_user(username="other")
     Authenticator.objects.create(user=request.user, type="totp", data={})
-    assert not recently_reauthenticated_with_mfa(request)
+    assert not has_mfa_evidence(request, recent=True)
 
 
 def test_anonymous_request_has_no_mfa_reauthentication() -> None:
     request = RequestFactory().get("/")
     request.user = AnonymousUser()
-    assert not recently_reauthenticated_with_mfa(request)
+    assert not has_mfa_evidence(request, recent=True)
 
 
 def test_password_reauthentication_cannot_remove_customer_totp() -> None:
@@ -227,10 +227,10 @@ def test_recovery_access_and_factor_removal_serialize_across_sessions(
     verified, release, removal_finished = Event(), Event(), Event()
     recovery_pid: Queue[int] = Queue()
     removal_pid: Queue[int] = Queue()
-    original = mfa_views.recently_reauthenticated_with_mfa
+    original = has_mfa_evidence
 
-    def pause_after_verification(request: HttpRequest) -> bool:
-        authenticated = original(request)
+    def pause_after_verification(request: HttpRequest, *, recent: bool = False) -> bool:
+        authenticated = original(request, recent=recent)
         if request.path == RECOVERY:
             with connections["default"].cursor() as cursor:
                 cursor.execute("SELECT pg_backend_pid()")
@@ -239,7 +239,7 @@ def test_recovery_access_and_factor_removal_serialize_across_sessions(
             assert release.wait(timeout=10)
         return authenticated
 
-    monkeypatch.setattr(mfa_views, "recently_reauthenticated_with_mfa", pause_after_verification)
+    monkeypatch.setattr(step_up, "has_mfa_evidence", pause_after_verification)
 
     def access_recovery() -> tuple[int, list[str]]:
         try:

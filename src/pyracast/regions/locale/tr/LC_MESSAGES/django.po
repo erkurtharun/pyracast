@@ -2552,3 +2552,36 @@ msgstr[1] "%(counter)s üye"
 
 msgid "You cannot remove your own membership from this console."
 msgstr "Bu konsoldan kendi üyeliğinizi kaldıramazsınız."
+
+msgid "Confirm with your authenticator"
+msgstr "Doğrulama uygulamanızla onaylayın"
+
+msgid ""
+"Nothing was saved. Confirm with your authenticator, then submit the change "
+"again."
+msgstr ""
+"Hiçbir şey kaydedilmedi. Doğrulama uygulamanızla onaylayın, ardından "
+"değişikliği yeniden gönderin."
+
+msgid ""
+"Changes in the console need a recent confirmation with your authenticator."
+msgstr ""
+"Konsoldaki değişiklikler, doğrulama uygulamanızla yakın zamanda verilmiş bir "
+"onay gerektirir."
+
+msgid "Changes need a recent confirmation with your authenticator."
+msgstr ""
+"Değişiklikler, doğrulama uygulamanızla yakın zamanda verilmiş bir onay "
+"gerektirir."
+
+msgid "Authenticator code"
+msgstr "Doğrulama kodu"
+
+msgid "Authenticator or recovery code"
+msgstr "Doğrulama veya kurtarma kodu"
+
+msgid "Confirm"
+msgstr "Onayla"
+
+msgid "Confirmed with your authenticator."
+msgstr "Doğrulama uygulamanızla onaylandı."

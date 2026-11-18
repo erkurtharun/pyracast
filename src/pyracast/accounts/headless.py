@@ -34,6 +34,8 @@ from pyracast.accounts.processes import (
     lock_account,
     require_authority,
 )
+from pyracast.accounts.security import Factor
+from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor
 from pyracast.db import violated_constraint
 
 COMPLETION_FAILURES = (
@@ -94,7 +96,11 @@ class RequestPasswordResetView(StartingView, views.RequestPasswordResetView):
     input_class = inputs.RequestPasswordResetInput
 
 
-class RequestReauthenticationCodeView(StartingView, views.RequestReauthenticationCodeView):
+class RequestReauthenticationCodeView(
+    StrongestFactor, StartingView, views.RequestReauthenticationCodeView
+):
+    factor = Factor.CODE
+
     def handle_input(self, data: Any) -> ErrorResponse | None:
         # With the code budget of the typed address spent, the input reads the account unlocked
         # and allauth refuses it there; one it admits after all (a use expired meanwhile) read
@@ -167,7 +173,9 @@ class ResendEmailVerificationCodeView(views.ResendEmailVerificationCodeView):
         return response
 
 
-class ConfirmReauthenticationCodeView(views.ConfirmReauthenticationCodeView):
+class ConfirmReauthenticationCodeView(StrongestFactor, views.ConfirmReauthenticationCodeView):
+    factor = Factor.CODE
+
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         try:
             with transaction.atomic():
@@ -178,7 +186,7 @@ class ConfirmReauthenticationCodeView(views.ConfirmReauthenticationCodeView):
             return ConflictResponse(request)
 
 
-class ChangePasswordView(views.ChangePasswordView):
+class ChangePasswordView(StepUpAnswers, views.ChangePasswordView):
     input_class = inputs.ChangePasswordInput
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
@@ -189,11 +197,12 @@ class ChangePasswordView(views.ChangePasswordView):
         return response
 
 
-class ReauthenticateView(views.ReauthenticateView):
+class ReauthenticateView(StrongestFactor, views.ReauthenticateView):
+    factor = Factor.PASSWORD
     input_class = inputs.ReauthenticateInput
 
 
-class ManageEmailView(StartingView, views.ManageEmailView):
+class ManageEmailView(StepUpAnswers, StartingView, views.ManageEmailView):
     def handle_input(self, data: Any) -> ErrorResponse | None:
         if self.request.method == "POST":
             if spent(self.request, "request_email_change", user=self.user):

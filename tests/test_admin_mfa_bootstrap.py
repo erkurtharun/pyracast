@@ -108,7 +108,7 @@ def test_the_first_administrator_is_created_from_the_operator_terminal(
     assert "issuer=Pyracast" in shown
     assert any(block in shown for block in "▀▄█")
     assert "\x1b" not in shown
-    assert f"Platform administrator {ADDRESS} is ready." in shown
+    assert f"Platform administrator {ADDRESS} is ready. Username: {user.username}." in shown
     assert terminal.asked == 3
     assert events() == [
         {
@@ -265,7 +265,9 @@ def test_a_wrong_answer_stores_nothing(
     assert NEW_PASSWORD not in caplog.text
 
 
-@pytest.mark.parametrize("password", ["short-secret", "password" * 2, "first.admin@example.com"])
+@pytest.mark.parametrize(
+    "password", ["short-secret", "1q2w3e4r5t6y7u8i", "first.admin@example.com"]
+)
 def test_a_password_outside_the_policy_is_refused_without_a_bypass(
     password: str, now: float
 ) -> None:
@@ -296,6 +298,22 @@ def test_an_account_created_meanwhile_stops_the_bootstrap(
     assert list(User.objects.values_list("username", flat=True)) == ["customer"]
     assert not Authenticator.objects.exists()
     assert events() == []
+
+
+def test_an_administrator_created_meanwhile_stops_the_bootstrap(now: float) -> None:
+    def code_while_another_run_finishes(shown: str) -> str:
+        User.objects.create_user(username="raced", email=ADDRESS, is_staff=True, is_superuser=True)
+        return current_code(now)(shown)
+
+    message, _shown, _terminal = refusal(
+        [NEW_PASSWORD, NEW_PASSWORD, code_while_another_run_finishes]
+    )
+
+    assert message == (
+        "The account changed while the command ran. Nothing was stored; run it again."
+    )
+    assert not User.objects.get().has_usable_password()
+    assert not Authenticator.objects.exists()
 
 
 def test_a_factor_added_meanwhile_stops_the_enrollment(now: float) -> None:

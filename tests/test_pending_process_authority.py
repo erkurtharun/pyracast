@@ -536,6 +536,7 @@ def test_a_reauthentication_code_dies_when_the_account_gains_an_authenticator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pending = reauthentication_code(monkeypatch)
+    mail.outbox.clear()
     with_totp(pending.user)
 
     pending.client.get("/api/session/")

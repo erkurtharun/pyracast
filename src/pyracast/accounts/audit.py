@@ -63,6 +63,7 @@ class SecurityEvent(StrEnum):
     SOCIAL_ACCOUNT_CONNECTED = "social_account_connected"
     SOCIAL_ACCOUNT_DISCONNECTED = "social_account_disconnected"
     ADMIN_MFA_PROVISIONED = "admin_mfa_provisioned"
+    MFA_RESET_BY_OPERATOR = "mfa_reset_by_operator"
     INVALID_PROXY_HEADERS = "invalid_proxy_headers"
     AUTHENTICATION_REQUEST_THROTTLED = "authentication_request_throttled"
     API_REQUEST_THROTTLED = "api_throttled"
