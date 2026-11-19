@@ -517,7 +517,9 @@ reported if the session is still signed in after it or the read shows another ac
 Revoke sessions after 12 hours or 30 minutes without requests; polling of a visible
 tab counts as activity, and hidden tabs do not poll. Sessions predating the lifetime markers fail closed. A request
 whose session another session of the account ended while it ran answers 400
-`session_ended`, also when its own work committed; the client signs in again. API
+`session_ended`, also when its own work committed; the client signs in again. A
+provider callback whose session ended before it took its provider state answers like
+one that finds nothing pending: it stores nothing and sends no session cookie. API
 responses are private and non-cacheable. The frontend reads stored results and
 never handles provider credentials. A fixed public HTTPS origin determines
 security-email navigation. Verification and recovery codes expire after ten minutes,

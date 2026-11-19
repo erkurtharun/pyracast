@@ -17,6 +17,8 @@ from allauth.headless.socialaccount.views import (
 from allauth.headless.socialaccount.views import (
     RedirectToProviderView as AllauthRedirectToProviderView,
 )
+from allauth.socialaccount.adapter import get_adapter as get_social_adapter
+from allauth.socialaccount.helpers import render_authentication_error
 from allauth.socialaccount.internal.flows.signup import get_pending_signup
 from allauth.socialaccount.models import SocialAccount, SocialApp
 from allauth.socialaccount.providers import registry
@@ -25,6 +27,7 @@ from allauth.socialaccount.providers.google.views import oauth2_callback as goog
 from allauth.socialaccount.providers.microsoft.views import oauth2_callback as microsoft_callback
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.contrib.sessions.backends.base import UpdateError
 from django.db import IntegrityError, transaction
 from django.http import (
     HttpRequest,
@@ -208,4 +211,12 @@ def provider_callback(request: HttpRequest, provider: str) -> HttpResponseBase:
         callback = social_callback_url()
         return HttpResponseRedirect(f"{callback}&error=provider_unavailable")
     callback = google_callback if provider == "google" else microsoft_callback
-    return starting(request, lambda: cast(HttpResponseBase, callback(request)))
+    try:
+        return starting(request, lambda: cast(HttpResponseBase, callback(request)))
+    except UpdateError:
+        # allauth saves the session as it takes the provider state; a session that ended
+        # meanwhile fails that save and the callback's transaction rolls back. Nothing is
+        # pending for it any more: answer as then, on an empty session that sends no cookie.
+        request.session = type(request.session)()
+        social_provider = get_social_adapter(request).get_provider(request, provider)
+        return cast(HttpResponseBase, render_authentication_error(request, social_provider))
