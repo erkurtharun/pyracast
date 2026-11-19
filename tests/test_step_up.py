@@ -16,13 +16,14 @@ from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from allauth.socialaccount.models import SocialAccount
 from django.conf import settings
+from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
 from django.core import mail
 from django.test import Client, override_settings
 
 from pyracast.accounts import processes, security, step_up
-from tests.support.account_sessions import alongside, elsewhere, session_user
-from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, totp_code
+from tests.support.account_sessions import alongside, browser, elsewhere, session_user
+from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit, totp_code
 from tests.support.social_accounts import (
     CALLBACK,
     PROVIDERS,
@@ -579,7 +580,108 @@ def arranged(write: CredentialWrite) -> tuple[User, Client, Client]:
     return user, sessions[0], sessions[1]
 
 
-def assert_refused(write: CredentialWrite, response: Any) -> None:
+def authenticator_removal(other: Client, token: str, _prepared: Any) -> Any:
+    return api(other, token, "delete", "account/authenticators/totp")
+
+
+def authenticator_activation(other: Client, token: str, prepared: Any) -> Any:
+    return api(other, token, "post", "account/authenticators/totp", prepared)
+
+
+def address_removal(other: Client, token: str, _prepared: Any) -> Any:
+    return api(other, token, "delete", "account/email", {"email": SECOND})
+
+
+OTHER_PASSWORD = PASSWORD + "-other"
+
+
+def password_setting(other: Client, token: str, _prepared: Any) -> Any:
+    return api(other, token, "post", "account/password/change", {"new_password": OTHER_PASSWORD})
+
+
+def password_removal(user: User) -> Callable[[Client, str, Any], None]:
+    def remove(_other: Client, _token: str, _prepared: Any) -> None:
+        User.objects.filter(pk=user.pk).update(password=make_password(None))
+
+    return remove
+
+
+def accepted(response: Any) -> bool:
+    return bool(response.status_code == 200)
+
+
+def password_was_set(response: Any) -> bool:
+    # A password change signs the session that made it out: 401 with the change noted.
+    return response.json()["meta"].get("password_changed") is True
+
+
+@dataclass(frozen=True)
+class CompetingChange:
+    # A credential change of the same account made by the other session while the write runs.
+    kinds: frozenset[str]
+    make: Callable[[User], Callable[[Client, str, Any], Any]]
+    applied: Callable[[User], bool]
+    prepare: Callable[[Client, float], Any] = nothing_to_prepare
+    answered: Callable[[Any], bool] = accepted
+    # No route removes a password: that change is written to the account row directly, which
+    # signs the sessions out through their password hash instead of revoking them.
+    routed: bool = True
+    revokes_sessions: bool = False
+
+
+COMPETING = {
+    "address-removed": CompetingChange(
+        frozenset({"authenticator", "password", "code"}),
+        lambda _user: address_removal,
+        lambda user: SECOND not in addresses(user),
+    ),
+    "last-authenticator-removed": CompetingChange(
+        frozenset({"authenticator"}),
+        lambda _user: authenticator_removal,
+        lambda user: factors(user) == set(),
+        revokes_sessions=True,
+    ),
+    "first-authenticator-added": CompetingChange(
+        frozenset({"password", "code"}),
+        lambda _user: authenticator_activation,
+        lambda user: "totp" in factors(user),
+        prepare=activation,
+        revokes_sessions=True,
+    ),
+    "password-set": CompetingChange(
+        frozenset({"code"}),
+        lambda _user: password_setting,
+        lambda user: User.objects.get(pk=user.pk).check_password(OTHER_PASSWORD),
+        answered=password_was_set,
+        revokes_sessions=True,
+    ),
+    "password-removed": CompetingChange(
+        frozenset({"password"}),
+        password_removal,
+        lambda user: not User.objects.get(pk=user.pk).has_usable_password(),
+        routed=False,
+    ),
+}
+COMPETITIONS = [
+    pytest.param(write, change, id=f"{write}-against-{change}")
+    for write, case in WRITES.items()
+    for change, competing in COMPETING.items()
+    if case.kind in competing.kinds
+]
+
+
+def competing(
+    change: CompetingChange, user: User, other: Client, now: float
+) -> tuple[list[Any], Callable[[], object]]:
+    prepared = change.prepare(other, now)
+    token = token_of(other)
+    made = change.make(user)
+    answers: list[Any] = []
+    return answers, lambda: answers.append(made(other, token, prepared))
+
+
+def assert_refused(write: CredentialWrite, response: Any, user: User) -> None:
+    # The refusal asks for the factor the account's state after the change demands.
     if write.method == "callback":
         assert response.status_code == 302
         assert "error=permission_denied" in response["Location"]
@@ -589,7 +691,17 @@ def assert_refused(write: CredentialWrite, response: Any) -> None:
     else:
         assert response.status_code == 401
         flows = [flow["id"] for flow in response.json()["data"]["flows"]]
-        assert flows == [FLOWS[STRONGEST[write.kind]]]
+        assert flows == [FLOWS[strongest_now(user)]]
+
+
+def assert_ended(write: CredentialWrite, response: Any) -> None:
+    # The change revoked this session while its request ran.
+    if write.method == "callback":
+        # allauth saves the session while it reads the provider state, before the connection
+        # step, so a revoked session fails there as a server error (an open finding).
+        assert response.status_code == 500
+        return
+    assert (response.status_code, response.json()["code"]) == (400, "session_ended")
 
 
 def assert_refused_or_ended(response: Any, user: User) -> None:
@@ -653,64 +765,62 @@ def changing_after_the_gate(
     return changes
 
 
-@pytest.mark.parametrize("write", WRITES)
+@pytest.mark.parametrize(("write", "change"), COMPETITIONS)
 def test_a_credential_write_is_refused_after_another_sessions_credential_change_committed(
-    write: str, now: float, providers: None, monkeypatch: pytest.MonkeyPatch
+    write: str, change: str, now: float, providers: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    case = WRITES[write]
+    case, competitor = WRITES[write], COMPETING[change]
     user, client, other = arranged(case)
     prepared = case.prepare(client, now)
-    token, other_token = token_of(client), token_of(other)
-    removed: list[Any] = []
-    after = changed_after_the_check(
-        monkeypatch,
-        case.path,
-        user,
-        lambda: removed.append(
-            api(other, other_token, "delete", "account/email", {"email": SECOND})
-        ),
-    )
+    answers, make_change = competing(competitor, user, other, now)
+    token = token_of(client)
+    after = changed_after_the_check(monkeypatch, case.path, user, make_change)
+    client.raise_request_exception = not competitor.revokes_sessions
 
     response = case.send(client, token, prepared)
 
-    assert removed[0].status_code == 200
-    assert_refused(case, response)
+    if competitor.routed:
+        assert competitor.answered(answers[0])
+    assert competitor.applied(user)
+    if competitor.revokes_sessions:
+        assert_ended(case, response)
+    else:
+        assert_refused(case, response, user)
     assert credentials(user) == after[0]
     assert mail.outbox == []
-    assert session_user(client) == user.pk
+    signed_out = competitor.revokes_sessions or not competitor.routed
+    assert session_user(client) == (None if signed_out else user.pk)
     assert proofs(client) == []
 
 
-@pytest.mark.parametrize("write", WRITES)
+@pytest.mark.parametrize(("write", "change"), COMPETITIONS)
 def test_a_credential_change_attempted_while_a_credential_write_runs_waits_and_ends_the_proofs(
-    write: str, now: float, providers: None, monkeypatch: pytest.MonkeyPatch
+    write: str, change: str, now: float, providers: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    case = WRITES[write]
+    case, competitor = WRITES[write], COMPETING[change]
     user, client, other = arranged(case)
     prepared = case.prepare(client, now)
-    token, other_token = token_of(client), token_of(other)
+    answers, make_change = competing(competitor, user, other, now)
+    token = token_of(client)
     before = credentials(user)
     mail.outbox.clear()
-    removed: list[Any] = []
-    changes = changing_after_the_gate(
-        monkeypatch,
-        lambda: removed.append(
-            api(other, other_token, "delete", "account/email", {"email": SECOND})
-        ),
-    )
+    changes = changing_after_the_gate(monkeypatch, make_change)
 
     response = case.send(client, token, prepared)
-    [(committed, change)] = changes
-    change.result(timeout=10)
+    [(committed, waited)] = changes
+    waited.result(timeout=10)
 
     assert not committed
     assert case.done(user, before, response)
-    if case.changes_state:
-        assert_refused_or_ended(removed[0], user)
-        assert SECOND in addresses(user)
+    if not competitor.routed:
+        assert competitor.applied(user)
+    elif case.changes_state:
+        assert_refused_or_ended(answers[0], user)
     else:
-        assert removed[0].status_code == 200
-        assert SECOND not in addresses(user)
+        assert competitor.answered(answers[0])
+        assert competitor.applied(user)
+    if change == "address-removed" and case.changes_state:
+        assert SECOND in addresses(user)
     for session in (client, other):
         session_user(session)
         assert proofs(session) == []
@@ -778,3 +888,40 @@ def test_a_password_change_reads_the_current_password_under_the_accounts_locks(
     assert User.objects.get(pk=user.pk).check_password(elsewhere_password)
     assert credentials(user) == after[0]
     assert session_user(client) is None
+
+
+def test_a_password_change_whose_proof_ended_is_refused_when_the_last_authenticator_went(
+    now: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The current password alone would pass the gate the account has after the removal.
+    user, client, other = arranged(WRITES["change-password"])
+    token, other_token = token_of(client), token_of(other)
+    removed: list[Any] = []
+    changed_after_the_check(
+        monkeypatch,
+        AUTH + "account/password/change",
+        user,
+        lambda: removed.append(authenticator_removal(other, other_token, None)),
+    )
+
+    response = api(
+        client,
+        token,
+        "post",
+        "account/password/change",
+        {"current_password": PASSWORD, "new_password": CHANGED_PASSWORD},
+    )
+
+    assert removed[0].status_code == 200
+    assert factors(user) == set()
+    assert (response.status_code, response.json()["code"]) == (400, "session_ended")
+    assert (
+        submit(browser(), "auth/login", {"email": user.email, "password": PASSWORD}).status_code
+        == 200
+    )
+    assert (
+        submit(
+            browser(), "auth/login", {"email": user.email, "password": CHANGED_PASSWORD}
+        ).status_code
+        == 400
+    )
