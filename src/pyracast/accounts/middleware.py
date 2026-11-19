@@ -7,6 +7,7 @@ from django.http import HttpRequest, HttpResponse
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authorization import requires_admin_mfa
+from pyracast.accounts.session_cookie import lapse
 from pyracast.accounts.sessions import activity_refresh_due, expiry_reason, record_activity
 
 
@@ -42,6 +43,7 @@ class SessionLifetime:
                     user_id=request.user.pk,
                     reason=reason,
                 )
+                lapse(request)
                 logout(request)
             elif activity_refresh_due(request.session, now):
                 record_activity(request, now)
