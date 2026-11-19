@@ -536,10 +536,11 @@ erased when the intent ends, and unknown-account and account-exists notices shar
 hour. Every mail is transmitted at most once: an intent interrupted before its transmit
 marker is retried, and one interrupted after it ends `uncertain`, holds no code, is
 reported in health and the console and is never resent. After a failed or uncertain
-mail the person asks for a new verification or reset code at once, alike whether the
-address has an account (which gets a notice instead of the code), and the administrator
-sends the invitation again,
-while an uncertain notice (the daily sign-in pause included) or reminder slot stays sent
+mail the person asks for a new reset code at once and for a new verification code once
+its one-minute resend window has passed, which no mail outcome shortens, so that answer
+is alike whether the address has an account (which gets a notice instead of the code);
+the administrator sends a failed or uncertain invitation again at once, while an
+uncertain notice (the daily sign-in pause included) or reminder slot stays sent
 at most once and the next slot sends normally. Verification and recovery codes expire
 after ten minutes, allow at most three attempts and are bound to the initiating browser
 session. A pending code or sign-in step, and a reauthentication kept in the session (a

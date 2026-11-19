@@ -50,22 +50,6 @@ def throttled(request: HttpRequest) -> ImmediateHttpResponse:
     return ImmediateHttpResponse(ratelimit.respond_429(request))
 
 
-def release_code_resend(address: str) -> None:
-    # A mail that spent the window and failed or may not have arrived lets the person ask again at
-    # once: only the shortest per-address window is cleared, the longer ones still count the mail.
-    # The rates are per key, so no request is needed.
-    rates = (account_settings.RATE_LIMITS.get("confirm_email") or "").split(",")
-    if parts := [part.strip() for part in rates if part.strip()]:
-        shortest = min(parts, key=lambda rate: ratelimit.parse_rate(rate).duration)
-        ratelimit.clear(
-            HttpRequest(),
-            app=APP,
-            action="confirm_email",
-            config={"confirm_email": shortest},
-            key=address.lower(),
-        )
-
-
 def reserve_client_failure(request: HttpRequest) -> ratelimit.RateLimitUsage | None:
     return reserve(request, FAILED_LOGIN_FROM_CLIENT)
 

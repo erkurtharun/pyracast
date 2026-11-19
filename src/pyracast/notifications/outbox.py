@@ -4,7 +4,6 @@ import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from functools import partial
 
 from django.core.mail import EmailMultiAlternatives
 from django.db import connection, transaction
@@ -13,7 +12,6 @@ from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.account_mail import compose_account_mail
 from pyracast.accounts.invitations import compose_invitation
-from pyracast.accounts.login_limits import release_code_resend
 from pyracast.accounts.models import InvitationDeliveryStatus, WorkspaceInvitation
 from pyracast.encryption import secret_cipher
 from pyracast.mail.errors import (
@@ -30,7 +28,6 @@ from pyracast.notifications.models import (
     OPEN_MAIL,
     OutboundMail,
     OutboundMailError,
-    OutboundMailKind,
     OutboundMailStatus,
 )
 
@@ -44,13 +41,6 @@ ANONYMOUS_MAIL_PER_HOUR = 20
 # Two-key advisory lock ("PYOB", 1) that serializes the anonymous budget across workers.
 ANONYMOUS_BUDGET_LOCK = (0x50594F42, 1)
 WAITING = (OutboundMailStatus.PENDING, OutboundMailStatus.RETRY)
-# The mail whose request spent the address's `confirm_email` window: the verification code, or the
-# notice sent instead of it when the address already has an account.
-VERIFICATION_MAIL = (
-    OutboundMailKind.EMAIL_CONFIRMATION_SIGNUP,
-    OutboundMailKind.EMAIL_CONFIRMATION,
-    OutboundMailKind.ACCOUNT_ALREADY_EXISTS,
-)
 UNDELIVERED = (OutboundMailStatus.FAILED, OutboundMailStatus.UNCERTAIN)
 
 
@@ -110,8 +100,6 @@ def _report(mail: OutboundMail) -> None:
 
 
 def _finish(mail: OutboundMail, status: OutboundMailStatus, error: str, now: datetime) -> None:
-    # An uncertain intent ends again as failed after a late refusal; it released its window once.
-    first_end = mail.status in OPEN_MAIL
     mail.status, mail.last_error, mail.finished_at, mail.sealed_code = status, error, now, ""
     if status != OutboundMailStatus.UNCERTAIN:
         mail.lease_token = mail.lease_expires_at = None
@@ -120,8 +108,6 @@ def _finish(mail: OutboundMail, status: OutboundMailStatus, error: str, now: dat
         WorkspaceInvitation.objects.filter(pk=mail.invitation_id).update(
             delivery_status=InvitationDeliveryStatus(status)
         )
-    if first_end and status in UNDELIVERED and mail.kind in VERIFICATION_MAIL:
-        transaction.on_commit(partial(release_code_resend, mail.recipient))
     _report(mail)
 
 
