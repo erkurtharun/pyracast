@@ -108,7 +108,7 @@ test("member submits a native production correction with a stable retry key and 
         )
             direct.push(request.url());
     });
-    await page.route("**/production/?*", (route) => {
+    await page.route("**/api/**/production/?*", (route) => {
         const date = new URL(route.request().url()).searchParams.get(
             "start_date",
         )!;
@@ -226,7 +226,7 @@ test("member submits a native production correction with a stable retry key and 
 
 test("a server error shows its reference", async ({ page }) => {
     await member(page);
-    await page.route("**/production/?*", (route) => {
+    await page.route("**/api/**/production/?*", (route) => {
         const date = new URL(route.request().url()).searchParams.get(
             "start_date",
         )!;
@@ -291,7 +291,7 @@ test("member outage reports remain proposals and use explicit action envelopes",
         status: "active",
         declared_configuration_id: 31,
     };
-    await page.route("**/outages/", (route) => {
+    await page.route("**/api/**/outages/", (route) => {
         expect(route.request().method()).toBe("GET");
         return route.fulfill({ json: paged([outage]) });
     });
@@ -791,7 +791,7 @@ test("workspace and current role changes clear review controls and previous tena
         page.getByRole("button", { name: "Approve and apply", exact: true }),
     ).toBeVisible();
     role = "viewer";
-    await page.clock.runFor(30_001);
+    await page.clock.runFor(120_001);
     await expect(
         page.getByRole("button", { name: "Approve and apply", exact: true }),
     ).toHaveCount(0);
@@ -890,6 +890,60 @@ for (const removal of ["decision", "concurrent"] as const) {
     });
 }
 
+test("a poll that was already reading cannot bring a decided request back to the first page", async ({
+    page,
+}) => {
+    await page.clock.install({ time: new Date("2026-11-10T12:00:00Z") });
+    await mockApi(page);
+    let decided = false;
+    let holding = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let reading!: () => void;
+    const held = new Promise<void>((resolve) => {
+        reading = resolve;
+    });
+    await page.route("**/change-requests/?*", async (route) => {
+        const answer = paged(decided ? [] : [proposal(1)]);
+        if (holding) {
+            holding = false;
+            reading();
+            await gate;
+        }
+        await route.fulfill({ json: answer }).catch(() => {});
+    });
+    await page.route("**/change-requests/1/", (route) =>
+        route.fulfill({ json: proposal(1) }),
+    );
+    await page.route("**/change-requests/1/approve/", (route) => {
+        decided = true;
+        return route.fulfill({
+            json: { ...proposal(1), status: "approved", can_review: false },
+        });
+    });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /^Inbox/ }).click();
+    await page
+        .getByRole("button", { name: "Review details", exact: true })
+        .click();
+    holding = true;
+    await page.clock.runFor(30_000);
+    await held;
+    await page
+        .getByRole("button", { name: "Approve and apply", exact: true })
+        .click();
+    await expect(
+        page.getByRole("status").filter({ hasText: /^Approved$/ }),
+    ).toBeVisible();
+    release();
+    await expect(
+        page.getByText("No submissions here.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".inbox-card")).toHaveCount(0);
+});
+
 test("the inbox label counts several updates in the plural", async ({
     page,
 }) => {
@@ -918,7 +972,7 @@ async function routeUnavailableRows(
     reasons: (string | null)[],
     role: "member" | "admin",
 ) {
-    await page.route("**/production/?*", (route) => {
+    await page.route("**/api/**/production/?*", (route) => {
         const date = new URL(route.request().url()).searchParams.get(
             "start_date",
         );

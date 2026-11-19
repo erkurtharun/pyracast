@@ -233,7 +233,7 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
         await expect(page.locator("html")).toHaveAttribute("lang", "en");
     }
     await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto("/app/?workspace=customer");
+    await page.goto("/app/w/");
     await expect(
         page.getByRole("link", { name: "Administration" }),
     ).toBeVisible();

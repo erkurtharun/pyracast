@@ -1,5 +1,15 @@
 import { expect, test } from "./support/test";
 import { mockApi, region } from "./support/workspace";
+import type { Page } from "@playwright/test";
+
+// Advances exactly one poll period and waits for the answer of that single poll.
+async function pollOnce(page: Page) {
+    const polled = page.waitForResponse((response) =>
+        response.url().includes("/forecast/?date=2026-11-14"),
+    );
+    await page.clock.runFor(30_000);
+    await polled;
+}
 
 test("automatic forecast survives midnight until historical estimates arrive", async ({
     page,
@@ -49,7 +59,11 @@ test("automatic forecast survives midnight until historical estimates arrive", a
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
+    const requested = page.waitForResponse((response) =>
+        response.url().includes("/forecast/?date=2026-11-14"),
+    );
     await page.getByLabel("Forecast date").fill("2026-11-14");
+    await requested;
     const generation = page.locator(".stat", { hasText: "Estimated energy" });
     const pending = page.getByText(
         "Saved forecast · Historical estimates pending",
@@ -63,7 +77,10 @@ test("automatic forecast survives midnight until historical estimates arrive", a
     await expect(pending).toHaveCount(0);
     await page.clock.pauseAt(new Date("2026-11-14T20:59:50Z"));
     completedDay = true;
-    await page.clock.runFor(30_000);
+    await pollOnce(page);
+    // The query layer hands an answer to the screen on a zero-delay timer, which a paused clock holds;
+    // flowing time releases it but cannot reach the next 30 s poll before the assertion times out.
+    await page.clock.resume();
     await expect(pending).toBeVisible();
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-14");
     await expect(page.getByLabel("Data source")).toHaveValue("auto");
@@ -82,7 +99,7 @@ test("automatic forecast survives midnight until historical estimates arrive", a
     ).toBeVisible();
 
     historicalEstimatesAvailable = true;
-    await page.clock.runFor(30_000);
+    await pollOnce(page);
     await expect(actualLabel).toBeVisible();
     await expect(pending).toHaveCount(0);
     await expect(generation).toContainText("230");

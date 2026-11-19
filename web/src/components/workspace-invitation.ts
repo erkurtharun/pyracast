@@ -1,51 +1,51 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 const storageKey = "pyracast.workspaceInvitation";
-export function clearWorkspaceInvitation() {
+const listeners = new Set<() => void>();
+// Browser privacy settings can disable session storage; this page load then keeps the token in memory.
+let pending: string | null = null;
+
+function notify() {
+    for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void) {
+    listeners.add(listener);
+    return () => {
+        listeners.delete(listener);
+    };
+}
+
+function persist(write: (storage: Storage) => void) {
     try {
-        window.sessionStorage.removeItem(storageKey);
+        write(window.sessionStorage);
     } catch {
-        // Browser privacy settings can disable session storage.
+        return;
     }
 }
-export function useWorkspaceInvitation() {
-    const [invitation, setInvitation] = useState<
-        { ready: false } | { ready: true; token: string | null }
-    >({ ready: false });
-    useEffect(() => {
-        const restore = () => {
-            const url = new URL(window.location.href);
-            const fragment = new URLSearchParams(url.hash.slice(1));
-            const fragmentToken = fragment.get("token");
-            let token = fragmentToken ?? url.searchParams.get("token");
-            try {
-                if (token) window.sessionStorage.setItem(storageKey, token);
-                else token = window.sessionStorage.getItem(storageKey);
-            } catch {
-                // Browser privacy settings can disable session storage.
-            }
-            if (fragmentToken !== null || url.searchParams.has("token")) {
-                url.searchParams.delete("token");
-                if (fragmentToken !== null) {
-                    fragment.delete("token");
-                    url.hash = fragment.toString();
-                }
-                window.history.replaceState(
-                    window.history.state,
-                    "",
-                    `${url.pathname}${url.search}${url.hash}`,
-                );
-            }
-            setInvitation({
-                ready: true,
-                token:
-                    url.searchParams.get("account") === "security"
-                        ? null
-                        : token,
-            });
-        };
-        restore();
-    }, []);
-    return invitation;
+
+export function storedInvitation() {
+    if (pending !== null) return pending;
+    try {
+        return window.sessionStorage.getItem(storageKey);
+    } catch {
+        return null;
+    }
+}
+
+export function storeInvitation(token: string) {
+    pending = token;
+    persist((storage) => storage.setItem(storageKey, token));
+    notify();
+}
+
+export function clearWorkspaceInvitation() {
+    pending = null;
+    persist((storage) => storage.removeItem(storageKey));
+    notify();
+}
+
+export function useStoredInvitation(): string | null | undefined {
+    return useSyncExternalStore(subscribe, storedInvitation, () => undefined);
 }

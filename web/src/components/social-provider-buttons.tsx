@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { authRequest } from "@/lib/auth-api";
+import { routes } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
 
 export type SocialProvider = "google" | "microsoft";
@@ -79,7 +80,7 @@ export function SocialProviderButtons({
                         value={
                             typeof window === "undefined"
                                 ? ""
-                                : `${window.location.origin}/app/?social_callback=1`
+                                : `${window.location.origin}${routes.socialCallback()}`
                         }
                     />
                     <button

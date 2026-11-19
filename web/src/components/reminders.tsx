@@ -6,7 +6,8 @@ import type { components } from "@/lib/schema";
 import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { isLanguage } from "@/i18n/language";
-import { ActionForm, Empty, Notice, Tag, useResource } from "./ui";
+import { useApiQuery, useRefresh } from "@/lib/api/query";
+import { ActionForm, Empty, Notice, RefreshFailed, Tag } from "./ui";
 type ReminderSchedule = components["schemas"]["ReminderOutput"];
 function useRowFocus(rows: { id: number }[]) {
     const prefix = useId();
@@ -261,22 +262,12 @@ type ReminderProps = {
 };
 
 export function Reminders(props: ReminderProps) {
-    const [version, setVersion] = useState(0);
-    return (
-        <ReminderSettings
-            key={`${props.scope.region_id}-${version}`}
-            {...props}
-            onSaved={() => setVersion((current) => current + 1)}
-        />
-    );
+    return <ReminderSettings key={props.scope.region_id} {...props} />;
 }
 
-function ReminderSettings({
-    scope,
-    region,
-    onSaved,
-}: ReminderProps & { onSaved: () => void }) {
+function ReminderSettings({ scope, region }: ReminderProps) {
     const t = useTranslations("Reminders");
+    const refresh = useRefresh();
     const locale = useLocale();
     const format = useFormatter();
     const languageId = useId();
@@ -320,16 +311,27 @@ function ReminderSettings({
         no_saved_forecast: t("noSavedForecast"),
     };
 
-    const resource = useResource(
+    const resource = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/reminders/",
         { path: scope },
     );
-    if (resource.loading)
-        return <p role="status">{t("loadingEmailReminders")}</p>;
-    if (resource.error) return <Notice error>{resource.error}</Notice>;
-    const data = resource.data!;
+    // A save resets the editor only once a later read has succeeded; a failed read keeps what is on screen.
+    const [editor, setEditor] = useState<{
+        edition: number;
+        savedAt?: number;
+    }>({ edition: 0 });
+    if (editor.savedAt !== undefined && resource.updatedAt > editor.savedAt)
+        setEditor({ edition: editor.edition + 1 });
+    const data = resource.data;
+    if (data === undefined)
+        return resource.error ? (
+            <Notice error>{resource.error}</Notice>
+        ) : (
+            <p role="status">{t("loadingEmailReminders")}</p>
+        );
     return (
         <>
+            <RefreshFailed resource={resource} />
             <section className="panel">
                 <div className="section-heading">
                     <div>
@@ -342,7 +344,7 @@ function ReminderSettings({
                     </Tag>
                 </div>
                 <ActionForm
-                    key={JSON.stringify(data)}
+                    key={`${editor.edition}:${JSON.stringify(data)}`}
                     submit={t("saveReminders")}
                     onSubmit={async (form) => {
                         const times = form
@@ -413,7 +415,11 @@ function ReminderSettings({
                                 },
                             },
                         );
-                        onSaved();
+                        setEditor((current) => ({
+                            ...current,
+                            savedAt: resource.updatedAt,
+                        }));
+                        await refresh.workspace(scope.tenant_id);
                     }}
                 >
                     <label className="check-field">

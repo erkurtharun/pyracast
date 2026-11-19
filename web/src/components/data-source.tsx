@@ -17,10 +17,12 @@ export function DataSourceControl({
     value,
     onChange,
     allowArchivedForecast = false,
+    archivedForecastDisabled = false,
 }: {
     value: DataSource;
     onChange: (source: DataSource) => void;
     allowArchivedForecast?: boolean;
+    archivedForecastDisabled?: boolean;
 }) {
     const t = useTranslations("DataSource");
 
@@ -41,7 +43,10 @@ export function DataSourceControl({
                             : t("archived_forecast")}
                     </option>
                     {allowArchivedForecast && (
-                        <option value="archived_forecast">
+                        <option
+                            value="archived_forecast"
+                            disabled={archivedForecastDisabled}
+                        >
                             {t("archived_forecast")}
                         </option>
                     )}

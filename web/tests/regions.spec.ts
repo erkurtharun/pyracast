@@ -117,3 +117,55 @@ test("requests a location change and preserves the current location", async ({
     ).toBe(true);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
+
+test("a failed reload after a location request keeps the form until a retry shows the request", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let pending = false;
+    let unavailable = false;
+    const item = {
+        id: 1,
+        base_revision: 1,
+        latitude: 37,
+        longitude: 31,
+        timezone: "Europe/Istanbul",
+        reason: "Move",
+        status: "pending",
+        created_at: "2026-01-01T00:00:00Z",
+        reviewed_at: null,
+    };
+    await page.route("**/location-change-requests/", async (route) => {
+        if (route.request().method() === "POST") {
+            pending = true;
+            unavailable = true;
+            return route.fulfill({ json: item });
+        }
+        if (unavailable)
+            return route.fulfill({
+                status: 503,
+                json: errorBody("busy", "Location service is busy."),
+            });
+        return route.fulfill({ json: paged(pending ? [item] : []) });
+    });
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Location", exact: true }).click();
+    await page.getByText("Request location change", { exact: true }).click();
+    await page.getByLabel("Latitude (°)").fill("37");
+    await page.getByRole("button", { name: "Submit location request" }).click();
+    const notice = page
+        .getByRole("alert")
+        .filter({ hasText: "Could not refresh" });
+    await expect(notice).toContainText("Location service is busy.");
+    await expect(page.getByLabel("Latitude (°)")).toHaveValue("37");
+    unavailable = false;
+    await notice
+        .getByRole("button", { name: "Try again", exact: true })
+        .click();
+    await expect(notice).toHaveCount(0);
+    await expect(page.getByText("37°, 31° · Europe/Istanbul")).toBeVisible();
+});

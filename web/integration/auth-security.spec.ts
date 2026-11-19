@@ -45,7 +45,28 @@ test("verified email and a recovery code protect a real browser session", async 
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
+    const linkedAccountsRead = page.waitForEvent(
+        "requestfinished",
+        (request) =>
+            request.url().endsWith("/api/auth/browser/v1/account/providers") &&
+            request.method() === "GET",
+    );
     await page.getByRole("button", { name: "Account" }).click();
+    expect((await (await linkedAccountsRead).response())?.status()).toBe(200);
+    const twoFactor = page.locator("section").filter({
+        has: page.getByRole("heading", {
+            name: "Two-factor authentication",
+            exact: true,
+        }),
+    });
+    await expect(
+        twoFactor.getByRole("button", { name: "Set up authenticator" }),
+    ).toBeVisible();
+    await expect(
+        page
+            .getByRole("region", { name: "Connected accounts" })
+            .getByRole("button", { name: "Connect an account" }),
+    ).toBeVisible();
     const sessionResponse = await page.request.get("/api/session/");
     expect(sessionResponse.status()).toBe(200);
     const session = (await sessionResponse.json()) as { csrf_token: string };
@@ -60,12 +81,6 @@ test("verified email and a recovery code protect a real browser session", async 
     expect(await confirmation.json()).toMatchObject({
         status: 200,
         meta: { is_authenticated: true },
-    });
-    const twoFactor = page.locator("section").filter({
-        has: page.getByRole("heading", {
-            name: "Two-factor authentication",
-            exact: true,
-        }),
     });
     await page.getByRole("button", { name: "Set up authenticator" }).click();
     await page.getByText("Can't scan? Use setup key", { exact: true }).click();
@@ -122,9 +137,8 @@ test("verified email and a recovery code protect a real browser session", async 
     await page.getByLabel("Authenticator or recovery code").fill(recoveryCode);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
-        page.getByRole("heading", { name: "Plants", exact: true }),
+        page.getByRole("heading", { name: "Account settings", exact: true }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Account" }).click();
     const newPassword = `${password}-new`;
     const passwordSettings = page.locator("section").filter({
         has: page.getByRole("heading", {
@@ -161,7 +175,7 @@ test("verified email and a recovery code protect a real browser session", async 
         .fill(secondRecoveryCode);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
-        page.getByRole("heading", { name: "Plants", exact: true }),
+        page.getByRole("heading", { name: "Account settings", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.getByRole("button", { name: "Forgot password?" }).click();
@@ -212,6 +226,6 @@ test("verified email and a recovery code protect a real browser session", async 
         .fill(thirdRecoveryCode);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
-        page.getByRole("heading", { name: "Plants", exact: true }),
+        page.getByRole("heading", { name: "Account settings", exact: true }),
     ).toBeVisible();
 });

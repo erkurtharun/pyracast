@@ -1,6 +1,7 @@
 "use client";
 import { useTranslations, useFormatter } from "next-intl";
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { startTransition, useOptimistic, useState } from "react";
 import { useCanManageWorkspace } from "./workspace-access";
 import { Reminders } from "./reminders";
 import { CollectionSchedule } from "./collection-schedule";
@@ -8,8 +9,15 @@ import { RegionSettings } from "./region-settings";
 import { CsvDownload } from "./csv-download";
 import type { Forecast, Plant, PlantScope, Region } from "@/lib/api";
 import { api } from "@/lib/api/client";
+import { cadence, useApiQuery, useRefresh, type Loaded } from "@/lib/api/query";
+import {
+    plantView,
+    routes,
+    type PlantAddress,
+    type PlantSection,
+} from "@/lib/routes";
 import { Calibrations } from "./calibrations";
-import { ActionForm, Notice, Tag, useResource } from "./ui";
+import { ActionForm, Notice, RefreshFailed, Tag } from "./ui";
 import { ProductionHistory } from "./production-history";
 import { MoveToRecycleBin } from "./recycle-bin";
 import { ForecastPanel } from "./forecast-panel";
@@ -26,60 +34,86 @@ export function PlantWorkspace({
     scope,
     timezone,
     region,
-    onBack,
-    onDeleted,
+    section: tab,
+    address,
 }: {
     plant: Plant;
     scope: PlantScope;
     timezone: string;
     region: Region;
-    onBack: () => void;
-    onDeleted: () => void;
+    section: PlantSection;
+    address: PlantAddress;
 }) {
     const t = useTranslations("PlantWorkspace");
     const format = useFormatter();
     const canManage = useCanManageWorkspace();
-
-    const [tab, setTab] = useState("forecast"),
-        [forecastView, setForecastView] = useState("generation"),
-        [productionView, setProductionView] = useState("production"),
-        [settingsView, setSettingsView] = useState("configuration"),
-        [date, setDate] = useState(() => localDay(timezone, 1)),
-        [resolution, setResolution] = useState("60"),
+    const router = useRouter();
+    const refresh = useRefresh();
+    const date = address.date ?? localDay(timezone, 1);
+    const forecastView = plantView("forecast", address);
+    const productionView = plantView("production", address);
+    const settingsView = plantView("settings", address);
+    const [resolution, setResolution] = useState("60"),
         [source, setSource] = useState<DataSource>("auto");
-    const [productionRevision, setProductionRevision] = useState(0);
-    const [outageRevision, setOutageRevision] = useState(0);
+    // Archived forecasts exist only for generation; the view also changes through Back and Forward.
+    if (forecastView === "irradiance" && source === "archived_forecast")
+        setSource("auto");
     const [savedPlant, setSavedPlant] = useState<Plant>();
     const currentPlant = latestPlant(plant, savedPlant);
     if (savedPlant && currentPlant === plant) setSavedPlant(undefined);
-    useEffect(() => {
-        const sync = () => {
-            const match = window.location.hash.match(
-                /^#plant-\d+\/(forecast|production|calibration|outages|settings)/,
+    const portfolio = routes.portfolio(scope.tenant_id);
+    // Lives as long as the router transition: a committed, superseded, restored or failed
+    // navigation returns it to the displayed address.
+    const [pending, setPending] = useOptimistic({ section: tab, address });
+    // Controls belong to the displayed section; only a pending change of that section is their base.
+    const base = pending.section === tab ? pending.address : address;
+    const navigating =
+        routes.plant(
+            scope.tenant_id,
+            scope.region_id,
+            pending.section,
+            pending.address,
+        ) !== routes.plant(scope.tenant_id, scope.region_id, tab, address);
+    // Controls only the outgoing view has rest until the pending view change commits. A disabled
+    // fieldset stops only form controls, so the outgoing body is also inert (disclosures, links).
+    const leaving = (section: "forecast" | "production" | "settings") =>
+        pending.section === tab &&
+        tab === section &&
+        plantView(section, pending.address) !== plantView(section, address);
+    const leavingGeneration =
+        leaving("forecast") && forecastView === "generation";
+    const navigate = (
+        section: PlantSection,
+        next: PlantAddress,
+        mode: "push" | "replace",
+    ) =>
+        startTransition(() => {
+            setPending({ section, address: next });
+            router[mode](
+                routes.plant(scope.tenant_id, scope.region_id, section, next),
             );
-            setTab(match?.[1] ?? "forecast");
-        };
-        sync();
-        window.addEventListener("hashchange", sync);
-        return () => window.removeEventListener("hashchange", sync);
-    }, []);
-    const selectTab = (next: string) => {
-        setTab(next);
-        window.history.pushState(null, "", `#plant-${region.id}/${next}`);
-    };
+        });
+    const selectTab = (next: PlantSection) =>
+        navigate(next, next === tab ? base : {}, "push");
+    const show = (next: PlantAddress) =>
+        navigate(tab, { ...base, ...next }, "replace");
+    const setDate = (next: string) => show({ date: next });
+    const changed = () => refresh.workspace(scope.tenant_id);
     const today = localDay(timezone);
     const configuration = currentPlant.current_configuration;
     const metadata = configuration ?? currentPlant.submission;
     return (
         <>
-            <button className="back-button" onClick={onBack}>
+            <button
+                className="back-button"
+                onClick={() => router.push(portfolio)}
+            >
                 {t("allPlants")}
             </button>
             {!canManage && (tab === "production" || tab === "outages") && (
                 <OwnPendingRequests
                     tenantId={scope.tenant_id}
                     plantId={plant.id}
-                    revision={productionRevision + outageRevision}
                 />
             )}
             <div className="page-heading plant-identity">
@@ -100,7 +134,11 @@ export function PlantWorkspace({
                           })}
                 </Notice>
             )}
-            <nav className="tabs" aria-label={t("plantSections")}>
+            <nav
+                className="tabs"
+                aria-label={t("plantSections")}
+                aria-busy={navigating || undefined}
+            >
                 {(
                     [
                         ["forecast", t("forecast")],
@@ -141,20 +179,16 @@ export function PlantWorkspace({
                                 aria-current={
                                     forecastView === key ? "page" : undefined
                                 }
-                                onClick={() => {
-                                    setForecastView(key);
-                                    if (
-                                        key === "irradiance" &&
-                                        source === "archived_forecast"
-                                    )
-                                        setSource("auto");
-                                }}
+                                onClick={() => show({ view: key })}
                             >
                                 {label}
                             </button>
                         ))}
                     </nav>
-                    <div className="forecast-controls">
+                    <div
+                        className="forecast-controls"
+                        aria-busy={leaving("forecast") || undefined}
+                    >
                         <label className="field">
                             {t("forecastDate")}
                             <input
@@ -176,17 +210,14 @@ export function PlantWorkspace({
                             allowArchivedForecast={
                                 forecastView === "generation"
                             }
+                            archivedForecastDisabled={leavingGeneration}
                             value={source}
                             onChange={(next) => {
                                 setSource(next);
                                 if (
-                                    next === "estimated_actuals" &&
-                                    date > today
-                                )
-                                    setDate(today);
-                                if (
-                                    next === "archived_forecast" &&
-                                    date > today
+                                    (next === "estimated_actuals" ||
+                                        next === "archived_forecast") &&
+                                    (base.date || localDay(timezone, 1)) > today
                                 )
                                     setDate(today);
                             }}
@@ -196,6 +227,7 @@ export function PlantWorkspace({
                                 {t("resolution")}
                                 <select
                                     value={resolution}
+                                    disabled={leavingGeneration}
                                     onChange={(event) =>
                                         setResolution(event.target.value)
                                     }
@@ -215,12 +247,18 @@ export function PlantWorkspace({
                         <Notice>{t("selectArchivedDay")}</Notice>
                     ) : (
                         <PlantForecast
-                            key={`${forecastView}-${date}-${resolution}-${source}-${configuration?.id}-${outageRevision}`}
+                            key={`${forecastView}-${date}-${resolution}-${source}-${configuration?.id}`}
                             scope={scope}
                             electrical={forecastView === "generation"}
                             date={date}
                             resolution={resolution === "30" ? 30 : 60}
                             source={source}
+                            poll={
+                                source !== "archived_forecast" &&
+                                date >= localDay(timezone, -1)
+                                    ? cadence.live
+                                    : false
+                            }
                         />
                     )}
                 </>
@@ -229,7 +267,7 @@ export function PlantWorkspace({
                     configuration={configuration}
                     scope={scope}
                     timezone={timezone}
-                    onChanged={() => setOutageRevision((value) => value + 1)}
+                    onChanged={changed}
                 />
             ) : tab === "settings" ? (
                 <>
@@ -268,53 +306,62 @@ export function PlantWorkspace({
                                 aria-current={
                                     settingsView === key ? "page" : undefined
                                 }
-                                onClick={() => setSettingsView(key)}
+                                onClick={() => show({ view: key })}
                             >
                                 {label}
                             </button>
                         ))}
                     </nav>
-                    {settingsView === "configuration" ? (
-                        <section className="panel">
-                            <h2>{t("technicalDetails")}</h2>
-                            {metadata ? (
-                                <ActionForm
-                                    submit={t("saveConfiguration")}
-                                    onSubmit={async (data) => {
-                                        setSavedPlant(
-                                            await api.put(
-                                                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/",
-                                                {
-                                                    path: scope,
-                                                    body: configurationInput(
-                                                        data,
-                                                    ),
-                                                },
-                                            ),
-                                        );
-                                    }}
-                                >
-                                    <PlantConfigurationFields
-                                        name={currentPlant.name}
-                                        configuration={metadata}
-                                    />
-                                    {configuration && (
-                                        <p className="fine">
-                                            {t("calibrationChangeNote")}
-                                        </p>
-                                    )}
-                                </ActionForm>
-                            ) : (
-                                <Notice>{t("approvalDetailsRequired")}</Notice>
-                            )}
-                        </section>
-                    ) : settingsView === "location" ? (
-                        <RegionSettings region={region} scope={scope} />
-                    ) : settingsView === "collection" ? (
-                        <CollectionSchedule scope={scope} region={region} />
-                    ) : (
-                        <Reminders scope={scope} region={region} />
-                    )}
+                    <fieldset
+                        disabled={leaving("settings")}
+                        inert={leaving("settings")}
+                        aria-busy={leaving("settings") || undefined}
+                    >
+                        {settingsView === "configuration" ? (
+                            <section className="panel">
+                                <h2>{t("technicalDetails")}</h2>
+                                {metadata ? (
+                                    <ActionForm
+                                        submit={t("saveConfiguration")}
+                                        onSubmit={async (data) => {
+                                            setSavedPlant(
+                                                await api.put(
+                                                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/",
+                                                    {
+                                                        path: scope,
+                                                        body: configurationInput(
+                                                            data,
+                                                        ),
+                                                    },
+                                                ),
+                                            );
+                                            await changed();
+                                        }}
+                                    >
+                                        <PlantConfigurationFields
+                                            name={currentPlant.name}
+                                            configuration={metadata}
+                                        />
+                                        {configuration && (
+                                            <p className="fine">
+                                                {t("calibrationChangeNote")}
+                                            </p>
+                                        )}
+                                    </ActionForm>
+                                ) : (
+                                    <Notice>
+                                        {t("approvalDetailsRequired")}
+                                    </Notice>
+                                )}
+                            </section>
+                        ) : settingsView === "location" ? (
+                            <RegionSettings region={region} scope={scope} />
+                        ) : settingsView === "collection" ? (
+                            <CollectionSchedule scope={scope} region={region} />
+                        ) : (
+                            <Reminders scope={scope} region={region} />
+                        )}
+                    </fieldset>
                     {canManage && (
                         <section className="panel">
                             <h2>{t("deletePlant")}</h2>
@@ -322,7 +369,10 @@ export function PlantWorkspace({
                             <MoveToRecycleBin
                                 name={currentPlant.name}
                                 scope={scope}
-                                onDeleted={onDeleted}
+                                onDeleted={async () => {
+                                    await changed();
+                                    router.push(portfolio);
+                                }}
                             />
                         </section>
                     )}
@@ -332,7 +382,7 @@ export function PlantWorkspace({
                     <nav className="subnav" aria-label={t("productionViews")}>
                         {(
                             [
-                                ["production", t("actuals")],
+                                ["actuals", t("actuals")],
                                 ["comparison", t("comparison")],
                             ] as const
                         ).map(([key, label]) => (
@@ -344,29 +394,36 @@ export function PlantWorkspace({
                                 aria-current={
                                     productionView === key ? "page" : undefined
                                 }
-                                onClick={() => setProductionView(key)}
+                                onClick={() => show({ view: key })}
                             >
                                 {label}
                             </button>
                         ))}
                     </nav>
-                    {productionView === "comparison" ? (
-                        <ForecastPerformance
-                            key={configuration?.id}
-                            scope={scope}
-                            timezone={timezone}
-                        />
-                    ) : (
-                        <ProductionHistory
-                            key={`history-${configuration?.id}`}
-                            scope={scope}
-                            configuration={configuration?.id}
-                            timezone={timezone}
-                            onSaved={() =>
-                                setProductionRevision((current) => current + 1)
-                            }
-                        />
-                    )}
+                    <fieldset
+                        disabled={leaving("production")}
+                        inert={leaving("production")}
+                        aria-busy={leaving("production") || undefined}
+                    >
+                        {productionView === "comparison" ? (
+                            <ForecastPerformance
+                                key={configuration?.id}
+                                scope={scope}
+                                timezone={timezone}
+                            />
+                        ) : (
+                            <ProductionHistory
+                                key={`history-${configuration?.id}`}
+                                scope={scope}
+                                configuration={configuration?.id}
+                                timezone={timezone}
+                                day={address.date}
+                                baseDay={base.date}
+                                onDay={setDate}
+                                onSaved={changed}
+                            />
+                        )}
+                    </fieldset>
                 </>
             ) : !configuration ? (
                 <Notice>{t("calibrationUnavailable")}</Notice>
@@ -375,7 +432,6 @@ export function PlantWorkspace({
                     key={`calibration-${configuration.id}`}
                     scope={scope}
                     currentConfigurationId={configuration.id}
-                    productionRevision={productionRevision}
                 />
             )}
         </>
@@ -422,6 +478,7 @@ type ForecastQuery = {
     date: string;
     resolution: 30 | 60;
     source: DataSource;
+    poll: number | false;
 };
 function PlantForecast({
     electrical,
@@ -438,8 +495,9 @@ function GenerationForecast({
     date,
     resolution,
     source,
+    poll,
 }: ForecastQuery) {
-    const resource = useResource(
+    const resource = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/forecast/",
         {
             path: scope,
@@ -449,23 +507,24 @@ function GenerationForecast({
                 data_source: source,
             },
         },
-        0,
-        30_000,
+        { poll },
     );
     return <ForecastResource resource={resource} electrical />;
 }
-function IrradianceForecast({ scope, date, source }: ForecastQuery) {
-    const resource = useResource(
+function IrradianceForecast({ scope, date, source, poll }: ForecastQuery) {
+    const resource = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/forecast/",
         {
-            path: scope,
+            path: {
+                tenant_id: scope.tenant_id,
+                region_id: scope.region_id,
+            },
             query: {
                 date,
                 data_source: source === "archived_forecast" ? "auto" : source,
             },
         },
-        0,
-        30_000,
+        { poll },
     );
     return <ForecastResource resource={resource} electrical={false} />;
 }
@@ -473,7 +532,7 @@ function ForecastResource({
     resource,
     electrical,
 }: {
-    resource: { data?: Forecast; error?: string; loading: boolean };
+    resource: Loaded<Forecast>;
     electrical: boolean;
 }) {
     const t = useTranslations("PlantWorkspace");
@@ -485,15 +544,16 @@ function ForecastResource({
                         ? t("loadingGeneration")
                         : t("loadingIrradiance")}
                 </p>
-            ) : resource.error ? (
-                <Notice error>{resource.error}</Notice>
-            ) : (
-                resource.data && (
+            ) : resource.data ? (
+                <>
+                    <RefreshFailed resource={resource} />
                     <ForecastPanel
                         forecast={resource.data}
                         electrical={electrical}
                     />
-                )
+                </>
+            ) : (
+                <Notice error>{resource.error}</Notice>
             )}
         </section>
     );

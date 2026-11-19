@@ -50,8 +50,8 @@
       <div class="rail-foot rail-desktop">
         {% if user.is_authenticated %}<p class="rail-user">{% translate "Signed in as" %} <strong>{{ user.get_username }}</strong></p>{% endif %}
         <ul>
-          <li><a href="/app/?account=security">{% translate "Account security" %}</a></li>
-          <li><a href="/app/?workspace=customer">{% translate "Customer workspace" %}</a></li>
+          <li><a href="/app/account/">{% translate "Account security" %}</a></li>
+          <li><a href="/app/w/">{% translate "Customer workspace" %}</a></li>
         </ul>
 
         <form method="post" action="{% url 'admin:logout' %}">
@@ -75,8 +75,8 @@
           <div class="rail-foot">
             {% if user.is_authenticated %}<p class="rail-user">{% translate "Signed in as" %} <strong>{{ user.get_username }}</strong></p>{% endif %}
             <ul>
-              <li><a href="/app/?account=security">{% translate "Account security" %}</a></li>
-              <li><a href="/app/?workspace=customer">{% translate "Customer workspace" %}</a></li>
+              <li><a href="/app/account/">{% translate "Account security" %}</a></li>
+              <li><a href="/app/w/">{% translate "Customer workspace" %}</a></li>
             </ul>
 
             <form method="post" action="{% url 'admin:logout' %}">

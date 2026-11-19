@@ -1,3 +1,4 @@
+import type { Request } from "@playwright/test";
 import { test, expect, type Page } from "./support/test";
 import AxeBuilder from "@axe-core/playwright";
 import { parseProduction } from "../src/lib/production";
@@ -426,7 +427,7 @@ test("open regional and plant forecasts refresh after new data arrives", async (
     await page.clock.install();
     await mockApi(page);
     let revised = false;
-    await page.route("**/forecast/**", async (route) => {
+    await page.route("**/api/**/forecast/**", async (route) => {
         await route.fulfill({
             json: {
                 timezone: region.timezone,
@@ -442,7 +443,12 @@ test("open regional and plant forecasts refresh after new data arrives", async (
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    const irradiance = page.getByRole("button", {
+        name: "Irradiance",
+        exact: true,
+    });
+    await irradiance.click();
+    await expect(irradiance).toHaveAttribute("aria-current", "page");
     await expect(
         page.getByRole("heading", { name: "No forecast for this day yet" }),
     ).toBeVisible();
@@ -454,7 +460,12 @@ test("open regional and plant forecasts refresh after new data arrives", async (
         }),
     ).toBeVisible();
     revised = false;
-    await page.getByRole("button", { name: "Generation", exact: true }).click();
+    const generation = page.getByRole("button", {
+        name: "Generation",
+        exact: true,
+    });
+    await generation.click();
+    await expect(generation).toHaveAttribute("aria-current", "page");
     await expect(
         page.getByRole("heading", { name: "No forecast for this day yet" }),
     ).toBeVisible();
@@ -465,6 +476,343 @@ test("open regional and plant forecasts refresh after new data arrives", async (
             name: "No estimated actuals for this day",
         }),
     ).toBeVisible();
+});
+
+test("a date picked while a forecast view switch loads keeps the chosen view", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(new Date("2026-03-28T12:00:00Z"));
+    await mockApi(page);
+    let holding = false;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route(
+        (url) =>
+            url.searchParams.has("_rsc") && url.pathname.endsWith("/forecast/"),
+        async (route) => {
+            if (holding) {
+                holding = false;
+                await held;
+            }
+            await route.fallback();
+        },
+    );
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    const irradiance = page.getByRole("button", {
+        name: "Irradiance",
+        exact: true,
+    });
+    await irradiance.click();
+    await expect(irradiance).toHaveAttribute("aria-current", "page");
+    holding = true;
+    const generation = page.getByRole("button", {
+        name: "Generation",
+        exact: true,
+    });
+    await generation.click();
+    await page.getByLabel("Forecast date").fill("2026-03-27");
+    release();
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-27$/);
+    await expect(generation).toHaveAttribute("aria-current", "page");
+    await expect(page.getByLabel("Resolution")).toBeVisible();
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-27");
+});
+
+async function holdNavigation(page: Page, section: string) {
+    let seen!: () => void;
+    let settle!: () => void;
+    let end!: () => void;
+    const requested = new Promise<void>((resolve) => (seen = resolve));
+    const settled = new Promise<void>((resolve) => (settle = resolve));
+    const ended = new Promise<void>((resolve) => (end = resolve));
+    let held = false;
+    await page.route(
+        (url) =>
+            url.searchParams.has("_rsc") &&
+            url.pathname.endsWith(`/${section}/`),
+        async (route) => {
+            if (held) return route.fallback();
+            held = true;
+            const request = route.request();
+            const finish = (done: Request) => {
+                if (done !== request) return;
+                page.off("requestfinished", finish);
+                end();
+            };
+            page.on("requestfinished", finish);
+            seen();
+            await settled;
+            return route.fallback();
+        },
+    );
+    // The held response has finished and the plant screen has no navigation pending.
+    const release = async () => {
+        settle();
+        await ended;
+        await expect(
+            page.getByRole("navigation", { name: "Plant sections" }),
+        ).not.toHaveAttribute("aria-busy", "true");
+    };
+    return { requested, release };
+}
+
+async function openPlant(page: Page, address: string) {
+    await page.clock.setFixedTime(new Date("2026-03-28T12:00:00Z"));
+    await mockApi(page);
+    await page.goto(`/app/w/1/plants/11/${address}`);
+    return (name: string) => page.getByRole("button", { name, exact: true });
+}
+
+test("the displayed section clicked while another section loads keeps its date and view", async ({
+    page,
+}) => {
+    const button = await openPlant(
+        page,
+        "forecast/?date=2026-03-27&view=irradiance",
+    );
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    const production = await holdNavigation(page, "production");
+    await button("Production").click();
+    await production.requested;
+    await button("Forecast").click();
+    await page.getByLabel("Forecast date").fill("2026-03-26");
+    await expect(page).toHaveURL(
+        /\/forecast\/\?date=2026-03-26&view=irradiance$/,
+    );
+    await production.release();
+    await expect(page).toHaveURL(
+        /\/forecast\/\?date=2026-03-26&view=irradiance$/,
+    );
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-26");
+    // No product event marks a discarded answer as handled, so a further change probes the base after it.
+    await page.getByLabel("Forecast date").fill("2026-03-25");
+    await expect(page).toHaveURL(
+        /\/forecast\/\?date=2026-03-25&view=irradiance$/,
+    );
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+});
+
+test("a forecast view chosen while another section loads applies to the forecast", async ({
+    page,
+}) => {
+    const button = await openPlant(
+        page,
+        "forecast/?date=2026-03-27&view=irradiance",
+    );
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    const production = await holdNavigation(page, "production");
+    await button("Production").click();
+    await production.requested;
+    await button("Generation").click();
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-27$/);
+    await production.release();
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-27$/);
+    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+    await page.getByLabel("Forecast date").fill("2026-03-26");
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
+    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+});
+
+for (const source of ["estimated_actuals", "archived_forecast"] as const)
+    for (const picked of ["2026-03-29", ""] as const)
+        test(`${source} chosen while ${picked ? "a later date" : "a cleared date"} loads limits the date being navigated to`, async ({
+            page,
+        }) => {
+            await openPlant(page, "forecast/?date=2026-03-27");
+            const day = page.getByLabel("Forecast date");
+            await expect(day).toHaveValue("2026-03-27");
+            const forecast = await holdNavigation(page, "forecast");
+            await day.fill(picked);
+            await forecast.requested;
+            await page.getByLabel("Data source").selectOption(source);
+            await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-28$/);
+            await forecast.release();
+            await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-28$/);
+            await expect(day).toHaveValue("2026-03-28");
+            await expect(day).toHaveAttribute("max", "2026-03-28");
+            await day.fill("2026-03-26");
+            await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
+            await expect(page.getByLabel("Data source")).toHaveValue(source);
+        });
+
+test("a second day step taken while the first loads continues from the day being navigated to", async ({
+    page,
+}) => {
+    const button = await openPlant(page, "production/?date=2026-03-25");
+    const day = page.getByLabel("Day", { exact: true });
+    await expect(day).toHaveValue("2026-03-25");
+    const production = await holdNavigation(page, "production");
+    await button("Previous day").click();
+    await production.requested;
+    await button("Previous day").click();
+    await expect(page).toHaveURL(/\/production\/\?date=2026-03-23$/);
+    await production.release();
+    await expect(page).toHaveURL(/\/production\/\?date=2026-03-23$/);
+    await expect(day).toHaveValue("2026-03-23");
+    await button("Next day").click();
+    await expect(page).toHaveURL(/\/production\/\?date=2026-03-24$/);
+    await expect(day).toHaveValue("2026-03-24");
+});
+
+test("Back while section changes load leaves the restored section in charge of its controls", async ({
+    page,
+}) => {
+    const button = await openPlant(page, "forecast/");
+    await button("Production").click();
+    await expect(page).toHaveURL(/\/production\/$/);
+    await button("Forecast").click();
+    await expect(page).toHaveURL(/\/forecast\/$/);
+    const production = await holdNavigation(page, "production");
+    const settings = await holdNavigation(page, "settings");
+    await button("Production").click();
+    await production.requested;
+    await button("Settings").click();
+    await settings.requested;
+    await page.goBack();
+    await expect(page).toHaveURL(/\/production\/$/);
+    await production.release();
+    await settings.release();
+    await expect(page).toHaveURL(/\/production\/$/);
+    await expect(button("Production")).toHaveAttribute("aria-current", "page");
+    await button("Comparison").click();
+    await expect(page).toHaveURL(/\/production\/\?view=comparison$/);
+    await expect(button("Comparison")).toHaveAttribute("aria-current", "page");
+    await button("Calibration").click();
+    await expect(page).toHaveURL(/\/calibration\/$/);
+    await expect(button("Calibration")).toHaveAttribute("aria-current", "page");
+});
+
+for (const overtaken of ["a section change", "Back"] as const)
+    test(`a view switch overtaken by ${overtaken} is not the base for the next change`, async ({
+        page,
+    }) => {
+        const button = await openPlant(page, "forecast/");
+        if (overtaken === "Back") {
+            await button("Production").click();
+            await expect(page).toHaveURL(/\/production\/$/);
+            await button("Forecast").click();
+            await expect(page).toHaveURL(/\/forecast\/$/);
+        }
+        const forecast = await holdNavigation(page, "forecast");
+        await button("Irradiance").click();
+        await forecast.requested;
+        if (overtaken === "Back") await page.goBack();
+        else await button("Production").click();
+        await expect(page).toHaveURL(/\/production\/$/);
+        await forecast.release();
+        await expect(page).toHaveURL(/\/production\/$/);
+        // History moves to the forecast without a click, which would replace a stuck pending view.
+        if (overtaken === "Back") await page.goForward();
+        else await page.goBack();
+        await expect(page).toHaveURL(/\/forecast\/$/);
+        await expect(button("Generation")).toHaveAttribute(
+            "aria-current",
+            "page",
+        );
+        await page.getByLabel("Forecast date").fill("2026-03-26");
+        await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
+        await expect(button("Generation")).toHaveAttribute(
+            "aria-current",
+            "page",
+        );
+    });
+
+test("generation-only controls rest while the irradiance view loads", async ({
+    page,
+}) => {
+    const button = await openPlant(page, "forecast/?date=2026-03-29");
+    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+    const controls = page.locator(".forecast-controls");
+    const archived = page
+        .getByLabel("Data source")
+        .locator('option[value="archived_forecast"]');
+    await expect(archived).toBeEnabled();
+    await expect(page.getByLabel("Resolution")).toBeEnabled();
+    const forecast = await holdNavigation(page, "forecast");
+    await button("Irradiance").click();
+    await forecast.requested;
+    await expect(archived).toBeDisabled();
+    await expect(page.getByLabel("Resolution")).toBeDisabled();
+    await expect(controls).toHaveAttribute("aria-busy", "true");
+    await expect(page.getByLabel("Forecast date")).toBeEnabled();
+    await forecast.release();
+    await expect(page).toHaveURL(
+        /\/forecast\/\?date=2026-03-29&view=irradiance$/,
+    );
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    await expect(controls).not.toHaveAttribute("aria-busy", "true");
+    await expect(page.getByLabel("Resolution")).toHaveCount(0);
+    await expect(archived).toHaveCount(0);
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-29");
+    await expect(page.getByLabel("Data source")).toHaveValue("auto");
+});
+
+test("the outgoing production view's disclosures stay closed while the comparison loads", async ({
+    page,
+}) => {
+    const button = await openPlant(page, "production/");
+    const importer = page.locator("#production-import");
+    // A pointer click at the disclosure's position, as a person makes it.
+    const toggle = async () => {
+        const summary = importer.locator(":scope > summary");
+        await summary.scrollIntoViewIfNeeded();
+        const box = await summary.boundingBox();
+        await page.mouse.click(
+            box!.x + box!.width / 2,
+            box!.y + box!.height / 2,
+        );
+    };
+    await toggle();
+    await expect(importer).toHaveAttribute("open", "");
+    await toggle();
+    await expect(importer).not.toHaveAttribute("open", /.*/);
+    const comparison = await holdNavigation(page, "production");
+    await button("Comparison").click();
+    await comparison.requested;
+    await toggle();
+    await expect(importer).not.toHaveAttribute("open", /.*/);
+    await expect(page.getByLabel("Production CSV")).toBeHidden();
+    await comparison.release();
+    await expect(page).toHaveURL(/\/production\/\?view=comparison$/);
+    await expect(button("Comparison")).toHaveAttribute("aria-current", "page");
+    await expect(importer).toHaveCount(0);
+});
+
+test("Back to the irradiance view does not keep an archived generation source", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(new Date("2026-03-28T12:00:00Z"));
+    await mockApi(page);
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    const button = (name: string) =>
+        page.getByRole("button", { name, exact: true });
+    await button("Irradiance").click();
+    await expect(page).toHaveURL(/\/forecast\/\?view=irradiance$/);
+    await button("Production").click();
+    await expect(page).toHaveURL(/\/production\/$/);
+    await button("Forecast").click();
+    await expect(page).toHaveURL(/\/forecast\/$/);
+    await page.getByLabel("Data source").selectOption("archived_forecast");
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-28$/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/production\/$/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/forecast\/\?view=irradiance$/);
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-29");
+    await expect(page.getByLabel("Data source")).toHaveValue("auto");
+    await expect(
+        page.getByText(
+            "Choose today or an earlier day for archived forecasts.",
+        ),
+    ).toHaveCount(0);
 });
 
 test("region collection schedule validates and saves distinct local times", async ({
@@ -639,25 +987,27 @@ test("regional and plant data sources identify estimated actuals and retain arch
     await mockApi(page);
     const sources: string[] = [];
     const plantRequests: URL[] = [];
-    await page.route("**/forecast/**", async (route) => {
+    const generation = page.locator(".stat", { hasText: "Estimated energy" });
+    await page.route("**/api/**/forecast/**", async (route) => {
         const url = new URL(route.request().url());
         const source = url.searchParams.get("data_source") ?? "missing";
         sources.push(source);
         if (url.pathname.includes("/plants/")) plantRequests.push(url);
+        const date = url.searchParams.get("date")!;
+        const day = Number(date.slice(-2));
         await route.fulfill({
             json: {
                 timezone: region.timezone,
                 freshness: "fresh",
                 source_kind:
-                    source === "forecast" ||
-                    url.searchParams.get("date")! >= "2026-03-28"
+                    source === "forecast" || date >= "2026-03-28"
                         ? "forecast"
                         : "estimated_actuals",
                 result: {
                     complete: true,
                     intervals: [],
                     energy_kwh_m2: 4,
-                    energy_mwh: 5,
+                    energy_mwh: 100 + day + day / 100,
                 },
             },
         });
@@ -708,13 +1058,9 @@ test("regional and plant data sources identify estimated actuals and retain arch
     await expect(
         page.getByText("Satellite/model estimates, not meter readings."),
     ).toHaveCount(0);
+    await expect(generation).toContainText("129.29");
     await page.getByLabel("Forecast date").fill("2026-03-27");
-    await expect
-        .poll(() => plantRequests.at(-1)?.searchParams.get("date"))
-        .toBe("2026-03-27");
-    await expect
-        .poll(() => plantRequests.at(-1)?.searchParams.get("data_source"))
-        .toBe("auto");
+    await expect(generation).toContainText("127.27");
     await expect(
         page.getByText("Satellite/model estimates, not meter readings."),
     ).toBeVisible();
@@ -740,7 +1086,7 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
 }) => {
     await mockApi(page);
     const values = [0, 12.34567, null, 5, 0];
-    await page.route("**/forecast/**", (route) =>
+    await page.route("**/api/**/forecast/**", (route) =>
         route.fulfill({
             json: {
                 date: "2026-01-01",
@@ -804,7 +1150,7 @@ test("all-zero forecasts remain visible as measured zero values", async ({
     page,
 }) => {
     await mockApi(page);
-    await page.route("**/forecast/**", (route) =>
+    await page.route("**/api/**/forecast/**", (route) =>
         route.fulfill({
             json: {
                 timezone: region.timezone,
@@ -950,7 +1296,7 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
         await route.fulfill({
             json: {
                 count: 2,
-                next: second ? null : "http://backend.test/api/tenants/?page=2",
+                next: second ? null : "/api/tenants/?page=2",
                 previous: null,
                 results: [
                     {
@@ -962,7 +1308,7 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
             },
         });
     });
-    await page.route(/\/forecast\/\?/, async (route) =>
+    await page.route(/\/api\/.*\/forecast\/\?/, async (route) =>
         route.fulfill({
             json: {
                 timezone: region.timezone,
@@ -1331,13 +1677,6 @@ test("recycle bin confirms deletion and restores a plant site with associated da
             await route.fulfill({
                 json: paged(deleted ? [] : [{ ...region, plant }]),
             });
-        } else if (
-            path === "/api/tenants/1/regions/11/plants/" &&
-            route.request().method() === "GET"
-        ) {
-            await route.fulfill({
-                json: paged([plant]),
-            });
         } else if (path.includes("/trash/")) {
             const ownList = path.endsWith("/trash/regions/");
             await route.fulfill({
@@ -1474,6 +1813,64 @@ test("recycle bin disables expired records", async ({ page }) => {
     expect(scan.violations).toEqual([]);
 });
 
+test("a failed reload after a restore keeps the remaining plants until a retry loads them", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const deleted = [91, 92].map((id) => ({
+        id,
+        name: `Deleted plant ${id}`,
+        deleted_at: "2026-11-10T12:00:00Z",
+        purge_after: "2026-12-10T12:00:00Z",
+        can_restore: true,
+    }));
+    let restored = false;
+    let unavailable = false;
+    await page.route("**/trash/regions/", (route) =>
+        unavailable
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", "Recycle bin is busy."),
+              })
+            : route.fulfill({
+                  json: paged(restored ? deleted.slice(1) : deleted),
+              }),
+    );
+    await page.route("**/regions/91/restore/", (route) => {
+        restored = true;
+        unavailable = true;
+        return route.fulfill({ json: { ...region, id: 91 } });
+    });
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: "Recycle bin", exact: true })
+        .click();
+    await page
+        .getByRole("button", { name: "Restore Deleted plant 91", exact: true })
+        .click();
+    const notice = page
+        .getByRole("alert")
+        .filter({ hasText: "Could not refresh" });
+    await expect(notice).toContainText("Recycle bin is busy.");
+    const remaining = page.getByRole("button", {
+        name: "Restore Deleted plant 92",
+        exact: true,
+    });
+    await expect(remaining).toBeVisible();
+    unavailable = false;
+    await notice
+        .getByRole("button", { name: "Try again", exact: true })
+        .click();
+    await expect(notice).toHaveCount(0);
+    await expect(remaining).toBeVisible();
+    await expect(
+        page.getByRole("button", {
+            name: "Restore Deleted plant 91",
+            exact: true,
+        }),
+    ).toHaveCount(0);
+});
+
 test("recycle bin ignores a prior workspace response and restores only in the selected workspace", async ({
     page,
 }) => {
@@ -1494,7 +1891,7 @@ test("recycle bin ignores a prior workspace response and restores only in the se
     const firstRequest = new Promise<void>((resolve) => {
         requestedFirst = resolve;
     });
-    await page.route("**/trash/**", async (route) => {
+    await page.route("**/api/**/trash/**", async (route) => {
         const path = new URL(route.request().url()).pathname;
         if (path.endsWith("/plants/")) {
             await route.fulfill({ json: paged([]) });
@@ -1583,7 +1980,7 @@ test("a session that ends while the tab is open returns to sign in with a notice
     await page.goto("/app/");
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     ended = true;
-    await page.clock.fastForward(30_000);
+    await page.clock.fastForward(120_000);
     await expect(
         page.getByText("Your session has expired. Please sign in again."),
     ).toBeVisible();

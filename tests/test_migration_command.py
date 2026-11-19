@@ -63,6 +63,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0003_workspace_invitation_role",
             "0004_invitation_and_administrator_change_checks",
             "0005_schema_naming_convention",
+            "0006_expire_invitations_with_the_previous_link",
         ),
         "change_requests": (
             "0002_change_vocabulary_checks",

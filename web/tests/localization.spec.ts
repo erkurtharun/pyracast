@@ -97,7 +97,7 @@ test("public language never replaces a signed in account preference", async ({
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await expect(page).toHaveURL("/app/");
+    await expect(page).toHaveURL("/app/w/1/");
     expect(writes).toBe(0);
 });
 
@@ -161,7 +161,7 @@ for (const outcome of ["success", "failure"] as const) {
     });
 }
 
-test("failed public language selection offers a retry before exposing authentication", async ({
+test("failed public language selection offers a retry in the requested language before exposing authentication", async ({
     page,
 }) => {
     await mockLanguage(page, "en", true);
@@ -173,10 +173,11 @@ test("failed public language selection offers a retry before exposing authentica
     });
     await page.goto("/app/?language=tr&signup=1");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Language could not be saved. Please try again.",
+        "Dil kaydedilemedi. Tekrar deneyin.",
     );
+    await expect(page.locator("html")).toHaveAttribute("lang", "tr");
     await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: "Try again" }).click();
+    await page.getByRole("button", { name: "Tekrar dene" }).click();
     await expect(
         page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
     ).toBeVisible();

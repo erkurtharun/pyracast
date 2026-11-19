@@ -115,7 +115,7 @@ def test_verified_admin_uses_common_password_change_and_strict_csp() -> None:
     assert "object-src 'none'" in policy
     assert "unsafe-inline" not in policy
     assert client.get("/admin/login/").headers["Location"] == "/admin/"
-    assert client.get("/admin/password_change/").headers["Location"] == "/app/?account=security"
+    assert client.get("/admin/password_change/").headers["Location"] == "/app/account/"
 
 
 def test_legacy_administrator_requires_explicit_email_and_proves_ownership_later() -> None:

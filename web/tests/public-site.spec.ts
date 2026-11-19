@@ -284,16 +284,3 @@ test("an unknown path answers a localized not-found page", async ({ page }) => {
         /noindex/,
     );
 });
-
-test("previous account links retain their parameters on the private route", async ({
-    request,
-}) => {
-    const response = await request.get(
-        "/?social_callback=1&error=denied&account=security&item=a&item=b",
-        { maxRedirects: 0 },
-    );
-    expect(response.status()).toBe(307);
-    expect(response.headers().location).toBe(
-        "/app/?social_callback=1&error=denied&account=security&item=a&item=b",
-    );
-});

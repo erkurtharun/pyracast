@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { publicPath, type PublicPage } from "@/lib/public-metadata";
 import { homeCopy, type PublicLanguage } from "./home-copy";
+import { routes } from "@/lib/routes";
 import styles from "./public-site.module.css";
 
 export function SiteShell({
@@ -72,7 +73,7 @@ export function SiteShell({
                         </a>
                         <a
                             className={styles.login}
-                            href={`/app/?language=${language}`}
+                            href={routes.signIn(language)}
                         >
                             {copy.login}
                             <span aria-hidden="true"> ↗</span>

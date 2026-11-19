@@ -3,10 +3,12 @@ import { useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import type { Tenant } from "@/lib/api";
 import { api } from "@/lib/api/client";
-import type { Session } from "@/lib/session-client";
+import { useApiQuery, useRefresh } from "@/lib/api/query";
+import { routes } from "@/lib/routes";
+import { useSessionState } from "@/lib/session-client";
 import { authRequest } from "@/lib/auth-api";
 import type { components } from "@/lib/schema";
-import { ActionForm, Field, Notice, useResource } from "./ui";
+import { ActionForm, Field, Notice } from "./ui";
 import { clearWorkspaceInvitation } from "./workspace-invitation";
 
 type Member = components["schemas"]["WorkspaceMemberOutput"];
@@ -14,14 +16,12 @@ type Member = components["schemas"]["WorkspaceMemberOutput"];
 export function WorkspaceMembers({
     tenant,
     userId,
-    onAccessChange,
 }: {
     tenant: Tenant;
     userId: number;
-    onAccessChange: () => void;
 }) {
     const t = useTranslations("WorkspaceMembers");
-    const [version, setVersion] = useState(0);
+    const refresh = useRefresh();
     const [removal, setRemoval] = useState<
         | { status: "idle" }
         | { status: "confirming" | "pending"; member: Member }
@@ -31,15 +31,10 @@ export function WorkspaceMembers({
     const removing = useRef(false);
     const membersHeading = useRef<HTMLHeadingElement>(null);
     const scope = { path: { tenant_id: tenant.id } };
-    const members = useResource(
-        "/api/tenants/{tenant_id}/members/",
-        scope,
-        version,
-    );
-    const invitations = useResource(
+    const members = useApiQuery("/api/tenants/{tenant_id}/members/", scope);
+    const invitations = useApiQuery(
         "/api/tenants/{tenant_id}/invitations/",
         scope,
-        version,
     );
     return (
         <>
@@ -63,7 +58,7 @@ export function WorkspaceMembers({
                                 },
                             },
                         );
-                        setVersion((value) => value + 1);
+                        await refresh.workspace(tenant.id);
                     }}
                 >
                     <Field
@@ -172,10 +167,9 @@ export function WorkspaceMembers({
                                             status: "error",
                                             message: (failure as Error).message,
                                         });
-                                        onAccessChange();
                                     } finally {
                                         removing.current = false;
-                                        setVersion((value) => value + 1);
+                                        await refresh.workspace(tenant.id);
                                         membersHeading.current?.focus();
                                     }
                                 }}
@@ -228,7 +222,7 @@ export function WorkspaceMembers({
                                                     },
                                                 },
                                             );
-                                            setVersion((value) => value + 1);
+                                            await refresh.workspace(tenant.id);
                                         }}
                                     />
                                 </li>
@@ -244,17 +238,16 @@ export function WorkspaceMembers({
 
 export function AcceptInvitation({
     invitationToken,
-    session,
 }: {
     invitationToken: string;
-    session: Session;
 }) {
     const t = useTranslations("WorkspaceMembers");
+    const { session } = useSessionState();
     return (
         <main className="auth-page">
             <section className="auth-card">
                 <h1>{t("joinWorkspace")}</h1>
-                <p>{session.user?.email}</p>
+                <p>{session?.user?.email}</p>
                 <ActionForm
                     children={null}
                     submit={t("accept")}
@@ -263,7 +256,7 @@ export function AcceptInvitation({
                             body: { token: invitationToken },
                         });
                         clearWorkspaceInvitation();
-                        window.location.replace("/app/?workspace=customer");
+                        window.location.replace(routes.workspaces());
                     }}
                 />
                 <ActionForm
@@ -271,7 +264,7 @@ export function AcceptInvitation({
                     submit={t("useAnotherAccount")}
                     onSubmit={async () => {
                         await authRequest("auth/session", "DELETE");
-                        window.location.replace("/app/");
+                        window.location.replace(routes.invitation());
                     }}
                 />
                 <button
@@ -279,7 +272,7 @@ export function AcceptInvitation({
                     className="text-button"
                     onClick={() => {
                         clearWorkspaceInvitation();
-                        window.location.replace("/app/?workspace=customer");
+                        window.location.replace(routes.workspaces());
                     }}
                 >
                     {t("dismiss")}

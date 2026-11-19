@@ -7,6 +7,7 @@ import { authRequest, type AuthResult } from "@/lib/auth-api";
 import { loadSession, useSessionState } from "@/lib/session-client";
 import { isLanguage } from "@/i18n/language";
 import { publicPath } from "@/lib/public-metadata";
+import { routes } from "@/lib/routes";
 import { ActionForm, Field, Notice } from "./ui";
 import { SocialProviderButtons } from "./social-provider-buttons";
 import { LanguageSelect } from "./language-select";
@@ -415,9 +416,7 @@ export function Auth({
                             className="text-button"
                             onClick={() => {
                                 clearWorkspaceInvitation();
-                                window.location.replace(
-                                    "/app/?workspace=customer",
-                                );
+                                window.location.replace(routes.workspaces());
                             }}
                         >
                             {invitationLabels("cancel")}

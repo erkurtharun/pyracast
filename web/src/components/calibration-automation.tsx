@@ -4,37 +4,20 @@ import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
-import { Notice, useResource } from "./ui";
+import { cadence, useApiQuery } from "@/lib/api/query";
+import { Notice, RefreshFailed } from "./ui";
 
-type PanelProps = {
-    scope: PlantScope;
-    refresh: number;
-    disabled: boolean;
-    onPendingChange: (pending: boolean) => void;
-    onChanged: () => void;
-};
-
-export function CalibrationAutomationPanel(props: PanelProps) {
-    const [revision, setRevision] = useState(0);
-    return (
-        <AutomationStatus
-            key={`${props.scope.plant_id}-${revision}`}
-            {...props}
-            onSaved={() => {
-                setRevision((value) => value + 1);
-                props.onChanged();
-            }}
-        />
-    );
-}
-
-function AutomationStatus({
+export function CalibrationAutomationPanel({
     scope,
-    refresh,
     disabled,
     onPendingChange,
-    onSaved,
-}: PanelProps & { onSaved: () => void }) {
+    onChanged,
+}: {
+    scope: PlantScope;
+    disabled: boolean;
+    onPendingChange: (pending: boolean) => void;
+    onChanged: () => Promise<unknown>;
+}) {
     const t = useTranslations("CalibrationAutomation");
     const locale = useLocale();
     const reasons: Record<string, string> = {
@@ -75,11 +58,10 @@ function AutomationStatus({
             live.current = false;
         };
     }, []);
-    const resource = useResource(
+    const resource = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibration/automation/",
         { path: scope },
-        refresh,
-        30_000,
+        { poll: cadence.steady },
     );
     const canManage = useCanManageWorkspace();
     async function toggle(enabled: boolean) {
@@ -95,7 +77,7 @@ function AutomationStatus({
                     body: { enabled },
                 },
             );
-            if (live.current) onSaved();
+            await onChanged();
         } catch (reason) {
             if (live.current) setError((reason as Error).message);
         } finally {
@@ -117,7 +99,7 @@ function AutomationStatus({
                         {t("automatic_calibration")}
                     </h2>
                 </div>
-                {data && !resource.error && (
+                {data && (
                     <label className="check-field">
                         <input
                             type="checkbox"
@@ -133,9 +115,10 @@ function AutomationStatus({
             {resource.loading && (
                 <p role="status">{t("loading_automatic_calibration")}</p>
             )}
-            {resource.error && <Notice error>{resource.error}</Notice>}
+            <RefreshFailed resource={resource} />
+            {resource.error && !data && <Notice error>{resource.error}</Notice>}
             {error && <Notice error>{error}</Notice>}
-            {data && !resource.error && (
+            {data && (
                 <>
                     {data.enabled && !data.authorized && (
                         <Notice>

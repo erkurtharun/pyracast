@@ -3,9 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { useFormatter, useLocale, useTranslations } from "next-intl";
 import type { Tenant } from "@/lib/api";
 import { api, buildUrl } from "@/lib/api/client";
+import { cadence, useApiQuery, useRefresh } from "@/lib/api/query";
 import type { components } from "@/lib/schema";
-import { ActionForm, Notice, Tag, useResource } from "./ui";
-import { useChangeRequestUpdates } from "./change-request-updates";
+import { ActionForm, Notice, RefreshFailed, Tag } from "./ui";
 
 type ChangeRequest = components["schemas"]["ChangeRequestOutput"];
 type Summary = components["schemas"]["ChangeRequestSummaryOutput"];
@@ -16,51 +16,77 @@ type Decision = "approve" | "reject" | "withdraw" | "seen";
 export function OwnPendingRequests({
     tenantId,
     plantId,
-    revision,
 }: {
     tenantId: number;
     plantId: number;
-    revision: number;
 }) {
     const t = useTranslations("ChangeRequests");
-    const items = useResource(
+    const items = useApiQuery(
         "/api/tenants/{tenant_id}/change-requests/",
         {
             path: { tenant_id: tenantId },
             query: { scope: "pending", plant_id: plantId },
         },
-        revision,
-        30_000,
+        { poll: cadence.background },
     );
     const count = items.data?.count ?? 0;
     if (!count) return null;
     return <Notice>{t("pendingContext", { count })}</Notice>;
 }
 
+function firstPending(tenantId: number) {
+    return {
+        path: "/api/tenants/{tenant_id}/change-requests/",
+        options: {
+            path: { tenant_id: tenantId },
+            query: { scope: "pending", page: 1 },
+        },
+    };
+}
+
 export function OperationalInbox({ tenant }: { tenant: Tenant }) {
     const t = useTranslations("ChangeRequests");
+    const refresh = useRefresh();
     const [scope, setScope] = useState<Scope>("pending");
     const [update, setUpdate] = useState<{
         revision: number;
         outcome: Decision | null;
-    }>({ revision: 0, outcome: null });
+        reuse: boolean;
+    }>({ revision: 0, outcome: null, reuse: false });
     const feedback = useRef<HTMLDivElement>(null);
     const [page, setPage] = useState(1);
     const admin = tenant.role === "admin";
     const effectiveScope = admin ? scope : "mine";
     const changed = (outcome: Decision | null = null) => {
-        if (outcome && outcome !== "seen" && effectiveScope === "pending")
-            setPage(1);
-        setUpdate((value) => ({ revision: value.revision + 1, outcome }));
+        const reset =
+            outcome !== null &&
+            outcome !== "seen" &&
+            effectiveScope === "pending";
+        if (reset) setPage(1);
+        // A first-page read already running when the decision was answered may predate it; only one started afterwards is reused.
+        const reuse = reset && !refresh.reading(firstPending(tenant.id));
+        setUpdate((value) => ({
+            revision: value.revision + 1,
+            outcome,
+            reuse,
+        }));
     };
     useEffect(() => {
+        if (update.revision > 0)
+            void refresh.workspace(
+                tenant.id,
+                update.reuse ? firstPending(tenant.id) : undefined,
+            );
         if (update.outcome) feedback.current?.focus();
-    }, [update]);
+    }, [update, refresh, tenant.id]);
     return (
         <>
             <div className="page-heading">
                 <h1>{t("inbox")}</h1>
-                <button className="button secondary" onClick={() => changed()}>
+                <button
+                    className="button secondary"
+                    onClick={() => void refresh.requests(tenant.id)}
+                >
                     {t("refreshList")}
                 </button>
             </div>
@@ -106,7 +132,6 @@ export function OperationalInbox({ tenant }: { tenant: Tenant }) {
                 tenantId={tenant.id}
                 scope={effectiveScope}
                 page={page}
-                revision={update.revision}
                 onChanged={changed}
                 onPage={setPage}
             />
@@ -118,14 +143,12 @@ function InboxPage({
     tenantId,
     scope,
     page,
-    revision,
     onChanged,
     onPage,
 }: {
     tenantId: number;
     scope: Scope;
     page: number;
-    revision: number;
     onChanged: (action: Decision) => void;
     onPage: (page: number) => void;
 }) {
@@ -134,11 +157,10 @@ function InboxPage({
     const base = buildUrl("/api/tenants/{tenant_id}/change-requests/", {
         path,
     });
-    const items = useResource(
+    const items = useApiQuery(
         "/api/tenants/{tenant_id}/change-requests/",
         { path, query: { scope, page } },
-        revision,
-        30_000,
+        { poll: cadence.live },
     );
     const [opened, setOpened] = useState<number | null>(null);
     function go(url: string | null) {
@@ -155,8 +177,9 @@ function InboxPage({
     return (
         <>
             {items.loading && <p role="status">{t("loading")}</p>}
-            {items.error && <Notice error>{items.error}</Notice>}
-            {!items.loading && !items.error && !items.data?.results.length && (
+            <RefreshFailed resource={items} />
+            {items.error && !items.data && <Notice error>{items.error}</Notice>}
+            {items.data && !items.data.results.length && (
                 <section className="panel">
                     <p>{t("empty")}</p>
                 </section>
@@ -312,13 +335,10 @@ function RequestDetail({
     onChanged: (action: Decision) => void;
 }) {
     const t = useTranslations("ChangeRequests");
-    const refreshCounters = useChangeRequestUpdates();
-    const [revision, setRevision] = useState(0);
     const path = { tenant_id: tenantId, request_id: id };
-    const resource = useResource(
+    const resource = useApiQuery(
         "/api/tenants/{tenant_id}/change-requests/{request_id}/",
         { path },
-        revision,
     );
     const [state, setState] = useState<
         { status: "idle" | "pending" } | { status: "error"; message: string }
@@ -338,9 +358,7 @@ function RequestDetail({
         try {
             await run();
             setState({ status: "idle" });
-            setRevision((value) => value + 1);
             onChanged(action);
-            refreshCounters();
         } catch (error) {
             if (action === "approve") setBlockedContext(item ?? null);
             setState({ status: "error", message: (error as Error).message });
@@ -366,7 +384,7 @@ function RequestDetail({
                 onClick={() => {
                     setBlockedContext(item ?? null);
                     setState({ status: "idle" });
-                    setRevision((value) => value + 1);
+                    resource.retry();
                 }}
             >
                 {t("refreshDetails")}

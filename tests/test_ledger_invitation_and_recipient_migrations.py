@@ -88,6 +88,15 @@ RULES = {
 ADDRESS = "recipient@example.com"
 WEEK = timedelta(days=7)
 START = NOW - timedelta(days=20)
+# The invitation link migration after it expires open invitations; it has its own test.
+LINK_EXPIRY = ("accounts", "0006_expire_invitations_with_the_previous_link")
+
+
+def through_checks() -> list[tuple[str, str]]:
+    return [
+        ("accounts", "0005_schema_naming_convention") if node == LINK_EXPIRY else node
+        for node in leaf_nodes()
+    ]
 
 
 @pytest.fixture
@@ -216,7 +225,7 @@ def test_migrations_close_superseded_invitations_and_keep_every_valid_row(
     alone = invited(case, "e@example.com", START, START + timedelta(days=1))
     invitations = stored(previous_invitations().all())
 
-    forward()
+    migrate(*through_checks())
 
     assert {table: installed(table) for table in NEW} == NEW
     assert broken_rules() == {}

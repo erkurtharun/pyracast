@@ -571,16 +571,16 @@ test("an administrator can choose the customer workspace and return", async ({
     page,
 }) => {
     await mockApi(page, { admin: true });
-    await page.goto("/app/?workspace=customer");
+    await page.goto("/app/w/");
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     await expect(
         page.getByRole("link", { name: "Administration" }),
     ).toHaveAttribute("href", "/admin/");
-    await page.goto("/app/?account=security");
+    await page.goto("/app/account/");
     await expect(
         page.getByRole("heading", { name: "Account settings", exact: true }),
     ).toBeVisible();
-    expect(new URL(page.url()).search).toBe("?account=security");
+    expect(new URL(page.url()).pathname).toBe("/app/account/");
 });
 
 test("a customer cannot enter administration through a return parameter", async ({

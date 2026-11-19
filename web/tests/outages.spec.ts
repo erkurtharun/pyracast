@@ -54,15 +54,19 @@ async function workspace(
         else if (path === "/api/tenants/")
             data = paged([tenantRow({ id: 1, name: "Tenant", role })]);
         else if (path.endsWith("/change-requests/")) data = paged([]);
-        else if (path.endsWith("/sites/")) data = paged([region]);
-        else if (path.endsWith("/plants/"))
+        else if (path.endsWith("/sites/"))
             data = paged([
                 {
-                    id: 21,
-                    name: "Outage plant",
-                    region_id: 11,
-                    current_configuration: configured ? configuration : null,
-                    submission: configured ? null : configuration,
+                    ...region,
+                    plant: {
+                        id: 21,
+                        name: "Outage plant",
+                        region_id: 11,
+                        current_configuration: configured
+                            ? configuration
+                            : null,
+                        submission: configured ? null : configuration,
+                    },
                 },
             ]);
         else if (path.endsWith("/performance/"))
@@ -164,7 +168,7 @@ async function workspace(
         await route.fulfill({ json: data });
     });
     await page.goto("/app/");
-    await page.getByRole("button", { name: /Outage region/ }).click();
+    await page.getByRole("button", { name: /Outage plant/ }).click();
     return {
         reads: () => outageReads,
         incident: () => incident,
@@ -271,6 +275,51 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
     await expect(
         page.getByRole("button", { name: "Download both scenarios CSV" }),
     ).toHaveCount(0);
+});
+
+test("a failed reload after saving keeps the outages until a retry loads them", async ({
+    page,
+}) => {
+    await workspace(page);
+    await create(page);
+    let unavailable = false;
+    await page.route("**/outages/", (route) =>
+        unavailable && route.request().method() === "GET"
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", "Outage service is busy."),
+              })
+            : route.fallback(),
+    );
+    await page
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    await page.getByLabel("Capacity impact").selectOption("reduced");
+    await page.getByLabel("Available panel DC capacity (MW)").fill("2");
+    await page.getByLabel("Available inverter AC capacity (MW)").fill("1");
+    unavailable = true;
+    await page.getByRole("button", { name: "Save outage changes" }).click();
+    const notice = page
+        .getByRole("alert")
+        .filter({ hasText: "Could not refresh" });
+    await expect(notice).toContainText("Outage service is busy.");
+    await expect(
+        page.getByRole("heading", {
+            name: "Inverter disconnected",
+            exact: true,
+        }),
+    ).toBeVisible();
+    unavailable = false;
+    await notice
+        .getByRole("button", { name: "Try again", exact: true })
+        .click();
+    await expect(notice).toHaveCount(0);
+    await expect(
+        page
+            .locator("dl > div")
+            .filter({ hasText: "Available panels" })
+            .getByText("2 MW", { exact: true }),
+    ).toBeVisible();
 });
 
 test("unknown impact remains missing and stale edits show a conflict", async ({
