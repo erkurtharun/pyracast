@@ -240,7 +240,9 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
         NOW,
         "insufficient",
     )
-    assert automated.values().get() == stored_plant
+    backfilled = automated.values().get()
+    assert backfilled["calibration_preparation_due_at"] is not None
+    assert {**backfilled, "calibration_preparation_due_at": None} == stored_plant
     assert violations("plants_calibrationrun", CALIBRATION_RUN_RULE) == 0
     assert violations("plants_plant", PLANT_AUTOMATION_RULE) == 0
 
