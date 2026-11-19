@@ -1,8 +1,21 @@
 import logging
 import traceback
+from collections.abc import Callable, Iterable, Sequence
+from datetime import datetime, timedelta
 from pathlib import Path
 
+from django.db import close_old_connections
+from dramatiq import Actor
+
 _PACKAGE = Path(__file__).resolve().parents[1]
+BACK_OFF = timedelta(minutes=15)
+
+
+class ItemsFailedError(Exception):
+    def __init__(self, count: int) -> None:
+        super().__init__(f"{count} item(s) failed")
+        self.count = count
+        self.published: int | None = None
 
 
 def _chain(error: BaseException) -> list[BaseException]:
@@ -27,10 +40,7 @@ def failure_origin(error: BaseException) -> str:
 
 
 def log_failure(logger: logging.Logger, event: str, error: BaseException, **fields: object) -> None:
-    """Log a background failure by type and code location.
-
-    Never logs str(error) or the traceback: provider errors and URLs can carry secrets.
-    """
+    """Never logs str(error) or the traceback: provider errors and URLs can carry secrets."""
     names = "".join(f" {name}=%s" for name in fields)
     logger.error(
         f"{event}{names} error_type=%s origin=%s",
@@ -38,3 +48,84 @@ def log_failure(logger: logging.Logger, event: str, error: BaseException, **fiel
         type(error).__name__,
         failure_origin(error),
     )
+
+
+def isolate[T, R](
+    items: Iterable[T],
+    operation: Callable[[T], R],
+    *,
+    logger: logging.Logger,
+    event: str,
+    name: Callable[[T], str],
+    back_off: Callable[[T], object],
+) -> list[R]:
+    """Log and back off a failing item, then go on; raise ItemsFailedError after the last one.
+
+    The caller runs this outside any transaction and gives each item its own, so a failure
+    rolls back only that item.
+    """
+    results: list[R] = []
+    failed = 0
+    for item in items:
+        try:
+            results.append(operation(item))
+        except Exception as error:
+            failed += 1
+            log_failure(logger, event, error, item=name(item))
+            close_old_connections()
+            try:
+                back_off(item)
+            except Exception as back_off_error:
+                log_failure(logger, "back_off_failed", back_off_error, item=name(item))
+                close_old_connections()
+    if failed:
+        raise ItemsFailedError(failed)
+    return results
+
+
+class Deferrals:
+    """Process-local back-off for items without a durable due time.
+
+    Holds only the items that failed within the last delay.
+    """
+
+    def __init__(self, delay: timedelta) -> None:
+        self._delay = delay
+        self._until: dict[int, datetime] = {}
+
+    def active(self, now: datetime) -> list[int]:
+        self._until = {key: until for key, until in self._until.items() if until > now}
+        return list(self._until)
+
+    def defer(self, key: int, now: datetime) -> None:
+        self._until[key] = now + self._delay
+
+
+def _send(identifiers: Sequence[int], actor: Actor[[int], None]) -> int:
+    for identifier in identifiers:
+        actor.send(identifier)
+    return len(identifiers)
+
+
+def publish_after(
+    schedule: Callable[[], object],
+    pending: Callable[[], Sequence[int]],
+    actor: Actor[[int], None],
+    *,
+    logger: logging.Logger,
+    phase: str,
+) -> int:
+    """Publish the pending ids even when scheduling failed, then re-raise its failure."""
+    try:
+        schedule()
+    except Exception as error:
+        close_old_connections()
+        try:
+            published: int | None = _send(pending(), actor)
+        except Exception as publish_error:
+            log_failure(logger, f"{phase}_publish_failed", publish_error)
+            published = None
+        if isinstance(error, ItemsFailedError):
+            error.published = published
+        raise
+    return _send(pending(), actor)

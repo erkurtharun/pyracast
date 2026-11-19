@@ -38,7 +38,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.numerics import POLICY_VERSION, PowerInterval
-from pyracast.plants.preparation import prepare_calibration
+from pyracast.plants.preparation import request_preparation
 from pyracast.plants.transfer import calibration_matches_transfer
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus
@@ -447,7 +447,7 @@ def import_observations(
                 action=PlantEventAction.OBSERVATIONS_IMPORTED,
                 details={"configuration_id": configuration.pk, "created": created, "ids": ids},
             )
-            prepare_calibration(plant.pk)
+            request_preparation([plant.pk])
         return {"created": created, "existing": len(ids) - created, "count": len(ids), "ids": ids}
 
 

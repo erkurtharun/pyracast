@@ -405,13 +405,14 @@ def publish(
             job.status == CollectionJobStatus.SUCCEEDED
             and job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
         ):
-            from pyracast.plants.preparation import prepare_calibration
+            from pyracast.plants.preparation import request_preparation
 
-            for plant_id in Plant.objects.filter(
-                region_id=binding.region_id,
-                current_configuration__binding=binding,
-            ).values_list("pk", flat=True):
-                prepare_calibration(plant_id, now)
+            request_preparation(
+                Plant.objects.filter(
+                    region_id=binding.region_id, current_configuration__binding=binding
+                ).values_list("pk", flat=True),
+                now,
+            )
         return job.status == CollectionJobStatus.SUCCEEDED
 
 

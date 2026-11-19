@@ -6,15 +6,18 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
+from django.apps import apps
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import close_old_connections, connection
+from django.db import close_old_connections, connection, models
 from django.db.models import QuerySet
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
+from pyracast.errors import DomainError
 from pyracast.forecasts.historical_import import import_historical_reference
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -42,11 +45,12 @@ from pyracast.trash import (
     restore_region,
     trash_region,
 )
+from tests.support.concurrency import behind_open_transaction
 from tests.support.domain import NOW, System
 from tests.support.errors import raises_code
 from tests.support.historical_reference_import import power_file, source_settings, system_for_import
 from tests.support.plant_operations import make_plant, request_run, snapshot_for
-from tests.support.trash_operations import sibling
+from tests.support.trash_operations import remaining_purge_work, revised_observation, sibling
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -416,3 +420,114 @@ def test_purge_validates_clock_and_bounds_each_batch(monkeypatch: pytest.MonkeyP
     assert Region.objects.filter(pk=region.pk).exists()
     assert purge_expired(NOW + RETENTION) == {"regions": 1, "plants": 0}
     assert not Plant.objects.filter(pk=plant.pk).exists()
+
+
+def json_columns() -> set[str]:
+    return {
+        f'"{model._meta.db_table}"."{field.column}"'
+        for model in apps.get_models()
+        for field in model._meta.concrete_fields
+        if isinstance(field, models.JSONField)
+    }
+
+
+def test_purge_selects_no_json_column(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = make_plant(monkeypatch)
+    linked_records(system, plant)
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    with CaptureQueriesContext(connection) as queries:
+        assert purge_expired(NOW + RETENTION) == {"regions": 1, "plants": 1}
+    selected = [
+        column
+        for query in queries.captured_queries
+        if query["sql"].lstrip().upper().startswith("SELECT")
+        for column in json_columns()
+        if column in query["sql"]
+    ]
+    assert selected == []
+
+
+def test_purge_deletes_archive_rows_in_bounded_statements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _ = make_plant(monkeypatch)
+    for offset in range(3):
+        snapshot_for(system, NOW.date() - timedelta(days=offset + 1))
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    monkeypatch.setattr("pyracast.trash.PURGE_CHUNK_SIZE", 1, raising=False)
+    with CaptureQueriesContext(connection) as queries:
+        purge_expired(NOW + RETENTION)
+    deletes = [
+        query["sql"]
+        for query in queries.captured_queries
+        if query["sql"].startswith('DELETE FROM "forecasts_forecastsnapshot"')
+    ]
+    assert len(deletes) == 3
+    assert not ForecastSnapshot.objects.exists()
+
+
+@pytest.mark.parametrize("first", ["restore", "purge", "partial_purge"])
+def test_restore_and_purge_at_the_deadline_never_both_succeed(
+    monkeypatch: pytest.MonkeyPatch, first: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    source, _ = linked_records(system, plant)
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    deadline = NOW + RETENTION
+    monkeypatch.setattr(timezone, "now", lambda: deadline - timedelta(microseconds=1))
+    if first == "partial_purge":
+        monkeypatch.setattr("pyracast.trash.PURGE_STATEMENT_BUDGET", 1)
+
+    def restore() -> str:
+        try:
+            restore_region(system.member, system.tenant.pk, system.region.pk)
+            return "restored"
+        except Region.DoesNotExist:
+            return "missing"
+        except DomainError as error:
+            return error.code
+
+    def purge() -> dict[str, int]:
+        return purge_expired(deadline)
+
+    outcomes: tuple[object, object] = (
+        behind_open_transaction(restore, purge)
+        if first == "restore"
+        else behind_open_transaction(purge, restore)
+    )
+
+    if first == "restore":
+        assert outcomes == ("restored", {"regions": 0, "plants": 0})
+        assert Region.objects.get(pk=system.region.pk).deleted_at is None
+        assert ForecastSnapshot.objects.filter(pk=source.pk).exists()
+        assert Plant.objects.filter(pk=plant.pk).exists()
+    elif first == "purge":
+        assert outcomes == ({"regions": 1, "plants": 1}, "missing")
+        assert not Region.objects.filter(pk=system.region.pk).exists()
+    else:
+        assert outcomes == ({"regions": 0, "plants": 0}, "trash_retention_expired")
+        region = Region.objects.get(pk=system.region.pk)
+        assert (region.deleted_at, region.purge_started_at) == (NOW, deadline)
+
+
+def test_a_small_budget_purges_a_revised_observation_history_in_committed_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    chain = revised_observation(system, plant, 3)
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    monkeypatch.setattr("pyracast.trash.PURGE_CHUNK_SIZE", 1)
+    monkeypatch.setattr("pyracast.trash.PURGE_STATEMENT_BUDGET", 1)
+    work = remaining_purge_work()
+    assert ProductionObservation.objects.filter(pk__in=chain).count() == 4
+
+    for _ in range(work):
+        if not Region.objects.filter(pk=system.region.pk).exists():
+            break
+        purge_expired(NOW + RETENTION)
+        left = remaining_purge_work()
+        assert left < work, "every cycle commits progress"
+        work = left
+
+    assert not Region.objects.filter(pk=system.region.pk).exists()
+    assert not ProductionObservation.objects.exists()

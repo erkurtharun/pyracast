@@ -1,7 +1,7 @@
 import json
 from calendar import monthrange
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -20,7 +20,7 @@ from pyracast.metering.scheduler import enqueue_due_epias_jobs
 from pyracast.plants.models import Plant, ProductionObservation
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
-from tests.support.metering import NEXT_NIGHT, PROVIDER_PLANT, connected
+from tests.support.metering import NEXT_NIGHT, connected
 from tests.support.metering_settlement import (
     SETTLEMENT,
     SettlementClient,
@@ -47,7 +47,7 @@ def test_month_collection_splits_immutable_daily_sources_without_manual_observat
     job = jobs.get(target_date=date(2026, 9, 1))
     prepared: list[int] = []
 
-    def prepare(plant_id: int) -> None:
+    def prepare(plant_id: int, now: datetime | None = None) -> None:
         assert connection.in_atomic_block
         assert EpiasSnapshot.objects.filter(job=job).count() == 30
         prepared.append(plant_id)
@@ -136,14 +136,14 @@ def test_existing_connections_resolve_eic_outside_locks_with_daily_bound_and_rev
     calls: list[str] = []
 
     class Resolver(SettlementClient):
-        def resolve_settlement_plant(self, eic: str) -> EpiasPlant | None:
+        def list_settlement_plants(self) -> tuple[EpiasPlant, ...]:
             assert not connection.in_atomic_block
-            calls.append(eic)
+            calls.append("list")
             if outcome == "failure":
                 raise EpiasError("request_failed")
             if outcome == "revision_changed":
                 EpiasConnection.objects.filter(pk=linked.pk).update(revision=2, eic="changed-eic")
-            return None if outcome == "missing" else SETTLEMENT
+            return () if outcome == "missing" else (SETTLEMENT,)
 
     monkeypatch.setattr("pyracast.metering.scheduler.get_epias_client", lambda: Resolver())
     identifiers = enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(hours=1))
@@ -159,7 +159,7 @@ def test_existing_connections_resolve_eic_outside_locks_with_daily_bound_and_rev
         assert EpiasCollectionJob.objects.filter(source_kind="realtime_generation").count() == 97
     if outcome != "revision_changed":
         assert enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(hours=2)) == identifiers
-        assert calls == [PROVIDER_PLANT.eic]
+        assert calls == (["list", "list"] if outcome == "failure" else ["list"])
     assert (linked.settlement_checked_at is None) == (outcome == "revision_changed")
 
 
@@ -194,29 +194,26 @@ def test_changed_pinned_identity_cannot_publish(
     assert not EpiasSnapshot.objects.exists()
 
 
-def test_settlement_publication_and_calibration_request_share_one_transaction(
+def test_settlement_publication_persists_while_calibration_preparation_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    link_settlement(monkeypatch)
+    linked = link_settlement(monkeypatch)
     job = EpiasCollectionJob.objects.filter(source_kind="settlement_injection").first()
     assert job is not None
     assert job.period_end_day is not None
     data = month_data(SETTLEMENT, job.target_date, job.period_end_day)
 
-    def fail(plant_id: int) -> None:
-        assert connection.in_atomic_block
+    def fail(plant_id: int, now: datetime | None = None) -> None:
         assert EpiasSnapshot.objects.filter(job=job).exists()
         raise RuntimeError("Preparation interrupted")
 
     monkeypatch.setattr("pyracast.plants.preparation.prepare_calibration", fail)
-    assert not run_epias_job(job.pk, fetch=lambda *_: data, now=NOW)
-    assert not EpiasSnapshot.objects.exists()
-    job.refresh_from_db()
-    assert job.status == "pending"
-    assert job.attempts == 1
-    monkeypatch.setattr("pyracast.plants.preparation.prepare_calibration", lambda *_: None)
-    assert run_epias_job(job.pk, fetch=lambda *_: data, now=job.available_at)
+    assert run_epias_job(job.pk, fetch=lambda *_: data, now=NOW)
     assert EpiasSnapshot.objects.filter(job=job).count() == 31
+    job.refresh_from_db()
+    assert (job.status, job.attempts) == ("succeeded", 1)
+    plant = Plant.objects.get(pk=linked.plant_id)
+    assert plant.calibration_preparation_due_at is not None
 
 
 @pytest.mark.parametrize("revocation", ["configuration", "approval"])

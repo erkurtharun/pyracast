@@ -34,6 +34,6 @@ def incidents_changed(plant_id: int) -> None:
             run.lease_token = None
             run.lease_expires_at = None
             run.save(update_fields=("status", "completed_at", "lease_token", "lease_expires_at"))
-    from pyracast.plants.preparation import prepare_calibration
+    from pyracast.plants.preparation import request_preparation
 
-    prepare_calibration(plant_id, moment)
+    request_preparation([plant_id], moment)

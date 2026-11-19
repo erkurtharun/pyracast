@@ -35,7 +35,7 @@ from pyracast.plants.numerics import (
     fit_calibration,
 )
 from pyracast.plants.operations import configuration_is_current
-from pyracast.plants.preparation import prepare_calibration
+from pyracast.plants.preparation import request_preparation
 from pyracast.plants.transfer import transfer_model
 from pyracast.regions.models import Region
 
@@ -52,11 +52,16 @@ class _Lease:
     token: uuid.UUID
 
 
-def _prepare_followup(plant: Plant, run: CalibrationRun, now: datetime) -> None:
-    from pyracast.plants.automation import promote_automatic_calibration
+def _follow_up(plant: Plant, run: CalibrationRun, now: datetime) -> None:
+    from pyracast.plants.automation import promote_automatic_calibration, record_automatic_skip
 
-    promote_automatic_calibration(plant, run, now)
-    prepare_calibration(run.plant_id, now)
+    try:
+        with transaction.atomic():
+            promote_automatic_calibration(plant, run, now)
+    except Exception as error:
+        log_failure(logger, "calibration_promotion_failed", error, run=run.pk)
+        record_automatic_skip(plant, run.pk, "promotion_failed")
+    request_preparation([run.plant_id], now)
 
 
 def _claim(run_id: int, now: datetime) -> _Lease | None:
@@ -117,7 +122,7 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
                 "lease_expires_at",
             )
         )
-        _prepare_followup(plant, run, now)
+        _follow_up(plant, run, now)
         return None
 
 
@@ -179,7 +184,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
                 "dataset_sha256": run.dataset_sha256,
             },
         )
-        _prepare_followup(plant, run, now)
+        _follow_up(plant, run, now)
         return run.status != CalibrationStatus.SUPERSEDED
 
 
@@ -213,7 +218,7 @@ def _fail(lease: _Lease, now: datetime) -> None:
             )
         )
         if run.status == CalibrationStatus.FAILED:
-            _prepare_followup(plant, run, now)
+            _follow_up(plant, run, now)
 
 
 def run_calibration(run_id: int, now: datetime | None = None) -> bool:

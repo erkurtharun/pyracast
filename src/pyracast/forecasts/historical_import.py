@@ -150,16 +150,6 @@ def _day_indexes(power: PowerFile, zone: ZoneInfo) -> dict[date, list[int]]:
     return days
 
 
-def _prepare_region_calibrations(region_id: int) -> None:
-    from pyracast.plants.models import Plant
-    from pyracast.plants.preparation import prepare_calibration
-
-    for plant_id in Plant.objects.filter(
-        region_id=region_id, current_configuration__isnull=False
-    ).values_list("pk", flat=True):
-        prepare_calibration(plant_id)
-
-
 def import_historical_reference(
     actor: User,
     tenant_id: int,
@@ -258,5 +248,7 @@ def _archive_historical_reference(
         action=AuditAction.HISTORICAL_REFERENCE_IMPORTED,
         revision=region.revision,
     )
-    transaction.on_commit(lambda: _prepare_region_calibrations(region.pk))
+    from pyracast.plants.preparation import request_region_preparation
+
+    request_region_preparation(region.pk)
     return record

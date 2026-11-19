@@ -12,13 +12,14 @@ from django.db.models import QuerySet
 from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.background.failures import ItemsFailedError
 from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import validate_binding
 from pyracast.notifications import runtime
 from pyracast.notifications import scheduler as notification_scheduler
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.operations import configure_reminders, invalid_reminder_recipient_count
-from pyracast.notifications.scheduler import NotificationSchedulingError, enqueue_due
+from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import Region
 from pyracast.regions.operations import approve_region, configure_binding, submit_region
 from tests.support.domain import NOW, FakeAdapter, System
@@ -135,7 +136,7 @@ def test_slot_database_failure_rolls_back_its_recipients_before_another_tenant_c
         return original(queryset, **kwargs)
 
     monkeypatch.setattr(QuerySet, "create", create)
-    with pytest.raises(NotificationSchedulingError):
+    with pytest.raises(ItemsFailedError):
         enqueue_due(SLOT)
     assert not NotificationDelivery.objects.filter(schedule=broken).exists()
     assert NotificationDelivery.objects.filter(schedule=healthy, status="pending").count() == 1
@@ -190,7 +191,30 @@ def test_a_terminated_connection_is_recovered_before_processing_another_tenant(
         return original(schedule, now)
 
     monkeypatch.setattr(notification_scheduler, "_enqueue_schedule", interrupt)
-    with pytest.raises(NotificationSchedulingError, match="1 email reminder"):
+    with pytest.raises(ItemsFailedError, match="1 item"):
         enqueue_due(SLOT)
     assert not NotificationDelivery.objects.filter(schedule=broken).exists()
     assert NotificationDelivery.objects.filter(schedule=healthy, status="pending").count() == 1
+
+
+def test_a_failing_schedule_is_logged_with_its_origin_and_the_others_are_published(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    system, broken = configured()
+    healthy = another_tenant_schedule(system)
+    original = notification_scheduler._enqueue_schedule
+
+    def enqueue(schedule: ReminderSchedule, now: datetime) -> list[int]:
+        if schedule.pk == broken.pk:
+            raise RuntimeError("private schedule detail")
+        return original(schedule, now)
+
+    monkeypatch.setattr(notification_scheduler, "_enqueue_schedule", enqueue)
+    actor = MagicMock()
+    with pytest.raises(Exception, match=r"^1 "):
+        runtime.dispatch_notifications(actor, SLOT)
+    delivery = NotificationDelivery.objects.get(schedule=healthy)
+    actor.send.assert_called_once_with(delivery.pk)
+    assert f"item=schedule:{broken.pk}" in pyracast_logs.text
+    assert "origin=pyracast." in pyracast_logs.text
+    assert "private schedule detail" not in pyracast_logs.text

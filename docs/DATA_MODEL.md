@@ -312,6 +312,7 @@ erDiagram
         timestamp_with_time_zone deleted_at "nullable"
         bigint approved_binding_id FK "nullable; references connections_sitebinding.id"
         bigint tenant_id FK "references accounts_tenant.id"
+        timestamp_with_time_zone purge_started_at "nullable"
     }
     regions_regionlocationchangerequest {
         bigint id PK
@@ -673,6 +674,7 @@ erDiagram
         integer automatic_calibration_enabled_by_id FK "nullable; references auth_user.id"
         bigint region_id FK "references regions_region.id"
         bigint current_configuration_id FK "nullable; references plants_plantconfiguration.id"
+        timestamp_with_time_zone calibration_preparation_due_at "nullable"
     }
     plants_plantconfiguration {
         bigint id PK

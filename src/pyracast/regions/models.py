@@ -101,6 +101,8 @@ class Region(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, db_index=True)
+    # Set by the first purge transaction; such a region can no longer be restored.
+    purge_started_at = models.DateTimeField(null=True)
 
     objects = RegionQuerySet.as_manager()
 

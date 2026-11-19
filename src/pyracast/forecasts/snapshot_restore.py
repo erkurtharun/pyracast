@@ -22,10 +22,7 @@ from pyracast.calculation import calculate
 from pyracast.connections.models import Provider, ProviderAccount, SiteBinding
 from pyracast.forecasts.actuals import select_archived_actual_source
 from pyracast.forecasts.coverage import intervals_cover_day
-from pyracast.forecasts.historical_import import (
-    _prepare_region_calibrations,
-    _validate_authorized_binding,
-)
+from pyracast.forecasts.historical_import import _validate_authorized_binding
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
@@ -38,6 +35,7 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.projections import prepare_daily_payloads
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.forecasts.timing import approval_job
+from pyracast.plants.preparation import request_region_preparation
 from pyracast.regions.models import Region
 
 # Sibling of the provider's keys in raw_payload; no reader depends on it. A row that was
@@ -635,5 +633,5 @@ def restore_provider_snapshots(
             and Outcome.RESTORED in dict(item.outcomes)
             for item in summary.endpoints
         ):
-            transaction.on_commit(partial(_prepare_region_calibrations, region.pk))
+            request_region_preparation(region.pk)
     return summary

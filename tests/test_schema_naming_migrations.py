@@ -250,4 +250,17 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     forward()
 
     assert catalog() == fresh
-    assert project_rows() == renamed(before)
+    after = project_rows()
+    assert [
+        (row["id"], row["calibration_preparation_due_at"] is not None)
+        for row in after["plants_plant"]
+    ] == [
+        (row["id"], row["current_configuration_id"] is not None) for row in before["plants_plant"]
+    ]
+    for row in after["plants_plant"]:
+        del row["calibration_preparation_due_at"]
+    assert after["regions_region"]
+    assert all(row["purge_started_at"] is None for row in after["regions_region"])
+    for row in after["regions_region"]:
+        del row["purge_started_at"]
+    assert after == renamed(before)

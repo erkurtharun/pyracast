@@ -54,6 +54,10 @@ class SettlementClient(FixtureClient):
         assert eic == SETTLEMENT.eic
         return SETTLEMENT
 
+    def list_settlement_plants(self) -> tuple[EpiasPlant, ...]:
+        assert not connection.in_atomic_block
+        return (SETTLEMENT,)
+
     def fetch_settlement(self, plant: EpiasPlant, start: date, end: date) -> EpiasDay:
         assert not connection.in_atomic_block
         assert plant.id == SETTLEMENT.id

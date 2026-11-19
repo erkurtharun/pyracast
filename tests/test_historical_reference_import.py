@@ -8,6 +8,7 @@ from pathlib import Path
 from threading import Barrier
 from typing import Any
 
+import psycopg
 import pytest
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
@@ -437,9 +438,11 @@ def test_calibration_is_prepared_once_after_whole_archive_commits(
     path = power_file(tmp_path)
     observed: list[int] = []
 
-    def prepare(plant_id: int) -> None:
-        assert not connection.in_atomic_block
-        assert ForecastSnapshot.objects.count() == 2
+    def prepare(plant_id: int, now: datetime | None = None) -> None:
+        with psycopg.connect(**connection.get_connection_params(), autocommit=True) as other:
+            assert other.execute("SELECT count(*) FROM forecasts_forecastsnapshot").fetchone() == (
+                2,
+            )
         observed.append(plant_id)
 
     monkeypatch.setattr("pyracast.plants.preparation.prepare_calibration", prepare)

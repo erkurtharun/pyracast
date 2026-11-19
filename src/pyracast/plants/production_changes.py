@@ -28,7 +28,7 @@ from pyracast.plants.operations import (
     _observation,
     configuration_is_current,
 )
-from pyracast.plants.preparation import prepare_calibration
+from pyracast.plants.preparation import request_preparation
 from pyracast.regions.models import Region
 
 
@@ -205,7 +205,7 @@ def change_production(
                 action=PlantEventAction.PRODUCTION_CHANGED,
                 details={"configuration_id": configuration_id, "ids": ids},
             )
-            prepare_calibration(plant_id)
+            request_preparation([plant_id])
         return {"created": created, "existing": len(ids) - created, "count": len(ids), "ids": ids}
 
 

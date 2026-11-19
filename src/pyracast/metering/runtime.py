@@ -1,11 +1,16 @@
+import logging
 from datetime import UTC, datetime
+from functools import partial
 
 import dramatiq
 from django.db import close_old_connections, connections
 from dramatiq import Actor, Broker
 
+from pyracast.background.failures import publish_after
 from pyracast.metering.jobs import pending_epias_ids, run_epias_job
 from pyracast.metering.scheduler import enqueue_due_epias_jobs
+
+logger = logging.getLogger(__name__)
 
 
 def deliver_epias(job_id: int) -> None:
@@ -24,8 +29,10 @@ def make_epias_actor(broker: Broker) -> Actor[[int], None]:
 
 def dispatch_epias(actor: Actor[[int], None]) -> int:
     now = datetime.now(UTC)
-    enqueue_due_epias_jobs(now=now)
-    identifiers = pending_epias_ids(now)
-    for identifier in identifiers:
-        actor.send(identifier)
-    return len(identifiers)
+    return publish_after(
+        partial(enqueue_due_epias_jobs, now=now),
+        partial(pending_epias_ids, now),
+        actor,
+        logger=logger,
+        phase="metering",
+    )

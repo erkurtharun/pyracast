@@ -1,11 +1,14 @@
 import logging
 from datetime import datetime, timedelta
+from functools import partial
+from itertools import chain
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
-from django.db import close_old_connections, transaction
+from django.db import transaction
 
 from pyracast.accounts.models import Tenant
+from pyracast.background.failures import BACK_OFF, Deferrals, isolate
 from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
@@ -28,35 +31,27 @@ PREPARATION_GRACE = timedelta(minutes=15)
 
 
 logger = logging.getLogger(__name__)
-
-
-class NotificationSchedulingError(RuntimeError):
-    pass
+_deferrals = Deferrals(BACK_OFF)
 
 
 def enqueue_due(now: datetime) -> list[int]:
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
-    ids: list[int] = []
-    failures = 0
-    for schedule in ReminderSchedule.objects.filter(
-        active_region("region__"), enabled=True
-    ).select_related("region__approved_binding__provider_account"):
-        try:
-            ids.extend(_enqueue_schedule(schedule, now))
-        except Exception as error:
-            failures += 1
-            logger.error(
-                "notification_schedule_failed schedule_id=%s error_type=%s",
-                schedule.pk,
-                type(error).__name__,
-            )
-            close_old_connections()
-    if failures:
-        raise NotificationSchedulingError(
-            f"{failures} email reminder schedule(s) could not be scheduled."
-        )
-    return ids
+    schedules = list(
+        ReminderSchedule.objects.filter(active_region("region__"), enabled=True)
+        .exclude(pk__in=_deferrals.active(now))
+        .select_related("region__approved_binding__provider_account")
+        .order_by("pk")
+    )
+    batches = isolate(
+        schedules,
+        partial(_enqueue_schedule, now=now),
+        logger=logger,
+        event="notification_schedule_failed",
+        name=lambda schedule: f"schedule:{schedule.pk}",
+        back_off=lambda schedule: _deferrals.defer(schedule.pk, now),
+    )
+    return list(chain.from_iterable(batches))
 
 
 def slot_recipients(schedule: ReminderSchedule, limit: int) -> tuple[list[str], str]:
