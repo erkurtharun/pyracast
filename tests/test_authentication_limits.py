@@ -20,8 +20,10 @@ from django.contrib.auth.models import User
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connections
+from django.http import HttpRequest
 from django.test import Client, override_settings
 
+from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.audit import logger as security_logger
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, member, submit, totp_code
 from tests.support.company_registration import signup
@@ -154,19 +156,19 @@ def hold_password_checks(
 
 
 def hold_correct_password(monkeypatch: pytest.MonkeyPatch) -> tuple[Event, Event]:
-    # A correct password check signals `held` after its slots are reserved and answers only
-    # once `release` is set.
+    # A sign-in with the correct password signals `held` once its slots are reserved and goes on
+    # to its check only once `release` is set; the check runs under the account's locks, which
+    # the attempts beside it would wait for.
     held, release = Event(), Event()
-    check_password = User.check_password
+    pre_authenticate = AccountAdapter.pre_authenticate
 
-    def checked(user: User, raw_password: str) -> bool:
-        correct = check_password(user, raw_password)
-        if correct:
+    def reserved(adapter: AccountAdapter, request: HttpRequest, **credentials: Any) -> None:
+        pre_authenticate(adapter, request, **credentials)
+        if credentials.get("password") == PASSWORD:
             held.set()
             release.wait(timeout=10)
-        return correct
 
-    monkeypatch.setattr(User, "check_password", checked)
+    monkeypatch.setattr(AccountAdapter, "pre_authenticate", reserved)
     return held, release
 
 
@@ -270,16 +272,18 @@ def test_five_wrong_second_factor_codes_lock_the_account_code_check(
     ) == ["too_many_login_attempts"]
 
 
-def test_a_pending_second_factor_without_an_authenticator_refuses_the_code(
+def test_a_pending_second_factor_whose_authenticator_is_removed_answers_like_nothing_pending(
     clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     now = time.time()
     client, secret = pending_second_factor(monkeypatch, now, "member")
     Authenticator.objects.all().delete()
+    code = {"code": totp_code(secret, now)}
+    expected = submit(Client(enforce_csrf_checks=True), "auth/2fa/authenticate", code)
 
-    assert error_codes(
-        submit(client, "auth/2fa/authenticate", {"code": totp_code(secret, now)})
-    ) == ["incorrect_code"]
+    response = submit(client, "auth/2fa/authenticate", code)
+
+    assert (response.status_code, response.json()) == (expected.status_code, expected.json())
     assert client.get("/api/session/").json()["user"] is None
 
 

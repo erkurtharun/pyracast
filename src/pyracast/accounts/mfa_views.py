@@ -3,6 +3,8 @@ from typing import Any
 
 from allauth.account import app_settings
 from allauth.account.internal.flows.login import get_authentication_records
+from allauth.account.internal.stagekit import LOGIN_SESSION_KEY, clear_login
+from allauth.headless.base.response import UnauthorizedResponse
 from allauth.headless.internal.restkit.inputs import Input
 from allauth.headless.internal.restkit.response import APIResponse
 from allauth.headless.mfa import views
@@ -21,6 +23,7 @@ from pyracast.accounts.inputs import (
     SecondFactorReauthenticateInput,
     TOTPActivationInput,
 )
+from pyracast.accounts.processes import AuthorityChangedError, require_authority
 
 
 def recently_reauthenticated_with_mfa(request: HttpRequest) -> bool:
@@ -63,6 +66,20 @@ def require_mfa_reauthentication(request: HttpRequest) -> APIResponse | None:
 
 class AuthenticateView(views.AuthenticateView):
     input_class = SecondFactorInput
+
+    def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        # Without a pending sign-in allauth answers and the session keeps its authentication.
+        if request.method != "POST" or LOGIN_SESSION_KEY not in request.session:
+            return super().handle(request, *args, **kwargs)
+        # The step is checked under the account's locks before its input uses up a code, so the
+        # code, the authenticator write and the sign-in commit together.
+        try:
+            with transaction.atomic():
+                require_authority(request, LOGIN_SESSION_KEY)
+                return super().handle(request, *args, **kwargs)
+        except AuthorityChangedError:
+            clear_login(request)
+            return UnauthorizedResponse(request)
 
 
 class ReauthenticateView(views.ReauthenticateView):

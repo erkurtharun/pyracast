@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import requests
+from django.conf import settings
 from django.http import HttpResponse, HttpResponseBase
 from django.test import Client
 
@@ -66,7 +67,10 @@ def begin(client: Client, provider: str = "google", process: str = "login") -> s
     query = parse_qs(urlsplit(destination).query)
     assert query["code_challenge_method"] == ["S256"]
     assert query["response_type"] == ["code"]
-    assert query["redirect_uri"] == [f"http://testserver/api/accounts/{provider}/login/callback/"]
+    scheme = settings.ACCOUNT_DEFAULT_HTTP_PROTOCOL
+    assert query["redirect_uri"] == [
+        f"{scheme}://testserver/api/accounts/{provider}/login/callback/"
+    ]
     assert "offline_access" not in query["scope"][0]
     assert set(query["scope"][0].split()) == (
         {"openid", "email"} if provider == "google" else {"User.Read"}

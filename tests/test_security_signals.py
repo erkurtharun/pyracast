@@ -48,6 +48,7 @@ PINNED_LINE_KEYS = frozenset(
         "authenticator_type",
         "provider",
         "scope",
+        "count",
     }
 )
 WRITERS = frozenset({"record_security_event", "record_on_commit", "record_refusal"})
@@ -84,6 +85,7 @@ WRITTEN = frozenset(
     {
         "login_refused",
         "session_expired",
+        "sessions_revoked",
         "password_reset_requested",
         "social_login_refused",
         "reauthentication_failed",

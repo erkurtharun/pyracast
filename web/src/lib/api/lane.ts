@@ -13,7 +13,7 @@ const MAX_RETRY_SECONDS = 2;
 let csrfToken: string | undefined;
 let epoch = 0;
 let serial: Promise<unknown> = Promise.resolve();
-const endedListeners = new Set<() => void>();
+let sessionHeld: () => Promise<boolean> = () => Promise.resolve(false);
 const unreadable = Symbol("unreadable");
 
 export function setCsrfToken(token: string | undefined) {
@@ -24,11 +24,8 @@ export function mutationEpoch() {
     return epoch;
 }
 
-export function onSessionEnded(listener: () => void) {
-    endedListeners.add(listener);
-    return () => {
-        endedListeners.delete(listener);
-    };
+export function confirmSessionWith(check: () => Promise<boolean>) {
+    sessionHeld = check;
 }
 
 function unsafe(method: Method) {
@@ -48,15 +45,31 @@ export function exchange(request: LaneRequest): Promise<Exchange> {
 }
 
 export async function send<T>(request: LaneRequest): Promise<T> {
-    const { status, ok, data } = await exchange(request);
-    if (ok) return data as T;
-    const error = errorFromResponse(status, data);
+    const first = await exchange(request);
+    if (first.ok) return first.data as T;
+    const error = errorFromResponse(first.status, first.data);
+    // session_ended answers after the request's own work committed, so only a refusal is repeated.
     if (
-        !changesSession(request.url) &&
-        (error.code === "not_authenticated" || error.code === "session_ended")
+        !(await stillSignedIn(request, error)) ||
+        error.code !== "not_authenticated"
     )
-        for (const listener of endedListeners) listener();
-    throw error;
+        throw error;
+    const retry = await exchange(request);
+    if (retry.ok) return retry.data as T;
+    const refused = errorFromResponse(retry.status, retry.data);
+    await stillSignedIn(request, refused);
+    throw refused;
+}
+
+// A request sent with a session key that a reauthentication or sign-in replaced meanwhile is
+// answered as signed out; only a session read sent after that answer decides.
+async function stillSignedIn(request: LaneRequest, error: ApiError) {
+    if (
+        changesSession(request.url) ||
+        (error.code !== "not_authenticated" && error.code !== "session_ended")
+    )
+        return false;
+    return sessionHeld().catch(() => false);
 }
 
 async function attempt(request: LaneRequest, retried = false) {

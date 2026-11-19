@@ -1,7 +1,14 @@
 import { useSyncExternalStore } from "react";
 import type { components } from "./schema";
-import { mutationEpoch, onSessionEnded, send, setCsrfToken } from "./api/lane";
+import {
+    confirmSessionWith,
+    mutationEpoch,
+    send,
+    setCsrfToken,
+} from "./api/lane";
+import { ApiError } from "./api/errors";
 import { authRequest } from "./auth-api";
+import { browserErrors } from "@/i18n/browser";
 
 export type Session = components["schemas"]["SessionOutput"];
 export type SessionUser = components["schemas"]["SessionUserOutput"];
@@ -9,7 +16,7 @@ export type SessionState = { session?: Session; ended: boolean };
 
 let state: SessionState = { ended: false };
 let flight: { epoch: number; promise: Promise<Session> } | undefined;
-let ending = false;
+let confirming: Promise<boolean> | undefined;
 let signingOut = false;
 const listeners = new Set<() => void>();
 
@@ -34,7 +41,9 @@ export function adoptSession(session: Session) {
         ended: session.user
             ? false
             : !signingOut &&
-              (state.ended || ending || Boolean(state.session?.user)),
+              (state.ended ||
+                  confirming !== undefined ||
+                  Boolean(state.session?.user)),
     };
     setCsrfToken(session.csrf_token);
     for (const listener of listeners) listener();
@@ -59,7 +68,7 @@ export function loadSession(): Promise<Session> {
     return promise;
 }
 
-export async function signOut() {
+async function endSession() {
     await authRequest("auth/session", "DELETE");
     signingOut = true;
     try {
@@ -69,12 +78,28 @@ export async function signOut() {
     }
 }
 
-onSessionEnded(() => {
-    if (!state.session?.user || ending) return;
-    ending = true;
-    loadSession()
-        .catch(() => {})
+// A sign-out that carried a key another tab replaced meanwhile ends nothing and leaves the newer
+// key in place; the session read after it shows that key, which is signed out once more.
+export async function signOut() {
+    const session = await endSession();
+    if (!session.user) return session;
+    const repeated = await endSession();
+    if (!repeated.user) return repeated;
+    throw new ApiError(browserErrors()("stillSignedIn"));
+}
+
+// Session reads queue behind the session changes of this tab sent before them, so a read started
+// after a signed-out answer, and shared by the answers arriving while it runs, sees any key that
+// replaced the one those requests carried.
+confirmSessionWith(() => {
+    if (!state.session?.user) return Promise.resolve(false);
+    confirming ??= send<Session>({ method: "GET", url: "/api/session/" })
+        .then((session) => {
+            adoptSession(session);
+            return Boolean(session.user);
+        })
         .finally(() => {
-            ending = false;
+            confirming = undefined;
         });
+    return confirming;
 });

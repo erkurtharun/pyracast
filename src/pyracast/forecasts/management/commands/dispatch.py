@@ -10,6 +10,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import close_old_connections
 from django.utils import timezone
 
+from pyracast.accounts.retention import sweep_accounts
 from pyracast.background.failures import log_failure
 from pyracast.forecasts.monitoring import PhaseOutcome, record_dispatch_phase
 from pyracast.metering.runtime import dispatch_epias, make_epias_actor
@@ -27,7 +28,9 @@ def _published(operation: Callable[[], int]) -> Callable[[], PhaseOutcome]:
 
 
 def _retention() -> PhaseOutcome:
-    purge_expired()
+    now = timezone.now()
+    purge_expired(now)
+    sweep_accounts(now)
     return PhaseOutcome()
 
 

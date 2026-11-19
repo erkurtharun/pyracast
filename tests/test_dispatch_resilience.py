@@ -48,6 +48,7 @@ def test_dispatch_failure_does_not_suppress_email_and_one_shot_reports_failure(
         operations[name] = MagicMock()
         monkeypatch.setattr(command, name, operations[name])
     operations["dispatch"].return_value = PhaseOutcome()
+    monkeypatch.setattr(command, "sweep_accounts", MagicMock())
     operations[failed_phase].side_effect = RuntimeError("private-provider-response")
     monkeypatch.setattr(command, "logger", logging.getLogger("test.dispatch"), raising=False)
 
@@ -75,7 +76,7 @@ def test_dispatch_monitoring_failure_does_not_skip_other_phases(
         monkeypatch.setattr(command, factory, MagicMock())
     notifications = MagicMock()
     monkeypatch.setattr(command, "dispatch_notifications", notifications)
-    for name in ("purge_expired", "dispatch_calibrations", "dispatch_epias"):
+    for name in ("purge_expired", "sweep_accounts", "dispatch_calibrations", "dispatch_epias"):
         monkeypatch.setattr(command, name, MagicMock())
     monkeypatch.setattr(command, "dispatch", MagicMock(return_value=PhaseOutcome()))
     monkeypatch.setattr(command, "record_dispatch_phase", MagicMock(side_effect=ConnectionError))
@@ -96,7 +97,12 @@ def test_dispatch_loop_recovers_after_a_failed_cycle(
         "make_epias_actor",
     ):
         monkeypatch.setattr(command, factory, MagicMock())
-    for name in ("purge_expired", "dispatch_calibrations", "dispatch_notifications"):
+    for name in (
+        "purge_expired",
+        "sweep_accounts",
+        "dispatch_calibrations",
+        "dispatch_notifications",
+    ):
         monkeypatch.setattr(command, name, MagicMock())
     collection = MagicMock(side_effect=[ConnectionError("private-broker-url"), PhaseOutcome()])
     monkeypatch.setattr(command, "dispatch", collection)
@@ -143,6 +149,7 @@ def test_phase_records_duration_and_published_count(
     monkeypatch.setattr(command, "dispatch", MagicMock(return_value=PhaseOutcome(published=2)))
     monkeypatch.setattr(command, "dispatch_calibrations", MagicMock(return_value=1))
     monkeypatch.setattr(command, "purge_expired", MagicMock(return_value={"plants": 4}))
+    monkeypatch.setattr(command, "sweep_accounts", MagicMock())
     monkeypatch.setattr(command, "dispatch_epias", MagicMock(return_value=0))
     call_command("dispatch")
     phases = recorded_phases(isolated_monitoring)

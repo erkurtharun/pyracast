@@ -1,5 +1,4 @@
 from django.apps import AppConfig
-from django.contrib.auth.signals import user_logged_in
 
 
 class AccountsConfig(AppConfig):
@@ -8,9 +7,9 @@ class AccountsConfig(AppConfig):
     def ready(self) -> None:
         from pyracast.accounts import checks  # noqa: F401 -- Register deployment checks.
         from pyracast.accounts.audit import connect_security_events
-        from pyracast.accounts.security import start_user_session
-        from pyracast.accounts.sessions import connect_session_revocation
+        from pyracast.accounts.sessions import connect_session_lifecycle
+        from pyracast.accounts.social import connect_identity_recovery
 
-        user_logged_in.connect(start_user_session, dispatch_uid="pyracast.start_user_session")
         connect_security_events()
-        connect_session_revocation()
+        connect_session_lifecycle()
+        connect_identity_recovery()

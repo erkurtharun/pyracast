@@ -20,7 +20,6 @@ from allauth.socialaccount.adapter import get_adapter
 from allauth.socialaccount.internal.flows.connect import do_connect
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialLogin, SocialToken
 from allauth.socialaccount.providers.google.provider import GoogleProvider
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.db import IntegrityError, close_old_connections, connections, transaction
@@ -51,8 +50,6 @@ pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth
 def social_settings() -> Iterator[None]:
     with override_settings(
         SOCIALACCOUNT_PROVIDERS=PROVIDERS,
-        HEADLESS_FRONTEND_URLS=settings.HEADLESS_FRONTEND_URLS
-        | {"socialaccount_login_error": CALLBACK},
         MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}},
     ):
         yield
@@ -367,6 +364,16 @@ def test_unexpected_callback_destinations_return_to_the_configured_callback(url:
     assert response["Location"] == CALLBACK + "&error=invalid_request"
 
 
+def test_a_provider_callback_without_state_returns_to_the_current_public_origin() -> None:
+    with override_settings(PYRACAST_PUBLIC_ORIGIN="https://app.example.com"):
+        response = Client().get("/api/accounts/google/login/callback/", {"code": "provider-code"})
+
+    assert response.status_code == 302
+    assert response["Location"] == (
+        "https://app.example.com/app/?social_callback=1&error=unknown&error_process=login"
+    )
+
+
 def test_an_unknown_provider_returns_to_the_configured_callback() -> None:
     response = Client().post(
         AUTH + "auth/provider/redirect",
@@ -663,7 +670,9 @@ def test_concurrent_sessions_cannot_disconnect_both_passwordless_login_methods()
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(disconnect, index) for index in range(2)]
         statuses = sorted(future.result(timeout=20) for future in futures)
-    assert statuses == [200, 400]
+    # The first removal ends the account's other sessions, so the second is refused either as
+    # the last way to sign in (400) or because its session has ended (401).
+    assert statuses in ([200, 400], [200, 401])
     assert SocialAccount.objects.filter(user=user).count() == 1
 
 

@@ -1,8 +1,10 @@
 from collections.abc import Callable
+from typing import Any
 
 from allauth.account import app_settings as account_settings
 from allauth.account.adapter import get_adapter
 from allauth.core import context
+from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.core.internal import ratelimit
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -30,6 +32,16 @@ def reserve(
             return None
         reservation.usage.extend(usage.usage)
     return reservation
+
+
+def spent(request: HttpRequest, action: str, **scope: Any) -> bool:
+    # Whether a budget refuses now, without using it: a start asks before it locks an account and
+    # the budget is still used where allauth uses it.
+    return ratelimit.consume(request, app=APP, action=action, dry_run=True, **scope) is None
+
+
+def throttled(request: HttpRequest) -> ImmediateHttpResponse:
+    return ImmediateHttpResponse(ratelimit.respond_429(request))
 
 
 def reserve_client_failure(request: HttpRequest) -> ratelimit.RateLimitUsage | None:

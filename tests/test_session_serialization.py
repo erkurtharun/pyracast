@@ -238,11 +238,11 @@ def acquire_on_another_connection(key: str) -> bool:
 @pytest.mark.parametrize(
     "phase",
     [
+        "configure",
         "acquire",
-        "restore",
         "commit",
         "release",
-        "restore_non_database",
+        "configure_non_database",
         "release_interface",
         "release_non_database",
     ],
@@ -256,19 +256,15 @@ def test_database_failure_does_not_leak_a_session_lock(
 
     def fail(execute: Callable[..., Any], sql: str, params: Any, many: bool, context: Any) -> Any:
         target = (
-            (phase == "acquire" and "current_setting" in sql)
-            or (
-                phase in {"restore", "restore_non_database"}
-                and "set_config" in sql
-                and params[0] != "100ms"
-            )
+            (phase in {"configure", "configure_non_database"} and "set_config" in sql)
+            or (phase == "acquire" and "pg_advisory_lock(" in sql)
             or (
                 phase in {"release", "release_interface", "release_non_database"}
                 and "pg_advisory_unlock" in sql
             )
         )
         if target:
-            if phase in {"restore_non_database", "release_non_database"}:
+            if phase in {"configure_non_database", "release_non_database"}:
                 raise RuntimeError("Injected non-database failure")
             if phase == "release_interface":
                 raise InterfaceError("Injected interface failure")
@@ -292,6 +288,49 @@ def test_database_failure_does_not_leak_a_session_lock(
         assert connection.connection is None
     finally:
         connection.close()
+
+
+def test_taking_the_session_lock_sets_its_wait_once() -> None:
+    connection = connections["default"]
+    statements: list[str] = []
+
+    def record(execute: Callable[..., Any], sql: str, params: Any, many: bool, context: Any) -> Any:
+        statements.append(sql)
+        return execute(sql, params, many, context)
+
+    with connection.execute_wrapper(record), serialize_session("e" * 32):
+        pass
+
+    assert [sql for sql in statements if "lock_timeout" in sql] == [
+        "SELECT set_config('lock_timeout', %s, true)"
+    ]
+
+
+def test_a_busy_session_keeps_its_database_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(session_lock, "_LOCK_TIMEOUT", "100ms")
+    connection = connections["default"]
+    key = "9" * 32
+    held, release = Event(), Event()
+
+    def hold() -> None:
+        try:
+            with serialize_session(key):
+                held.set()
+                assert release.wait(timeout=10)
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        holder = pool.submit(hold)
+        assert held.wait(timeout=10)
+        try:
+            with pytest.raises(session_lock.SessionBusyError), serialize_session(key):
+                pass
+            assert connection.connection is not None
+            assert connection.is_usable()
+        finally:
+            release.set()
+            holder.result(timeout=10)
 
 
 @pytest.mark.parametrize("loss", ["wrapper", "reconnected", "transport"])

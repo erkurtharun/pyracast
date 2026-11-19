@@ -230,10 +230,6 @@ ACTION_URLS = {
 }
 PROVIDER_NAMES = {"google": "Google", "microsoft": "Microsoft"}
 OTHER_PROVIDER = {"google": "microsoft", "microsoft": "google", "none": "google"}
-REFUSAL = {
-    "en": "This email address is already verified.",
-    "tr": "Bu e-posta adresi zaten doğrulanm\u0131ş.",
-}
 
 PRIMARY = "member@example.com"
 SECONDARY = "second@example.com"
@@ -273,13 +269,12 @@ STATES = (
     "reauthentication-pending",
     "reauthenticated",
     "pending-change",
-    "pending-stored-change",
 )
 PROVIDER_CHOICES = ("none", "google", "microsoft")
 ANONYMOUS = frozenset({"signed-out", "pending-signup", "pending-provider-signup", "pending-reset"})
 SIGNED = frozenset(STATES) - ANONYMOUS
 NOT_REAUTHENTICATED = frozenset({"signed-in", "reauthentication-pending"})
-PENDING_CHANGES = frozenset({"pending-change", "pending-stored-change"})
+PENDING_CHANGES = frozenset({"pending-change"})
 PENDING_VERIFICATION = PENDING_CHANGES | {"pending-signup"}
 NO_VERIFICATION = frozenset(STATES) - PENDING_VERIFICATION
 TAKEN = frozenset({"other-account", "inactive-account"})
@@ -332,12 +327,14 @@ GATED = {
     "verify": NO_VERIFICATION,
     "resend": NO_VERIFICATION,
     "provider-connect": ANONYMOUS | NOT_REAUTHENTICATED,
+    "select-address": frozenset(STATES),
+    "make-primary": frozenset(STATES),
+    "provider-signup": SIGNED,
+    "provider-login": SIGNED,
 } | {
     name: ANONYMOUS
     for name in (
         "add-address",
-        "select-address",
-        "make-primary",
         "remove-address",
         "password",
         "reauthentication-code",
@@ -449,15 +446,6 @@ NOT_APPLICABLE: tuple[tuple[str, Callable[[Combination], bool]], ...] = (
     (
         "a reset is pending only for an account that was mailed a reset code",
         lambda c: c.state == "pending-reset" and c.shape == "inactive",
-    ),
-    (
-        "while a change started by PUT is pending, the stored secondary is the pending address",
-        lambda c: c.state == "pending-stored-change" and c.target == "own-unverified-secondary",
-    ),
-    (
-        "a change started by PUT verifies the stored unverified secondary, which only that "
-        "account shape has",
-        lambda c: c.state == "pending-stored-change" and c.shape != "unverified-secondary",
     ),
     (
         "a provider sign-in names the account its identity is linked to, not one of its addresses",
@@ -653,45 +641,21 @@ EXPECTED: tuple[Expect, ...] = (
     expect("resend", Mail(CHANGE_CODE, "pending", "member", 200), states=PENDING_CHANGES),
     expect("add-address", NoMail(409, "no session and no change stage"), states=ANONYMOUS),
     expect("add-address", NoMail(400, "already an address of the account"), targets=OWN),
-    expect(
-        "add-address",
-        NoMail(400, "already an address of the account"),
-        targets={"pending-address"},
-        states={"pending-stored-change"},
-    ),
     expect("add-address", NoMail(401, "needs reauthentication"), states=NOT_REAUTHENTICATED),
     expect(
         "add-address",
         Mail(CHANGE_CODE, "target", "member", 200),
         targets={*ELSEWHERE, "pending-address"},
     ),
-    expect("select-address", NoMail(401, "no session"), states=ANONYMOUS),
     expect(
         "select-address",
-        NoMail(400, "the address is already verified"),
-        targets={"own-primary", "own-verified-secondary"},
-    ),
-    expect(
-        "select-address",
-        Mail(CHANGE_CODE, "target", "member", 200),
-        targets={"own-unverified-secondary", "pending-address"},
-    ),
-    expect("select-address", NoMail(400, "not an address of the account"), targets=ELSEWHERE),
-    expect("make-primary", NoMail(401, "no session"), states=ANONYMOUS),
-    expect(
-        "make-primary",
-        NoMail(400, "an unverified address cannot become primary"),
-        targets={"own-unverified-secondary", "pending-address"},
-    ),
-    expect("make-primary", NoMail(400, "not an address of the account"), targets=ELSEWHERE),
-    expect("make-primary", NoMail(401, "needs reauthentication"), states=NOT_REAUTHENTICATED),
-    expect(
-        "make-primary", NoMail(200, "already primary: nothing changes"), targets={"own-primary"}
+        NoMail(405, "the account email endpoint answers reads, changes and removals only"),
+        states=STATES,
     ),
     expect(
         "make-primary",
-        Mail(EMAIL_CHANGED, "primary", "member", 200),
-        targets={"own-verified-secondary"},
+        NoMail(405, "the account email endpoint answers reads, changes and removals only"),
+        states=STATES,
     ),
     expect("remove-address", NoMail(401, "no session"), states=ANONYMOUS),
     expect("remove-address", NoMail(400, "the primary address stays"), targets={"own-primary"}),
@@ -747,20 +711,10 @@ EXPECTED: tuple[Expect, ...] = (
     expect("disconnect", Mail(DISCONNECTED, "primary", "member", 200)),
     expect(
         "provider-signup",
-        NoMail(
-            200, "Google's verified address becomes the primary; the entered one stays unverified"
-        ),
-        targets={"unknown"},
-        states={"pending-provider-signup"},
-        providers={"google"},
+        NoMail(409, "a signed-in session starts no provider sign-up"),
+        states=SIGNED,
     ),
     expect("provider-signup", Mail(SIGNUP_CODE, "target", "request", 401), targets={"unknown"}),
-    expect(
-        "provider-signup",
-        Mail(SIGNUP_CODE, "target", "request", 401),
-        targets={"pending-address"},
-        states={"pending-change"},
-    ),
     expect(
         "provider-signup",
         Mail(EXISTS, "target", "request", 401),
@@ -781,6 +735,7 @@ EXPECTED: tuple[Expect, ...] = (
     expect(
         "provider-signup", Mail(EXISTS, "target", "inactive", 401), targets={"inactive-account"}
     ),
+    expect("provider-login", NoMail(302, "a signed-in session is refused"), states=SIGNED),
     expect(
         "provider-login",
         Mail(SIGNUP_CODE, "target", "member", 302),
@@ -856,7 +811,6 @@ REPLACES = {
     "signup": {"pending-signup"},
     "provider-signup": {"pending-signup"},
     "resend": PENDING_VERIFICATION,
-    "select-address": PENDING_CHANGES,
     "add-address": PENDING_CHANGES,
     "reauthentication-code": {"reauthentication-pending"},
     "reset-request": {"pending-reset"},
@@ -902,12 +856,8 @@ class Act:
         return self.case.combination.provider
 
 
-def pending_address(case: Case) -> str:
-    return UNVERIFIED if case.combination.state == "pending-stored-change" else CHANGE
-
-
 def address_of(case: Case, target: str) -> str:
-    return pending_address(case) if target == "pending-address" else ADDRESSES.get(target, "")
+    return CHANGE if target == "pending-address" else ADDRESSES.get(target, "")
 
 
 def provider_requests(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -941,8 +891,6 @@ def matrix_settings() -> dict[str, Any]:
         "MAILERS": {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}},
         "TIME_ZONE": "Europe/Istanbul",
         "SOCIALACCOUNT_PROVIDERS": PROVIDERS,
-        "HEADLESS_FRONTEND_URLS": settings.HEADLESS_FRONTEND_URLS
-        | {"socialaccount_login_error": CALLBACK},
     }
 
 
@@ -1110,10 +1058,7 @@ def enter(case: Case, world: World, profile: dict[str, Any], client_class: type[
     reauthenticate(client, case, world)
     if state == "reauthenticated":
         return Session(client, "")
-    if state == "pending-stored-change":
-        assert call(client, "put", "account/email", {"email": UNVERIFIED}).status_code == 200
-    else:
-        assert submit(client, "account/email", {"email": CHANGE}).status_code == 200
+    assert submit(client, "account/email", {"email": CHANGE}).status_code == 200
     return Session(client, mailed_code())
 
 
@@ -1296,7 +1241,7 @@ def recipient(role: str, case: Case) -> str:
         "target": address_of(case, case.combination.target),
         "primary": PRIMARY,
         "fresh": FRESH,
-        "pending": pending_address(case),
+        "pending": CHANGE,
     }[role]
 
 
@@ -1316,7 +1261,7 @@ def sentence_values(template: str, case: Case, to: str) -> dict[str, str]:
         return {"email": to}
     if template == EMAIL_CHANGED:
         if combination.endpoint == "verify":
-            return {"from_email": PRIMARY, "to_email": pending_address(case)}
+            return {"from_email": PRIMARY, "to_email": CHANGE}
         return {"from_email": PRIMARY, "to_email": address_of(case, combination.target)}
     if template == EMAIL_DELETED:
         return {"deleted_email": address_of(case, combination.target)}

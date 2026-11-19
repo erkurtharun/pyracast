@@ -2,10 +2,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, cast
 
+from allauth.account import signals as account_signals
 from allauth.account.internal.flows import reauthentication
 from allauth.account.models import EmailAddress
 from allauth.core.exceptions import ImmediateHttpResponse
+from allauth.headless.adapter import DefaultHeadlessAdapter
 from allauth.mfa.models import Authenticator
+from allauth.socialaccount import signals as social_signals
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from allauth.socialaccount.internal.flows.connect import do_connect
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialLogin
@@ -20,10 +23,41 @@ from django.http import HttpRequest, HttpResponseRedirect
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event, refusal_throttle
 from pyracast.accounts.authorization import requires_admin_mfa
+from pyracast.accounts.processes import (
+    account_state,
+    identified_accounts,
+    identifying,
+    lock_account,
+)
+
+
+def unbind_unproven_identities(*, request: HttpRequest, user: User, **_kwargs: Any) -> None:
+    # An account that never signed in may hold an identity bound before its address was proven;
+    # recovering the address through a reset leaves the mailbox owner as the only authority.
+    if user.last_login is not None:
+        return
+    for account in SocialAccount.objects.filter(user=user):
+        account.delete()
+        social_signals.social_account_removed.send(
+            sender=SocialAccount, request=request, socialaccount=account
+        )
+
+
+def connect_identity_recovery() -> None:
+    account_signals.password_reset.connect(
+        unbind_unproven_identities, dispatch_uid="pyracast.unbind_unproven_identities"
+    )
 
 
 def social_callback_url() -> str:
     return f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1"
+
+
+class HeadlessAdapter(DefaultHeadlessAdapter):
+    def get_frontend_url(self, urlname: str, **kwargs: Any) -> str | None:
+        if urlname == "socialaccount_login_error":
+            return social_callback_url()
+        return super().get_frontend_url(urlname, **kwargs)
 
 
 def record_social_refusal(
@@ -47,13 +81,28 @@ class UnavailableSocialAppError(SocialApp.DoesNotExist, ValueError):
 @contextmanager
 def locked_social_user(request: HttpRequest, user_id: int) -> Iterator[User | None]:
     with transaction.atomic():
-        user = User.objects.select_for_update().filter(pk=user_id).first()
+        exists = account_state(user_id, lock=True) is not None
         request.user = get_user(request)
         yield (
             request.user
-            if user is not None and request.user.is_authenticated and request.user.pk == user.pk
+            if exists and request.user.is_authenticated and request.user.pk == user_id
             else None
         )
+
+
+def lock_identity(provider: str, uid: str) -> None:
+    # In the callback, which starts pending processes, the account a provider identity names is
+    # locked before allauth looks the identity up; the owner is read again under the lock.
+    if not identifying():
+        return
+    identity = SocialAccount.objects.filter(provider=provider, uid=uid)
+    owner = identity.values_list("user_id", flat=True).first()
+    while owner is not None:
+        lock_account(owner)
+        current = identity.values_list("user_id", flat=True).first()
+        if current == owner:
+            return
+        owner = current
 
 
 class SocialAccountAdapter(DefaultSocialAccountAdapter):
@@ -89,26 +138,45 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
             apps.append(SocialApp(provider=name, client_id=identifier, secret=secret))
         return apps
 
-    def pre_social_login(self, request: HttpRequest, sociallogin: SocialLogin) -> None:
+    def populate_user(
+        self, request: HttpRequest, sociallogin: SocialLogin, data: dict[str, Any]
+    ) -> User:
+        # Runs before allauth looks the identity up and saves it, so no other profile field is
+        # ever stored and the account it names is locked before that lookup reads it.
+        lock_identity(sociallogin.account.provider, sociallogin.account.uid)
+        user = cast(User, super().populate_user(request, sociallogin, data))
         provider = sociallogin.account.provider
-        data = sociallogin.account.extra_data
+        profile = sociallogin.account.extra_data
         for address in sociallogin.email_addresses:
             authoritative_google_email = provider == "google" and (
-                address.email.lower().endswith("@gmail.com") or bool(data.get("hd"))
+                address.email.lower().endswith("@gmail.com") or bool(profile.get("hd"))
             )
             address.verified = address.verified and authoritative_google_email
         sociallogin.account.extra_data = {
-            "email": data.get("email") or data.get("mail") or data.get("userPrincipalName") or ""
+            "email": profile.get("email")
+            or profile.get("mail")
+            or profile.get("userPrincipalName")
+            or ""
         }
+        return user
+
+    def pre_social_login(self, request: HttpRequest, sociallogin: SocialLogin) -> None:
+        provider = sociallogin.account.provider
         sociallogin.token = None
         user = cast(User, sociallogin.user) if sociallogin.is_existing else None
-        if user is not None:
-            sociallogin.account.save(update_fields=["extra_data"])
         if provider not in settings.SOCIALACCOUNT_PROVIDERS:
             record_social_refusal(request, provider, "provider_disabled", user)
             raise PermissionDenied("This sign-in provider is unavailable.")
         if sociallogin.state.get("process") == "connect":
             self.connect_account(request, sociallogin)
+        if request.user.is_authenticated:
+            record_social_refusal(request, provider, "signed_in", request.user)
+            raise PermissionDenied("Sign out before signing in with a provider.")
+        if user is not None and user.pk not in identified_accounts():
+            # The identity was connected after the callback looked for it, so its account was
+            # read without its lock.
+            record_social_refusal(request, provider, "identity_changed", user)
+            raise PermissionDenied("The provider identity changed during the sign-in.")
         if (
             user is not None
             and requires_admin_mfa(user)
@@ -161,6 +229,7 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
                 ):
                     raise
                 raise self.validation_error("connected_other") from error
+        # Ends allauth's flow here: returning would let it run do_connect again, outside the lock.
         raise ImmediateHttpResponse(
             HttpResponseRedirect(self.get_connect_redirect_url(request, sociallogin.account))
         )

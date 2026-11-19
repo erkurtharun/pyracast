@@ -3,7 +3,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
-from allauth.account.models import EmailAddress
 from allauth.socialaccount.models import SocialAccount
 from django.core import mail
 from django.core.cache import cache
@@ -25,12 +24,8 @@ from tests.support.account_mail import (
     NOT_APPLICABLE,
     OTHER,
     PRIMARY,
-    REFUSAL,
     RESET_CODE,
-    SECONDARY,
     SIGNED,
-    SIGNUP_CODE,
-    UNVERIFIED,
     Case,
     Mail,
     NoMail,
@@ -38,7 +33,6 @@ from tests.support.account_mail import (
     assert_code_mail,
     assume_identity,
     browser,
-    call,
     gated,
     html,
     matrix_settings,
@@ -63,17 +57,13 @@ PRECEDENCE_EXCEPTIONS: dict[tuple[str, int, int], str] = {
         16,
         17,
     ): "an unverified owner uses request language regardless of client state",
-    ("add-address", 38, 40): "an existing address is refused before reauthentication",
-    ("add-address", 40, 41): "adding an address requires reauthentication before sending",
-    ("make-primary", 47, 49): "an unverified address is refused before reauthentication",
-    ("make-primary", 48, 49): "an address outside the account is refused before reauthentication",
-    ("make-primary", 49, 50): "selecting the current primary still requires reauthentication",
-    ("make-primary", 49, 51): "changing the primary requires reauthentication before sending",
-    ("remove-address", 53, 56): "the primary address is refused before reauthentication",
-    ("remove-address", 54, 56): "an address outside the account is refused before reauthentication",
-    ("remove-address", 56, 57): "removing a secondary requires reauthentication before sending",
-    ("totp-on", 65, 67): "an unverified address prevents activation before reauthentication",
-    ("disconnect", 76, 77): "the last way to sign in is refused before reauthentication",
+    ("add-address", 38, 39): "an existing address is refused before reauthentication",
+    ("add-address", 39, 40): "adding an address requires reauthentication before sending",
+    ("remove-address", 44, 47): "the primary address is refused before reauthentication",
+    ("remove-address", 45, 47): "an address outside the account is refused before reauthentication",
+    ("remove-address", 47, 48): "removing a secondary requires reauthentication before sending",
+    ("totp-on", 56, 58): "an unverified address prevents activation before reauthentication",
+    ("disconnect", 67, 68): "the last way to sign in is refused before reauthentication",
 }
 
 
@@ -165,25 +155,6 @@ def test_every_sending_row_runs_in_both_languages_for_each_provider() -> None:
     } == {"google", "microsoft"}
 
 
-@pytest.mark.parametrize("target", [PRIMARY, SECONDARY])
-def test_verified_address_refusal_names_the_field_in_the_account_language(
-    language: str, target: str
-) -> None:
-    member = account(PRIMARY, "member", language)
-    EmailAddress.objects.create(user=member, email=SECONDARY, verified=True)
-    client = commit_browser()
-    assert submit(client, "auth/login", {"email": PRIMARY, "password": PASSWORD}).status_code == 200
-    mail.outbox.clear()
-
-    response = call(client, "put", "account/email", {"email": target})
-
-    assert response.status_code == 400
-    assert response.json()["errors"] == [
-        {"message": REFUSAL[language], "code": "email_already_verified", "param": "email"}
-    ]
-    assert mail.outbox == []
-
-
 def test_reset_request_for_duplicate_unverified_identities_mails_the_shared_address(
     language: str,
 ) -> None:
@@ -201,9 +172,7 @@ def test_reset_request_for_duplicate_unverified_identities_mails_the_shared_addr
 
 
 def signed_in_actor(state: str, language: str) -> Client:
-    actor = account(PRIMARY, "member", language)
-    if state == "pending-stored-change":
-        EmailAddress.objects.create(user=actor, email=UNVERIFIED)
+    account(PRIMARY, "member", language)
     client = commit_browser()
     credentials = {"email": PRIMARY, "password": PASSWORD}
     assert submit(client, "auth/login", credentials).status_code == 200
@@ -213,15 +182,13 @@ def signed_in_actor(state: str, language: str) -> Client:
         assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     if state == "pending-change":
         assert submit(client, "account/email", {"email": CHANGE}).status_code == 200
-    if state == "pending-stored-change":
-        assert call(client, "put", "account/email", {"email": UNVERIFIED}).status_code == 200
     mail.outbox.clear()
     return client
 
 
 @pytest.mark.parametrize("provider", ["google", "microsoft"])
 @pytest.mark.parametrize("state", sorted(SIGNED))
-def test_signed_in_provider_sign_in_of_another_unverified_account_mails_its_language(
+def test_a_signed_in_provider_sign_in_is_refused_and_mails_nothing(
     language: str,
     provider: str,
     state: str,
@@ -237,9 +204,8 @@ def test_signed_in_provider_sign_in_of_another_unverified_account_mails_its_lang
     response = through_provider(client, provider, "login")
 
     assert response.status_code == 302
-    assert_code_mail(
-        only_mail(), prefix=SIGNUP_CODE, to="linked@example.com", language=language, minutes=10
-    )
+    assert "error=permission_denied" in response["Location"]
+    assert mail.outbox == []
 
 
 def test_verification_resend_after_signup_with_a_taken_address_mails_nothing(

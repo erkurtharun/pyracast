@@ -3,6 +3,7 @@ from collections.abc import Callable
 from http import HTTPStatus
 from typing import Any, cast
 
+from allauth.account import stages
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.headless.account.inputs import SignupInput
 from allauth.headless.account.views import SignupView
@@ -20,7 +21,9 @@ from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.urls import reverse
 
+from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.inputs import PasswordInput
+from pyracast.accounts.processes import StartingView, lock_account
 
 
 class CompanySignupInput(PasswordInput, SignupInput):
@@ -56,11 +59,32 @@ class CompanySignupInput(PasswordInput, SignupInput):
 
     def save(self, request: HttpRequest) -> User:
         with transaction.atomic():
-            return cast(User, super().save(request))
+            user = cast(User, super().save(request))
+            lock_account(user.pk)
+            return user
 
 
-class CompanySignupView(SignupView):
+class CompanySignupView(StartingView, SignupView):
     input_class = {"POST": CompanySignupInput}  # noqa: RUF012 -- Allauth's view contract.
+
+
+class EmailVerificationStage(stages.EmailVerificationStage):
+    def handle(self) -> tuple[HttpResponse | None, bool]:
+        handle = cast(Callable[[], tuple[HttpResponse | None, bool]], super().handle)
+        try:
+            return handle()
+        except ImmediateHttpResponse as refusal:
+            # Both kinds of password sign-up answer this refusal like a sent mail, so it is
+            # recorded where it happens.
+            if (
+                self.login.signup
+                and "sociallogin" not in (self.login.signal_kwargs or {})
+                and refusal.response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+            ):
+                record_security_event(
+                    SecurityEvent.AUTHENTICATION_REQUEST_THROTTLED, request=self.request
+                )
+            raise
 
 
 class SignupMinimumAnswerTime:

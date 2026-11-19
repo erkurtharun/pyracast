@@ -11,7 +11,6 @@ from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.socialaccount.models import SocialAccount
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.core.mail import EmailMessage
@@ -96,8 +95,6 @@ def social_providers(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setattr(requests.Session, "request", request)
     with override_settings(
         SOCIALACCOUNT_PROVIDERS=PROVIDERS,
-        HEADLESS_FRONTEND_URLS=settings.HEADLESS_FRONTEND_URLS
-        | {"socialaccount_login_error": CALLBACK},
     ):
         yield
 

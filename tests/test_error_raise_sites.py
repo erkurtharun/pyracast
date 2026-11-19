@@ -14,11 +14,15 @@ ALLAUTH_PROTOCOL = {
     "accounts/adapters.py:AccountAdapter.validation_error",
     "accounts/adapters.py:AccountAdapter.pre_authenticate",
     "accounts/adapters.py:AccountAdapter.confirm_email",
-    # A completion that failed answers allauth's own 409 for a client with nothing pending.
+    # A completion that failed answers allauth's own answer for a client with nothing pending.
     "accounts/headless.py:ResetPasswordView.post",
     "accounts/headless.py:VerifyEmailView.post",
+    "accounts/headless.py:ResendEmailVerificationCodeView.post",
+    "accounts/headless.py:ConfirmReauthenticationCodeView.post",
+    "accounts/mfa_views.py:AuthenticateView.handle",
+    "accounts/headless.py:ManageEmailView.post",
+    "accounts/social_views.py:ProviderSignupView.handle",
     "accounts/inputs.py:ChangePasswordInput.clean_current_password",
-    "accounts/inputs.py:ResendEmailVerificationInput.clean",
     "accounts/inputs.py:SecondFactorCode.matching_code",
     "accounts/inputs.py:TOTPActivationInput.clean_code.matching_code",
     "accounts/login_limits.py:check_second_factor",

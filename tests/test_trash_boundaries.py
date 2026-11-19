@@ -101,7 +101,8 @@ def test_dispatch_prioritizes_notifications_and_continues_all_queues(
         "make_epias_actor",
     ):
         monkeypatch.setattr(dispatch_command, name, lambda broker: object())
-    monkeypatch.setattr(dispatch_command, "purge_expired", lambda: calls.append("purge"))
+    monkeypatch.setattr(dispatch_command, "purge_expired", lambda now: calls.append("purge"))
+    monkeypatch.setattr(dispatch_command, "sweep_accounts", lambda now: calls.append("sweep"))
     for name in ("dispatch_calibrations", "dispatch_notifications", "dispatch_epias"):
         monkeypatch.setattr(dispatch_command, name, lambda actor, name=name: calls.append(name))
 
@@ -116,6 +117,7 @@ def test_dispatch_prioritizes_notifications_and_continues_all_queues(
         "dispatch",
         "dispatch_calibrations",
         "purge",
+        "sweep",
         "dispatch_epias",
     ]
     broker.close.assert_called_once_with()

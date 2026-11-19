@@ -107,7 +107,7 @@ export function AccountSecurity({
                                 name="new_password"
                                 type="password"
                                 autoComplete="new-password"
-                                minLength={12}
+                                minLength={15}
                             />
                         </ActionForm>
                     )}
