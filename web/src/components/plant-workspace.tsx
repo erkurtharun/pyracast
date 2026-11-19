@@ -74,7 +74,8 @@ export function PlantWorkspace({
             pending.section,
             pending.address,
         ) !== routes.plant(scope.tenant_id, scope.region_id, tab, address);
-    // Controls only the outgoing view has rest until the pending view change commits.
+    // Controls only the outgoing view has rest until the pending view change commits. A disabled
+    // fieldset stops only form controls, so the outgoing body is also inert (disclosures, links).
     const leaving = (section: "forecast" | "production" | "settings") =>
         pending.section === tab &&
         tab === section &&
@@ -313,6 +314,7 @@ export function PlantWorkspace({
                     </nav>
                     <fieldset
                         disabled={leaving("settings")}
+                        inert={leaving("settings")}
                         aria-busy={leaving("settings") || undefined}
                     >
                         {settingsView === "configuration" ? (
@@ -400,6 +402,7 @@ export function PlantWorkspace({
                     </nav>
                     <fieldset
                         disabled={leaving("production")}
+                        inert={leaving("production")}
                         aria-busy={leaving("production") || undefined}
                     >
                         {productionView === "comparison" ? (
