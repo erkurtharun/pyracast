@@ -23,7 +23,7 @@ from pyracast.accounts.models import (
     WorkspaceRole,
 )
 from pyracast.forecasts.management.commands import dispatch
-from tests.support.account_sessions import alongside, browser, session_user
+from tests.support.account_sessions import alongside, browser, elsewhere, session_user
 from tests.support.auth_lifecycle import submit
 from tests.support.company_registration import mailed_code, signup
 
@@ -171,6 +171,29 @@ def test_a_signup_that_changes_after_selection_is_kept(case: str) -> None:
 
     assert not retention.reclaim_signup(user.pk, cutoff)
 
+    assert User.objects.filter(pk=user.pk).exists()
+    assert Tenant.objects.filter(membership__user=user).exists()
+
+
+@pytest.mark.parametrize("case", ["workspace-with-another-member", "workspace-with-an-invitation"])
+def test_a_signup_that_changes_before_its_workspaces_are_locked_is_kept(
+    case: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = signup_account("owner")
+    changes: list[str] = []
+    lock = retention._lock
+
+    def changed_before_the_workspaces_are_locked(rows: Any) -> list[Any]:
+        if rows.model is Tenant and not changes:
+            changes.append(case)
+            elsewhere(lambda: AFTER_SELECTION[case](user))
+        return lock(rows)
+
+    monkeypatch.setattr(retention, "_lock", changed_before_the_workspaces_are_locked)
+
+    assert not retention.reclaim_signup(user.pk, timezone.now() - retention.ABANDONED_AFTER)
+
+    assert changes == [case]
     assert User.objects.filter(pk=user.pk).exists()
     assert Tenant.objects.filter(membership__user=user).exists()
 

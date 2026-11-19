@@ -3,6 +3,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
+from importlib import import_module
 from threading import Event
 from typing import Any
 
@@ -10,6 +11,7 @@ import pytest
 from allauth.account import utils as account_utils
 from allauth.account.internal.flows.login import AUTHENTICATION_METHODS_SESSION_KEY
 from allauth.account.internal.flows.password_reset_by_code import (
+    PASSWORD_RESET_VERIFICATION_SESSION_KEY,
     PasswordResetVerificationProcess,
 )
 from allauth.account.internal.flows.reauthenticate_by_code import (
@@ -34,10 +36,11 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import mail
 from django.db import connections, transaction
-from django.test import Client, override_settings
+from django.http import HttpRequest
+from django.test import Client, RequestFactory, override_settings
 from django.utils import timezone
 
-from pyracast.accounts import headless
+from pyracast.accounts import authentication, headless, processes, social
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.inputs import (
     LoginInput,
@@ -1081,3 +1084,164 @@ def test_a_reauthentication_code_admitted_after_its_budget_looked_spent_sends_no
     assert response.status_code == 429
     assert mail.outbox == []
     assert REAUTHENTICATION_CODE_SESSION_KEY not in client.session
+
+
+def test_an_address_change_whose_budget_is_spent_after_it_looked_available_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = account("owner")
+    client = spent_address_change(user)
+    mail.outbox.clear()
+    monkeypatch.setattr(headless, "spent", lambda *args, **kwargs: False)
+
+    response = submit(client, "account/email", {"email": CHANGED})
+
+    assert response.status_code == 429
+    assert mail.outbox == []
+    assert not EmailAddress.objects.filter(email=CHANGED).exists()
+
+
+def test_a_reset_requested_while_its_address_moves_resets_the_account_that_now_holds_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = account("owner")
+    changes = changing(monkeypatch, authentication, "lock_account", lambda: reassigned(user))
+    client = browser()
+
+    assert submit(client, "auth/password/request", {"email": OWNER}).status_code == 401
+    reset = {"key": mailed_code(), "password": PASSWORD + "reset"}
+    response = submit(client, "auth/password/reset", reset)
+
+    assert committed_first(changes)
+    assert response.status_code == 401
+    assert User.objects.get(username="other").check_password(PASSWORD + "reset")
+    assert User.objects.get(pk=user.pk).check_password(PASSWORD)
+
+
+def test_a_provider_sign_in_whose_identity_moves_before_it_is_locked_signs_in_its_new_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    serve_provider_profile(monkeypatch)
+    user = account("owner")
+    other = account("other")
+    SocialAccount.objects.create(user=user, provider="google", uid="google-identity")
+    client = browser()
+    state = begin(client)
+    changes = changing(
+        monkeypatch,
+        social,
+        "lock_account",
+        lambda: SocialAccount.objects.filter(uid="google-identity").update(user=other),
+    )
+
+    complete(client, state)
+
+    assert committed_first(changes)
+    assert session_user(client) == other.pk
+
+
+def changed_once_steps_are_checked(
+    monkeypatch: pytest.MonkeyPatch, change: Callable[[], object]
+) -> Changes:
+    # Starts the change from another connection once the first POST has had its pending steps
+    # checked at the start of the request.
+    changes: Changes = []
+    discard_stale = processes.discard_stale
+
+    def changed_after_the_check(request: HttpRequest) -> None:
+        discard_stale(request)
+        if request.method == "POST" and not changes:
+            future = alongside(change)
+            changes.append((future.done(), future))
+
+    monkeypatch.setattr(processes, "discard_stale", changed_after_the_check)
+    return changes
+
+
+def test_a_change_committed_after_the_request_checked_its_steps_ends_the_second_factor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pending = second_factor(monkeypatch)
+    changes = changed_once_steps_are_checked(
+        monkeypatch, lambda: password_changed(User.objects.get(pk=pending.user.pk))
+    )
+
+    response = submit(pending.client, pending.endpoint, pending.data)
+
+    assert committed_first(changes)
+    assert response.status_code == 401
+    assert session_user(pending.client) is None
+
+
+def test_a_second_factor_reauthentication_without_an_authenticator_refuses_the_code() -> None:
+    client = signed_in(account("owner"))
+
+    response = submit(client, "auth/2fa/reauthenticate", {"code": "123456"})
+
+    assert (response.status_code, error_codes(response)) == (400, ["incorrect_code"])
+
+
+@override_settings(ACCOUNT_EMAIL_VERIFICATION_SUPPORTS_CHANGE=True)
+def test_a_signup_that_changes_its_address_while_verifying_completes_with_the_new_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pending = signup_code(monkeypatch)
+    mail.outbox.clear()
+
+    assert submit(pending.client, "account/email", {"email": CHANGED}).status_code == 200
+    response = submit(pending.client, pending.endpoint, {"key": mailed_code()})
+
+    assert response.status_code == 200
+    assert session_user(pending.client) == pending.user.pk
+    assert list(EmailAddress.objects.values_list("email", "verified")) == [(CHANGED, True)]
+
+
+@override_settings(ACCOUNT_EMAIL_VERIFICATION_SUPPORTS_CHANGE=True)
+def test_a_signup_address_change_after_its_account_changed_ends_the_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pending = signup_code(monkeypatch)
+    changes = changed_once_steps_are_checked(
+        monkeypatch, lambda: password_changed(User.objects.get(pk=pending.user.pk))
+    )
+    mail.outbox.clear()
+
+    response = submit(pending.client, "account/email", {"email": CHANGED})
+
+    assert committed_first(changes)
+    assert response.status_code == 409
+    assert mail.outbox == []
+    assert answer(submit(pending.client, pending.endpoint, pending.data)) == (
+        pending.nothing_pending()
+    )
+
+
+def started(start: Callable[[HttpRequest], None]) -> HttpRequest:
+    request = RequestFactory().post("/")
+    request.session = import_module(settings.SESSION_ENGINE).SessionStore()
+    processes.starting(request, lambda: start(request))
+    return request
+
+
+STARTED_STEPS: dict[str, tuple[bool, bool, bool]] = {
+    "locked": (True, True, True),
+    "never-locked": (True, False, False),
+    "locked-but-gone": (False, True, False),
+}
+
+
+@pytest.mark.parametrize("case", STARTED_STEPS)
+def test_a_started_step_holds_only_for_an_existing_account_its_request_locked(case: str) -> None:
+    exists, locked, held = STARTED_STEPS[case]
+    user_id = account("owner").pk
+    if not exists:
+        User.objects.filter(pk=user_id).delete()
+
+    def start(request: HttpRequest) -> None:
+        if locked:
+            processes.lock_account(user_id)
+        request.session[PASSWORD_RESET_VERIFICATION_SESSION_KEY] = {"user_id": str(user_id)}
+
+    request = started(start)
+
+    assert (PASSWORD_RESET_VERIFICATION_SESSION_KEY in request.session) is held
