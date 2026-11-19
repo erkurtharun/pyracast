@@ -710,6 +710,37 @@ test("generation-only controls rest while the irradiance view loads", async ({
     await expect(page.getByLabel("Data source")).toHaveValue("auto");
 });
 
+test("the outgoing production view's disclosures stay closed while the comparison loads", async ({
+    page,
+}) => {
+    const button = await openPlant(page, "production/");
+    const importer = page.locator("#production-import");
+    // A pointer click at the disclosure's position, as a person makes it.
+    const toggle = async () => {
+        const summary = importer.locator(":scope > summary");
+        await summary.scrollIntoViewIfNeeded();
+        const box = await summary.boundingBox();
+        await page.mouse.click(
+            box!.x + box!.width / 2,
+            box!.y + box!.height / 2,
+        );
+    };
+    await toggle();
+    await expect(importer).toHaveAttribute("open", "");
+    await toggle();
+    await expect(importer).not.toHaveAttribute("open", /.*/);
+    const comparison = await holdNavigation(page, "production");
+    await button("Comparison").click();
+    await comparison.requested;
+    await toggle();
+    await expect(importer).not.toHaveAttribute("open", /.*/);
+    await expect(page.getByLabel("Production CSV")).toBeHidden();
+    await comparison.release();
+    await expect(page).toHaveURL(/\/production\/\?view=comparison$/);
+    await expect(button("Comparison")).toHaveAttribute("aria-current", "page");
+    await expect(importer).toHaveCount(0);
+});
+
 test("Back to the irradiance view does not keep an archived generation source", async ({
     page,
 }) => {
