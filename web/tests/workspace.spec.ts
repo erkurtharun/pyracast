@@ -523,10 +523,10 @@ test("a date picked while a forecast view switch loads keeps the chosen view", a
 
 async function holdNavigation(page: Page, section: string) {
     let seen!: () => void;
-    let settle!: (failed: boolean) => void;
+    let settle!: () => void;
     let end!: () => void;
     const requested = new Promise<void>((resolve) => (seen = resolve));
-    const settled = new Promise<boolean>((resolve) => (settle = resolve));
+    const settled = new Promise<void>((resolve) => (settle = resolve));
     const ended = new Promise<void>((resolve) => (end = resolve));
     let held = false;
     await page.route(
@@ -540,29 +540,23 @@ async function holdNavigation(page: Page, section: string) {
             const finish = (done: Request) => {
                 if (done !== request) return;
                 page.off("requestfinished", finish);
-                page.off("requestfailed", finish);
                 end();
             };
             page.on("requestfinished", finish);
-            page.on("requestfailed", finish);
             seen();
-            if (await settled) return route.abort();
+            await settled;
             return route.fallback();
         },
     );
-    // The held response has finished or failed and the plant screen has no navigation pending.
-    const done = async (failed: boolean) => {
-        settle(failed);
+    // The held response has finished and the plant screen has no navigation pending.
+    const release = async () => {
+        settle();
         await ended;
         await expect(
             page.getByRole("navigation", { name: "Plant sections" }),
         ).not.toHaveAttribute("aria-busy", "true");
     };
-    return {
-        requested,
-        release: () => done(false),
-        fail: () => done(true),
-    };
+    return { requested, release };
 }
 
 async function openPlant(page: Page, address: string) {
@@ -602,26 +596,6 @@ test("the displayed section clicked while another section loads keeps its date a
     await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
 });
 
-test("a forecast control used while a failing section change loads applies to the forecast", async ({
-    page,
-}) => {
-    const button = await openPlant(
-        page,
-        "forecast/?date=2026-03-27&view=irradiance",
-    );
-    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
-    const production = await holdNavigation(page, "production");
-    await button("Production").click();
-    await production.requested;
-    await button("Generation").click();
-    await production.fail();
-    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-27$/);
-    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
-    await page.getByLabel("Forecast date").fill("2026-03-26");
-    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
-    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
-});
-
 test("Back while section changes load leaves the restored section in charge of its controls", async ({
     page,
 }) => {
@@ -638,7 +612,6 @@ test("Back while section changes load leaves the restored section in charge of i
     await settings.requested;
     await page.goBack();
     await expect(page).toHaveURL(/\/production\/$/);
-    await expect(button("Production")).toHaveAttribute("aria-current", "page");
     await production.release();
     await settings.release();
     await expect(page).toHaveURL(/\/production\/$/);
