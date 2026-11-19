@@ -15,6 +15,7 @@ IMAGES = [
     "us-docker.pkg.dev/project/repo/web@sha256:" + "1" * 64,
     "us-docker.pkg.dev/project/repo/gateway@sha256:" + "2" * 64,
     "us-docker.pkg.dev/project/repo/postgres@sha256:" + "3" * 64,
+    "us-docker.pkg.dev/project/repo/rabbitmq@sha256:" + "4" * 64,
 ]
 
 
@@ -204,6 +205,20 @@ def test_main_dispatches_each_subcommand(
         ("run", host.stage, [SHA, *IMAGES]),
         ("follow", host.stage, []),
     ]
+
+
+@pytest.mark.parametrize("command", ["start", "run"])
+def test_main_refuses_a_release_that_does_not_name_every_image(
+    monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    def installed(*_arguments: object) -> int:
+        raise AssertionError("The installer must not start.")
+
+    monkeypatch.setattr(release_unit, command, installed)
+
+    with pytest.raises(SystemExit) as refused:
+        release_unit.main([command, STAGE, SHA, *IMAGES[:4]])
+    assert refused.value.code == 2
 
 
 def test_main_refuses_an_invalid_stage(capsys: pytest.CaptureFixture[str]) -> None:

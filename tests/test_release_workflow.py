@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from deploy import release_authorization, release_unit
+from deploy import ci_images, release_authorization, release_unit
 from tests.support.workflows import (
     WORKFLOWS,
     ci_job_names,
@@ -104,6 +104,34 @@ def test_the_cleanup_removes_every_image_build_of_the_authorizing_run_up_to_the_
     )
 
 
+SCAN = "Scan every image; block every high or critical vulnerability"
+RELEASE_IMAGES = ("backend", "web", "gateway", "postgres", "rabbitmq")
+CONTEXTS = {
+    "backend": (".", "Dockerfile"),
+    "web": ("web", "web/Dockerfile"),
+    "gateway": ("deploy/gateway", None),
+    "postgres": ("deploy/postgres", None),
+    "rabbitmq": ("deploy/rabbitmq", None),
+}
+# The support images run under their immutable identity, which the scan and the smoke share.
+SCANNED = [
+    "POSTGRES_IMAGE=$(docker image inspect pyracast-postgres:ci --format '{{.Id}}')",
+    "RABBITMQ_IMAGE=$(docker image inspect pyracast-rabbitmq:ci --format '{{.Id}}')",
+    '[[ "$POSTGRES_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]',
+    '[[ "$RABBITMQ_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]',
+    "bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "
+    '"$POSTGRES_IMAGE" "$RABBITMQ_IMAGE"',
+]
+HANDED_TO_SMOKE = [
+    'echo "POSTGRES_IMAGE=$POSTGRES_IMAGE" >> "$GITHUB_ENV"',
+    'echo "RABBITMQ_IMAGE=$RABBITMQ_IMAGE" >> "$GITHUB_ENV"',
+]
+
+
+def scanned(job: dict[str, Any]) -> list[str]:
+    return [line for line in step(job, SCAN)["run"].splitlines() if "$GITHUB_ENV" not in line]
+
+
 def test_every_image_is_scanned_before_any_cloud_credential_exists() -> None:
     jobs = release_jobs()
     scan = jobs["scan"]
@@ -117,10 +145,7 @@ def test_every_image_is_scanned_before_any_cloud_credential_exists() -> None:
         < step_index(scan, "deploy/scan-images.sh")
         < scan["steps"].index(current)
     )
-    assert (
-        "bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "
-        '"$POSTGRES_IMAGE"'
-    ) in commands(scan)
+    assert step(scan, SCAN)["run"].splitlines() == SCANNED
     assert current["run"] == (
         'python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA"'
     )
@@ -132,17 +157,53 @@ def test_every_image_is_scanned_before_any_cloud_credential_exists() -> None:
 
 def test_ci_scans_all_five_images_before_merge() -> None:
     deployment = ci_jobs()["deployment"]
-    scan = step(deployment, "Scan every image; block every high or critical vulnerability")
+    scan = step(deployment, SCAN)
+    environment = [line for line in scan["run"].splitlines() if "$GITHUB_ENV" in line]
 
-    assert (
-        "bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "
-        '"$POSTGRES_IMAGE"'
-    ) in scan["run"]
+    assert scanned(deployment) == SCANNED
+    assert environment == HANDED_TO_SMOKE
     assert deployment["steps"].index(scan) < step_index(deployment, "deploy/smoke.sh")
     assert not (ROOT / "deploy" / "scan-support.sh").exists()
 
 
-SCAN = "Scan every image; block every high or critical vulnerability"
+def test_the_compose_smoke_runs_the_five_images_ci_built_and_scanned() -> None:
+    deployment = ci_jobs()["deployment"]
+    smoke = step(deployment, "Exercise the production images and Compose boundary")
+
+    assert smoke["run"] == (
+        "bash deploy/smoke.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "
+        '"$POSTGRES_IMAGE" "$RABBITMQ_IMAGE"'
+    )
+
+
+def test_ci_builds_each_release_image_once_into_the_archive_the_release_reads() -> None:
+    deployment = ci_jobs()["deployment"]
+    builds = {
+        candidate["id"]: candidate["with"]
+        for candidate in deployment["steps"]
+        if str(candidate.get("uses", "")).startswith("docker/build-push-action@")
+    }
+    bind = step(deployment, "Bind the image archives to this exact CI run")
+
+    assert tuple(builds) == RELEASE_IMAGES == ci_images.IMAGES
+    for name, build in builds.items():
+        context, dockerfile = CONTEXTS[name]
+        assert build["context"] == context
+        assert build.get("file") == dockerfile
+        assert build["platforms"] == "linux/amd64"
+        assert build["tags"] == f"pyracast-{name}:ci"
+        assert build["outputs"] == (
+            f"type=oci,dest=${{{{ runner.temp }}}}/release-images/{name}.oci.tar"
+        )
+        assert build["provenance"] == "mode=max"
+        assert build["sbom"] == builds["backend"]["sbom"]
+        assert build["labels"] == "org.opencontainers.image.revision=${{ github.sha }}"
+        assert build["cache-from"] == f"type=gha,scope={name}-linux-amd64,timeout=2m"
+    assert bind["env"] == {
+        f"{name.upper()}_DIGEST": f"${{{{ steps.{name}.outputs.digest }}}}"
+        for name in RELEASE_IMAGES
+    }
+    assert f"for image in {' '.join(RELEASE_IMAGES)}; do" in bind["run"]
 
 
 def triggers(name: str) -> dict[str, Any]:
@@ -175,9 +236,7 @@ def test_the_release_images_are_rescanned_daily_without_cloud_credentials() -> N
     assert "environment" not in job
     assert built == released
     assert all(build["load"] is True for build in image_builds(job))
-    assert step(job, SCAN)["run"] == step(ci_jobs()["deployment"], SCAN)["run"].replace(
-        'echo "POSTGRES_IMAGE=$POSTGRES_IMAGE" >> "$GITHUB_ENV"\n', ""
-    )
+    assert step(job, SCAN)["run"].splitlines() == SCANNED
     assert triggers("release.yml")["workflow_run"]["workflows"] == ["CI"]
     assert document["name"] != "CI"
 
@@ -214,7 +273,10 @@ def test_the_installer_runs_in_a_transient_unit_that_the_job_only_follows() -> N
 
     assert "install-release.sh" not in release_text()
     assert f"stage={stage}" in transfer
-    assert "release_unit.py' start '$stage' '$RELEASE_SHA' '$BACKEND_IMAGE'" in transfer
+    assert (
+        "release_unit.py' start '$stage' '$RELEASE_SHA' '$BACKEND_IMAGE' '$WEB_IMAGE' "
+        "'$GATEWAY_IMAGE' '$POSTGRES_IMAGE' '$RABBITMQ_IMAGE'\""
+    ) in transfer
     assert "release_unit.py' follow '$stage'" in transfer
     assert re.search(r"while \(\( status == 255 && attempt < \d+ \)\)", transfer)
     assert release_unit.CONNECTION_LOST == 255
@@ -222,6 +284,17 @@ def test_the_installer_runs_in_a_transient_unit_that_the_job_only_follows() -> N
     assert 'unit="${stage#/run/}.service"' in transfer
     assert transfer.index("trap cleanup EXIT") < transfer.index("git archive")
     assert transfer.endswith('trap - EXIT\ncleanup\nexit "$status"\n')
+
+
+def test_the_release_records_the_five_digests_it_deployed() -> None:
+    record = step(release_jobs()["deploy"], "Record the deployed digests")
+
+    assert record["run"].splitlines() == [
+        r"printf 'Released %s\n\nBackend: %s\n\nWeb: %s\n\nGateway: %s\n\nPostgreSQL: %s"
+        r"\n\nRabbitMQ: %s\n' "
+        '"$RELEASE_SHA" "$BACKEND_IMAGE" "$WEB_IMAGE" "$GATEWAY_IMAGE" "$POSTGRES_IMAGE" '
+        '"$RABBITMQ_IMAGE" >> "$GITHUB_STEP_SUMMARY"'
+    ]
 
 
 def test_the_migration_secret_version_is_pinned_when_configured_and_numeric() -> None:

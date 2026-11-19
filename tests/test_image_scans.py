@@ -45,6 +45,17 @@ def test_every_deployed_image_is_scanned() -> None:
     assert SERVICES == ("backend", "web", "gateway", "rabbitmq", "postgres")
 
 
+def test_the_scan_reads_each_image_the_release_built_from_the_local_daemon_and_pulls_none() -> None:
+    script = (Path(__file__).resolve().parents[1] / "deploy" / "scan-images.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert f"for service in {' '.join(SERVICES)}; do" in script
+    assert "identity=$(docker image inspect \"$image\" --format '{{.Id}}')" in script
+    assert "docker pull" not in script
+    assert "rabbitmq" not in script.replace(f"for service in {' '.join(SERVICES)}; do", "")
+
+
 def test_complete_clean_reports_have_no_findings(reports: Path) -> None:
     assert check(reports) == []
 
@@ -80,7 +91,7 @@ def test_every_finding_of_every_result_is_reported(reports: Path) -> None:
         ("packages", "package inventory is missing"),
     ],
 )
-@pytest.mark.parametrize("service", ["backend", "gateway"])
+@pytest.mark.parametrize("service", SERVICES)
 def test_mismatched_or_incomplete_scans_are_refused(
     reports: Path, service: str, change: str, message: str
 ) -> None:

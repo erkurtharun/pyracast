@@ -12,11 +12,15 @@ REPOSITORY = "us-docker.pkg.dev/project/repo"
 def images(digit: str, *, web: str | None = None) -> dict[str, str]:
     values = {
         f"{name.upper()}_IMAGE": f"{REPOSITORY}/{name}@sha256:{digit * 64}"
-        for name in ("backend", "web", "gateway", "postgres")
+        for name in ("backend", "web", "gateway", "postgres", "rabbitmq")
     }
     if web is not None:
         values["WEB_IMAGE"] = f"{REPOSITORY}/web@sha256:{web * 64}"
     return values
+
+
+def four_images(digit: str) -> dict[str, str]:
+    return {key: value for key, value in images(digit).items() if key != "RABBITMQ_IMAGE"}
 
 
 class Host:
@@ -85,6 +89,21 @@ def test_prune_keeps_the_serving_and_the_previous_release_with_their_images(host
     assert f"{REPOSITORY}/web@sha256:{'4' * 64}" not in host.removed
     assert not oldest.exists()
     assert not older.exists()
+
+
+def test_prune_removes_a_retired_broker_image_and_keeps_a_four_image_previous_release(
+    host: Host,
+) -> None:
+    host.release("older", images("1"))
+    previous = host.release("previous", four_images("2"))
+    serving = host.release("serving", images("3"))
+    release_state.record(host.state, serving, previous)
+
+    assert host.prune() == []
+
+    assert sorted(path.name for path in host.releases.iterdir()) == ["previous", "serving"]
+    assert sorted(host.removed) == sorted(images("1").values())
+    assert f"{REPOSITORY}/rabbitmq@sha256:{'1' * 64}" in host.removed
 
 
 def test_prune_after_a_first_release_keeps_only_the_serving_release(host: Host) -> None:

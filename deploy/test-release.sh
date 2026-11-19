@@ -10,7 +10,13 @@ mkdir -p /mock-bin /fixture/deploy /etc/pyracast /etc/systemd/system /var/lib/py
 cat >/host.json <<'JSON'
 {"domain":"example.com","acme_email":"ops@example.com","backup_bucket":"pyracast-backups","runtime_secret_version":"1"}
 JSON
+# A modelled Compose file names the variables the real one requires; the docker mock refuses a call
+# whose environment file lacks one. The release before the broker image ran the public broker.
+mapfile -t required < <(grep -o '[$][{][A-Z_]*:[?]' /source/compose.yaml | sed 's/[^A-Z_]//g' | sort -u)
+[[ " ${required[*]} " == *' RABBITMQ_IMAGE '* ]]
 printf 'name: fixture\n' >/fixture/deploy/compose.yaml
+printf '# requires %s\n' "${required[@]}" >>/fixture/deploy/compose.yaml
+grep -v RABBITMQ_IMAGE /fixture/deploy/compose.yaml >/four-image-compose.yaml
 touch /fixture/deploy/runtime_secrets.py /fixture/deploy/bootstrap_database.py
 # The installer records and reads the maintenance session with the release's own helpers; the
 # python3 mock still answers every backup.py call.
@@ -146,6 +152,19 @@ cat >/mock-bin/docker <<'SH'
 #!/bin/bash
 printf 'docker %s\n' "$*" >>/calls
 if [[ $1 == login ]]; then cat >/dev/null; exit 0; fi
+if [[ $1 == compose ]]; then
+  environment= file=
+  for (( index = 2; index < $#; index++ )); do
+    next=$((index + 1))
+    case ${!index} in
+      --env-file) [[ -n $environment ]] || environment=${!next} ;;
+      -f) [[ -n $file ]] || file=${!next} ;;
+    esac
+  done
+  for name in $(sed -n 's/^# requires //p' "$file"); do
+    grep -q "^$name=." "$environment" || { echo "required variable $name is missing a value" >&2; exit 94; }
+  done
+fi
 # A container whose runtime secret the role's password does not match cannot connect.
 connects() { cmp -s /role "$1/runtime.env" || exit 58; }
 if [[ "$*" == *' up -d --no-recreate --wait --wait-timeout 180 postgres' ]]; then
@@ -208,12 +227,15 @@ retired_backend_image=$repository/backend@sha256:5555555555555555555555555555555
 web_image=$repository/web@sha256:2222222222222222222222222222222222222222222222222222222222222222
 gateway_image=$repository/gateway@sha256:3333333333333333333333333333333333333333333333333333333333333333
 postgres_image=$repository/postgres@sha256:1111111111111111111111111111111111111111111111111111111111111111
+rabbitmq_image=$repository/rabbitmq@sha256:6666666666666666666666666666666666666666666666666666666666666666
+retired_rabbitmq_image=$repository/rabbitmq@sha256:7777777777777777777777777777777777777777777777777777777777777777
+public_broker=rabbitmq@sha256:8888888888888888888888888888888888888888888888888888888888888888
 
 release_directory() {
   printf '/opt/pyracast/releases/%s-%s' "$revision" "$(printf '%s\n' "$@" | sha256sum | cut -c1-12)"
 }
-new_release=$(release_directory "$backend_image" "$web_image" "$gateway_image" "$postgres_image")
-previous_build=$(release_directory "$rebuilt_backend_image" "$web_image" "$gateway_image" "$postgres_image")
+new_release=$(release_directory "$backend_image" "$web_image" "$gateway_image" "$postgres_image" "$rabbitmq_image")
+previous_build=$(release_directory "$rebuilt_backend_image" "$web_image" "$gateway_image" "$postgres_image" "$rabbitmq_image")
 
 run_cancelled_release() {
   local stage=/run/pyracast-release-$revision-1-1 follower
@@ -327,7 +349,7 @@ assert marker, 'The marker holds no identity'
 assert session == {'marker': marker, 'object': sys.argv[3], 'release': 'old', 'replaced': True}, session
 PY
 }
-for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready stop-failed switch maintenance-backup migration legacy-migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-replaced maintenance-prepared maintenance-record-invalid record-invalid retry-migration retry-backup cancelled origin-pull origin-pull-open; do
+for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image public-broker live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready stop-failed switch maintenance-backup migration legacy-migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-replaced maintenance-prepared maintenance-record-invalid record-invalid retry-migration retry-backup cancelled origin-pull origin-pull-open; do
   export MODE RUN=1
   cp /host.json /etc/pyracast/host.json
   if [[ $MODE == origin-pull* ]]; then
@@ -357,8 +379,8 @@ PY
   mkdir -p /opt/pyracast/releases/old/deploy /run/pyracast
   if [[ $MODE == prune ]]; then
     mkdir -p /opt/pyracast/releases/older/deploy /run/pyracast/releases/older
-    printf 'BACKEND_IMAGE=%s\nWEB_IMAGE=%s\n' "$retired_backend_image" "$web_image" \
-      >/opt/pyracast/releases/older/deploy/release.env
+    printf 'BACKEND_IMAGE=%s\nWEB_IMAGE=%s\nRABBITMQ_IMAGE=%s\n' "$retired_backend_image" \
+      "$web_image" "$retired_rabbitmq_image" >/opt/pyracast/releases/older/deploy/release.env
   fi
   live=/opt/pyracast/releases/old
   case "$MODE" in
@@ -370,7 +392,16 @@ PY
   export PREVIOUS_SECRETS=/run/pyracast/releases/${live##*/}
   if [[ -n $live ]]; then
     mkdir -p "$live/deploy" "$PREVIOUS_SECRETS"
-    printf 'BACKEND_IMAGE=%s\n' "$rebuilt_backend_image" >"$live/deploy/release.env"
+    printf 'BACKEND_IMAGE=%s\nWEB_IMAGE=%s\nGATEWAY_IMAGE=%s\nPOSTGRES_IMAGE=%s\n' \
+      "$rebuilt_backend_image" "$web_image" "$gateway_image" "$postgres_image" >"$live/deploy/release.env"
+    # The release "old" is the one before the broker image: four images and the public broker.
+    if [[ $live == /opt/pyracast/releases/old ]]; then
+      cp /four-image-compose.yaml "$live/deploy/compose.yaml"
+    else
+      printf 'RABBITMQ_IMAGE=%s\n' "$rabbitmq_image" >>"$live/deploy/release.env"
+      cp /fixture/deploy/compose.yaml "$live/deploy/compose.yaml"
+    fi
+    printf 'SITE_ADDRESS=example.com\nACME_EMAIL=ops@example.com\n' >>"$live/deploy/release.env"
     cp "$live/deploy/release.env" /live-release.env
     touch "$live/deploy/runtime_secrets.py"
     ln -s "$live" /opt/pyracast/current
@@ -392,8 +423,9 @@ PY
     fi
   done
   printf 'host-owned unit\n' >/etc/systemd/system/pyracast.service
-  images=("$backend_image" "$web_image" "$gateway_image" "$postgres_image")
+  images=("$backend_image" "$web_image" "$gateway_image" "$postgres_image" "$rabbitmq_image")
   if [[ $MODE == image ]]; then images[2]=$web_image; fi
+  if [[ $MODE == public-broker ]]; then images[4]=$public_broker; fi
   printf '{"PGUSER":"owner","PGPASSWORD":"password"}\n' >/migration.json
   : >/calls
   if run_release >/result 2>&1; then
@@ -424,9 +456,11 @@ PY
     [[ -f /migration.json ]]
     [[ ! -s /calls ]]
     [[ "$(readlink /opt/pyracast/current)" == /opt/pyracast/releases/old ]]
-  elif [[ $MODE == image ]]; then
+  elif [[ $MODE == image || $MODE == public-broker ]]; then
     [[ "$result" == 2 ]]
-    grep -Fxq 'Invalid gateway image reference; expected an Artifact Registry digest.' /result
+    refused=gateway
+    if [[ $MODE == public-broker ]]; then refused=rabbitmq; fi
+    grep -Fxq "Invalid $refused image reference; expected an Artifact Registry digest." /result
     [[ ! -s /calls ]]
     [[ $(ls /opt/pyracast/releases) == old ]]
   elif [[ $MODE == killed || $MODE == killed-backup ]]; then
@@ -482,6 +516,7 @@ PY
         [[ "$new_release" != "$live" ]]
         [[ ! -e /var/lib/pyracast/release-blocked ]]
         grep -Fxq "POSTGRES_IMAGE=$postgres_image" "$new_release/deploy/release.env"
+        grep -Fxq "RABBITMQ_IMAGE=$rabbitmq_image" "$new_release/deploy/release.env"
         # Nothing the serving release reads changed: its staged files, the role's password, its containers.
         grep -Fxq 'PGUSER=old-runtime' "$PREVIOUS_SECRETS/runtime.env"
         grep -Fxq 'RABBITMQ_DEFAULT_PASS=old-password' "$PREVIOUS_SECRETS/broker.env"
@@ -524,6 +559,14 @@ PY
         [[ "$stopped" -lt "$rendered" ]]
         [[ "$rendered" -lt "$resumed" ]]
         [[ "$(grep -n '^curl ' /calls | tail -n 1 | cut -d: -f1)" -gt "$resumed" ]]
+        # The release before the broker image serves again from its own files, with the public broker,
+        # also after this release's broker started.
+        cmp /live-release.env /opt/pyracast/current/deploy/release.env
+        if grep -q '^RABBITMQ_IMAGE=' /opt/pyracast/current/deploy/release.env; then exit 1; fi
+        if [[ $MODE == record-invalid ]]; then
+          broker=$(grep -n "$new_release/deploy/compose.yaml up -d rabbitmq$" /calls | cut -d: -f1)
+          [[ -n "$broker" && "$broker" -lt "$resumed" ]]
+        fi
         if grep -q 'reset_database.py' /result; then exit 1; fi
         absent ' run --rm --no-deps migrate$'
         absent 'release_state.py'
@@ -664,6 +707,12 @@ PY
         [[ "$(readlink /opt/pyracast/current)" == "$new_release" ]]
         [[ ! -e /var/lib/pyracast/release-blocked ]]
         grep -Fxq "POSTGRES_IMAGE=$postgres_image" "$new_release/deploy/release.env"
+        grep -Fxq "RABBITMQ_IMAGE=$rabbitmq_image" "$new_release/deploy/release.env"
+        # The first five-image release keeps the four-image one it replaced, unchanged, to return to.
+        if [[ $live == /opt/pyracast/releases/old ]]; then
+          cmp /live-release.env "$live/deploy/release.env"
+          if grep -q '^RABBITMQ_IMAGE=' "$live/deploy/release.env"; then exit 1; fi
+        fi
         for name in runtime broker database migration; do
           grep -Fxq "${name^^}_ENV_FILE=$RELEASE_SECRETS/$name.env" "$new_release/deploy/release.env"
         done
@@ -685,7 +734,9 @@ PY
           [[ ! -e /opt/pyracast/releases/older ]]
           [[ ! -e /run/pyracast/releases/older ]]
           grep -Fxq "docker image rm $retired_backend_image" /calls
+          grep -Fxq "docker image rm $retired_rabbitmq_image" /calls
           absent "docker image rm $web_image"
+          absent "docker image rm $rabbitmq_image"
         else
           absent 'docker image rm'
         fi
