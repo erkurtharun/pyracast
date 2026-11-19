@@ -11,6 +11,7 @@ from allauth.usersessions.models import UserSession
 from django.contrib.auth.models import User
 from django.contrib.sessions.models import Session
 from django.core.management import CommandError, call_command
+from django.db.models.signals import pre_delete
 from django.db.models.deletion import Collector
 from django.test import override_settings
 from django.utils import timezone
@@ -310,6 +311,26 @@ def test_a_kept_signup_does_not_hold_back_later_abandoned_ones(
     assert list(User.objects.values_list("pk", flat=True)) == [kept.pk]
 
 
+def test_scanning_past_kept_signups_retains_at_most_one_page_of_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for index in range(3):
+        referenced(signup_account(f"kept-{index}"))
+    monkeypatch.setattr(retention, "BATCH_SIZE", 1)
+    retained: list[int] = []
+    isolate = retention.isolate
+
+    def recording(*args: Any, **kwargs: Any) -> list[Any]:
+        results = isolate(*args, **kwargs)
+        retained.append(len(results))
+        return results
+
+    monkeypatch.setattr(retention, "isolate", recording)
+
+    assert retention.reclaim_abandoned_signups(timezone.now()) == 0
+    assert (sum(retained), max(retained)) == (3, 1)
+
+
 def test_signup_reclaim_removes_a_bounded_batch_per_run(monkeypatch: pytest.MonkeyPatch) -> None:
     for index in range(3):
         signup_account(f"owner-{index}")
@@ -353,14 +374,17 @@ def test_a_failing_region_purge_still_ends_sessions_and_reclaims_signups(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     region = expired_region(monkeypatch, failing=True)
-    session("expired", NOW - timedelta(seconds=1))
+    session("expired", NOW - timedelta(seconds=1), User.objects.create_user(username="signed-in"))
     abandoned = signup_account("abandoned")
+    abandoned_workspace = workspace(abandoned)
 
     dispatch_once(monkeypatch)
 
     assert Region.objects.filter(pk=region.pk).exists()
     assert not Session.objects.exists()
+    assert not UserSession.objects.exists()
     assert not User.objects.filter(pk=abandoned.pk).exists()
+    assert not Tenant.objects.filter(pk=abandoned_workspace.pk).exists()
     assert retention_error() == "items_failed:1"
 
 
@@ -394,27 +418,34 @@ def test_a_failing_signup_reclaim_does_not_stop_the_others_and_is_retried(
     monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
 ) -> None:
     failing = signup_account("failing-owner")
-    signup_account("later-owner")
-    session("expired", timezone.now() - timedelta(seconds=1))
-    original = retention.reclaim_signup
+    failing_workspace = workspace(failing)
+    later_workspace = workspace(signup_account("later-owner"))
+    session("expired", timezone.now() - timedelta(seconds=1), failing)
 
-    def reclaim(user_id: int, cutoff: datetime) -> bool:
-        if user_id == failing.pk:
+    def fail_after_the_workspace_delete(sender: type[User], instance: User, **_: Any) -> None:
+        if instance.pk == failing.pk:
             raise RuntimeError(f"private {failing.email} {failing.username}")
-        return original(user_id, cutoff)
 
-    monkeypatch.setattr(retention, "reclaim_signup", reclaim)
-    dispatch_once(monkeypatch)
+    pre_delete.connect(fail_after_the_workspace_delete, sender=User)
+    try:
+        dispatch_once(monkeypatch)
+    finally:
+        pre_delete.disconnect(fail_after_the_workspace_delete, sender=User)
 
     assert list(User.objects.values_list("pk", flat=True)) == [failing.pk]
+    assert list(Membership.objects.values_list("tenant_id", "user_id")) == [
+        (failing_workspace.pk, failing.pk)
+    ]
+    assert not Tenant.objects.filter(pk=later_workspace.pk).exists()
     assert not Session.objects.exists()
+    assert not UserSession.objects.exists()
     assert retention_error() == "items_failed:1"
     assert f"signup_reclaim_failed item=account:{failing.pk}" in pyracast_logs.text
     assert "private" not in pyracast_logs.text
     assert "failing-owner" not in pyracast_logs.text
 
-    monkeypatch.setattr(retention, "reclaim_signup", original)
     dispatch_once(monkeypatch)
 
     assert not User.objects.exists()
+    assert not Tenant.objects.exists()
     assert retention_error() == ""
