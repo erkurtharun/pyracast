@@ -65,7 +65,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
     clock = Clock(time.time())
     reading = SimpleNamespace(time=clock.read, monotonic=time.monotonic, sleep=time.sleep)
     monkeypatch.setattr(ratelimit, "time", reading)
-    monkeypatch.setattr(login_limits, "time", reading, raising=False)
+    monkeypatch.setattr(login_limits, "time", reading)
     return clock
 
 
@@ -811,18 +811,18 @@ def test_the_last_two_failures_of_a_known_address_at_once_store_one_notice(
     assert lock_notices() == [("member@example.com", "pending")]
 
 
-def test_a_failure_without_a_daily_rate_or_a_full_allowance_announces_nothing(
+def test_a_failure_without_a_reservation_or_a_full_allowance_locks_nothing(
     pyracast_logs: pytest.LogCaptureFixture,
 ) -> None:
-    from pyracast.accounts.login_limits import record_finished_failure
+    from pyracast.accounts.login_limits import finish_failure, locked_on_finished_failures
 
-    announced: list[None] = []
-    record_finished_failure(ratelimit.RateLimitUsage(usage=[]), lambda: announced.append(None))
+    assert finish_failure(ratelimit.RateLimitUsage(usage=[])) is None
     slot = ratelimit.SingleRateLimitUsage(cache_key="daily", cache_duration=86400, timestamp=1.0)
 
-    record_finished_failure(ratelimit.RateLimitUsage(usage=[slot]), lambda: announced.append(None))
+    history = finish_failure(ratelimit.RateLimitUsage(usage=[slot]))
 
-    assert announced == []
+    assert history == "daily"
+    assert not locked_on_finished_failures(history)
     assert pyracast_logs.records == []
 
 

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from django.db import connections, transaction
+from django.utils import timezone
 from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.models import WorkspaceInvitation
@@ -49,11 +50,9 @@ def enqueue_mail(
     )
 
 
-def enqueue_lock_notice(
-    address: str, *, language: str, expires_at: datetime, now: datetime
-) -> None:
-    """Store a daily-lock notice for the attempted address unless it got one in the last 24
-    hours, so a lock always has a notice from its preceding day and no address gets more.
+def enqueue_lock_notice(address: str, *, language: str, lifetime: timedelta) -> None:
+    """Make sure the attempted address has a daily-lock notice from the last 24 hours: one is
+    stored unless it exists, so a lock always has one and no address gets more.
 
     The notice commits on its own, so no rollback of the sign-in separates it from the lock.
     """
@@ -62,6 +61,7 @@ def enqueue_lock_notice(
             cursor.execute(
                 "SELECT pg_advisory_xact_lock(%s, hashtext(%s))", [LOCK_NOTICE_LOCK_SPACE, address]
             )
+        now = timezone.now()
         notices = OutboundMail.objects.using(LOCK_NOTICE_DATABASE)
         if notices.filter(
             kind=OutboundMailKind.LOGIN_LOCKED,
@@ -76,5 +76,5 @@ def enqueue_lock_notice(
             owner_language=True,
             created_at=now,
             available_at=now,
-            expires_at=expires_at,
+            expires_at=now + lifetime,
         )

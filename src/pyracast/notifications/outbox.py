@@ -44,10 +44,14 @@ ANONYMOUS_MAIL_PER_HOUR = 20
 # Two-key advisory lock ("PYOB", 1) that serializes the anonymous budget across workers.
 ANONYMOUS_BUDGET_LOCK = (0x50594F42, 1)
 WAITING = (OutboundMailStatus.PENDING, OutboundMailStatus.RETRY)
+# The mail whose request spent the address's `confirm_email` window: the verification code, or the
+# notice sent instead of it when the address already has an account.
 VERIFICATION_MAIL = (
     OutboundMailKind.EMAIL_CONFIRMATION_SIGNUP,
     OutboundMailKind.EMAIL_CONFIRMATION,
+    OutboundMailKind.ACCOUNT_ALREADY_EXISTS,
 )
+UNDELIVERED = (OutboundMailStatus.FAILED, OutboundMailStatus.UNCERTAIN)
 
 
 @sensitive_variables()
@@ -87,7 +91,7 @@ def publish_due_mail(publish: Callable[[int], object], now: datetime, limit: int
 
 
 def _report(mail: OutboundMail) -> None:
-    if mail.status in (OutboundMailStatus.FAILED, OutboundMailStatus.UNCERTAIN):
+    if mail.status in UNDELIVERED:
         logger.error(
             "outbound_mail_failed mail_id=%s kind=%s status=%s error_code=%s",
             mail.pk,
@@ -106,19 +110,17 @@ def _report(mail: OutboundMail) -> None:
 
 
 def _finish(mail: OutboundMail, status: OutboundMailStatus, error: str, now: datetime) -> None:
+    # An uncertain intent ends again as failed after a late refusal; it released its window once.
+    first_end = mail.status in OPEN_MAIL
     mail.status, mail.last_error, mail.finished_at, mail.sealed_code = status, error, now, ""
     if status != OutboundMailStatus.UNCERTAIN:
         mail.lease_token = mail.lease_expires_at = None
     mail.save()
-    if mail.invitation_id is not None and status in (
-        OutboundMailStatus.SENT,
-        OutboundMailStatus.FAILED,
-        OutboundMailStatus.UNCERTAIN,
-    ):
+    if mail.invitation_id is not None and status in (OutboundMailStatus.SENT, *UNDELIVERED):
         WorkspaceInvitation.objects.filter(pk=mail.invitation_id).update(
             delivery_status=InvitationDeliveryStatus(status)
         )
-    if status == OutboundMailStatus.UNCERTAIN and mail.kind in VERIFICATION_MAIL:
+    if first_end and status in UNDELIVERED and mail.kind in VERIFICATION_MAIL:
         transaction.on_commit(partial(release_code_resend, mail.recipient))
     _report(mail)
 

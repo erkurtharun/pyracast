@@ -139,7 +139,11 @@ share an atomic PostgreSQL JSON/TTL cache; ingress limits and per-user API throt
 expensive endpoints additionally protect capacity.
 Failed sign-ins are limited per address (also per day) and, under a project action
 that no sign-in success or password reset clears, per client IP; a refused account
-answers and counts exactly like a wrong password.
+answers and counts exactly like a wrong password. Only finished failures make the daily
+lock: a check that ends in an error releases its slots and one that never ends stops
+counting after the 90-second request ceiling. Once a failure completes the lock, and at
+every refusal while it holds, the address is sure to have a pause notice from the last
+24 hours.
 
 Google and Microsoft sign-in use backend authorization-code exchanges with PKCE
 and session-bound state. A same-origin continuation page starts provider navigation
@@ -531,8 +535,10 @@ waits for or reveals delivery; a code is kept only sealed with the application k
 erased when the intent ends, and unknown-account and account-exists notices share 20 a
 hour. Every mail is transmitted at most once: an intent interrupted before its transmit
 marker is retried, and one interrupted after it ends `uncertain`, holds no code, is
-reported in health and the console and is never resent. The person then asks for a new
-verification or reset code at once and the administrator sends the invitation again,
+reported in health and the console and is never resent. After a failed or uncertain
+mail the person asks for a new verification or reset code at once, alike whether the
+address has an account (which gets a notice instead of the code), and the administrator
+sends the invitation again,
 while an uncertain notice (the daily sign-in pause included) or reminder slot stays sent
 at most once and the next slot sends normally. Verification and recovery codes expire
 after ten minutes, allow at most three attempts and are bound to the initiating browser

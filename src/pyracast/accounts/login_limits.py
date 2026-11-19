@@ -1,3 +1,4 @@
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -16,6 +17,9 @@ from pyracast.accounts.audit import SecurityEvent, record_security_event
 APP = "allauth.account"
 FAILED_LOGIN = "login_failed"
 FAILED_LOGIN_FROM_CLIENT = "login_failed_ip"
+# The longest a request runs: gunicorn's `timeout` (deploy/gunicorn_conf.py), which the gateway's
+# response header timeout equals. An older reservation belongs to a check that never ended.
+REQUEST_CEILING_SECONDS = 90
 
 
 def reserve(
@@ -46,9 +50,9 @@ def throttled(request: HttpRequest) -> ImmediateHttpResponse:
 
 
 def release_code_resend(address: str) -> None:
-    # A code mail whose delivery is unknown lets the person ask for a new code at once: only the
-    # shortest per-address window is cleared, the longer ones still count the mail that may have
-    # arrived. The rates are per key, so no request is needed.
+    # A mail that spent the window and failed or may not have arrived lets the person ask again at
+    # once: only the shortest per-address window is cleared, the longer ones still count the mail.
+    # The rates are per key, so no request is needed.
     rates = (account_settings.RATE_LIMITS.get("confirm_email") or "").split(",")
     if parts := [part.strip() for part in rates if part.strip()]:
         shortest = min(parts, key=lambda rate: ratelimit.parse_rate(rate).duration)
@@ -65,37 +69,82 @@ def reserve_client_failure(request: HttpRequest) -> ratelimit.RateLimitUsage | N
     return reserve(request, FAILED_LOGIN_FROM_CLIENT)
 
 
-def reserve_address_failure(request: HttpRequest, key: str) -> ratelimit.RateLimitUsage | None:
-    return reserve(request, FAILED_LOGIN, key)
+def _daily_rate() -> ratelimit.Rate | None:
+    rates = ratelimit.parse_rates(account_settings.RATE_LIMITS.get(FAILED_LOGIN))
+    return max(rates, key=lambda rate: rate.duration, default=None)
+
+
+def _history_key(request: HttpRequest, key: str, rate: ratelimit.Rate) -> str:
+    return ratelimit.get_cache_key(request, app=APP, action=FAILED_LOGIN, rate=rate, key=key)
+
+
+def failure_history(request: HttpRequest, key: str) -> str | None:
+    """The cache key of the daily failure history of an attempted address."""
+    rate = _daily_rate()
+    return None if rate is None else _history_key(request, key, rate)
 
 
 def _finished_key(cache_key: str, moment: float) -> str:
     return f"{cache_key}:finished:{moment!r}"
 
 
-def record_finished_failure(usage: ratelimit.RateLimitUsage, announce: Callable[[], None]) -> None:
-    """Calls `announce` when every hit of the daily allowance of an address is a finished
-    failure, so the address is locked.
+def _finished(cache_key: str, moments: list[float]) -> list[bool]:
+    found = cache.get_many([_finished_key(cache_key, moment) for moment in moments])
+    return [_finished_key(cache_key, moment) in found for moment in moments]
 
-    Each finished failure is its own entry, so no lock is contested and every finishing
-    failure of a lock reaches the same decision; `announce` decides whether the lock needs a
-    notice. A check still in flight (its hit already in allauth's history) never completes a
-    lock, and a password reset clears the history, so failures after it form a new lock.
-    """
-    if not usage.usage:
+
+def _forget_unfinished(history_key: str, duration: float) -> None:
+    cutoff = time.time() - REQUEST_CEILING_SECONDS
+
+    def unfinished(history: list[float]) -> set[float]:
+        old = [moment for moment in history if moment < cutoff]
+        if not old:
+            return set()
+        return {
+            moment
+            for moment, done in zip(old, _finished(history_key, old), strict=True)
+            if not done
+        }
+
+    if not unfinished(cache.get(history_key, [])):
         return
-    allowance = max(
-        ratelimit.parse_rates(account_settings.RATE_LIMITS.get(FAILED_LOGIN)),
-        key=lambda rate: rate.duration,
-    ).amount
+    with ratelimit.cache_lock(history_key) as locked:
+        history: list[float] = cache.get(history_key, []) if locked else []
+        if forgotten := unfinished(history):
+            kept = [moment for moment in history if moment not in forgotten]
+            cache.set(history_key, kept, duration)
+
+
+def reserve_address_failure(request: HttpRequest, key: str) -> ratelimit.RateLimitUsage | None:
+    # A reservation is not a failure: one that never finished stops counting toward the lock
+    # once it is older than any request.
+    rate = _daily_rate()
+    if rate is not None:
+        _forget_unfinished(_history_key(request, key, rate), rate.duration)
+    return reserve(request, FAILED_LOGIN, key)
+
+
+def finish_failure(usage: ratelimit.RateLimitUsage) -> str | None:
+    """Records the reserved check as a finished failure and returns its daily history key."""
+    if not usage.usage:
+        return None
     slot = max(usage.usage, key=lambda item: item.cache_duration)
     cache.set(_finished_key(slot.cache_key, slot.timestamp), True, slot.cache_duration)
-    history: list[float] = cache.get(slot.cache_key, [])
-    if len(history) < allowance:
-        return
-    finished = cache.get_many([_finished_key(slot.cache_key, moment) for moment in history])
-    if len(finished) == len(history):
-        announce()
+    return slot.cache_key
+
+
+def locked_on_finished_failures(history_key: str) -> bool:
+    """Whether the finished failures in a daily history fill the allowance of its address.
+
+    Every entry counts, however many share a time; a check still in flight never counts, and a
+    password reset clears the history, so failures after it form a new lock.
+    """
+    rate = _daily_rate()
+    if rate is None:
+        return False
+    since = time.time() - rate.duration
+    history = [moment for moment in cache.get(history_key, []) if moment > since]
+    return len(history) >= rate.amount and sum(_finished(history_key, history)) >= rate.amount
 
 
 def check_second_factor(

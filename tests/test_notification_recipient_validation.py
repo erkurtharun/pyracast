@@ -80,6 +80,7 @@ def test_pending_messages_are_dispatched_before_a_scheduling_failure_is_reported
     actor = MagicMock()
     monkeypatch.setattr(runtime, "enqueue_due", schedule)
     monkeypatch.setattr(runtime, "pending_notification_ids", pending)
+    monkeypatch.setattr(runtime, "publish_outbound_mail", MagicMock(return_value=0))
     monkeypatch.setattr(failures, "close_old_connections", close_connections)
     with pytest.raises(ItemsFailedError) as raised:
         runtime.dispatch_notifications(actor, MagicMock())

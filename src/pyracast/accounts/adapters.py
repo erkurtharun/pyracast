@@ -21,7 +21,9 @@ from pyracast.accounts.account_mail import NOTICES, render_notice
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.language import user_language
 from pyracast.accounts.login_limits import (
-    record_finished_failure,
+    failure_history,
+    finish_failure,
+    locked_on_finished_failures,
     reserve_address_failure,
     reserve_client_failure,
 )
@@ -104,20 +106,33 @@ class AccountAdapter(DefaultAccountAdapter):
     def pre_authenticate(self, request: HttpRequest, **credentials: Any) -> None:
         # Replaces allauth's consume of `login_failed`, which keeps the 10-minute hit when the
         # daily rate refuses; allauth's success path rolls `_login_failed_rl_usage` back.
-        address = credentials.get("email")
-        self._client_failure = reserve_client_failure(request)
-        if self._client_failure is None:
-            record_security_event(SecurityEvent.LOGIN_LOCKED, request=request, address=address)
-            raise self.validation_error("too_many_login_attempts")
+        self._client_failure = self._login_failed_rl_usage = None
         key = self._get_login_attempts_cache_key(request, **credentials)
-        self._login_failed_rl_usage = reserve_address_failure(request, key)
+        self._client_failure = reserve_client_failure(request)
+        if self._client_failure is not None:
+            self._login_failed_rl_usage = reserve_address_failure(request, key)
+            if self._login_failed_rl_usage is None:
+                self._client_failure.rollback()
+                self._client_failure = None
         if self._login_failed_rl_usage is None:
-            self._client_failure.rollback()
+            address = credentials.get("email")
             record_security_event(SecurityEvent.LOGIN_LOCKED, request=request, address=address)
+            history = failure_history(request, key)
+            if history is not None and locked_on_finished_failures(history):
+                self._ensure_lock_notice(credentials)
             raise self.validation_error("too_many_login_attempts")
 
     def authenticate(self, request: HttpRequest, **credentials: Any) -> User | None:
-        user = cast(User | None, super().authenticate(request, **credentials))
+        try:
+            user = cast(User | None, super().authenticate(request, **credentials))
+        except BaseException:
+            # Only an accepted or a wrong attempt is decided; a check that ends otherwise is no
+            # failure, so its reservations are released before the error leaves.
+            for reservation in (self._client_failure, self._login_failed_rl_usage):
+                if reservation is not None:
+                    reservation.rollback()
+            self._client_failure = self._login_failed_rl_usage = None
+            raise
         if user is not None and self._client_failure is not None:
             self._client_failure.rollback()
         return user
@@ -208,13 +223,13 @@ class AccountAdapter(DefaultAccountAdapter):
         )
 
     def authentication_failed(self, request: HttpRequest, **credentials: Any) -> None:
-        address = str(credentials.get("email") or "").strip().lower()
-        usage = self._login_failed_rl_usage if address else None
+        history = finish_failure(self._login_failed_rl_usage or RateLimitUsage(usage=[]))
+        # A finished failure counts toward the lock whatever happens next, so its reservations
+        # are never released.
+        self._client_failure = self._login_failed_rl_usage = None
+        if history is not None and locked_on_finished_failures(history):
+            self._ensure_lock_notice(credentials)
 
-        def announce() -> None:
-            now = timezone.now()
-            enqueue_lock_notice(
-                address, language=mail_language(), expires_at=now + NOTICE_LIFETIME, now=now
-            )
-
-        record_finished_failure(usage or RateLimitUsage(usage=[]), announce)
+    def _ensure_lock_notice(self, credentials: dict[str, Any]) -> None:
+        if address := str(credentials.get("email") or "").strip().lower():
+            enqueue_lock_notice(address, language=mail_language(), lifetime=NOTICE_LIFETIME)
