@@ -505,11 +505,6 @@ sent after it agrees, and otherwise repeats the refused request once; a repeat r
 again goes through the same read and is not sent a third time. A sign-out whose session
 read still shows a signed-in session is sent once more with the current key, and
 reported if the session is still signed in after it.
-The browser's tabs share a random session generation in `localStorage` that names no
-account; a tab writes a fresh one when an answer (sign-in, sign-out, password change) or
-its own session read shows that another session holds. A tab whose confirmed generation
-differs shows no workspace data, sends no request, clears its query cache and reads the
-session again, and drops every answer to a request prepared under another generation.
 Revoke sessions after 12 hours or 30 minutes without requests; polling of a visible
 tab counts as activity, and hidden tabs do not poll. Sessions predating the lifetime markers fail closed. A request
 whose session another session of the account ended while it ran answers 400

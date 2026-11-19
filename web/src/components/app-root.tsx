@@ -1,16 +1,9 @@
 "use client";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { generationKey } from "@/lib/api/generation";
-import { sessionCurrent } from "@/lib/api/lane";
 import { createQueryClient, QueryOwner } from "@/lib/api/query";
-import {
-    checkSession,
-    loadSession,
-    useSessionState,
-} from "@/lib/session-client";
+import { loadSession, useSessionState } from "@/lib/session-client";
 import { Brand } from "./brand";
 import { useLanguageHandoff } from "./language-handoff";
 import { SessionLanguage } from "./session-language";
@@ -18,14 +11,10 @@ import { Notice } from "./ui";
 
 export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
-    const { session, current, failure } = useSessionBootstrap();
+    const { session, failure, retry } = useSessionBootstrap();
     const handoff = useLanguageHandoff(session);
     const user = session?.user?.id;
     useForeignCacheRemoval(client, user);
-    useEffect(() => {
-        // A new session, also of the same account, starts with an empty cache.
-        if (!current) client.clear();
-    }, [client, current]);
     return (
         <QueryClientProvider client={client}>
             <SessionLanguage
@@ -35,16 +24,14 @@ export function AppRoot({ children }: { children: ReactNode }) {
                         : session?.language
                 }
             >
-                {session && current && handoff.status === "ready" ? (
+                {session && handoff.status === "ready" ? (
                     <QueryOwner value={user}>{children}</QueryOwner>
                 ) : (
                     <Bootstrap
                         languageFailed={handoff.status === "failed"}
                         failure={failure}
                         retry={
-                            handoff.status === "failed"
-                                ? handoff.retry
-                                : () => void loadSession().catch(() => {})
+                            handoff.status === "failed" ? handoff.retry : retry
                         }
                     />
                 )}
@@ -88,32 +75,24 @@ function Bootstrap({
     );
 }
 
-// The tab compares the browser's session generation on every navigation, storage change, focus and
-// return to visibility, and at render, so no screen of an earlier session is shown in between.
 function useSessionBootstrap() {
-    const { session, current, failure } = useSessionState();
-    const pathname = usePathname();
-    const search = useSearchParams().toString();
+    const [attempt, setAttempt] = useState(0);
+    const [failure, setFailure] = useState<string>();
+    const { session } = useSessionState();
     useEffect(() => {
-        loadSession().catch(() => {});
-    }, []);
-    useEffect(() => {
-        checkSession();
-    }, [pathname, search]);
-    useEffect(() => {
-        const changed = (event: StorageEvent) => {
-            if (event.key === null || event.key === generationKey)
-                checkSession();
+        let active = true;
+        loadSession().catch((error: Error) => {
+            if (active) setFailure(error.message);
+        });
+        return () => {
+            active = false;
         };
-        window.addEventListener("storage", changed);
-        return () => window.removeEventListener("storage", changed);
-    }, []);
+    }, [attempt]);
     useEffect(() => {
         if (!session) return;
         const refresh = () => {
-            if (document.visibilityState !== "visible") return;
-            checkSession();
-            loadSession().catch(() => {});
+            if (document.visibilityState === "visible")
+                loadSession().catch(() => {});
         };
         window.addEventListener("focus", refresh);
         document.addEventListener("visibilitychange", refresh);
@@ -122,7 +101,14 @@ function useSessionBootstrap() {
             document.removeEventListener("visibilitychange", refresh);
         };
     }, [session]);
-    return { session, current: current && sessionCurrent(), failure };
+    return {
+        session,
+        failure,
+        retry: () => {
+            setFailure(undefined);
+            setAttempt((value) => value + 1);
+        },
+    };
 }
 
 function useForeignCacheRemoval(client: QueryClient, user: number | undefined) {

@@ -1,8 +1,7 @@
 import { ApiError, errorFromResponse } from "./api/errors";
 import {
     exchange,
-    preparation,
-    repeatable,
+    sessionStillHeld,
     type Exchange,
     type Method,
 } from "./api/lane";
@@ -49,12 +48,11 @@ export async function authRequest<TData = AuthData>(
 ): Promise<AuthResult<TData>> {
     const t = browserErrors();
     const request = { method, url: `/api/auth/browser/v1/${path}`, body };
-    const prepared = preparation(request);
-    let answer = await exchange(request, prepared);
+    let answer = await exchange(request);
     // A read carrying a key that a reauthentication replaced meanwhile is answered as signed out;
     // it is repeated once when a session read sent after that answer still shows the session.
-    if (method === "GET" && signedOut(answer) && (await repeatable(prepared)))
-        answer = await exchange(request, prepared);
+    if (method === "GET" && signedOut(answer) && (await sessionStillHeld()))
+        answer = await exchange(request);
     const { status, ok, data } = answer;
     if (!data || typeof data !== "object" || Array.isArray(data))
         throw new ApiError(

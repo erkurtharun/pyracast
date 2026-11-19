@@ -384,16 +384,14 @@ test("a sign-out or another account never shows the previous account's cached pl
     );
 });
 
-test("another account signed in in a second tab hides the first account's data in this tab", async ({
+test("a tab adopts another account signed in in a second tab at its focus read and keeps none of the first account's data", async ({
     page,
     context,
 }) => {
     const other = { ...user, id: 2, email: "other@example.test" };
     let account: "first" | "none" | "second" = "first";
     let readSeen!: () => void;
-    let releaseRead!: () => void;
     const readRequested = new Promise<void>((resolve) => (readSeen = resolve));
-    const readHeld = new Promise<void>((resolve) => (releaseRead = resolve));
     const second = await context.newPage();
     for (const tab of [page, second]) {
         await mockApi(tab);
@@ -407,10 +405,7 @@ test("another account signed in in a second tab hides the first account's data i
         });
         await tab.route("**/api/session/", async (route) => {
             const answered = account;
-            if (tab === page && answered === "second") {
-                readSeen();
-                await readHeld;
-            }
+            if (tab === page && answered === "second") readSeen();
             await route.fulfill({
                 json:
                     answered === "none"
@@ -482,16 +477,9 @@ test("another account signed in in a second tab hides the first account's data i
         second.getByRole("button", { name: /Second account array/ }),
     ).toBeVisible();
     await page.bringToFront();
-    await expect(page.getByRole("button", { name: /East array/ })).toHaveCount(
-        0,
-    );
+    // Headless Chromium fires no focus event for bringToFront.
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await readRequested;
-    await expect(page.getByRole("progressbar")).toBeVisible();
-    await expect(page.getByRole("button", { name: /East array/ })).toHaveCount(
-        0,
-    );
-    await expect(page.getByText(user.email)).toHaveCount(0);
-    releaseRead();
     await expect(
         page.getByRole("button", { name: /Second account array/ }),
     ).toBeVisible();
