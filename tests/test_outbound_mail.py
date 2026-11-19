@@ -341,6 +341,29 @@ def test_an_invitation_whose_mail_ends_uncertain_at_once_can_be_reissued_at_once
     assert deliver_mail() == 1
 
 
+def test_an_invitation_whose_mail_failed_can_be_sent_again_at_once(
+    workspace: tuple[Tenant, User], transport: type[Transport]
+) -> None:
+    tenant, administrator = workspace
+    invite(workspace)
+    transport.send_failure = PermanentlyNotSentError("mailbox refused")
+    assert deliver_mail() == 0
+    transport.send_failure = None
+    assert WorkspaceInvitation.objects.get().delivery_status == "failed"
+    client = Client()
+    client.force_login(administrator)
+
+    response = client.post(
+        f"/api/tenants/{tenant.pk}/invitations/",
+        {"email": "guest@example.com"},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 201
+    assert response.json()["delivery_status"] == "pending"
+    assert deliver_mail() == 1
+
+
 def test_an_intent_that_expires_while_its_row_lock_is_awaited_is_skipped(
     workspace: tuple[Tenant, User], transport: type[Transport], monkeypatch: pytest.MonkeyPatch
 ) -> None:

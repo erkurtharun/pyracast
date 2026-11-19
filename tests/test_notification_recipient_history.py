@@ -170,3 +170,27 @@ def test_an_address_of_two_members_counts_once() -> None:
     assert administrator["deliveries"][0]["recipients"] == ["shared@example.com"]
     NotificationSettings.objects.update(max_recipients=2)
     assert plants_at_recipient_limit(system.tenant.pk) == 0
+
+
+def test_an_address_pinned_to_an_inactive_member_reaches_the_member_holding_it_now() -> None:
+    system, _ = configured()
+    former = member(system, "shared@example.com")
+    schedule = group(system, ["shared@example.com"])
+    assert schedule.recipient_memberships == {
+        "shared@example.com": [Membership.objects.get(user=former).pk]
+    }
+    User.objects.filter(pk=former.pk).update(is_active=False, email="former@example.com")
+    EmailAddress.objects.filter(user=former).delete()
+    holder = User.objects.create(username="holder", email="shared@example.com")
+    Membership.objects.create(tenant=system.tenant, user=holder)
+    EmailAddress.objects.create(
+        user=holder, email="shared@example.com", verified=True, primary=True
+    )
+    assert effective_recipients(schedule) == ["shared@example.com"]
+
+    (delivery_id,) = enqueue_due(SLOT)
+    process_notification(delivery_id, SLOT)
+
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert (delivery.status, delivery.last_error) == ("sent", "")
+    assert mail.outbox[0].bcc == ["shared@example.com"]

@@ -8,6 +8,7 @@ from django.core.management import CommandError, call_command
 from django.db import OperationalError
 
 from pyracast import runtime
+from pyracast.background.failures import ItemsFailedError
 from pyracast.forecasts import scheduler
 from pyracast.forecasts.management.commands import dispatch as command
 from pyracast.forecasts.monitoring import PhaseOutcome
@@ -186,6 +187,25 @@ def test_phase_records_duration_and_published_count(
     assert re.fullmatch(
         r"dispatch_phase_finished phase=collection duration_ms=\d+ published=2 error=", finished[1]
     )
+
+
+def test_the_mail_purge_runs_beside_retention_steps_whose_items_failed(
+    monkeypatch: pytest.MonkeyPatch, isolated_monitoring: MagicMock
+) -> None:
+    mock_runtime(monkeypatch)
+    for name in ("dispatch_notifications", "dispatch_calibrations", "dispatch_epias"):
+        monkeypatch.setattr(command, name, MagicMock(return_value=0))
+    monkeypatch.setattr(command, "dispatch", MagicMock(return_value=PhaseOutcome()))
+    monkeypatch.setattr(command, "purge_expired", MagicMock(side_effect=ItemsFailedError(1)))
+    monkeypatch.setattr(command, "sweep_accounts", MagicMock(side_effect=ItemsFailedError(2)))
+    purge_mail = MagicMock()
+    monkeypatch.setattr(command, "purge_finished_mail", purge_mail)
+
+    with pytest.raises(CommandError, match="retention"):
+        call_command("dispatch")
+
+    purge_mail.assert_called_once()
+    assert recorded_phases(isolated_monitoring)["retention"][:2] == ("items_failed:3", None)
 
 
 @pytest.mark.django_db(transaction=True)
