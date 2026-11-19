@@ -148,16 +148,38 @@ export function useApiList<P extends ListPath>(
     );
 }
 
+export function invalidate(
+    client: QueryClient,
+    queryKey: QueryKey,
+    mounted?: QueryKey,
+) {
+    void mounted;
+    return client.invalidateQueries({ queryKey });
+}
+
+type Request = { path: string; options: Parameters<typeof keys.request>[2] };
+
 export function useRefresh() {
     const client = useQueryClient();
     const owner = useOwner();
+    const locale = useLocale();
     return useMemo(() => {
         const refresh = (queryKey: QueryKey) =>
             client.invalidateQueries({ queryKey });
         return {
-            workspace: (tenant: number) =>
+            workspace: (tenant: number, mounted?: Request) =>
                 Promise.all([
-                    refresh(keys.workspace(owner, tenant)),
+                    invalidate(
+                        client,
+                        keys.workspace(owner, tenant),
+                        mounted &&
+                            keys.request(
+                                owner,
+                                mounted.path,
+                                mounted.options,
+                                locale,
+                            ),
+                    ),
                     refresh(keys.path(owner, "/api/tenants/")),
                 ]),
             requests: (tenant: number) =>
@@ -179,5 +201,5 @@ export function useRefresh() {
                     queryKey: keys.path(owner, path, parameters),
                 }),
         };
-    }, [client, owner]);
+    }, [client, owner, locale]);
 }

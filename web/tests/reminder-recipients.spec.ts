@@ -82,6 +82,66 @@ test("shared reminder recipients and email language survive administrator transf
     expect(saves).toBe(1);
 });
 
+test("a failed reload after saving keeps the saved reminders and the history until a retry loads them", async ({
+    page,
+}) => {
+    await reminderApi(page, [user.email], 5, true);
+    let unavailable = false;
+    await page.route("**/reminders/", (route) => {
+        if (route.request().method() === "PUT") unavailable = true;
+        else if (unavailable)
+            return route.fulfill({
+                status: 503,
+                json: errorBody("busy", "Reminder service is busy."),
+            });
+        return route.fallback();
+    });
+    const read = (status: number) =>
+        page.waitForResponse(
+            (response) =>
+                response.request().method() === "GET" &&
+                response.url().endsWith("/reminders/") &&
+                response.status() === status,
+        );
+    await openReminders(page);
+    await page.getByText("Recent deliveries", { exact: true }).click();
+    const history = page.getByRole("table", {
+        name: "Recent forecast email deliveries",
+    });
+    await expect(history).toBeVisible();
+    await page.getByRole("button", { name: /Add time/ }).click();
+    await page.getByLabel("Delivery time 2", { exact: true }).fill("07:00");
+    const failed = read(503);
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    await failed;
+    const notice = page
+        .getByRole("alert")
+        .filter({ hasText: "Could not refresh" });
+    await expect(notice).toBeVisible();
+    await expect(
+        page.getByLabel("Delivery time 1", { exact: true }),
+    ).toHaveValue("08:00");
+    await expect(
+        page.getByLabel("Delivery time 2", { exact: true }),
+    ).toHaveValue("07:00");
+    await expect(history).toBeVisible();
+
+    unavailable = false;
+    const reloaded = read(200);
+    await notice
+        .getByRole("button", { name: "Try again", exact: true })
+        .click();
+    await reloaded;
+    await expect(notice).toHaveCount(0);
+    await expect(
+        page.getByLabel("Delivery time 1", { exact: true }),
+    ).toHaveValue("07:00");
+    await expect(
+        page.getByLabel("Delivery time 2", { exact: true }),
+    ).toHaveValue("08:00");
+    await expect(history).toBeVisible();
+});
+
 async function openReminders(page: Page) {
     await page.goto("/app/");
     await page

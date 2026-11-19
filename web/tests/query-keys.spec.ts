@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { keys } from "../src/lib/api/keys";
-import { fetchList, pollInterval } from "../src/lib/api/query";
+import { fetchList, invalidate, pollInterval } from "../src/lib/api/query";
 
 const sites = "/api/tenants/{tenant_id}/sites/";
 const forecast =
@@ -122,6 +122,39 @@ test("a poll of a list over several pages waits that many periods", () => {
     expect(pollInterval(30_000, 1)).toBe(30_000);
     expect(pollInterval(30_000, 3)).toBe(90_000);
     expect(pollInterval(false, 3)).toBe(false);
+});
+
+test("a refresh after a change reuses the read a just-mounted page started and still refreshes an idle one", async () => {
+    const client = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: 2_000 } },
+    });
+    const pageOne = keys.request(
+        1,
+        "/api/tenants/{tenant_id}/change-requests/",
+        { path: { tenant_id: 5 }, query: { scope: "pending", page: 1 } },
+        "en",
+    );
+    let reads = 0;
+    client.setQueryData(pageOne, 0, { updatedAt: 0 });
+    const observer = new QueryObserver(client, {
+        queryKey: pageOne,
+        queryFn: async () => {
+            reads++;
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            return reads;
+        },
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    try {
+        await expect.poll(() => reads).toBe(1);
+        await invalidate(client, keys.workspace(1, 5), pageOne);
+        expect(reads).toBe(1);
+        await expect.poll(() => observer.getCurrentResult().data).toBe(1);
+        await invalidate(client, keys.workspace(1, 5), pageOne);
+        expect(reads).toBe(2);
+    } finally {
+        unsubscribe();
+    }
 });
 
 test("a list refuses a next page outside the API or one already read", async () => {

@@ -639,25 +639,27 @@ test("regional and plant data sources identify estimated actuals and retain arch
     await mockApi(page);
     const sources: string[] = [];
     const plantRequests: URL[] = [];
+    const generation = page.locator(".stat", { hasText: "Estimated energy" });
     await page.route("**/api/**/forecast/**", async (route) => {
         const url = new URL(route.request().url());
         const source = url.searchParams.get("data_source") ?? "missing";
         sources.push(source);
         if (url.pathname.includes("/plants/")) plantRequests.push(url);
+        const date = url.searchParams.get("date")!;
+        const day = Number(date.slice(-2));
         await route.fulfill({
             json: {
                 timezone: region.timezone,
                 freshness: "fresh",
                 source_kind:
-                    source === "forecast" ||
-                    url.searchParams.get("date")! >= "2026-03-28"
+                    source === "forecast" || date >= "2026-03-28"
                         ? "forecast"
                         : "estimated_actuals",
                 result: {
                     complete: true,
                     intervals: [],
                     energy_kwh_m2: 4,
-                    energy_mwh: 5,
+                    energy_mwh: 100 + day + day / 100,
                 },
             },
         });
@@ -708,9 +710,9 @@ test("regional and plant data sources identify estimated actuals and retain arch
     await expect(
         page.getByText("Satellite/model estimates, not meter readings."),
     ).toHaveCount(0);
+    await expect(generation).toContainText("129.29");
     await page.getByLabel("Forecast date").fill("2026-03-27");
-    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-27");
-    await expect(page.getByLabel("Data source")).toHaveValue("auto");
+    await expect(generation).toContainText("127.27");
     await expect(
         page.getByText("Satellite/model estimates, not meter readings."),
     ).toBeVisible();

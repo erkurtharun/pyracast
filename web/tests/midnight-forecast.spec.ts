@@ -2,11 +2,13 @@ import { expect, test } from "./support/test";
 import { mockApi, region } from "./support/workspace";
 import type { Page } from "@playwright/test";
 
-async function pollUntil(page: Page, check: () => Promise<void>) {
-    await expect(async () => {
-        await page.clock.runFor(30_000);
-        await check();
-    }).toPass({ timeout: 20_000 });
+// Advances exactly one poll period and waits for the answer of that single poll.
+async function pollOnce(page: Page) {
+    const polled = page.waitForResponse((response) =>
+        response.url().includes("/forecast/?date=2026-11-14"),
+    );
+    await page.clock.runFor(30_000);
+    await polled;
 }
 
 test("automatic forecast survives midnight until historical estimates arrive", async ({
@@ -75,9 +77,11 @@ test("automatic forecast survives midnight until historical estimates arrive", a
     await expect(pending).toHaveCount(0);
     await page.clock.pauseAt(new Date("2026-11-14T20:59:50Z"));
     completedDay = true;
-    await pollUntil(page, async () => {
-        await expect(pending).toBeVisible({ timeout: 500 });
-    });
+    await pollOnce(page);
+    // The query layer hands an answer to the screen on a zero-delay timer, which a paused clock holds;
+    // flowing time releases it but cannot reach the next 30 s poll before the assertion times out.
+    await page.clock.resume();
+    await expect(pending).toBeVisible();
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-14");
     await expect(page.getByLabel("Data source")).toHaveValue("auto");
     await expect(generation).toContainText("237.773");
@@ -95,9 +99,8 @@ test("automatic forecast survives midnight until historical estimates arrive", a
     ).toBeVisible();
 
     historicalEstimatesAvailable = true;
-    await pollUntil(page, async () => {
-        await expect(actualLabel).toBeVisible({ timeout: 500 });
-    });
+    await pollOnce(page);
+    await expect(actualLabel).toBeVisible();
     await expect(pending).toHaveCount(0);
     await expect(generation).toContainText("230");
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-14");
