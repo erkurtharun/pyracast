@@ -4,7 +4,6 @@ import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
 from datetime import timedelta
 from threading import Barrier, BrokenBarrierError, Event
 from types import SimpleNamespace
@@ -34,6 +33,7 @@ from tests.support.auth_lifecycle import (
     AUTH,
     LONGEST_ADDRESS,
     PASSWORD,
+    Clock,
     mailed_code,
     member,
     submit,
@@ -54,24 +54,10 @@ def local_mail() -> Iterator[None]:
         yield
 
 
-@dataclass
-class Clock:
-    now: float
-    # allauth rolls a hit back by its timestamp, so readings are distinct unless a test stops it.
-    step: float = 1e-6
-
-    def advance(self, seconds: float) -> None:
-        self.now += seconds
-
-    def read(self) -> float:
-        self.now += self.step
-        return self.now
-
-
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
     clock = Clock(time.time())
-    reading = SimpleNamespace(time=clock.read, monotonic=time.monotonic, sleep=time.sleep)
+    reading = clock.reading()
     monkeypatch.setattr(ratelimit, "time", reading)
     monkeypatch.setattr(login_limits, "time", reading)
     return clock

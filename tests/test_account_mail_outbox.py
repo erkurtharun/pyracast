@@ -1,4 +1,5 @@
 import re
+import time
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -7,6 +8,7 @@ from typing import Any, ClassVar
 
 import pytest
 from allauth.account.models import EmailAddress
+from allauth.core.internal import ratelimit
 from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
 from django.core.mail.backends.base import BaseEmailBackend
@@ -15,12 +17,14 @@ from django.test import Client, override_settings
 from django.utils import timezone
 from psycopg import sql
 
+from pyracast.accounts.cache import AuthenticationCache
 from pyracast.mail.errors import PermanentlyNotSentError
-from tests.support.auth_lifecycle import LONGEST_ADDRESS, PASSWORD, member, submit
+from tests.support.auth_lifecycle import LONGEST_ADDRESS, PASSWORD, Clock, member, submit
 from tests.support.company_registration import signup
 from tests.support.outbox import after_the_lease, deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+RESEND = "auth/email/verify/resend"
 
 
 class WorkerCrash(BaseException):
@@ -55,6 +59,13 @@ def transport() -> Iterator[type[Transport]]:
         MAILERS={"default": {"BACKEND": "tests.test_account_mail_outbox.Transport"}}
     ):
         yield Transport
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
+    clock = Clock(time.time())
+    monkeypatch.setattr(ratelimit, "time", clock.reading())
+    return clock
 
 
 def visitor(index: int) -> Client:
@@ -161,20 +172,41 @@ def test_an_uncertain_code_mail_holds_no_code_and_a_new_code_is_mailed_at_once(
     )
 
 
-def test_a_verification_code_whose_mail_ends_uncertain_at_once_can_be_asked_again_at_once(
-    transport: type[Transport],
+def end_mails(transport: type[Transport], outcome: str) -> None:
+    """Ends every due intent: `failed` and `uncertain` through the transport, `pending` leaves
+    them waiting, any other outcome lets the worker decide as usual."""
+    if outcome == "pending":
+        return
+    if outcome == "failed":
+        transport.refusal = PermanentlyNotSentError("relay refused the message")
+    elif outcome == "uncertain":
+        transport.failure_after_acceptance = TimeoutError("relay answer lost")
+    deliver_mail()
+    transport.refusal = transport.failure_after_acceptance = None
+
+
+@pytest.mark.parametrize("outcome", ["failed", "uncertain"])
+def test_a_verification_code_whose_mail_failed_or_ended_uncertain_is_asked_again_after_a_minute(
+    transport: type[Transport], clock: Clock, outcome: str
 ) -> None:
+    from pyracast.notifications.models import OutboundMail
+
     client = Client(enforce_csrf_checks=True)
     assert signup(client).status_code == 401
-    transport.failure_after_acceptance = TimeoutError("relay answer lost")
-    assert deliver_mail() == 0
-    transport.failure_after_acceptance = None
-    lost = mailed_code(transport.sent[0])
+    end_mails(transport, outcome)
+    waiting = OutboundMail.objects.filter(status="pending")
 
-    assert submit(client, "auth/email/verify/resend", {}).status_code == 200
+    clock.advance(59)
+    assert submit(client, RESEND, {}).status_code == 429
+    assert not waiting.exists()
+    clock.advance(2)
+    assert submit(client, RESEND, {}).status_code == 200
+    assert list(waiting.values_list("kind", flat=True)) == [
+        "account/email/email_confirmation_signup"
+    ]
     assert deliver_mail() == 1
     code = mailed_code(transport.sent[-1])
-    assert code != lost
+    assert code not in [mailed_code(message) for message in transport.sent[:-1]]
     assert submit(client, "auth/email/verify", {"key": code}).status_code == 200
 
 
@@ -198,40 +230,151 @@ def pending_address_change(index: int, address: str) -> Client:
     return client
 
 
-def end_first_mails(transport: type[Transport], outcome: str) -> None:
-    if outcome == "pending":
-        return
-    if outcome == "failed":
-        transport.refusal = PermanentlyNotSentError("relay refused the message")
-    elif outcome == "uncertain":
-        transport.failure_after_acceptance = TimeoutError("relay answer lost")
-    assert deliver_mail() == (2 if outcome == "sent" else 0)
-    transport.refusal = transport.failure_after_acceptance = None
+def registered(address: str) -> User:
+    user = User.objects.create_user(username="taken", email=address, password=PASSWORD)
+    EmailAddress.objects.create(user=user, email=address, primary=True, verified=True)
+    return user
 
 
-def resend_answer(client: Client) -> tuple[int, Any, dict[str, str | None]]:
-    response = submit(client, "auth/email/verify/resend", {})
-    headers = {name: response.get(name) for name in ("Content-Type", "Retry-After")}
-    return response.status_code, response.json(), headers
+def spend_anonymous_budget() -> None:
+    from pyracast.notifications.outbox import ANONYMOUS_MAIL_PER_HOUR
+
+    for index in range(ANONYMOUS_MAIL_PER_HOUR):
+        assert request_reset(10 + index, f"absent-{index}@example.com").status_code == 401
+    assert deliver_mail() == ANONYMOUS_MAIL_PER_HOUR
 
 
-@pytest.mark.parametrize("outcome", ["sent", "failed", "uncertain", "pending"])
+Answer = tuple[int, Any, dict[str, str | None]]
+
+
+def resend_answers(*clients: Client) -> tuple[Answer, ...]:
+    answers = []
+    for client in clients:
+        response = submit(client, RESEND, {})
+        headers = {name: response.get(name) for name in ("Content-Type", "Retry-After")}
+        answers.append((response.status_code, response.json(), headers))
+    return tuple(answers)
+
+
+@pytest.mark.parametrize("outcome", ["sent", "failed", "uncertain", "pending", "budget-skipped"])
 @pytest.mark.parametrize(
     "start", [pending_signup, pending_address_change], ids=["signup", "address-change"]
 )
 def test_asking_again_for_a_code_answers_alike_for_an_address_with_and_without_an_account(
-    transport: type[Transport], start: Callable[[int, str], Client], outcome: str
+    transport: type[Transport],
+    clock: Clock,
+    start: Callable[[int, str], Client],
+    outcome: str,
 ) -> None:
-    taken = User.objects.create_user(username="taken", email="taken@example.com", password=PASSWORD)
-    EmailAddress.objects.create(user=taken, email=taken.email, primary=True, verified=True)
-    unknown = start(0, "fresh@example.com")
-    known = start(1, taken.email)
-    end_first_mails(transport, outcome)
+    if outcome == "budget-skipped":
+        spend_anonymous_budget()
+    taken = registered("taken@example.com")
+    clients = start(0, "fresh@example.com"), start(1, taken.email)
+    end_mails(transport, outcome)
 
-    answers = resend_answer(unknown), resend_answer(known)
+    answers = []
+    for _ in ("first resend", "second resend"):
+        for seconds in (0, 59, 2):
+            clock.advance(seconds)
+            answers.append(resend_answers(*clients))
+        end_mails(transport, outcome)
+
+    assert [fresh for fresh, _ in answers] == [known for _, known in answers]
+    assert [fresh[0] for fresh, _ in answers] == [429, 429, 200] * 2
+
+
+@pytest.mark.parametrize("first_mail", ["undelivered", "sent"])
+@pytest.mark.parametrize("outcome", ["failed", "uncertain"])
+def test_a_second_resend_after_undelivered_codes_answers_alike_with_and_without_an_account(
+    transport: type[Transport], clock: Clock, outcome: str, first_mail: str
+) -> None:
+    taken = registered("taken@example.com")
+    clients = pending_signup(0, "fresh@example.com"), pending_signup(1, taken.email)
+    end_mails(transport, outcome if first_mail == "undelivered" else "sent")
+    if first_mail == "sent":
+        clock.advance(61)
+
+    first = resend_answers(*clients)
+    end_mails(transport, outcome)
+    second = resend_answers(*clients)
+
+    assert first[0] == first[1]
+    assert second[0] == second[1]
+    assert (first[0][0], second[0][0]) == (200 if first_mail == "sent" else 429, 429)
+
+
+@pytest.mark.parametrize("outcome", ["failed", "uncertain"])
+def test_a_first_resend_after_a_notice_skipped_by_the_anonymous_budget_answers_alike(
+    transport: type[Transport], clock: Clock, outcome: str
+) -> None:
+    from pyracast.notifications.models import OutboundMail
+
+    spend_anonymous_budget()
+    taken = registered("taken@example.com")
+    clients = pending_signup(0, "fresh@example.com"), pending_signup(1, taken.email)
+    end_mails(transport, outcome)
+    ends = OutboundMail.objects.filter(recipient__in=("fresh@example.com", taken.email))
+    assert list(ends.order_by("pk").values_list("kind", "status")) == [
+        ("account/email/email_confirmation_signup", outcome),
+        ("account/email/account_already_exists", "skipped"),
+    ]
+    assert ends.get(recipient=taken.email).last_error == "budget_exhausted"
+
+    answers = resend_answers(*clients)
 
     assert answers[0] == answers[1]
-    assert answers[0][0] == (200 if outcome in ("failed", "uncertain") else 429)
+    assert answers[0][0] == 429
+
+
+def store_writes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Records the key of every write to the store of allauth's rate limits ("*" for a clear)."""
+    writes: list[str] = []
+
+    def recorded(name: str) -> Callable[..., Any]:
+        original = getattr(AuthenticationCache, name)
+
+        def write(store: AuthenticationCache, *args: Any, **kwargs: Any) -> Any:
+            writes.append(str(kwargs.get("key", args[0] if args else "*")))
+            return original(store, *args, **kwargs)
+
+        return write
+
+    for name in ("add", "set", "delete", "clear"):
+        monkeypatch.setattr(AuthenticationCache, name, recorded(name))
+    return writes
+
+
+def test_the_worker_writes_no_resend_window_even_when_a_late_refusal_ends_an_uncertain_code(
+    transport: type[Transport], clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.mail.errors import NotSentError
+    from pyracast.notifications import outbox
+    from pyracast.notifications.models import OutboundMail
+
+    writes = store_writes(monkeypatch)
+    client = Client(enforce_csrf_checks=True)
+    assert signup(client).status_code == 401
+    assert any(":confirm_email:" in key for key in writes)
+    mail_id = OutboundMail.objects.get().pk
+    writes.clear()
+
+    def recovered_then_refused(message: EmailMessage, *, before_send: Any) -> None:
+        assert before_send()
+        # The lease ends while the relay answers and another worker recovers the intent.
+        assert not outbox.send_outbound_mail(mail_id, after_the_lease())
+        assert OutboundMail.objects.get().status == "uncertain"
+        raise NotSentError("relay refused the message")
+
+    with monkeypatch.context() as relay:
+        relay.setattr(outbox, "send", recovered_then_refused)
+        assert not outbox.send_outbound_mail(mail_id, timezone.now())
+
+    assert OutboundMail.objects.get().status == "failed"
+    assert [key for key in writes if key == "*" or ":confirm_email:" in key] == []
+    clock.advance(59)
+    assert submit(client, RESEND, {}).status_code == 429
+    clock.advance(2)
+    assert submit(client, RESEND, {}).status_code == 200
 
 
 def test_a_reset_for_the_longest_accepted_address_answers_alike_and_is_mailed(

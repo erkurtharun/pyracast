@@ -1,6 +1,9 @@
 import base64
 import hmac
 import re
+import time
+from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from allauth.account.models import EmailAddress
@@ -17,6 +20,24 @@ PASSWORD = "test-only-" + "falcon-cloud-79!"
 # The longest address the account inputs accept (Django's `EmailValidator` allows 320 characters);
 # no account holds one, because the account address columns keep 254.
 LONGEST_ADDRESS = "a" * 64 + "@" + ".".join(["b" * 63] * 3 + ["c" * 59, "com"])
+
+
+@dataclass
+class Clock:
+    now: float
+    # allauth rolls a hit back by its timestamp, so readings are distinct unless a test stops it.
+    step: float = 1e-6
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+    def read(self) -> float:
+        self.now += self.step
+        return self.now
+
+    def reading(self) -> SimpleNamespace:
+        """A stand-in for the `time` module of allauth's rate limits."""
+        return SimpleNamespace(time=self.read, monotonic=time.monotonic, sleep=time.sleep)
 
 
 def member() -> User:
