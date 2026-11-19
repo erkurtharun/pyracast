@@ -209,7 +209,7 @@ export function Outages({
                                     },
                                 );
                             setEditor(null);
-                            changed();
+                            void changed();
                         }}
                     />
                     <div className="button-group">
@@ -218,7 +218,7 @@ export function Outages({
                             onClick={() => {
                                 setEditor(null);
                                 setResolving(null);
-                                changed();
+                                void changed();
                             }}
                         >
                             {t("reloadOutages")}
@@ -409,7 +409,7 @@ export function Outages({
                                                 },
                                             );
                                         setResolving(null);
-                                        changed();
+                                        void changed();
                                     }}
                                 >
                                     {!canManage && <ProposalReason />}
@@ -464,7 +464,7 @@ export function Outages({
                                                         },
                                                     },
                                                 );
-                                            changed();
+                                            void changed();
                                         }}
                                     >
                                         {!canManage && <ProposalReason />}
