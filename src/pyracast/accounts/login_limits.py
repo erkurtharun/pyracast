@@ -1,4 +1,7 @@
-from collections.abc import Callable
+import logging
+import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from allauth.account import app_settings as account_settings
@@ -12,6 +15,8 @@ from django.core.exceptions import ValidationError
 from django.http import HttpRequest
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
+
+logger = logging.getLogger(__name__)
 
 APP = "allauth.account"
 FAILED_LOGIN = "login_failed"
@@ -53,33 +58,49 @@ def reserve_address_failure(request: HttpRequest, key: str) -> ratelimit.RateLim
     return reserve(request, FAILED_LOGIN, key)
 
 
-def daily_lock_reached(usage: ratelimit.RateLimitUsage) -> bool:
-    """True once for each daily lock of an address: when this finished failure is the last of
-    the daily allowance and every failure of that allowance came after the last announced one.
+@contextmanager
+def _record_lock(record_key: str) -> Iterator[bool]:
+    # allauth waits one second for its lock; waiting out the lock's own lifetime means a holder
+    # that died never makes a finished failure go unrecorded.
+    deadline = time.monotonic() + ratelimit.CACHE_LOCK_TIMEOUT
+    while True:
+        with ratelimit.cache_lock(record_key) as locked:
+            if locked or time.monotonic() >= deadline:
+                yield locked
+                return
 
-    Only finished failures are recorded here, so a check still in flight (whose reservation
-    allauth's history already holds) never completes a lock. A password reset clears allauth's
-    history, which drops the earlier failures from the count.
+
+def record_finished_failure(usage: ratelimit.RateLimitUsage, announce: Callable[[], None]) -> None:
+    """Runs `announce` once for each daily lock of an address: when this finished failure is the
+    last of the daily allowance and every failure of that allowance came after the last
+    announced one. The lock is recorded as announced only after `announce` returns, so an
+    interruption repeats a notice rather than losing it.
+
+    Only finished failures count, so a check still in flight (whose reservation allauth's
+    history already holds) never completes a lock. A password reset clears allauth's history,
+    which drops the earlier failures from the count.
     """
     if not usage.usage:
-        return False
+        return
     allowance = max(
         ratelimit.parse_rates(account_settings.RATE_LIMITS.get(FAILED_LOGIN)),
         key=lambda rate: rate.duration,
     ).amount
     slot = max(usage.usage, key=lambda item: item.cache_duration)
     record_key = f"{slot.cache_key}:finished"
-    with ratelimit.cache_lock(record_key) as locked:
+    with _record_lock(record_key) as locked:
         if not locked:
-            return False
+            logger.warning("login_failure_unrecorded reason=record_busy")
+            return
         history = set(cache.get(slot.cache_key, []))
         record = cache.get(record_key) or {"failures": [], "announced": 0.0}
         finished = [moment for moment in record["failures"] if moment in history]
         failures = [*finished, slot.timestamp][-allowance:]
         reached = len(failures) == allowance and failures[0] > record["announced"]
+        if reached:
+            announce()
         announced = failures[-1] if reached else record["announced"]
         cache.set(record_key, {"failures": failures, "announced": announced}, slot.cache_duration)
-    return reached
 
 
 def check_second_factor(

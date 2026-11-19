@@ -24,7 +24,8 @@ from pyracast.notifications.recipients import recipient_rows, stored_recipients
 from pyracast.regions.models import Region, RegionStatus, active_region
 
 RECIPIENT_MAX_LENGTH = 254
-MAX_RECIPIENTS_PER_SAVE = 100
+# The largest per-plant recipient limit the console accepts (a smallint column).
+MAX_RECIPIENT_LIMIT = 32767
 CLOCK = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]")
 
 

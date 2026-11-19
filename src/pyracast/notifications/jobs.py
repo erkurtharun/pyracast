@@ -41,7 +41,6 @@ logger = logging.getLogger(__name__)
 
 
 def _skip_reason(delivery: NotificationDelivery, limit: int) -> tuple[str | None, list[str]]:
-    """Why the slot must not be sent now, or the addresses it may still be sent to."""
     schedule = delivery.schedule
     clock = delivery.scheduled_for.astimezone(ZoneInfo(schedule.region.timezone)).strftime("%H:%M")
     if not schedule.enabled or clock not in schedule.times:

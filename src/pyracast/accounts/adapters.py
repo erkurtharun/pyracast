@@ -21,7 +21,7 @@ from pyracast.accounts.account_mail import NOTICES, render_notice
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.language import user_language
 from pyracast.accounts.login_limits import (
-    daily_lock_reached,
+    record_finished_failure,
     reserve_address_failure,
     reserve_client_failure,
 )
@@ -209,8 +209,9 @@ class AccountAdapter(DefaultAccountAdapter):
 
     def authentication_failed(self, request: HttpRequest, **credentials: Any) -> None:
         address = str(credentials.get("email") or "").strip().lower()
-        usage = self._login_failed_rl_usage
-        if address and usage is not None and daily_lock_reached(usage):
+        usage = self._login_failed_rl_usage if address else None
+
+        def announce() -> None:
             now = timezone.now()
             enqueue_mail(
                 OutboundMailKind.LOGIN_LOCKED,
@@ -220,3 +221,5 @@ class AccountAdapter(DefaultAccountAdapter):
                 expires_at=now + NOTICE_LIFETIME,
                 now=now,
             )
+
+        record_finished_failure(usage or RateLimitUsage(usage=[]), announce)

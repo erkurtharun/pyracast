@@ -79,7 +79,8 @@ class ReminderRecipient(models.Model):
     schedule = models.ForeignKey(
         ReminderSchedule, on_delete=models.CASCADE, related_name="recipients"
     )
-    email = models.EmailField()
+    # Unbounded so an invalid saved address stays visible as one; input is validated to 254.
+    email = models.CharField()
     # Set when the address belonged to a workspace member at saving; the row goes with them.
     membership = models.ForeignKey(Membership, on_delete=models.CASCADE, null=True)
 
@@ -229,7 +230,7 @@ class DeliveryRecipient(models.Model):
     delivery = models.ForeignKey(
         NotificationDelivery, on_delete=models.CASCADE, related_name="recipients"
     )
-    email = models.EmailField()
+    email = models.CharField()
     # The membership the address belonged to when the slot was created, kept as history.
     membership_id = models.PositiveBigIntegerField(null=True)
     revoked = models.BooleanField(default=False)

@@ -1,4 +1,5 @@
 import sys
+from collections import defaultdict
 from typing import ClassVar
 
 import django.db.models.deletion
@@ -9,10 +10,13 @@ from django.conf import settings
 from django.db import migrations, models
 from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.migrations.operations.base import Operation
+from psycopg import sql
 
 import pyracast.db
 
-ADDRESS_LENGTH = 254
+BIGINT_MAX = 2**63 - 1
+# A lowered address longer than this cannot enter the unique B-tree index on lower(email).
+INDEXABLE_BYTES = 2000
 
 
 def _rows(
@@ -23,63 +27,110 @@ def _rows(
     return stored._default_manager.using(schema_editor.connection.alias).all()
 
 
+def _addresses(
+    schema_editor: BaseDatabaseSchemaEditor, model: type[models.Model]
+) -> dict[int, list[tuple[str, str, int]]]:
+    """Each list's addresses in order with the database's lower() and its size in bytes, so a
+    repeat is judged exactly as the unique index judges it."""
+    listed: dict[int, list[tuple[str, str, int]]] = defaultdict(list)
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            sql.SQL(
+                "SELECT stored.id, item.address, lower(item.address),"
+                " octet_length(lower(item.address)) FROM {} AS stored"
+                " CROSS JOIN LATERAL jsonb_array_elements_text(stored.recipients)"
+                " WITH ORDINALITY AS item(address, position) ORDER BY stored.id, item.position"
+            ).format(sql.Identifier(model._meta.db_table))
+        )
+        for pk, address, lowered, size in cursor.fetchall():
+            listed[pk].append((address, lowered, size))
+    return listed
+
+
+def _membership(
+    pins: list[object], tenant_id: int, members: dict[int, tuple[int, bool]]
+) -> tuple[int | None, int | None]:
+    """The pin an address keeps: a membership of the plant's workspace with an active user, as
+    any one of them made the address eligible, else one that exists, else the first pin that
+    can be a membership id. Returns (existing membership, kept id)."""
+    ids = [int(pin) for pin in pins if isinstance(pin, int | float) and 1 <= pin <= BIGINT_MAX]
+    active = [pk for pk in ids if members.get(pk) == (tenant_id, True)]
+    existing = [pk for pk in ids if pk in members]
+    return next(iter(active + existing), None), next(iter(active + existing + ids), None)
+
+
 def copy_recipients_to_rows(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
-    """Every stored recipient becomes a row in its list's order. A schedule address keeps the
-    first of its pinned memberships that still exists; one pinned only to removed memberships
-    was never sent to and is not kept, as the membership's cascade would have removed it. A
-    delivery keeps its first pinned id as history and its revocations. Repeated addresses and
-    addresses no writer could store are skipped; every skip is counted and printed."""
-    members = set(_rows(apps, schema_editor, "accounts.Membership").values_list("pk", flat=True))
+    """Every stored address becomes a row in its list's order, invalid ones included, and keeps
+    the eligibility it had. Skipped and counted: a repeat of an address in the same list; a
+    schedule address pinned only to removed memberships (never sent to; the membership's cascade
+    removes such a row); an address too long to index, whose schedule is paused instead of
+    sending without it. A delivery address pinned only to ids no membership can have stays
+    refused as revoked."""
+    members = {
+        pk: (tenant_id, active)
+        for pk, tenant_id, active in _rows(apps, schema_editor, "accounts.Membership").values_list(
+            "pk", "tenant_id", "user__is_active"
+        )
+    }
     schedule_rows = _rows(apps, schema_editor, "notifications.ReminderRecipient")
     delivery_rows = _rows(apps, schema_editor, "notifications.DeliveryRecipient")
-    removed = repeated = oversized = 0
+    removed = repeated = unindexable = 0
+    held: set[int] = set()
     schedules = _rows(apps, schema_editor, "notifications.ReminderSchedule")
-    for pk, addresses, pins in schedules.values_list(
-        "pk", "recipients", "recipient_memberships"
+    listed = _addresses(schema_editor, schedules.model)
+    for pk, pins, tenant_id in schedules.values_list(
+        "pk", "recipient_memberships", "region__tenant_id"
     ).iterator():
         kept: list[models.Model] = []
         seen: set[str] = set()
-        for address in addresses:
+        for address, lowered, size in listed[pk]:
             pinned = pins.get(address.casefold(), [])
-            membership = next((member for member in pinned if member in members), None)
+            membership, _ = _membership(pinned, tenant_id, members)
             if pinned and membership is None:
                 removed += 1
-            elif address.lower() in seen:
+            elif lowered in seen:
                 repeated += 1
-            elif len(address) > ADDRESS_LENGTH:
-                oversized += 1
+            elif size > INDEXABLE_BYTES:
+                unindexable += 1
+                held.add(pk)
             else:
-                seen.add(address.lower())
+                seen.add(lowered)
                 kept.append(
                     schedule_rows.model(schedule_id=pk, email=address, membership_id=membership)
                 )
         schedule_rows.bulk_create(kept)
+    schedules.filter(pk__in=held).update(enabled=False)
     deliveries = _rows(apps, schema_editor, "notifications.NotificationDelivery")
-    for pk, addresses, pins, revoked in deliveries.values_list(
-        "pk", "recipients", "recipient_memberships", "revoked_recipients"
+    listed = _addresses(schema_editor, deliveries.model)
+    for pk, pins, revoked, tenant_id in deliveries.values_list(
+        "pk", "recipient_memberships", "revoked_recipients", "schedule__region__tenant_id"
     ).iterator():
         frozen: list[models.Model] = []
         seen = set()
-        for address in addresses:
-            if address.lower() in seen:
+        for address, lowered, size in listed[pk]:
+            pinned = pins.get(address.casefold(), [])
+            _, membership = _membership(pinned, tenant_id, members)
+            if lowered in seen:
                 repeated += 1
-            elif len(address) > ADDRESS_LENGTH:
-                oversized += 1
+            elif size > INDEXABLE_BYTES:
+                unindexable += 1
             else:
-                seen.add(address.lower())
+                seen.add(lowered)
                 frozen.append(
                     delivery_rows.model(
                         delivery_id=pk,
                         email=address,
-                        membership_id=next(iter(pins.get(address.casefold(), [])), None),
-                        revoked=address.casefold() in revoked,
+                        membership_id=membership,
+                        revoked=address.casefold() in revoked
+                        or bool(pinned and membership is None),
                     )
                 )
         delivery_rows.bulk_create(frozen)
     for count, what in (
         (removed, "reminder recipient(s) pinned only to removed memberships were not kept"),
         (repeated, "repeated recipient address(es) were kept once"),
-        (oversized, "recipient address(es) longer than 254 characters were not kept"),
+        (unindexable, f"recipient address(es) over {INDEXABLE_BYTES} bytes were not kept"),
+        (len(held), "reminder schedule(s) holding such an address were paused"),
     ):
         if count:
             sys.stdout.write(f"\n  notifications: {count} {what}.")
@@ -102,7 +153,7 @@ class Migration(migrations.Migration):
                         auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
                     ),
                 ),
-                ("email", models.EmailField(max_length=254)),
+                ("email", models.CharField()),
                 ("membership_id", models.PositiveBigIntegerField(null=True)),
                 ("revoked", models.BooleanField(default=False)),
             ],
@@ -218,7 +269,7 @@ class Migration(migrations.Migration):
                         auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
                     ),
                 ),
-                ("email", models.EmailField(max_length=254)),
+                ("email", models.CharField()),
             ],
             options={
                 "ordering": ("pk",),

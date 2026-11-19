@@ -919,7 +919,7 @@ erDiagram
 erDiagram
     notifications_deliveryrecipient {
         bigint id PK
-        varchar_254 email
+        varchar email
         bigint membership_id "nullable"
         boolean revoked
         bigint delivery_id FK "references notifications_notificationdelivery.id"
@@ -970,7 +970,7 @@ erDiagram
     }
     notifications_reminderrecipient {
         bigint id PK
-        varchar_254 email
+        varchar email
         bigint membership_id FK "nullable; references accounts_membership.id"
         bigint schedule_id FK "references notifications_reminderschedule.id"
     }

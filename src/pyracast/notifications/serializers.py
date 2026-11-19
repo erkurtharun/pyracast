@@ -9,7 +9,7 @@ from pyracast.notifications.models import (
     PreparedMessageKind,
     ReminderState,
 )
-from pyracast.notifications.operations import MAX_RECIPIENTS_PER_SAVE, RECIPIENT_MAX_LENGTH
+from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT, RECIPIENT_MAX_LENGTH
 from pyracast.notifications.overview import ReminderAddresses, ReminderDelivery, ReminderOverview
 
 
@@ -19,7 +19,7 @@ class ReminderInput(InputSerializer):
     language = serializers.ChoiceField(choices=Language.choices)
     recipients = serializers.ListField(
         child=serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH),
-        max_length=MAX_RECIPIENTS_PER_SAVE,
+        max_length=MAX_RECIPIENT_LIMIT,
     )
     times = serializers.ListField(
         child=serializers.RegexField(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"),

@@ -8669,7 +8669,7 @@
                             "format": "email",
                             "maxLength": 254
                         },
-                        "maxItems": 100
+                        "maxItems": 32767
                     },
                     "times": {
                         "type": "array",

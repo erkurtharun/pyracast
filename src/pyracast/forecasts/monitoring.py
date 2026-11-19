@@ -208,7 +208,8 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
                 filter=Q(
                     status__in=(OutboundMailStatus.PENDING, OutboundMailStatus.RETRY),
                     available_at__lt=cutoff,
-                ),
+                )
+                | Q(status=OutboundMailStatus.SENDING) & expired_leases,
             ),
             failed_outbound_mail=Count(
                 "pk",
