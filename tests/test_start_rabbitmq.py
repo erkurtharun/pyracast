@@ -22,7 +22,7 @@ def windows_broker(
             (destination / "bin").mkdir(parents=True, exist_ok=True)
             (destination / "bin" / "erl.exe").touch()
         else:
-            server = destination / "rabbitmq_server-4.4.0" / "sbin" / "rabbitmq-server.bat"
+            server = destination / "rabbitmq_server-4.4.1" / "sbin" / "rabbitmq-server.bat"
             server.parent.mkdir(parents=True)
             server.touch()
 

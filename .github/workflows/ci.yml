@@ -175,7 +175,7 @@ jobs:
           RABBITMQ_DEFAULT_PASS="$(openssl rand -hex 24)"
           echo "::add-mask::${RABBITMQ_DEFAULT_PASS}"
           export RABBITMQ_DEFAULT_PASS
-          docker run -d --name pyracast-rabbitmq -p 127.0.0.1:5672:5672 -e RABBITMQ_DEFAULT_USER=pyracast -e RABBITMQ_DEFAULT_PASS rabbitmq:4.4.0@sha256:1166559c9e77b0208b9d96bfaf265ddbdd491ce3cebb8cf990aabe9274f16d2c
+          docker run -d --name pyracast-rabbitmq -p 127.0.0.1:5672:5672 -e RABBITMQ_DEFAULT_USER=pyracast -e RABBITMQ_DEFAULT_PASS rabbitmq:4.4.1@sha256:183272aa2ff82718cabeef343de8d9a900931ea65fda4e563fed2a6d9efde578
           for _ in $(seq 1 90); do
             if docker exec --user rabbitmq pyracast-rabbitmq rabbitmq-diagnostics -q check_running; then
               echo 'PYRACAST_LIVE_QUEUE=1' >> "$GITHUB_ENV"

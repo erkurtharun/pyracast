@@ -16,13 +16,13 @@ from scripts.start_postgres import durable_root, require_durable
 ERLANG_URL = "https://github.com/erlang/otp/releases/download/OTP-29.1.2/otp_win64_29.1.2.zip"
 ERLANG_SHA256 = "4efe9772a84c6c1ef75377e9326815584958776c905f2bf687b62509e2d809c0"
 RABBITMQ_URL = (
-    "https://github.com/rabbitmq/rabbitmq-server/releases/download/v4.4.0/"
-    "rabbitmq-server-windows-4.4.0.zip"
+    "https://github.com/rabbitmq/rabbitmq-server/releases/download/v4.4.1/"
+    "rabbitmq-server-windows-4.4.1.zip"
 )
-RABBITMQ_SHA256 = "c077a084890e57e1498e479913d4d5bda77e88647e153b433e97f72a31431542"
+RABBITMQ_SHA256 = "510769c9e0c82e8a86eeb3979d4fcebc3668f332e5dc0cca955b301a2e84fab4"
 PORT = 5672
 QUEUE_URL = f"amqp://guest:guest@127.0.0.1:{PORT}/%2F"
-SERVER = Path("rabbitmq_server-4.4.0") / "sbin" / "rabbitmq-server.bat"
+SERVER = Path("rabbitmq_server-4.4.1") / "sbin" / "rabbitmq-server.bat"
 
 
 def download_and_extract(url: str, digest: str, archive: Path, destination: Path) -> None:
