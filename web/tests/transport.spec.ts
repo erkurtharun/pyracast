@@ -477,6 +477,54 @@ test("a sign-out answered for a key another tab replaced signs out the replacing
     ]);
 });
 
+test("an account read answered as signed out is repeated once the session read shows the session", async () => {
+    answer(
+        () => json(signedIn("token")),
+        signedOutAnswer,
+        () => json(signedIn("rotated")),
+        () => json({ status: 200, data: [] }),
+    );
+    await loadSession();
+    const result = await authRequest("account/authenticators", "GET");
+    expect(result).toEqual({ status: 200, data: [] });
+    expect(sessionState()).toMatchObject({
+        ended: false,
+        session: { csrf_token: "rotated" },
+    });
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+        "GET /api/session/",
+        "GET /api/auth/browser/v1/account/authenticators",
+        "GET /api/session/",
+        "GET /api/auth/browser/v1/account/authenticators",
+    ]);
+});
+
+test("an account read answered as signed out is not repeated when the session read agrees", async () => {
+    answer(
+        () => json(signedIn("token")),
+        signedOutAnswer,
+        () => json({ ...signedIn("anonymous"), user: null, expires_at: null }),
+    );
+    await loadSession();
+    const result = await authRequest("account/authenticators", "GET");
+    expect(result.status).toBe(401);
+    expect(sessionState()).toMatchObject({
+        ended: true,
+        session: { user: null },
+    });
+    expect(calls).toHaveLength(3);
+});
+
+test("an account change answered as signed out is not repeated", async () => {
+    answer(() => json(signedIn("token")), signedOutAnswer);
+    await loadSession();
+    const result = await authRequest("account/authenticators/totp", "POST", {
+        code: "123456",
+    });
+    expect(result.status).toBe(401);
+    expect(calls).toHaveLength(2);
+});
+
 test("a sign-out that still finds a signed-in session after repeating it is reported", async () => {
     adoptSession(signedIn("token"));
     answer(

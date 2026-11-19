@@ -256,6 +256,40 @@ test("cancelling setup clears the provisioning key without enabling MFA", async 
     expect(state.activations).toEqual([]);
 });
 
+test("an authenticator read answered as signed out while the session stays signed in keeps the setup control", async ({
+    page,
+}) => {
+    const state = await mockTwoFactor(page);
+    // Account reads carry the key a reauthentication replaced until a session read follows a refusal.
+    const reads: string[] = [];
+    await page.route("**/api/session/", (route) => {
+        if (reads.includes("refused")) reads.push("session");
+        return route.fallback();
+    });
+    await page.route(`**${authenticatorsPath}`, (route) => {
+        if (reads.includes("session")) {
+            reads.push("answered");
+            return route.fallback();
+        }
+        reads.push("refused");
+        return route.fulfill({
+            status: 401,
+            json: { status: 401, meta: { is_authenticated: false } },
+        });
+    });
+    await openSettings(page);
+    const setup = page.getByRole("button", { name: "Set up authenticator" });
+    await expect(setup).toBeVisible();
+    await expect(twoFactorPanel(page).getByRole("alert")).toHaveCount(0);
+    expect(reads[0]).toBe("refused");
+    expect(reads).toContain("answered");
+    expect(reads.indexOf("session")).toBeLessThan(reads.indexOf("answered"));
+    await setup.click();
+    await page.getByText("Can't scan? Use setup key", { exact: true }).click();
+    await expect(page.getByText(secret, { exact: true })).toBeVisible();
+    expect(state.setupRequests).toBe(1);
+});
+
 test("activation prevents duplicate submissions while the server is responding", async ({
     page,
 }) => {
