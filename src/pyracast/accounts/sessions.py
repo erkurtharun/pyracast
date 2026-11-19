@@ -21,6 +21,7 @@ from django.dispatch import Signal
 from django.http import HttpRequest
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
+from pyracast.accounts.processes import stamp_reauthentication
 
 # Seconds between two writes of a session's activity marker and its device record.
 ACTIVITY_REFRESH_SECONDS = 60
@@ -137,6 +138,7 @@ def _rotate_after_reauthentication(
         return
     key = request.session.session_key
     with transaction.atomic():
+        stamp_reauthentication(request, user)
         _hold_account(user.pk)
         if not Session.objects.filter(session_key=key).exists():
             raise SessionInterrupted("Another session of the account ended this one.")

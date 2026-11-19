@@ -133,7 +133,7 @@ def test_a_retained_proof_by_a_weaker_factor_ends_and_the_step_up_asks_for_the_s
 ) -> None:
     user, _secret = holder(kind)
     client = signed_in(user)
-    with_proof(client, user, factor, age=0, reauthenticated=True)
+    with_proof(client, user, factor, age=0, reauthenticated=True, retained=True)
     before = stored(user)
 
     response = call(client, *ACTIONS[action])
@@ -166,7 +166,7 @@ def test_a_password_proof_ends_when_the_account_gains_an_authenticator(now: floa
 def test_a_connection_needs_a_proof_by_the_strongest_factor() -> None:
     user, _secret = holder("authenticator")
     client = signed_in(user)
-    with_proof(client, user, "password", age=0, reauthenticated=True)
+    with_proof(client, user, "password", age=0, reauthenticated=True, retained=True)
     token = client.get("/api/session/").json()["csrf_token"]
 
     response = client.post(

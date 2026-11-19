@@ -186,14 +186,14 @@ def test_change_code_for_an_address_verified_out_of_band_answers_like_no_pending
     user = member()
     client, code = change_pending(user)
     EmailAddress.objects.create(user=user, email="new@example.com", verified=True)
-    methods = client.get(AUTH + "auth/session").json()["data"]["methods"]
+    methods = signed_in_records(client)
     expected = answer(submit(signed_in(user), "auth/email/verify", {"key": code}))
 
     response = submit(client, "auth/email/verify", {"key": code})
 
     assert answer(response) == expected
     assert mail.outbox == []
-    assert client.get(AUTH + "auth/session").json()["data"]["methods"] == methods
+    assert signed_in_records(client) == methods
     assert EmailAddress.objects.get(user=user, primary=True).email == "member@example.com"
 
 
@@ -305,6 +305,13 @@ def before_property(
     monkeypatch.setattr(owner, name, property(run_competitor_first))
 
 
+def signed_in_records(client: Client) -> list[dict[str, Any]]:
+    # The session's authentication records without the reauthentication flag, which ends when the
+    # account's credential state changes; the records themselves stay with the sign-in.
+    records = client.get(AUTH + "auth/session").json()["data"]["methods"]
+    return [{k: v for k, v in record.items() if k != "reauthenticated"} for record in records]
+
+
 def test_signup_code_answers_like_nothing_pending_when_verified_before_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -325,7 +332,7 @@ def test_change_code_answers_like_nothing_pending_when_verified_before_completio
 ) -> None:
     user = member()
     client, code = change_pending(user)
-    methods = client.get(AUTH + "auth/session").json()["data"]["methods"]
+    methods = signed_in_records(client)
     expected = answer(submit(signed_in(user), "auth/email/verify", {"key": code}))
     after(monkeypatch, VerifyEmailInput, "clean_key", verified_change_address(user))
 
@@ -333,7 +340,7 @@ def test_change_code_answers_like_nothing_pending_when_verified_before_completio
 
     assert answer(response) == expected
     assert mail.outbox == []
-    assert client.get(AUTH + "auth/session").json()["data"]["methods"] == methods
+    assert signed_in_records(client) == methods
     assert EmailAddress.objects.get(user=user, email="new@example.com").verified
     assert EmailAddress.objects.get(user=user, primary=True).email == "member@example.com"
 
@@ -359,7 +366,7 @@ def test_change_resend_mails_nothing_when_verified_before_the_code_is_sent(
 ) -> None:
     user = member()
     client, _ = change_pending(user)
-    methods = client.get(AUTH + "auth/session").json()["data"]["methods"]
+    methods = signed_in_records(client)
     one_minute_later(monkeypatch)
     expected = answer(submit(signed_in(user), "auth/email/verify/resend", {}))
     before_property(
@@ -370,7 +377,7 @@ def test_change_resend_mails_nothing_when_verified_before_the_code_is_sent(
 
     assert answer(response) == expected
     assert mail.outbox == []
-    assert client.get(AUTH + "auth/session").json()["data"]["methods"] == methods
+    assert signed_in_records(client) == methods
     assert EmailAddress.objects.get(user=user, email="new@example.com").verified
 
 

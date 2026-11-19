@@ -247,11 +247,23 @@ def test_social_link_and_unlink_require_reauthentication_and_emit_audit(
     listed = client.get(AUTH + "account/providers").json()["data"]
     assert listed[0]["uid"] == account.uid
     assert listed[0]["provider"]["id"] == "google"
+    removal = {"provider": "google", "account": account.uid}
+    token = client.get("/api/session/").json()["csrf_token"]
+    # The connection changed the account's credential state, which ends the reauthentication.
+    stale = client.delete(
+        AUTH + "account/providers",
+        removal,
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=token,
+    )
+    assert stale.status_code == 401
+    assert SocialAccount.objects.filter(pk=account.pk).exists()
+    assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     token = client.get("/api/session/").json()["csrf_token"]
     with caplog.at_level("INFO", logger="pyracast.security"):
         removed = client.delete(
             AUTH + "account/providers",
-            {"provider": "google", "account": account.uid},
+            removal,
             content_type="application/json",
             HTTP_X_CSRFTOKEN=token,
         )
@@ -630,17 +642,18 @@ def test_concurrent_sessions_cannot_disconnect_both_passwordless_login_methods()
         SocialAccount.objects.create(user=user, provider=provider, uid=f"{provider}-identity")
         for provider in PROVIDERS
     ]
+    # The account has no password; its sessions reauthenticate with a mailed code.
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
     clients = [Client(enforce_csrf_checks=True), Client(enforce_csrf_checks=True)]
     tokens = []
     for client in clients:
-        assert (
-            submit(client, "auth/login", {"email": user.email, "password": PASSWORD}).status_code
-            == 200
-        )
-        assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+        client.force_login(user)
+        request = {"email": user.email}
+        assert submit(client, "auth/reauthenticate/code/request", request).status_code == 200
+        confirmation = {"code": mailed_code()}
+        assert submit(client, "auth/reauthenticate/code/confirm", confirmation).status_code == 200
         tokens.append(client.get("/api/session/").json()["csrf_token"])
-    user.set_unusable_password()
-    user.save(update_fields=["password"])
     barrier = Barrier(2)
 
     def disconnect(index: int) -> int:
@@ -661,12 +674,6 @@ def test_concurrent_sessions_cannot_disconnect_both_passwordless_login_methods()
         finally:
             connections.close_all()
 
-    # Password changes expire sessions; retain their recorded authenticated identity
-    # while testing only simultaneous removal of independent provider credentials.
-    for client in clients:
-        session = client.session
-        session["_auth_user_hash"] = user.get_session_auth_hash()
-        session.save()
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(disconnect, index) for index in range(2)]
         statuses = sorted(future.result(timeout=20) for future in futures)

@@ -1,13 +1,17 @@
 import json
+import math
+import time
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
+from allauth.account import app_settings as account_settings
 from allauth.account.internal.flows.email_verification_by_code import (
     EMAIL_VERIFICATION_CODE_SESSION_KEY,
     EmailVerificationProcess,
 )
+from allauth.account.internal.flows.login import get_authentication_records
 from allauth.account.internal.flows.password_reset_by_code import (
     PASSWORD_RESET_VERIFICATION_SESSION_KEY,
 )
@@ -21,16 +25,18 @@ from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.headless.base.views import APIView
 from allauth.mfa.models import Authenticator
 from allauth.socialaccount.models import SocialAccount
+from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.utils.crypto import salted_hmac
 from django.utils.http import base36_to_int
 
-from pyracast.accounts.security import end_weaker_reauthentication
-
 PROVIDER_SIGNUP_SESSION_KEY = "socialaccount_sociallogin"
 STAMP = "pyracast_authority"
+# The stamp of the session's reauthentications; allauth returns its authentication records to the
+# client, so the stamp is kept beside them.
+PROOF_STAMP = "pyracast_reauthentication_authority"
 # Authenticator data allauth rewrites when a recovery code is used or the codes are shown; each
 # code is checked against the current row when it is entered.
 USE_MARKERS = frozenset({"used_mask", "viewed_at"})
@@ -255,6 +261,53 @@ class StartingView(APIView):
         return starting(request, lambda: super(StartingView, self).handle(request, *args, **kwargs))
 
 
+def _proofs(request: HttpRequest, user: AbstractBaseUser) -> list[dict[str, Any]]:
+    # The reauthentications allauth's gates can still accept: flagged and inside the window.
+    now = time.time()
+    return [
+        record
+        for record in get_authentication_records(request, user)
+        if record.get("reauthenticated")
+        and isinstance(at := record.get("at"), int | float)
+        and math.isfinite(at)
+        and now - at < account_settings.REAUTHENTICATION_TIMEOUT
+    ]
+
+
+def _end(request: HttpRequest, proofs: list[dict[str, Any]]) -> None:
+    # allauth's gates read only the flag; the records stay, so the session keeps its sign-in.
+    for record in proofs:
+        record["reauthenticated"] = False
+    request.session.modified = True
+
+
+def stamp_reauthentication(request: HttpRequest, user: AbstractBaseUser) -> None:
+    # Runs as a reauthentication is recorded, in the transaction that rotates the session key: the
+    # state is read under the account's locks, and a factor changed since the check has already
+    # ended the session. Earlier reauthentications given under another state end.
+    state = account_state(user.pk, lock=True)
+    proofs = _proofs(request, user)
+    if state is None:
+        _end(request, proofs)
+        request.session.pop(PROOF_STAMP, None)
+        return
+    if request.session.get(PROOF_STAMP) != [user.pk, state]:
+        given = get_authentication_records(request, user)[-1]
+        _end(request, [proof for proof in proofs if proof is not given])
+    request.session[PROOF_STAMP] = [user.pk, state]
+
+
+def end_stale_reauthentication(request: HttpRequest) -> None:
+    # A reauthentication holds while the account's credential state equals the one it was given
+    # under; any change of that state ends it.
+    user = request.user
+    if not user.is_authenticated or not (proofs := _proofs(request, user)):
+        return
+    if request.session.get(PROOF_STAMP) != [user.pk, account_state(user.pk)]:
+        _end(request, proofs)
+        request.session.pop(PROOF_STAMP, None)
+
+
 class PendingProcessAuthority:
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
@@ -262,5 +315,5 @@ class PendingProcessAuthority:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         if request.session.session_key is not None:
             discard_stale(request)
-            end_weaker_reauthentication(request)
+            end_stale_reauthentication(request)
         return self.get_response(request)

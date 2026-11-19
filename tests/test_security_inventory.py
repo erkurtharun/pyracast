@@ -30,6 +30,7 @@ from tests.support.social_accounts import (
     complete,
     serve_provider_profile,
 )
+from tests.support.step_up import with_proof
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -255,13 +256,14 @@ def unreadable_authenticator(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 def unreadable_recovery_codes(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    client, user, secret = authenticated_account(privileged=False)
+    client, user, _secret = authenticated_account(privileged=False)
     RecoveryCodes.activate(user)
-    code = totp_code(secret, fixed_totp_clock(monkeypatch))
-    assert submit(client, "auth/2fa/reauthenticate", {"code": code}).status_code == 200
     Authenticator.objects.filter(user=user, type=Authenticator.Type.RECOVERY_CODES).update(
         data={"seed": "mfa:v1:unreadable", "used_mask": 0}
     )
+    # Rewriting the codes changes the credential state, so the step-up proof follows it.
+    factor = Authenticator.objects.get(user=user, type=Authenticator.Type.TOTP)
+    with_proof(client, user, "mfa", age=0, reauthenticated=True, type=factor.type, id=factor.pk)
     refused = client.get(AUTH + "account/authenticators/recovery-codes")
     assert refused.status_code == 403
     assert refused.json()["code"] == "permission_denied"

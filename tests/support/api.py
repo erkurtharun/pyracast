@@ -3,6 +3,8 @@ from allauth.mfa.models import Authenticator
 from django.contrib.auth.models import User
 from django.test import Client, RequestFactory
 
+from tests.support.step_up import stamped
+
 
 def verified_admin(
     *, enforce_csrf_checks: bool = False, confirmed: bool = True
@@ -17,5 +19,6 @@ def verified_admin(
     record_authentication(request, user, method="mfa", type="totp", id=authenticator.pk)
     if confirmed:
         get_authentication_records(request, user)[-1]["reauthenticated"] = True
+        stamped(request, user)
     request.session.save()
     return client, user

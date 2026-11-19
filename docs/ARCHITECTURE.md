@@ -152,8 +152,8 @@ Only Google-authoritative Gmail or verified Workspace addresses satisfy mailbox
 verification; other addresses use Pyracast's email verification.
 Connections require an authenticated session and recent reauthentication. A
 reauthentication uses the strongest factor the account holds: its authenticator, else its
-password, else a code sent to its verified email; it ends when the account gains a
-stronger factor. Linking is
+password, else a code sent to its verified email; it ends when the account's credential
+state changes. Linking is
 bound to the initiating user, and disconnects lock the user record to preserve a
 working login method. Provider sign-in retains Pyracast's local MFA requirements.
 
@@ -516,14 +516,17 @@ responses are private and non-cacheable. The frontend reads stored results and
 never handles provider credentials. A fixed public HTTPS origin determines
 security-email navigation. Verification and recovery codes expire after ten minutes,
 allow at most three attempts and are bound to the initiating browser session. A
-pending code or sign-in step rests on the credential state of its account (password,
+pending code or sign-in step, and a reauthentication kept in the session (a console
+confirmation included), rests on the credential state of its account (password,
 active flag, addresses, provider identities, authenticators) as read under lock where
-the request identified the account; any change of that state ends every pending step
-of the account, a state equal again counts as the same, ending sessions by hand ends
+the request identified the account or recorded the reauthentication; any change of that
+state ends every pending step and reauthentication of the account, the operator commands'
+changes included, a state equal again counts as the same, ending sessions by hand ends
 none, and a step without an account (a provider sign-up, the new address of a change)
-is guarded by the unique constraints when it completes. Starting or completing a step
-and reclaiming an abandoned sign-up lock the account's addresses, provider identities
-and account row, in that order, before its authenticators or workspaces. Real
+is guarded by the unique constraints when it completes. Starting or completing a step,
+recording a reauthentication, an operator command on an account and reclaiming an
+abandoned sign-up lock the account's addresses, provider identities and account row, in
+that order, before its authenticators or workspaces. Real
 mail delivery through the Gmail API or SMTP is a production requirement, separate
 from mocked mail validation. Gmail uses only `gmail.send` with OAuth credentials
 for the configured sender; credentials remain deployment secrets.

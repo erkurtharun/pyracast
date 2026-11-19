@@ -19,6 +19,7 @@ from pyracast.accounts import step_up
 from pyracast.accounts.security import has_mfa_evidence
 from tests.support.admin_mfa_bootstrap import TEST_PASSWORD
 from tests.support.admin_recovery_security import AUTH, RECOVERY, authenticated_account, submit
+from tests.support.step_up import stamped
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
 
@@ -222,6 +223,7 @@ def test_recovery_access_and_factor_removal_serialize_across_sessions(
         request.session = client.session
         record_authentication(request, user, method="mfa", type="totp", id=factor.pk)
         get_authentication_records(request, user)[-1]["reauthenticated"] = True
+        stamped(request, user)
         request.session.save()
     token = removal_client.get("/api/session/").json()["csrf_token"]
     verified, release, removal_finished = Event(), Event(), Event()

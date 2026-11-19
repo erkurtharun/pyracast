@@ -9,8 +9,11 @@ from allauth.account.internal.flows.login import (
 from allauth.account.models import EmailAddress
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.contrib.auth.models import User
+from django.db import transaction
+from django.http import HttpRequest
 from django.test import Client, RequestFactory
 
+from pyracast.accounts.processes import stamp_reauthentication
 from tests.support.auth_lifecycle import PASSWORD
 
 STRONGEST = {
@@ -57,10 +60,24 @@ def call(client: Client, method: str, path: str, data: dict[str, Any] | None = N
     )
 
 
+def stamped(request: HttpRequest, user: User) -> None:
+    # The product stamps a reauthentication with the account's credential state as it records it.
+    with transaction.atomic():
+        stamp_reauthentication(request, user)
+
+
 def with_proof(
-    client: Client, user: User, method: str, *, age: float, reauthenticated: bool, **extra: Any
+    client: Client,
+    user: User,
+    method: str,
+    *,
+    age: float,
+    reauthenticated: bool,
+    retained: bool = False,
+    **extra: Any,
 ) -> None:
     # The flag is set after recording, so the signal does not rotate the test client's session key.
+    # A retained proof was recorded before proofs carried the account's credential state.
     request = RequestFactory().get("/")
     request.user = user
     request.session = client.session
@@ -69,6 +86,8 @@ def with_proof(
     record["at"] = time.time() - age
     if reauthenticated:
         record["reauthenticated"] = True
+        if not retained:
+            stamped(request, user)
     request.session.save()
 
 

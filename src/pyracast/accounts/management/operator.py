@@ -8,7 +8,9 @@ from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.core.validators import validate_email
 from django.db import connection
-from django.db.models import Q
+from django.db.models import Q, QuerySet
+
+from pyracast.accounts.processes import lock_account
 
 INVALID_ADDRESS = "Enter a valid email address."
 SHARED_ADDRESS = "The address belongs to more than one account. Resolve that first."
@@ -52,7 +54,16 @@ class OperatorCommand(BaseCommand):
         if lock:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT pg_advisory_xact_lock(%s)", [OPERATOR_LOCK])
-            holders = holders.select_for_update()
+        account = self._only(holders)
+        if lock and account is not None:
+            # The account's rows are locked in the account lock order and the holder is read
+            # again under the locks; callers compare it with the account they started with.
+            lock_account(account.pk)
+            account = self._only(holders.all())
+        return account
+
+    @staticmethod
+    def _only(holders: QuerySet[User]) -> User | None:
         accounts = list(holders)
         if len(accounts) > 1:
             raise CommandError(SHARED_ADDRESS)

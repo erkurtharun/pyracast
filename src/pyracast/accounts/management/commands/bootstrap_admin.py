@@ -27,6 +27,29 @@ PASSWORDS_DIFFER = "The two passwords differ. Nothing was stored."
 POLICY_REFUSED = "The password does not meet the password policy. Nothing was stored."
 WRONG_CODE = "The code does not match the new authenticator. Nothing was stored."
 CHANGED = "The account changed while the command ran. Nothing was stored; run it again."
+UNUSABLE = (
+    "The administrator could not sign in with this address: it must be verified or the "
+    "account's only, primary address. Nothing was changed."
+)
+
+
+def signs_in_with(account: User, address: str) -> bool:
+    # The sign-in rule (authentication.holders) after `store`: an address identifies the account
+    # that holds it verified, else the account whose only address row it is, when primary.
+    # `store` adds a missing row unverified, primary only when the account has no primary row;
+    # `account_using` has already refused an address that another account uses.
+    rows = [
+        (email.lower(), verified, primary)
+        for email, verified, primary in EmailAddress.objects.filter(user=account).values_list(
+            "email", "verified", "primary"
+        )
+    ]
+    given = [row for row in rows if row[0] == address]
+    if any(verified for _email, verified, _primary in given):
+        return True
+    if not given:
+        rows.append((address, False, not any(primary for _email, _verified, primary in rows)))
+    return len(rows) == 1 and rows[0][0] == address and rows[0][2]
 
 
 class Command(OperatorCommand):
@@ -86,6 +109,8 @@ class Command(OperatorCommand):
             raise CommandError(CUSTOMER)
         if Authenticator.objects.filter(user=account).exists():
             raise CommandError(ENROLLED)
+        if not signs_in_with(account, address):
+            raise CommandError(UNUSABLE)
         return account
 
     def new_password(self, user: User) -> str:
