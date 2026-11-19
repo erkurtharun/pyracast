@@ -1,5 +1,5 @@
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Barrier
@@ -15,6 +15,7 @@ from django.test import Client, override_settings
 from django.utils import timezone
 from psycopg import sql
 
+from pyracast.mail.errors import PermanentlyNotSentError
 from tests.support.auth_lifecycle import PASSWORD, member, submit
 from tests.support.company_registration import signup
 from tests.support.outbox import after_the_lease, deliver_mail
@@ -28,11 +29,14 @@ class WorkerCrash(BaseException):
 
 class Transport(BaseEmailBackend):
     sent: ClassVar[list[EmailMessage]] = []
+    refusal: ClassVar[Exception | None] = None
     crash_after_acceptance: ClassVar[bool] = False
     failure_after_acceptance: ClassVar[Exception | None] = None
 
     def send_messages(self, email_messages: Sequence[EmailMessage] | None) -> int:
         assert email_messages is not None
+        if self.refusal is not None:
+            raise self.refusal
         self.sent.extend(email_messages)
         if self.crash_after_acceptance:
             raise WorkerCrash
@@ -44,6 +48,7 @@ class Transport(BaseEmailBackend):
 @pytest.fixture(autouse=True)
 def transport() -> Iterator[type[Transport]]:
     Transport.sent = []
+    Transport.refusal = None
     Transport.crash_after_acceptance = False
     Transport.failure_after_acceptance = None
     with override_settings(
@@ -171,6 +176,62 @@ def test_a_verification_code_whose_mail_ends_uncertain_at_once_can_be_asked_agai
     code = mailed_code(transport.sent[-1])
     assert code != lost
     assert submit(client, "auth/email/verify", {"key": code}).status_code == 200
+
+
+def pending_signup(index: int, address: str) -> Client:
+    client = visitor(index)
+    details = {"company_name": f"Company {index}", "email": address}
+    assert signup(client, details).status_code == 401
+    return client
+
+
+def pending_address_change(index: int, address: str) -> Client:
+    user = User.objects.create_user(
+        username=f"changer-{index}", email=f"changer-{index}@example.com", password=PASSWORD
+    )
+    EmailAddress.objects.create(user=user, email=user.email, primary=True, verified=True)
+    client = visitor(index)
+    credentials = {"email": user.email, "password": PASSWORD}
+    assert submit(client, "auth/login", credentials).status_code == 200
+    assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+    assert submit(client, "account/email", {"email": address}).status_code == 200
+    return client
+
+
+def end_first_mails(transport: type[Transport], outcome: str) -> None:
+    if outcome == "pending":
+        return
+    if outcome == "failed":
+        transport.refusal = PermanentlyNotSentError("relay refused the message")
+    elif outcome == "uncertain":
+        transport.failure_after_acceptance = TimeoutError("relay answer lost")
+    assert deliver_mail() == (2 if outcome == "sent" else 0)
+    transport.refusal = transport.failure_after_acceptance = None
+
+
+def resend_answer(client: Client) -> tuple[int, Any, dict[str, str | None]]:
+    response = submit(client, "auth/email/verify/resend", {})
+    headers = {name: response.get(name) for name in ("Content-Type", "Retry-After")}
+    return response.status_code, response.json(), headers
+
+
+@pytest.mark.parametrize("outcome", ["sent", "failed", "uncertain", "pending"])
+@pytest.mark.parametrize(
+    "start", [pending_signup, pending_address_change], ids=["signup", "address-change"]
+)
+def test_asking_again_for_a_code_answers_alike_for_an_address_with_and_without_an_account(
+    transport: type[Transport], start: Callable[[int, str], Client], outcome: str
+) -> None:
+    taken = User.objects.create_user(username="taken", email="taken@example.com", password=PASSWORD)
+    EmailAddress.objects.create(user=taken, email=taken.email, primary=True, verified=True)
+    unknown = start(0, "fresh@example.com")
+    known = start(1, taken.email)
+    end_first_mails(transport, outcome)
+
+    answers = resend_answer(unknown), resend_answer(known)
+
+    assert answers[0] == answers[1]
+    assert answers[0][0] == (200 if outcome in ("failed", "uncertain") else 429)
 
 
 def test_a_late_refusal_never_reopens_an_intent_recovered_as_uncertain(

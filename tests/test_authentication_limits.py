@@ -3,7 +3,7 @@ import logging
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import timedelta
 from threading import Barrier, BrokenBarrierError, Event
@@ -21,11 +21,12 @@ from django.contrib.auth.models import User
 from django.core import mail
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db import close_old_connections, connections
+from django.db import OperationalError, close_old_connections, connections, transaction
 from django.http import HttpRequest
-from django.test import Client, override_settings
+from django.test import Client, RequestFactory, override_settings
 from django.utils import timezone
 
+from pyracast.accounts import adapters, login_limits
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.audit import logger as security_logger
 from pyracast.accounts.models import UserLanguagePreference
@@ -48,24 +49,23 @@ def local_mail() -> Iterator[None]:
 @dataclass
 class Clock:
     now: float
+    # allauth rolls a hit back by its timestamp, so readings are distinct unless a test stops it.
+    step: float = 1e-6
 
     def advance(self, seconds: float) -> None:
         self.now += seconds
 
     def read(self) -> float:
-        # allauth rolls a hit back by its timestamp, so every reading must be distinct.
-        self.now += 1e-6
+        self.now += self.step
         return self.now
 
 
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
     clock = Clock(time.time())
-    monkeypatch.setattr(
-        ratelimit,
-        "time",
-        SimpleNamespace(time=clock.read, monotonic=time.monotonic, sleep=time.sleep),
-    )
+    reading = SimpleNamespace(time=clock.read, monotonic=time.monotonic, sleep=time.sleep)
+    monkeypatch.setattr(ratelimit, "time", reading)
+    monkeypatch.setattr(login_limits, "time", reading, raising=False)
     return clock
 
 
@@ -160,16 +160,18 @@ def hold_password_checks(
     monkeypatch.setattr(User, "check_password", held)
 
 
-def hold_correct_password(monkeypatch: pytest.MonkeyPatch) -> tuple[Event, Event]:
-    # A sign-in with the correct password signals `held` once its slots are reserved and goes on
-    # to its check only once `release` is set; the check runs under the account's locks, which
-    # the attempts beside it would wait for.
+def hold_correct_password(
+    monkeypatch: pytest.MonkeyPatch, password: str = PASSWORD
+) -> tuple[Event, Event]:
+    # A sign-in with `password` signals `held` once its slots are reserved and goes on to its
+    # check only once `release` is set; the check runs under the account's locks, which the
+    # attempts beside it would wait for.
     held, release = Event(), Event()
     pre_authenticate = AccountAdapter.pre_authenticate
 
     def reserved(adapter: AccountAdapter, request: HttpRequest, **credentials: Any) -> None:
         pre_authenticate(adapter, request, **credentials)
-        if credentials.get("password") == PASSWORD:
+        if credentials.get("password") == password:
             held.set()
             release.wait(timeout=10)
 
@@ -889,7 +891,6 @@ def advisory_waiters(space: int, expected: int) -> int:
 def test_two_failures_that_finish_a_lock_at_once_store_one_notice(
     clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from pyracast.accounts import login_limits
     from pyracast.notifications.intents import LOCK_NOTICE_LOCK_SPACE
 
     address = "absent@example.com"
@@ -929,3 +930,189 @@ def test_two_failures_that_finish_a_lock_at_once_store_one_notice(
     assert waiting == 2
     assert results == [["email_password_mismatch"]] * 2
     assert lock_notices() == [(address, "pending")]
+
+
+@contextmanager
+def account_row_held_past_the_lock_timeout(user: User) -> Iterator[None]:
+    # Another connection holds the account row, and the requests of the test client, which run
+    # on this connection, wait for it only briefly, so a sign-in ends in a lock timeout.
+    held, release = Event(), Event()
+
+    def hold() -> bool:
+        try:
+            with transaction.atomic():
+                User.objects.select_for_update().get(pk=user.pk)
+                held.set()
+                return release.wait(timeout=10)
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        holder = executor.submit(hold)
+        assert held.wait(timeout=10)
+        with connections["default"].cursor() as cursor:
+            cursor.execute("SET lock_timeout = '100ms'")
+        try:
+            yield
+        finally:
+            with connections["default"].cursor() as cursor:
+                cursor.execute("RESET lock_timeout")
+            release.set()
+            assert holder.result(timeout=10)
+
+
+def errored_sign_in(client: Client, user: User) -> None:
+    with account_row_held_past_the_lock_timeout(user), pytest.raises(OperationalError):
+        login(client, user.email, WRONG)
+
+
+def test_a_sign_in_that_errors_on_its_hundredth_try_leaves_no_lock_and_no_orphan(
+    clock: Clock,
+) -> None:
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    fail_daily(client, user.email, 99, clock)
+
+    errored_sign_in(client, user)
+
+    assert login(Client(enforce_csrf_checks=True), user.email, PASSWORD).status_code == 200
+    assert lock_notices() == []
+    assert error_codes(login(client, user.email, WRONG)) == ["email_password_mismatch"]
+    assert error_codes(login(client, user.email, PASSWORD)) == ["too_many_login_attempts"]
+    assert lock_notices() == [("member@example.com", "pending")]
+
+
+def test_ninety_nine_failures_after_an_errored_sign_in_do_not_lock(clock: Clock) -> None:
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    errored_sign_in(client, user)
+    clock.advance(601)
+
+    fail_daily(client, user.email, 99, clock)
+
+    assert login(client, user.email, PASSWORD).status_code == 200
+    assert lock_notices() == []
+
+
+def reserve_without_finishing(email: str) -> None:
+    # The process of a sign-in dies once its slots are reserved: nothing finishes or releases them.
+    request = RequestFactory().post("/")
+    AccountAdapter(request).pre_authenticate(request, email=email, password=WRONG)
+
+
+@pytest.mark.parametrize(("past_the_ceiling", "status"), [(-0.001, 400), (0.001, 200)])
+def test_a_reservation_that_never_finished_stops_counting_once_older_than_any_request(
+    clock: Clock, past_the_ceiling: float, status: int
+) -> None:
+    from pyracast.accounts.login_limits import REQUEST_CEILING_SECONDS
+
+    user = member()
+    fail_daily(Client(enforce_csrf_checks=True), user.email, 99, clock)
+    reserve_without_finishing(user.email)
+    clock.advance(REQUEST_CEILING_SECONDS + past_the_ceiling)
+
+    response = login(Client(enforce_csrf_checks=True), user.email, PASSWORD)
+
+    assert response.status_code == status
+    assert lock_notices() == []
+
+
+def test_a_lock_whose_notice_was_not_stored_gets_it_at_the_next_refusal(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.notifications.intents import enqueue_lock_notice as store
+
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    fail_daily(client, user.email, 99, clock)
+
+    def unavailable(*args: Any, **kwargs: Any) -> None:
+        raise OperationalError("notice store unavailable")
+
+    monkeypatch.setattr(adapters, "enqueue_lock_notice", unavailable)
+    with pytest.raises(OperationalError):
+        login(client, user.email, WRONG)
+    monkeypatch.setattr(adapters, "enqueue_lock_notice", store)
+    assert lock_notices() == []
+
+    assert error_codes(login(client, user.email, PASSWORD)) == ["too_many_login_attempts"]
+    assert lock_notices() == [("member@example.com", "pending")]
+
+
+def test_two_failures_recorded_at_one_time_count_as_two_and_lock_with_one_notice(
+    clock: Clock,
+) -> None:
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    fail_daily(client, user.email, 98, clock)
+    clock.step = 0.0
+    fail_daily(client, user.email, 2, clock)
+    clock.step = 1e-6
+
+    assert error_codes(login(client, user.email, PASSWORD)) == ["too_many_login_attempts"]
+    assert lock_notices() == [("member@example.com", "pending")]
+
+
+def test_a_failure_in_flight_beside_a_refusal_announces_the_lock_once_it_finishes(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = member()
+    fail_daily(Client(enforce_csrf_checks=True), user.email, 99, clock)
+    held, release = hold_correct_password(monkeypatch, WRONG)
+
+    def beside_the_held_check() -> tuple[list[str], list[tuple[str, str]]]:
+        assert held.wait(timeout=10)
+        try:
+            refusal = error_codes(login(Client(enforce_csrf_checks=True), user.email, WRONG))
+            return refusal, lock_notices()
+        finally:
+            release.set()
+
+    failure, beside = in_parallel(
+        [
+            lambda: error_codes(login(Client(enforce_csrf_checks=True), user.email, WRONG)),
+            beside_the_held_check,
+        ]
+    )
+
+    assert failure == ["email_password_mismatch"]
+    assert beside == (["too_many_login_attempts"], [])
+    assert lock_notices() == [("member@example.com", "pending")]
+
+
+def test_a_lock_notice_is_stamped_once_its_address_lock_is_granted(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.notifications.intents import LOCK_NOTICE_LOCK_SPACE
+    from pyracast.notifications.models import OutboundMail
+
+    asked = timezone.now()
+    moment = [asked]
+    monkeypatch.setattr(timezone, "now", lambda: moment[0])
+    address = "absent@example.com"
+    fail_daily(Client(enforce_csrf_checks=True), address, 99, clock)
+
+    def failed_login() -> list[str]:
+        close_old_connections()
+        try:
+            return error_codes(login(Client(enforce_csrf_checks=True), address, WRONG))
+        finally:
+            connections.close_all()
+
+    lock: tuple[int, str] = (LOCK_NOTICE_LOCK_SPACE, address)
+    with connections["default"].cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", lock)
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                failure = executor.submit(failed_login)
+                waiting = advisory_waiters(LOCK_NOTICE_LOCK_SPACE, 1)
+                moment[0] = asked + timedelta(seconds=4)
+                cursor.execute("SELECT pg_advisory_unlock(%s, hashtext(%s))", lock)
+                result = failure.result(timeout=30)
+        finally:
+            cursor.execute("SELECT pg_advisory_unlock_all()")
+
+    assert (waiting, result) == (1, ["email_password_mismatch"])
+    notice = OutboundMail.objects.get(kind="account/email/login_locked")
+    granted = asked + timedelta(seconds=4)
+    assert (notice.created_at, notice.expires_at) == (granted, granted + timedelta(hours=24))

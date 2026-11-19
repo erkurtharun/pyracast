@@ -379,6 +379,14 @@ def test_gateway_timeout_covers_gunicorn_and_grace_periods_fit_service_limits() 
     )
 
 
+def test_an_unfinished_sign_in_reservation_counts_as_long_as_the_longest_request() -> None:
+    from pyracast.accounts.login_limits import REQUEST_CEILING_SECONDS
+
+    gunicorn = runpy.run_path(str(DEPLOY / "gunicorn_conf.py"))
+
+    assert gunicorn["timeout"] == REQUEST_CEILING_SECONDS
+
+
 def body_limit(router: str) -> int:
     (limit,) = [
         middleware(name)["buffering"]["maxRequestBodyBytes"]
