@@ -61,7 +61,7 @@ test("available historical model days appear without empty grid rows", async ({
     await expect(
         comparison.getByRole("combobox", { name: /^Comparison/ }),
     ).toHaveValue("historical_model");
-    expect(query).toContain("comparison=historical_model");
+    await expect.poll(() => query).toContain("comparison=historical_model");
     await expect(comparison.getByLabel("Previous-day cutoff")).toHaveCount(0);
     await expect(comparison.getByRole("row")).toHaveCount(9);
     await expect(
