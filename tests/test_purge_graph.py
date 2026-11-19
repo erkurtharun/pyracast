@@ -130,7 +130,13 @@ def _purged_references() -> dict[tuple[str, str], str]:
 
 def _deleted_by_name() -> set[str]:
     names: set[str] = set()
-    for node in ast.walk(ast.parse(inspect.getsource(trash))):
+    module = ast.parse(inspect.getsource(trash))
+    callers = [
+        node
+        for node in module.body
+        if isinstance(node, ast.FunctionDef) and node.name not in DELETERS
+    ]
+    for node in (inner for caller in callers for inner in ast.walk(caller)):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id not in DELETERS:
                 continue

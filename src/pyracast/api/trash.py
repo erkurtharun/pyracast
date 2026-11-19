@@ -44,7 +44,7 @@ class TrashedRegionsView(GenericAPIView[Region]):
     def get_queryset(self) -> QuerySet[Region]:
         return (
             Region.objects.trashed()
-            .filter(tenant_id=self.kwargs["tenant_id"])
+            .filter(tenant_id=self.kwargs["tenant_id"], purge_started_at__isnull=True)
             .order_by("deleted_at", "id")
         )
 

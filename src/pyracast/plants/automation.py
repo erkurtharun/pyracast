@@ -17,6 +17,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.calibration_data import current_source_validation
 from pyracast.plants.events import record_plant_event
 from pyracast.plants.models import (
+    CalibrationActivation,
     CalibrationAssessment,
     CalibrationRun,
     CalibrationStatus,
@@ -287,14 +288,42 @@ def promote_automatic_calibration(plant: Plant, run: CalibrationRun, now: dateti
     return True
 
 
-def retry_failed_promotion(plant_id: int, now: datetime) -> None:
-    """Promote again a candidate whose promotion raised; the caller holds the plant lock."""
+def _undecided_candidate(plant: Plant) -> CalibrationRun | None:
+    """The latest run of the current configuration while it is ready and its promotion is
+    undecided: neither activated nor skipped for a reason. A promotion that raised decides
+    nothing."""
+    run = (
+        CalibrationRun.objects.filter(plant=plant, configuration_id=plant.current_configuration_id)
+        .order_by("-created_at", "-pk")
+        .first()
+    )
+    if run is None or run.status != CalibrationStatus.READY:
+        return None
+    decided = (
+        CalibrationActivation.objects.filter(calibration=run).exists()
+        or PlantEvent.objects.filter(
+            plant=plant,
+            details__calibration_id=run.pk,
+            action__in=(
+                PlantEventAction.CALIBRATION_AUTOMATIC_SKIPPED,
+                PlantEventAction.CALIBRATION_AUTOMATICALLY_ACTIVATED,
+            ),
+        )
+        .exclude(
+            action=PlantEventAction.CALIBRATION_AUTOMATIC_SKIPPED,
+            details__reason="promotion_failed",
+        )
+        .exists()
+    )
+    return None if decided else run
+
+
+def promote_undecided_candidate(plant_id: int, now: datetime) -> None:
+    """Promote a ready candidate whose promotion is undecided; the caller holds the plant lock."""
     plant = Plant.objects.select_related("region").get(pk=plant_id)
-    last = _last_attempt(plant) if plant.automatic_calibration_enabled else None
-    if last is None or last.details.get("reason") != "promotion_failed":
-        return
-    run = CalibrationRun.objects.get(pk=last.details["calibration_id"], plant=plant)
-    promote_automatic_calibration(plant, run, now)
+    run = _undecided_candidate(plant) if plant.automatic_calibration_enabled else None
+    if run is not None:
+        promote_automatic_calibration(plant, run, now)
 
 
 def prepare_due_calibrations(now: datetime, limit: int = 100) -> list[int]:

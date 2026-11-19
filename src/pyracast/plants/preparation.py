@@ -243,7 +243,7 @@ def _prepare_each(plant_ids: list[int], now: datetime | None) -> list[Calibratio
 
 
 def _prepare_requested(plant_id: int, now: datetime | None) -> CalibrationRun | None:
-    from pyracast.plants.automation import retry_failed_promotion
+    from pyracast.plants.automation import promote_undecided_candidate
 
     moment = now or timezone.now()
     with transaction.atomic():
@@ -268,7 +268,7 @@ def _prepare_requested(plant_id: int, now: datetime | None) -> CalibrationRun | 
             return None
         run = prepare_calibration(plant_id, now)
         if run is None:
-            retry_failed_promotion(plant_id, moment)
+            promote_undecided_candidate(plant_id, moment)
         Plant.objects.filter(pk=plant_id).update(calibration_preparation_due_at=None)
         return run
 

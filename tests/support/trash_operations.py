@@ -95,7 +95,7 @@ def revised_observation(system: System, plant: Plant, revisions: int) -> list[in
 
 def remaining_purge_work() -> int:
     """Purged rows plus the references the purge clears; every purge statement lowers it."""
-    rows = sum(apps.get_model(label).objects.count() for label in PURGED)
+    rows: int = sum(apps.get_model(label)._default_manager.count() for label in PURGED)
     links = (
         RequestAttempt.objects.filter(Q(binding__isnull=False) | Q(job__isnull=False)).count()
         + Plant.objects.filter(current_configuration__isnull=False).count()

@@ -312,6 +312,7 @@ erDiagram
         timestamp_with_time_zone deleted_at "nullable"
         bigint approved_binding_id FK "nullable; references connections_sitebinding.id"
         bigint tenant_id FK "references accounts_tenant.id"
+        timestamp_with_time_zone purge_started_at "nullable"
     }
     regions_regionlocationchangerequest {
         bigint id PK

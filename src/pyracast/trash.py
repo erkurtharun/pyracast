@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q, QuerySet
+from django.db.models import BooleanField, Exists, ExpressionWrapper, OuterRef, Q, QuerySet
 from django.utils import timezone
 
 from pyracast.accounts.authorization import tenant_membership
@@ -64,8 +64,10 @@ logger = logging.getLogger(__name__)
 _deferrals = Deferrals(BACK_OFF)
 
 
-def _restore_deadline(deleted_at: datetime | None, now: datetime) -> None:
-    if deleted_at is not None and now >= deleted_at + RETENTION:
+def _restore_deadline(region: Region, now: datetime) -> None:
+    if region.purge_started_at is not None or (
+        region.deleted_at is not None and now >= region.deleted_at + RETENTION
+    ):
         raise DomainError(ErrorCode.TRASH_RETENTION_EXPIRED)
 
 
@@ -129,7 +131,7 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
         )
         region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
         now = timezone.now()
-        _restore_deadline(region.deleted_at, now)
+        _restore_deadline(region, now)
         if region.deleted_at is None:
             return region
         region.deleted_at = None
@@ -176,7 +178,16 @@ def _delete(queryset: QuerySet[Any], budget: _Budget) -> None:
         manager.filter(pk__in=identifiers)._raw_delete(queryset.db)
 
 
-def _detach(queryset: QuerySet[Any], budget: _Budget, **values: None) -> None:
+def _delete_leaves_first(queryset: QuerySet[Any], reference: str, budget: _Budget) -> None:
+    """Delete rows of a self-referencing model that no remaining row references, so a budget
+    cut between chunks never leaves a reference to a deleted row. Revisions only point at
+    older rows, so the references form chains that always have a leaf."""
+    manager = queryset.model._default_manager
+    referenced = manager.filter(**{reference: OuterRef("pk")})
+    _delete(queryset.filter(~Exists(referenced)), budget)
+
+
+def _detach(queryset: QuerySet[Any], budget: _Budget, **values: object) -> None:
     """The queryset must stop matching a row once its references are cleared."""
     manager = queryset.model._default_manager
     while identifiers := list(queryset.values_list("pk", flat=True)[:PURGE_CHUNK_SIZE]):
@@ -206,11 +217,14 @@ def _purge_plant(plant: Plant, budget: _Budget) -> None:
     )
     _delete(CalibrationActivation.objects.filter(plant=plant), budget)
     _delete(CalibrationRun.objects.filter(plant=plant), budget)
-    _delete(ProductionObservation.objects.filter(plant=plant), budget)
+    _delete_leaves_first(ProductionObservation.objects.filter(plant=plant), "supersedes", budget)
     _purge_epias_history(plant, budget)
     _delete(PlantEvent.objects.filter(plant=plant), budget)
-    plant.current_configuration = None
-    plant.save(update_fields=("current_configuration",))
+    _detach(
+        Plant.objects.filter(pk=plant.pk, current_configuration__isnull=False),
+        budget,
+        current_configuration=None,
+    )
     _delete(PlantSubmission.objects.filter(plant=plant), budget)
     _delete(PlantConfiguration.objects.filter(plant=plant), budget)
     _delete(Plant.objects.filter(pk=plant.pk), budget)
@@ -241,32 +255,40 @@ def _purge_region(region: Region, plants: list[Plant], budget: _Budget) -> None:
     _delete(ForecastSnapshot.objects.filter(job__binding__region=region), budget)
     _delete(CollectionJob.objects.filter(binding__region=region), budget)
     _delete(HistoricalReferenceImport.objects.filter(binding__region=region), budget)
-    region.status = RegionStatus.PENDING
-    region.approved_binding = None
-    region.save(update_fields=("status", "approved_binding"))
+    _detach(
+        Region.objects.filter(pk=region.pk, approved_binding__isnull=False),
+        budget,
+        status=RegionStatus.PENDING,
+        approved_binding=None,
+    )
     _delete(SiteBinding.objects.filter(region=region), budget)
     _delete(AuditEvent.objects.filter(region=region), budget)
     _delete(RegionLocationChangeRequest.objects.filter(region=region), budget)
     _delete(Region.objects.filter(pk=region.pk), budget)
 
 
+def _purgeable(cutoff: datetime) -> Q:
+    return Q(deleted_at__lte=cutoff) | Q(purge_started_at__isnull=False)
+
+
 def purge_expired(now: datetime | None = None) -> dict[str, int]:
     """Purge expired regions within one statement budget; a region that exceeds it resumes
-    on the next call."""
+    on the next call before any region that has not started."""
     moment = timezone.now() if now is None else now
     if moment.utcoffset() is None:
         raise ValidationError("An aware timestamp is required.")
     cutoff = moment - RETENTION
+    waiting = ExpressionWrapper(Q(purge_started_at__isnull=True), output_field=BooleanField())
     regions = list(
-        Region.objects.filter(deleted_at__lte=cutoff)
+        Region.objects.filter(_purgeable(cutoff))
         .exclude(pk__in=_deferrals.active(moment))
-        .order_by("pk")
+        .order_by(waiting, "pk")
         .values_list("pk", flat=True)[:PURGE_BATCH_SIZE]
     )
     budget = _Budget(PURGE_STATEMENT_BUDGET)
     purged = isolate(
         takewhile(lambda _: budget.statements > 0, regions),
-        partial(_purge_expired_region, cutoff=cutoff, budget=budget),
+        partial(_purge_expired_region, moment=moment, budget=budget),
         logger=logger,
         event="retention_purge_failed",
         name=lambda region_id: f"region:{region_id}",
@@ -276,18 +298,18 @@ def purge_expired(now: datetime | None = None) -> dict[str, int]:
     return {"regions": len(done), "plants": sum(done)}
 
 
-def _purge_expired_region(region_id: int, cutoff: datetime, budget: _Budget) -> int | None:
+def _purge_expired_region(region_id: int, moment: datetime, budget: _Budget) -> int | None:
     with transaction.atomic():
         region = (
-            Region.objects.select_for_update().filter(pk=region_id, deleted_at__lte=cutoff).first()
+            Region.objects.select_for_update()
+            .filter(_purgeable(moment - RETENTION), pk=region_id)
+            .first()
         )
         if region is None:
             return None
-        # A partly purged region must never be restored, even by a clock behind this one.
-        sealed = cutoff - RETENTION
-        if region.deleted_at is not None and region.deleted_at > sealed:
-            region.deleted_at = sealed
-            region.save(update_fields=("deleted_at",))
+        if region.purge_started_at is None:
+            region.purge_started_at = moment
+            region.save(update_fields=("purge_started_at",))
         plants = list(Plant.objects.select_for_update().filter(region=region).order_by("pk"))
         try:
             _purge_region(region, plants, budget)

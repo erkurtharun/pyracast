@@ -96,7 +96,11 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0004_schema_naming_convention",
             "0005_calibration_preparation_due_at",
         ),
-        "regions": ("0002_audit_event_details", "0003_schema_naming_convention"),
+        "regions": (
+            "0002_audit_event_details",
+            "0003_schema_naming_convention",
+            "0004_region_purge_started_at",
+        ),
     }
     expected = {app: names | set(forward.get(app, ())) for app, names in baseline.items()}
     assert {app: {name for label, name in disk if label == app} for app in project} == expected
