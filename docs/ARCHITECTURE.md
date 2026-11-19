@@ -157,8 +157,9 @@ state changes. A credential change ends the account's reauthentications for ever
 that starts after it commits, as a revocation ends a session, so a request already past its
 check, such as a console write of business data, still finishes. A write of the account's own
 credentials (recovery codes, authenticator, password, addresses, provider identities) checks
-its reauthentication again under the account's locks in its own transaction, so it never
-commits after another session's credential change. Linking is
+its reauthentication again under the account's locks in its own transaction and is refused
+when that reauthentication ended there, so it never commits after another session's credential
+change, even when that change left a weaker factor to demand. Linking is
 bound to the initiating user, and disconnects lock the user record to preserve a
 working login method. Provider sign-in retains Pyracast's local MFA requirements.
 

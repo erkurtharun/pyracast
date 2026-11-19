@@ -3,7 +3,7 @@ from urllib.parse import urlsplit
 
 from allauth.account.internal.flows import reauthentication
 from allauth.core import ratelimit
-from allauth.core.exceptions import ImmediateHttpResponse
+from allauth.core.exceptions import ImmediateHttpResponse, ReauthenticationRequired
 from allauth.headless.base.response import AuthenticationResponse, ConflictResponse
 from allauth.headless.socialaccount.forms import RedirectToProviderForm
 from allauth.headless.socialaccount.inputs import SignupInput
@@ -108,9 +108,14 @@ class ProviderSignupView(AllauthProviderSignupView):
 
 
 def connection_needs_reauthentication(request: HttpRequest) -> bool:
-    with transaction.atomic():
-        require_current_proof(request)
-        return reauthentication.is_reauthentication_required(request, app="allauth.socialaccount")
+    try:
+        with transaction.atomic():
+            require_current_proof(request)
+            return reauthentication.is_reauthentication_required(
+                request, app="allauth.socialaccount"
+            )
+    except ReauthenticationRequired:
+        return True
 
 
 class RedirectToProviderView(AllauthRedirectToProviderView):
@@ -186,13 +191,13 @@ class ManageProvidersView(StepUpAnswers, AllauthManageProvidersView):
             self.prepare_disabled_provider(request, account)
         return super().delete(request, *args, **kwargs)
 
-    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+    def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         if request.method != "DELETE" or not request.user.is_authenticated:
-            return super().dispatch(request, *args, **kwargs)
+            return super().handle(request, *args, **kwargs)
         with locked_social_user(request, request.user.pk) as user:
             if user is None:
                 return AuthenticationResponse(request)
-            return super().dispatch(request, *args, **kwargs)
+            return super().handle(request, *args, **kwargs)
 
 
 @require_GET

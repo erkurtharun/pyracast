@@ -1,11 +1,11 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 from allauth.account import signals as account_signals
 from allauth.account.internal.flows import reauthentication
 from allauth.account.models import EmailAddress
-from allauth.core.exceptions import ImmediateHttpResponse
+from allauth.core.exceptions import ImmediateHttpResponse, ReauthenticationRequired
 from allauth.headless.adapter import DefaultHeadlessAdapter
 from allauth.mfa.models import Authenticator
 from allauth.socialaccount import signals as social_signals
@@ -209,30 +209,37 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
                 request, sociallogin.account.provider, "initiating_user_missing", user
             )
             raise PermissionDenied("Account connection requires an initiating user.")
-        with locked_social_user(request, user_id) as user:
-            if user is None or reauthentication.is_reauthentication_required(
-                request, app="allauth.socialaccount"
-            ):
-                actor = request.user if request.user.is_authenticated else None
-                record_social_refusal(
-                    request, sociallogin.account.provider, "reauthentication_required", actor
-                )
-                raise PermissionDenied("Account connection requires current reauthentication.")
-            try:
-                with transaction.atomic():
-                    do_connect(request, sociallogin)
-            except IntegrityError as error:
-                diagnostic = getattr(error.__cause__, "diag", None)
-                if (
-                    getattr(error.__cause__, "sqlstate", None) != "23505"
-                    or getattr(diagnostic, "table_name", None) != SocialAccount._meta.db_table
+        try:
+            with locked_social_user(request, user_id) as user:
+                if user is None or reauthentication.is_reauthentication_required(
+                    request, app="allauth.socialaccount"
                 ):
-                    raise
-                raise self.validation_error("connected_other") from error
+                    self.refuse_connection(request, sociallogin)
+                try:
+                    with transaction.atomic():
+                        do_connect(request, sociallogin)
+                except IntegrityError as error:
+                    diagnostic = getattr(error.__cause__, "diag", None)
+                    if (
+                        getattr(error.__cause__, "sqlstate", None) != "23505"
+                        or getattr(diagnostic, "table_name", None) != SocialAccount._meta.db_table
+                    ):
+                        raise
+                    raise self.validation_error("connected_other") from error
+        except ReauthenticationRequired:
+            self.refuse_connection(request, sociallogin)
         # Ends allauth's flow here: returning would let it run do_connect again, outside the lock.
         raise ImmediateHttpResponse(
             HttpResponseRedirect(self.get_connect_redirect_url(request, sociallogin.account))
         )
+
+    @staticmethod
+    def refuse_connection(request: HttpRequest, sociallogin: SocialLogin) -> NoReturn:
+        actor = request.user if request.user.is_authenticated else None
+        record_social_refusal(
+            request, sociallogin.account.provider, "reauthentication_required", actor
+        )
+        raise PermissionDenied("Account connection requires current reauthentication.")
 
     def get_connect_redirect_url(self, request: HttpRequest, socialaccount: SocialAccount) -> str:
         return social_callback_url()

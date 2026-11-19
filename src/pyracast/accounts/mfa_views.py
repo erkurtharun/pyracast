@@ -48,7 +48,7 @@ class ReauthenticateView(StrongestFactor, views.ReauthenticateView):
     input_class = SecondFactorReauthenticateInput
 
 
-class ManageRecoveryCodesView(AllauthRecoveryCodesView):
+class ManageRecoveryCodesView(StepUpAnswers, AllauthRecoveryCodesView):
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         if request.method not in {"GET", "HEAD", "POST"} or not request.user.is_authenticated:
             return super().handle(request, *args, **kwargs)

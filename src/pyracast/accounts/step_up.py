@@ -32,7 +32,10 @@ REFUSALS = {
 
 
 def step_up_required(request: HttpRequest, factor: Factor | None = None) -> APIResponse:
-    user = cast(User, request.user)
+    # The account is read again: a credential change during the request may have changed which
+    # factor a new proof needs.
+    signed_in = cast(User, request.user)
+    user = User.objects.filter(pk=signed_in.pk).first() or signed_in
     factor = factor or strongest_factor(user)
     code, message = REFUSALS[factor]
     flows = [flow for flow in get_reauthentication_flows(user) if flow["id"] == FLOWS[factor]]

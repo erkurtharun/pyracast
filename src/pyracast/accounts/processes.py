@@ -21,7 +21,7 @@ from allauth.account.internal.flows.reauthenticate_by_code import (
 from allauth.account.internal.stagekit import LOGIN_SESSION_KEY, clear_login
 from allauth.account.internal.userkit import str_to_user_id
 from allauth.account.models import EmailAddress
-from allauth.core.exceptions import ImmediateHttpResponse
+from allauth.core.exceptions import ImmediateHttpResponse, ReauthenticationRequired
 from allauth.headless.base.views import APIView
 from allauth.mfa.models import Authenticator
 from allauth.socialaccount.models import SocialAccount
@@ -299,13 +299,15 @@ def stamp_reauthentication(request: HttpRequest, user: AbstractBaseUser) -> None
 
 def _end_unless_given_under(
     request: HttpRequest, user: AbstractBaseUser, state: str | None
-) -> None:
+) -> bool:
     # A reauthentication holds while the account's credential state equals the one it was given
     # under; any change of that state ends it.
     proofs = _proofs(request, user)
     if proofs and request.session.get(PROOF_STAMP) != [user.pk, state]:
         _end(request, proofs)
         request.session.pop(PROOF_STAMP, None)
+        return True
+    return False
 
 
 def end_stale_reauthentication(request: HttpRequest) -> None:
@@ -319,10 +321,14 @@ def end_stale_reauthentication(request: HttpRequest) -> None:
 def require_current_proof(request: HttpRequest) -> None:
     # A write that changes the account's own credentials calls this first in its transaction,
     # before any gate reads a proof: the account's locks hold its state until the write commits,
-    # so the write never commits after another session's credential change.
+    # so the write never commits after another session's credential change. A proof that ends
+    # here refuses the request, since the changed state may select a weaker gate; a request that
+    # carried no proof is left to its gate.
     user = request.user
-    if user.is_authenticated:
-        _end_unless_given_under(request, user, account_state(user.pk, lock=True))
+    if user.is_authenticated and _end_unless_given_under(
+        request, user, account_state(user.pk, lock=True)
+    ):
+        raise ReauthenticationRequired
 
 
 class PendingProcessAuthority:
