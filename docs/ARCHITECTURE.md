@@ -501,10 +501,11 @@ change); an expired session leaves its key, which names no session. So an answer
 arriving after a newer one never restores an older key, and an expiry never deletes the
 key of a later sign-in; a request whose session no longer exists answers as signed out.
 The web client treats that answer as the end of the session only after a session read
-sent after it agrees, and otherwise repeats the refused request once; a repeat refused
+sent after it agrees, and otherwise repeats the refused request once when that read shows
+the account the request was prepared under; a repeat refused
 again goes through the same read and is not sent a third time. A sign-out whose session
-read still shows a signed-in session is sent once more with the current key, and
-reported if the session is still signed in after it.
+read still shows the same account signed in is sent once more with the current key, and
+reported if the session is still signed in after it or the read shows another account.
 Revoke sessions after 12 hours or 30 minutes without requests; polling of a visible
 tab counts as activity, and hidden tabs do not poll. Sessions predating the lifetime markers fail closed. A request
 whose session another session of the account ended while it ran answers 400

@@ -13,7 +13,16 @@ const MAX_RETRY_SECONDS = 2;
 let csrfToken: string | undefined;
 let epoch = 0;
 let serial: Promise<unknown> = Promise.resolve();
-let sessionHeld: () => Promise<boolean> = () => Promise.resolve(false);
+// The account of the session the tab has adopted; undefined while signed out or not yet read.
+export type Owner = number | undefined;
+type SessionCheck = {
+    owner: () => Owner;
+    confirm: () => Promise<Owner>;
+};
+let session: SessionCheck = {
+    owner: () => undefined,
+    confirm: () => Promise.resolve(undefined),
+};
 const unreadable = Symbol("unreadable");
 
 export function setCsrfToken(token: string | undefined) {
@@ -24,12 +33,18 @@ export function mutationEpoch() {
     return epoch;
 }
 
-export function confirmSessionWith(check: () => Promise<boolean>) {
-    sessionHeld = check;
+export function confirmSessionWith(check: SessionCheck) {
+    session = check;
 }
 
-export function sessionStillHeld() {
-    return sessionHeld().catch(() => false);
+export function sessionOwner() {
+    return session.owner();
+}
+
+// A refused request is repeated only for the account it was prepared under.
+export async function sessionHeldBy(owner: Owner) {
+    if (owner === undefined) return false;
+    return (await session.confirm().catch(() => undefined)) === owner;
 }
 
 function unsafe(method: Method) {
@@ -49,31 +64,36 @@ export function exchange(request: LaneRequest): Promise<Exchange> {
 }
 
 export async function send<T>(request: LaneRequest): Promise<T> {
+    const owner = sessionOwner();
     const first = await exchange(request);
     if (first.ok) return first.data as T;
     const error = errorFromResponse(first.status, first.data);
     // session_ended answers after the request's own work committed, so only a refusal is repeated.
     if (
-        !(await stillSignedIn(request, error)) ||
+        !(await stillSignedIn(request, error, owner)) ||
         error.code !== "not_authenticated"
     )
         throw error;
     const retry = await exchange(request);
     if (retry.ok) return retry.data as T;
     const refused = errorFromResponse(retry.status, retry.data);
-    await stillSignedIn(request, refused);
+    await stillSignedIn(request, refused, owner);
     throw refused;
 }
 
 // A request sent with a session key that a reauthentication or sign-in replaced meanwhile is
 // answered as signed out; only a session read sent after that answer decides.
-async function stillSignedIn(request: LaneRequest, error: ApiError) {
+async function stillSignedIn(
+    request: LaneRequest,
+    error: ApiError,
+    owner: Owner,
+) {
     if (
         changesSession(request.url) ||
         (error.code !== "not_authenticated" && error.code !== "session_ended")
     )
         return false;
-    return sessionStillHeld();
+    return sessionHeldBy(owner);
 }
 
 async function attempt(request: LaneRequest, retried = false) {

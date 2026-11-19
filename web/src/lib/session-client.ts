@@ -5,6 +5,7 @@ import {
     mutationEpoch,
     send,
     setCsrfToken,
+    type Owner,
 } from "./api/lane";
 import { ApiError } from "./api/errors";
 import { authRequest } from "./auth-api";
@@ -16,7 +17,7 @@ export type SessionState = { session?: Session; ended: boolean };
 
 let state: SessionState = { ended: false };
 let flight: { epoch: number; promise: Promise<Session> } | undefined;
-let confirming: Promise<boolean> | undefined;
+let confirming: Promise<Owner> | undefined;
 let signingOut = false;
 const listeners = new Set<() => void>();
 
@@ -79,27 +80,34 @@ async function endSession() {
 }
 
 // A sign-out that carried a key another tab replaced meanwhile ends nothing and leaves the newer
-// key in place; the session read after it shows that key, which is signed out once more.
+// key in place; the session read after it shows that key, which is signed out once more only
+// while it belongs to the account this tab signed out.
 export async function signOut() {
+    const owner = state.session?.user?.id;
     const session = await endSession();
     if (!session.user) return session;
-    const repeated = await endSession();
-    if (!repeated.user) return repeated;
+    if (session.user.id === owner) {
+        const repeated = await endSession();
+        if (!repeated.user) return repeated;
+    }
     throw new ApiError(browserErrors()("stillSignedIn"));
 }
 
 // Session reads queue behind the session changes of this tab sent before them, so a read started
 // after a signed-out answer, and shared by the answers arriving while it runs, sees any key that
 // replaced the one those requests carried.
-confirmSessionWith(() => {
-    if (!state.session?.user) return Promise.resolve(false);
-    confirming ??= send<Session>({ method: "GET", url: "/api/session/" })
-        .then((session) => {
-            adoptSession(session);
-            return Boolean(session.user);
-        })
-        .finally(() => {
-            confirming = undefined;
-        });
-    return confirming;
+confirmSessionWith({
+    owner: () => state.session?.user?.id,
+    confirm: () => {
+        if (!state.session?.user) return Promise.resolve(undefined);
+        confirming ??= send<Session>({ method: "GET", url: "/api/session/" })
+            .then((session) => {
+                adoptSession(session);
+                return session.user?.id;
+            })
+            .finally(() => {
+                confirming = undefined;
+            });
+        return confirming;
+    },
 });
