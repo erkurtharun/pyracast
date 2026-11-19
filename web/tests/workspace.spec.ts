@@ -617,23 +617,45 @@ test("a forecast view chosen while another section loads applies to the forecast
     await expect(button("Generation")).toHaveAttribute("aria-current", "page");
 });
 
-test("a data source chosen while a date change loads limits the date being navigated to", async ({
+for (const source of ["estimated_actuals", "archived_forecast"] as const)
+    for (const picked of ["2026-03-29", ""] as const)
+        test(`${source} chosen while ${picked ? "a later date" : "a cleared date"} loads limits the date being navigated to`, async ({
+            page,
+        }) => {
+            await openPlant(page, "forecast/?date=2026-03-27");
+            const day = page.getByLabel("Forecast date");
+            await expect(day).toHaveValue("2026-03-27");
+            const forecast = await holdNavigation(page, "forecast");
+            await day.fill(picked);
+            await forecast.requested;
+            await page.getByLabel("Data source").selectOption(source);
+            await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-28$/);
+            await forecast.release();
+            await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-28$/);
+            await expect(day).toHaveValue("2026-03-28");
+            await expect(day).toHaveAttribute("max", "2026-03-28");
+            await day.fill("2026-03-26");
+            await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
+            await expect(page.getByLabel("Data source")).toHaveValue(source);
+        });
+
+test("a second day step taken while the first loads continues from the day being navigated to", async ({
     page,
 }) => {
-    await openPlant(page, "forecast/?date=2026-03-27");
-    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-27");
-    const forecast = await holdNavigation(page, "forecast");
-    await page.getByLabel("Forecast date").fill("2026-03-29");
-    await forecast.requested;
-    await page.getByLabel("Data source").selectOption("estimated_actuals");
-    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-28$/);
-    await forecast.release();
-    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-28$/);
-    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-28");
-    await expect(page.getByLabel("Forecast date")).toHaveAttribute(
-        "max",
-        "2026-03-28",
-    );
+    const button = await openPlant(page, "production/?date=2026-03-25");
+    const day = page.getByLabel("Day", { exact: true });
+    await expect(day).toHaveValue("2026-03-25");
+    const production = await holdNavigation(page, "production");
+    await button("Previous day").click();
+    await production.requested;
+    await button("Previous day").click();
+    await expect(page).toHaveURL(/\/production\/\?date=2026-03-23$/);
+    await production.release();
+    await expect(page).toHaveURL(/\/production\/\?date=2026-03-23$/);
+    await expect(day).toHaveValue("2026-03-23");
+    await button("Next day").click();
+    await expect(page).toHaveURL(/\/production\/\?date=2026-03-24$/);
+    await expect(day).toHaveValue("2026-03-24");
 });
 
 test("Back while section changes load leaves the restored section in charge of its controls", async ({
