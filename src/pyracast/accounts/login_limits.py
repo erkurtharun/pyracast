@@ -1,4 +1,5 @@
 import time
+from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
@@ -84,34 +85,40 @@ def failure_history(request: HttpRequest, key: str) -> str | None:
     return None if rate is None else _history_key(request, key, rate)
 
 
-def _finished_key(cache_key: str, moment: float) -> str:
-    return f"{cache_key}:finished:{moment!r}"
+def _finished_key(cache_key: str, moment: float, index: int) -> str:
+    return f"{cache_key}:finished:{moment!r}:{index}"
 
 
-def _finished(cache_key: str, moments: list[float]) -> list[bool]:
-    found = cache.get_many([_finished_key(cache_key, moment) for moment in moments])
-    return [_finished_key(cache_key, moment) in found for moment in moments]
+def _finished(cache_key: str, moments: list[float]) -> Counter[float]:
+    # allauth tells entries apart only by their time, so entries that share a time are counted:
+    # the n-th failure finished at a time holds marker n, and a time's entries beyond its markers
+    # are checks still in flight.
+    keys = {
+        _finished_key(cache_key, moment, index): moment
+        for moment, entries in Counter(moments).items()
+        for index in range(entries)
+    }
+    return Counter(keys[key] for key in cache.get_many(keys))
 
 
 def _forget_unfinished(history_key: str, duration: float) -> None:
     cutoff = time.time() - REQUEST_CEILING_SECONDS
 
-    def unfinished(history: list[float]) -> set[float]:
+    def unfinished(history: list[float]) -> Counter[float]:
         old = [moment for moment in history if moment < cutoff]
-        if not old:
-            return set()
-        return {
-            moment
-            for moment, done in zip(old, _finished(history_key, old), strict=True)
-            if not done
-        }
+        return Counter(old) - _finished(history_key, old) if old else Counter()
 
     if not unfinished(cache.get(history_key, [])):
         return
     with ratelimit.cache_lock(history_key) as locked:
         history: list[float] = cache.get(history_key, []) if locked else []
         if forgotten := unfinished(history):
-            kept = [moment for moment in history if moment not in forgotten]
+            kept: list[float] = []
+            for moment in history:
+                if forgotten[moment]:
+                    forgotten[moment] -= 1
+                else:
+                    kept.append(moment)
             cache.set(history_key, kept, duration)
 
 
@@ -129,7 +136,11 @@ def finish_failure(usage: ratelimit.RateLimitUsage) -> str | None:
     if not usage.usage:
         return None
     slot = max(usage.usage, key=lambda item: item.cache_duration)
-    cache.set(_finished_key(slot.cache_key, slot.timestamp), True, slot.cache_duration)
+    index = 0
+    while not cache.add(
+        _finished_key(slot.cache_key, slot.timestamp, index), True, slot.cache_duration
+    ):
+        index += 1
     return slot.cache_key
 
 
@@ -144,7 +155,7 @@ def locked_on_finished_failures(history_key: str) -> bool:
         return False
     since = time.time() - rate.duration
     history = [moment for moment in cache.get(history_key, []) if moment > since]
-    return len(history) >= rate.amount and sum(_finished(history_key, history)) >= rate.amount
+    return len(history) >= rate.amount and _finished(history_key, history).total() >= rate.amount
 
 
 def check_second_factor(

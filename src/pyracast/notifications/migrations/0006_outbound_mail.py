@@ -54,7 +54,7 @@ class Migration(migrations.Migration):
                         max_length=48,
                     ),
                 ),
-                ("recipient", models.EmailField(max_length=254)),
+                ("recipient", models.EmailField(max_length=320)),
                 (
                     "language",
                     models.CharField(choices=[("en", "English"), ("tr", "Türkçe")], max_length=2),

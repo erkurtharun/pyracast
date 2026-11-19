@@ -941,7 +941,7 @@ erDiagram
     notifications_outboundmail {
         bigint id PK
         varchar_48 kind
-        varchar_254 recipient
+        varchar_320 recipient
         varchar_2 language
         boolean owner_language
         jsonb context

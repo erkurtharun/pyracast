@@ -908,15 +908,16 @@ def test_two_failures_that_finish_a_lock_at_once_store_one_notice(
     fail_daily(Client(enforce_csrf_checks=True), address, 98, clock)
     both_finished = Barrier(2)
 
-    def set_then_wait(key: str, value: Any, timeout: Any = None) -> None:
-        cache.set(key, value, timeout)
+    def add_then_wait(key: str, value: Any, timeout: Any = None) -> bool:
+        added = cache.add(key, value, timeout)
         if ":finished:" in key:
             both_finished.wait(timeout=10)
+        return added
 
     monkeypatch.setattr(
         login_limits,
         "cache",
-        SimpleNamespace(get=cache.get, get_many=cache.get_many, set=set_then_wait),
+        SimpleNamespace(get=cache.get, get_many=cache.get_many, set=cache.set, add=add_then_wait),
     )
 
     def failed_login() -> list[str]:

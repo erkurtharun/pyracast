@@ -296,7 +296,8 @@ class OutboundMailError(models.TextChoices):
 class OutboundMail(models.Model):
     kind = models.CharField(max_length=48, choices=OutboundMailKind)
     # The address the request named; the daily-lock notice goes to its account's primary one.
-    recipient = models.EmailField()
+    # As long as the account inputs accept (Django's `EmailValidator`), longer than an account's.
+    recipient = models.EmailField(max_length=320)
     invitation = models.ForeignKey(WorkspaceInvitation, on_delete=models.CASCADE, null=True)
     language = models.CharField(max_length=2, choices=Language)
     # Set when no signed-in account asked for the mail: the worker then uses the language of the
