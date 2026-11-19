@@ -520,6 +520,139 @@ test("a date picked while a forecast view switch loads keeps the chosen view", a
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-27");
 });
 
+async function holdNavigation(page: Page, section: string) {
+    let seen!: () => void;
+    let settle!: (failed: boolean) => void;
+    const requested = new Promise<void>((resolve) => (seen = resolve));
+    const settled = new Promise<boolean>((resolve) => (settle = resolve));
+    let held = false;
+    await page.route(
+        (url) =>
+            url.searchParams.has("_rsc") &&
+            url.pathname.endsWith(`/${section}/`),
+        async (route) => {
+            if (held) return route.fallback();
+            held = true;
+            seen();
+            if (await settled) return route.abort();
+            return route.fallback();
+        },
+    );
+    return {
+        requested,
+        release: () => settle(false),
+        fail: () => settle(true),
+    };
+}
+
+async function openPlant(page: Page, address: string) {
+    await page.clock.setFixedTime(new Date("2026-03-28T12:00:00Z"));
+    await mockApi(page);
+    await page.goto(`/app/w/1/plants/11/${address}`);
+    return (name: string) => page.getByRole("button", { name, exact: true });
+}
+
+test("the displayed section clicked while another section loads keeps its date and view", async ({
+    page,
+}) => {
+    const button = await openPlant(
+        page,
+        "forecast/?date=2026-03-27&view=irradiance",
+    );
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    const production = await holdNavigation(page, "production");
+    await button("Production").click();
+    await production.requested;
+    await button("Forecast").click();
+    await page.getByLabel("Forecast date").fill("2026-03-26");
+    await expect(page).toHaveURL(
+        /\/forecast\/\?date=2026-03-26&view=irradiance$/,
+    );
+    production.release();
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-26");
+});
+
+test("a forecast control used while a failing section change loads applies to the forecast", async ({
+    page,
+}) => {
+    const button = await openPlant(
+        page,
+        "forecast/?date=2026-03-27&view=irradiance",
+    );
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    const production = await holdNavigation(page, "production");
+    await button("Production").click();
+    await production.requested;
+    await button("Generation").click();
+    production.fail();
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-27$/);
+    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+    await page.getByLabel("Forecast date").fill("2026-03-26");
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
+    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+});
+
+test("Back while section changes load leaves the restored section in charge of its controls", async ({
+    page,
+}) => {
+    const button = await openPlant(page, "forecast/");
+    await button("Production").click();
+    await expect(page).toHaveURL(/\/production\/$/);
+    await button("Forecast").click();
+    await expect(page).toHaveURL(/\/forecast\/$/);
+    const production = await holdNavigation(page, "production");
+    const settings = await holdNavigation(page, "settings");
+    await button("Production").click();
+    await production.requested;
+    await button("Settings").click();
+    await settings.requested;
+    await page.goBack();
+    await expect(page).toHaveURL(/\/production\/$/);
+    await expect(button("Production")).toHaveAttribute("aria-current", "page");
+    production.release();
+    settings.release();
+    await button("Comparison").click();
+    await expect(page).toHaveURL(/\/production\/\?view=comparison$/);
+    await expect(button("Comparison")).toHaveAttribute("aria-current", "page");
+    await button("Calibration").click();
+    await expect(page).toHaveURL(/\/calibration\/$/);
+    await expect(button("Calibration")).toHaveAttribute("aria-current", "page");
+});
+
+for (const overtaken of ["a section change", "Back"] as const)
+    test(`a view switch overtaken by ${overtaken} is not the base for the next change`, async ({
+        page,
+    }) => {
+        const button = await openPlant(page, "forecast/");
+        if (overtaken === "Back") {
+            await button("Production").click();
+            await expect(page).toHaveURL(/\/production\/$/);
+            await button("Forecast").click();
+            await expect(page).toHaveURL(/\/forecast\/$/);
+        }
+        const forecast = await holdNavigation(page, "forecast");
+        await button("Irradiance").click();
+        await forecast.requested;
+        if (overtaken === "Back") await page.goBack();
+        else await button("Production").click();
+        await expect(page).toHaveURL(/\/production\/$/);
+        forecast.release();
+        if (overtaken === "Back") await page.goForward();
+        else await button("Forecast").click();
+        await expect(page).toHaveURL(/\/forecast\/$/);
+        await expect(button("Generation")).toHaveAttribute(
+            "aria-current",
+            "page",
+        );
+        await page.getByLabel("Forecast date").fill("2026-03-26");
+        await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
+        await expect(button("Generation")).toHaveAttribute(
+            "aria-current",
+            "page",
+        );
+    });
+
 test("Back to the irradiance view does not keep an archived generation source", async ({
     page,
 }) => {

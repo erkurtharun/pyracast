@@ -204,6 +204,26 @@ test("the document keeps its title while the workspace changes address", async (
     ).toBeVisible();
     await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
     expect(await page.locator("title").count()).toBe(1);
+    await page.route(
+        (url) =>
+            url.pathname.startsWith("/api/") &&
+            url.pathname.endsWith("/plants/21/forecast/"),
+        (route) =>
+            route.fulfill({
+                json: {
+                    timezone: region.timezone,
+                    freshness: "fresh",
+                    result: {},
+                    production_diagnostic: { days: null },
+                },
+            }),
+    );
+    await page.goto("/app/w/1/plants/11/forecast/");
+    await expect(
+        page.getByRole("heading", { name: "This page could not be displayed" }),
+    ).toBeVisible();
+    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    expect(await page.locator("title").count()).toBe(1);
 });
 
 test("account settings have their own address", async ({ page }) => {
@@ -350,4 +370,124 @@ test("a sign-out or another account never shows the previous account's cached pl
     await expect(page.getByRole("button", { name: /East array/ })).toHaveCount(
         0,
     );
+});
+
+test("another account signed in in a second tab hides the first account's data in this tab", async ({
+    page,
+    context,
+}) => {
+    const other = { ...user, id: 2, email: "other@example.test" };
+    let account: "first" | "none" | "second" = "first";
+    let readSeen!: () => void;
+    let releaseRead!: () => void;
+    const readRequested = new Promise<void>((resolve) => (readSeen = resolve));
+    const readHeld = new Promise<void>((resolve) => (releaseRead = resolve));
+    const second = await context.newPage();
+    for (const tab of [page, second]) {
+        await mockApi(tab);
+        await tab.route("**/api/auth/browser/v1/auth/login", (route) => {
+            account = "second";
+            return route.fallback();
+        });
+        await tab.route("**/api/auth/browser/v1/auth/session", (route) => {
+            if (route.request().method() === "DELETE") account = "none";
+            return route.fallback();
+        });
+        await tab.route("**/api/session/", async (route) => {
+            const answered = account;
+            if (tab === page && answered === "second") {
+                readSeen();
+                await readHeld;
+            }
+            await route.fulfill({
+                json:
+                    answered === "none"
+                        ? { user: null, csrf_token: "anonymous-token" }
+                        : {
+                              user: answered === "second" ? other : user,
+                              csrf_token: "signed-token",
+                          },
+            });
+        });
+        await tab.route("**/api/tenants/1/sites/", (route) =>
+            account === "second"
+                ? route.fulfill({
+                      json: paged([
+                          {
+                              ...region,
+                              id: 13,
+                              plant: {
+                                  ...plant,
+                                  id: 23,
+                                  name: "Second account array",
+                              },
+                          },
+                      ]),
+                  })
+                : route.fallback(),
+        );
+        await tab.route("**/api/tenants/1/members/", (route) =>
+            route.fulfill({
+                json: {
+                    members: [
+                        {
+                            id: account === "second" ? other.id : user.id,
+                            email:
+                                account === "second" ? other.email : user.email,
+                            role: "admin",
+                        },
+                    ],
+                },
+            }),
+        );
+        await tab.route("**/api/tenants/1/invitations/", (route) =>
+            route.fulfill({ json: { invitations: [] } }),
+        );
+    }
+    await page.goto("/app/w/1/members/");
+    await expect(page.getByText(user.email).first()).toBeVisible();
+    await page.getByRole("button", { name: /Plants/ }).click();
+    await expect(
+        page.getByRole("button", { name: /East array/ }),
+    ).toBeVisible();
+    await second.goto("/app/");
+    await expect(
+        second.getByRole("button", { name: /East array/ }),
+    ).toBeVisible();
+    await second.getByRole("button", { name: "Sign out" }).click();
+    await expect(
+        second.locator("form").getByRole("button", { name: "Sign in" }),
+    ).toBeVisible();
+    await second.getByLabel("Email", { exact: true }).fill(other.email);
+    await second
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await second
+        .locator("form")
+        .getByRole("button", { name: "Sign in" })
+        .click();
+    await expect(
+        second.getByRole("button", { name: /Second account array/ }),
+    ).toBeVisible();
+    await page.bringToFront();
+    await expect(page.getByRole("button", { name: /East array/ })).toHaveCount(
+        0,
+    );
+    await readRequested;
+    await expect(page.getByRole("progressbar")).toBeVisible();
+    await expect(page.getByRole("button", { name: /East array/ })).toHaveCount(
+        0,
+    );
+    await expect(page.getByText(user.email)).toHaveCount(0);
+    releaseRead();
+    await expect(
+        page.getByRole("button", { name: /Second account array/ }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /East array/ })).toHaveCount(
+        0,
+    );
+    await page.getByRole("button", { name: "Members", exact: true }).click();
+    await expect(page).toHaveURL("/app/w/1/members/");
+    await expect(page.getByText(other.email).first()).toBeVisible();
+    await expect(page.getByText(user.email)).toHaveCount(0);
 });
