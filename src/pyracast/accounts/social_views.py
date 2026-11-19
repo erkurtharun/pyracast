@@ -28,7 +28,8 @@ from allauth.socialaccount.providers.microsoft.views import oauth2_callback as m
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.sessions.backends.base import UpdateError
-from django.db import IntegrityError, transaction
+from django.core.exceptions import ObjectNotUpdated
+from django.db import DatabaseError, IntegrityError, transaction
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -213,10 +214,15 @@ def provider_callback(request: HttpRequest, provider: str) -> HttpResponseBase:
     callback = google_callback if provider == "google" else microsoft_callback
     try:
         return starting(request, lambda: cast(HttpResponseBase, callback(request)))
-    except UpdateError:
+    except UpdateError as error:
         # allauth saves the session as it takes the provider state; a session that ended
         # meanwhile fails that save and the callback's transaction rolls back. Nothing is
         # pending for it any more: answer as then, on an empty session that sends no cookie.
+        # Django raises the same error for any failed save, such as a lock timeout, which
+        # leaves the session and its state; that failure is answered as itself.
+        failure = error.__context__
+        if isinstance(failure, DatabaseError) and not isinstance(failure, ObjectNotUpdated):
+            raise failure from failure.__cause__
         request.session = type(request.session)()
         social_provider = get_social_adapter(request).get_provider(request, provider)
         return cast(HttpResponseBase, render_authentication_error(request, social_provider))
