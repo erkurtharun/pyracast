@@ -1,3 +1,4 @@
+import re
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -14,7 +15,7 @@ from django.db import transaction
 from django.test import Client, override_settings
 from django.urls import reverse
 
-from pyracast.accounts import inputs
+from pyracast.accounts import inputs, processes
 from pyracast.accounts.processes import lock_account
 from tests.support.account_sessions import (
     alongside,
@@ -130,26 +131,22 @@ def test_every_sign_in_records_the_state_the_session_signed_in_under(
     assert holds_current_authority(client, user.pk)
 
 
-def password_confirmed(client: Client, _user: User, _secret: str, _now: float) -> int:
-    return int(submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code)
+def password_confirmed(client: Client, _user: User, _secret: str, _now: float) -> Any:
+    return submit(client, "auth/reauthenticate", {"password": PASSWORD})
 
 
-def code_confirmed(client: Client, user: User, _secret: str, _now: float) -> int:
+def code_confirmed(client: Client, user: User, _secret: str, _now: float) -> Any:
     requested = submit(client, "auth/reauthenticate/code/request", {"email": user.email})
     assert requested.status_code == 200
-    return int(
-        submit(client, "auth/reauthenticate/code/confirm", {"code": mailed_code()}).status_code
-    )
+    return submit(client, "auth/reauthenticate/code/confirm", {"code": mailed_code()})
 
 
-def authenticator_confirmed(client: Client, _user: User, secret: str, now: float) -> int:
-    code = {"code": totp_code(secret, now)}
-    return int(submit(client, "auth/2fa/reauthenticate", code).status_code)
+def authenticator_confirmed(client: Client, _user: User, secret: str, now: float) -> Any:
+    return submit(client, "auth/2fa/reauthenticate", {"code": totp_code(secret, now)})
 
 
-def console_confirmed(client: Client, _user: User, secret: str, now: float) -> int:
-    confirm = reverse("admin:workspace_confirm")
-    return int(client.post(confirm, {"code": totp_code(secret, now)}).status_code)
+def console_confirmed(client: Client, _user: User, secret: str, now: float) -> Any:
+    return client.post(reverse("admin:workspace_confirm"), {"code": totp_code(secret, now)})
 
 
 def confirming(kind: str) -> tuple[Client, User, str]:
@@ -167,7 +164,7 @@ def confirming(kind: str) -> tuple[Client, User, str]:
     return signed_in(user), user, secret
 
 
-CONFIRMATIONS: dict[str, tuple[Callable[[Client, User, str, float], int], int]] = {
+CONFIRMATIONS: dict[str, tuple[Callable[[Client, User, str, float], Any], int]] = {
     "password": (password_confirmed, 200),
     "code": (code_confirmed, 200),
     "authenticator": (authenticator_confirmed, 200),
@@ -186,7 +183,7 @@ def test_every_confirmation_records_the_state_it_was_given_under(
     assert not holds_current_authority(client, user.pk)
     confirm, answered = CONFIRMATIONS[kind]
 
-    assert confirm(client, user, secret, now) == answered
+    assert confirm(client, user, secret, now).status_code == answered
 
     assert holds_current_authority(client, user.pk)
 
@@ -238,7 +235,7 @@ def test_a_connection_made_while_a_confirmation_checks_its_factor_commits_after_
     started = after_the_factor_check(monkeypatch, kind, connected_elsewhere(user))
     confirm, answered = CONFIRMATIONS[kind]
 
-    assert confirm(client, user, secret, now) == answered
+    assert confirm(client, user, secret, now).status_code == answered
     [(finished, connection)] = started
     connection.result(timeout=10)
 
@@ -274,6 +271,71 @@ def test_a_confirmation_whose_session_ended_while_its_code_was_checked_spends_no
     codes = Authenticator.objects.get(user=user, type=Authenticator.Type.RECOVERY_CODES).wrap()
     assert code in codes.get_unused_codes()
     assert {"reauthenticated", "mfa_succeeded"} & {line["event"] for line in events()} == set()
+
+
+def before_the_confirmation_locks(
+    monkeypatch: pytest.MonkeyPatch, work: Callable[[], object]
+) -> None:
+    lock = processes.lock_account
+
+    def changed_then_locked(user_id: Any) -> None:
+        elsewhere(work)
+        lock(user_id)
+
+    monkeypatch.setattr(processes, "lock_account", changed_then_locked)
+
+
+def refusal(response: Any) -> tuple[int, str | None]:
+    if response["Content-Type"] == "application/json":
+        return response.status_code, response.json().get("code")
+    title = re.search(r"<title>(.*)</title>", response.content.decode())
+    return response.status_code, title and title[1]
+
+
+ENDED = {
+    "password": (400, "session_ended"),
+    "authenticator": (400, "session_ended"),
+    "console": (400, "Bad Request (400)"),
+}
+
+
+@pytest.mark.parametrize("kind", ENDED)
+def test_a_confirmation_whose_session_ended_before_it_took_the_locks_is_refused_and_records_nothing(
+    kind: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    now = time.time()
+    totp_clock(monkeypatch, now)
+    client, user, secret = confirming(kind)
+    key = session_key(client)
+    before_the_confirmation_locks(
+        monkeypatch, lambda: Session.objects.filter(session_key=key).delete()
+    )
+    events = capture_security_events(caplog, monkeypatch)
+    client.raise_request_exception = False
+    confirm, _answered = CONFIRMATIONS[kind]
+
+    response = confirm(client, user, secret, now)
+
+    assert refusal(response) == ENDED[kind]
+    assert session_user(client) is None
+    assert {"reauthenticated", "mfa_succeeded"} & {line["event"] for line in events()} == set()
+
+
+def test_a_console_confirmation_whose_authenticator_was_removed_before_its_locks_refuses_the_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = time.time()
+    totp_clock(monkeypatch, now)
+    client, user, secret = confirming("console")
+    before_the_confirmation_locks(
+        monkeypatch, lambda: Authenticator.objects.filter(user=user).delete()
+    )
+
+    response = console_confirmed(client, user, secret, now)
+
+    assert response.status_code == 400
+    assert response.context["form"].has_error("code", "incorrect_code")
+    assert not holds_current_authority(client, user.pk)
 
 
 ADDED = "added@example.com"
