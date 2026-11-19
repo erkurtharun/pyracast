@@ -40,7 +40,7 @@ from django.http import HttpRequest
 from django.test import Client, RequestFactory, override_settings
 from django.utils import timezone
 
-from pyracast.accounts import authentication, headless, processes, social
+from pyracast.accounts import authentication, headless, processes, security, social
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.inputs import (
     LoginInput,
@@ -1186,8 +1186,23 @@ def test_a_change_committed_after_the_request_checked_its_steps_ends_the_second_
     assert session_user(pending.client) is None
 
 
-def test_a_second_factor_reauthentication_without_an_authenticator_refuses_the_code() -> None:
-    client = signed_in(account("owner"))
+def test_a_second_factor_reauthentication_without_an_authenticator_refuses_the_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Only an account holding an authenticator reaches the code (others answer 403), so the
+    # authenticator is removed elsewhere once the view has checked the account's factor.
+    user = account("owner")
+    with_totp(user)
+    client = browser()
+    client.force_login(user)
+    checked = security.strongest_factor
+
+    def removed_after_the_check(checked_user: Any) -> Any:
+        factor = checked(checked_user)
+        elsewhere(lambda: Authenticator.objects.filter(user_id=checked_user.pk).delete())
+        return factor
+
+    monkeypatch.setattr("pyracast.accounts.step_up.strongest_factor", removed_after_the_check)
 
     response = submit(client, "auth/2fa/reauthenticate", {"code": "123456"})
 

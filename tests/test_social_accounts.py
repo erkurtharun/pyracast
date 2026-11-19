@@ -700,7 +700,7 @@ def test_microsoft_without_mail_uses_principal_or_requests_email(
     }
 
 
-@pytest.mark.parametrize("change", ["password", "deactivated", "deleted", "staff"])
+@pytest.mark.parametrize("change", ["password", "deactivated", "deleted", "staff", "renamed"])
 def test_connect_rechecks_current_user_after_provider_exchange(
     oauth_profile: dict[str, Any], change: str
 ) -> None:
@@ -736,19 +736,20 @@ def test_connect_rechecks_current_user_after_provider_exchange(
                 User.objects.filter(pk=user.pk).update(is_active=False)
             elif change == "deleted":
                 user.delete()
-            else:
+            elif change == "staff":
                 User.objects.filter(pk=user.pk).update(is_staff=True, is_superuser=True)
+            else:
+                User.objects.filter(pk=user.pk).update(first_name="Renamed")
         finally:
             continue_profile.set()
         response = future.result(timeout=20)
-    if change == "staff":
+    if change == "renamed":
+        # A change outside the credential state keeps the reauthentication.
         assert response["Location"] == CALLBACK
-        user.refresh_from_db()
-        assert user.is_staff
-        assert user.is_superuser
-        assert user.check_password(PASSWORD)
         assert SocialAccount.objects.get().user_id == user.pk
     else:
+        # The staff flags are part of the credential state, so changing them ends the
+        # reauthentication the connection rests on.
         assert "error=permission_denied" in response["Location"]
         assert not SocialAccount.objects.exists()
         if change == "password":
@@ -757,6 +758,11 @@ def test_connect_rechecks_current_user_after_provider_exchange(
         elif change == "deactivated":
             user.refresh_from_db()
             assert not user.is_active
+        elif change == "staff":
+            user.refresh_from_db()
+            assert user.is_staff
+            assert user.is_superuser
+            assert user.check_password(PASSWORD)
 
 
 def test_concurrent_provider_claim_rejects_second_user_without_losing_identity(

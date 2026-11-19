@@ -19,13 +19,15 @@ from django.test import Client
 from django.test.utils import CaptureQueriesContext
 from django.urls import URLPattern, URLResolver, reverse
 
+from pyracast.accounts import processes
 from pyracast.accounts.models import Language, UserLanguagePreference
 from pyracast.admin import site
 from pyracast.languages import LANGUAGE_COOKIE
 from pyracast.notifications.models import NotificationSettings
+from tests.support.account_sessions import elsewhere
 from tests.support.api import verified_admin
 from tests.support.auth_lifecycle import totp_code
-from tests.support.step_up import with_proof
+from tests.support.step_up import call, with_proof
 
 pytestmark = pytest.mark.django_db
 CONFIRMATION = "admin/workspace/confirm.html"
@@ -296,6 +298,66 @@ def test_a_console_confirmation_holds_only_while_the_credential_state_it_was_giv
         return
     assert refused(response)
     assert client.get(reverse("admin:index")).status_code == 200
+
+
+# Credential changes another session commits while a console write runs; regenerating the
+# recovery codes also ends the account's other sessions.
+CHANGES_ELSEWHERE: dict[str, Callable[[Client], Any]] = {
+    "recovery-codes-regenerated": lambda other: call(
+        other, "post", "account/authenticators/recovery-codes"
+    ),
+    "address-removed": lambda other: call(
+        other, "delete", "account/email", {"email": "second@example.com"}
+    ),
+}
+
+
+@CODE_LIMITS
+@pytest.mark.parametrize("change", CHANGES_ELSEWHERE)
+def test_a_console_write_that_passed_its_check_completes_and_the_next_one_is_refused(
+    operator: tuple[Client, str, float], monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    # A console write of business data checks its confirmation as its request starts: a
+    # credential change committed later ends the confirmation for the next request.
+    client, secret, now = operator
+    user = User.objects.get(username="operator")
+    RecoveryCodes.activate(user)
+    EmailAddress.objects.create(
+        user=user, email="operator@example.com", verified=True, primary=True
+    )
+    EmailAddress.objects.create(user=user, email="second@example.com", verified=True)
+    NotificationSettings.objects.update_or_create(pk=1, defaults={"max_recipients": 5})
+    settings_path = reverse("admin:workspace_settings")
+    confirmed = client.post(
+        reverse("admin:workspace_confirm"), {"code": totp_code(secret, now), "next": settings_path}
+    )
+    assert confirmed.status_code == 302
+    other = Client(enforce_csrf_checks=True)
+    other.force_login(user)
+    with_proof(other, user, "mfa", age=0, reauthenticated=True, **factor_of(user))
+    checked = processes.end_stale_reauthentication
+    answers: list[int] = []
+
+    def changed_after_the_check(request: Any) -> None:
+        checked(request)
+        if request.path == settings_path and not answers:
+            elsewhere(lambda: answers.append(CHANGES_ELSEWHERE[change](other).status_code))
+
+    monkeypatch.setattr(processes, "end_stale_reauthentication", changed_after_the_check)
+
+    response = client.post(settings_path, {"max_recipients": 8, "expected_max_recipients": 5})
+    following = client.post(settings_path, {"max_recipients": 9, "expected_max_recipients": 8})
+
+    assert answers == [200]
+    assert response.status_code == 302
+    assert NotificationSettings.objects.get().max_recipients == 8
+    if change == "recovery-codes-regenerated":
+        assert following.status_code == 302
+        assert following["Location"].startswith(reverse("admin:login"))
+        assert client.get("/api/session/").json()["user"] is None
+    else:
+        assert refused(following)
+    assert NotificationSettings.objects.get().max_recipients == 8
 
 
 @CODE_LIMITS
