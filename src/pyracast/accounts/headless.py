@@ -148,7 +148,7 @@ class VerifyEmailView(StepUpAnswers, views.VerifyEmailView):
                 require_authority(request, EMAIL_VERIFICATION_CODE_SESSION_KEY)
                 if self.stage:
                     require_authority(request, LOGIN_SESSION_KEY)
-                elif request.user.is_authenticated:
+                else:
                     # A signed-in session completing a change of its own address also needs its
                     # authority record; a change that ended the code answers above as nothing
                     # pending.

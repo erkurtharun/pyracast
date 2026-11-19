@@ -4,19 +4,24 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
+from allauth.account.internal.flows.login import get_authentication_records
 from allauth.account.models import EmailAddress
+from allauth.core.exceptions import ReauthenticationRequired
 from allauth.mfa.models import Authenticator
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
-from allauth.socialaccount.models import SocialAccount
-from django.contrib.auth.models import User
+from allauth.socialaccount.models import SocialAccount, SocialApp
+from django.contrib.auth.models import AnonymousUser, User
+from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
 from django.db import transaction
-from django.test import Client, override_settings
+from django.test import Client, RequestFactory, override_settings
 from django.urls import reverse
 
 from pyracast.accounts import inputs, processes
 from pyracast.accounts.processes import lock_account
+from pyracast.accounts.session_cookie import persist
+from pyracast.accounts.social import SocialAccountAdapter
 from tests.support.account_sessions import (
     alongside,
     browser,
@@ -415,3 +420,77 @@ def test_after_another_session_changed_the_account_a_password_change_needs_a_con
     assert removed.status_code == 200
 
     assert_confirmation_asked_first(client, user)
+
+
+def test_a_credential_write_of_a_request_without_an_account_asks_for_a_confirmation() -> None:
+    request = RequestFactory().post("/")
+    request.user = AnonymousUser()
+
+    with pytest.raises(ReauthenticationRequired):
+        processes.authorize_credential_write(request)
+
+
+def test_an_address_request_whose_session_ended_before_it_was_saved_is_answered_as_ended(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = member()
+    client = signed_in(user)
+    with_proof(client, user, "password", age=0, reauthenticated=True)
+    key = session_key(client)
+    stamp = processes.stamp_started
+
+    def ended_then_stamped(*args: Any, **kwargs: Any) -> None:
+        elsewhere(lambda: Session.objects.filter(session_key=key).delete())
+        stamp(*args, **kwargs)
+
+    monkeypatch.setattr(processes, "stamp_started", ended_then_stamped)
+    client.raise_request_exception = False
+
+    response = submit(client, "account/email", {"email": ADDED})
+
+    assert (response.status_code, response.json()["code"]) == (400, "session_ended")
+    assert not EmailAddress.objects.filter(email=ADDED).exists()
+
+
+def test_a_session_without_a_key_is_not_saved() -> None:
+    request = RequestFactory().post("/")
+    request.session = SessionStore()
+
+    persist(request)
+
+    assert request.session.session_key is None
+
+
+def test_a_state_of_a_deleted_account_ends_the_confirmations_the_session_holds() -> None:
+    user = member()
+    client = signed_in(user)
+    with_proof(client, user, "password", age=0, reauthenticated=True)
+    User.objects.filter(pk=user.pk).delete()
+    request = RequestFactory().post("/")
+    request.session = client.session
+
+    with transaction.atomic():
+        processes.record_authority(request, user)
+
+    assert [record["reauthenticated"] for record in get_authentication_records(request, user)] == [
+        False
+    ]
+
+
+def test_a_sign_in_through_a_provider_app_held_in_the_database_completes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    serve_provider_profile(monkeypatch)
+    stored = SocialApp.objects.create(
+        provider="google",
+        client_id="google-client",
+        secret="test-client-secret",  # noqa: S106
+    )
+    monkeypatch.setattr(SocialAccountAdapter, "list_apps", lambda *_args, **_kwargs: [stored])
+    user = member()
+    SocialAccount.objects.create(user=user, provider="google", uid="google-identity")
+    client = browser()
+
+    assert complete(client, begin(client))["Location"] == CALLBACK
+
+    assert session_user(client) == user.pk
