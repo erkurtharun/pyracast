@@ -1,30 +1,45 @@
 import { useSyncExternalStore } from "react";
 import type { components } from "./schema";
 import {
+    confirmedSession,
+    confirmSession,
     confirmSessionWith,
     mutationEpoch,
+    onStaleSession,
     send,
+    sessionCurrent,
     setCsrfToken,
 } from "./api/lane";
+import {
+    storedGeneration,
+    writeGeneration,
+    type Generation,
+} from "./api/generation";
 import { ApiError } from "./api/errors";
 import { authRequest } from "./auth-api";
 import { browserErrors } from "@/i18n/browser";
 
 export type Session = components["schemas"]["SessionOutput"];
 export type SessionUser = components["schemas"]["SessionUserOutput"];
-// signals counts the session changes other tabs announced; unconfirmed holds until a session read
-// sent after the latest one answers.
+// current holds while the browser's session generation is the one this tab confirmed; failure is
+// the last session read that failed while no session could be shown.
 export type SessionState = {
     session?: Session;
     ended: boolean;
-    signals: number;
-    unconfirmed: boolean;
+    current: boolean;
+    failure?: string;
 };
 
-let state: SessionState = { ended: false, signals: 0, unconfirmed: false };
-let flight:
-    { epoch: number; signal: number; promise: Promise<Session> } | undefined;
-let confirming: Promise<boolean> | undefined;
+type Read = {
+    epoch: number;
+    generation: Generation;
+    confirms: boolean;
+    promise: Promise<Session>;
+};
+
+let state: SessionState = { ended: false, current: true };
+let running: Read | undefined;
+let queued: { promise: Promise<Session>; start: () => void } | undefined;
 let signingOut = false;
 const listeners = new Set<() => void>();
 
@@ -43,67 +58,96 @@ export function useSessionState() {
     return useSyncExternalStore(subscribeSession, sessionState, sessionState);
 }
 
-function notify() {
+function update(next: Partial<SessionState>) {
+    state = { ...state, ...next };
     for (const listener of listeners) listener();
 }
 
-// Tabs share the session cookie, so a sign-in or sign-out in one tab tells the others that their
-// session is unconfirmed; the message carries no account and no data.
-const channel =
-    typeof window !== "undefined" && "BroadcastChannel" in window
-        ? new BroadcastChannel("pyracast-session")
-        : undefined;
-channel?.addEventListener("message", () => {
-    state = { ...state, signals: state.signals + 1, unconfirmed: true };
-    notify();
-});
-
 export function adoptSession(session: Session) {
-    adopt(session, false);
-}
-
-function adopt(session: Session, confirmed: boolean) {
-    const previous = state;
-    state = {
+    setCsrfToken(session.csrf_token);
+    update({
         session,
         ended: session.user
             ? false
-            : !signingOut &&
-              (state.ended ||
-                  confirming !== undefined ||
-                  Boolean(state.session?.user)),
-        signals: state.signals,
-        unconfirmed: state.unconfirmed && !confirmed,
-    };
-    setCsrfToken(session.csrf_token);
-    notify();
+            : !signingOut && (state.ended || Boolean(state.session?.user)),
+    });
+}
+
+// The generation read just before the read was sent is the one it confirms, so a change during the
+// read leaves the tab not current and causes one more read.
+function adoptRead(session: Session, generation: Generation) {
+    const owner = session.user?.id ?? null;
+    const previous = confirmedSession();
+    // A change this tab finds while current was announced by no other tab.
     if (
-        previous.session &&
-        !previous.unconfirmed &&
-        previous.session.user?.id !== session.user?.id
+        previous &&
+        previous.owner !== owner &&
+        previous.generation === generation
     )
-        channel?.postMessage("changed");
+        writeGeneration();
+    confirmSession({ generation, owner });
+    state = { ...state, current: sessionCurrent(), failure: undefined };
+    adoptSession(session);
+    if (!state.current) loadSession().catch(() => {});
+}
+
+export function checkSession() {
+    const current = sessionCurrent();
+    if (current !== state.current) update({ current });
+    if (!current) loadSession().catch(() => {});
+}
+
+onStaleSession(checkSession);
+
+function start(confirms: boolean): Promise<Session> {
+    const epoch = mutationEpoch();
+    const generation = storedGeneration();
+    if (state.failure) update({ failure: undefined });
+    const promise = send<Session>({ method: "GET", url: "/api/session/" }).then(
+        (session) => {
+            adoptRead(session, generation);
+            return session;
+        },
+        (error: Error) => {
+            if (!state.session || !state.current)
+                update({ failure: error.message });
+            throw error;
+        },
+    );
+    running = { epoch, generation, confirms, promise };
+    const next = () => {
+        running = undefined;
+        const waiting = queued;
+        queued = undefined;
+        waiting?.start();
+    };
+    promise.then(next, next);
+    return promise;
+}
+
+// At most one session read is in flight and one waits behind it. A running read is shared while no
+// change of this tab was sent and the generation stayed since it left; a confirmation after a
+// refused answer shares only a read that a confirmation started.
+function readSession(confirms: boolean): Promise<Session> {
+    if (!running) return start(confirms);
+    if (
+        running.epoch === mutationEpoch() &&
+        running.generation === storedGeneration() &&
+        (running.confirms || !confirms)
+    )
+        return running.promise;
+    if (!queued) {
+        let begin!: () => void;
+        const promise = new Promise<Session>((resolve, reject) => {
+            begin = () => start(true).then(resolve, reject);
+        });
+        queued = { promise, start: begin };
+    }
+    return queued.promise;
 }
 
 export function loadSession(): Promise<Session> {
-    const epoch = mutationEpoch();
-    const signal = state.signals;
-    if (flight?.epoch === epoch && flight.signal === signal)
-        return flight.promise;
-    const promise = send<Session>({ method: "GET", url: "/api/session/" }).then(
-        (session) => {
-            adopt(session, signal === state.signals);
-            return session;
-        },
-    );
-    const current = { epoch, signal, promise };
-    flight = current;
-    promise
-        .finally(() => {
-            if (flight === current) flight = undefined;
-        })
-        .catch(() => {});
-    return promise;
+    return readSession(false);
 }
 
 async function endSession() {
@@ -129,15 +173,7 @@ export async function signOut() {
 // Session reads queue behind the session changes of this tab sent before them, so a read started
 // after a signed-out answer, and shared by the answers arriving while it runs, sees any key that
 // replaced the one those requests carried.
-confirmSessionWith(() => {
-    if (!state.session?.user) return Promise.resolve(false);
-    confirming ??= send<Session>({ method: "GET", url: "/api/session/" })
-        .then((session) => {
-            adoptSession(session);
-            return Boolean(session.user);
-        })
-        .finally(() => {
-            confirming = undefined;
-        });
-    return confirming;
+confirmSessionWith(async () => {
+    if (!state.session?.user) return null;
+    return (await readSession(true)).user?.id ?? null;
 });

@@ -67,6 +67,20 @@ export function PlantWorkspace({
     const [pending, setPending] = useOptimistic({ section: tab, address });
     // Controls belong to the displayed section; only a pending change of that section is their base.
     const base = pending.section === tab ? pending.address : address;
+    const navigating =
+        routes.plant(
+            scope.tenant_id,
+            scope.region_id,
+            pending.section,
+            pending.address,
+        ) !== routes.plant(scope.tenant_id, scope.region_id, tab, address);
+    // Controls only the outgoing view has rest until the pending view change commits.
+    const leaving = (section: "forecast" | "production" | "settings") =>
+        pending.section === tab &&
+        tab === section &&
+        plantView(section, pending.address) !== plantView(section, address);
+    const leavingGeneration =
+        leaving("forecast") && forecastView === "generation";
     const navigate = (
         section: PlantSection,
         next: PlantAddress,
@@ -119,7 +133,11 @@ export function PlantWorkspace({
                           })}
                 </Notice>
             )}
-            <nav className="tabs" aria-label={t("plantSections")}>
+            <nav
+                className="tabs"
+                aria-label={t("plantSections")}
+                aria-busy={navigating || undefined}
+            >
                 {(
                     [
                         ["forecast", t("forecast")],
@@ -166,7 +184,10 @@ export function PlantWorkspace({
                             </button>
                         ))}
                     </nav>
-                    <div className="forecast-controls">
+                    <div
+                        className="forecast-controls"
+                        aria-busy={leaving("forecast") || undefined}
+                    >
                         <label className="field">
                             {t("forecastDate")}
                             <input
@@ -188,6 +209,7 @@ export function PlantWorkspace({
                             allowArchivedForecast={
                                 forecastView === "generation"
                             }
+                            archivedForecastDisabled={leavingGeneration}
                             value={source}
                             onChange={(next) => {
                                 setSource(next);
@@ -204,6 +226,7 @@ export function PlantWorkspace({
                                 {t("resolution")}
                                 <select
                                     value={resolution}
+                                    disabled={leavingGeneration}
                                     onChange={(event) =>
                                         setResolution(event.target.value)
                                     }
@@ -288,48 +311,55 @@ export function PlantWorkspace({
                             </button>
                         ))}
                     </nav>
-                    {settingsView === "configuration" ? (
-                        <section className="panel">
-                            <h2>{t("technicalDetails")}</h2>
-                            {metadata ? (
-                                <ActionForm
-                                    submit={t("saveConfiguration")}
-                                    onSubmit={async (data) => {
-                                        setSavedPlant(
-                                            await api.put(
-                                                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/",
-                                                {
-                                                    path: scope,
-                                                    body: configurationInput(
-                                                        data,
-                                                    ),
-                                                },
-                                            ),
-                                        );
-                                        await changed();
-                                    }}
-                                >
-                                    <PlantConfigurationFields
-                                        name={currentPlant.name}
-                                        configuration={metadata}
-                                    />
-                                    {configuration && (
-                                        <p className="fine">
-                                            {t("calibrationChangeNote")}
-                                        </p>
-                                    )}
-                                </ActionForm>
-                            ) : (
-                                <Notice>{t("approvalDetailsRequired")}</Notice>
-                            )}
-                        </section>
-                    ) : settingsView === "location" ? (
-                        <RegionSettings region={region} scope={scope} />
-                    ) : settingsView === "collection" ? (
-                        <CollectionSchedule scope={scope} region={region} />
-                    ) : (
-                        <Reminders scope={scope} region={region} />
-                    )}
+                    <fieldset
+                        disabled={leaving("settings")}
+                        aria-busy={leaving("settings") || undefined}
+                    >
+                        {settingsView === "configuration" ? (
+                            <section className="panel">
+                                <h2>{t("technicalDetails")}</h2>
+                                {metadata ? (
+                                    <ActionForm
+                                        submit={t("saveConfiguration")}
+                                        onSubmit={async (data) => {
+                                            setSavedPlant(
+                                                await api.put(
+                                                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/",
+                                                    {
+                                                        path: scope,
+                                                        body: configurationInput(
+                                                            data,
+                                                        ),
+                                                    },
+                                                ),
+                                            );
+                                            await changed();
+                                        }}
+                                    >
+                                        <PlantConfigurationFields
+                                            name={currentPlant.name}
+                                            configuration={metadata}
+                                        />
+                                        {configuration && (
+                                            <p className="fine">
+                                                {t("calibrationChangeNote")}
+                                            </p>
+                                        )}
+                                    </ActionForm>
+                                ) : (
+                                    <Notice>
+                                        {t("approvalDetailsRequired")}
+                                    </Notice>
+                                )}
+                            </section>
+                        ) : settingsView === "location" ? (
+                            <RegionSettings region={region} scope={scope} />
+                        ) : settingsView === "collection" ? (
+                            <CollectionSchedule scope={scope} region={region} />
+                        ) : (
+                            <Reminders scope={scope} region={region} />
+                        )}
+                    </fieldset>
                     {canManage && (
                         <section className="panel">
                             <h2>{t("deletePlant")}</h2>
@@ -368,23 +398,28 @@ export function PlantWorkspace({
                             </button>
                         ))}
                     </nav>
-                    {productionView === "comparison" ? (
-                        <ForecastPerformance
-                            key={configuration?.id}
-                            scope={scope}
-                            timezone={timezone}
-                        />
-                    ) : (
-                        <ProductionHistory
-                            key={`history-${configuration?.id}`}
-                            scope={scope}
-                            configuration={configuration?.id}
-                            timezone={timezone}
-                            day={address.date}
-                            onDay={setDate}
-                            onSaved={changed}
-                        />
-                    )}
+                    <fieldset
+                        disabled={leaving("production")}
+                        aria-busy={leaving("production") || undefined}
+                    >
+                        {productionView === "comparison" ? (
+                            <ForecastPerformance
+                                key={configuration?.id}
+                                scope={scope}
+                                timezone={timezone}
+                            />
+                        ) : (
+                            <ProductionHistory
+                                key={`history-${configuration?.id}`}
+                                scope={scope}
+                                configuration={configuration?.id}
+                                timezone={timezone}
+                                day={address.date}
+                                onDay={setDate}
+                                onSaved={changed}
+                            />
+                        )}
+                    </fieldset>
                 </>
             ) : !configuration ? (
                 <Notice>{t("calibrationUnavailable")}</Notice>
