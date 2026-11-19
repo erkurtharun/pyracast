@@ -617,6 +617,25 @@ test("a forecast view chosen while another section loads applies to the forecast
     await expect(button("Generation")).toHaveAttribute("aria-current", "page");
 });
 
+test("a data source chosen while a date change loads limits the date being navigated to", async ({
+    page,
+}) => {
+    await openPlant(page, "forecast/?date=2026-03-27");
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-27");
+    const forecast = await holdNavigation(page, "forecast");
+    await page.getByLabel("Forecast date").fill("2026-03-29");
+    await forecast.requested;
+    await page.getByLabel("Data source").selectOption("estimated_actuals");
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-28$/);
+    await forecast.release();
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-28$/);
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-28");
+    await expect(page.getByLabel("Forecast date")).toHaveAttribute(
+        "max",
+        "2026-03-28",
+    );
+});
+
 test("Back while section changes load leaves the restored section in charge of its controls", async ({
     page,
 }) => {
