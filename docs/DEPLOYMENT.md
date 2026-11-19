@@ -361,7 +361,8 @@ successful `main` CI runs trigger it automatically. The workflow:
 3. Transfers the release through IAP using a short-lived OIDC identity and starts the
    installer in the transient unit `pyracast-release-<sha>-<run>-<attempt>.service`,
    so a cancelled job or a dropped tunnel does not stop it; the job follows its journal
-   (`journalctl -u` that unit) and reconnects.
+   (`journalctl -u` that unit) and reconnects. The installer's interface is
+   `install-release.sh SHA BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE RABBITMQ_IMAGE BUNDLE MIGRATION_JSON`.
 4. Checks configuration, that containers cannot reach the metadata server, database
    provisioning and the owner's access, the migration plan, that every stored secret
    decrypts with the release's staged secrets (`check_secrets` in the new image) and
