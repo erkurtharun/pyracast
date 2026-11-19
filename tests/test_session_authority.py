@@ -5,15 +5,24 @@ from typing import Any
 import pytest
 from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
+from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from allauth.socialaccount.models import SocialAccount
 from django.contrib.auth.models import User
+from django.contrib.sessions.models import Session
+from django.db import transaction
 from django.test import Client, override_settings
 from django.urls import reverse
 
+from pyracast.accounts import inputs
+from pyracast.accounts.processes import lock_account
 from tests.support.account_sessions import (
+    alongside,
     browser,
+    capture_security_events,
+    elsewhere,
     passwordless,
+    session_key,
     session_user,
     totp_clock,
     with_totp,
@@ -180,6 +189,116 @@ def test_every_confirmation_records_the_state_it_was_given_under(
     assert confirm(client, user, secret, now) == answered
 
     assert holds_current_authority(client, user.pk)
+
+
+FACTOR_CHECKS = {
+    "password": (inputs.ReauthenticateInput, "clean_password"),
+    "authenticator": (inputs.SecondFactorCode, "matching_code"),
+    "console": (inputs.SecondFactorCode, "matching_code"),
+}
+
+
+def after_the_factor_check(
+    monkeypatch: pytest.MonkeyPatch, kind: str, work: Callable[[], object]
+) -> list[Any]:
+    # Runs `work` from another connection once the confirmation checked its factor, and notes
+    # whether it had finished when the confirmation went on.
+    owner, name = FACTOR_CHECKS[kind]
+    check = getattr(owner, name)
+    started: list[Any] = []
+
+    def checked(self: Any, *args: Any, **kwargs: Any) -> Any:
+        value = check(self, *args, **kwargs)
+        if not started:
+            future = alongside(work)
+            started.append((future.done(), future))
+        return value
+
+    monkeypatch.setattr(owner, name, checked)
+    return started
+
+
+def connected_elsewhere(user: User) -> Callable[[], None]:
+    # Another session connects a provider identity, which locks the account first.
+    def connect() -> None:
+        with transaction.atomic():
+            lock_account(user.pk)
+            SocialAccount.objects.create(user=user, provider="google", uid="connected-elsewhere")
+
+    return connect
+
+
+@pytest.mark.parametrize("kind", ["password", "authenticator", "console"])
+def test_a_connection_made_while_a_confirmation_checks_its_factor_commits_after_its_record(
+    kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = time.time()
+    totp_clock(monkeypatch, now)
+    client, user, secret = confirming(kind)
+    started = after_the_factor_check(monkeypatch, kind, connected_elsewhere(user))
+    confirm, answered = CONFIRMATIONS[kind]
+
+    assert confirm(client, user, secret, now) == answered
+    [(finished, connection)] = started
+    connection.result(timeout=10)
+
+    assert not finished
+    assert SocialAccount.objects.filter(user=user, uid="connected-elsewhere").exists()
+    # The record names the state the factor was checked under, which the connection then changed.
+    assert not holds_current_authority(client, user.pk)
+
+
+def test_a_confirmation_whose_session_ended_while_its_code_was_checked_spends_nothing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    user = member()
+    with_totp(user)
+    [code, *_rest] = RecoveryCodes.activate(user).get_unused_codes()
+    client = signed_in(user)
+    key = session_key(client)
+    owner, name = FACTOR_CHECKS["authenticator"]
+    check = getattr(owner, name)
+
+    def checked_then_ended(self: Any, *args: Any, **kwargs: Any) -> Any:
+        value = check(self, *args, **kwargs)
+        elsewhere(lambda: Session.objects.filter(session_key=key).delete())
+        return value
+
+    monkeypatch.setattr(owner, name, checked_then_ended)
+    events = capture_security_events(caplog, monkeypatch)
+    client.raise_request_exception = False
+
+    response = submit(client, "auth/2fa/reauthenticate", {"code": code})
+
+    assert (response.status_code, response.json()["code"]) == (400, "session_ended")
+    codes = Authenticator.objects.get(user=user, type=Authenticator.Type.RECOVERY_CODES).wrap()
+    assert code in codes.get_unused_codes()
+    assert {"reauthenticated", "mfa_succeeded"} & {line["event"] for line in events()} == set()
+
+
+ADDED = "added@example.com"
+
+
+def test_a_session_without_an_authority_record_confirms_before_it_completes_an_address_change() -> (
+    None
+):
+    # The change was started in a session from before sessions carried an authority record.
+    user = member()
+    client = signed_in(user)
+    with_proof(client, user, "password", age=0, reauthenticated=True)
+    assert submit(client, "account/email", {"email": ADDED}).status_code == 200
+    forget_authority(client)
+    code = {"key": mailed_code()}
+
+    refused = submit(client, "auth/email/verify", code)
+
+    assert refused.status_code == 401
+    assert [flow["id"] for flow in refused.json()["data"]["flows"]] == ["reauthenticate"]
+    assert not EmailAddress.objects.filter(user=user, email=ADDED, verified=True).exists()
+    assert session_user(client) == user.pk
+    assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+    assert submit(client, "auth/email/verify", code).status_code == 200
+    assert EmailAddress.objects.filter(user=user, email=ADDED, verified=True).exists()
 
 
 def change_password(client: Client) -> Any:

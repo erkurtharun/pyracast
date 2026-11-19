@@ -1186,27 +1186,33 @@ def test_a_change_committed_after_the_request_checked_its_steps_ends_the_second_
     assert session_user(pending.client) is None
 
 
-def test_a_second_factor_reauthentication_without_an_authenticator_refuses_the_code(
+def test_an_authenticator_removal_started_after_the_factor_check_waits_for_the_code_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Only an account holding an authenticator reaches the code (others answer 403), so the
-    # authenticator is removed elsewhere once the view has checked the account's factor.
+    # The view checks the account's factor and then the code under the account's locks, so a
+    # removal started between the two commits only after the code was checked.
     user = account("owner")
     with_totp(user)
     client = browser()
     client.force_login(user)
     checked = security.strongest_factor
+    removals: list[tuple[bool, Future[None]]] = []
 
     def removed_after_the_check(checked_user: Any) -> Any:
         factor = checked(checked_user)
-        elsewhere(lambda: Authenticator.objects.filter(user_id=checked_user.pk).delete())
+        future = alongside(lambda: Authenticator.objects.filter(user_id=checked_user.pk).delete())
+        removals.append((future.done(), future))
         return factor
 
     monkeypatch.setattr("pyracast.accounts.step_up.strongest_factor", removed_after_the_check)
 
     response = submit(client, "auth/2fa/reauthenticate", {"code": "123456"})
+    [(finished, removal)] = removals
+    removal.result(timeout=10)
 
+    assert not finished
     assert (response.status_code, error_codes(response)) == (400, ["incorrect_code"])
+    assert not Authenticator.objects.filter(user=user).exists()
 
 
 @override_settings(ACCOUNT_EMAIL_VERIFICATION_SUPPORTS_CHANGE=True)

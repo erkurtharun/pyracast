@@ -231,24 +231,31 @@ def confirm_change(client: Client) -> None:
     assert submit(client, "auth/email/verify", {"key": mailed_code()}).status_code == 200
 
 
-def test_a_reauthentication_whose_session_was_ended_meanwhile_answers_session_ended(
+def test_a_change_that_ends_a_session_waits_for_the_reauthentication_it_meets_and_ends_it_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user = account("owner")
     rotating = signed_in(user)
     other = signed_in(user, reauthenticated=True)
     clean: Callable[..., Any] = ReauthenticateInput.clean
+    changes: list[tuple[bool, Future[None]]] = []
 
-    def ended_meanwhile(self: ReauthenticateInput) -> Any:
+    def changed_meanwhile(self: ReauthenticateInput) -> Any:
         cleaned = clean(self)
-        elsewhere(lambda: confirm_change(other))
+        future = alongside(lambda: confirm_change(other))
+        changes.append((future.done(), future))
         return cleaned
 
-    monkeypatch.setattr(ReauthenticateInput, "clean", ended_meanwhile)
+    monkeypatch.setattr(ReauthenticateInput, "clean", changed_meanwhile)
 
     response = submit(rotating, "auth/reauthenticate", {"password": PASSWORD})
+    [(finished, change)] = changes
+    change.result(timeout=10)
 
-    assert (response.status_code, response.json().get("code")) == (400, "session_ended")
+    # The password was checked under the account's locks, so the change commits after the
+    # reauthentication and ends the session under its rotated key.
+    assert not finished
+    assert response.status_code == 200
     assert session_user(rotating) is None
     assert session_user(other) == user.pk
     devices = UserSession.objects.filter(user=user).values_list("session_key", flat=True)

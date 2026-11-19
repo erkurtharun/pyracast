@@ -1374,3 +1374,43 @@ def test_a_factor_write_that_rolls_back_leaves_no_security_line(
     assert credentials(user) == before
     assert {event, "sessions_revoked"} & {line["event"] for line in events()} == set()
     assert session_user(other) == user.pk
+
+
+def test_an_address_change_whose_session_cannot_be_saved_sends_no_code(
+    now: float, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    case = WRITES["add-address"]
+    user, client, _other = arranged(case)
+    token = token_of(client)
+    events = capture_security_events(caplog, monkeypatch)
+    mail.outbox.clear()
+    client.raise_request_exception = False
+
+    with session_row_held(session_key(client)):
+        response = case.send(client, token, None)
+
+    assert mail.outbox == []
+    assert "email_change_requested" not in {line["event"] for line in events()}
+    assert (response.status_code, response.json()["code"]) == (503, "busy")
+    assert session_user(client) == user.pk
+
+
+@pytest.mark.parametrize("write", ["add-authenticator", "regenerate-recovery-codes"])
+def test_a_factor_write_that_cannot_end_the_other_sessions_stores_nothing(
+    write: str, now: float
+) -> None:
+    case = WRITES[write]
+    user, client, other = arranged(case)
+    prepared = case.prepare(client, now)
+    token = token_of(client)
+    # Its first request records the other session's device, through which revocation finds it.
+    token_of(other)
+    before = credentials(user)
+    client.raise_request_exception = False
+
+    with session_row_held(session_key(other)):
+        response = case.send(client, token, prepared)
+
+    assert credentials(user) == before
+    assert (response.status_code, response.json()["code"]) == (503, "busy")
+    assert session_user(other) == user.pk
