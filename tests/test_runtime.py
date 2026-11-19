@@ -106,6 +106,7 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     broker, actor, purge = MagicMock(), MagicMock(), MagicMock()
     send = MagicMock(return_value=PhaseOutcome())
     monkeypatch.setattr(command, "purge_expired", purge)
+    monkeypatch.setattr(command, "sweep_accounts", MagicMock())
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "make_actor", lambda _: actor)
     monkeypatch.setattr(command, "dispatch", send)
@@ -119,7 +120,7 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "make_epias_actor", lambda _: epias_actor)
     monkeypatch.setattr(command, "dispatch_epias", send_epias)
     call_command("dispatch")
-    purge.assert_called_once_with()
+    purge.assert_called_once()
     send.assert_called_once_with(actor)
     send_calibrations.assert_called_once_with(calibration_actor)
     send_notifications.assert_called_once_with(notification_actor)
@@ -204,7 +205,7 @@ def test_commands_handle_termination_and_restore_previous_handlers(
     ):
         monkeypatch.setattr(command, factory, MagicMock())
 
-    def terminate() -> None:
+    def terminate(*_: object) -> None:
         handler = signal.getsignal(signal.SIGTERM)
         assert callable(handler)
         handler(signal.SIGTERM, None)
@@ -218,6 +219,7 @@ def test_commands_handle_termination_and_restore_previous_handlers(
         instance.stop.assert_called_once()
     else:
         monkeypatch.setattr(command, "purge_expired", terminate)
+        monkeypatch.setattr(command, "sweep_accounts", MagicMock())
         for operation in (
             "dispatch",
             "dispatch_calibrations",
@@ -316,6 +318,7 @@ def test_dispatch_repeats_after_poll_timeout_until_stop_requested(
         monkeypatch.setattr(command, factory, MagicMock())
     for operation in (
         "purge_expired",
+        "sweep_accounts",
         "dispatch",
         "dispatch_calibrations",
         "dispatch_notifications",
