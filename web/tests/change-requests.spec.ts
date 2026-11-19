@@ -863,8 +863,14 @@ for (const removal of ["decision", "concurrent"] as const) {
         });
         await page.goto("/app/");
         await page.getByRole("button", { name: "Inbox", exact: true }).click();
+        const secondPage = page.waitForResponse(
+            (response) =>
+                response.url().includes("/change-requests/?") &&
+                response.url().includes("page=2"),
+        );
         await page.getByRole("button", { name: "Next", exact: true }).click();
         await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
+        await secondPage;
         if (removal === "decision") {
             await page
                 .getByRole("button", { name: "Review details", exact: true })
