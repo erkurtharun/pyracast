@@ -542,3 +542,65 @@ test("a sign-out that still finds a signed-in session after repeating it is repo
     });
     expect(calls).toHaveLength(4);
 });
+
+const otherAccount = (token: string) => ({
+    ...signedIn(token),
+    user: {
+        ...signedIn(token).user,
+        id: 2,
+        username: "other",
+        email: "other@example.test",
+    },
+});
+
+test("a save refused as signed out is not sent again while another account's session is confirmed", async () => {
+    answer(
+        () => json(signedIn("token")),
+        () => json(errorBody("not_authenticated", "Sign in."), 401),
+        () => json(otherAccount("other-token")),
+    );
+    await loadSession();
+    const error = await api
+        .post("/api/tenants/{tenant_id}/sites/", site)
+        .catch((failure) => failure);
+    expect(error).toMatchObject({ status: 401, code: "not_authenticated" });
+    expect(sessionState().session?.user?.id).toBe(2);
+    expect(
+        calls.map((call) => `${call.method} ${call.url} ${call.token}`),
+    ).toEqual([
+        "GET /api/session/ null",
+        "POST /api/tenants/1/sites/ token",
+        "GET /api/session/ null",
+    ]);
+});
+
+test("an account read answered as signed out is not repeated while another account's session is confirmed", async () => {
+    answer(
+        () => json(signedIn("token")),
+        signedOutAnswer,
+        () => json(otherAccount("other-token")),
+    );
+    await loadSession();
+    const result = await authRequest("account/authenticators", "GET");
+    expect(result.status).toBe(401);
+    expect(sessionState().session?.user?.id).toBe(2);
+    expect(calls).toHaveLength(3);
+});
+
+test("a sign-out is not sent a second time under another account", async () => {
+    adoptSession(signedIn("token"));
+    answer(signedOutAnswer, () => json(otherAccount("other-token")));
+    const error = await signOut().catch((failure) => failure);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.message).toBe("You are still signed in. Sign out again.");
+    expect(sessionState()).toMatchObject({
+        ended: false,
+        session: { user: { id: 2 }, csrf_token: "other-token" },
+    });
+    expect(
+        calls.map((call) => `${call.method} ${call.url} ${call.token}`),
+    ).toEqual([
+        "DELETE /api/auth/browser/v1/auth/session token",
+        "GET /api/session/ null",
+    ]);
+});
