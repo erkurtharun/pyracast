@@ -325,6 +325,30 @@ test("a not-authenticated answer arriving before a reauthentication's answer wai
     ]);
 });
 
+test("a repeated request refused again ends the session after another session read", async () => {
+    answer(
+        () => json(signedIn("token")),
+        () => json(errorBody("not_authenticated", "Sign in."), 401),
+        () => json(signedIn("rotated")),
+        () => json(errorBody("not_authenticated", "Sign in."), 401),
+        () => json({ ...signedIn("anonymous"), user: null, expires_at: null }),
+    );
+    await loadSession();
+    const error = await api.get("/api/tenants/").catch((failure) => failure);
+    expect(error).toMatchObject({ status: 401, code: "not_authenticated" });
+    expect(sessionState()).toMatchObject({
+        ended: true,
+        session: { user: null },
+    });
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+        "GET /api/session/",
+        "GET /api/tenants/",
+        "GET /api/session/",
+        "GET /api/tenants/",
+        "GET /api/session/",
+    ]);
+});
+
 test("an allauth flow answer does not end the session", async () => {
     answer(
         () => json(signedIn("token")),
@@ -424,4 +448,49 @@ test("an explicit sign-out returns to sign-in without an expiry notice", async (
     await signOut();
     expect(sessionState().session?.user).toBeNull();
     expect(sessionState().ended).toBe(false);
+});
+
+const signedOutAnswer = () =>
+    json({ status: 401, meta: { is_authenticated: false } }, 401);
+
+test("a sign-out answered for a key another tab replaced signs out the replacing session", async () => {
+    adoptSession(signedIn("token"));
+    answer(
+        signedOutAnswer,
+        () => json(signedIn("rotated")),
+        signedOutAnswer,
+        () => json({ ...signedIn("anonymous"), user: null, expires_at: null }),
+    );
+    const session = await signOut();
+    expect(session.user).toBeNull();
+    expect(sessionState()).toMatchObject({
+        ended: false,
+        session: { user: null },
+    });
+    expect(
+        calls.map((call) => `${call.method} ${call.url} ${call.token}`),
+    ).toEqual([
+        "DELETE /api/auth/browser/v1/auth/session token",
+        "GET /api/session/ null",
+        "DELETE /api/auth/browser/v1/auth/session rotated",
+        "GET /api/session/ null",
+    ]);
+});
+
+test("a sign-out that still finds a signed-in session after repeating it is reported", async () => {
+    adoptSession(signedIn("token"));
+    answer(
+        signedOutAnswer,
+        () => json(signedIn("rotated")),
+        signedOutAnswer,
+        () => json(signedIn("again")),
+    );
+    const error = await signOut().catch((failure) => failure);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.message).toBe("You are still signed in. Sign out again.");
+    expect(sessionState()).toMatchObject({
+        ended: false,
+        session: { csrf_token: "again" },
+    });
+    expect(calls).toHaveLength(4);
 });
