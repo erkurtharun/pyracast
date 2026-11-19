@@ -5,6 +5,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from enum import StrEnum
 from functools import partial
 from ipaddress import ip_address
@@ -26,6 +27,7 @@ from pyracast.event_details import INTEGER, OPTIONAL_INTEGER, OPTIONAL_TEXT, TEX
 
 logger = logging.getLogger("pyracast.security")
 failure_logger = logging.getLogger(__name__)
+_after_commit: ContextVar[bool] = ContextVar("pyracast_lines_after_commit", default=False)
 
 
 class SecurityEvent(StrEnum):
@@ -77,6 +79,30 @@ class SecurityEvent(StrEnum):
     WORKSPACE_MEMBER_REMOVED = "workspace_member_removed"
     WORKSPACE_ADMIN_REASSIGNED = "workspace_admin_reassigned"
 
+
+# Lines that report a change rather than a refusal or failure; inside lines_after_commit they
+# leave only with the commit of the change.
+CHANGE_EVENTS = frozenset(
+    {
+        SecurityEvent.LOGIN_SUCCEEDED,
+        SecurityEvent.LOGOUT,
+        SecurityEvent.SESSIONS_REVOKED,
+        SecurityEvent.SIGNUP,
+        SecurityEvent.EMAIL_VERIFIED,
+        SecurityEvent.EMAIL_ADDED,
+        SecurityEvent.EMAIL_CHANGE_REQUESTED,
+        SecurityEvent.EMAIL_CHANGED,
+        SecurityEvent.EMAIL_REMOVED,
+        SecurityEvent.CREDENTIAL_CHANGED,
+        SecurityEvent.CREDENTIAL_SET,
+        SecurityEvent.CREDENTIAL_RESET,
+        SecurityEvent.MFA_ADDED,
+        SecurityEvent.MFA_REMOVED,
+        SecurityEvent.MFA_RESET,
+        SecurityEvent.SOCIAL_ACCOUNT_CONNECTED,
+        SecurityEvent.SOCIAL_ACCOUNT_DISCONNECTED,
+    }
+)
 
 SIGNAL_EVENTS: Mapping[Signal, SecurityEvent] = {
     auth_signals.user_logged_in: SecurityEvent.LOGIN_SUCCEEDED,
@@ -171,6 +197,15 @@ def _client_ip(request: HttpRequest | None, client_ip: str | None) -> str | None
 
 
 @contextmanager
+def lines_after_commit() -> Iterator[None]:
+    token = _after_commit.set(True)
+    try:
+        yield
+    finally:
+        _after_commit.reset(token)
+
+
+@contextmanager
 def _contained(event: SecurityEvent) -> Iterator[None]:
     # A line that cannot be written must not fail the request it describes. Only the error type
     # is logged: an exception message can carry an address.
@@ -224,7 +259,15 @@ def record_security_event(
             key for key, kind in LINE_KINDS.items() if key in line and not kind.accepts(line[key])
         ]:
             raise ValueError(f"{event} takes {', '.join(mistyped)} of another type.")
-        logger.info("%s", json.dumps(line, sort_keys=True))
+        write = partial(logger.info, "%s", json.dumps(line, sort_keys=True))
+        if (
+            event in CHANGE_EVENTS
+            and _after_commit.get()
+            and transaction.get_connection().in_atomic_block
+        ):
+            transaction.on_commit(write, robust=True)
+        else:
+            write()
 
 
 def record_on_commit(event: SecurityEvent, **fields: Any) -> None:

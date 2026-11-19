@@ -13,7 +13,11 @@ from django.core.exceptions import PermissionDenied
 from django.test import Client, RequestFactory, override_settings
 
 from pyracast.accounts.audit import logger, refusal_throttle
-from pyracast.accounts.social import SocialAccountAdapter, record_social_refusal
+from pyracast.accounts.social import (
+    SocialAccountAdapter,
+    authorize_connection,
+    record_social_refusal,
+)
 from tests.support.auth_lifecycle import PASSWORD, member, submit
 from tests.support.social_accounts import (
     CALLBACK,
@@ -163,7 +167,7 @@ def test_a_reported_connection_refusal_is_not_recorded_again_as_a_provider_error
     adapter = SocialAccountAdapter(request)
     login = SocialLogin(account=SocialAccount(provider="google", uid="provider-identity"))
     with pytest.raises(PermissionDenied) as denied:
-        adapter.connect_account(request, login)
+        authorize_connection(request, login)
 
     provider = GoogleProvider(request, app=SocialApp(provider="google"))
     adapter.on_authentication_error(request, provider, exception=denied.value)

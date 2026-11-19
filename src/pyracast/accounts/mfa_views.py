@@ -18,8 +18,8 @@ from pyracast.accounts.inputs import (
 )
 from pyracast.accounts.processes import (
     AuthorityChangedError,
+    credential_write,
     require_authority,
-    require_current_proof,
 )
 from pyracast.accounts.security import Factor
 from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor, require_recent_mfa
@@ -52,8 +52,7 @@ class ManageRecoveryCodesView(StepUpAnswers, AllauthRecoveryCodesView):
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         if request.method not in {"GET", "HEAD", "POST"} or not request.user.is_authenticated:
             return super().handle(request, *args, **kwargs)
-        with transaction.atomic():
-            require_current_proof(request)
+        with credential_write(request):
             response = require_recent_mfa(request)
             if response is not None:
                 return response
@@ -70,8 +69,7 @@ class ManageTOTPView(StepUpAnswers, AllauthTOTPView):
             raise PermissionDenied("Administrator authenticators are provisioned by the operator.")
         if request.method not in {"POST", "DELETE"} or not user.is_authenticated:
             return super().handle(request, *args, **kwargs)
-        with transaction.atomic():
-            require_current_proof(request)
+        with credential_write(request):
             response = require_recent_mfa(request) if request.method == "DELETE" else None
             if response is not None:
                 return response

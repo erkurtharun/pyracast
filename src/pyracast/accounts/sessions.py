@@ -21,7 +21,7 @@ from django.dispatch import Signal
 from django.http import HttpRequest
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
-from pyracast.accounts.processes import stamp_reauthentication
+from pyracast.accounts.processes import record_authority
 
 # Seconds between two writes of a session's activity marker and its device record.
 ACTIVITY_REFRESH_SECONDS = 60
@@ -34,10 +34,12 @@ class ExpiryReason(StrEnum):
     INVALID_MARKER = "invalid_marker"
 
 
-def start_session(*, request: HttpRequest, **_kwargs: Any) -> None:
+def start_session(*, request: HttpRequest, user: AbstractBaseUser, **_kwargs: Any) -> None:
     now = time.time()
     request.session["authenticated_at"] = now
     request.session["last_activity_at"] = now
+    with transaction.atomic():
+        record_authority(request, user)
 
 
 def _marker_age(session: SessionBase, marker: str, now: float) -> float | None:
@@ -138,7 +140,7 @@ def _rotate_after_reauthentication(
         return
     key = request.session.session_key
     with transaction.atomic():
-        stamp_reauthentication(request, user)
+        record_authority(request, user)
         _hold_account(user.pk)
         if not Session.objects.filter(session_key=key).exists():
             raise SessionInterrupted("Another session of the account ended this one.")

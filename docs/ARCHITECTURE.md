@@ -153,13 +153,14 @@ verification; other addresses use Pyracast's email verification.
 Connections require an authenticated session and recent reauthentication. A
 reauthentication uses the strongest factor the account holds: its authenticator, else its
 password, else a code sent to its verified email; it ends when the account's credential
-state changes. A credential change ends the account's reauthentications for every request
-that starts after it commits, as a revocation ends a session, so a request already past its
-check, such as a console write of business data, still finishes. A write of the account's own
-credentials (recovery codes, authenticator, password, addresses, provider identities) checks
-its reauthentication again under the account's locks in its own transaction and is refused
-when that reauthentication ended there, so it never commits after another session's credential
-change, even when that change left a weaker factor to demand. Linking is
+state changes. Each session keeps one record of that state, written under the account's
+locks when it signs in or confirms. A write of the account's own credentials (recovery codes,
+authenticator, password, addresses, provider identities) runs in one transaction that first
+locks the account, answers `session_ended` when the session is gone and asks for a
+confirmation by the factor the account needs now when the record differs, also before a
+password change that gives the current password. Other requests, such as console writes of
+business data, compare the record when they start, so one already past that check finishes,
+as a request of a session revoked a moment later does. Linking is
 bound to the initiating user, and disconnects lock the user record to preserve a
 working login method. Provider sign-in retains Pyracast's local MFA requirements.
 
@@ -518,8 +519,9 @@ Revoke sessions after 12 hours or 30 minutes without requests; polling of a visi
 tab counts as activity, and hidden tabs do not poll. Sessions predating the lifetime markers fail closed. A request
 whose session another session of the account ended while it ran answers 400
 `session_ended`, also when its own work committed; the client signs in again. A
-provider callback whose session ended before it took its provider state answers like
-one that finds nothing pending: it stores nothing and sends no session cookie. API
+provider callback whose session ended before it took its provider state or during the
+provider exchange answers like one that finds nothing pending: it stores nothing and sends
+no session cookie. API
 responses are private and non-cacheable. The frontend reads stored results and
 never handles provider credentials. A fixed public HTTPS origin determines
 security-email navigation. Verification and recovery codes expire after ten minutes,

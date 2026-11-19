@@ -26,14 +26,16 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from psycopg.errors import DeadlockDetected
 
 from pyracast.accounts import inputs
+from pyracast.accounts.audit import lines_after_commit
 from pyracast.accounts.login_limits import spent, throttled
 from pyracast.accounts.processes import (
     AuthorityChangedError,
     StartingView,
+    authorize_credential_write,
     continuing,
+    credential_write,
     lock_account,
     require_authority,
-    require_current_proof,
 )
 from pyracast.accounts.security import Factor, strongest_factor
 from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor, require_recent_mfa
@@ -194,8 +196,7 @@ class ChangePasswordView(StepUpAnswers, views.ChangePasswordView):
         user = request.user
         if request.method != "POST" or not user.is_authenticated:
             return super().handle(request, *args, **kwargs)
-        with transaction.atomic():
-            require_current_proof(request)
+        with credential_write(request):
             # The current password is checked against the password as locked here.
             request.user = User.objects.get(pk=user.pk)
             # The current password proves only the password; an account with an authenticator
@@ -221,10 +222,13 @@ class ReauthenticateView(StrongestFactor, views.ReauthenticateView):
 
 class ManageEmailView(StepUpAnswers, StartingView, views.ManageEmailView):
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        if request.method != "DELETE" or not request.user.is_authenticated:
+        if not request.user.is_authenticated or request.method not in {"POST", "DELETE"}:
             return super().handle(request, *args, **kwargs)
-        with transaction.atomic():
-            require_current_proof(request)
+        if request.method == "POST":
+            # `starting` opens the transaction and handle_input checks first in it.
+            with lines_after_commit():
+                return super().handle(request, *args, **kwargs)
+        with credential_write(request):
             return super().handle(request, *args, **kwargs)
 
     def handle_input(self, data: Any) -> ErrorResponse | None:
@@ -232,7 +236,7 @@ class ManageEmailView(StepUpAnswers, StartingView, views.ManageEmailView):
             if spent(self.request, "request_email_change", user=self.user):
                 raise throttled(self.request)
             if self.request.user.is_authenticated:
-                require_current_proof(self.request)
+                authorize_credential_write(self.request)
             else:
                 lock_account(self.user.pk)
         return super().handle_input(data)

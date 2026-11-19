@@ -1,5 +1,3 @@
-from collections.abc import Iterator
-from contextlib import contextmanager
 from typing import Any, NoReturn, cast
 
 from allauth.account import signals as account_signals
@@ -14,7 +12,6 @@ from allauth.socialaccount.internal.flows.connect import do_connect
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialLogin
 from allauth.socialaccount.providers.base.provider import Provider
 from django.conf import settings
-from django.contrib.auth import get_user
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
@@ -24,10 +21,9 @@ from django.http import HttpRequest, HttpResponseRedirect
 from pyracast.accounts.audit import SecurityEvent, record_security_event, refusal_throttle
 from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.processes import (
+    authorize_credential_write,
     identified_accounts,
-    identifying,
     lock_account,
-    require_current_proof,
 )
 
 
@@ -78,23 +74,31 @@ class UnavailableSocialAppError(SocialApp.DoesNotExist, ValueError):
     pass
 
 
-@contextmanager
-def locked_social_user(request: HttpRequest, user_id: int) -> Iterator[User | None]:
-    # Connecting and removing an identity are credential writes of the session's own account.
-    with transaction.atomic():
-        if request.user.pk == user_id:
-            require_current_proof(request)
-        request.user = get_user(request)
-        yield (
-            request.user if request.user.is_authenticated and request.user.pk == user_id else None
-        )
+def authorize_connection(request: HttpRequest, sociallogin: SocialLogin) -> None:
+    # First in the callback's completion, before allauth's lookup reads or refreshes the identity,
+    # so a refused connection stores nothing: the session's account must be the one that started
+    # the connection, and its authority record must hold under the account's locks.
+    origin = sociallogin.state.get("data") or {}
+    user_id = origin.get("user_id")
+    provider = sociallogin.account.provider
+    actor = request.user if request.user.is_authenticated else None
+    if not isinstance(user_id, int):
+        record_social_refusal(request, provider, "initiating_user_missing", actor)
+        raise PermissionDenied("Account connection requires an initiating user.")
+    try:
+        if actor is None or actor.pk != user_id:
+            raise ReauthenticationRequired
+        authorize_credential_write(request)
+        if reauthentication.is_reauthentication_required(request, app="allauth.socialaccount"):
+            raise ReauthenticationRequired
+    except ReauthenticationRequired:
+        record_social_refusal(request, provider, "reauthentication_required", actor)
+        raise PermissionDenied("Account connection requires current reauthentication.") from None
 
 
 def lock_identity(provider: str, uid: str) -> None:
-    # In the callback, which starts pending processes, the account a provider identity names is
-    # locked before allauth looks the identity up; the owner is read again under the lock.
-    if not identifying():
-        return
+    # A sign-in's completion locks the account a provider identity names before allauth looks the
+    # identity up; the owner is read again under the lock.
     identity = SocialAccount.objects.filter(provider=provider, uid=uid)
     owner = identity.values_list("user_id", flat=True).first()
     while owner is not None:
@@ -142,8 +146,7 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
         self, request: HttpRequest, sociallogin: SocialLogin, data: dict[str, Any]
     ) -> User:
         # Runs before allauth looks the identity up and saves it, so no other profile field is
-        # ever stored and the account it names is locked before that lookup reads it.
-        lock_identity(sociallogin.account.provider, sociallogin.account.uid)
+        # ever stored.
         user = cast(User, super().populate_user(request, sociallogin, data))
         provider = sociallogin.account.provider
         profile = sociallogin.account.extra_data
@@ -200,46 +203,23 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
             request, provider, error=error, exception=exception, extra_context=extra_context
         )
 
-    def connect_account(self, request: HttpRequest, sociallogin: SocialLogin) -> None:
-        origin = sociallogin.state.get("data") or {}
-        user_id = origin.get("user_id")
-        if not isinstance(user_id, int):
-            user = request.user if request.user.is_authenticated else None
-            record_social_refusal(
-                request, sociallogin.account.provider, "initiating_user_missing", user
-            )
-            raise PermissionDenied("Account connection requires an initiating user.")
+    def connect_account(self, request: HttpRequest, sociallogin: SocialLogin) -> NoReturn:
+        # authorize_connection ran before allauth's lookup, under the locks this completion holds.
         try:
-            with locked_social_user(request, user_id) as user:
-                if user is None or reauthentication.is_reauthentication_required(
-                    request, app="allauth.socialaccount"
-                ):
-                    self.refuse_connection(request, sociallogin)
-                try:
-                    with transaction.atomic():
-                        do_connect(request, sociallogin)
-                except IntegrityError as error:
-                    diagnostic = getattr(error.__cause__, "diag", None)
-                    if (
-                        getattr(error.__cause__, "sqlstate", None) != "23505"
-                        or getattr(diagnostic, "table_name", None) != SocialAccount._meta.db_table
-                    ):
-                        raise
-                    raise self.validation_error("connected_other") from error
-        except ReauthenticationRequired:
-            self.refuse_connection(request, sociallogin)
-        # Ends allauth's flow here: returning would let it run do_connect again, outside the lock.
+            with transaction.atomic():
+                do_connect(request, sociallogin)
+        except IntegrityError as error:
+            diagnostic = getattr(error.__cause__, "diag", None)
+            if (
+                getattr(error.__cause__, "sqlstate", None) != "23505"
+                or getattr(diagnostic, "table_name", None) != SocialAccount._meta.db_table
+            ):
+                raise
+            raise self.validation_error("connected_other") from error
+        # Ends allauth's flow here: returning would let it run do_connect again.
         raise ImmediateHttpResponse(
             HttpResponseRedirect(self.get_connect_redirect_url(request, sociallogin.account))
         )
-
-    @staticmethod
-    def refuse_connection(request: HttpRequest, sociallogin: SocialLogin) -> NoReturn:
-        actor = request.user if request.user.is_authenticated else None
-        record_social_refusal(
-            request, sociallogin.account.provider, "reauthentication_required", actor
-        )
-        raise PermissionDenied("Account connection requires current reauthentication.")
 
     def get_connect_redirect_url(self, request: HttpRequest, socialaccount: SocialAccount) -> str:
         return social_callback_url()

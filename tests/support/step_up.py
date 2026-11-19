@@ -13,11 +13,8 @@ from django.db import transaction
 from django.http import HttpRequest
 from django.test import Client, RequestFactory
 
-from pyracast.accounts.processes import account_state, stamp_reauthentication
+from pyracast.accounts.processes import AUTHORITY, account_state, record_authority
 from tests.support.auth_lifecycle import PASSWORD
-
-# The session key of the authority record a session keeps of its account's credential state.
-AUTHORITY = "pyracast_session_authority"
 
 STRONGEST = {
     "authenticator": "mfa",
@@ -66,7 +63,7 @@ def call(client: Client, method: str, path: str, data: dict[str, Any] | None = N
 def stamped(request: HttpRequest, user: User) -> None:
     # The product records the account's credential state as it records a reauthentication.
     with transaction.atomic():
-        stamp_reauthentication(request, user)
+        record_authority(request, user)
 
 
 def with_proof(

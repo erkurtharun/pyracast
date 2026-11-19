@@ -1,7 +1,8 @@
 import json
 import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
@@ -27,16 +28,19 @@ from allauth.mfa.models import Authenticator
 from allauth.socialaccount.models import SocialAccount
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.models import User
+from django.contrib.sessions.exceptions import SessionInterrupted
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.utils.crypto import salted_hmac
 from django.utils.http import base36_to_int
 
+from pyracast.accounts.audit import lines_after_commit
+
 PROVIDER_SIGNUP_SESSION_KEY = "socialaccount_sociallogin"
 STAMP = "pyracast_authority"
-# The stamp of the session's reauthentications; allauth returns its authentication records to the
-# client, so the stamp is kept beside them.
-PROOF_STAMP = "pyracast_reauthentication_authority"
+# The session's authority record: [account, credential state] as read under the account's locks
+# when the session signed in or last recorded a reauthentication.
+AUTHORITY = "pyracast_session_authority"
 # Authenticator data allauth rewrites when a recovery code is used or the codes are shown; each
 # code is checked against the current row when it is entered.
 USE_MARKERS = frozenset({"used_mask", "viewed_at"})
@@ -274,61 +278,60 @@ def _proofs(request: HttpRequest, user: AbstractBaseUser) -> list[dict[str, Any]
     ]
 
 
-def _end(request: HttpRequest, proofs: list[dict[str, Any]]) -> None:
+def _end(request: HttpRequest, user: AbstractBaseUser, *, keep: object = None) -> None:
     # allauth's gates read only the flag; the records stay, so the session keeps its sign-in.
-    for record in proofs:
-        record["reauthenticated"] = False
-    request.session.modified = True
+    for record in get_authentication_records(request, user):
+        if record.get("reauthenticated") and record is not keep:
+            record["reauthenticated"] = False
+            request.session.modified = True
 
 
-def stamp_reauthentication(request: HttpRequest, user: AbstractBaseUser) -> None:
-    # Runs as a reauthentication is recorded, in the transaction that rotates the session key: the
-    # state is read under the account's locks, and a factor changed since the check has already
-    # ended the session. Earlier reauthentications given under another state end.
+def record_authority(request: HttpRequest, user: AbstractBaseUser) -> None:
+    # The only writer of the session's authority record: it runs when the session signs in and
+    # when it records a reauthentication, inside their transaction. Reauthentications given under
+    # an earlier state end.
     state = account_state(user.pk, lock=True)
-    proofs = _proofs(request, user)
     if state is None:
-        _end(request, proofs)
-        request.session.pop(PROOF_STAMP, None)
+        _end(request, user)
         return
-    if request.session.get(PROOF_STAMP) != [user.pk, state]:
-        given = get_authentication_records(request, user)[-1]
-        _end(request, [proof for proof in proofs if proof is not given])
-    request.session[PROOF_STAMP] = [user.pk, state]
-
-
-def _end_unless_given_under(
-    request: HttpRequest, user: AbstractBaseUser, state: str | None
-) -> bool:
-    # A reauthentication holds while the account's credential state equals the one it was given
-    # under; any change of that state ends it.
-    proofs = _proofs(request, user)
-    if proofs and request.session.get(PROOF_STAMP) != [user.pk, state]:
-        _end(request, proofs)
-        request.session.pop(PROOF_STAMP, None)
-        return True
-    return False
+    if request.session.get(AUTHORITY) != [user.pk, state]:
+        records = get_authentication_records(request, user)
+        _end(request, user, keep=records[-1] if records else None)
+    request.session[AUTHORITY] = [user.pk, state]
 
 
 def end_stale_reauthentication(request: HttpRequest) -> None:
-    # Read unlocked as a request starts: a change committed after this read ends the proof for
-    # the next request; credential writes read the state again under the locks.
+    # Read unlocked as a request starts, so pages and the console's guard see a reauthentication
+    # only while the session's record equals the account's state; the record stays.
     user = request.user
-    if user.is_authenticated and _proofs(request, user):
-        _end_unless_given_under(request, user, account_state(user.pk))
+    if not user.is_authenticated or not _proofs(request, user):
+        return
+    if request.session.get(AUTHORITY) != [user.pk, account_state(user.pk)]:
+        _end(request, user)
 
 
-def require_current_proof(request: HttpRequest) -> None:
-    # A write that changes the account's own credentials calls this first in its transaction,
-    # before any gate reads a proof: the account's locks hold its state until the write commits,
-    # so the write never commits after another session's credential change. A proof that ends
-    # here refuses the request, since the changed state may select a weaker gate; a request that
-    # carried no proof is left to its gate.
+def authorize_credential_write(request: HttpRequest) -> None:
+    # First in the one transaction of a write of the account's own credentials. The account's
+    # locks come before any session row (revocation holds the account row while it deletes
+    # session rows), so the session read below is ordered with every revocation, and the state
+    # stays as compared until the write commits.
     user = request.user
-    if user.is_authenticated and _end_unless_given_under(
-        request, user, account_state(user.pk, lock=True)
-    ):
+    if not user.is_authenticated:
         raise ReauthenticationRequired
+    state = account_state(user.pk, lock=True)
+    key = request.session.session_key
+    if key is None or not request.session.exists(key):
+        raise SessionInterrupted("Another session of the account ended this one.")
+    if state is None or request.session.get(AUTHORITY) != [user.pk, state]:
+        _end(request, user)
+        raise ReauthenticationRequired
+
+
+@contextmanager
+def credential_write(request: HttpRequest) -> Iterator[None]:
+    with lines_after_commit(), transaction.atomic():
+        authorize_credential_write(request)
+        yield
 
 
 class PendingProcessAuthority:

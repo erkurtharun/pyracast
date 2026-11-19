@@ -22,6 +22,10 @@ ALLAUTH_PROTOCOL = {
     "accounts/mfa_views.py:AuthenticateView.handle",
     "accounts/headless.py:ManageEmailView.post",
     "accounts/social_views.py:ProviderSignupView.handle",
+    # The provider redirect and callback answer with allauth's error redirect, as allauth's own
+    # callback does.
+    "accounts/social_views.py:RedirectToProviderView.post",
+    "accounts/social_views.py:ProviderCallbackView.dispatch",
     "accounts/inputs.py:ChangePasswordInput.clean_current_password",
     "accounts/inputs.py:SecondFactorCode.matching_code",
     "accounts/inputs.py:TOTPActivationInput.clean_code.matching_code",
