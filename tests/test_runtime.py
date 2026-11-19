@@ -1,5 +1,7 @@
 import signal
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
 
@@ -103,10 +105,12 @@ def test_rabbitmq_failover_urls_preserve_explicit_parameters(
 def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     from pyracast.forecasts.management.commands import dispatch as command
 
-    broker, actor, purge = MagicMock(), MagicMock(), MagicMock()
+    broker, actor, purge, sweep = MagicMock(), MagicMock(), MagicMock(), MagicMock()
     send = MagicMock(return_value=PhaseOutcome())
+    moment = datetime(2026, 11, 19, 3, 0, tzinfo=UTC)
+    monkeypatch.setattr(command, "timezone", SimpleNamespace(now=lambda: moment))
     monkeypatch.setattr(command, "purge_expired", purge)
-    monkeypatch.setattr(command, "sweep_accounts", MagicMock())
+    monkeypatch.setattr(command, "sweep_accounts", sweep)
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "make_actor", lambda _: actor)
     monkeypatch.setattr(command, "dispatch", send)
@@ -120,7 +124,8 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "make_epias_actor", lambda _: epias_actor)
     monkeypatch.setattr(command, "dispatch_epias", send_epias)
     call_command("dispatch")
-    purge.assert_called_once()
+    purge.assert_called_once_with(moment)
+    sweep.assert_called_once_with(moment)
     send.assert_called_once_with(actor)
     send_calibrations.assert_called_once_with(calibration_actor)
     send_notifications.assert_called_once_with(notification_actor)

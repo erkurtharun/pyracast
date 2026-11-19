@@ -367,6 +367,16 @@ def test_unexpected_callback_destinations_return_to_the_configured_callback(url:
     assert response["Location"] == CALLBACK + "&error=invalid_request"
 
 
+def test_a_provider_callback_without_state_returns_to_the_current_public_origin() -> None:
+    with override_settings(PYRACAST_PUBLIC_ORIGIN="https://app.example.com"):
+        response = Client().get("/api/accounts/google/login/callback/", {"code": "provider-code"})
+
+    assert response.status_code == 302
+    assert response["Location"] == (
+        "https://app.example.com/app/?social_callback=1&error=unknown&error_process=login"
+    )
+
+
 def test_an_unknown_provider_returns_to_the_configured_callback() -> None:
     response = Client().post(
         AUTH + "auth/provider/redirect",

@@ -247,6 +247,84 @@ test("a not-authenticated answer ends the session once", async () => {
     );
 });
 
+const emptyList = { results: [], count: 0, next: null, previous: null };
+const reauthenticated = { status: 200, meta: { is_authenticated: true } };
+
+test("a not-authenticated answer arriving after a reauthentication is retried once the session read shows the session", async () => {
+    answer(
+        () => json(signedIn("token")),
+        () => json(reauthenticated),
+        () => json(errorBody("not_authenticated", "Sign in."), 401),
+        () => json(signedIn("rotated")),
+        () => json(emptyList),
+    );
+    await loadSession();
+    await authRequest("auth/reauthenticate", "POST", { password: "secret" });
+    const workspaces = await api.get("/api/tenants/");
+    expect(workspaces).toEqual(emptyList);
+    expect(sessionState()).toMatchObject({
+        ended: false,
+        session: { csrf_token: "rotated" },
+    });
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+        "GET /api/session/",
+        "POST /api/auth/browser/v1/auth/reauthenticate",
+        "GET /api/tenants/",
+        "GET /api/session/",
+        "GET /api/tenants/",
+    ]);
+});
+
+test("a not-authenticated answer arriving before a reauthentication's answer waits for a session read sent after it", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let reauthenticationAnswered = false;
+    let readAfterReauthentication = false;
+    answer(
+        () => json(signedIn("token")),
+        async () => {
+            await held;
+            reauthenticationAnswered = true;
+            return json(reauthenticated);
+        },
+        () => json(errorBody("not_authenticated", "Sign in."), 401),
+        () => {
+            readAfterReauthentication = reauthenticationAnswered;
+            return json(signedIn("rotated"));
+        },
+        () => json(emptyList),
+    );
+    await loadSession();
+    const reauthentication = authRequest("auth/reauthenticate", "POST", {
+        password: "secret",
+    });
+    await expect.poll(() => calls.length).toBe(2);
+    const workspaces = api.get("/api/tenants/");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).toHaveLength(3);
+    expect(sessionState()).toMatchObject({
+        ended: false,
+        session: { csrf_token: "token" },
+    });
+    release();
+    expect((await reauthentication).status).toBe(200);
+    expect(await workspaces).toEqual(emptyList);
+    expect(readAfterReauthentication).toBe(true);
+    expect(sessionState()).toMatchObject({
+        ended: false,
+        session: { csrf_token: "rotated" },
+    });
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+        "GET /api/session/",
+        "POST /api/auth/browser/v1/auth/reauthenticate",
+        "GET /api/tenants/",
+        "GET /api/session/",
+        "GET /api/tenants/",
+    ]);
+});
+
 test("an allauth flow answer does not end the session", async () => {
     answer(
         () => json(signedIn("token")),
