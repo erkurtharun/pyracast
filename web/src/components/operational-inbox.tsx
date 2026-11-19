@@ -41,18 +41,38 @@ export function OperationalInbox({ tenant }: { tenant: Tenant }) {
     const [update, setUpdate] = useState<{
         revision: number;
         outcome: Decision | null;
-    }>({ revision: 0, outcome: null });
+        reset: boolean;
+    }>({ revision: 0, outcome: null, reset: false });
     const feedback = useRef<HTMLDivElement>(null);
     const [page, setPage] = useState(1);
     const admin = tenant.role === "admin";
     const effectiveScope = admin ? scope : "mine";
     const changed = (outcome: Decision | null = null) => {
-        if (outcome && outcome !== "seen" && effectiveScope === "pending")
-            setPage(1);
-        setUpdate((value) => ({ revision: value.revision + 1, outcome }));
+        const reset =
+            outcome !== null &&
+            outcome !== "seen" &&
+            effectiveScope === "pending";
+        if (reset) setPage(1);
+        setUpdate((value) => ({
+            revision: value.revision + 1,
+            outcome,
+            reset,
+        }));
     };
     useEffect(() => {
-        if (update.revision > 0) void refresh.workspace(tenant.id);
+        if (update.revision > 0)
+            void refresh.workspace(
+                tenant.id,
+                update.reset
+                    ? {
+                          path: "/api/tenants/{tenant_id}/change-requests/",
+                          options: {
+                              path: { tenant_id: tenant.id },
+                              query: { scope: "pending", page: 1 },
+                          },
+                      }
+                    : undefined,
+            );
         if (update.outcome) feedback.current?.focus();
     }, [update, refresh, tenant.id]);
     return (

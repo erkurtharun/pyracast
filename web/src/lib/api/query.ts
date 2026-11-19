@@ -1,5 +1,6 @@
 "use client";
 import {
+    partialMatchKey,
     QueryClient,
     useQuery,
     useQueryClient,
@@ -148,13 +149,19 @@ export function useApiList<P extends ListPath>(
     );
 }
 
+// A query under `mounted` that is already reading was mounted after the change, so its read stands instead of being cancelled and repeated.
 export function invalidate(
     client: QueryClient,
     queryKey: QueryKey,
     mounted?: QueryKey,
 ) {
-    void mounted;
-    return client.invalidateQueries({ queryKey });
+    return client.invalidateQueries({
+        queryKey,
+        predicate: (query) =>
+            !mounted ||
+            query.state.fetchStatus !== "fetching" ||
+            !partialMatchKey(query.queryKey, mounted),
+    });
 }
 
 type Request = { path: string; options: Parameters<typeof keys.request>[2] };
@@ -196,10 +203,6 @@ export function useRefresh() {
                     refresh(keys.path(owner, "/api/tenants/")),
                 ]),
             tenants: () => refresh(keys.path(owner, "/api/tenants/")),
-            discard: (path: string, parameters: object) =>
-                client.removeQueries({
-                    queryKey: keys.path(owner, path, parameters),
-                }),
         };
     }, [client, owner, locale]);
 }
