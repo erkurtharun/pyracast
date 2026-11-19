@@ -151,14 +151,15 @@ def reminder_overview(
 
 
 def plants_at_recipient_limit(tenant_id: int) -> int:
-    """Plants whose reminders include the members and already reach the limit, so one more
-    member pauses them."""
+    """Plants whose reminders include the members, are sending and already reach the limit, so
+    one more member pauses them."""
     limit = recipient_limit()
     return sum(
-        len(effective_recipients(schedule)) >= limit
+        reminder_state(schedule, limit) == ReminderState.SENDING
+        and len(effective_recipients(schedule)) == limit
         for schedule in ReminderSchedule.objects.filter(
             region__in=Region.objects.active().filter(tenant_id=tenant_id),
             enabled=True,
             include_workspace_members=True,
-        ).select_related("region")
+        ).select_related("region__approved_binding__provider_account")
     )

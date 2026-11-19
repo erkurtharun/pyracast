@@ -4,6 +4,7 @@ import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from functools import partial
 
 from django.core.mail import EmailMultiAlternatives
 from django.db import connection, transaction
@@ -12,6 +13,7 @@ from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.account_mail import compose_account_mail
 from pyracast.accounts.invitations import compose_invitation
+from pyracast.accounts.login_limits import release_code_resend
 from pyracast.accounts.models import InvitationDeliveryStatus, WorkspaceInvitation
 from pyracast.encryption import secret_cipher
 from pyracast.mail.errors import (
@@ -28,6 +30,7 @@ from pyracast.notifications.models import (
     OPEN_MAIL,
     OutboundMail,
     OutboundMailError,
+    OutboundMailKind,
     OutboundMailStatus,
 )
 
@@ -41,6 +44,10 @@ ANONYMOUS_MAIL_PER_HOUR = 20
 # Two-key advisory lock ("PYOB", 1) that serializes the anonymous budget across workers.
 ANONYMOUS_BUDGET_LOCK = (0x50594F42, 1)
 WAITING = (OutboundMailStatus.PENDING, OutboundMailStatus.RETRY)
+VERIFICATION_MAIL = (
+    OutboundMailKind.EMAIL_CONFIRMATION_SIGNUP,
+    OutboundMailKind.EMAIL_CONFIRMATION,
+)
 
 
 @sensitive_variables()
@@ -111,6 +118,8 @@ def _finish(mail: OutboundMail, status: OutboundMailStatus, error: str, now: dat
         WorkspaceInvitation.objects.filter(pk=mail.invitation_id).update(
             delivery_status=InvitationDeliveryStatus(status)
         )
+    if status == OutboundMailStatus.UNCERTAIN and mail.kind in VERIFICATION_MAIL:
+        transaction.on_commit(partial(release_code_resend, mail.recipient))
     _report(mail)
 
 
@@ -184,12 +193,13 @@ def _compose(mail: OutboundMail, now: datetime) -> EmailMultiAlternatives | Outb
 
 
 def _authorize(
-    mail_id: int, token: uuid.UUID, now: datetime, message: EmailMultiAlternatives
+    mail_id: int, token: uuid.UUID, clock: Callable[[], datetime], message: EmailMultiAlternatives
 ) -> bool:
     """Runs on the open connection, just before the mail transaction: re-checks the lease and
     the intent, renders the message in memory and sets the transmit marker."""
     with transaction.atomic():
         mail = OutboundMail.objects.select_for_update().filter(pk=mail_id).first()
+        now = clock()
         if mail is None or mail.status != OutboundMailStatus.SENDING or mail.lease_token != token:
             return False
         if mail.lease_expires_at is not None and mail.lease_expires_at <= now:
@@ -228,7 +238,10 @@ def _record(
         )
         if mail is None:
             return False
-        if outcome == OutboundMailStatus.RETRY:
+        if outcome == OutboundMailStatus.RETRY and mail.status == OutboundMailStatus.UNCERTAIN:
+            # Its code was erased when it became uncertain, and an uncertain intent never reopens.
+            _finish(mail, OutboundMailStatus.FAILED, error, now)
+        elif outcome == OutboundMailStatus.RETRY:
             _retry_or_fail(mail, now, error, _backoff(mail.attempts))
         else:
             _finish(mail, outcome, error, now)
@@ -250,7 +263,7 @@ def send_outbound_mail(mail_id: int, now: datetime) -> bool:
 
     def before_send() -> bool:
         nonlocal transmitting
-        transmitting = _authorize(mail_id, token, clock(), message)
+        transmitting = _authorize(mail_id, token, clock, message)
         return transmitting
 
     try:
