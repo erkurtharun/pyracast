@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import re
 import subprocess
 import sys
 import tarfile
@@ -15,6 +16,16 @@ from deploy import ci_images
 SHA = "1" * 40
 INDEX = "application/vnd.oci.image.index.v1+json"
 MANIFEST = "application/vnd.oci.image.manifest.v1+json"
+
+
+def test_the_archives_are_loaded_and_published_for_every_release_image() -> None:
+    script = (Path(__file__).resolve().parents[1] / "deploy" / "oci-images.sh").read_text(
+        encoding="utf-8"
+    )
+    loops = re.findall(r"^ +for image in ([a-z ]+); do$", script, flags=re.MULTILINE)
+
+    assert ci_images.IMAGES == ("backend", "web", "gateway", "postgres", "rabbitmq")
+    assert loops == [" ".join(ci_images.IMAGES)] * 2
 
 
 def test_json_object_rejects_non_string_keys() -> None:
@@ -205,7 +216,7 @@ def test_oci_archive_rejects_another_revision_and_build_output(tmp_path: Path) -
 def test_cli_rechecks_trusted_identity_and_archive_bytes(tmp_path: Path, mutation: str) -> None:
     path, digest, _ = _archive(tmp_path)
     content = path.read_bytes()
-    for name in ("backend", "web", "gateway", "postgres"):
+    for name in ci_images.IMAGES:
         (tmp_path / f"{name}.oci.tar").write_bytes(content)
         (tmp_path / f"{name}.digest").write_text(digest + "\n")
     command = [sys.executable, "deploy/ci_images.py", "prepare", str(tmp_path), SHA, "42", "3"]

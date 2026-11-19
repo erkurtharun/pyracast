@@ -254,7 +254,7 @@ services:
     logging: *logs
 
   rabbitmq:
-    image: rabbitmq:4.4.0@sha256:1166559c9e77b0208b9d96bfaf265ddbdd491ce3cebb8cf990aabe9274f16d2c
+    image: ${RABBITMQ_IMAGE:?Set RABBITMQ_IMAGE to the verified digest}
     hostname: rabbitmq
     user: "999:999"
     restart: unless-stopped

@@ -34,7 +34,7 @@ updates:
       actions:
         patterns: ['*']
   - package-ecosystem: docker
-    directories: [/, /web, /deploy/gateway, /deploy/postgres]
+    directories: [/, /web, /deploy/gateway, /deploy/postgres, /deploy/rabbitmq]
     schedule:
       interval: weekly
       day: monday
@@ -48,15 +48,6 @@ updates:
         update-types: ['version-update:semver-major', 'version-update:semver-minor']
       - dependency-name: node
         update-types: ['version-update:semver-major']
-  - package-ecosystem: docker-compose
-    directory: /deploy
-    schedule:
-      interval: weekly
-      day: monday
-      time: '05:00'
-      timezone: Europe/Istanbul
-    cooldown:
-      default-days: 5
   - package-ecosystem: gomod
     directory: /deploy/gateway
     schedule:

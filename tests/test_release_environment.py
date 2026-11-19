@@ -16,6 +16,7 @@ IMAGES = [
     "us-docker.pkg.dev/project/repo/web@sha256:" + "1" * 64,
     "us-docker.pkg.dev/project/repo/gateway@sha256:" + "2" * 64,
     "us-docker.pkg.dev/project/repo/postgres@sha256:" + "3" * 64,
+    "us-docker.pkg.dev/project/repo/rabbitmq@sha256:" + "4" * 64,
 ]
 SECRETS = "/run/pyracast/releases/abc-123"
 AUTHORITY = (Path(__file__).resolve().parents[1] / "deploy" / "origin-pull-off.pem").read_text(
@@ -68,6 +69,7 @@ def test_the_release_environment_names_the_images_the_site_and_the_staged_secret
         "WEB_IMAGE": IMAGES[1],
         "GATEWAY_IMAGE": IMAGES[2],
         "POSTGRES_IMAGE": IMAGES[3],
+        "RABBITMQ_IMAGE": IMAGES[4],
         "SITE_ADDRESS": "pyracast.example",
         "ACME_EMAIL": "ops@pyracast.example",
         "RUNTIME_ENV_FILE": f"{SECRETS}/runtime.env",
@@ -172,5 +174,15 @@ def test_main_writes_the_release_environment_file(tmp_path: Path) -> None:
 
     lines = (deploy / "release.env").read_text(encoding="utf-8").splitlines()
     assert lines[0] == f"BACKEND_IMAGE={IMAGES[0]}"
+    assert lines[4] == f"RABBITMQ_IMAGE={IMAGES[4]}"
     assert "ORIGIN_PULL=required" in lines
     assert f"ORIGIN_PULL_CA={(deploy / release_environment.ORIGIN_PULL_CA).as_posix()}" in lines
+
+
+def test_main_refuses_a_release_that_names_only_four_images(tmp_path: Path) -> None:
+    host = tmp_path / "host.json"
+    host.write_text(json.dumps(config()), encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        release_environment.main([str(host), str(tmp_path / "release.env"), SECRETS, *IMAGES[:4]])
+    assert not (tmp_path / "release.env").exists()

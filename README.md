@@ -46,7 +46,7 @@ development broker with its state in `%LOCALAPPDATA%\pyracast\rabbitmq`; `start.
 runs both helpers when a dependency is down. On Ubuntu with Docker:
 
 ```text
-docker run -d --name pyracast-rabbitmq --hostname pyracast-rabbitmq -v pyracast-rabbitmq-data:/var/lib/rabbitmq -p 127.0.0.1:5672:5672 rabbitmq:4.4.0@sha256:1166559c9e77b0208b9d96bfaf265ddbdd491ce3cebb8cf990aabe9274f16d2c
+docker run -d --name pyracast-rabbitmq --hostname pyracast-rabbitmq -v pyracast-rabbitmq-data:/var/lib/rabbitmq -p 127.0.0.1:5672:5672 rabbitmq:4.4.1@sha256:183272aa2ff82718cabeef343de8d9a900931ea65fda4e563fed2a6d9efde578
 ```
 
 ### Local settings

@@ -61,8 +61,18 @@ jobs:
           tags: pyracast-postgres:ci
           load: true
           cache-from: type=gha,scope=postgres-linux-amd64,timeout=2m
+      - name: Build the production RabbitMQ image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/rabbitmq
+          platforms: linux/amd64
+          tags: pyracast-rabbitmq:ci
+          load: true
+          cache-from: type=gha,scope=rabbitmq-linux-amd64,timeout=2m
       - name: Scan every image; block every high or critical vulnerability
         run: |
           POSTGRES_IMAGE=$(docker image inspect pyracast-postgres:ci --format '{{.Id}}')
+          RABBITMQ_IMAGE=$(docker image inspect pyracast-rabbitmq:ci --format '{{.Id}}')
           [[ "$POSTGRES_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
-          bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE"
+          [[ "$RABBITMQ_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
+          bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE" "$RABBITMQ_IMAGE"

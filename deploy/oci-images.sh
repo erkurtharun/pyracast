@@ -11,7 +11,7 @@ options=(--rm --cap-drop ALL --security-opt no-new-privileges -v "$directory:/im
 
 case "$mode" in
   load)
-    for image in backend web gateway postgres; do
+    for image in backend web gateway postgres rabbitmq; do
       docker run "${options[@]}" -v /var/run/docker.sock:/var/run/docker.sock "$skopeo" \
         --override-os linux --override-arch amd64 copy \
         "oci-archive:/images/$image.oci.tar" "docker-daemon:pyracast-$image:ci"
@@ -33,7 +33,7 @@ case "$mode" in
     printf '%s' "$REGISTRY_ACCESS_TOKEN" | docker run -i "${options[@]}" "$skopeo" login \
       --authfile /credentials/auth.json --username oauth2accesstoken --password-stdin "${registry%%/*}"
     unset REGISTRY_ACCESS_TOKEN
-    for image in backend web gateway postgres; do
+    for image in backend web gateway postgres rabbitmq; do
       expected=$(jq -er --arg image "$image" '.images[$image].digest' "$directory/images.json")
       [[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]
       docker run "${options[@]}" "$skopeo" copy --all --preserve-digests \

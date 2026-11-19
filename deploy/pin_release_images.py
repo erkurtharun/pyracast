@@ -11,10 +11,15 @@ IMAGE_PACKAGES = {
     "WEB_IMAGE": "web",
     "GATEWAY_IMAGE": "gateway",
     "POSTGRES_IMAGE": "postgres",
+    "RABBITMQ_IMAGE": "rabbitmq",
 }
+# A live release installed before the release built the broker image names the other four and
+# runs the public broker; it stays a release to upgrade from and to roll back to.
+RELEASE_IMAGE_SETS = (frozenset(IMAGE_PACKAGES), frozenset(IMAGE_PACKAGES) - {"RABBITMQ_IMAGE"})
 CURRENT_IMAGES_PREFIX = "PYRACAST_RELEASE_IMAGES="
 CURRENT_IMAGES_SCRIPT = (
     f"record_prefix = {CURRENT_IMAGES_PREFIX!r}\n"
+    f"accepted = [set(keys) for keys in {[sorted(keys) for keys in RELEASE_IMAGE_SETS]!r}]\n"
     + """
 import json
 from pathlib import Path
@@ -24,7 +29,7 @@ try:
 except FileNotFoundError:
     print(record_prefix + '{}')
 else:
-    wanted = {'BACKEND_IMAGE', 'WEB_IMAGE', 'GATEWAY_IMAGE', 'POSTGRES_IMAGE'}
+    wanted = set().union(*accepted)
     values = {}
     for line in (current / 'deploy/release.env').read_text().splitlines():
         key, separator, value = line.partition('=')
@@ -32,7 +37,7 @@ else:
             if not separator or key in values:
                 raise ValueError('Invalid current release image configuration.')
             values[key] = value
-    if values.keys() != wanted:
+    if values.keys() not in accepted:
         raise ValueError('Current release is missing image identities.')
     print(record_prefix + json.dumps(values))
 """
@@ -41,8 +46,8 @@ else:
 
 def validate_images(payload: str, repository: str) -> dict[str, str]:
     values = json.loads(payload)
-    if not isinstance(values, dict) or (values and set(values) != IMAGE_PACKAGES.keys()):
-        raise ValueError("Expected exactly four release image identities.")
+    if not isinstance(values, dict) or (values and frozenset(values) not in RELEASE_IMAGE_SETS):
+        raise ValueError("Expected the identities of every release image.")
     for key, value in values.items():
         expected = rf"{re.escape(repository)}/{IMAGE_PACKAGES[key]}@sha256:[0-9a-f]{{64}}"
         if not isinstance(value, str) or re.fullmatch(expected, value) is None:

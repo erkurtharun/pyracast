@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
-[[ $# == 4 ]] || { echo 'Usage: smoke.sh BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE' >&2; exit 2; }
-export BACKEND_IMAGE=$1 WEB_IMAGE=$2 GATEWAY_IMAGE=$3 POSTGRES_IMAGE=$4
+[[ $# == 5 ]] || { echo 'Usage: smoke.sh BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE RABBITMQ_IMAGE' >&2; exit 2; }
+export BACKEND_IMAGE=$1 WEB_IMAGE=$2 GATEWAY_IMAGE=$3 POSTGRES_IMAGE=$4 RABBITMQ_IMAGE=$5
 root=$(cd "$(dirname "$0")/.." && pwd)
 temporary=$(mktemp -d)
 cleanup() {

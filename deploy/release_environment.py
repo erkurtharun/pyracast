@@ -41,12 +41,13 @@ def origin_pull_authority(config: Mapping[str, Any]) -> str | None:
 def render(
     config: Mapping[str, Any], secrets: str, images: Sequence[str], deploy: Path
 ) -> dict[str, str]:
-    backend, web, gateway, postgres = images
+    backend, web, gateway, postgres, rabbitmq = images
     values = {
         "BACKEND_IMAGE": backend,
         "WEB_IMAGE": web,
         "GATEWAY_IMAGE": gateway,
         "POSTGRES_IMAGE": postgres,
+        "RABBITMQ_IMAGE": rabbitmq,
         "SITE_ADDRESS": config["domain"],
         "ACME_EMAIL": config["acme_email"],
         "RUNTIME_ENV_FILE": f"{secrets}/runtime.env",
@@ -72,7 +73,7 @@ def main(arguments: Sequence[str] | None = None) -> None:
     parser.add_argument("host_config", type=Path)
     parser.add_argument("release_env", type=Path)
     parser.add_argument("secrets")
-    parser.add_argument("images", nargs=4)
+    parser.add_argument("images", nargs=5)
     options = parser.parse_args(arguments)
     config = json.loads(options.host_config.read_text(encoding="utf-8"))
     values = render(config, options.secrets, options.images, options.release_env.parent)

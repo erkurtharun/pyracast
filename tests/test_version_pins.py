@@ -19,6 +19,7 @@ IMAGE_SOURCES = (
     "web/Dockerfile",
     "deploy/gateway/Dockerfile",
     "deploy/postgres/Dockerfile",
+    "deploy/rabbitmq/Dockerfile",
     "deploy/*.yaml",
     "deploy/*.sh",
     ".github/workflows/*.yml",
@@ -39,7 +40,14 @@ IMAGES: dict[str, tuple[str, tuple[str, ...]]] = {
     "PostgreSQL in development and CI": ("postgres", ("scripts/start_postgres.py",)),
     "PostgreSQL in production": ("postgres", ("deploy/postgres/Dockerfile",)),
     "Python": ("python", ("Dockerfile", ".github/workflows/ci.yml", "deploy/scan-images.sh")),
-    "RabbitMQ": ("rabbitmq", ("deploy/compose.yaml", ".github/workflows/ci.yml", "README.md")),
+    "RabbitMQ": (
+        "rabbitmq",
+        ("deploy/rabbitmq/Dockerfile", ".github/workflows/ci.yml", "README.md"),
+    ),
+    "RabbitMQ of the releases before the built broker": (
+        "rabbitmq",
+        ("deploy/test-broker-rollback.sh",),
+    ),
     "SBOM scanner": ("docker/buildkit-syft-scanner", (".github/workflows/ci.yml",)),
     "Skopeo": ("quay.io/containers/skopeo", ("deploy/oci-images.sh",)),
     "Trivy": ("aquasec/trivy", ("deploy/scan-images.sh",)),
@@ -148,7 +156,7 @@ PINS: dict[str, list[Text | ActionInput]] = {
         Text("docs/STACK.md", r"and (\d+\.\d+) \(development, CI tests\)"),
     ],
     "RabbitMQ": [
-        Text("deploy/compose.yaml", rf"rabbitmq:{VERSION}@"),
+        Text("deploy/rabbitmq/Dockerfile", rf"^FROM rabbitmq:{VERSION}@"),
         Text(".github/workflows/ci.yml", rf"rabbitmq:{VERSION}@"),
         Text("README.md", rf"rabbitmq:{VERSION}@"),
         Text("scripts/start_rabbitmq.py", rf"rabbitmq-server-windows-{VERSION}\.zip"),
@@ -322,12 +330,10 @@ def ecosystem(path: PurePosixPath) -> str | None:
         return "gomod" if requires else None
     if path.suffix == ".tf":
         return "terraform"
-    manifests = {
-        "Dockerfile": "docker",
-        "compose.yaml": "docker-compose",
-        "package.json": "npm",
-        "uv.lock": "uv",
-    }
+    if path.name == "compose.yaml":
+        pins = IMAGE.search((ROOT / path).read_text(encoding="utf-8"))
+        return "docker-compose" if pins else None
+    manifests = {"Dockerfile": "docker", "package.json": "npm", "uv.lock": "uv"}
     return manifests.get(path.name)
 
 
@@ -358,7 +364,6 @@ def test_dependabot_updates_every_ecosystem_the_repository_uses() -> None:
 
     assert {name for name, _ in used} == {
         "docker",
-        "docker-compose",
         "github-actions",
         "gomod",
         "npm",
@@ -366,6 +371,15 @@ def test_dependabot_updates_every_ecosystem_the_repository_uses() -> None:
         "uv",
     }
     assert used - covered == set()
+    assert covered <= used
+
+
+def test_dependabot_updates_the_base_image_of_each_support_image_the_release_builds() -> None:
+    (docker,) = [
+        update for update in dependabot_updates() if update["package-ecosystem"] == "docker"
+    ]
+
+    assert {"/deploy/postgres", "/deploy/rabbitmq"} <= set(docker["directories"])
 
 
 def test_every_dependabot_update_waits_out_a_cooldown_before_it_can_release() -> None:

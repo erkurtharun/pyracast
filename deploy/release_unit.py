@@ -121,7 +121,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     for name in ("start", "run"):
         command = commands.add_parser(name)
         command.add_argument("stage", type=_stage)
-        command.add_argument("installer_arguments", nargs=5, metavar="SHA_AND_IMAGES")
+        command.add_argument("installer_arguments", nargs=6, metavar="SHA_AND_IMAGES")
     commands.add_parser("follow").add_argument("stage", type=_stage)
     options = parser.parse_args(arguments)
     if options.command == "start":

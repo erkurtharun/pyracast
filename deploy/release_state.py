@@ -13,7 +13,7 @@ STATE = Path("/var/lib/pyracast/release-state.json")
 RELEASES = Path("/opt/pyracast/releases")
 SECRETS = Path("/run/pyracast/releases")
 CURRENT = Path("/opt/pyracast/current")
-IMAGE_KEYS = ("BACKEND_IMAGE", "WEB_IMAGE", "GATEWAY_IMAGE", "POSTGRES_IMAGE")
+IMAGE_KEYS = ("BACKEND_IMAGE", "WEB_IMAGE", "GATEWAY_IMAGE", "POSTGRES_IMAGE", "RABBITMQ_IMAGE")
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 

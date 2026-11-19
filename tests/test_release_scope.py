@@ -185,6 +185,8 @@ def test_each_unshipped_path_alone_skips_the_release(repository: Path, path: str
         "pyproject.toml",
         "uv.lock",
         "deploy/x.py",
+        "deploy/postgres/Dockerfile",
+        "deploy/rabbitmq/Dockerfile",
         "web/src/x.ts",
         ".github/workflows/ci.yml",
         "docsx/a.md",
