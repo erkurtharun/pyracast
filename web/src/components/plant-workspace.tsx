@@ -55,6 +55,9 @@ export function PlantWorkspace({
     const settingsView = plantView("settings", address);
     const [resolution, setResolution] = useState("60"),
         [source, setSource] = useState<DataSource>("auto");
+    // Archived forecasts exist only for generation; the view also changes through Back and Forward.
+    if (forecastView === "irradiance" && source === "archived_forecast")
+        setSource("auto");
     const [savedPlant, setSavedPlant] = useState<Plant>();
     const currentPlant = latestPlant(plant, savedPlant);
     if (savedPlant && currentPlant === plant) setSavedPlant(undefined);
@@ -176,14 +179,7 @@ export function PlantWorkspace({
                                 aria-current={
                                     forecastView === key ? "page" : undefined
                                 }
-                                onClick={() => {
-                                    show({ view: key });
-                                    if (
-                                        key === "irradiance" &&
-                                        source === "archived_forecast"
-                                    )
-                                        setSource("auto");
-                                }}
+                                onClick={() => show({ view: key })}
                             >
                                 {label}
                             </button>
