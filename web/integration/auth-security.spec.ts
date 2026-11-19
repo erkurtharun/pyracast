@@ -139,7 +139,6 @@ test("verified email and a recovery code protect a real browser session", async 
     await expect(
         page.getByRole("heading", { name: "Account settings", exact: true }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Account" }).click();
     const newPassword = `${password}-new`;
     const passwordSettings = page.locator("section").filter({
         has: page.getByRole("heading", {
