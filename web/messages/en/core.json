@@ -226,7 +226,8 @@
         "invalidResponse": "The server returned an invalid response. Please try again.",
         "reference": "Reference: {reference}",
         "network": "Could not reach the server. Check your connection and try again.",
-        "unconfirmed": "The server did not confirm the change. Reload to check whether it was saved."
+        "unconfirmed": "The server did not confirm the change. Reload to check whether it was saved.",
+        "stillSignedIn": "You are still signed in. Sign out again."
     },
     "ProductionCsv": {
         "size": "Choose a CSV no larger than 2 MiB.",

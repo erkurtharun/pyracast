@@ -56,7 +56,9 @@ export async function send<T>(request: LaneRequest): Promise<T> {
         throw error;
     const retry = await exchange(request);
     if (retry.ok) return retry.data as T;
-    throw errorFromResponse(retry.status, retry.data);
+    const refused = errorFromResponse(retry.status, retry.data);
+    await stillSignedIn(request, refused);
+    throw refused;
 }
 
 // A request sent with a session key that a reauthentication or sign-in replaced meanwhile is

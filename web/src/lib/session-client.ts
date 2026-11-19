@@ -6,7 +6,9 @@ import {
     send,
     setCsrfToken,
 } from "./api/lane";
+import { ApiError } from "./api/errors";
 import { authRequest } from "./auth-api";
+import { browserErrors } from "@/i18n/browser";
 
 export type Session = components["schemas"]["SessionOutput"];
 export type SessionUser = components["schemas"]["SessionUserOutput"];
@@ -66,7 +68,7 @@ export function loadSession(): Promise<Session> {
     return promise;
 }
 
-export async function signOut() {
+async function endSession() {
     await authRequest("auth/session", "DELETE");
     signingOut = true;
     try {
@@ -74,6 +76,16 @@ export async function signOut() {
     } finally {
         signingOut = false;
     }
+}
+
+// A sign-out that carried a key another tab replaced meanwhile ends nothing and leaves the newer
+// key in place; the session read after it shows that key, which is signed out once more.
+export async function signOut() {
+    const session = await endSession();
+    if (!session.user) return session;
+    const repeated = await endSession();
+    if (!repeated.user) return repeated;
+    throw new ApiError(browserErrors()("stillSignedIn"));
 }
 
 // Session reads queue behind the session changes of this tab sent before them, so a read started
