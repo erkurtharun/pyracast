@@ -288,6 +288,24 @@ def test_the_members_screen_warns_before_a_new_member_pushes_a_plant_over_its_li
     )
 
 
+def test_the_members_warning_counts_only_plants_a_new_member_would_pause() -> None:
+    system = approved()
+    viewer_of(system)
+    save(system, recipients=["ops@example.com"], include_workspace_members=True)
+    members = f"/api/tenants/{system.tenant.pk}/members/"
+    NotificationSettings.objects.update_or_create(pk=1, defaults={"max_recipients": 2})
+
+    already_over = client_for(system.member).get(members).json()
+    NotificationSettings.objects.filter(pk=1).update(max_recipients=3)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
+    held_otherwise = client_for(system.member).get(members).json()
+
+    assert (
+        already_over["plants_at_recipient_limit"],
+        held_otherwise["plants_at_recipient_limit"],
+    ) == (0, 0)
+
+
 def test_concurrent_first_saves_of_one_plant_keep_one_schedule() -> None:
     system = approved()
     start = Barrier(4)

@@ -2,10 +2,10 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from threading import Barrier
+from threading import Barrier, Event, Thread
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
@@ -13,7 +13,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
 from django.core.mail.backends.base import BaseEmailBackend
-from django.db import close_old_connections, connection, connections
+from django.db import close_old_connections, connection, connections, transaction
 from django.db.models import F
 from django.test import Client, override_settings
 from django.utils import timezone
@@ -45,10 +45,13 @@ class Transport(BaseEmailBackend):
     send_failure: ClassVar[BaseException | None] = None
     failure_after_acceptance: ClassVar[BaseException | None] = None
     delay: ClassVar[float] = 0.0
+    on_open: ClassVar[Callable[[], None] | None] = None
 
     def open(self) -> bool:
         if self.open_failure is not None:
             raise self.open_failure
+        if Transport.on_open is not None:
+            Transport.on_open()
         return True
 
     def send_messages(self, email_messages: Sequence[EmailMessage] | None) -> int:
@@ -67,6 +70,7 @@ def transport() -> Iterator[type[Transport]]:
     Transport.sent = []
     Transport.open_failure = Transport.send_failure = Transport.failure_after_acceptance = None
     Transport.delay = 0.0
+    Transport.on_open = None
     with override_settings(MAILERS={"default": {"BACKEND": "tests.test_outbound_mail.Transport"}}):
         yield Transport
 
@@ -312,6 +316,73 @@ def test_an_uncertain_invitation_holds_no_token_and_can_be_sent_again(
     assert accept_workspace_invitation(guest, mailed_token(transport.sent[-1])).tenant_id == (
         tenant.pk
     )
+
+
+def test_an_invitation_whose_mail_ends_uncertain_at_once_can_be_reissued_at_once(
+    workspace: tuple[Tenant, User], transport: type[Transport]
+) -> None:
+    tenant, administrator = workspace
+    invite(workspace)
+    transport.failure_after_acceptance = TimeoutError("relay answer lost")
+    assert deliver_mail() == 0
+    transport.failure_after_acceptance = None
+    assert outbound_state() == [("uncertain", 1, "mail_outcome_uncertain")]
+    client = Client()
+    client.force_login(administrator)
+
+    response = client.post(
+        f"/api/tenants/{tenant.pk}/invitations/",
+        {"email": "guest@example.com"},
+        content_type="application/json",
+    )
+
+    assert response.status_code == 201
+    assert response.json()["delivery_status"] == "pending"
+    assert deliver_mail() == 1
+
+
+def test_an_intent_that_expires_while_its_row_lock_is_awaited_is_skipped(
+    workspace: tuple[Tenant, User], transport: type[Transport], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.notifications import outbox
+    from pyracast.notifications.models import OutboundMail
+
+    invite(workspace)
+    moment = timezone.now()
+    OutboundMail.objects.update(expires_at=moment + timedelta(seconds=10))
+    elapsed = [0.0]
+    monkeypatch.setattr(outbox, "time", SimpleNamespace(monotonic=lambda: elapsed[0]))
+    locked = Event()
+
+    def hold_the_row_past_the_expiry() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                OutboundMail.objects.select_for_update().get()
+                locked.set()
+                with connection.cursor() as cursor:
+                    for _ in range(200):
+                        cursor.execute("SELECT count(*) FROM pg_locks WHERE NOT granted")
+                        if cursor.fetchone() != (0,):
+                            break
+                        time.sleep(0.05)
+                elapsed[0] = 20.0
+        finally:
+            connections.close_all()
+
+    holder = Thread(target=hold_the_row_past_the_expiry)
+
+    def lock_the_row() -> None:
+        holder.start()
+        assert locked.wait(timeout=10)
+
+    transport.on_open = lock_the_row
+
+    assert not outbox.send_outbound_mail(OutboundMail.objects.get().pk, moment)
+    holder.join(timeout=10)
+
+    assert transport.sent == []
+    assert outbound_state() == [("skipped", 1, "expired")]
 
 
 def test_uncertain_intents_are_counted_apart_from_failed_ones_and_listed_in_the_console(

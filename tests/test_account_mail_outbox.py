@@ -29,12 +29,15 @@ class WorkerCrash(BaseException):
 class Transport(BaseEmailBackend):
     sent: ClassVar[list[EmailMessage]] = []
     crash_after_acceptance: ClassVar[bool] = False
+    failure_after_acceptance: ClassVar[Exception | None] = None
 
     def send_messages(self, email_messages: Sequence[EmailMessage] | None) -> int:
         assert email_messages is not None
         self.sent.extend(email_messages)
         if self.crash_after_acceptance:
             raise WorkerCrash
+        if self.failure_after_acceptance is not None:
+            raise self.failure_after_acceptance
         return len(email_messages)
 
 
@@ -42,6 +45,7 @@ class Transport(BaseEmailBackend):
 def transport() -> Iterator[type[Transport]]:
     Transport.sent = []
     Transport.crash_after_acceptance = False
+    Transport.failure_after_acceptance = None
     with override_settings(
         MAILERS={"default": {"BACKEND": "tests.test_account_mail_outbox.Transport"}}
     ):
@@ -150,6 +154,48 @@ def test_an_uncertain_code_mail_holds_no_code_and_a_new_code_is_mailed_at_once(
         submit(visitor(1), "auth/login", {"email": user.email, "password": password}).status_code
         == 200
     )
+
+
+def test_a_verification_code_whose_mail_ends_uncertain_at_once_can_be_asked_again_at_once(
+    transport: type[Transport],
+) -> None:
+    client = Client(enforce_csrf_checks=True)
+    assert signup(client).status_code == 401
+    transport.failure_after_acceptance = TimeoutError("relay answer lost")
+    assert deliver_mail() == 0
+    transport.failure_after_acceptance = None
+    lost = mailed_code(transport.sent[0])
+
+    assert submit(client, "auth/email/verify/resend", {}).status_code == 200
+    assert deliver_mail() == 1
+    code = mailed_code(transport.sent[-1])
+    assert code != lost
+    assert submit(client, "auth/email/verify", {"key": code}).status_code == 200
+
+
+def test_a_late_refusal_never_reopens_an_intent_recovered_as_uncertain(
+    transport: type[Transport], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.mail.errors import NotSentError
+    from pyracast.notifications import outbox
+    from pyracast.notifications.models import OutboundMail
+
+    request_reset(0, member().email)
+    mail_id = OutboundMail.objects.get().pk
+
+    def recovered_then_refused(message: EmailMessage, *, before_send: Any) -> None:
+        assert before_send()
+        # The lease ends while the relay answers and another worker recovers the intent.
+        assert not outbox.send_outbound_mail(mail_id, after_the_lease())
+        raise NotSentError("relay refused the message")
+
+    monkeypatch.setattr(outbox, "send", recovered_then_refused)
+    assert not outbox.send_outbound_mail(mail_id, timezone.now())
+    monkeypatch.undo()
+
+    assert deliver_mail(timezone.now() + timedelta(minutes=3)) == 0
+    assert transport.sent == []
+    assert list(OutboundMail.objects.values_list("status", "sealed_code")) == [("failed", "")]
 
 
 def test_an_unsent_code_is_erased_when_it_expires(transport: type[Transport]) -> None:
