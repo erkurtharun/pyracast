@@ -171,7 +171,7 @@ def summarize_health(report: Mapping[str, object]) -> HealthSummary:
             _("Account and invitation emails with an unknown outcome"),
             _(
                 "They may have arrived and are never resent; the person or administrator "
-                "can ask again at once."
+                "can ask again."
             ),
             _("Review outbound emails"),
             "review",
