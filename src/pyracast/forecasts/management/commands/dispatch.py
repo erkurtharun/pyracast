@@ -28,9 +28,17 @@ def _published(operation: Callable[[], int]) -> Callable[[], PhaseOutcome]:
 
 
 def _retention() -> PhaseOutcome:
+    # Item failures of one step do not skip the other; a step that fails as a whole outranks
+    # them because its items are already logged one by one.
     now = timezone.now()
-    purge_expired(now)
-    sweep_accounts(now)
+    failed = 0
+    for step in (purge_expired, sweep_accounts):
+        try:
+            step(now)
+        except ItemsFailedError as error:
+            failed += error.count
+    if failed:
+        raise ItemsFailedError(failed)
     return PhaseOutcome()
 
 
