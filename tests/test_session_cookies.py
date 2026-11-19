@@ -20,8 +20,10 @@ from pyracast.accounts import middleware as account_middleware
 from pyracast.accounts.session_cookie import SessionCookie
 from tests.support.account_sessions import (
     account,
+    arrive,
     browser,
     moment,
+    session_cookie,
     session_key,
     session_user,
     signed_in,
@@ -79,23 +81,6 @@ def test_production_cookie_attributes_satisfy_the_host_prefix() -> None:
 def test_the_session_cookie_middleware_refuses_a_foreign_session_engine() -> None:
     with pytest.raises(ImproperlyConfigured, match="SESSION_ENGINE must be"):
         SessionCookie(lambda request: HttpResponse())
-
-
-def session_cookie(response: Any) -> tuple[str, Any, str] | None:
-    cookie = response.cookies.get(settings.SESSION_COOKIE_NAME)
-    return None if cookie is None else (cookie.value, cookie["max-age"], cookie["expires"])
-
-
-def arrive(jar: Client, *answers: Any) -> None:
-    # A browser applies the session cookie of each answer in the order the answers arrive.
-    for answer in answers:
-        cookie = answer.cookies.get(settings.SESSION_COOKIE_NAME)
-        if cookie is None:
-            continue
-        if cookie["max-age"] == 0:
-            jar.cookies.pop(settings.SESSION_COOKIE_NAME, None)
-        else:
-            jar.cookies[settings.SESSION_COOKIE_NAME] = cookie.value
 
 
 def carrying(key: str) -> tuple[Client, str]:

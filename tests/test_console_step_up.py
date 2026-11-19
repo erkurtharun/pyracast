@@ -19,12 +19,20 @@ from django.test import Client
 from django.test.utils import CaptureQueriesContext
 from django.urls import URLPattern, URLResolver, reverse
 
+from pyracast.accounts import middleware as account_middleware
 from pyracast.accounts import processes
 from pyracast.accounts.models import Language, UserLanguagePreference
 from pyracast.admin import site
 from pyracast.languages import LANGUAGE_COOKIE
 from pyracast.notifications.models import NotificationSettings
-from tests.support.account_sessions import elsewhere
+from tests.support.account_sessions import (
+    arrive,
+    carrying_key,
+    elsewhere,
+    moment,
+    session_cookie,
+    session_key,
+)
 from tests.support.api import verified_admin
 from tests.support.auth_lifecycle import totp_code
 from tests.support.step_up import call, with_proof
@@ -236,6 +244,54 @@ def test_confirming_with_the_authenticator_allows_console_writes(
     assert right.status_code == 302
     assert right["Location"] == settings_path
     assert not refused(client.post(settings_path, {}))
+
+
+@CODE_LIMITS
+@pytest.mark.parametrize("order", ["processed before", "processed after"])
+def test_a_confirmation_sends_its_rotated_key_once_and_the_next_console_writes_use_it(
+    operator: tuple[Client, str, float], order: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The confirmation rotates the session key; an answer for the old key arriving after it
+    # leaves the rotated key, and the confirmed writes that follow send no session cookie.
+    client, secret, now = operator
+    user = User.objects.get(username="operator")
+    NotificationSettings.objects.update_or_create(pk=1, defaults={"max_recipients": 5})
+    settings_path = reverse("admin:workspace_settings")
+    old = session_key(client)
+    stale = carrying_key(old, enforce_csrf_checks=False)
+
+    def confirm() -> Any:
+        return client.post(
+            reverse("admin:workspace_confirm"),
+            {"code": totp_code(secret, now), "next": settings_path},
+        )
+
+    if order == "processed before":
+        # The background page records its activity, so it saves the session it carries.
+        monkeypatch.setattr(account_middleware, "time", moment(time.time() + 61))
+        late = stale.get(reverse("admin:index"))
+        confirmed = confirm()
+        assert late.status_code == 200
+    else:
+        confirmed = confirm()
+        late = stale.get(reverse("admin:index"))
+        assert late.status_code == 302
+    assert confirmed.status_code == 302
+    assert session_cookie(confirmed) == (session_key(client), "", "")
+    jar = carrying_key(old, enforce_csrf_checks=False)
+
+    arrive(jar, confirmed, late)
+    language = jar.post(reverse("admin:workspace_language"), {"language": "tr", "next": "/admin/"})
+    write = jar.post(settings_path, {"max_recipients": 8, "expected_max_recipients": 5})
+
+    assert session_key(jar) == session_key(client) != old
+    assert language.status_code == 302
+    assert LANGUAGE_COOKIE in language.cookies
+    assert UserLanguagePreference.objects.get(user=user).language == Language.TR
+    assert write.status_code == 302
+    assert NotificationSettings.objects.get().max_recipients == 8
+    assert session_cookie(language) is None
+    assert session_cookie(write) is None
 
 
 def recovery_codes_removed(user: User) -> None:

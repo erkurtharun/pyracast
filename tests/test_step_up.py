@@ -1,5 +1,6 @@
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future
 from dataclasses import dataclass
@@ -15,14 +16,28 @@ from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from allauth.socialaccount.models import SocialAccount
-from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
 from django.core import mail
 from django.test import Client, override_settings
 
+from pyracast.accounts import middleware as account_middleware
 from pyracast.accounts import processes, security, step_up
-from tests.support.account_sessions import alongside, browser, elsewhere, session_user
+from pyracast.accounts.audit import refusal_throttle
+from pyracast.accounts.sessions import end_sessions
+from tests.support import account_sessions
+from tests.support.account_sessions import (
+    alongside,
+    arrive,
+    browser,
+    capture_security_events,
+    carrying_key,
+    elsewhere,
+    moment,
+    session_cookie,
+    session_key,
+    session_user,
+)
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit, totp_code
 from tests.support.social_accounts import (
     CALLBACK,
@@ -394,11 +409,7 @@ CALLBACK_PATH = "/api/accounts/google/login/callback/"
 @pytest.fixture
 def providers(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     serve_provider_profile(monkeypatch)
-    with override_settings(
-        SOCIALACCOUNT_PROVIDERS=PROVIDERS,
-        HEADLESS_FRONTEND_URLS=settings.HEADLESS_FRONTEND_URLS
-        | {"socialaccount_login_error": CALLBACK},
-    ):
+    with override_settings(SOCIALACCOUNT_PROVIDERS=PROVIDERS):
         yield
 
 
@@ -694,12 +705,14 @@ def assert_refused(write: CredentialWrite, response: Any, user: User) -> None:
         assert flows == [FLOWS[strongest_now(user)]]
 
 
+NOTHING_PENDING = CALLBACK + "&error=unknown&error_process=login"
+
+
 def assert_ended(write: CredentialWrite, response: Any) -> None:
     # The change revoked this session while its request ran.
     if write.method == "callback":
-        # allauth saves the session while it reads the provider state, before the connection
-        # step, so a revoked session fails there as a server error (an open finding).
-        assert response.status_code == 500
+        # A provider callback whose session ended answers as one that finds nothing pending.
+        assert (response.status_code, response["Location"]) == (302, NOTHING_PENDING)
         return
     assert (response.status_code, response.json()["code"]) == (400, "session_ended")
 
@@ -786,6 +799,8 @@ def test_a_credential_write_is_refused_after_another_sessions_credential_change_
         assert_ended(case, response)
     else:
         assert_refused(case, response, user)
+    # Ending the proofs changes the session's data under its key; no answer sends the cookie.
+    assert session_cookie(response) is None
     assert credentials(user) == after[0]
     assert mail.outbox == []
     signed_out = competitor.revokes_sessions or not competitor.routed
@@ -925,3 +940,92 @@ def test_a_password_change_whose_proof_ended_is_refused_when_the_last_authentica
         ).status_code
         == 400
     )
+
+
+@pytest.mark.parametrize("order", ["processed before", "processed after"])
+def test_a_proof_recorded_with_the_key_rotation_serves_the_next_request_of_that_browser(
+    order: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The proof is stamped in the transaction that rotates the session key: the browser gets the
+    # rotated key once, and an answer for the old key arriving after it changes nothing.
+    user, _secret = holder("password")
+    client = account_sessions.signed_in(user)
+    old = session_key(client)
+    stale = carrying_key(old)
+
+    def reauthenticate_by_password() -> Any:
+        return submit(client, "auth/reauthenticate", {"password": PASSWORD})
+
+    if order == "processed before":
+        # The background read records its activity, so it saves the session it carries.
+        monkeypatch.setattr(account_middleware, "time", moment(time.time() + 61))
+        late = stale.get("/api/tenants/")
+        rotation = reauthenticate_by_password()
+        assert late.status_code == 200
+    else:
+        rotation = reauthenticate_by_password()
+        late = stale.get("/api/tenants/")
+        assert (late.status_code, late.json()["code"]) == (401, "not_authenticated")
+    rotated = session_key(client)
+    assert session_cookie(rotation) == (rotated, "", "")
+    jar = carrying_key(old)
+
+    arrive(jar, rotation, late)
+    write = submit(jar, "account/email", {"email": "added@example.com"})
+
+    assert session_key(jar) == rotated != old
+    assert write.status_code == 200
+    assert session_cookie(write) is None
+    assert ["added@example.com"] in [message.to for message in mail.outbox]
+
+
+def test_a_proof_ended_as_a_request_starts_changes_the_session_data_and_sends_no_cookie() -> None:
+    user, _secret = holder("password")
+    client = account_sessions.signed_in(user, reauthenticated=True)
+    key = session_key(client)
+    assert proofs(client) != []
+    EmailAddress.objects.create(user=user, email=SECOND, verified=True)
+
+    response = client.get("/api/session/")
+
+    assert int(response.json()["user"]["id"]) == user.pk
+    assert session_cookie(response) is None
+    assert session_key(client) == key
+    assert proofs(client) == []
+
+
+def test_a_provider_callback_whose_session_ended_while_it_ran_answers_like_nothing_pending(
+    now: float,
+    providers: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    user, client, _other = arranged(WRITES["connect"])
+    state = connection_started(client, now)
+    newer: list[Client] = []
+
+    def revoked_then_signed_in_again() -> None:
+        end_sessions(user.pk, "mfa_reset")
+        newer.append(account_sessions.signed_in(user))
+
+    changed_after_the_check(monkeypatch, CALLBACK_PATH, user, revoked_then_signed_in_again)
+    monkeypatch.setattr(refusal_throttle, "_seen", OrderedDict())
+    events = capture_security_events(caplog, monkeypatch)
+
+    response = complete(client, state)
+
+    refusals = [
+        (event["reason"], event["user_id"])
+        for event in events()
+        if event["event"] == "social_login_refused"
+    ]
+    assert (response.status_code, response["Location"]) == (302, NOTHING_PENDING)
+    assert refusals == [("provider_error", None)]
+    assert session_cookie(response) is None
+    assert credentials(user)["identities"] == []
+    [established] = newer
+    jar = carrying_key(session_key(established))
+    arrive(jar, response)
+    assert session_user(jar) == user.pk
+    # The same browser's callback, its session gone, finds nothing pending and answers alike.
+    assert complete(client, state)["Location"] == response["Location"]
