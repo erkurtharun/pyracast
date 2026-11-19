@@ -30,7 +30,12 @@ from pyracast.calculation import calculate
 from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob
-from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.models import (
+    DeliveryRecipient,
+    NotificationDelivery,
+    ReminderRecipient,
+    ReminderSchedule,
+)
 from pyracast.plants.sites import submit_site
 from pyracast.providers import FixtureProvider
 from pyracast.regions.models import Region, RegionLocationChangeRequest
@@ -344,14 +349,13 @@ def seed_review(accounts: Accounts, other: OtherWorkspace) -> Review:
     reminder = ReminderSchedule.objects.create(
         configured_by=other.owner,
         region=region,
-        recipients=["operations-recipient@example.test"],
         times=["10:00"],
         effective_from=now,
     )
-    NotificationDelivery.objects.create(
+    ReminderRecipient.objects.create(schedule=reminder, email="operations-recipient@example.test")
+    delivery = NotificationDelivery.objects.create(
         schedule=reminder,
         binding=binding,
-        recipients=["operations-recipient@example.test"],
         status="uncertain",
         scheduled_for=now - timedelta(minutes=5),
         preparation_deadline=now + timedelta(minutes=10),
@@ -359,4 +363,5 @@ def seed_review(accounts: Accounts, other: OtherWorkspace) -> Review:
         attempts=1,
         last_error="mail_outcome_uncertain",
     )
+    DeliveryRecipient.objects.create(delivery=delivery, email="operations-recipient@example.test")
     return Review(region, location_change)

@@ -16,6 +16,7 @@ from django.db import close_old_connections, connections
 from django.test import Client, override_settings
 
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, member, submit, totp_code
+from tests.support.outbox import deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -69,6 +70,7 @@ def test_unverified_sign_in_can_request_a_new_code_after_one_minute(
     )
     assert response.status_code == 401
     assert {"id": "verify_email", "is_pending": True} in response.json()["data"]["flows"]
+    deliver_mail()
     assert len(mail.outbox) == 2
 
 
@@ -162,6 +164,7 @@ def test_oversized_login_password_is_rejected_before_hashing(
 
 
 def reset_code_mailed() -> bool:
+    deliver_mail()
     return any(
         message.extra_headers.get("X-Pyracast-Mail") == "account/email/password_reset_code"
         for message in mail.outbox
@@ -268,6 +271,7 @@ def test_email_change_requires_reauthentication_and_initiating_session_verificat
     user.refresh_from_db()
     assert user.email == replacement["email"]
     assert EmailAddress.objects.get(user=user).verified
+    deliver_mail()
     assert any(message.to == ["member@example.com"] for message in mail.outbox)
 
 

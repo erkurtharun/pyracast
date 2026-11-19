@@ -74,6 +74,14 @@ class ErrorCode(models.TextChoices):
     REQUEST_CONFLICT = "request_conflict"
     REVIEW_CONTEXT_CHANGED = "review_context_changed"
     WORKSPACE_ADMIN_CHANGED = "workspace_admin_changed"
+    REMINDER_TIME_REQUIRED = "reminder_time_required"
+    DUPLICATE_REMINDER_TIMES = "duplicate_reminder_times"
+    TOO_MANY_REMINDER_TIMES = "too_many_reminder_times"
+    RECIPIENT_REQUIRED = "recipient_required"
+    DUPLICATE_RECIPIENTS = "duplicate_recipients"
+    RECIPIENT_LIMIT_EXCEEDED = "recipient_limit_exceeded"
+    PLANT_NOT_APPROVED = "plant_not_approved"
+    PROVIDER_ACCOUNT_UNAVAILABLE = "provider_account_unavailable"
 
 
 MESSAGES: Mapping[ErrorCode, StrPromise] = {
@@ -176,6 +184,16 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.REVIEW_CONTEXT_CHANGED: _("The review context changed. Refresh and review again."),
     ErrorCode.WORKSPACE_ADMIN_CHANGED: _(
         "The workspace administrator changed. Reload before saving."
+    ),
+    ErrorCode.REMINDER_TIME_REQUIRED: _("Add at least one delivery time to turn reminders on."),
+    ErrorCode.DUPLICATE_REMINDER_TIMES: _("Use each delivery time once."),
+    ErrorCode.TOO_MANY_REMINDER_TIMES: _("This plant allows fewer delivery times a day."),
+    ErrorCode.RECIPIENT_REQUIRED: _("Add a recipient or include the workspace members."),
+    ErrorCode.DUPLICATE_RECIPIENTS: _("Recipient addresses must be distinct (case-insensitive)."),
+    ErrorCode.RECIPIENT_LIMIT_EXCEEDED: _("This plant allows fewer recipient addresses."),
+    ErrorCode.PLANT_NOT_APPROVED: _("Reminders can be turned on once the plant is approved."),
+    ErrorCode.PROVIDER_ACCOUNT_UNAVAILABLE: _(
+        "Reminders can be turned on once the plant's forecast provider account is enabled."
     ),
 }
 

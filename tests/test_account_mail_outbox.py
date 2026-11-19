@@ -1,4 +1,3 @@
-import logging
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -62,7 +61,7 @@ def mail_row_holds(text: str) -> bool:
             ).format(sql.Identifier("notifications_outboundmail")),
             [text],
         )
-        return cursor.fetchone() != (0,)
+        return bool(cursor.fetchone() != (0,))
 
 
 def test_a_password_reset_request_answers_alike_and_mails_only_from_the_worker(
@@ -91,9 +90,8 @@ def test_a_password_reset_request_answers_alike_and_mails_only_from_the_worker(
 def test_a_mailed_code_rests_only_sealed_and_is_erased_once_sent(
     transport: type[Transport],
 ) -> None:
-    from pyracast.notifications.outbox import unseal_code
-
     from pyracast.notifications.models import OutboundMail
+    from pyracast.notifications.outbox import unseal_code
 
     user = member()
     request_reset(0, user.email)
@@ -110,9 +108,8 @@ def test_a_mailed_code_rests_only_sealed_and_is_erased_once_sent(
 
 
 def test_an_unsent_code_is_erased_when_it_expires(transport: type[Transport]) -> None:
-    from pyracast.notifications.outbox import end_expired_mail
-
     from pyracast.notifications.models import OutboundMail
+    from pyracast.notifications.outbox import end_expired_mail
 
     request_reset(0, member().email)
     moment = timezone.now()
@@ -146,10 +143,8 @@ def test_the_database_keeps_codes_out_of_ended_intents_and_their_context() -> No
 
 
 def test_anonymous_account_mails_share_twenty_per_hour_in_the_worker(
-    transport: type[Transport], caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    transport: type[Transport], pyracast_logs: pytest.LogCaptureFixture
 ) -> None:
-    monkeypatch.setattr(logging.getLogger("pyracast"), "propagate", True)
-    caplog.set_level(logging.INFO)
     for index in range(11):
         existing = User.objects.create_user(
             username=f"existing-{index}", email=f"existing-{index}@example.com", password=PASSWORD
@@ -173,7 +168,7 @@ def test_anonymous_account_mails_share_twenty_per_hour_in_the_worker(
     assert deliver_mail() == 20
     skipped = [
         record.getMessage()
-        for record in caplog.records
+        for record in pyracast_logs.records
         if record.getMessage().startswith("outbound_mail_skipped")
     ]
     assert len(skipped) == 2
@@ -201,3 +196,17 @@ def test_concurrent_workers_keep_the_anonymous_budget(transport: type[Transport]
         sent = sum(pool.map(work, [ids[part::4] for part in range(4)]))
 
     assert (sent, len(transport.sent)) == (20, 20)
+
+
+def test_a_code_claimed_after_its_expiry_is_skipped_and_erased(transport: type[Transport]) -> None:
+    from pyracast.notifications.models import OutboundMail
+    from pyracast.notifications.outbox import send_outbound_mail
+
+    request_reset(0, member().email)
+    row = OutboundMail.objects.get()
+
+    assert not send_outbound_mail(row.pk, timezone.now() + timedelta(seconds=601))
+
+    row.refresh_from_db()
+    assert (row.status, row.last_error, row.sealed_code) == ("skipped", "expired", "")
+    assert transport.sent == []

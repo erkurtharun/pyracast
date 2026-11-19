@@ -7,6 +7,7 @@ from allauth.core import context
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.core.internal import ratelimit
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest
 
@@ -50,6 +51,35 @@ def reserve_client_failure(request: HttpRequest) -> ratelimit.RateLimitUsage | N
 
 def reserve_address_failure(request: HttpRequest, key: str) -> ratelimit.RateLimitUsage | None:
     return reserve(request, FAILED_LOGIN, key)
+
+
+def daily_lock_reached(usage: ratelimit.RateLimitUsage) -> bool:
+    """True once for each daily lock of an address: when this finished failure is the last of
+    the daily allowance and every failure of that allowance came after the last announced one.
+
+    Only finished failures are recorded here, so a check still in flight (whose reservation
+    allauth's history already holds) never completes a lock. A password reset clears allauth's
+    history, which drops the earlier failures from the count.
+    """
+    if not usage.usage:
+        return False
+    allowance = max(
+        ratelimit.parse_rates(account_settings.RATE_LIMITS.get(FAILED_LOGIN)),
+        key=lambda rate: rate.duration,
+    ).amount
+    slot = max(usage.usage, key=lambda item: item.cache_duration)
+    record_key = f"{slot.cache_key}:finished"
+    with ratelimit.cache_lock(record_key) as locked:
+        if not locked:
+            return False
+        history = set(cache.get(slot.cache_key, []))
+        record = cache.get(record_key) or {"failures": [], "announced": 0.0}
+        finished = [moment for moment in record["failures"] if moment in history]
+        failures = [*finished, slot.timestamp][-allowance:]
+        reached = len(failures) == allowance and failures[0] > record["announced"]
+        announced = failures[-1] if reached else record["announced"]
+        cache.set(record_key, {"failures": failures, "announced": announced}, slot.cache_duration)
+    return reached
 
 
 def check_second_factor(

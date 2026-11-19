@@ -64,6 +64,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0004_invitation_and_administrator_change_checks",
             "0005_schema_naming_convention",
             "0006_expire_invitations_with_the_previous_link",
+            "0007_invitation_token_minted_at_send",
         ),
         "change_requests": (
             "0002_change_vocabulary_checks",
@@ -78,6 +79,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0002_collection_endpoint_and_request_purpose_checks",
             "0003_lease_import_and_archive_checks",
             "0004_schema_naming_convention",
+            "0005_collection_times_shape_check",
         ),
         "incidents": ("0002_incident_kind_choices", "0003_schema_naming_convention"),
         "metering": (
@@ -90,6 +92,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0003_delivery_lease_check",
             "0004_recipient_and_time_shape_checks",
             "0005_schema_naming_convention",
+            "0006_outbound_mail_and_recipient_rows",
         ),
         "plants": (
             "0002_plant_event_action_and_calibration_error_checks",

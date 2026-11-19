@@ -111,6 +111,8 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "timezone", SimpleNamespace(now=lambda: moment))
     monkeypatch.setattr(command, "purge_expired", purge)
     monkeypatch.setattr(command, "sweep_accounts", sweep)
+    purge_mail = MagicMock()
+    monkeypatch.setattr(command, "purge_finished_mail", purge_mail)
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "make_actor", lambda _: actor)
     monkeypatch.setattr(command, "dispatch", send)
@@ -119,6 +121,8 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "dispatch_calibrations", send_calibrations)
     notification_actor, send_notifications = MagicMock(), MagicMock()
     monkeypatch.setattr(command, "make_notification_actor", lambda _: notification_actor)
+    mail_actor = MagicMock()
+    monkeypatch.setattr(command, "make_outbound_mail_actor", lambda _: mail_actor)
     monkeypatch.setattr(command, "dispatch_notifications", send_notifications)
     epias_actor, send_epias = MagicMock(), MagicMock()
     monkeypatch.setattr(command, "make_epias_actor", lambda _: epias_actor)
@@ -126,9 +130,10 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     call_command("dispatch")
     purge.assert_called_once_with(moment)
     sweep.assert_called_once_with(moment)
+    purge_mail.assert_called_once_with(moment)
     send.assert_called_once_with(actor)
     send_calibrations.assert_called_once_with(calibration_actor)
-    send_notifications.assert_called_once_with(notification_actor)
+    send_notifications.assert_called_once_with(notification_actor, mail_actor)
     send_epias.assert_called_once_with(epias_actor)
     broker.close.assert_called_once()
     with pytest.raises(CommandError, match="positive"):
@@ -153,6 +158,8 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(command, "make_calibration_actor", calibration_registration)
     notification_registration = MagicMock()
     monkeypatch.setattr(command, "make_notification_actor", notification_registration)
+    mail_registration = MagicMock()
+    monkeypatch.setattr(command, "make_outbound_mail_actor", mail_registration)
     epias_registration = MagicMock()
     monkeypatch.setattr(command, "make_epias_actor", epias_registration)
     create_worker = MagicMock(return_value=worker)
@@ -164,6 +171,7 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
     )
     calibration_registration.assert_called_once_with(broker)
     notification_registration.assert_called_once_with(broker)
+    mail_registration.assert_called_once_with(broker)
     epias_registration.assert_called_once_with(broker)
     worker.start.assert_called_once()
     worker.stop.assert_called_once()
@@ -181,6 +189,7 @@ def test_notification_worker_consumes_only_its_queue(monkeypatch: pytest.MonkeyP
         "make_actor",
         "make_calibration_actor",
         "make_notification_actor",
+        "make_outbound_mail_actor",
         "make_epias_actor",
     ):
         monkeypatch.setattr(command, factory, MagicMock())
@@ -206,6 +215,7 @@ def test_commands_handle_termination_and_restore_previous_handlers(
         "make_actor",
         "make_calibration_actor",
         "make_notification_actor",
+        "make_outbound_mail_actor",
         "make_epias_actor",
     ):
         monkeypatch.setattr(command, factory, MagicMock())
@@ -225,6 +235,7 @@ def test_commands_handle_termination_and_restore_previous_handlers(
     else:
         monkeypatch.setattr(command, "purge_expired", terminate)
         monkeypatch.setattr(command, "sweep_accounts", MagicMock())
+        monkeypatch.setattr(command, "purge_finished_mail", MagicMock())
         for operation in (
             "dispatch",
             "dispatch_calibrations",
@@ -250,6 +261,7 @@ def test_worker_command_closes_broker_when_stopping_fails(monkeypatch: pytest.Mo
         "make_actor",
         "make_calibration_actor",
         "make_notification_actor",
+        "make_outbound_mail_actor",
         "make_epias_actor",
     ):
         monkeypatch.setattr(command, factory, MagicMock())
@@ -274,7 +286,12 @@ def test_dispatch_does_not_start_cycle_after_shutdown_requested(
     broker, purge = MagicMock(), MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "purge_expired", purge)
-    for factory in ("make_actor", "make_calibration_actor", "make_notification_actor"):
+    for factory in (
+        "make_actor",
+        "make_calibration_actor",
+        "make_notification_actor",
+        "make_outbound_mail_actor",
+    ):
         monkeypatch.setattr(command, factory, MagicMock())
 
     def finish_registration(_: object) -> None:
@@ -318,12 +335,15 @@ def test_dispatch_repeats_after_poll_timeout_until_stop_requested(
         "make_actor",
         "make_calibration_actor",
         "make_notification_actor",
+        "make_outbound_mail_actor",
         "make_epias_actor",
     ):
         monkeypatch.setattr(command, factory, MagicMock())
     for operation in (
         "purge_expired",
         "sweep_accounts",
+        "purge_finished_mail",
+        "publish_outbound_mail",
         "dispatch",
         "dispatch_calibrations",
         "dispatch_notifications",

@@ -9,6 +9,7 @@ from django.utils import translation
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
+from tests.support.outbox import deliver_mail
 
 
 def test_unknown_account_mail_template_is_not_rendered_as_a_code_message() -> None:
@@ -79,8 +80,10 @@ def test_invitation_mail_has_private_action_and_escaped_workspace(language: str)
 
     invitation = invite_workspace_member(actor, tenant.pk, "guest@example.com")
 
+    deliver_mail()
     message = mail.outbox[-1]
     assert isinstance(message, EmailMultiAlternatives)
+    invitation.refresh_from_db()
     assert invitation.delivery_status == "sent"
     assert message.to == ["guest@example.com"]
     assert tenant.name in str(message.body)

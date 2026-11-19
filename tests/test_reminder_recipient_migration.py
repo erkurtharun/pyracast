@@ -4,7 +4,7 @@ from datetime import timedelta
 import pytest
 from django.apps.registry import Apps
 from django.contrib.auth.models import User
-from django.db import connection
+from django.db import connection, models
 from django.db.migrations.executor import MigrationExecutor
 
 from pyracast.accounts.models import Membership, WorkspaceRole
@@ -19,6 +19,12 @@ PREVIOUS = (
     ("forecasts", "0004_schema_naming_convention"),
     ("notifications", "0005_schema_naming_convention"),
 )
+
+
+def historical(apps: Apps, label: str) -> models.Manager[models.Model]:
+    app_label, model_name = label.split(".")
+    model: type[models.Model] = apps.get_model(app_label, model_name)
+    return model._default_manager
 
 
 @pytest.fixture
@@ -40,7 +46,7 @@ def test_every_effective_reminder_recipient_becomes_a_row(
     other_member = Membership.objects.create(
         tenant=system.tenant, user=other, role=WorkspaceRole.VIEWER
     ).pk
-    schedule = apps.get_model("notifications", "ReminderSchedule").objects.create(
+    schedule = historical(apps, "notifications.ReminderSchedule").create(
         region_id=system.region.pk,
         enabled=True,
         recipients=["Admin@Example.com", "ext@example.com", "gone@example.com", "both@example.com"],
@@ -53,7 +59,7 @@ def test_every_effective_reminder_recipient_becomes_a_row(
         effective_from=NOW,
         language="en",
     )
-    deliveries = apps.get_model("notifications", "NotificationDelivery").objects
+    deliveries = historical(apps, "notifications.NotificationDelivery")
     common = {
         "schedule_id": schedule.pk,
         "binding_id": system.binding.pk,
@@ -107,7 +113,7 @@ def test_collection_times_are_repaired_to_their_valid_local_times(
     previous: tuple[System, Apps], capsys: pytest.CaptureFixture[str]
 ) -> None:
     system, apps = previous
-    stored = apps.get_model("forecasts", "CollectionSchedule").objects
+    stored = historical(apps, "forecasts.CollectionSchedule")
     stored.create(
         region_id=system.region.pk,
         times=["07:00", "7:00", 5, "07:00", "25:00", "06:30"],
@@ -125,9 +131,61 @@ def test_a_collection_schedule_without_a_time_list_is_emptied(
     previous: tuple[System, Apps],
 ) -> None:
     system, apps = previous
-    stored = apps.get_model("forecasts", "CollectionSchedule").objects
+    stored = historical(apps, "forecasts.CollectionSchedule")
     stored.create(region_id=system.region.pk, times={"07:00": True}, effective_from=NOW)
 
     forward()
 
     assert CollectionSchedule.objects.get(region=system.region).times == []
+
+
+def test_repeated_and_oversized_addresses_are_skipped_and_counted(
+    previous: tuple[System, Apps], capsys: pytest.CaptureFixture[str]
+) -> None:
+    system, apps = previous
+    oversized = "x" * 250 + "@example.com"
+    schedule = historical(apps, "notifications.ReminderSchedule").create(
+        region_id=system.region.pk,
+        recipients=["ext@example.com", "EXT@example.com", oversized],
+        recipient_memberships={},
+        times=["10:00"],
+        effective_from=NOW,
+        language="en",
+    )
+    delivery = historical(apps, "notifications.NotificationDelivery").create(
+        schedule_id=schedule.pk,
+        binding_id=system.binding.pk,
+        scheduled_for=NOW,
+        available_at=NOW,
+        preparation_deadline=NOW,
+        status="sent",
+        recipients=["ext@example.com", "Ext@example.com", oversized],
+        recipient_memberships={},
+        revoked_recipients=[],
+    )
+
+    forward()
+
+    from pyracast.notifications.models import DeliveryRecipient, ReminderRecipient
+
+    assert list(ReminderRecipient.objects.values_list("email", flat=True)) == ["ext@example.com"]
+    assert list(
+        DeliveryRecipient.objects.filter(delivery_id=delivery.pk).values_list("email", flat=True)
+    ) == ["ext@example.com"]
+    printed = capsys.readouterr().out
+    assert "2 repeated recipient address(es) were kept once" in printed
+    assert "2 recipient address(es) longer than 254 characters were not kept" in printed
+
+
+def test_valid_collection_times_are_kept_as_stored(
+    previous: tuple[System, Apps], capsys: pytest.CaptureFixture[str]
+) -> None:
+    system, apps = previous
+    historical(apps, "forecasts.CollectionSchedule").create(
+        region_id=system.region.pk, times=["18:00", "06:00"], effective_from=NOW
+    )
+
+    forward()
+
+    assert CollectionSchedule.objects.get(region=system.region).times == ["18:00", "06:00"]
+    assert "collection schedule" not in capsys.readouterr().out

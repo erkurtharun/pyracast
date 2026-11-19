@@ -23,6 +23,7 @@ from tests.support.admin_recovery_security import RECOVERY, authenticated_accoun
 from tests.support.admin_recovery_security import submit as submit_to
 from tests.support.auth_lifecycle import PASSWORD, member, submit
 from tests.support.company_registration import signup
+from tests.support.outbox import deliver_mail
 from tests.support.social_accounts import CALLBACK, PROVIDERS, begin, complete
 
 pytestmark = [
@@ -117,7 +118,11 @@ def assert_no_failure_detail(response: Any) -> None:
 
 
 def mail_failure_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
-    return [record for record in caplog.records if "account_mail_failed" in record.getMessage()]
+    return [
+        record
+        for record in caplog.records
+        if record.name == "pyracast.notifications.outbox" and record.levelno >= logging.WARNING
+    ]
 
 
 def signed_in(user: User, *, reauthenticated: bool = False) -> Client:
@@ -136,6 +141,7 @@ def test_signup_with_failing_mail_reaches_verification_stage(
     client = Client(enforce_csrf_checks=True)
 
     response = signup(client)
+    deliver_mail()
 
     assert response.status_code == 401
     assert any(flow["id"] == "verify_email" for flow in response.json()["data"]["flows"])
@@ -144,14 +150,16 @@ def test_signup_with_failing_mail_reaches_verification_stage(
     assert Membership.objects.get(user=user).tenant == Tenant.objects.get()
     assert not EmailAddress.objects.get(user=user).verified
     assert [message.to for message in FailingBackend.attempted] == [["owner@example.com"]]
-    [record] = mail_failure_records(caplog)
-    assert f" user_id={user.pk} " in record.getMessage()
-    assert user.email not in record.getMessage()
-    assert f"={user.get_username()} " not in record.getMessage()
+    records = mail_failure_records(caplog)
+    assert records
+    assert all("kind=account/email/email_confirmation_signup" in r.getMessage() for r in records)
+    assert all(user.email not in r.getMessage() for r in records)
+    assert all(user.get_username() not in r.getMessage() for r in records)
 
     FailingBackend.failure = None
     cache.clear()
     assert submit(client, "auth/email/verify/resend", {}).status_code == 200
+    deliver_mail()
     assert submit(client, "auth/email/verify", {"key": attempted_code()}).status_code == 200
     assert EmailAddress.objects.get(user=user).verified
 
@@ -161,10 +169,12 @@ def test_password_reset_request_with_failing_mail_answers_like_success() -> None
     reset = Client(enforce_csrf_checks=True)
 
     known = submit(reset, "auth/password/request", {"email": user.email})
+    deliver_mail()
     code = attempted_code()
     unknown = submit(
         Client(enforce_csrf_checks=True), "auth/password/request", {"email": "missing@example.com"}
     )
+    deliver_mail()
 
     assert known.status_code == unknown.status_code == 401
     assert known.json() == unknown.json()
@@ -200,6 +210,7 @@ def test_password_change_with_failing_mail_completes_and_is_audited(
     assert user.check_password(PASSWORD + "new")
     assert '"event": "password_changed"' in caplog.text
     assert client.get("/api/session/").json()["user"] is None
+    deliver_mail()
     assert len(FailingBackend.attempted) == 1
 
 
@@ -213,6 +224,7 @@ def test_provider_connect_with_failing_mail_redirects_to_callback() -> None:
     assert response.status_code == 302
     assert response["Location"] == CALLBACK
     assert SocialAccount.objects.get().user_id == user.pk
+    deliver_mail()
     assert len(FailingBackend.attempted) == 1
 
 
@@ -234,6 +246,7 @@ def test_provider_disconnect_with_failing_mail_answers_200() -> None:
     assert removed.json()["data"] == []
     assert_no_failure_detail(removed)
     assert not SocialAccount.objects.exists()
+    deliver_mail()
     assert len(FailingBackend.attempted) == 1
 
 
@@ -253,10 +266,11 @@ def test_recovery_code_regeneration_with_failing_mail_returns_codes() -> None:
     assert_no_failure_detail(response)
     stored = Authenticator.objects.get(user=user, type=Authenticator.Type.RECOVERY_CODES)
     assert RecoveryCodes(stored).get_unused_codes() == codes
+    deliver_mail()
     assert len(FailingBackend.attempted) == 1
 
 
-def test_account_mail_failure_is_logged_once_without_address_or_code(
+def test_account_mail_failure_is_logged_by_the_mailer_without_address_or_code(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     user = member()
@@ -267,19 +281,22 @@ def test_account_mail_failure_is_logged_once_without_address_or_code(
 
     with caplog.at_level("INFO", logger="pyracast"):
         response = submit(client, "auth/reauthenticate/code/request", {"email": user.email})
+        deliver_mail()
 
     assert response.status_code == 200
     assert_no_failure_detail(response)
     code = attempted_code()
-    [record] = mail_failure_records(caplog)
-    assert record.name == "pyracast.accounts.adapters"
-    assert record.levelname == "ERROR"
-    assert record.exc_info is None
+    records = mail_failure_records(caplog)
+    assert records
+    assert all(record.exc_info is None for record in records)
     error = FailingBackend.raised[-1]
-    assert "template=account/email/login_code" in record.getMessage()
-    assert f"error_type={type(error).__name__}" in record.getMessage()
-    expected_code = error.code if isinstance(error, NotSentError) else None
-    assert record.getMessage().endswith(f" error_code={expected_code}")
+    assert all("kind=account/email/login_code" in r.getMessage() for r in records)
+    expected = (
+        f"error_code={error.code}"
+        if isinstance(error, NotSentError)
+        else f"error_type={type(error).__name__}"
+    )
+    assert any(expected in record.getMessage() for record in records)
     assert user.email not in caplog.text
     assert code not in caplog.text
     assert str(error) not in caplog.text

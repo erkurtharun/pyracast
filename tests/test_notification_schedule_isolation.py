@@ -24,9 +24,11 @@ from pyracast.regions.models import Region
 from pyracast.regions.operations import approve_region, configure_binding, submit_region
 from tests.support.domain import NOW, FakeAdapter, System
 from tests.support.notification_recipient_validation import recipient
-from tests.support.notifications import SLOT, configured
+from tests.support.notifications import SLOT, addresses, configured, store_recipients
 
 pytestmark = pytest.mark.django_db(transaction=True)
+# A saved address the validator refuses; the column holds at most 254 characters.
+INVALID = "private-invalid-recipient"
 
 
 def another_tenant_schedule(system: System) -> ReminderSchedule:
@@ -52,7 +54,7 @@ def another_tenant_schedule(system: System) -> ReminderSchedule:
         region.pk,
         language="en",
         enabled=True,
-        recipients=[],
+        recipients=[user.email],
         times=["10:00"],
         now=NOW,
     )
@@ -76,12 +78,17 @@ def test_request_and_application_reject_oversized_recipients_without_changing_sc
     client.force_authenticate(system.member)
     response = client.put(
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/",
-        {"enabled": True, "recipients": [address], "times": ["10:00"], "language": "en"},
+        {
+            "enabled": True,
+            "include_workspace_members": False,
+            "recipients": [address],
+            "times": ["10:00"],
+            "language": "en",
+        },
         format="json",
     )
     assert response.status_code == 400
-    schedule.refresh_from_db()
-    assert schedule.recipients == ["default@example.com"]
+    assert addresses(schedule) == ["default@example.com"]
 
 
 def test_invalid_saved_recipient_records_a_skipped_slot_without_blocking_another_tenant(
@@ -90,24 +97,22 @@ def test_invalid_saved_recipient_records_a_skipped_slot_without_blocking_another
 ) -> None:
     system, broken = configured()
     healthy = another_tenant_schedule(system)
-    address = recipient(255)
-    ReminderSchedule.objects.filter(pk=broken.pk).update(recipients=[address])
+    store_recipients(broken, [INVALID])
     actor = MagicMock()
     logger = logging.getLogger("test.notifications.scheduler")
     monkeypatch.setattr("pyracast.notifications.scheduler.logger", logger)
     with caplog.at_level(logging.INFO):
-        runtime.dispatch_notifications(actor, SLOT)
+        runtime.dispatch_notifications(actor, MagicMock(), SLOT)
     deliveries = list(NotificationDelivery.objects.filter(schedule=healthy))
     assert len(deliveries) == 1
     assert deliveries[0].status == "pending"
-    assert deliveries[0].recipients == ["healthy@example.com"]
+    assert addresses(deliveries[0]) == ["healthy@example.com"]
     paused = NotificationDelivery.objects.get(schedule=broken)
     assert (paused.status, paused.last_error) == ("skipped", "invalid_recipient")
-    assert (paused.recipients, paused.recipient_memberships, paused.snapshot_id) == ([], {}, None)
+    assert (paused.recipients.exists(), paused.snapshot_id) == (False, None)
     actor.send.assert_called_once_with(deliveries[0].pk)
-    broken.refresh_from_db()
-    assert broken.recipients == [address]
-    assert address not in caplog.text
+    assert addresses(broken) == [INVALID]
+    assert INVALID not in caplog.text
     assert f"schedule_id={broken.pk} reason=invalid_recipient" in caplog.text
     assert invalid_reminder_recipient_count() == 1
 
@@ -146,7 +151,7 @@ def test_slot_database_failure_rolls_back_its_recipients_before_another_tenant_c
 def test_invalid_recipient_health_count_only_includes_current_approved_schedules() -> None:
     system, schedule = configured()
     assert invalid_reminder_recipient_count() == 0
-    ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[recipient(255)])
+    store_recipients(schedule, [INVALID])
     assert invalid_reminder_recipient_count() == 1
     ReminderSchedule.objects.filter(pk=schedule.pk).update(enabled=False)
     assert invalid_reminder_recipient_count() == 0
@@ -212,7 +217,7 @@ def test_a_failing_schedule_is_logged_with_its_origin_and_the_others_are_publish
     monkeypatch.setattr(notification_scheduler, "_enqueue_schedule", enqueue)
     actor = MagicMock()
     with pytest.raises(Exception, match=r"^1 "):
-        runtime.dispatch_notifications(actor, SLOT)
+        runtime.dispatch_notifications(actor, MagicMock(), SLOT)
     delivery = NotificationDelivery.objects.get(schedule=healthy)
     actor.send.assert_called_once_with(delivery.pk)
     assert f"item=schedule:{broken.pk}" in pyracast_logs.text

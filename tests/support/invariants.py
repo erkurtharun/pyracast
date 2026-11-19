@@ -8,7 +8,12 @@ from psycopg import sql
 from pyracast.change_requests.models import ChangeRequestStatus
 from pyracast.forecasts.models import CollectionJobStatus
 from pyracast.metering.models import EpiasJobStatus
-from pyracast.notifications.models import NotificationDeliveryStatus
+from pyracast.notifications.models import (
+    CODED_MAIL,
+    OPEN_MAIL,
+    NotificationDeliveryStatus,
+    OutboundMailStatus,
+)
 from pyracast.plants.models import CalibrationStatus
 
 
@@ -32,6 +37,12 @@ LEASE_RULES = {
         "(lease_token IS NULL) = (lease_expires_at IS NULL)"
         f" AND (status <> '{SENDING}' OR lease_token IS NOT NULL)"
         f" AND (lease_token IS NULL OR status IN ('{SENDING}', '{UNCERTAIN}'))"
+    ),
+    "notifications_outboundmail": (
+        "(lease_token IS NULL) = (lease_expires_at IS NULL)"
+        f" AND (status <> '{OutboundMailStatus.SENDING}' OR lease_token IS NOT NULL)"
+        " AND (lease_token IS NULL"
+        f" OR status IN ('{OutboundMailStatus.SENDING}', '{OutboundMailStatus.UNCERTAIN}'))"
     ),
 }
 
@@ -142,6 +153,19 @@ REMINDER_TIMES_RULE = """CASE WHEN jsonb_typeof(times) = 'array' THEN NOT EXISTS
         ELSE true END)
     ELSE false END"""
 AUDIT_DETAILS_RULE = "left(details::text, 1) = '{'"
+SEALED_CODE_RULE = (
+    "sealed_code = '' OR (kind IN ("
+    + ", ".join(f"'{kind}'" for kind in CODED_MAIL)
+    + ") AND status IN ("
+    + ", ".join(f"'{status}'" for status in OPEN_MAIL)
+    + "))"
+)
+MAIL_INVITATION_RULE = "(kind = 'workspace_invitation') = (invitation_id IS NOT NULL)"
+MAIL_CONTEXT_RULE = """CASE WHEN jsonb_typeof(context) = 'object' THEN NOT EXISTS (
+    SELECT 1 FROM jsonb_each(context) AS entry
+    WHERE jsonb_typeof(entry.value) <> 'string' OR entry.key NOT IN (
+        'from_email', 'to_email', 'deleted_email', 'provider', 'timestamp', 'ip', 'user_agent'))
+    ELSE false END"""
 # Every row invariant the database enforces on the constrained tables; archive immutability is
 # a before/after property and is audited by `rewritten_archive_rows`.
 STORED_RULES: tuple[tuple[str, str], ...] = (
@@ -151,12 +175,11 @@ STORED_RULES: tuple[tuple[str, str], ...] = (
     ("accounts_workspaceinvitation", OPEN_INVITATION_RULE),
     ("change_requests_changerequest", REJECTION_REASON_RULE),
     ("change_requests_incidentchange", INCIDENT_INTERVAL_RULE),
-    ("notifications_reminderschedule", RECIPIENTS_RULE),
-    ("notifications_reminderschedule", MEMBERSHIPS_RULE),
     ("notifications_reminderschedule", REMINDER_TIMES_RULE),
-    ("notifications_notificationdelivery", RECIPIENTS_RULE),
-    ("notifications_notificationdelivery", REVOKED_RECIPIENTS_RULE),
-    ("notifications_notificationdelivery", MEMBERSHIPS_RULE),
+    ("forecasts_collectionschedule", REMINDER_TIMES_RULE),
+    ("notifications_outboundmail", SEALED_CODE_RULE),
+    ("notifications_outboundmail", MAIL_INVITATION_RULE),
+    ("notifications_outboundmail", MAIL_CONTEXT_RULE),
     ("regions_auditevent", AUDIT_DETAILS_RULE),
     ("forecasts_collectionjob", IMPORT_SHAPE_RULE),
     ("forecasts_collectionjob", NATIVE_SLOT_RULE),

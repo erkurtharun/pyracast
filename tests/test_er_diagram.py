@@ -43,7 +43,7 @@ def test_core_tenant_relationships_and_constraints_are_documented() -> None:
         '    auth_user ||--o| accounts_userlanguagepreference : "user_id"',
         '    auth_user |o--o{ accounts_workspaceadminchange : "previous_administrator_id"',
         '        bigint tenant_id FK "references accounts_tenant.id"',
-        "        varchar_64 token_hash UK",
+        '        varchar_64 token_hash UK "nullable"',
         '- `membership_tenant_user_uniq`: `UNIQUE ("tenant_id", "user_id")`',
         "- `membership_tenant_administrator_uniq`: "
         '`UNIQUE INDEX ("tenant_id") WHERE "role" = \'admin\'`',

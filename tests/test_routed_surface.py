@@ -134,6 +134,7 @@ RECORD_BROWSER_MODELS = {
     "forecasts.requestattempt",
     "notifications.notificationdelivery",
     "notifications.notificationsettings",
+    "notifications.outboundmail",
     "plants.calibrationactivation",
     "plants.calibrationrun",
     "plants.plant",

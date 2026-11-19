@@ -38,14 +38,17 @@ def test_removing_a_verified_alias_preserves_other_members_and_external_addresse
         now=NOW,
     )
     (delivery_id,) = enqueue_due(SLOT)
-    assert schedule.recipient_memberships == {
-        "alias@example.com": [removed_membership.pk],
-        retained.email: [retained_membership.pk],
-    }
+    assert list(schedule.recipients.values_list("email", "membership_id")) == [
+        ("ALIAS@example.com", removed_membership.pk),
+        (retained.email, retained_membership.pk),
+        ("external@example.com", None),
+    ]
     remove_workspace_member(system.member, system.tenant.pk, removed.pk)
     schedule.refresh_from_db()
-    assert schedule.recipients == [retained.email, "external@example.com"]
-    assert schedule.recipient_memberships == {retained.email: [retained_membership.pk]}
+    assert list(schedule.recipients.values_list("email", "membership_id")) == [
+        (retained.email, retained_membership.pk),
+        ("external@example.com", None),
+    ]
     assert process_notification(delivery_id, SLOT)
     assert mail.outbox[0].bcc == [retained.email, "external@example.com"]
 

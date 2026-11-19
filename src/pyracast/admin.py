@@ -7,6 +7,7 @@ from django.contrib import admin, messages
 from django.contrib.auth import logout
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect
 from django.template.response import TemplateResponse
@@ -64,7 +65,7 @@ from pyracast.forecasts.models import (
 from pyracast.languages import explicit_language
 from pyracast.metering.models import EpiasConnection
 from pyracast.metering.operations import connect_epias, disconnect_epias
-from pyracast.notifications.models import NotificationDelivery, NotificationSettings
+from pyracast.notifications.models import NotificationDelivery, NotificationSettings, OutboundMail
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -414,7 +415,7 @@ class DispatcherStatusAdmin(ReadOnlyAdmin):
 class NotificationDeliveryAdmin(ReadOnlyAdmin):
     list_display = (
         "id",
-        "recipients",
+        "recipient_list",
         "scheduled_for",
         "status",
         "attempts",
@@ -422,10 +423,10 @@ class NotificationDeliveryAdmin(ReadOnlyAdmin):
         "sent_at",
     )
     list_filter = ("status",)
-    search_fields = ("recipients", "schedule__region__name")
+    search_fields = ("recipients__email", "schedule__region__name")
     fields = (
         "schedule",
-        "recipients",
+        "recipient_list",
         "scheduled_for",
         "status",
         "available_at",
@@ -436,6 +437,32 @@ class NotificationDeliveryAdmin(ReadOnlyAdmin):
         "transmit_started_at",
         "sent_at",
         "last_error",
+    )
+    readonly_fields = ("recipient_list",)
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[NotificationDelivery]:
+        return super().get_queryset(request).prefetch_related("recipients")
+
+    @admin.display(description="recipients")
+    def recipient_list(self, delivery: NotificationDelivery) -> str:
+        return ", ".join(delivery.addresses())
+
+
+@admin.register(OutboundMail, site=site)
+class OutboundMailAdmin(ReadOnlyAdmin):
+    list_display = ("id", "kind", "status", "attempts", "last_error", "created_at", "finished_at")
+    list_filter = ("status", "kind")
+    fields = (
+        "kind",
+        "recipient",
+        "status",
+        "attempts",
+        "last_error",
+        "created_at",
+        "available_at",
+        "expires_at",
+        "transmit_started_at",
+        "finished_at",
     )
 
 

@@ -18,9 +18,11 @@ from pyracast.mail.errors import (
 )
 from pyracast.mail.send import send
 from pyracast.notifications.jobs import process_notification
+from pyracast.notifications.models import OutboundMail
 from tests.smtp_server import Script, loopback_smtp
 from tests.support.auth_lifecycle import submit
 from tests.support.notifications import SLOT, ready
+from tests.support.outbox import deliver_mail
 
 SMTP_BACKEND = "pyracast.mail.smtp.EmailBackend"
 
@@ -199,7 +201,7 @@ def test_reminder_stores_the_relay_outcome(
 ) -> None:
     delivery = ready()
     if phase == "rcpt":
-        relay.recipient_replies = dict.fromkeys(delivery.recipients, reply)
+        relay.recipient_replies = dict.fromkeys(delivery.addresses(), reply)
     else:
         script_reply(relay, phase, reply)
 
@@ -262,7 +264,7 @@ def workspace() -> tuple[Tenant, User]:
     ("failure", "status"),
     [
         (None, "sent"),
-        (NotSentError("private relay detail"), "failed"),
+        (NotSentError("private relay detail"), "pending"),
         (PermanentlyNotSentError("private relay detail"), "failed"),
         (DeliveryUncertainError("private relay detail"), "uncertain"),
         (RuntimeError("private relay detail"), "uncertain"),
@@ -278,8 +280,9 @@ def test_invitation_records_the_delivery_outcome_per_error_class(
     scripted.send_failure = failure
 
     invitation = invite_workspace_member(administrator, tenant.pk, "guest@example.com")
+    deliver_mail()
 
-    assert invitation.delivery_status == status
+    assert invitation.delivery_status == "pending"
     assert WorkspaceInvitation.objects.get().delivery_status == status
     assert [message.to for message in scripted.sent] == (
         [["guest@example.com"]] if failure is None else []
@@ -287,7 +290,7 @@ def test_invitation_records_the_delivery_outcome_per_error_class(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_invitation_template_error_leaves_no_invitation(
+def test_invitation_template_error_at_send_time_sends_nothing_and_retries(
     scripted: type[ScriptedBackend],
     workspace: tuple[Tenant, User],
     monkeypatch: pytest.MonkeyPatch,
@@ -299,10 +302,13 @@ def test_invitation_template_error_leaves_no_invitation(
 
     monkeypatch.setattr("pyracast.accounts.invitations.render_to_string", broken)
 
-    with pytest.raises(TemplateSyntaxError):
-        invite_workspace_member(administrator, tenant.pk, "guest@example.com")
+    invite_workspace_member(administrator, tenant.pk, "guest@example.com")
+    deliver_mail()
 
-    assert not WorkspaceInvitation.objects.exists()
+    assert WorkspaceInvitation.objects.get().delivery_status == "pending"
+    assert list(OutboundMail.objects.values_list("status", "last_error")) == [
+        ("retry", "mail_preparation_failed")
+    ]
     assert scripted.sent == []
 
 
@@ -354,61 +360,63 @@ def request_unknown_account_notice() -> None:
     assert response.status_code == 401
 
 
-def account_mail_failures(caplog: pytest.LogCaptureFixture) -> list[str]:
+def account_mail_failures(logs: pytest.LogCaptureFixture) -> list[str]:
+    deliver_mail()
     return [
         record.getMessage()
-        for record in caplog.records
-        if record.getMessage().startswith("account_mail_failed ")
+        for record in logs.records
+        if record.getMessage().startswith(("outbound_mail_retry ", "outbound_mail_failed "))
     ]
 
 
 @ACCOUNT_MAIL
 def test_account_mail_reports_an_invalid_mailer_configuration(
-    caplog: pytest.LogCaptureFixture,
+    pyracast_logs: pytest.LogCaptureFixture,
 ) -> None:
     options = {"host": "127.0.0.1", "use_tls": True, "use_ssl": True}
     with override_settings(MAILERS={"default": {"BACKEND": SMTP_BACKEND, "OPTIONS": options}}):
         request_unknown_account_notice()
+        (failure,) = account_mail_failures(pyracast_logs)
 
-    (failure,) = account_mail_failures(caplog)
-    assert failure.endswith(" error_type=NotSentError error_code=mail_configuration_invalid")
+    assert failure.endswith(" error_code=mail_configuration_invalid")
+    assert "kind=account/email/unknown_account" in failure
 
 
 @ACCOUNT_MAIL
 def test_account_mail_reports_a_backend_that_sent_nothing(
-    closing: type[ClosingBackend], caplog: pytest.LogCaptureFixture
+    closing: type[ClosingBackend], pyracast_logs: pytest.LogCaptureFixture
 ) -> None:
     closing.delivered = 0
 
     request_unknown_account_notice()
 
-    (failure,) = account_mail_failures(caplog)
-    assert failure.endswith(" error_type=NotSentError error_code=mail_not_sent")
+    (failure,) = account_mail_failures(pyracast_logs)
+    assert failure.endswith(" error_code=mail_not_sent")
 
 
 @ACCOUNT_MAIL
 def test_account_mail_accepted_before_a_failed_close_is_delivered(
-    closing: type[ClosingBackend], caplog: pytest.LogCaptureFixture
+    closing: type[ClosingBackend], pyracast_logs: pytest.LogCaptureFixture
 ) -> None:
     closing.close_failure = ConnectionResetError("relay closed the connection")
 
     request_unknown_account_notice()
 
+    assert account_mail_failures(pyracast_logs) == []
     assert [message.to for message in closing.sent] == [["missing@example.com"]]
-    assert account_mail_failures(caplog) == []
 
 
 @ACCOUNT_MAIL
 def test_account_mail_logs_the_uncertain_delivery_code(
-    scripted: type[ScriptedBackend], caplog: pytest.LogCaptureFixture
+    scripted: type[ScriptedBackend], pyracast_logs: pytest.LogCaptureFixture
 ) -> None:
     scripted.send_failure = DeliveryUncertainError("private relay detail")
 
     request_unknown_account_notice()
 
-    (failure,) = account_mail_failures(caplog)
-    assert failure.endswith(" error_type=DeliveryUncertainError error_code=mail_outcome_uncertain")
-    assert "private relay detail" not in caplog.text
+    (failure,) = account_mail_failures(pyracast_logs)
+    assert failure.endswith(" status=uncertain error_code=mail_outcome_uncertain")
+    assert "private relay detail" not in pyracast_logs.text
 
 
 @pytest.mark.django_db(transaction=True)

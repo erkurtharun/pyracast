@@ -1211,6 +1211,14 @@ export interface components {
          *     * `request_conflict` - Request Conflict
          *     * `review_context_changed` - Review Context Changed
          *     * `workspace_admin_changed` - Workspace Admin Changed
+         *     * `reminder_time_required` - Reminder Time Required
+         *     * `duplicate_reminder_times` - Duplicate Reminder Times
+         *     * `too_many_reminder_times` - Too Many Reminder Times
+         *     * `recipient_required` - Recipient Required
+         *     * `duplicate_recipients` - Duplicate Recipients
+         *     * `recipient_limit_exceeded` - Recipient Limit Exceeded
+         *     * `plant_not_approved` - Plant Not Approved
+         *     * `provider_account_unavailable` - Provider Account Unavailable
          * @enum {string}
          */
         ErrorCode:
@@ -1277,7 +1285,15 @@ export interface components {
             | "request_already_closed"
             | "request_conflict"
             | "review_context_changed"
-            | "workspace_admin_changed";
+            | "workspace_admin_changed"
+            | "reminder_time_required"
+            | "duplicate_reminder_times"
+            | "too_many_reminder_times"
+            | "recipient_required"
+            | "duplicate_recipients"
+            | "recipient_limit_exceeded"
+            | "plant_not_approved"
+            | "provider_account_unavailable";
         ForecastOutput: {
             /** Format: date */
             date: string;
@@ -2160,9 +2176,12 @@ export interface components {
         RejectionInput: {
             reason: string;
         };
+        ReminderAddressesOutput: {
+            recipients: string[];
+            workspace_recipients: string[];
+        };
         ReminderDeliveryOutput: {
             id: number;
-            recipients: string[];
             /** Format: date-time */
             scheduled_for: string;
             status: components["schemas"]["NotificationDeliveryStatusEnum"];
@@ -2184,10 +2203,11 @@ export interface components {
             stale: boolean | null;
             /** Format: date-time */
             sent_at: string | null;
+            recipient_count: number;
+            recipients: string[] | null;
         };
         ReminderInput: {
             enabled: boolean;
-            /** @default false */
             include_workspace_members: boolean;
             language: components["schemas"]["LanguageEnum"];
             recipients: string[];
@@ -2195,24 +2215,36 @@ export interface components {
         };
         ReminderOutput: {
             enabled: boolean;
+            state: components["schemas"]["ReminderStateEnum"];
             include_workspace_members: boolean;
-            workspace_recipients: string[];
             language: components["schemas"]["LanguageEnum"];
             times: string[];
-            recipients: string[];
-            effective_recipients: string[];
             recipient_limit: number;
             recipient_count: number;
-            recipient_slots_remaining: number;
+            workspace_member_count: number;
             recipient_limit_exceeded: boolean;
-            timezone: string;
-            quota: components["schemas"]["ReminderQuotaOutput"] | null;
+            daily_reminder_limit: number | null;
+            addresses: components["schemas"]["ReminderAddressesOutput"] | null;
             deliveries: components["schemas"]["ReminderDeliveryOutput"][];
         };
-        ReminderQuotaOutput: {
-            daily_reminder_limit: number;
-            queries_per_email: number;
-        };
+        /**
+         * @description * `sending` - Sending
+         *     * `paused_by_user` - Paused
+         *     * `waiting_for_approval` - Waiting for approval
+         *     * `provider_attention` - Provider account needs attention
+         *     * `no_recipients` - No recipients
+         *     * `invalid_recipient` - Invalid recipient
+         *     * `over_recipient_limit` - Over the recipient limit
+         * @enum {string}
+         */
+        ReminderStateEnum:
+            | "sending"
+            | "paused_by_user"
+            | "waiting_for_approval"
+            | "provider_attention"
+            | "no_recipients"
+            | "invalid_recipient"
+            | "over_recipient_limit";
         /**
          * @description * `uncertain` - Uncertain
          *     * `succeeded` - Succeeded
@@ -2387,6 +2419,7 @@ export interface components {
         };
         WorkspaceMembersOutput: {
             members: components["schemas"]["WorkspaceMemberOutput"][];
+            plants_at_recipient_limit: number;
         };
         /**
          * @description * `admin` - Administrator

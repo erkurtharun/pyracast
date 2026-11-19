@@ -7,6 +7,7 @@ import pytest
 from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, models, transaction
 
+from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership
 from pyracast.epias import EpiasDay, EpiasError, EpiasPlant
 from pyracast.forecasts.jobs import LEASE_DURATION, claim, collect, pending_job_ids
@@ -17,7 +18,7 @@ from pyracast.metering.jobs import claim_epias_job, pending_epias_ids, run_epias
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.metering.operations import disconnect_epias
 from pyracast.notifications.jobs import process_notification
-from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.models import NotificationDelivery, OutboundMail
 from pyracast.plants import training
 from pyracast.plants.models import CalibrationRun
 from pyracast.plants.training import pending_calibration_ids, run_calibration
@@ -38,6 +39,7 @@ CLEAN = dict.fromkeys(
         "metering_epiascollectionjob",
         "plants_calibrationrun",
         "notifications_notificationdelivery",
+        "notifications_outboundmail",
     ),
     0,
 )
@@ -71,6 +73,12 @@ def _delivery(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     return _prepared(ready())
 
 
+def _outbound_mail(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    system = make_system()
+    invite_workspace_member(system.member, system.tenant.pk, "guest@example.com")
+    return OutboundMail.objects.get()
+
+
 def _prepared(delivery: NotificationDelivery) -> NotificationDelivery:
     NotificationDelivery.objects.filter(pk=delivery.pk).update(prepared_message=UNAVAILABLE)
     return delivery
@@ -81,6 +89,7 @@ ROWS: list[tuple[Callable[[pytest.MonkeyPatch], models.Model], str, str]] = [
     (_epias_job, "running", "epiascollectionjob_lease_chk"),
     (_calibration_run, "running", "calibrationrun_lease_chk"),
     (_delivery, "sending", "notificationdelivery_lease_chk"),
+    (_outbound_mail, "sending", "outboundmail_lease_chk"),
 ]
 LEASE: dict[str, Any] = {"lease_token": uuid.uuid4(), "lease_expires_at": NOW}
 

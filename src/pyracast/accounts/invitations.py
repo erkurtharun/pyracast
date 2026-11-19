@@ -1,5 +1,4 @@
 import hashlib
-import logging
 import math
 import secrets
 from dataclasses import dataclass
@@ -16,6 +15,7 @@ from django.db.models.functions import Least
 from django.template.loader import render_to_string
 from django.utils import timezone, translation
 from django.utils.translation import gettext as _
+from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.audit import (
     SecurityEvent,
@@ -26,7 +26,6 @@ from pyracast.accounts.audit import (
 from pyracast.accounts.authorization import authorize_workspace_admin
 from pyracast.accounts.language import user_language
 from pyracast.accounts.models import (
-    InvitationDeliveryStatus,
     Membership,
     Tenant,
     WorkspaceAdminChange,
@@ -34,10 +33,8 @@ from pyracast.accounts.models import (
     WorkspaceRole,
 )
 from pyracast.errors import ConflictError, DomainError, ErrorCode, ForbiddenError
-from pyracast.mail.errors import NotSentError
-from pyracast.mail.send import send
-
-logger = logging.getLogger(__name__)
+from pyracast.notifications.intents import enqueue_mail
+from pyracast.notifications.models import OutboundMailError, OutboundMailKind
 
 INVITATION_LIFETIME = timedelta(days=7)
 # Two-key advisory lock space ("PYIV") that serializes budget checks per sender and per address.
@@ -153,11 +150,9 @@ def invite_workspace_member(
     WorkspaceInvitation.objects.filter(
         replaced, tenant_id=tenant_id, accepted_at__isnull=True, revoked_at__isnull=True
     ).update(revoked_at=now, expires_at=Least("expires_at", Value(now)))
-    token = secrets.token_urlsafe(32)
     invitation = WorkspaceInvitation.objects.create(
         tenant_id=tenant_id,
         email=email,
-        token_hash=invitation_digest(token),
         created_by=actor,
         expires_at=now + INVITATION_LIFETIME,
         role=role,
@@ -169,47 +164,51 @@ def invite_workspace_member(
         target_id=invitation.pk,
         address=email,
     )
-    tenant = Tenant.objects.get(pk=tenant_id)
-    link = f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/invitation/#token={token}"
-    with translation.override(language or user_language(actor) or translation.get_language()):
+    enqueue_mail(
+        OutboundMailKind.WORKSPACE_INVITATION,
+        email,
+        invitation=invitation,
+        language=language or user_language(actor) or translation.get_language(),
+        expires_at=invitation.expires_at,
+        now=now,
+    )
+    return invitation
+
+
+@sensitive_variables("token", "context")
+def compose_invitation(
+    invitation_id: int, language: str, now: datetime
+) -> EmailMultiAlternatives | OutboundMailError:
+    """Mints the token while the mailer holds the intent: only its digest is stored, and the
+    link exists only in the message. A send that fails before transmission mints a new one."""
+    invitation = (
+        WorkspaceInvitation.objects.select_for_update(of=("self",))
+        .select_related("tenant")
+        .filter(pk=invitation_id, accepted_at__isnull=True, revoked_at__isnull=True)
+        .first()
+    )
+    if invitation is None or invitation.expires_at <= now:
+        return OutboundMailError.INVITATION_UNAVAILABLE
+    token = secrets.token_urlsafe(32)
+    invitation.token_hash = invitation_digest(token)
+    invitation.save(update_fields=["token_hash"])
+    with translation.override(language):
         context = {
-            "workspace": tenant.name,
-            "email": email,
-            "action_url": link,
-            "administrator": admin_role,
+            "workspace": invitation.tenant.name,
+            "email": invitation.email,
+            "action_url": f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/invitation/#token={token}",
+            "administrator": invitation.role == WorkspaceRole.ADMIN,
         }
         message = EmailMultiAlternatives(
             _("Pyracast workspace invitation"),
             render_to_string("mail/workspace_invitation.txt", context).strip(),
             settings.DEFAULT_FROM_EMAIL,
-            [email],
+            [invitation.email],
         )
         message.attach_alternative(
             render_to_string("mail/workspace_invitation.html", context), "text/html"
         )
-
-    def deliver() -> None:
-        try:
-            send(message)
-        except NotSentError as error:
-            status = InvitationDeliveryStatus.FAILED
-            logger.warning(
-                "invitation_mail_not_sent invitation_id=%s error_code=%s", invitation.pk, error.code
-            )
-        except Exception as error:
-            status = InvitationDeliveryStatus.UNCERTAIN
-            logger.warning(
-                "invitation_mail_uncertain invitation_id=%s error_type=%s",
-                invitation.pk,
-                type(error).__name__,
-            )
-        else:
-            status = InvitationDeliveryStatus.SENT
-        invitation.delivery_status = status
-        WorkspaceInvitation.objects.filter(pk=invitation.pk).update(delivery_status=status)
-
-    transaction.on_commit(deliver)
-    return invitation
+    return message
 
 
 def _record_refused_acceptance(actor: User, invitation: WorkspaceInvitation, reason: str) -> None:

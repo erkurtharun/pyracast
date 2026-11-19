@@ -1,5 +1,5 @@
-import logging
 import secrets
+from datetime import datetime, timedelta
 from typing import Any, cast
 
 from allauth.account.adapter import DefaultAccountAdapter
@@ -14,26 +14,49 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
-from django.utils import translation
+from django.utils import timezone, translation
 from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.account_mail import NOTICES, render_notice
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.language import user_language
-from pyracast.accounts.login_limits import reserve_address_failure, reserve_client_failure
+from pyracast.accounts.login_limits import (
+    daily_lock_reached,
+    reserve_address_failure,
+    reserve_client_failure,
+)
+from pyracast.accounts.models import Language
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.accounts.social import record_social_refusal
 from pyracast.db import violated_constraint
-from pyracast.mail.errors import DeliveryUncertainError, NotSentError
-from pyracast.mail.send import send
+from pyracast.notifications.intents import enqueue_mail
+from pyracast.notifications.models import MAIL_CONTEXT_KEYS, OutboundMailKind
 
-logger = logging.getLogger(__name__)
+NOTICE_LIFETIME = timedelta(days=1)
 CODE_TIMEOUTS = {
     "account/email/email_confirmation": "ACCOUNT_EMAIL_VERIFICATION_BY_CODE_TIMEOUT",
     "account/email/email_confirmation_signup": "ACCOUNT_EMAIL_VERIFICATION_BY_CODE_TIMEOUT",
     "account/email/password_reset_code": "ACCOUNT_PASSWORD_RESET_BY_CODE_TIMEOUT",
     "account/email/login_code": "ACCOUNT_LOGIN_BY_CODE_TIMEOUT",
 }
+
+
+def mail_language() -> Language:
+    language = translation.get_language()
+    return Language(language) if language in Language.values else Language.EN
+
+
+def mail_lifetime(template_prefix: str) -> timedelta:
+    timeout = CODE_TIMEOUTS.get(template_prefix)
+    return timedelta(seconds=getattr(settings, timeout)) if timeout else NOTICE_LIFETIME
+
+
+def stored_context(context: dict[str, Any]) -> dict[str, str]:
+    return {
+        key: value.isoformat() if isinstance(value, datetime) else str(value)
+        for key in MAIL_CONTEXT_KEYS
+        if (value := context.get(key)) is not None
+    }
 
 
 LOGIN_LIMITED_MESSAGE = gettext_lazy(
@@ -168,32 +191,32 @@ class AccountAdapter(DefaultAccountAdapter):
         )
 
     def send_mail(self, template_prefix: str, email: str, context: dict[str, Any]) -> None:
+        # The intent is stored in the request's transaction and sent by the mailer, so the
+        # answer never waits for or reveals delivery.
         user = context.get("user")
-        if not isinstance(user, User):
-            address = (
-                EmailAddress.objects.filter(email__iexact=email, verified=True)
-                .select_related("user")
-                .first()
-            )
-            user = address.user if address is not None else None
         preference = user_language(user) if isinstance(user, User) else None
-        language = preference or translation.get_language()
+        now = timezone.now()
+        enqueue_mail(
+            OutboundMailKind(template_prefix),
+            email,
+            language=preference or mail_language(),
+            owner_language=not isinstance(user, User),
+            context=stored_context(context),
+            code=str(context.get("code", "")),
+            expires_at=now + mail_lifetime(template_prefix),
+            now=now,
+        )
 
-        def deliver() -> None:
-            with translation.override(language):
-                try:
-                    send(self.render_mail(template_prefix, email, {"email": email, **context}))
-                except Exception as error:
-                    # Transport errors can carry the recipient address, so neither the message
-                    # nor the traceback is logged.
-                    logger.error(
-                        "account_mail_failed template=%s user_id=%s error_type=%s error_code=%s",
-                        template_prefix,
-                        user.pk if isinstance(user, User) else None,
-                        type(error).__name__,
-                        error.code
-                        if isinstance(error, (NotSentError, DeliveryUncertainError))
-                        else None,
-                    )
-
-        transaction.on_commit(deliver)
+    def authentication_failed(self, request: HttpRequest, **credentials: Any) -> None:
+        address = str(credentials.get("email") or "").strip().lower()
+        usage = self._login_failed_rl_usage
+        if address and usage is not None and daily_lock_reached(usage):
+            now = timezone.now()
+            enqueue_mail(
+                OutboundMailKind.LOGIN_LOCKED,
+                address,
+                language=mail_language(),
+                owner_language=True,
+                expires_at=now + NOTICE_LIFETIME,
+                now=now,
+            )

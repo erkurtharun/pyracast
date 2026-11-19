@@ -633,6 +633,64 @@ CASES: dict[str, Case] = {
         "Çal\u0131şma alan\u0131 yöneticisi değişti. Kaydetmeden önce sayfay\u0131 yenileyin.",
         domain("ConflictError", "workspace_admin_changed"),
     ),
+    "reminder_time_required": Case(
+        400,
+        "Add at least one delivery time to turn reminders on.",
+        "Hat\u0131rlatmalar\u0131 açmak için en az bir gönderim saati ekleyin.",
+        domain("DomainError", "reminder_time_required", field="times"),
+        fields=("times",),
+    ),
+    "duplicate_reminder_times": Case(
+        400,
+        "Use each delivery time once.",
+        "Her gönderim saatini bir kez kullan\u0131n.",
+        domain("DomainError", "duplicate_reminder_times", field="times"),
+        fields=("times",),
+    ),
+    "too_many_reminder_times": Case(
+        400,
+        "This plant allows fewer delivery times a day.",
+        "Bu santral günde daha az gönderim saatine izin verir.",
+        domain("DomainError", "too_many_reminder_times", field="times"),
+        fields=("times",),
+    ),
+    "recipient_required": Case(
+        400,
+        "Add a recipient or include the workspace members.",
+        "Bir al\u0131c\u0131 ekleyin veya çal\u0131şma alan\u0131 üyelerini dahil edin.",
+        domain("DomainError", "recipient_required", field="recipients"),
+        fields=("recipients",),
+    ),
+    "duplicate_recipients": Case(
+        400,
+        "Recipient addresses must be distinct (case-insensitive).",
+        "Al\u0131c\u0131 adresleri büyük/küçük harf ayr\u0131m\u0131 olmadan "
+        "birbirinden farkl\u0131 olmal\u0131d\u0131r.",
+        domain("DomainError", "duplicate_recipients", field="recipients"),
+        fields=("recipients",),
+    ),
+    "recipient_limit_exceeded": Case(
+        400,
+        "This plant allows fewer recipient addresses.",
+        "Bu santral daha az al\u0131c\u0131 adresine izin verir.",
+        domain("DomainError", "recipient_limit_exceeded", field="recipients"),
+        fields=("recipients",),
+    ),
+    "plant_not_approved": Case(
+        400,
+        "Reminders can be turned on once the plant is approved.",
+        "Hat\u0131rlatmalar santral onayland\u0131ktan sonra aç\u0131labilir.",
+        domain("DomainError", "plant_not_approved", field="enabled"),
+        fields=("enabled",),
+    ),
+    "provider_account_unavailable": Case(
+        400,
+        "Reminders can be turned on once the plant's forecast provider account is enabled.",
+        "Hat\u0131rlatmalar santralin tahmin sağlay\u0131c\u0131 hesab\u0131 "
+        "etkinleştirildikten sonra aç\u0131labilir.",
+        domain("DomainError", "provider_account_unavailable", field="enabled"),
+        fields=("enabled",),
+    ),
 }
 
 

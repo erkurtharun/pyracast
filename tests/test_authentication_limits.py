@@ -590,6 +590,7 @@ def test_an_unknown_address_is_locked_after_a_hundred_failures_in_a_day(clock: C
     client = Client(enforce_csrf_checks=True)
     fail_daily(client, "absent@example.com", 100, clock)
     assert error_codes(login(client, "absent@example.com", WRONG)) == ["too_many_login_attempts"]
+    deliver_mail()
     assert not mail.outbox
 
 
@@ -618,6 +619,7 @@ def test_an_address_receives_one_verification_mail_per_minute(clock: Clock) -> N
     assert signup(visitor(1), company(1)).status_code == 401
     clock.advance(2)
     assert signup(visitor(2), company(2)).status_code == 401
+    deliver_mail()
     assert len(mail.outbox) == 2
 
 
@@ -627,6 +629,7 @@ def test_an_address_receives_at_most_six_verification_mails_an_hour(clock: Clock
         statuses.append(signup(visitor(index), company(index)).status_code)
         clock.advance(181)
     assert statuses == [401] * 7
+    deliver_mail()
     assert len(mail.outbox) == 6
 
 
@@ -766,3 +769,21 @@ def test_a_new_lock_after_a_password_reset_is_announced_again(clock: Clock) -> N
     fail_daily(client, user.email, 1, clock)
 
     assert lock_notices() == [("member@example.com", "sent"), ("member@example.com", "pending")]
+
+
+def test_a_lock_is_not_announced_without_a_daily_rate_or_its_record_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import contextmanager
+
+    from pyracast.accounts.login_limits import daily_lock_reached
+
+    assert not daily_lock_reached(ratelimit.RateLimitUsage(usage=[]))
+
+    @contextmanager
+    def busy(_key: str) -> Iterator[bool]:
+        yield False
+
+    monkeypatch.setattr(ratelimit, "cache_lock", busy)
+    slot = ratelimit.SingleRateLimitUsage(cache_key="daily", cache_duration=86400, timestamp=1.0)
+    assert not daily_lock_reached(ratelimit.RateLimitUsage(usage=[slot]))

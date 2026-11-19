@@ -204,27 +204,11 @@ class InvitationForm(forms.Form):
 
 
 def report_invitation(request: HttpRequest, invitation: WorkspaceInvitation) -> None:
-    values = {"email": invitation.email}
-    if invitation.delivery_status == InvitationDeliveryStatus.SENT:
-        messages.success(request, _("The invitation to %(email)s was sent.") % values)
-    elif invitation.delivery_status == InvitationDeliveryStatus.FAILED:
-        messages.error(
-            request,
-            _(
-                "The invitation to %(email)s could not be sent. "
-                "Check the mail service, then resend it."
-            )
-            % values,
-        )
-    else:
-        messages.warning(
-            request,
-            _(
-                "The invitation to %(email)s may not have been delivered. "
-                "Check the mail service before resending it."
-            )
-            % values,
-        )
+    messages.success(
+        request,
+        _("The invitation to %(email)s is being sent; its state appears in the list.")
+        % {"email": invitation.email},
+    )
 
 
 def tenant_list_context(query: str, page: str) -> dict[str, Any]:

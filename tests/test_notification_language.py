@@ -15,7 +15,7 @@ from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.scheduler import enqueue_due
 from tests.support.domain import NOW
 from tests.support.notification_preparation import complete_saved
-from tests.support.notifications import SLOT, attached_sheet, configured
+from tests.support.notifications import SLOT, attached_sheet, configured, store_recipients
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -27,7 +27,7 @@ def test_schedule_pins_explicit_language_for_every_recipient_and_defaults_to_eng
     system, schedule = configured()
     recipient_user = User.objects.create(username="recipient", email="recipient@example.com")
     UserLanguagePreference.objects.create(user=recipient_user, language="tr")
-    schedule.recipients = [recipient_user.email, "external@example.com"]
+    store_recipients(schedule, [recipient_user.email, "external@example.com"])
     if language is not None:
         schedule.language = language
     schedule.save()
@@ -110,7 +110,6 @@ def test_delivery_language_is_database_constrained() -> None:
             scheduled_for=SLOT,
             preparation_deadline=SLOT,
             available_at=SLOT,
-            recipients=["default@example.com"],
         )
 
 

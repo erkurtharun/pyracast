@@ -187,3 +187,6 @@ msgstr "Tahmin (%(unit)s)"
 
 msgid "Source"
 msgstr "Kaynak"
+
+msgid "This plant allows at most %(limit)s delivery times a day."
+msgstr "Bu santral günde en fazla %(limit)s gönderim saatine izin verir."

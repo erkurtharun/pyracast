@@ -62,5 +62,8 @@ def test_a_member_configures_plants_production_and_forecast_mail(web_gateway: Ga
     assert schedule.times == ["09:00", "16:00"]
     reminder = ReminderSchedule.objects.get(configured_by=system.member, region=system.region)
     assert reminder.enabled
-    assert reminder.recipients == ["forecast-one@example.test", "forecast-two@example.test"]
+    assert list(reminder.recipients.values_list("email", flat=True)) == [
+        "forecast-one@example.test",
+        "forecast-two@example.test",
+    ]
     assert reminder.times == ["10:00"]

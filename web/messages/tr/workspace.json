@@ -166,7 +166,7 @@
         "emailAddress": "E-posta adresi {index, number}",
         "removeEmailAddress": "E-posta adresini kaldır: {index, number}",
         "recipientLimit": "En fazla {limit, number} e-posta adresi kullanın.",
-        "reminderPolicy": "E-postalar en son kayıtlı tahmini, veri toplama zamanını ve verinin yaşını gösterir; sağlayıcıdan yeni veri istemez. Yaz saati geçişindeki eksik saatler atlanır ve tekrarlanan yerel saatlerde bir kez çalışır. Günlük sınır: {limit}. E-posta başına sağlayıcı sorgusu: {queries}.",
+        "reminderPolicy": "E-postalar en son kayıtlı tahmini, veri toplama zamanını ve verinin yaşını gösterir; sağlayıcıdan yeni veri istemez. Yaz saati geçişindeki eksik saatler atlanır ve tekrarlanan yerel saatlerde bir kez çalışır. Günlük sınır: {limit}.",
         "scheduled": "Planlanan ({timezone})",
         "sourceAge": "{hours, number} sa {minutes, number} dk",
         "statusUnavailable": "Durum kullanılamıyor",
@@ -200,7 +200,11 @@
         "workspaceMembers": "Çalışma alanı üyeleri ({count, number})",
         "noWorkspaceMembers": "Henüz aktif, doğrulanmış üye yok.",
         "otherAddresses": "Diğer adresler",
-        "groupPrivacy": "Her gönderim saatinde tek e-posta. Alıcılar birbirini göremez (BCC)."
+        "groupPrivacy": "Her gönderim saatinde tek e-posta. Alıcılar birbirini göremez (BCC).",
+        "recipientCountOnly": "En fazla {limit, number} alıcıdan {count, number} alıcı. Adresleri yalnızca çalışma alanı yöneticisi görür.",
+        "deliveryRecipientCount": "{count, number} alıcı",
+        "stateWaitingForApproval": "Onay bekleniyor",
+        "stateProviderAttention": "Sağlayıcı hesabı ilgi bekliyor"
     },
     "Outages": {
         "plantOutages": "Santral kesintileri",
@@ -362,7 +366,8 @@
         "deliveryUncertain": "E-posta teslimatı doğrulanamadı.",
         "deliveryFailed": "Davet e-postası gönderilemedi. Daveti iptal edip yeniden davet edin.",
         "useAnotherAccount": "Başka hesap kullan",
-        "dismiss": "Vazgeç"
+        "dismiss": "Vazgeç",
+        "reminderLimitWarning": "{count, number} santralin e-posta hatırlatmaları çalışma alanı üyelerini içeriyor ve alıcı sınırına ulaştı. Yeni bir üye, liste kısaltılana kadar bu hatırlatmaları duraklatır."
     },
     "ChangeRequests": {
         "atDecision": "Karar anında",

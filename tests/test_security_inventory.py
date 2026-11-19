@@ -23,6 +23,7 @@ from pyracast.accounts.audit import LINE_KEYS, logger, redacted_key, refusal_thr
 from tests.support.admin_recovery_security import authenticated_account
 from tests.support.auth_lifecycle import PASSWORD, mailed_code, member, submit, totp_code
 from tests.support.company_registration import signup
+from tests.support.outbox import deliver_mail
 from tests.support.social_accounts import (
     AUTH,
     PROVIDERS,
@@ -311,6 +312,7 @@ CASES = [(event, case) for event in REQUIRED_EVENTS for case in FLOWS[event]]
 
 
 def mailed_codes() -> set[str]:
+    deliver_mail()
     return {
         code
         for message in mail.outbox
@@ -394,6 +396,7 @@ def sign_in_succeeds(user: User) -> None:
 def reset_request_is_answered(user: User) -> None:
     client = Client(enforce_csrf_checks=True)
     assert submit(client, "auth/password/request", {"email": user.email}).status_code == 401
+    deliver_mail()
     assert len(mail.outbox) == 1
 
 

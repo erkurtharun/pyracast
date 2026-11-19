@@ -87,7 +87,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | HistoricalReferenceImport | Authorized source settings, immutable export digest and actual acquisition time |
 | ReferenceCapacityNormalization | Authorized capacity-only copies, original source lineage and conversion availability |
 | ForecastIssuance, PlantEvent | Immutable published electrical forecast and audited plant operations |
-| NotificationSettings, ReminderSchedule, NotificationDelivery | Shared plant email schedule, explicit recipients and language, pinned saved forecasts and grouped delivery outcomes |
+| NotificationSettings, ReminderSchedule, ReminderRecipient, NotificationDelivery, DeliveryRecipient, OutboundMail | Shared plant email schedule, recipient rows and language, pinned saved forecasts, grouped delivery outcomes and account and invitation mail intents |
 | AuditEvent | Actor, action, target, the details its action declares and timestamp for privileged changes |
 
 Regions select explicit provider accounts rather than embedding credentials. One canonical record per account spans tenants and credential rotations; duplicate records must not create independent quota budgets.
@@ -187,8 +187,8 @@ an audit entry and expires pending invitations for all known addresses of that u
 
 Invitations grant member access after explicit acceptance by the authenticated
 owner of the verified invited email. New invited accounts do not create another
-workspace. Invitations expire after seven days, store only a random token's hash,
-and can be cancelled. A replacement invitation or administrator transfer invalidates
+workspace. Invitations expire after seven days and can be cancelled. The notification
+worker mints each invitation's token when it sends the mail and stores only its hash. A replacement invitation or administrator transfer invalidates
 the previous pending grant. Issuance is rate-limited per workspace and recipient.
 
 Member proposals are immutable and separate from production and incident records.
@@ -306,8 +306,8 @@ operation limits; business deadlines are checked separately after database waits
 `check_delivery_health --max-lag-minutes 5` emits JSON and fails for missing, stale
 or failed phases, overdue ready jobs, expired active leases, recent
 failed/uncertain/unavailable or incomplete tomorrow deliveries, missed delivery
-deadlines, EPİAŞ failures, credential blocks, account cooldowns and mail
-authentication failures. Enabled approved regions without a successful forecast
+deadlines, EPİAŞ failures, credential blocks, account cooldowns, mail
+authentication failures and overdue, failed or uncertain account and invitation mail. Enabled approved regions without a successful forecast
 in 26 hours are unhealthy. Complete saved-forecast fallback remains informational.
 This check needs a working database; monitoring
 must also treat failure to execute it as unhealthy. Run the mailer with
@@ -525,7 +525,11 @@ provider exchange answers like one that finds nothing pending: it stores nothing
 no session cookie. API
 responses are private and non-cacheable. The frontend reads stored results and
 never handles provider credentials. A fixed public HTTPS origin determines
-security-email navigation. Verification and recovery codes expire after ten minutes,
+security-email navigation. Account and invitation mail is stored as an outbound mail
+intent in the request's transaction and sent by the notification worker, so no answer
+waits for or reveals delivery; a code is kept only sealed with the application key and
+erased when the intent ends, and unknown-account and account-exists notices share 20 a
+hour. Verification and recovery codes expire after ten minutes,
 allow at most three attempts and are bound to the initiating browser session. A
 pending code or sign-in step, and a reauthentication kept in the session (a console
 confirmation included), rests on the credential state of its account (password,
@@ -651,10 +655,10 @@ The plant-only `archived_forecast` source and explicit `as_of` queries read thes
 
 Each approved plant has one shared reminder schedule with daily local `HH:MM`
 times, extra recipient addresses and an English or Turkish email language. Workspace
-administrators edit it; other members can view it and its delivery history. Optional
-workspace membership inclusion adds active members' verified account addresses.
-Membership changes update this group automatically. Without that option, an empty
-list on save captures the administrator's current email. Extra addresses retain their
+administrators edit it; other members see its settings, recipient counts and delivery
+history but no address. Optional workspace membership inclusion adds active members'
+verified account addresses. Membership changes update this group automatically. An
+enabled schedule needs an address or that option. Extra addresses retain their
 saved value; known member addresses retain their membership identity even after an
 email change. Removing a member also removes their saved addresses from current
 schedules. The configuring user is nullable audit information, not the schedule owner.

@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable
 from datetime import timedelta
 
 import pytest
@@ -17,11 +18,12 @@ from pyracast.accounts.models import (
     WorkspaceRole,
 )
 from pyracast.accounts.operations import reassign_workspace_admin
-from pyracast.mail.errors import NotSentError
+from pyracast.mail.errors import PermanentlyNotSentError
 from pyracast.plants.sites import submit_site
 from pyracast.regions.models import Region
 from tests.support.api import verified_admin
 from tests.support.concurrency import behind_open_transaction
+from tests.support.outbox import deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -93,6 +95,7 @@ def test_workspace_console_routes_require_a_verified_platform_administrator(
     tenant, owner, viewer = workspace()
     invitation = invite_workspace_member(owner, tenant.pk, "guest@example.com")
     region = site(owner, tenant)
+    deliver_mail()
     sent = len(mail.outbox)
     client = signed_in(identity, owner)
     attempt = {
@@ -110,6 +113,7 @@ def test_workspace_console_routes_require_a_verified_platform_administrator(
     assert Membership.objects.get(user=owner).role == WorkspaceRole.ADMIN
     assert Membership.objects.filter(user=viewer).exists()
     assert WorkspaceInvitation.objects.get().expires_at > timezone.now()
+    deliver_mail()
     assert len(mail.outbox) == sent
     assert Region.objects.get().name == "Console site"
 
@@ -187,6 +191,7 @@ def test_workspace_creation_without_an_administrator_is_logged() -> None:
     assert response["Location"] == f"/admin/workspaces/{tenant.pk}/"
     assert not Membership.objects.filter(tenant=tenant).exists()
     assert not WorkspaceInvitation.objects.exists()
+    deliver_mail()
     assert not mail.outbox
     entry = LogEntry.objects.get()
     assert (entry.action_flag, entry.object_id, entry.user, entry.object_repr) == (
@@ -214,9 +219,10 @@ def test_workspace_creation_invites_its_administrator_in_the_chosen_language() -
         WorkspaceRole.ADMIN,
         operator,
     )
+    deliver_mail()
     assert "çal\u0131şma alan\u0131n\u0131n yöneticisi yapar" in str(mail.outbox[-1].body)
     html = client.get(response["Location"]).content.decode()
-    assert "The invitation to boss@example.com was sent." in html
+    assert "The invitation to boss@example.com is being sent" in html
     assert "Invitation pending" in html
 
 
@@ -306,7 +312,7 @@ def test_invitation_form_offers_the_administrator_role_only_without_an_administr
     invitation = WorkspaceInvitation.objects.get(tenant=unassigned)
     assert (invitation.role, invitation.created_by) == (WorkspaceRole.ADMIN, operator)
     assert (
-        "The invitation to boss@example.com was sent."
+        "The invitation to boss@example.com is being sent"
         in client.get(invited["Location"]).content.decode()
     )
 
@@ -322,6 +328,7 @@ def test_invitation_form_offers_the_administrator_role_only_without_an_administr
     )
     assert viewer.status_code == 302
     assert WorkspaceInvitation.objects.get(tenant=tenant).role == WorkspaceRole.VIEWER
+    deliver_mail()
     assert "salt okunur erişim" in str(mail.outbox[-1].body)
 
 
@@ -361,38 +368,29 @@ def test_invitation_refusals_are_form_errors_that_keep_the_values() -> None:
 
 
 @pytest.mark.parametrize(
-    ("failure", "status", "label", "notice"),
+    ("failure", "status", "label"),
     [
-        (
-            NotSentError("relay refused"),
-            "failed",
-            "Not sent",
-            "The invitation to guest@example.com could not be sent.",
-        ),
-        (
-            TimeoutError("relay silent"),
-            "uncertain",
-            "Delivery unknown",
-            "The invitation to guest@example.com may not have been delivered.",
-        ),
+        (PermanentlyNotSentError("relay refused"), "failed", "Not sent"),
+        (TimeoutError("relay silent"), "uncertain", "Delivery unknown"),
     ],
 )
 def test_an_undelivered_invitation_is_reported_with_its_delivery_state(
-    monkeypatch: pytest.MonkeyPatch, failure: Exception, status: str, label: str, notice: str
+    monkeypatch: pytest.MonkeyPatch, failure: Exception, status: str, label: str
 ) -> None:
     tenant, _, _ = workspace()
     client, _ = verified_admin()
 
-    def fail(*args: object, **kwargs: object) -> None:
+    def fail(message: object, *, before_send: Callable[[], bool]) -> None:
+        assert before_send()
         raise failure
 
-    monkeypatch.setattr("pyracast.accounts.invitations.send", fail)
+    monkeypatch.setattr("pyracast.notifications.outbox.send", fail)
     response = client.post(
         f"/admin/workspaces/{tenant.pk}/invitations/new/",
         {"email": "guest@example.com", "language": "en"},
     )
+    deliver_mail()
     html = client.get(response["Location"]).content.decode()
-    assert notice in html
     assert f'<span class="badge badge--{status}">{label}</span>' in html
     assert WorkspaceInvitation.objects.get().delivery_status == status
 
@@ -401,6 +399,7 @@ def test_pending_invitations_are_reissued_and_revoked_from_the_workspace_page() 
     tenant, _, _ = workspace()
     client, operator = verified_admin()
     invitation = invite_workspace_member(operator, tenant.pk, "guest@example.com", platform=True)
+    deliver_mail()
     base = f"/admin/workspaces/{tenant.pk}/"
     page = client.get(base).content.decode()
     assert "guest@example.com" in page
@@ -419,8 +418,9 @@ def test_pending_invitations_are_reissued_and_revoked_from_the_workspace_page() 
     assert invitation.expires_at <= timezone.now()
     replacement = WorkspaceInvitation.objects.latest("pk")
     assert (replacement.email, replacement.role) == ("guest@example.com", WorkspaceRole.VIEWER)
+    deliver_mail()
     assert mail.outbox[-1].to == ["guest@example.com"]
-    assert "The invitation to guest@example.com was sent." in client.get(base).content.decode()
+    assert "The invitation to guest@example.com is being sent" in client.get(base).content.decode()
 
     revoked = client.post(f"{base}invitations/{replacement.pk}/revocation/")
     assert revoked["Location"] == f"{base}#invitations-title"
@@ -439,6 +439,7 @@ def test_a_resend_waiting_for_an_administrator_change_does_not_revive_the_invita
     client, operator = verified_admin()
     invitation = invite_workspace_member(operator, tenant.pk, "guest@example.com", platform=True)
     WorkspaceInvitation.objects.update(created_at=timezone.now() - timedelta(minutes=2))
+    deliver_mail()
     sent = len(mail.outbox)
     base = f"/admin/workspaces/{tenant.pk}/"
 
@@ -453,6 +454,7 @@ def test_a_resend_waiting_for_an_administrator_change_does_not_revive_the_invita
     assert Membership.objects.get(user=viewer).role == WorkspaceRole.ADMIN
     assert list(WorkspaceInvitation.objects.values_list("pk", flat=True)) == [invitation.pk]
     assert WorkspaceInvitation.objects.get().expires_at <= timezone.now()
+    deliver_mail()
     assert len(mail.outbox) == sent
     assert "The invitation is invalid or expired." in client.get(base).content.decode()
 
@@ -564,7 +566,7 @@ def test_workspace_console_pages_render_in_turkish_without_mail_or_provider_call
     def unexpected(*args: object, **kwargs: object) -> None:
         pytest.fail("A console page sent mail or called a provider on GET")
 
-    monkeypatch.setattr("pyracast.accounts.invitations.send", unexpected)
+    monkeypatch.setattr("pyracast.notifications.outbox.send", unexpected)
     monkeypatch.setattr("pyracast.admin.adapter_for", unexpected)
     base = f"/admin/workspaces/{tenant.pk}/"
     expectations = {

@@ -1,10 +1,12 @@
 import logging
 import re
 import time
+import uuid
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Barrier
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import pytest
@@ -25,7 +27,7 @@ from pyracast.accounts.invitations import (
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
 from pyracast.errors import DomainError
 from pyracast.forecasts.monitoring import delivery_health
-from pyracast.mail.errors import NotSentError, PermanentlyNotSentError
+from pyracast.mail.errors import NotSentError, PermanentlyNotSentError, SendCancelledError
 from tests.support.outbox import after_the_lease, deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
@@ -186,13 +188,10 @@ def test_a_definite_non_send_is_retried_with_a_fresh_token(
 def test_retries_end_after_a_bound_and_the_failure_is_reported(
     workspace: tuple[Tenant, User],
     transport: type[Transport],
-    caplog: pytest.LogCaptureFixture,
-    monkeypatch: pytest.MonkeyPatch,
+    pyracast_logs: pytest.LogCaptureFixture,
 ) -> None:
     from pyracast.notifications.outbox import MAX_ATTEMPTS
 
-    monkeypatch.setattr(logging.getLogger("pyracast"), "propagate", True)
-    caplog.set_level(logging.INFO)
     invite(workspace)
     transport.open_failure = NotSentError("relay unavailable")
     moment = timezone.now()
@@ -204,7 +203,7 @@ def test_retries_end_after_a_bound_and_the_failure_is_reported(
     assert WorkspaceInvitation.objects.get().delivery_status == "failed"
     (report,) = [
         record
-        for record in caplog.records
+        for record in pyracast_logs.records
         if record.getMessage().startswith("outbound_mail_failed")
     ]
     assert report.levelno == logging.ERROR
@@ -317,3 +316,132 @@ def test_the_dispatcher_publishes_a_due_intent_once_a_minute(
 
     assert counts == [1, 0, 0, 1]
     assert len(set(published)) == 1
+
+
+def test_an_unclassified_failure_before_transmission_is_retried(
+    workspace: tuple[Tenant, User], transport: type[Transport]
+) -> None:
+    invite(workspace)
+    transport.open_failure = RuntimeError("relay socket closed")
+
+    assert deliver_mail() == 0
+
+    assert outbound_state() == [("retry", 1, "mail_not_sent")]
+
+
+def test_the_worker_ignores_intents_it_may_not_claim(workspace: tuple[Tenant, User]) -> None:
+    from pyracast.notifications.models import OutboundMail
+    from pyracast.notifications.outbox import send_outbound_mail
+
+    invite(workspace)
+    mail = OutboundMail.objects.get()
+    moment = timezone.now()
+    OutboundMail.objects.filter(pk=mail.pk).update(
+        status="retry", available_at=moment + timedelta(minutes=1)
+    )
+    assert not send_outbound_mail(mail.pk, moment)
+    OutboundMail.objects.filter(pk=mail.pk).update(status="sent", finished_at=moment)
+    assert not send_outbound_mail(mail.pk, moment + timedelta(minutes=2))
+    assert not send_outbound_mail(mail.pk + 1, moment)
+
+
+def test_a_worker_that_loses_its_lease_before_transmission_sends_nothing(
+    workspace: tuple[Tenant, User], transport: type[Transport], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.notifications import outbox
+    from pyracast.notifications.models import OutboundMail
+
+    invite(workspace)
+    clock = iter([0.0, outbox.LEASE_DURATION.total_seconds() + 1, 400.0, 400.0])
+    monkeypatch.setattr(outbox, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+
+    assert not outbox.send_outbound_mail(OutboundMail.objects.get().pk, timezone.now())
+
+    assert transport.sent == []
+    assert outbound_state() == [("retry", 1, "interrupted_connection")]
+
+
+def test_another_worker_taking_the_intent_over_stops_this_one(
+    workspace: tuple[Tenant, User], transport: type[Transport], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.notifications import outbox
+    from pyracast.notifications.models import OutboundMail
+
+    invite(workspace)
+    taken_over = uuid.uuid4()
+
+    def take_over(message: EmailMessage, *, before_send: Any) -> None:
+        OutboundMail.objects.update(lease_token=taken_over)
+        if not before_send():
+            raise SendCancelledError
+
+    monkeypatch.setattr(outbox, "send", take_over)
+
+    assert not outbox.send_outbound_mail(OutboundMail.objects.get().pk, timezone.now())
+    assert OutboundMail.objects.get().lease_token == taken_over
+
+
+def test_an_outcome_after_a_takeover_is_not_recorded(
+    workspace: tuple[Tenant, User], transport: type[Transport], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.notifications import outbox
+    from pyracast.notifications.models import OutboundMail
+
+    invite(workspace)
+
+    def sent_then_taken_over(message: EmailMessage, *, before_send: Any) -> None:
+        assert before_send()
+        OutboundMail.objects.update(lease_token=uuid.uuid4())
+
+    monkeypatch.setattr(outbox, "send", sent_then_taken_over)
+
+    assert not outbox.send_outbound_mail(OutboundMail.objects.get().pk, timezone.now())
+    assert outbound_state() == [("sending", 1, "")]
+
+
+def test_an_intent_that_expires_while_its_connection_opens_is_skipped(
+    workspace: tuple[Tenant, User], transport: type[Transport], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.notifications import outbox
+    from pyracast.notifications.models import OutboundMail
+
+    invite(workspace)
+    moment = timezone.now()
+    OutboundMail.objects.update(expires_at=moment + timedelta(seconds=10))
+    clock = iter([0.0, 20.0, 20.0])
+    monkeypatch.setattr(outbox, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+
+    assert not outbox.send_outbound_mail(OutboundMail.objects.get().pk, moment)
+
+    assert transport.sent == []
+    assert outbound_state() == [("skipped", 1, "expired")]
+
+
+def test_the_worker_actor_sends_the_intent_it_is_given(
+    workspace: tuple[Tenant, User], transport: type[Transport]
+) -> None:
+    from pyracast.notifications.models import OutboundMail
+    from pyracast.notifications.runtime import deliver_outbound_mail
+
+    invite(workspace)
+
+    deliver_outbound_mail(OutboundMail.objects.get().pk)
+
+    assert len(transport.sent) == 1
+
+
+def test_ended_intents_are_purged_after_a_week(
+    workspace: tuple[Tenant, User], transport: type[Transport]
+) -> None:
+    from pyracast.notifications.models import OutboundMail
+    from pyracast.notifications.outbox import RETENTION, purge_finished_mail
+
+    invite(workspace)
+    invite_workspace_member(workspace[1], workspace[0].pk, "second@example.com")
+    finished = timezone.now()
+    first, second = OutboundMail.objects.order_by("pk")
+    deliver_mail(finished)
+    OutboundMail.objects.filter(pk=first.pk).update(finished_at=finished - RETENTION)
+
+    assert purge_finished_mail(finished + timedelta(seconds=1)) == 1
+    assert list(OutboundMail.objects.values_list("pk", flat=True)) == [second.pk]

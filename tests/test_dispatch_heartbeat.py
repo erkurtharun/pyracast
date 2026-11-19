@@ -17,9 +17,12 @@ def test_dispatcher_touches_its_heartbeat_before_every_cycle_even_after_a_failed
         "make_actor",
         "make_calibration_actor",
         "make_notification_actor",
+        "make_outbound_mail_actor",
         "make_epias_actor",
         "purge_expired",
         "sweep_accounts",
+        "purge_finished_mail",
+        "publish_outbound_mail",
         "dispatch_calibrations",
         "dispatch_notifications",
     ):

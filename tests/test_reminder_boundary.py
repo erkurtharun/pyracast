@@ -8,13 +8,15 @@ import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.db import close_old_connections, connections
+from django.db.models import F
 from django.test import Client
 
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.connections.models import ProviderAccount
-from pyracast.notifications.models import NotificationSettings, ReminderSchedule
+from pyracast.notifications.models import NotificationSettings, ReminderRecipient, ReminderSchedule
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import enqueue_due
+from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
 from pyracast.trash import trash_region
 from tests.support.domain import NOW, System, make_system
@@ -278,7 +280,7 @@ def test_concurrent_first_saves_of_one_plant_keep_one_schedule() -> None:
         close_old_connections()
         try:
             start.wait(timeout=10)
-            return put(system, recipients=[f"ops-{index}@example.com"]).status_code
+            return int(put(system, recipients=[f"ops-{index}@example.com"]).status_code)
         finally:
             connections.close_all()
 
@@ -290,3 +292,49 @@ def test_concurrent_first_saves_of_one_plant_keep_one_schedule() -> None:
     stored = client_for(system.member).get(url(system)).json()["addresses"]["recipients"]
     assert stored in [[f"ops-{index}@example.com"] for index in range(4)]
     assert schedule.region_id == system.region.pk
+
+
+def test_a_save_after_a_quota_reduction_keeps_the_stored_times() -> None:
+    system = approved()
+    save(system, times=["07:00", "12:00", "17:00"])
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=2)
+
+    response = put(system, times=["07:00", "12:00", "17:00"], recipients=["new@example.com"])
+
+    assert response.status_code == 200
+    assert response.json()["times"] == ["07:00", "12:00", "17:00"]
+
+
+def test_turning_reminders_on_needs_the_plant_revision_it_was_approved_at() -> None:
+    system = approved()
+    save(system, enabled=False)
+    Region.objects.filter(pk=system.region.pk).update(revision=F("revision") + 1)
+
+    response = put(system)
+
+    assert (response.status_code, response.json()["code"]) == (400, "plant_not_approved")
+
+
+@pytest.mark.parametrize(
+    ("change", "state"),
+    [
+        ({"status": "pending"}, "waiting_for_approval"),
+        ({"revision": 99}, "waiting_for_approval"),
+    ],
+)
+def test_an_enabled_schedule_of_a_plant_out_of_approval_waits(
+    change: dict[str, Any], state: str
+) -> None:
+    system = approved()
+    save(system)
+    Region.objects.filter(pk=system.region.pk).update(**change)
+
+    assert client_for(system.member).get(url(system)).json()["state"] == state
+
+
+def test_an_invalid_saved_recipient_names_its_state() -> None:
+    system = approved()
+    schedule = save(system)
+    ReminderRecipient.objects.create(schedule=schedule, email="not-an-address")
+
+    assert client_for(system.member).get(url(system)).json()["state"] == "invalid_recipient"

@@ -46,6 +46,13 @@ export function WorkspaceMembers({
             </div>
             <section className="panel narrow">
                 <h2>{t("invite")}</h2>
+                {!!members.data?.plants_at_recipient_limit && (
+                    <Notice>
+                        {t("reminderLimitWarning", {
+                            count: members.data.plants_at_recipient_limit,
+                        })}
+                    </Notice>
+                )}
                 <ActionForm
                     submit={t("sendInvitation")}
                     onSubmit={async (data) => {

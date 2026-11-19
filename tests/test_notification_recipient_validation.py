@@ -7,7 +7,7 @@ from django.core.validators import validate_email
 from pyracast.background import failures
 from pyracast.background.failures import ItemsFailedError
 from pyracast.notifications import runtime
-from pyracast.notifications.operations import normalize_recipients
+from pyracast.notifications.operations import validate_recipient
 from pyracast.notifications.serializers import ReminderInput
 from tests.support.notification_recipient_validation import recipient
 
@@ -18,7 +18,13 @@ def test_api_rejects_valid_email_addresses_that_do_not_fit_delivery_storage(leng
     assert len(address) == length
     validate_email(address)
     serializer = ReminderInput(
-        data={"enabled": True, "recipients": [address], "times": ["10:00"], "language": "en"}
+        data={
+            "enabled": True,
+            "include_workspace_members": False,
+            "recipients": [address],
+            "times": ["10:00"],
+            "language": "en",
+        }
     )
     assert not serializer.is_valid()
     assert "recipients" in serializer.errors
@@ -31,16 +37,22 @@ def test_application_rejects_valid_email_addresses_that_do_not_fit_delivery_stor
     address = recipient(length)
     validate_email(address)
     with pytest.raises(ValidationError, match="254"):
-        normalize_recipients([address])
+        validate_recipient(address)
 
 
 def test_exact_delivery_storage_limit_is_accepted_at_both_boundaries() -> None:
     address = recipient(254)
     serializer = ReminderInput(
-        data={"enabled": True, "recipients": [address], "times": ["10:00"], "language": "en"}
+        data={
+            "enabled": True,
+            "include_workspace_members": False,
+            "recipients": [address],
+            "times": ["10:00"],
+            "language": "en",
+        }
     )
     assert serializer.is_valid(), serializer.errors
-    assert normalize_recipients([" " + address + " "]) == [address]
+    validate_recipient(address)
 
 
 def test_pending_messages_are_dispatched_before_a_scheduling_failure_is_reported(
@@ -54,7 +66,7 @@ def test_pending_messages_are_dispatched_before_a_scheduling_failure_is_reported
     monkeypatch.setattr(runtime, "pending_notification_ids", pending)
     monkeypatch.setattr(failures, "close_old_connections", close_connections)
     with pytest.raises(ItemsFailedError) as raised:
-        runtime.dispatch_notifications(actor)
+        runtime.dispatch_notifications(actor, MagicMock())
     assert raised.value.published == 2
     assert schedule.call_args == pending.call_args
     assert actor.send.call_args_list == [call(11), call(12)]
@@ -69,6 +81,6 @@ def test_a_publish_failure_does_not_replace_the_scheduling_failure(
     actor = MagicMock()
     actor.send.side_effect = ConnectionError("private-broker-url")
     with pytest.raises(LookupError, match="scheduling"):
-        runtime.dispatch_notifications(actor)
+        runtime.dispatch_notifications(actor, MagicMock())
     assert "error_type=ConnectionError" in pyracast_logs.text
     assert "private-broker-url" not in pyracast_logs.text

@@ -366,7 +366,6 @@ def test_operations_show_safe_recent_records_and_recorded_dispatch_health() -> N
         scheduled_for=now,
         preparation_deadline=now + PREPARATION_GRACE,
         available_at=now,
-        recipients=["customer@example.com"],
         status="uncertain",
         attempts=1,
     )

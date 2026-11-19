@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from io import BytesIO
 from typing import Any
@@ -16,11 +17,15 @@ from pyracast.forecasts.models import (
 )
 from pyracast.intervals import NormalizedInterval
 from pyracast.notifications.models import (
+    DeliveryRecipient,
     NotificationDelivery,
+    ReminderRecipient,
     ReminderSchedule,
 )
 from pyracast.notifications.operations import configure_reminders
+from pyracast.notifications.overview import reminder_overview
 from pyracast.notifications.scheduler import enqueue_due
+from pyracast.notifications.serializers import ReminderOutput
 from tests.support.domain import NOW, System, make_system
 
 SLOT = NOW + timedelta(days=1) - timedelta(hours=6)
@@ -48,11 +53,56 @@ def configured() -> tuple[System, ReminderSchedule]:
         system.region.pk,
         language="en",
         enabled=True,
-        recipients=[],
+        recipients=["default@example.com"],
         times=["10:00"],
         now=NOW,
     )
     return system, schedule
+
+
+def addresses(owner: ReminderSchedule | NotificationDelivery) -> list[str]:
+    """A schedule's stored addresses, or the addresses a delivery still goes to, in order."""
+    if isinstance(owner, ReminderSchedule):
+        return list(owner.recipients.order_by("pk").values_list("email", flat=True))
+    return list(
+        owner.recipients.filter(revoked=False).order_by("pk").values_list("email", flat=True)
+    )
+
+
+def revoked(delivery: NotificationDelivery) -> list[str]:
+    return sorted(
+        address.casefold()
+        for address in delivery.recipients.filter(revoked=True).values_list("email", flat=True)
+    )
+
+
+def store_recipients(
+    owner: ReminderSchedule | NotificationDelivery,
+    stored: list[str],
+    memberships: dict[str, list[int]] | None = None,
+    revoked: Iterable[str] = (),
+) -> None:
+    """Replace the stored rows; an address keeps the first membership it is pinned to."""
+    pins = {address: ids[0] for address, ids in (memberships or {}).items() if ids}
+    withdrawn = {address.casefold() for address in revoked}
+    owner.recipients.all().delete()
+    if isinstance(owner, ReminderSchedule):
+        ReminderRecipient.objects.bulk_create(
+            ReminderRecipient(
+                schedule=owner, email=address, membership_id=pins.get(address.casefold())
+            )
+            for address in stored
+        )
+    else:
+        DeliveryRecipient.objects.bulk_create(
+            DeliveryRecipient(
+                delivery=owner,
+                email=address,
+                membership_id=pins.get(address.casefold()),
+                revoked=address.casefold() in withdrawn,
+            )
+            for address in stored
+        )
 
 
 def saved(
@@ -113,3 +163,13 @@ def ready() -> NotificationDelivery:
     ids = enqueue_due(SLOT)
     assert len(ids) == 1
     return NotificationDelivery.objects.get(pk=ids[0])
+
+
+def reminder_schedule_payload(
+    schedule: ReminderSchedule, now: datetime, *, administrator: bool = True
+) -> dict[str, Any]:
+    return dict(ReminderOutput(reminder_overview(schedule, now, administrator=administrator)).data)
+
+
+def stored_addresses(delivery: NotificationDelivery) -> list[str]:
+    return list(delivery.recipients.order_by("pk").values_list("email", flat=True))
