@@ -32,6 +32,7 @@ from pyracast.accounts.processes import (
     AuthorityChangedError,
     StartingView,
     authorize_credential_write,
+    confirmation,
     continuing,
     credential_write,
     lock_account,
@@ -137,7 +138,7 @@ class ResetPasswordView(views.ResetPasswordView):
             return ConflictResponse(request)
 
 
-class VerifyEmailView(views.VerifyEmailView):
+class VerifyEmailView(StepUpAnswers, views.VerifyEmailView):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         process = cast(EmailVerificationProcess, self.process)
         try:
@@ -147,6 +148,11 @@ class VerifyEmailView(views.VerifyEmailView):
                 require_authority(request, EMAIL_VERIFICATION_CODE_SESSION_KEY)
                 if self.stage:
                     require_authority(request, LOGIN_SESSION_KEY)
+                elif request.user.is_authenticated:
+                    # A signed-in session completing a change of its own address also needs its
+                    # authority record; a change that ended the code answers above as nothing
+                    # pending.
+                    authorize_credential_write(request)
                 email_address = process.finish()
                 response = None
                 if self.stage:
@@ -181,7 +187,7 @@ class ConfirmReauthenticationCodeView(StrongestFactor, views.ConfirmReauthentica
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         try:
-            with transaction.atomic():
+            with lines_after_commit(), transaction.atomic():
                 require_authority(request, REAUTHENTICATION_CODE_SESSION_KEY)
                 return super().post(request, *args, **kwargs)
         except AuthorityChangedError:
@@ -219,8 +225,16 @@ class ReauthenticateView(StrongestFactor, views.ReauthenticateView):
     factor = Factor.PASSWORD
     input_class = inputs.ReauthenticateInput
 
+    def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        if request.method != "POST" or not request.user.is_authenticated:
+            return super().handle(request, *args, **kwargs)
+        with confirmation(request):
+            return super().handle(request, *args, **kwargs)
+
 
 class ManageEmailView(StepUpAnswers, StartingView, views.ManageEmailView):
+    persists_session = True
+
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         if not request.user.is_authenticated or request.method not in {"POST", "DELETE"}:
             return super().handle(request, *args, **kwargs)

@@ -154,8 +154,9 @@ Connections require an authenticated session and recent reauthentication. A
 reauthentication uses the strongest factor the account holds: its authenticator, else its
 password, else a code sent to its verified email; it ends when the account's credential
 state changes. Each session keeps one record of that state, written under the account's
-locks when it signs in or confirms. A write of the account's own credentials (recovery codes,
-authenticator, password, addresses, provider identities) runs in one transaction that first
+locks when it signs in or confirms; a confirmation checks its factor under those locks.
+A write of the account's own credentials (recovery codes, authenticator, password,
+addresses, provider identities) runs in one transaction that first
 locks the account, answers `session_ended` when the session is gone and asks for a
 confirmation by the factor the account needs now when the record differs, also before a
 password change that gives the current password. Other requests, such as console writes of

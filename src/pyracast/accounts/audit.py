@@ -80,13 +80,15 @@ class SecurityEvent(StrEnum):
     WORKSPACE_ADMIN_REASSIGNED = "workspace_admin_reassigned"
 
 
-# Lines that report a change rather than a refusal or failure; inside lines_after_commit they
-# leave only with the commit of the change.
+# Lines that report a change or a success rather than a refusal or failure; inside
+# lines_after_commit they leave only with the commit of what they report.
 CHANGE_EVENTS = frozenset(
     {
         SecurityEvent.LOGIN_SUCCEEDED,
         SecurityEvent.LOGOUT,
         SecurityEvent.SESSIONS_REVOKED,
+        SecurityEvent.REAUTHENTICATED,
+        SecurityEvent.MFA_SUCCEEDED,
         SecurityEvent.SIGNUP,
         SecurityEvent.EMAIL_VERIFIED,
         SecurityEvent.EMAIL_ADDED,

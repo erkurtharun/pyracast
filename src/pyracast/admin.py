@@ -26,6 +26,7 @@ from pyracast import admin_tenant_views as workspace_views
 from pyracast.accounts.authorization import has_platform_admin_session
 from pyracast.accounts.language import save_user_language, set_language_cookie
 from pyracast.accounts.models import Tenant
+from pyracast.accounts.processes import confirmation
 from pyracast.accounts.security import has_mfa_evidence
 from pyracast.admin_forms import (
     BindingActionForm,
@@ -325,10 +326,14 @@ class PlatformAdminSite(admin.AdminSite):
         form = ConfirmationForm(
             request.POST if request.method == "POST" else None, user=request.user
         )
-        if request.method == "POST" and form.is_valid():
-            form.save()
-            messages.success(request, _("Confirmed with your authenticator."))
-            return redirect(destination)
+        if request.method == "POST":
+            with confirmation(request):
+                confirmed = form.is_valid()
+                if confirmed:
+                    form.save()
+            if confirmed:
+                messages.success(request, _("Confirmed with your authenticator."))
+                return redirect(destination)
         return self.confirmation(
             request, form, destination, status=400 if request.method == "POST" else 200
         )
