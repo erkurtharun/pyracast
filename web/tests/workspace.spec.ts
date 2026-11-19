@@ -596,6 +596,27 @@ test("the displayed section clicked while another section loads keeps its date a
     await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
 });
 
+test("a forecast view chosen while another section loads applies to the forecast", async ({
+    page,
+}) => {
+    const button = await openPlant(
+        page,
+        "forecast/?date=2026-03-27&view=irradiance",
+    );
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    const production = await holdNavigation(page, "production");
+    await button("Production").click();
+    await production.requested;
+    await button("Generation").click();
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-27$/);
+    await production.release();
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-27$/);
+    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+    await page.getByLabel("Forecast date").fill("2026-03-26");
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-26$/);
+    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+});
+
 test("Back while section changes load leaves the restored section in charge of its controls", async ({
     page,
 }) => {
