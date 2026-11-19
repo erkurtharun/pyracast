@@ -33,6 +33,7 @@ from tests.support.admin_mfa_bootstrap import (
     run,
 )
 from tests.support.auth_lifecycle import mailed_code, submit, totp_code
+from tests.support.step_up import holds_current_authority
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
 
@@ -163,6 +164,22 @@ def test_a_reset_ends_the_pending_steps_of_the_account(monkeypatch: pytest.Monke
     assert user.check_password(TEST_PASSWORD)
     assert (session_user(reset), session_user(sign_in)) == (None, None)
     assert mail.outbox == []
+
+
+def test_after_a_reset_a_sign_in_records_the_state_the_reset_left() -> None:
+    user = customer()
+    with_factors(user)
+    run("reset_mfa", [user.email], email=user.email, reason="lost_device")
+    client = browser()
+    credentials = {"email": user.email, "password": TEST_PASSWORD}
+
+    assert submit(client, "auth/login", credentials).status_code == 200
+
+    assert holds_current_authority(client, user.pk)
+    change = {"current_password": TEST_PASSWORD, "new_password": NEW_PASSWORD}
+    assert submit(client, "account/password/change", change).json()["meta"]["password_changed"]
+    user.refresh_from_db()
+    assert user.check_password(NEW_PASSWORD)
 
 
 def test_a_dry_run_changes_nothing_and_asks_nothing(

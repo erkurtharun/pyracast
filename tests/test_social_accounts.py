@@ -2,7 +2,6 @@ import runpy
 import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from pathlib import Path
 from threading import Barrier, Event
 from typing import Any
@@ -26,7 +25,7 @@ from django.db import IntegrityError, close_old_connections, connections, transa
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import Client, override_settings
 
-from pyracast.accounts import social, social_views
+from pyracast.accounts import processes, social
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
 from pyracast.accounts.social import SocialAccountAdapter
@@ -433,7 +432,12 @@ def test_connect_callback_remains_bound_to_original_recently_reauthenticated_use
 ) -> None:
     user = member()
     other = User.objects.create_user(username="other", email="other@example.com", password=PASSWORD)
-    existing = SocialAccount.objects.create(user=other, provider="google", uid="google-identity")
+    existing = SocialAccount.objects.create(
+        user=other,
+        provider="google",
+        uid="google-identity",
+        extra_data={"email": "old@gmail.com"},
+    )
     client = Client()
     assert (
         submit(client, "auth/login", {"email": user.email, "password": PASSWORD}).status_code == 200
@@ -470,20 +474,24 @@ def test_connect_callback_remains_bound_to_original_recently_reauthenticated_use
     assert SocialAccount.objects.count() == 1
     existing.refresh_from_db()
     assert existing.user_id == other.pk
-    assert existing.extra_data == {"email": oauth_profile["email"]}
+    # A refused connection stores nothing, not even the provider's newer profile.
+    assert existing.extra_data == {"email": "old@gmail.com"}
     assert "account_reauthentication_state" not in client.session
 
 
 def test_connect_rejects_identity_owned_by_other_user(oauth_profile: dict[str, Any]) -> None:
     user = member()
     other = User.objects.create_user(username="other")
-    SocialAccount.objects.create(user=other, provider="google", uid="google-identity")
+    SocialAccount.objects.create(
+        user=other, provider="google", uid="google-identity", extra_data={"email": "old@gmail.com"}
+    )
     client = Client()
     submit(client, "auth/login", {"email": user.email, "password": PASSWORD})
     submit(client, "auth/reauthenticate", {"password": PASSWORD})
     response = complete(client, begin(client, process="connect"))
     assert "error=connected_other" in response["Location"]
-    assert SocialAccount.objects.get().user_id == other.pk
+    identity = SocialAccount.objects.get()
+    assert (identity.user_id, identity.extra_data) == (other.pk, {"email": "old@gmail.com"})
 
 
 def test_disabling_provider_expires_pending_signup_and_callback(
@@ -836,15 +844,14 @@ def test_disconnect_rechecks_authentication_after_waiting_for_user_lock(
     submit(client, "auth/reauthenticate", {"password": PASSWORD})
     token = client.get("/api/session/").json()["csrf_token"]
     lock_requested = Event()
-    original = social.locked_social_user
+    original = processes.account_state
 
-    @contextmanager
-    def observed_lock(request: HttpRequest, user_id: int) -> Iterator[User | None]:
-        lock_requested.set()
-        with original(request, user_id) as locked:
-            yield locked
+    def observed_lock(user_id: Any, *, lock: bool = False) -> str | None:
+        if lock:
+            lock_requested.set()
+        return original(user_id, lock=lock)
 
-    monkeypatch.setattr(social_views, "locked_social_user", observed_lock)
+    monkeypatch.setattr(processes, "account_state", observed_lock)
 
     def disconnect() -> int:
         close_old_connections()

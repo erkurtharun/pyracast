@@ -18,7 +18,7 @@ from django.core.management.base import CommandError
 from django.test import Client, RequestFactory, override_settings
 
 from pyracast.accounts.mfa import MFAAdapter
-from tests.support.account_sessions import capture_security_events
+from tests.support.account_sessions import capture_security_events, session_user
 from tests.support.admin_mfa_bootstrap import (
     NEW_PASSWORD,
     TEST_PASSWORD,
@@ -30,6 +30,7 @@ from tests.support.admin_mfa_bootstrap import (
     setup_link,
 )
 from tests.support.auth_lifecycle import mailed_code, submit, totp_code
+from tests.support.step_up import holds_current_authority
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
 ADDRESS = "first.admin@example.com"
@@ -400,6 +401,8 @@ def signs_in(shown: str, password: str, now: float) -> None:
 
     assert submit(client, "auth/2fa/authenticate", second_factor).status_code == 200
     assert client.get("/admin/").status_code == 200
+    # The session's record is the state the enrollment left.
+    assert holds_current_authority(client, session_user(client))
 
 
 @override_settings(MAILERS=LOCAL_MAIL)

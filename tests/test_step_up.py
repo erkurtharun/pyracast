@@ -4,23 +4,28 @@ from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
+import requests
+from allauth.account import app_settings as account_settings
 from allauth.account.internal.flows import reauthentication
 from allauth.account.internal.flows.login import AUTHENTICATION_METHODS_SESSION_KEY
 from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal import auth as totp_auth
+from allauth.mfa.totp.internal import flows as totp_flows
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
+from allauth.socialaccount.internal import statekit
 from allauth.socialaccount.models import SocialAccount
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
 from django.core import mail
-from django.db import connection, connections, transaction
+from django.db import DatabaseError, connection, connections, transaction
 from django.test import Client, override_settings
 
 from pyracast.accounts import middleware as account_middleware
@@ -40,6 +45,7 @@ from tests.support.account_sessions import (
     session_key,
     session_user,
 )
+from tests.support.admin_mfa_bootstrap import run
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit, totp_code
 from tests.support.social_accounts import (
     CALLBACK,
@@ -729,25 +735,70 @@ def assert_refused_or_ended(response: Any, user: User) -> None:
     assert flows == [FLOWS[strongest_now(user)]]
 
 
+def cross_the_window(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Every reader of the reauthentication window sees it passed for the session's proofs.
+    clock = moment(time.time() + account_settings.REAUTHENTICATION_TIMEOUT + 1)
+    for module in (processes, security, reauthentication):
+        monkeypatch.setattr(module, "time", clock)
+
+
+# Where the other session's change commits in the request of the write: after the session and its
+# user were read, after the request-start comparison of the session's record, or while the write
+# waits for the account's locks, where its proofs also pass the reauthentication window.
+POINTS = ["session-read", "request-start", "waiting-for-locks"]
+
+
+def changed_at(
+    point: str,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    user: User,
+    change: Callable[[], object],
+) -> list[dict[str, Any]]:
+    # Commits the change from another session at `point` of the request to `path`, and notes the
+    # credentials it left.
+    after: list[dict[str, Any]] = []
+    started = threading.Event()
+
+    def commit_the_change() -> None:
+        started.set()
+        elsewhere(change)
+        after.append(credentials(user))
+        mail.outbox.clear()
+
+    if point == "waiting-for-locks":
+        state = processes.account_state
+        thread = threading.get_ident()
+
+        def change_before_the_locks(user_id: Any, *, lock: bool = False) -> str | None:
+            if lock and not started.is_set() and threading.get_ident() == thread:
+                commit_the_change()
+                cross_the_window(monkeypatch)
+            return state(user_id, lock=lock)
+
+        monkeypatch.setattr(processes, "account_state", change_before_the_locks)
+        return after
+    compare = processes.end_stale_reauthentication
+
+    def change_at_the_start(request: Any) -> None:
+        if request.path != path or started.is_set():
+            compare(request)
+        elif point == "session-read":
+            assert request.user.is_authenticated
+            commit_the_change()
+            compare(request)
+        else:
+            compare(request)
+            commit_the_change()
+
+    monkeypatch.setattr(processes, "end_stale_reauthentication", change_at_the_start)
+    return after
+
+
 def changed_after_the_check(
     monkeypatch: pytest.MonkeyPatch, path: str, user: User, change: Callable[[], object]
 ) -> list[dict[str, Any]]:
-    # Commits the change from another session once the request to `path` has compared its proof
-    # unlocked, as every request does when it starts, and notes the credentials it left.
-    after: list[dict[str, Any]] = []
-    started = threading.Event()
-    checked = processes.end_stale_reauthentication
-
-    def change_after_the_check(request: Any) -> None:
-        checked(request)
-        if request.path == path and not started.is_set():
-            started.set()
-            elsewhere(change)
-            after.append(credentials(user))
-            mail.outbox.clear()
-
-    monkeypatch.setattr(processes, "end_stale_reauthentication", change_after_the_check)
-    return after
+    return changed_at("request-start", monkeypatch, path, user, change)
 
 
 Changes = list[tuple[bool, Future[None]]]
@@ -780,16 +831,22 @@ def changing_after_the_gate(
     return changes
 
 
+@pytest.mark.parametrize("point", POINTS)
 @pytest.mark.parametrize(("write", "change"), COMPETITIONS)
 def test_a_credential_write_is_refused_after_another_sessions_credential_change_committed(
-    write: str, change: str, now: float, providers: None, monkeypatch: pytest.MonkeyPatch
+    write: str,
+    change: str,
+    point: str,
+    now: float,
+    providers: None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     case, competitor = WRITES[write], COMPETING[change]
     user, client, other = arranged(case)
     prepared = case.prepare(client, now)
     answers, make_change = competing(competitor, user, other, now)
     token = token_of(client)
-    after = changed_after_the_check(monkeypatch, case.path, user, make_change)
+    after = changed_at(point, monkeypatch, case.path, user, make_change)
     client.raise_request_exception = not competitor.revokes_sessions
 
     response = case.send(client, token, prepared)
@@ -900,21 +957,23 @@ def test_a_password_change_reads_the_current_password_under_the_accounts_locks(
     )
 
     assert changed[0].json()["meta"]["password_changed"] is True
-    assert response.status_code == 400
-    assert [error["param"] for error in response.json()["errors"]] == ["current_password"]
+    # The change elsewhere ended this session, which the locked check reads first.
+    assert (response.status_code, response.json()["code"]) == (400, "session_ended")
     assert User.objects.get(pk=user.pk).check_password(elsewhere_password)
     assert credentials(user) == after[0]
     assert session_user(client) is None
 
 
+@pytest.mark.parametrize("point", POINTS)
 def test_a_password_change_whose_proof_ended_is_refused_when_the_last_authenticator_went(
-    now: float, monkeypatch: pytest.MonkeyPatch
+    point: str, now: float, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The current password alone would pass the gate the account has after the removal.
     user, client, other = arranged(WRITES["change-password"])
     token, other_token = token_of(client), token_of(other)
     removed: list[Any] = []
-    changed_after_the_check(
+    changed_at(
+        point,
         monkeypatch,
         AUTH + "account/password/change",
         user,
@@ -1083,3 +1142,235 @@ def test_a_provider_callback_whose_session_save_times_out_answers_busy_and_keeps
     assert credentials(user)["identities"] == []
     assert session_user(client) == user.pk
     assert state in client.session["socialaccount_states"]
+
+
+@pytest.mark.parametrize("change", ["first-authenticator-added", "address-removed"])
+def test_a_change_attempted_while_the_connect_redirect_saves_its_state_commits_after_it(
+    change: str, now: float, providers: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case, competitor = WRITES["connect-redirect"], COMPETING[change]
+    user, client, other = arranged(case)
+    answers, make_change = competing(competitor, user, other, now)
+    token = token_of(client)
+    changes: Changes = []
+    stash = statekit.stash_state
+
+    def change_then_stash(request: Any, **kwargs: Any) -> str:
+        if not changes:
+            future = alongside(make_change)
+            changes.append((future.done(), future))
+        return str(stash(request, **kwargs))
+
+    monkeypatch.setattr(statekit, "stash_state", change_then_stash)
+
+    response = case.send(client, token, None)
+    [(committed, waited)] = changes
+    waited.result(timeout=10)
+
+    assert not committed
+    state = parse_qs(urlsplit(provider_destination(response)).query)["state"][0]
+    assert competitor.answered(answers[0])
+    assert competitor.applied(user)
+    callback = complete(client, state)
+    if competitor.revokes_sessions:
+        # The pending connection ended with the session the change ended.
+        assert callback["Location"] == NOTHING_PENDING
+    else:
+        assert "error=permission_denied" in callback["Location"]
+    assert credentials(user)["identities"] == []
+
+
+def test_a_refused_connection_leaves_an_existing_identity_as_it_was(
+    now: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = serve_provider_profile(monkeypatch)
+    with override_settings(SOCIALACCOUNT_PROVIDERS=PROVIDERS):
+        user, client, _other = arranged(WRITES["remove-identity"])
+        SocialAccount.objects.filter(user=user).update(extra_data={"email": "old@gmail.com"})
+        state = connection_started(client, now)
+
+        def password_removed() -> None:
+            elsewhere(lambda: User.objects.filter(pk=user.pk).update(password=make_password(None)))
+
+        profile["_before_profile"] = password_removed
+
+        response = complete(client, state)
+
+    assert "error=permission_denied" in response["Location"]
+    assert list(SocialAccount.objects.values_list("user_id", "uid", "extra_data")) == [
+        (user.pk, "google-identity", {"email": "old@gmail.com"})
+    ]
+
+
+def activation_by(_user: User, other: Client, now: float) -> Callable[[], Any]:
+    prepared, token = activation(other, now), token_of(other)
+    return lambda: authenticator_activation(other, token, prepared)
+
+
+def removal_by(_user: User, other: Client, _now: float) -> Callable[[], Any]:
+    token = token_of(other)
+    return lambda: authenticator_removal(other, token, None)
+
+
+def password_change_by(_user: User, other: Client, _now: float) -> Callable[[], Any]:
+    token = token_of(other)
+    data = {"current_password": PASSWORD, "new_password": OTHER_PASSWORD}
+    return lambda: api(other, token, "post", "account/password/change", data)
+
+
+def operator_reset(user: User, _other: Client, _now: float) -> Callable[[], Any]:
+    return lambda: run("reset_mfa", [user.email], email=user.email, reason="lost_device")
+
+
+@dataclass(frozen=True)
+class CallbackCompetitor:
+    # A change of the connecting account by its other session or by the operator; each ends the
+    # connecting session.
+    kind: str
+    prepare: Callable[[User, Client, float], Callable[[], Any]]
+    applied: Callable[[User], bool]
+
+
+AGAINST_THE_CALLBACK = {
+    "authenticator-activation": CallbackCompetitor(
+        "password", activation_by, lambda user: "totp" in factors(user)
+    ),
+    "authenticator-removal": CallbackCompetitor(
+        "authenticator", removal_by, lambda user: "totp" not in factors(user)
+    ),
+    "password-change": CallbackCompetitor(
+        "password",
+        password_change_by,
+        lambda user: User.objects.get(pk=user.pk).check_password(OTHER_PASSWORD),
+    ),
+    "operator-reset": CallbackCompetitor(
+        "authenticator", operator_reset, lambda user: factors(user) == set()
+    ),
+}
+
+
+def connecting(competitor: CallbackCompetitor, now: float) -> tuple[User, Client, str, Any]:
+    user, client, other = arranged(replace(WRITES["connect"], kind=competitor.kind))
+    state = connection_started(client, now)
+    return user, client, state, competitor.prepare(user, other, now)
+
+
+@pytest.mark.parametrize("change", AGAINST_THE_CALLBACK)
+def test_a_change_during_the_provider_exchange_waits_for_nothing_and_ends_the_connection(
+    change: str, now: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    competitor = AGAINST_THE_CALLBACK[change]
+    profile = serve_provider_profile(monkeypatch)
+    with override_settings(SOCIALACCOUNT_PROVIDERS=PROVIDERS):
+        user, client, state, make_change = connecting(competitor, now)
+        changes: Changes = []
+
+        def change_during_the_exchange() -> None:
+            if not changes:
+                future = alongside(make_change)
+                changes.append((future.done(), future))
+
+        profile["_before_profile"] = change_during_the_exchange
+
+        response = complete(client, state)
+    [(finished, future)] = changes
+    future.result(timeout=10)
+
+    # The callback held no lock while it waited for the provider.
+    assert finished
+    assert competitor.applied(user)
+    assert (response.status_code, response["Location"]) == (302, NOTHING_PENDING)
+    assert credentials(user)["identities"] == []
+    assert session_user(client) is None
+
+
+@pytest.mark.parametrize("change", AGAINST_THE_CALLBACK)
+def test_a_change_attempted_while_the_callback_completes_waits_for_the_connection(
+    change: str, now: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    competitor = AGAINST_THE_CALLBACK[change]
+    serve_provider_profile(monkeypatch)
+    with override_settings(SOCIALACCOUNT_PROVIDERS=PROVIDERS):
+        user, client, state, make_change = connecting(competitor, now)
+        answers: list[Any] = []
+        changes = changing_after_the_gate(monkeypatch, lambda: answers.append(make_change()))
+
+        response = complete(client, state)
+    [(committed, waited)] = changes
+    waited.result(timeout=10)
+
+    assert not committed
+    assert response["Location"] == CALLBACK
+    assert credentials(user)["identities"] == [("google", "google-identity")]
+    if change == "operator-reset":
+        assert competitor.applied(user)
+        assert session_user(client) is None
+    else:
+        # The connection changed the state the other session's record names.
+        assert_refused_or_ended(answers[0], user)
+        assert not competitor.applied(user)
+
+
+@pytest.mark.parametrize("process", ["login", "connect"])
+def test_no_provider_request_runs_inside_a_database_transaction(
+    process: str, now: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    serve_provider_profile(monkeypatch)
+    served = requests.Session.request
+    in_transaction: list[bool] = []
+
+    def observed(self: requests.Session, method: str, url: str, *args: Any, **kwargs: Any) -> Any:
+        in_transaction.append(transaction.get_connection().in_atomic_block)
+        return served(self, method, url, *args, **kwargs)
+
+    monkeypatch.setattr(requests.Session, "request", observed)
+    with override_settings(SOCIALACCOUNT_PROVIDERS=PROVIDERS):
+        if process == "login":
+            arranged(WRITES["remove-identity"])
+            client = browser()
+            state = begin(client)
+        else:
+            _user, client, _other = arranged(WRITES["connect"])
+            state = connection_started(client, now)
+
+        response = complete(client, state)
+
+    assert response["Location"] == CALLBACK
+    # The token request and the profile request.
+    assert in_transaction == [False, False]
+
+
+# allauth sends an activation's signal from the commit already; a removal sends it in the
+# transaction of the write.
+FAILING_AFTER = {
+    "add-authenticator": ("activate_totp", "mfa_added"),
+    "remove-authenticator": ("deactivate_totp", "mfa_removed"),
+}
+
+
+@pytest.mark.parametrize("write", FAILING_AFTER)
+def test_a_factor_write_that_rolls_back_leaves_no_security_line(
+    write: str, now: float, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    case = WRITES[write]
+    user, client, other = arranged(case)
+    prepared = case.prepare(client, now)
+    token = token_of(client)
+    before = credentials(user)
+    events = capture_security_events(caplog, monkeypatch)
+    name, event = FAILING_AFTER[write]
+    flow = getattr(totp_flows, name)
+
+    def written_then_failed(*args: Any) -> Any:
+        flow(*args)
+        raise DatabaseError("The transaction failed after the write.")
+
+    monkeypatch.setattr(totp_flows, name, written_then_failed)
+    client.raise_request_exception = False
+
+    response = case.send(client, token, prepared)
+
+    assert response.status_code >= 500
+    assert credentials(user) == before
+    assert {event, "sessions_revoked"} & {line["event"] for line in events()} == set()
+    assert session_user(other) == user.pk

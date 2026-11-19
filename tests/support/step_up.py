@@ -13,8 +13,11 @@ from django.db import transaction
 from django.http import HttpRequest
 from django.test import Client, RequestFactory
 
-from pyracast.accounts.processes import stamp_reauthentication
+from pyracast.accounts.processes import account_state, stamp_reauthentication
 from tests.support.auth_lifecycle import PASSWORD
+
+# The session key of the authority record a session keeps of its account's credential state.
+AUTHORITY = "pyracast_session_authority"
 
 STRONGEST = {
     "authenticator": "mfa",
@@ -61,7 +64,7 @@ def call(client: Client, method: str, path: str, data: dict[str, Any] | None = N
 
 
 def stamped(request: HttpRequest, user: User) -> None:
-    # The product stamps a reauthentication with the account's credential state as it records it.
+    # The product records the account's credential state as it records a reauthentication.
     with transaction.atomic():
         stamp_reauthentication(request, user)
 
@@ -77,7 +80,7 @@ def with_proof(
     **extra: Any,
 ) -> None:
     # The flag is set after recording, so the signal does not rotate the test client's session key.
-    # A retained proof was recorded before proofs carried the account's credential state.
+    # A retained proof was recorded in a session from before sessions carried an authority record.
     request = RequestFactory().get("/")
     request.user = user
     request.session = client.session
@@ -86,7 +89,9 @@ def with_proof(
     record["at"] = time.time() - age
     if reauthenticated:
         record["reauthenticated"] = True
-        if not retained:
+        if retained:
+            request.session.pop(AUTHORITY, None)
+        else:
             stamped(request, user)
     request.session.save()
 
@@ -94,3 +99,15 @@ def with_proof(
 def proofs(client: Client) -> list[dict[str, Any]]:
     records = client.session.get(AUTHENTICATION_METHODS_SESSION_KEY)
     return [record for record in records or [] if record.get("reauthenticated")]
+
+
+def forget_authority(client: Client) -> None:
+    # A session signed in before sessions carried an authority record.
+    session = client.session
+    session.pop(AUTHORITY, None)
+    session.save()
+
+
+def holds_current_authority(client: Client, user_id: Any) -> bool:
+    # The session's authority record names the account's credential state as it is now.
+    return bool(client.session.get(AUTHORITY) == [user_id, account_state(user_id)])
