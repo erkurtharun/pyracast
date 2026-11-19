@@ -389,16 +389,10 @@ def pending_flow(response: Any) -> str | None:
     return next((flow["id"] for flow in flows if flow.get("is_pending")), None)
 
 
-@override_settings(MAILERS=LOCAL_MAIL)
-@pytest.mark.parametrize("arrangement", SIGN_IN_ARRANGEMENTS)
-def test_an_enrolled_administrator_signs_in_with_the_address_password_and_authenticator(
-    arrangement: str, now: float
-) -> None:
-    arranged(SIGN_IN_ARRANGEMENTS[arrangement])
-    shown, _terminal = run("bootstrap_admin", guided(now), email=ADDRESS)
+def signs_in(shown: str, password: str, now: float) -> None:
     client = Client(enforce_csrf_checks=True)
 
-    response = submit(client, "auth/login", {"email": ADDRESS, "password": NEW_PASSWORD})
+    response = submit(client, "auth/login", {"email": ADDRESS, "password": password})
     if pending_flow(response) == "verify_email":
         response = submit(client, "auth/email/verify", {"key": mailed_code()})
     assert pending_flow(response) == "mfa_authenticate"
@@ -406,6 +400,54 @@ def test_an_enrolled_administrator_signs_in_with_the_address_password_and_authen
 
     assert submit(client, "auth/2fa/authenticate", second_factor).status_code == 200
     assert client.get("/admin/").status_code == 200
+
+
+@override_settings(MAILERS=LOCAL_MAIL)
+@pytest.mark.parametrize("arrangement", SIGN_IN_ARRANGEMENTS)
+def test_an_enrolled_administrator_signs_in_with_the_address_password_and_authenticator(
+    arrangement: str, now: float
+) -> None:
+    arranged(SIGN_IN_ARRANGEMENTS[arrangement])
+    shown, _terminal = run("bootstrap_admin", guided(now), email=ADDRESS)
+
+    signs_in(shown, NEW_PASSWORD, now)
+
+
+# The sign-in form reads at most 1,024 characters and no null character.
+LONGEST_PASSWORD = ((NEW_PASSWORD + "-") * 33)[:1024]
+
+
+@override_settings(MAILERS=LOCAL_MAIL)
+def test_an_administrator_signs_in_with_the_longest_password_the_sign_in_reads(
+    now: float,
+) -> None:
+    arranged(SIGN_IN_ARRANGEMENTS["verified"])
+    shown, _terminal = run("bootstrap_admin", guided(now, LONGEST_PASSWORD), email=ADDRESS)
+
+    signs_in(shown, LONGEST_PASSWORD, now)
+
+
+@pytest.mark.parametrize(
+    "password",
+    [LONGEST_PASSWORD + "x", NEW_PASSWORD + "\x00"],
+    ids=["longer-than-the-sign-in-reads", "null-character"],
+)
+@pytest.mark.parametrize("existing", [False, True])
+def test_a_password_the_sign_in_would_refuse_is_refused_before_anything_is_stored(
+    password: str, existing: bool, now: float, events: Callable[[], list[dict[str, Any]]]
+) -> None:
+    if existing:
+        arranged(SIGN_IN_ARRANGEMENTS["verified"])
+    before = snapshot()
+
+    message, shown, terminal = refusal(guided(now, password))
+
+    assert message.startswith("The password does not meet the password policy. Nothing was stored.")
+    assert password not in message
+    assert "otpauth://" not in shown
+    assert terminal.asked == 2
+    assert snapshot() == before
+    assert events() == []
 
 
 @pytest.mark.parametrize("arrangement", REFUSED_ARRANGEMENTS)
