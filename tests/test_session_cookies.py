@@ -11,10 +11,13 @@ from allauth.core.internal import ratelimit
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.sessions.models import Session
+from django.core.exceptions import ImproperlyConfigured
+from django.http import HttpResponse
 from django.test import Client, override_settings
 
 from pyracast import settings as production
 from pyracast.accounts import middleware as account_middleware
+from pyracast.accounts.session_cookie import SessionCookie
 from tests.support.account_sessions import (
     account,
     browser,
@@ -70,6 +73,12 @@ def test_production_cookie_attributes_satisfy_the_host_prefix() -> None:
         assert "; Secure" in header
         assert "Path=/" in header
         assert "Domain" not in header
+
+
+@override_settings(SESSION_ENGINE="django.contrib.sessions.backends.db")
+def test_the_session_cookie_middleware_refuses_a_foreign_session_engine() -> None:
+    with pytest.raises(ImproperlyConfigured, match="SESSION_ENGINE must be"):
+        SessionCookie(lambda request: HttpResponse())
 
 
 def session_cookie(response: Any) -> tuple[str, Any, str] | None:
