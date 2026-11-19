@@ -129,7 +129,8 @@ def _mark_transmit(
             return False
         delivery.transmit_started_at = now
         delivery.save(update_fields=("transmit_started_at",))
-        delivery.recipients.exclude(email__in=permitted).update(revoked=True)
+        delivery.recipients.filter(email__in=permitted).update(authorized=True)
+        delivery.recipients.exclude(email__in=permitted).update(revoked=True, authorized=False)
         message.bcc = permitted
         return True
 

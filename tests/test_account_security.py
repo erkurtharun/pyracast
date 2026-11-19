@@ -41,8 +41,11 @@ def test_authentication_cache_shares_values_and_honors_expiry() -> None:
     first.set("login", [3], timeout=None)
     assert second.get("login") == [3]
     assert not second.add("login", [4])
+    first.set("other", {"kept": True})
+    assert second.get_many(["login", "other", "absent"]) == {"login": [3], "other": {"kept": True}}
     first.set("login", [5], timeout=0)
     assert second.get("login", "expired") == "expired"
+    assert second.get_many(["login", "other"]) == {"other": {"kept": True}}
     assert second.add("login", [6])
     assert first.get("login") == [6]
     assert first.delete("login")

@@ -529,10 +529,15 @@ security-email navigation. Account and invitation mail is stored as an outbound 
 intent in the request's transaction and sent by the notification worker, so no answer
 waits for or reveals delivery; a code is kept only sealed with the application key and
 erased when the intent ends, and unknown-account and account-exists notices share 20 a
-hour. Verification and recovery codes expire after ten minutes,
-allow at most three attempts and are bound to the initiating browser session. A
-pending code or sign-in step, and a reauthentication kept in the session (a console
-confirmation included), rests on the credential state of its account (password,
+hour. Every mail is transmitted at most once: an intent interrupted before its transmit
+marker is retried, and one interrupted after it ends `uncertain`, holds no code, is
+reported in health and the console and is never resent. The person then asks for a new
+verification or reset code at once and the administrator sends the invitation again,
+while an uncertain notice (the daily sign-in pause included) or reminder slot stays sent
+at most once and the next slot sends normally. Verification and recovery codes expire
+after ten minutes, allow at most three attempts and are bound to the initiating browser
+session. A pending code or sign-in step, and a reauthentication kept in the session (a
+console confirmation included), rests on the credential state of its account (password,
 active flag, addresses, provider identities, authenticators) as read under lock where
 the request identified the account or recorded the reauthentication; any change of that
 state ends every pending step and reauthentication of the account, the operator commands'
@@ -659,9 +664,11 @@ administrators edit it; other members see its settings, recipient counts and del
 history but no address. Optional workspace membership inclusion adds active members'
 verified account addresses. Membership changes update this group automatically. An
 enabled schedule needs an address or that option. Extra addresses retain their
-saved value; known member addresses retain their membership identity even after an
-email change. Removing a member also removes their saved addresses from current
-schedules. The configuring user is nullable audit information, not the schedule owner.
+saved value; a known member address keeps a tie to every member it belonged to when
+saved, even after an email change, and stays a recipient while any of them is active.
+Removing a member ends only that member's ties and their unpinned saved addresses; an
+address is counted once however many members it belongs to. The configuring user is
+nullable audit information, not the schedule owner.
 
 The default limit is five distinct, case-insensitively compared addresses per plant,
 including automatically included members,
@@ -683,7 +690,8 @@ rejoining from reviving old slot authority, even when an address was originally
 external. Revocations survive late mail responses and safe retries without changing
 an already authorized envelope. Rejoining restores automatic inclusion in new slots.
 Tenant locking serializes membership changes with the transmission permission marker;
-removal after that marker cannot revoke an already authorized in-flight message.
+removal after that marker cannot revoke an already authorized in-flight message, and
+the history of a sent or uncertain delivery names that authorized envelope.
 If collection is scheduled at the same local time, preparation waits for that exact job to finish, for at most
 15 minutes. Its acquisition may become eligible within that grace period; every
 other acquisition must have been collected and published by the original reminder

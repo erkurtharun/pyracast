@@ -3,7 +3,7 @@ import uuid
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
-from django.db.models.functions import Lower
+from django.db.models.functions import MD5, Lower
 
 from pyracast.accounts.models import Language, Membership, WorkspaceInvitation
 from pyracast.connections.models import SiteBinding
@@ -81,14 +81,20 @@ class ReminderRecipient(models.Model):
     )
     # Unbounded so an invalid saved address stays visible as one; input is validated to 254.
     email = models.CharField()
-    # Set when the address belonged to a workspace member at saving; the row goes with them.
+    # One row for each member the address belonged to at saving, each going with its member;
+    # the address stays a recipient while any of them is active. None: no member's address.
     membership = models.ForeignKey(Membership, on_delete=models.CASCADE, null=True)
 
     class Meta:
         ordering = ("pk",)
         constraints = (
+            # The digest keeps every address indexable, whatever its length.
             models.UniqueConstraint(
-                "schedule", Lower("email"), name="%(class)s_schedule_email_uniq"
+                "schedule",
+                MD5(Lower("email")),
+                "membership",
+                nulls_distinct=False,
+                name="%(class)s_schedule_email_uniq",
             ),
         )
 
@@ -223,7 +229,17 @@ class NotificationDelivery(models.Model):
         return f"Delivery {self.pk} of schedule {self.schedule_id}: {self.status}"
 
     def addresses(self) -> list[str]:
-        return [row.email for row in self.recipients.all() if not row.revoked]
+        """Each address once: the envelope a sent or uncertain delivery was authorized for,
+        else the addresses it still goes to."""
+        authorized = self.status in (
+            NotificationDeliveryStatus.SENT,
+            NotificationDeliveryStatus.UNCERTAIN,
+        )
+        named: dict[str, str] = {}
+        for row in self.recipients.all():
+            if row.authorized if authorized else not row.revoked:
+                named.setdefault(row.email.casefold(), row.email)
+        return list(named.values())
 
 
 class DeliveryRecipient(models.Model):
@@ -231,15 +247,23 @@ class DeliveryRecipient(models.Model):
         NotificationDelivery, on_delete=models.CASCADE, related_name="recipients"
     )
     email = models.CharField()
-    # The membership the address belonged to when the slot was created, kept as history.
+    # A membership the address belonged to when the slot was created, kept as history: one row
+    # for each, the address permitted while any of them is active. None: no member's address.
     membership_id = models.PositiveBigIntegerField(null=True)
+    # Excluded from every later attempt.
     revoked = models.BooleanField(default=False)
+    # In the envelope of the latest transmit marker; a later revocation leaves it there.
+    authorized = models.BooleanField(default=False)
 
     class Meta:
         ordering = ("pk",)
         constraints = (
             models.UniqueConstraint(
-                "delivery", Lower("email"), name="%(class)s_delivery_email_uniq"
+                "delivery",
+                MD5(Lower("email")),
+                "membership_id",
+                nulls_distinct=False,
+                name="%(class)s_delivery_email_uniq",
             ),
         )
 
@@ -348,6 +372,8 @@ class OutboundMail(models.Model):
     transmit_started_at = models.DateTimeField(null=True)
     finished_at = models.DateTimeField(null=True)
     last_error = models.CharField(max_length=30, choices=OutboundMailError, blank=True, default="")
+    # The daily lock a sign-in pause notice announces, so each lock is stored once.
+    lock_key = models.CharField(max_length=64, null=True)
 
     class Meta:
         constraints = (
@@ -356,6 +382,12 @@ class OutboundMail(models.Model):
             choices_check("language", Language),
             choices_check("last_error", OutboundMailError, blank=True),
             lease_check((OutboundMailStatus.SENDING,), kept=(OutboundMailStatus.UNCERTAIN,)),
+            models.UniqueConstraint(fields=("lock_key",), name="%(class)s_lock_key_uniq"),
+            models.CheckConstraint(
+                condition=models.Q(kind=OutboundMailKind.LOGIN_LOCKED, lock_key__isnull=False)
+                | (~models.Q(kind=OutboundMailKind.LOGIN_LOCKED) & models.Q(lock_key__isnull=True)),
+                name="%(class)s_lock_key_chk",
+            ),
             models.CheckConstraint(
                 condition=models.Q(sealed_code="")
                 | models.Q(kind__in=CODED_MAIL, status__in=OPEN_MAIL),

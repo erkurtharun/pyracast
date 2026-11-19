@@ -3,7 +3,7 @@ import logging
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager, suppress
+from contextlib import suppress
 from dataclasses import dataclass
 from threading import Barrier, BrokenBarrierError, Event
 from types import SimpleNamespace
@@ -777,25 +777,6 @@ class Interrupted(BaseException):
     pass
 
 
-def busy_record_lock(monkeypatch: pytest.MonkeyPatch, refusals: int | None) -> None:
-    # The finished-failure record reports its lock taken `refusals` times (always when None),
-    # as when an earlier holder stopped without releasing it.
-    cache_lock = ratelimit.cache_lock
-    refused = 0
-
-    @contextmanager
-    def record_lock(key: str) -> Iterator[bool]:
-        nonlocal refused
-        if key.endswith(":finished") and (refusals is None or refused < refusals):
-            refused += 1
-            yield False
-            return
-        with cache_lock(key) as locked:
-            yield locked
-
-    monkeypatch.setattr(ratelimit, "cache_lock", record_lock)
-
-
 def daily_failure_key(email: str) -> str:
     request = RequestFactory().get("/")
     return ratelimit.get_cache_key(
@@ -849,11 +830,15 @@ def test_a_lock_notice_is_stored_before_the_lock_is_recorded_as_announced(
     fail_daily(client, user.email, 99, clock)
 
     def interrupted(key: str, value: Any, timeout: Any = None) -> None:
-        if key.endswith(":finished"):
+        if key.endswith(":announced"):
             raise Interrupted
         cache.set(key, value, timeout)
 
-    monkeypatch.setattr(login_limits, "cache", SimpleNamespace(get=cache.get, set=interrupted))
+    monkeypatch.setattr(
+        login_limits,
+        "cache",
+        SimpleNamespace(get=cache.get, get_many=cache.get_many, set=interrupted),
+    )
 
     with pytest.raises(Interrupted):
         login(client, user.email, WRONG)
@@ -861,20 +846,16 @@ def test_a_lock_notice_is_stored_before_the_lock_is_recorded_as_announced(
     assert lock_notices() == [("member@example.com", "pending")]
 
 
-def test_a_failure_without_a_daily_rate_or_a_free_record_announces_nothing(
-    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+def test_a_failure_without_a_daily_rate_or_a_full_allowance_announces_nothing(
+    pyracast_logs: pytest.LogCaptureFixture,
 ) -> None:
     from pyracast.accounts.login_limits import record_finished_failure
 
-    announced: list[None] = []
-    record_finished_failure(ratelimit.RateLimitUsage(usage=[]), lambda: announced.append(None))
-    busy_record_lock(monkeypatch, refusals=None)
-    monkeypatch.setattr(ratelimit, "CACHE_LOCK_TIMEOUT", 0)
+    announced: list[str] = []
+    record_finished_failure(ratelimit.RateLimitUsage(usage=[]), announced.append)
     slot = ratelimit.SingleRateLimitUsage(cache_key="daily", cache_duration=86400, timestamp=1.0)
 
-    record_finished_failure(ratelimit.RateLimitUsage(usage=[slot]), lambda: announced.append(None))
+    record_finished_failure(ratelimit.RateLimitUsage(usage=[slot]), announced.append)
 
     assert announced == []
-    assert [record.getMessage() for record in pyracast_logs.records] == [
-        "login_failure_unrecorded reason=record_busy"
-    ]
+    assert pyracast_logs.records == []

@@ -2578,8 +2578,18 @@ msgstr "Bildirim çalışanını ve dağıtıcıyı kontrol edin."
 msgid "Review outbound emails"
 msgstr "Giden e-postaları inceleyin"
 
-msgid "Account and invitation emails needing review"
-msgstr "İnceleme gerektiren hesap ve davet e-postaları"
+msgid "Failed account and invitation emails"
+msgstr "Gönderilemeyen hesap ve davet e-postaları"
 
-msgid "Review failed or unknown outcomes; an unknown outcome is never resent."
-msgstr "Başarısız veya sonucu bilinmeyen gönderimleri inceleyin; sonucu bilinmeyen bir e-posta yeniden gönderilmez."
+msgid "Review the recorded error; the person or administrator can ask again."
+msgstr "Kaydedilen hatayı inceleyin; kişi veya yönetici yeniden isteyebilir."
+
+msgid "Account and invitation emails with an unknown outcome"
+msgstr "Sonucu bilinmeyen hesap ve davet e-postaları"
+
+msgid ""
+"They may have arrived and are never resent; the person or administrator can "
+"ask again at once."
+msgstr ""
+"Ulaşmış olabilirler ve yeniden gönderilmezler; kişi veya yönetici hemen "
+"yeniden isteyebilir."

@@ -26,9 +26,11 @@ def enqueue_mail(
     invitation: WorkspaceInvitation | None = None,
     context: dict[str, str] | None = None,
     code: str = "",
-) -> OutboundMail:
-    """Store the intent in the caller's transaction; the mailer sends it after the commit."""
-    return OutboundMail.objects.create(
+    lock_key: str | None = None,
+) -> None:
+    """Store the intent in the caller's transaction; the mailer sends it after the commit. An
+    intent for a lock that already has one is not stored again."""
+    mail = OutboundMail(
         kind=kind,
         recipient=recipient,
         invitation=invitation,
@@ -39,4 +41,6 @@ def enqueue_mail(
         created_at=now,
         available_at=now,
         expires_at=expires_at,
+        lock_key=lock_key,
     )
+    OutboundMail.objects.bulk_create([mail], ignore_conflicts=True)

@@ -211,7 +211,7 @@ class AccountAdapter(DefaultAccountAdapter):
         address = str(credentials.get("email") or "").strip().lower()
         usage = self._login_failed_rl_usage if address else None
 
-        def announce() -> None:
+        def announce(lock_key: str) -> None:
             now = timezone.now()
             enqueue_mail(
                 OutboundMailKind.LOGIN_LOCKED,
@@ -220,6 +220,7 @@ class AccountAdapter(DefaultAccountAdapter):
                 owner_language=True,
                 expires_at=now + NOTICE_LIFETIME,
                 now=now,
+                lock_key=lock_key,
             )
 
         record_finished_failure(usage or RateLimitUsage(usage=[]), announce)

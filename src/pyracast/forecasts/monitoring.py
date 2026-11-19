@@ -212,11 +212,10 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
                 | Q(status=OutboundMailStatus.SENDING) & expired_leases,
             ),
             failed_outbound_mail=Count(
-                "pk",
-                filter=Q(
-                    status__in=(OutboundMailStatus.FAILED, OutboundMailStatus.UNCERTAIN),
-                    finished_at__gte=recent,
-                ),
+                "pk", filter=Q(status=OutboundMailStatus.FAILED, finished_at__gte=recent)
+            ),
+            uncertain_outbound_mail=Count(
+                "pk", filter=Q(status=OutboundMailStatus.UNCERTAIN, finished_at__gte=recent)
             ),
         ),
         **metering.aggregate(

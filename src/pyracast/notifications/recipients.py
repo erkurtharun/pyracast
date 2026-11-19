@@ -1,3 +1,6 @@
+from collections.abc import Iterable
+from itertools import chain
+
 from allauth.account.models import EmailAddress
 from django.db.models import Q
 from django.db.models.functions import Lower
@@ -33,25 +36,42 @@ def workspace_recipients(tenant_id: int) -> list[str]:
     )
 
 
-def address_memberships(tenant_id: int) -> dict[str, int]:
-    """The membership each member address belongs to; a verified address wins over the
-    account address of another member."""
+def distinct_addresses(addresses: Iterable[str]) -> list[str]:
+    named: dict[str, str] = {}
+    for address in addresses:
+        named.setdefault(address.casefold(), address)
+    return list(named.values())
+
+
+def address_memberships(tenant_id: int) -> dict[str, list[int]]:
+    """Every membership each member address belongs to: as a verified address, then as an
+    account address."""
     members = dict(Membership.objects.filter(tenant_id=tenant_id).values_list("user_id", "pk"))
-    result: dict[str, int] = {}
-    for user_id, address in (
+    verified = (
         EmailAddress.objects.filter(user_id__in=members, verified=True)
         .order_by("pk")
         .values_list("user_id", "email")
-    ):
-        result.setdefault(address.strip().casefold(), members[user_id])
-    for user_id, address in (
+    )
+    accounts = (
         Membership.objects.filter(tenant_id=tenant_id)
         .order_by("pk")
         .values_list("user_id", "user__email")
-    ):
+    )
+    result: dict[str, list[int]] = {}
+    for user_id, address in chain(verified, accounts):
         if key := address.strip().casefold():
-            result.setdefault(key, members[user_id])
+            tied = result.setdefault(key, [])
+            if members[user_id] not in tied:
+                tied.append(members[user_id])
     return result
+
+
+def _pinned(rows: Iterable[ReminderRecipient]) -> dict[str, list[int]]:
+    pinned: dict[str, list[int]] = {}
+    for row in rows:
+        if row.membership_id is not None:
+            pinned.setdefault(row.email.casefold(), []).append(row.membership_id)
+    return pinned
 
 
 def active_memberships(tenant_id: int) -> set[int]:
@@ -63,7 +83,7 @@ def active_memberships(tenant_id: int) -> set[int]:
 
 
 def stored_recipients(schedule: ReminderSchedule) -> list[str]:
-    return [row.email for row in schedule.recipients.all()] if schedule.pk else []
+    return distinct_addresses(row.email for row in schedule.recipients.all()) if schedule.pk else []
 
 
 def effective_recipients(schedule: ReminderSchedule) -> list[str]:
@@ -81,52 +101,44 @@ def effective_recipients(schedule: ReminderSchedule) -> list[str]:
     return list(addresses.values())
 
 
-def recipient_rows(schedule: ReminderSchedule, addresses: list[str]) -> list[ReminderRecipient]:
-    """Rows for a saved list: an address keeps its stored membership, and otherwise belongs to
-    the member who holds it now."""
-    pinned = {
-        row.email.casefold(): row.membership_id
-        for row in schedule.recipients.all()
-        if row.membership_id is not None
-    }
+def _ties(schedule: ReminderSchedule, addresses: list[str]) -> list[tuple[str, int | None]]:
+    """Each address with every membership it belongs to: the stored ones, else those of the
+    members who hold it now, else none."""
     known = address_memberships(schedule.region.tenant_id)
+    known.update(_pinned(schedule.recipients.all()) if schedule.pk else {})
     return [
-        ReminderRecipient(
-            schedule=schedule,
-            email=address,
-            membership_id=pinned.get(address.casefold(), known.get(address.casefold())),
-        )
+        (address, membership)
         for address in addresses
+        for membership in known.get(address.casefold()) or (None,)
+    ]
+
+
+def recipient_rows(schedule: ReminderSchedule, addresses: list[str]) -> list[ReminderRecipient]:
+    return [
+        ReminderRecipient(schedule=schedule, email=address, membership_id=membership)
+        for address, membership in _ties(schedule, addresses)
     ]
 
 
 def delivery_rows(
     delivery: NotificationDelivery, schedule: ReminderSchedule, addresses: list[str]
 ) -> list[DeliveryRecipient]:
-    known = address_memberships(schedule.region.tenant_id)
-    known.update(
-        (row.email.casefold(), row.membership_id)
-        for row in schedule.recipients.all()
-        if row.membership_id is not None
-    )
     return [
-        DeliveryRecipient(
-            delivery=delivery, email=address, membership_id=known.get(address.casefold())
-        )
-        for address in addresses
+        DeliveryRecipient(delivery=delivery, email=address, membership_id=membership)
+        for address, membership in _ties(schedule, addresses)
     ]
 
 
 def permitted_recipients(delivery: NotificationDelivery) -> list[str]:
     current = {address.casefold() for address in effective_recipients(delivery.schedule)}
     active = active_memberships(delivery.schedule.region.tenant_id)
-    return [
+    return distinct_addresses(
         row.email
         for row in delivery.recipients.all()
         if not row.revoked
         and row.email.casefold() in current
         and (row.membership_id is None or row.membership_id in active)
-    ]
+    )
 
 
 def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str]) -> None:

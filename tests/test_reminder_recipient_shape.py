@@ -52,13 +52,25 @@ def test_the_database_refuses_schedule_times_of_another_shape(value: object) -> 
     )
 
 
-def test_an_address_is_stored_once_per_list_whatever_its_case() -> None:
+@pytest.mark.parametrize("pinned", [True, False])
+def test_an_address_is_stored_once_per_list_and_membership_whatever_its_case(
+    pinned: bool,
+) -> None:
     delivery = ready()
+    membership = ReminderRecipient.objects.get(schedule=delivery.schedule).membership_id
+    if not pinned:
+        ReminderRecipient.objects.filter(schedule=delivery.schedule).update(membership=None)
+        delivery.recipients.update(membership_id=None)
+        membership = None
 
     with pytest.raises(IntegrityError) as schedule_row, transaction.atomic():
-        ReminderRecipient.objects.create(schedule=delivery.schedule, email="DEFAULT@example.com")
+        ReminderRecipient.objects.create(
+            schedule=delivery.schedule, email="DEFAULT@example.com", membership_id=membership
+        )
     with pytest.raises(IntegrityError) as delivery_row, transaction.atomic():
-        DeliveryRecipient.objects.create(delivery=delivery, email="Default@Example.com")
+        DeliveryRecipient.objects.create(
+            delivery=delivery, email="Default@Example.com", membership_id=membership
+        )
 
     assert violated_constraint(schedule_row.value) == "reminderrecipient_schedule_email_uniq"
     assert violated_constraint(delivery_row.value) == "deliveryrecipient_delivery_email_uniq"

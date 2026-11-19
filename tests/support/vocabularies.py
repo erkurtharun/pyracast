@@ -776,6 +776,7 @@ FREE_TEXT = frozenset(
         ("notifications.ReminderRecipient", "email"),
         ("notifications.DeliveryRecipient", "email"),
         ("notifications.OutboundMail", "recipient"),
+        ("notifications.OutboundMail", "lock_key"),
     }
 )
 # Exception class names and counted region failures written by the dispatcher: an open set.
