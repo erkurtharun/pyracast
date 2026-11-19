@@ -149,6 +149,8 @@ jobs:
           bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE" "$RABBITMQ_IMAGE"
       - name: Exercise the production images and Compose boundary
         run: bash deploy/smoke.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE" "$RABBITMQ_IMAGE"
+      - name: Move queued work to the built broker and back to the previous public broker
+        run: bash deploy/test-broker-rollback.sh pyracast-backend:ci "$RABBITMQ_IMAGE"
       - name: Retain tested main images for the release
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -819,6 +819,10 @@ point, that pruning keeps the previous release, that a release whose job is
 cancelled during `migrate` still completes and can be followed again, and that a
 release whose public port does not enforce required origin pulls resumes the previous
 release.
+`deploy/test-broker-rollback.sh BACKEND_IMAGE RABBITMQ_IMAGE` starts the public broker of
+the releases before the built one, the built broker and that public broker again on one
+data volume, and each keeps the queued work and accepts more: a failed release returns to
+the previous broker, and RabbitMQ does not guarantee downgrades.
 `tests/test_deployment_previous_helper.py` runs each recovery the installer prints
 through the current helper and the one on `main` before the maintenance notice,
 against a model of the database, and counts it only when the previous release serves
