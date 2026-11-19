@@ -33,7 +33,7 @@ Write code, documents and commits in English; explain progress and decisions in 
 
 ## Agent allocation
 
-Orchestration, architecture and integration use the user's GPT-6.0 Ultra profile (`gpt-6-astra` when available), effort `ultra`; this does not change the selected client model.
-Use `gpt-6.1-terra` at `medium` for simple bounded work or `high` for deeper bounded checks; use `gpt-6.1-sol` at `medium` for normal implementation/research, `high` for security/concurrency/mathematics/debugging, and `xhigh` only for exceptional unresolved complexity.
+Orchestration, architecture and integration use the user's Ultra profile (`gpt-6.2-astra`), effort `ultra`; this does not change the selected client model.
+Use `gpt-6.1-terra` at `medium` for simple bounded work or `high` for deeper bounded checks; use `gpt-6.2-sol` at `medium` for normal implementation/research, `high` for security/concurrency/mathematics/debugging, and `xhigh` only for exceptional unresolved complexity.
 Use exposed model IDs and efforts; report unavailable profiles instead of silently substituting. Delegate independent work only when it saves time or improves quality, with clear ownership and acceptance criteria; the orchestrator reviews and integrates evidence.
 These profile names apply to Codex. Keep the selected Claude profile unless the user explicitly requests another.
