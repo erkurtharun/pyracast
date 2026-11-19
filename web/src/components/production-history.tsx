@@ -166,6 +166,7 @@ export function ProductionHistory({
     configuration,
     timezone,
     day: requestedDay,
+    baseDay,
     onDay,
     onSaved,
 }: {
@@ -173,6 +174,7 @@ export function ProductionHistory({
     configuration?: number;
     timezone: string;
     day?: string;
+    baseDay: string | undefined;
     onDay: (day: string) => void;
     onSaved: () => Promise<unknown>;
 }) {
@@ -182,8 +184,10 @@ export function ProductionHistory({
     const proposals = useTranslations("ChangeRequests");
     const proposalKey = useProposalKey();
     const yesterday = localDay(timezone, -1);
-    const date =
-        requestedDay && requestedDay <= yesterday ? requestedDay : yesterday;
+    const shown = (day?: string) => (day && day <= yesterday ? day : yesterday);
+    const date = shown(requestedDay);
+    // A step taken while a day change loads continues from the day being navigated to.
+    const stepFrom = shown(baseDay);
     const [showFullDay, setShowFullDay] = useState(false);
     const [editor, setEditor] = useState<Editor>({ status: "closed" });
     const [message, setMessage] = useState("");
@@ -442,7 +446,7 @@ export function ProductionHistory({
                         type="button"
                         aria-label={t("previous_day")}
                         disabled={saving}
-                        onClick={() => selectDate(shiftDay(date, -1))}
+                        onClick={() => selectDate(shiftDay(stepFrom, -1))}
                     >
                         ←
                     </button>
@@ -460,8 +464,8 @@ export function ProductionHistory({
                         className="button secondary"
                         type="button"
                         aria-label={t("next_day")}
-                        disabled={saving || date >= yesterday}
-                        onClick={() => selectDate(shiftDay(date, 1))}
+                        disabled={saving || stepFrom >= yesterday}
+                        onClick={() => selectDate(shiftDay(stepFrom, 1))}
                     >
                         →
                     </button>

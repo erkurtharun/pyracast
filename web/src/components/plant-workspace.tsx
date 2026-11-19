@@ -217,7 +217,7 @@ export function PlantWorkspace({
                                 if (
                                     (next === "estimated_actuals" ||
                                         next === "archived_forecast") &&
-                                    (base.date ?? localDay(timezone, 1)) > today
+                                    (base.date || localDay(timezone, 1)) > today
                                 )
                                     setDate(today);
                             }}
@@ -418,6 +418,7 @@ export function PlantWorkspace({
                                 configuration={configuration?.id}
                                 timezone={timezone}
                                 day={address.date}
+                                baseDay={base.date}
                                 onDay={setDate}
                                 onSaved={changed}
                             />
