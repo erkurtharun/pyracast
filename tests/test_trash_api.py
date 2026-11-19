@@ -5,11 +5,13 @@ from django.contrib.auth.models import User
 from django.test import Client
 from django.utils import timezone
 
+from pyracast import trash
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.plants.models import Plant, PlantEvent
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
 from tests.support.plant_operations import make_plant
+from tests.support.trash_operations import sibling
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -79,6 +81,33 @@ def test_expired_trash_remains_visible_but_cannot_be_restored(
     assert client.post(region + "restore/", {}, content_type="application/json").status_code == 400
     assert Plant.objects.filter(pk=plant.pk).exists()
     assert Region.objects.filter(pk=system.region.pk).exists()
+
+
+def test_a_partly_purged_region_leaves_the_trash_and_keeps_its_deletion_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _ = make_plant(monkeypatch)
+    waiting, _ = sibling(system)
+    client = Client()
+    client.force_login(system.member)
+    tenant = f"/api/tenants/{system.tenant.pk}/"
+    region = f"{tenant}regions/{system.region.pk}/"
+    assert client.delete(region).status_code == 204
+    assert client.delete(f"{tenant}regions/{waiting.pk}/").status_code == 204
+    Region.objects.filter(pk=waiting.pk).update(deleted_at=NOW + timedelta(days=1))
+    monkeypatch.setattr("pyracast.trash.PURGE_STATEMENT_BUDGET", 1)
+    trash.purge_expired(NOW + trash.RETENTION)
+    partial = Region.objects.get(pk=system.region.pk)
+    assert (partial.deleted_at, partial.purge_started_at) == (NOW, NOW + trash.RETENTION)
+
+    monkeypatch.setattr(timezone, "now", lambda: NOW - timedelta(days=365))
+    client.force_login(system.member)
+    refused = client.post(region + "restore/", {}, content_type="application/json")
+    assert refused.status_code == 400
+    assert refused.json()["code"] == "trash_retention_expired"
+    listing = client.get(tenant + "trash/regions/").json()
+    assert (listing["count"], [row["id"] for row in listing["results"]]) == (1, [waiting.pk])
+    assert Region.objects.get(pk=system.region.pk).deleted_at == NOW
 
 
 def test_trash_and_restore_keep_tenant_boundaries_and_session_csrf(

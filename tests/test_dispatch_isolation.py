@@ -26,7 +26,12 @@ from tests.support.epias import PASSWORD, TICKET, USERNAME
 from tests.support.errors import raises_code
 from tests.support.metering import NEXT_NIGHT, PROVIDER_PLANT, connect, connected
 from tests.support.plant_operations import make_plant, snapshot_for
-from tests.support.trash_operations import sibling, sibling_plant
+from tests.support.trash_operations import (
+    remaining_purge_work,
+    revised_observation,
+    sibling,
+    sibling_plant,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -137,31 +142,47 @@ def test_a_purge_beyond_its_budget_resumes_next_run_and_later_phases_still_run(
     system, plant = make_plant(monkeypatch)
     for offset in range(3):
         snapshot_for(system, NOW.date() - timedelta(days=offset + 1))
+    revised_observation(system, plant, 2)
+    started = sibling_plant(system)
     trash_region(system.member, system.tenant.pk, system.region.pk)
+    trash_region(system.member, system.tenant.pk, started.region_id)
     deleted_at = NOW - RETENTION - timedelta(days=1)
-    Region.objects.update(deleted_at=deleted_at)
+    Region.objects.filter(pk=started.region_id).update(deleted_at=deleted_at)
     monkeypatch.setattr("pyracast.trash.PURGE_CHUNK_SIZE", 1)
     monkeypatch.setattr("pyracast.trash.PURGE_STATEMENT_BUDGET", 2)
+    work = remaining_purge_work()
 
     dispatch_once(monkeypatch)
 
-    assert Region.objects.filter(pk=system.region.pk).exists()
-    assert ForecastSnapshot.objects.count() == 3
-    assert Region.objects.get(pk=system.region.pk).deleted_at == NOW - 2 * RETENTION
+    partial = Region.objects.get(pk=started.region_id)
+    assert (partial.deleted_at, partial.purge_started_at is not None) == (deleted_at, True)
+    assert Region.objects.get(pk=system.region.pk).purge_started_at is None
     assert set(DispatcherStatus.objects.values_list("phase", "last_error")) >= {
         ("retention", ""),
         ("metering", ""),
     }
-    monkeypatch.setattr(timezone, "now", lambda: deleted_at + RETENTION - timedelta(days=1))
+    monkeypatch.setattr(timezone, "now", lambda: deleted_at + timedelta(days=1))
     with raises_code("trash_retention_expired"):
-        restore_region(system.member, system.tenant.pk, system.region.pk)
-
+        restore_region(system.member, system.tenant.pk, started.region_id)
     monkeypatch.setattr(timezone, "now", lambda: NOW)
-    monkeypatch.setattr("pyracast.trash.PURGE_STATEMENT_BUDGET", 1000)
-    dispatch_once(monkeypatch)
+    Region.objects.filter(pk=system.region.pk).update(deleted_at=deleted_at)
+    assert remaining_purge_work() < work
+    work = remaining_purge_work()
 
-    assert not Region.objects.filter(pk=system.region.pk).exists()
-    assert not Plant.objects.filter(pk=plant.pk).exists()
+    for _ in range(work):
+        if not Region.objects.filter(pk__in=(system.region.pk, started.region_id)).exists():
+            break
+        dispatch_once(monkeypatch)
+        left = remaining_purge_work()
+        assert left < work, "every cycle commits progress"
+        work = left
+        assert not (
+            Region.objects.filter(pk=started.region_id).exists()
+            and Region.objects.filter(pk=system.region.pk, purge_started_at__isnull=False).exists()
+        ), "the started region finishes before a lower-numbered one starts"
+
+    assert not Region.objects.filter(pk__in=(system.region.pk, started.region_id)).exists()
+    assert not Plant.objects.filter(pk__in=(plant.pk, started.pk)).exists()
     assert not ForecastSnapshot.objects.exists()
 
 

@@ -7,6 +7,7 @@ import pytest
 from django.db import connection
 from dramatiq.brokers.stub import StubBroker
 
+from pyracast.background.failures import ItemsFailedError
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.secrets import encrypt_secret
@@ -245,10 +246,7 @@ def test_concurrent_dispatchers_prepare_one_request_once(
     assert committed_request(plant.pk) is None
 
 
-def test_a_failed_automatic_promotion_is_retried_without_a_new_fit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    system, plant = make_plant(monkeypatch)
+def automated_candidate(system: System, plant: Plant) -> CalibrationRun:
     enable_automation(system, plant, Path())
     rows: list[ObservationInput] = []
     for offset in range(30):
@@ -268,32 +266,82 @@ def test_a_failed_automatic_promotion_is_retried_without_a_new_fit(
         unit="MWh",
         observations=rows,
     )
-    run = CalibrationRun.objects.get()
+    return CalibrationRun.objects.get()
+
+
+def failing_promotions(monkeypatch: pytest.MonkeyPatch, failures: int) -> list[int]:
     original = automation.promote_automatic_calibration
     calls: list[int] = []
 
-    def fail_once(plant: Plant, candidate: CalibrationRun, now: datetime) -> bool:
+    def fail_first(plant: Plant, candidate: CalibrationRun, now: datetime) -> bool:
         calls.append(candidate.pk)
-        if len(calls) == 1:
+        if len(calls) <= failures:
             raise RuntimeError("private promotion detail")
         return original(plant, candidate, now)
 
-    monkeypatch.setattr(automation, "promote_automatic_calibration", fail_once)
+    monkeypatch.setattr(automation, "promote_automatic_calibration", fail_first)
+    return calls
 
-    assert training.run_calibration(run.pk, NOW)
 
-    assert calls == [run.pk, run.pk]
-    assert CalibrationActivation.objects.get().calibration_id == run.pk
-    assert CalibrationRun.objects.count() == 1
-    assert list(
+def automatic_decisions(plant: Plant) -> list[tuple[str, str | None]]:
+    return list(
         PlantEvent.objects.filter(
             plant=plant,
             action__in=("calibration_automatic_skipped", "calibration_automatically_activated"),
         )
         .order_by("pk")
         .values_list("action", "details__reason")
-    ) == [
+    )
+
+
+def test_a_failed_automatic_promotion_is_retried_without_a_new_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    run = automated_candidate(system, plant)
+    calls = failing_promotions(monkeypatch, 1)
+
+    assert training.run_calibration(run.pk, NOW)
+
+    assert calls == [run.pk, run.pk]
+    assert CalibrationActivation.objects.get().calibration_id == run.pk
+    assert CalibrationRun.objects.count() == 1
+    assert automatic_decisions(plant) == [
         ("calibration_automatic_skipped", "promotion_failed"),
+        ("calibration_automatically_activated", None),
+    ]
+    assert committed_request(plant.pk) is None
+
+
+def test_a_failed_promotion_is_retried_after_an_unrelated_daily_check_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    run = automated_candidate(system, plant)
+    calls = failing_promotions(monkeypatch, 2)
+
+    assert training.run_calibration(run.pk, NOW)
+
+    retry_at = committed_request(plant.pk)
+    assert calls == [run.pk, run.pk]
+    assert retry_at is not None
+    assert retry_at >= NOW + preparation.PREPARATION_RETRY_DELAY
+    assert preparation.prepare_requested_calibrations(retry_at - timedelta(minutes=1)) == []
+    assert calls == [run.pk, run.pk], "the request's back-off bounds the retries"
+    Plant.objects.filter(pk=plant.pk).update(next_calibration_check_at=retry_at)
+    with monkeypatch.context() as failing:
+        failing.setattr(automation, "prepare_calibration", raise_private)
+        with pytest.raises(ItemsFailedError):
+            automation.prepare_due_calibrations(retry_at)
+
+    assert preparation.prepare_requested_calibrations(retry_at) == []
+
+    assert calls == [run.pk, run.pk, run.pk]
+    assert CalibrationActivation.objects.get().calibration_id == run.pk
+    assert CalibrationRun.objects.count() == 1
+    assert automatic_decisions(plant) == [
+        ("calibration_automatic_skipped", "promotion_failed"),
+        ("calibration_automatic_skipped", "preparation_failed"),
         ("calibration_automatically_activated", None),
     ]
     assert committed_request(plant.pk) is None

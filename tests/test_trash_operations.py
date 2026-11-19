@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
+from pyracast.errors import DomainError
 from pyracast.forecasts.historical_import import import_historical_reference
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -49,7 +50,7 @@ from tests.support.domain import NOW, System
 from tests.support.errors import raises_code
 from tests.support.historical_reference_import import power_file, source_settings, system_for_import
 from tests.support.plant_operations import make_plant, request_run, snapshot_for
-from tests.support.trash_operations import sibling
+from tests.support.trash_operations import remaining_purge_work, revised_observation, sibling
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -465,7 +466,7 @@ def test_purge_deletes_archive_rows_in_bounded_statements(
     assert not ForecastSnapshot.objects.exists()
 
 
-@pytest.mark.parametrize("first", ["restore", "purge"])
+@pytest.mark.parametrize("first", ["restore", "purge", "partial_purge"])
 def test_restore_and_purge_at_the_deadline_never_both_succeed(
     monkeypatch: pytest.MonkeyPatch, first: str
 ) -> None:
@@ -474,6 +475,8 @@ def test_restore_and_purge_at_the_deadline_never_both_succeed(
     trash_region(system.member, system.tenant.pk, system.region.pk)
     deadline = NOW + RETENTION
     monkeypatch.setattr(timezone, "now", lambda: deadline - timedelta(microseconds=1))
+    if first == "partial_purge":
+        monkeypatch.setattr("pyracast.trash.PURGE_STATEMENT_BUDGET", 1)
 
     def restore() -> str:
         try:
@@ -481,6 +484,8 @@ def test_restore_and_purge_at_the_deadline_never_both_succeed(
             return "restored"
         except Region.DoesNotExist:
             return "missing"
+        except DomainError as error:
+            return error.code
 
     def purge() -> dict[str, int]:
         return purge_expired(deadline)
@@ -496,6 +501,33 @@ def test_restore_and_purge_at_the_deadline_never_both_succeed(
         assert Region.objects.get(pk=system.region.pk).deleted_at is None
         assert ForecastSnapshot.objects.filter(pk=source.pk).exists()
         assert Plant.objects.filter(pk=plant.pk).exists()
-    else:
+    elif first == "purge":
         assert outcomes == ({"regions": 1, "plants": 1}, "missing")
         assert not Region.objects.filter(pk=system.region.pk).exists()
+    else:
+        assert outcomes == ({"regions": 0, "plants": 0}, "trash_retention_expired")
+        region = Region.objects.get(pk=system.region.pk)
+        assert (region.deleted_at, region.purge_started_at) == (NOW, deadline)
+
+
+def test_a_small_budget_purges_a_revised_observation_history_in_committed_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    chain = revised_observation(system, plant, 3)
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    monkeypatch.setattr("pyracast.trash.PURGE_CHUNK_SIZE", 1)
+    monkeypatch.setattr("pyracast.trash.PURGE_STATEMENT_BUDGET", 1)
+    work = remaining_purge_work()
+    assert ProductionObservation.objects.filter(pk__in=chain).count() == 4
+
+    for _ in range(work):
+        if not Region.objects.filter(pk=system.region.pk).exists():
+            break
+        purge_expired(NOW + RETENTION)
+        left = remaining_purge_work()
+        assert left < work, "every cycle commits progress"
+        work = left
+
+    assert not Region.objects.filter(pk=system.region.pk).exists()
+    assert not ProductionObservation.objects.exists()
