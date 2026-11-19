@@ -177,6 +177,17 @@ test("the document keeps its title while the workspace changes address", async (
             characterData: true,
         });
     });
+    const titlesKeptSinceFirst = async () => {
+        const titles = await page.evaluate(
+            () => (window as unknown as { titles: string[] }).titles,
+        );
+        expect(titles.length).toBeGreaterThan(0);
+        expect(
+            titles.filter(
+                (title) => title !== "1:Pyracast workspace | Pyracast",
+            ),
+        ).toEqual([]);
+    };
     const response = await page.goto("/app/w/1/");
     expect(
         (await response!.text()).match(/<title>[^<]+<\/title>/g),
@@ -191,19 +202,14 @@ test("the document keeps its title while the workspace changes address", async (
     await page.getByRole("button", { name: "Account" }).click();
     await expect(page).toHaveURL("/app/account/");
     await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
-    const titles = await page.evaluate(
-        () => (window as unknown as { titles: string[] }).titles,
-    );
-    expect(titles.length).toBeGreaterThan(0);
-    expect(
-        titles.filter((title) => title !== "1:Pyracast workspace | Pyracast"),
-    ).toEqual([]);
+    await titlesKeptSinceFirst();
     await page.goto("/app/w/1/plants/11/unknown/");
     await expect(
         page.getByRole("heading", { name: "Page not found" }),
     ).toBeVisible();
     await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
     expect(await page.locator("title").count()).toBe(1);
+    await titlesKeptSinceFirst();
     await page.route(
         (url) =>
             url.pathname.startsWith("/api/") &&
@@ -224,6 +230,7 @@ test("the document keeps its title while the workspace changes address", async (
     ).toBeVisible();
     await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
     expect(await page.locator("title").count()).toBe(1);
+    await titlesKeptSinceFirst();
 });
 
 test("account settings have their own address", async ({ page }) => {

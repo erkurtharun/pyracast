@@ -542,3 +542,87 @@ test("a sign-out that still finds a signed-in session after repeating it is repo
     });
     expect(calls).toHaveLength(4);
 });
+
+const otherAccount = (token: string) => ({
+    ...signedIn(token),
+    user: {
+        ...signedIn(token).user,
+        id: 2,
+        username: "other",
+        email: "other@example.test",
+    },
+});
+
+test("a refused request is repeated only when the session read shows the account it was prepared for", async () => {
+    answer(
+        () => json(signedIn("token")),
+        () => json(errorBody("not_authenticated", "Sign in."), 401),
+        () => json(otherAccount("other-token")),
+    );
+    await loadSession();
+    const error = await api.get("/api/tenants/").catch((failure) => failure);
+    expect(error).toMatchObject({ status: 401, code: "not_authenticated" });
+    expect(sessionState().session?.user?.id).toBe(2);
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+        "GET /api/session/",
+        "GET /api/tenants/",
+        "GET /api/session/",
+    ]);
+});
+
+test("an answer arriving after another tab changed the session is dropped and not repeated", async () => {
+    const generationKey = "pyracast.sessionGeneration";
+    const stored = new Map<string, string>([[generationKey, "first"]]);
+    Object.assign(globalThis, {
+        window: {
+            localStorage: {
+                getItem: (key: string) => stored.get(key) ?? null,
+                setItem: (key: string, value: string) =>
+                    void stored.set(key, value),
+            },
+        },
+    });
+    let releaseCreation!: () => void;
+    const creationHeld = new Promise<void>(
+        (resolve) => (releaseCreation = resolve),
+    );
+    let readSent!: () => void;
+    const reread = new Promise<void>((resolve) => (readSent = resolve));
+    try {
+        answer(
+            () => json(signedIn("token")),
+            async () => {
+                await creationHeld;
+                return json(errorBody("not_authenticated", "Sign in."), 401);
+            },
+            () => {
+                readSent();
+                return json(otherAccount("other-token"));
+            },
+        );
+        await loadSession();
+        const creation = api.post("/api/tenants/{tenant_id}/sites/", site).then(
+            () => "settled",
+            () => "settled",
+        );
+        stored.set(generationKey, "second");
+        releaseCreation();
+        await reread;
+        expect(await loadSession()).toMatchObject({ user: { id: 2 } });
+        expect(await Promise.race([creation, Promise.resolve("pending")])).toBe(
+            "pending",
+        );
+        expect(
+            calls.map((call) => `${call.method} ${call.url} ${call.token}`),
+        ).toEqual([
+            "GET /api/session/ null",
+            "POST /api/tenants/1/sites/ token",
+            "GET /api/session/ null",
+        ]);
+    } finally {
+        Reflect.deleteProperty(globalThis, "window");
+        calls = [];
+        answer(() => json(signedIn("token")));
+        await loadSession();
+    }
+});

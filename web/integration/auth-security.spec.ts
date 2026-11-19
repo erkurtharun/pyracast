@@ -45,12 +45,14 @@ test("verified email and a recovery code protect a real browser session", async 
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
-    const linkedAccountsRead = page.waitForResponse(
-        (response) =>
-            response.url().endsWith("/api/auth/browser/v1/account/providers") &&
-            response.request().method() === "GET",
+    const linkedAccountsRead = page.waitForEvent(
+        "requestfinished",
+        (request) =>
+            request.url().endsWith("/api/auth/browser/v1/account/providers") &&
+            request.method() === "GET",
     );
     await page.getByRole("button", { name: "Account" }).click();
+    expect((await (await linkedAccountsRead).response())?.status()).toBe(200);
     const twoFactor = page.locator("section").filter({
         has: page.getByRole("heading", {
             name: "Two-factor authentication",
@@ -65,7 +67,6 @@ test("verified email and a recovery code protect a real browser session", async 
             .getByRole("region", { name: "Connected accounts" })
             .getByRole("button", { name: "Connect an account" }),
     ).toBeVisible();
-    expect((await linkedAccountsRead).status()).toBe(200);
     const sessionResponse = await page.request.get("/api/session/");
     expect(sessionResponse.status()).toBe(200);
     const session = (await sessionResponse.json()) as { csrf_token: string };

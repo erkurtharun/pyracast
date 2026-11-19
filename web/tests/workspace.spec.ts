@@ -1,3 +1,4 @@
+import type { Request } from "@playwright/test";
 import { test, expect, type Page } from "./support/test";
 import AxeBuilder from "@axe-core/playwright";
 import { parseProduction } from "../src/lib/production";
@@ -523,8 +524,10 @@ test("a date picked while a forecast view switch loads keeps the chosen view", a
 async function holdNavigation(page: Page, section: string) {
     let seen!: () => void;
     let settle!: (failed: boolean) => void;
+    let end!: () => void;
     const requested = new Promise<void>((resolve) => (seen = resolve));
     const settled = new Promise<boolean>((resolve) => (settle = resolve));
+    const ended = new Promise<void>((resolve) => (end = resolve));
     let held = false;
     await page.route(
         (url) =>
@@ -533,15 +536,32 @@ async function holdNavigation(page: Page, section: string) {
         async (route) => {
             if (held) return route.fallback();
             held = true;
+            const request = route.request();
+            const finish = (done: Request) => {
+                if (done !== request) return;
+                page.off("requestfinished", finish);
+                page.off("requestfailed", finish);
+                end();
+            };
+            page.on("requestfinished", finish);
+            page.on("requestfailed", finish);
             seen();
             if (await settled) return route.abort();
             return route.fallback();
         },
     );
+    // The held response has finished or failed and the plant screen has no navigation pending.
+    const done = async (failed: boolean) => {
+        settle(failed);
+        await ended;
+        await expect(
+            page.getByRole("navigation", { name: "Plant sections" }),
+        ).not.toHaveAttribute("aria-busy", "true");
+    };
     return {
         requested,
-        release: () => settle(false),
-        fail: () => settle(true),
+        release: () => done(false),
+        fail: () => done(true),
     };
 }
 
@@ -568,7 +588,10 @@ test("the displayed section clicked while another section loads keeps its date a
     await expect(page).toHaveURL(
         /\/forecast\/\?date=2026-03-26&view=irradiance$/,
     );
-    production.release();
+    await production.release();
+    await expect(page).toHaveURL(
+        /\/forecast\/\?date=2026-03-26&view=irradiance$/,
+    );
     await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-26");
 });
@@ -585,7 +608,7 @@ test("a forecast control used while a failing section change loads applies to th
     await button("Production").click();
     await production.requested;
     await button("Generation").click();
-    production.fail();
+    await production.fail();
     await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-27$/);
     await expect(button("Generation")).toHaveAttribute("aria-current", "page");
     await page.getByLabel("Forecast date").fill("2026-03-26");
@@ -610,8 +633,10 @@ test("Back while section changes load leaves the restored section in charge of i
     await page.goBack();
     await expect(page).toHaveURL(/\/production\/$/);
     await expect(button("Production")).toHaveAttribute("aria-current", "page");
-    production.release();
-    settings.release();
+    await production.release();
+    await settings.release();
+    await expect(page).toHaveURL(/\/production\/$/);
+    await expect(button("Production")).toHaveAttribute("aria-current", "page");
     await button("Comparison").click();
     await expect(page).toHaveURL(/\/production\/\?view=comparison$/);
     await expect(button("Comparison")).toHaveAttribute("aria-current", "page");
@@ -637,9 +662,11 @@ for (const overtaken of ["a section change", "Back"] as const)
         if (overtaken === "Back") await page.goBack();
         else await button("Production").click();
         await expect(page).toHaveURL(/\/production\/$/);
-        forecast.release();
+        await forecast.release();
+        await expect(page).toHaveURL(/\/production\/$/);
+        // History moves to the forecast without a click, which would replace a stuck pending view.
         if (overtaken === "Back") await page.goForward();
-        else await button("Forecast").click();
+        else await page.goBack();
         await expect(page).toHaveURL(/\/forecast\/$/);
         await expect(button("Generation")).toHaveAttribute(
             "aria-current",
@@ -652,6 +679,36 @@ for (const overtaken of ["a section change", "Back"] as const)
             "page",
         );
     });
+
+test("generation-only controls rest while the irradiance view loads", async ({
+    page,
+}) => {
+    const button = await openPlant(page, "forecast/?date=2026-03-29");
+    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+    const controls = page.locator(".forecast-controls");
+    const archived = page
+        .getByLabel("Data source")
+        .locator('option[value="archived_forecast"]');
+    await expect(archived).toBeEnabled();
+    await expect(page.getByLabel("Resolution")).toBeEnabled();
+    const forecast = await holdNavigation(page, "forecast");
+    await button("Irradiance").click();
+    await forecast.requested;
+    await expect(archived).toBeDisabled();
+    await expect(page.getByLabel("Resolution")).toBeDisabled();
+    await expect(controls).toHaveAttribute("aria-busy", "true");
+    await expect(page.getByLabel("Forecast date")).toBeEnabled();
+    await forecast.release();
+    await expect(page).toHaveURL(
+        /\/forecast\/\?date=2026-03-29&view=irradiance$/,
+    );
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    await expect(controls).not.toHaveAttribute("aria-busy", "true");
+    await expect(page.getByLabel("Resolution")).toHaveCount(0);
+    await expect(archived).toHaveCount(0);
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-29");
+    await expect(page.getByLabel("Data source")).toHaveValue("auto");
+});
 
 test("Back to the irradiance view does not keep an archived generation source", async ({
     page,
