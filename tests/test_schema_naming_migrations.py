@@ -259,4 +259,8 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     ]
     for row in after["plants_plant"]:
         del row["calibration_preparation_due_at"]
+    assert after["regions_region"]
+    assert all(row["purge_started_at"] is None for row in after["regions_region"])
+    for row in after["regions_region"]:
+        del row["purge_started_at"]
     assert after == renamed(before)
