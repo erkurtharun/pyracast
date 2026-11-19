@@ -1,5 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
+from django.db import connections, transaction
 from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.models import WorkspaceInvitation
@@ -7,6 +8,12 @@ from pyracast.encryption import secret_cipher
 from pyracast.notifications.models import CODED_MAIL, OutboundMail, OutboundMailKind
 
 CODE_CONTEXT = b"pyracast-outbound-mail-code"
+# The failure history of a sign-in lives in the authentication cache; its notice is written
+# through the same autocommitted connection.
+LOCK_NOTICE_DATABASE = "auth_cache"
+LOCK_NOTICE_INTERVAL = timedelta(hours=24)
+# Two-key advisory lock space ("PYLN") that serializes the lock notices of one address.
+LOCK_NOTICE_LOCK_SPACE = 0x50594C4E
 
 
 @sensitive_variables("code")
@@ -26,11 +33,9 @@ def enqueue_mail(
     invitation: WorkspaceInvitation | None = None,
     context: dict[str, str] | None = None,
     code: str = "",
-    lock_key: str | None = None,
 ) -> None:
-    """Store the intent in the caller's transaction; the mailer sends it after the commit. An
-    intent for a lock that already has one is not stored again."""
-    mail = OutboundMail(
+    """Store the intent in the caller's transaction; the mailer sends it after the commit."""
+    OutboundMail.objects.create(
         kind=kind,
         recipient=recipient,
         invitation=invitation,
@@ -41,6 +46,35 @@ def enqueue_mail(
         created_at=now,
         available_at=now,
         expires_at=expires_at,
-        lock_key=lock_key,
     )
-    OutboundMail.objects.bulk_create([mail], ignore_conflicts=True)
+
+
+def enqueue_lock_notice(
+    address: str, *, language: str, expires_at: datetime, now: datetime
+) -> None:
+    """Store a daily-lock notice for the attempted address unless it got one in the last 24
+    hours, so a lock always has a notice from its preceding day and no address gets more.
+
+    The notice commits on its own, so no rollback of the sign-in separates it from the lock.
+    """
+    with transaction.atomic(using=LOCK_NOTICE_DATABASE, durable=True):
+        with connections[LOCK_NOTICE_DATABASE].cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(%s, hashtext(%s))", [LOCK_NOTICE_LOCK_SPACE, address]
+            )
+        notices = OutboundMail.objects.using(LOCK_NOTICE_DATABASE)
+        if notices.filter(
+            kind=OutboundMailKind.LOGIN_LOCKED,
+            recipient=address,
+            created_at__gt=now - LOCK_NOTICE_INTERVAL,
+        ).exists():
+            return
+        notices.create(
+            kind=OutboundMailKind.LOGIN_LOCKED,
+            recipient=address,
+            language=language,
+            owner_language=True,
+            created_at=now,
+            available_at=now,
+            expires_at=expires_at,
+        )

@@ -112,7 +112,6 @@ class Migration(migrations.Migration):
                         max_length=30,
                     ),
                 ),
-                ("lock_key", models.CharField(max_length=64, null=True)),
             ],
         ),
         migrations.AddField(
@@ -284,26 +283,6 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 name="outboundmail_context_chk",
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name="outboundmail",
-            constraint=models.UniqueConstraint(
-                fields=("lock_key",), name="outboundmail_lock_key_uniq"
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name="outboundmail",
-            constraint=models.CheckConstraint(
-                condition=models.Q(
-                    models.Q(("kind", "account/email/login_locked"), ("lock_key__isnull", False)),
-                    models.Q(
-                        models.Q(("kind", "account/email/login_locked"), _negated=True),
-                        ("lock_key__isnull", True),
-                    ),
-                    _connector="OR",
-                ),
-                name="outboundmail_lock_key_chk",
             ),
         ),
     ]

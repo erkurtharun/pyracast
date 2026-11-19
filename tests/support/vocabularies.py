@@ -774,7 +774,6 @@ FREE_TEXT = frozenset(
         ("incidents.PlantIncident", "title"),
         ("incidents.PlantIncident", "notes"),
         ("notifications.OutboundMail", "recipient"),
-        ("notifications.OutboundMail", "lock_key"),
     }
 )
 # Exception class names and counted region failures written by the dispatcher: an open set.

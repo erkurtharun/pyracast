@@ -29,7 +29,7 @@ from pyracast.accounts.models import Language
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.accounts.social import record_social_refusal
 from pyracast.db import violated_constraint
-from pyracast.notifications.intents import enqueue_mail
+from pyracast.notifications.intents import enqueue_lock_notice, enqueue_mail
 from pyracast.notifications.models import MAIL_CONTEXT_KEYS, OutboundMailKind
 
 NOTICE_LIFETIME = timedelta(days=1)
@@ -211,16 +211,10 @@ class AccountAdapter(DefaultAccountAdapter):
         address = str(credentials.get("email") or "").strip().lower()
         usage = self._login_failed_rl_usage if address else None
 
-        def announce(lock_key: str) -> None:
+        def announce() -> None:
             now = timezone.now()
-            enqueue_mail(
-                OutboundMailKind.LOGIN_LOCKED,
-                address,
-                language=mail_language(),
-                owner_language=True,
-                expires_at=now + NOTICE_LIFETIME,
-                now=now,
-                lock_key=lock_key,
+            enqueue_lock_notice(
+                address, language=mail_language(), expires_at=now + NOTICE_LIFETIME, now=now
             )
 
         record_finished_failure(usage or RateLimitUsage(usage=[]), announce)

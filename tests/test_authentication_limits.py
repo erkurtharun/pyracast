@@ -18,13 +18,12 @@ from allauth.mfa.models import Authenticator
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.contrib.auth.models import User
-from django.contrib.sites.shortcuts import get_current_site
 from django.core import mail
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connections
 from django.http import HttpRequest
-from django.test import Client, RequestFactory, override_settings
+from django.test import Client, override_settings
 from django.utils import timezone
 
 from pyracast.accounts.adapters import AccountAdapter
@@ -751,7 +750,16 @@ def test_a_check_still_in_flight_does_not_announce_a_lock(
     assert lock_notices() == []
 
 
-def test_a_new_lock_after_a_password_reset_is_announced_again(clock: Clock) -> None:
+@pytest.mark.parametrize(
+    ("elapsed", "notices"),
+    [(timedelta(hours=24) - timedelta(microseconds=1), 1), (timedelta(hours=24), 2)],
+)
+def test_a_new_lock_after_a_password_reset_is_announced_a_day_after_the_last_notice(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch, elapsed: timedelta, notices: int
+) -> None:
+    noticed = timezone.now()
+    moment = [noticed]
+    monkeypatch.setattr(timezone, "now", lambda: moment[0])
     user = member()
     client = Client(enforce_csrf_checks=True)
     fail_daily(client, user.email, 100, clock)
@@ -767,37 +775,29 @@ def test_a_new_lock_after_a_password_reset_is_announced_again(clock: Clock) -> N
         == 401
     )
     clock.advance(3600)
+    moment[0] = noticed + elapsed
 
     fail_daily(client, user.email, 99, clock)
     assert len(lock_notices()) == 1
     fail_daily(client, user.email, 1, clock)
 
-    assert lock_notices() == [("member@example.com", "sent"), ("member@example.com", "pending")]
+    assert error_codes(login(client, user.email, password)) == ["too_many_login_attempts"]
+    assert lock_notices() == [
+        ("member@example.com", "sent"),
+        *[("member@example.com", "pending")] * (notices - 1),
+    ]
 
 
 class Interrupted(BaseException):
     pass
 
 
-def daily_failure_key(email: str) -> str:
-    request = RequestFactory().get("/")
-    return ratelimit.get_cache_key(
-        request,
-        app="allauth.account",
-        action="login_failed",
-        rate=ratelimit.parse_rate("100/d/key"),
-        key=f"{get_current_site(request).domain}:{email.lower()}",
-    )
-
-
-def test_a_daily_lock_is_announced_once_while_its_completion_lock_stays_held(
+def test_the_last_two_failures_of_a_known_address_at_once_store_one_notice(
     clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = member()
     client = Client(enforce_csrf_checks=True)
     fail_daily(client, user.email, 98, clock)
-    monkeypatch.setattr(ratelimit, "CACHE_LOCK_TIMEOUT", 1)
-    assert cache.add(f"{daily_failure_key(user.email)}:finished:lock", True, timeout=3600)
     hold_password_checks(monkeypatch, 2)
 
     last = in_parallel(
@@ -807,45 +807,6 @@ def test_a_daily_lock_is_announced_once_while_its_completion_lock_stays_held(
     assert last == [["email_password_mismatch"]] * 2
     assert error_codes(login(client, user.email, PASSWORD)) == ["too_many_login_attempts"]
     assert lock_notices() == [("member@example.com", "pending")]
-    deliver_mail()
-    reset = Client(enforce_csrf_checks=True)
-    assert submit(reset, "auth/password/request", {"email": user.email}).status_code == 401
-    password = PASSWORD + "new"
-    assert (
-        submit(
-            reset, "auth/password/reset", {"key": mailed_code(), "password": password}
-        ).status_code
-        == 401
-    )
-    clock.advance(3600)
-    fail_daily(client, user.email, 100, clock)
-    assert lock_notices() == [("member@example.com", "sent"), ("member@example.com", "pending")]
-
-
-def test_a_lock_notice_is_stored_before_the_lock_is_recorded_as_announced(
-    clock: Clock, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from pyracast.accounts import login_limits
-
-    user = member()
-    client = Client(enforce_csrf_checks=True)
-    fail_daily(client, user.email, 99, clock)
-
-    def interrupted(key: str, value: Any, timeout: Any = None) -> None:
-        if key.endswith(":announced"):
-            raise Interrupted
-        cache.set(key, value, timeout)
-
-    monkeypatch.setattr(
-        login_limits,
-        "cache",
-        SimpleNamespace(get=cache.get, get_many=cache.get_many, set=interrupted),
-    )
-
-    with pytest.raises(Interrupted):
-        login(client, user.email, WRONG)
-
-    assert lock_notices() == [("member@example.com", "pending")]
 
 
 def test_a_failure_without_a_daily_rate_or_a_full_allowance_announces_nothing(
@@ -853,11 +814,11 @@ def test_a_failure_without_a_daily_rate_or_a_full_allowance_announces_nothing(
 ) -> None:
     from pyracast.accounts.login_limits import record_finished_failure
 
-    announced: list[str] = []
-    record_finished_failure(ratelimit.RateLimitUsage(usage=[]), announced.append)
+    announced: list[None] = []
+    record_finished_failure(ratelimit.RateLimitUsage(usage=[]), lambda: announced.append(None))
     slot = ratelimit.SingleRateLimitUsage(cache_key="daily", cache_duration=86400, timestamp=1.0)
 
-    record_finished_failure(ratelimit.RateLimitUsage(usage=[slot]), announced.append)
+    record_finished_failure(ratelimit.RateLimitUsage(usage=[slot]), lambda: announced.append(None))
 
     assert announced == []
     assert pyracast_logs.records == []
@@ -953,7 +914,7 @@ def test_two_failures_that_finish_a_lock_at_once_store_one_notice(
         finally:
             connections.close_all()
 
-    lock = [LOCK_NOTICE_LOCK_SPACE, address]
+    lock: tuple[int, str] = (LOCK_NOTICE_LOCK_SPACE, address)
     with connections["default"].cursor() as cursor:
         cursor.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", lock)
         try:

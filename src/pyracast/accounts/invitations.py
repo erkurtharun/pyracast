@@ -95,14 +95,17 @@ def _check_budgets(actor: User, tenant_id: int, email: str, now: datetime) -> No
             )
     invitations = WorkspaceInvitation.objects.all()
     to_address = invitations.filter(email=email)
-    # An invitation whose mail may not have arrived can be reissued at once; the longer budgets
-    # still count it.
+    # An invitation whose mail failed or may not have arrived can be reissued at once; the longer
+    # budgets still count it.
     budgets = (
         (WORKSPACE_HOURLY, invitations.filter(tenant_id=tenant_id)),
         (
             RESEND,
             to_address.filter(tenant_id=tenant_id).exclude(
-                delivery_status=InvitationDeliveryStatus.UNCERTAIN
+                delivery_status__in=(
+                    InvitationDeliveryStatus.UNCERTAIN,
+                    InvitationDeliveryStatus.FAILED,
+                )
             ),
         ),
         (SENDER_DAILY, invitations.filter(created_by=actor)),

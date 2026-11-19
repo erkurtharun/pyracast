@@ -1,6 +1,4 @@
-import hashlib
 from collections.abc import Callable
-from functools import partial
 from typing import Any
 
 from allauth.account import app_settings as account_settings
@@ -11,7 +9,6 @@ from allauth.core.internal import ratelimit
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from django.http import HttpRequest
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
@@ -76,17 +73,14 @@ def _finished_key(cache_key: str, moment: float) -> str:
     return f"{cache_key}:finished:{moment!r}"
 
 
-def record_finished_failure(
-    usage: ratelimit.RateLimitUsage, announce: Callable[[str], None]
-) -> None:
-    """Calls `announce` with the key of a daily lock of an address once every hit of the daily
-    allowance is a finished failure and the oldest came after the last announced lock.
+def record_finished_failure(usage: ratelimit.RateLimitUsage, announce: Callable[[], None]) -> None:
+    """Calls `announce` when every hit of the daily allowance of an address is a finished
+    failure, so the address is locked.
 
     Each finished failure is its own entry, so no lock is contested and every finishing
-    failure of a lock reaches the same decision; `announce` stores at most one notice per key.
-    The lock is recorded as announced once the notice has committed. A check still in flight (its
-    hit already in allauth's history) never completes a lock, and a password reset clears the
-    history, so failures after it form a new lock.
+    failure of a lock reaches the same decision; `announce` decides whether the lock needs a
+    notice. A check still in flight (its hit already in allauth's history) never completes a
+    lock, and a password reset clears the history, so failures after it form a new lock.
     """
     if not usage.usage:
         return
@@ -100,12 +94,8 @@ def record_finished_failure(
     if len(history) < allowance:
         return
     finished = cache.get_many([_finished_key(slot.cache_key, moment) for moment in history])
-    announced_key = f"{slot.cache_key}:announced"
-    if len(finished) < len(history) or min(history) <= cache.get(announced_key, 0.0):
-        return
-    newest = max(history)
-    announce(hashlib.sha256(f"{slot.cache_key}:{newest!r}".encode()).hexdigest())
-    transaction.on_commit(partial(cache.set, announced_key, newest, slot.cache_duration))
+    if len(finished) == len(history):
+        announce()
 
 
 def check_second_factor(

@@ -318,8 +318,6 @@ class OutboundMail(models.Model):
     transmit_started_at = models.DateTimeField(null=True)
     finished_at = models.DateTimeField(null=True)
     last_error = models.CharField(max_length=30, choices=OutboundMailError, blank=True, default="")
-    # The daily lock a sign-in pause notice announces, so each lock is stored once.
-    lock_key = models.CharField(max_length=64, null=True)
 
     class Meta:
         constraints = (
@@ -328,12 +326,6 @@ class OutboundMail(models.Model):
             choices_check("language", Language),
             choices_check("last_error", OutboundMailError, blank=True),
             lease_check((OutboundMailStatus.SENDING,), kept=(OutboundMailStatus.UNCERTAIN,)),
-            models.UniqueConstraint(fields=("lock_key",), name="%(class)s_lock_key_uniq"),
-            models.CheckConstraint(
-                condition=models.Q(kind=OutboundMailKind.LOGIN_LOCKED, lock_key__isnull=False)
-                | (~models.Q(kind=OutboundMailKind.LOGIN_LOCKED) & models.Q(lock_key__isnull=True)),
-                name="%(class)s_lock_key_chk",
-            ),
             models.CheckConstraint(
                 condition=models.Q(sealed_code="")
                 | models.Q(kind__in=CODED_MAIL, status__in=OPEN_MAIL),
