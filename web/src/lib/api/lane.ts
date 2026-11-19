@@ -28,6 +28,10 @@ export function confirmSessionWith(check: () => Promise<boolean>) {
     sessionHeld = check;
 }
 
+export function sessionStillHeld() {
+    return sessionHeld().catch(() => false);
+}
+
 function unsafe(method: Method) {
     return method !== "GET";
 }
@@ -69,7 +73,7 @@ async function stillSignedIn(request: LaneRequest, error: ApiError) {
         (error.code !== "not_authenticated" && error.code !== "session_ended")
     )
         return false;
-    return sessionHeld().catch(() => false);
+    return sessionStillHeld();
 }
 
 async function attempt(request: LaneRequest, retried = false) {

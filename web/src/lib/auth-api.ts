@@ -1,5 +1,10 @@
 import { ApiError, errorFromResponse } from "./api/errors";
-import { exchange, type Method } from "./api/lane";
+import {
+    exchange,
+    sessionStillHeld,
+    type Exchange,
+    type Method,
+} from "./api/lane";
 import { browserErrors } from "@/i18n/browser";
 
 export type AuthData = {
@@ -30,17 +35,25 @@ export type AuthResult<TData = AuthData> = {
     errors?: { message: string; param?: string; code?: string }[];
 };
 
+function signedOut({ status, data }: Exchange) {
+    return (
+        status === 401 && !(data as AuthResult | null)?.meta?.is_authenticated
+    );
+}
+
 export async function authRequest<TData = AuthData>(
     path: string,
     method: Method,
     body?: unknown,
 ): Promise<AuthResult<TData>> {
     const t = browserErrors();
-    const { status, ok, data } = await exchange({
-        method,
-        url: `/api/auth/browser/v1/${path}`,
-        body,
-    });
+    const request = { method, url: `/api/auth/browser/v1/${path}`, body };
+    let answer = await exchange(request);
+    // A read carrying a key that a reauthentication replaced meanwhile is answered as signed out;
+    // it is repeated once when a session read sent after that answer still shows the session.
+    if (method === "GET" && signedOut(answer) && (await sessionStillHeld()))
+        answer = await exchange(request);
+    const { status, ok, data } = answer;
     if (!data || typeof data !== "object" || Array.isArray(data))
         throw new ApiError(
             ok ? t("invalidResponse") : t("request", { status }),
