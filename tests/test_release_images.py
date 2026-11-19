@@ -21,6 +21,9 @@ PACKAGES = {
 IMAGES = {key: f"{REPOSITORY}/{package}@sha256:{'1' * 64}" for key, package in PACKAGES.items()}
 # A release installed before the release built the broker image ran the public broker.
 FOUR_IMAGES = {key: value for key, value in IMAGES.items() if key != "RABBITMQ_IMAGE"}
+FOUR_IMAGE_RELEASE_BROKER = (
+    "rabbitmq:4.4.0@sha256:1166559c9e77b0208b9d96bfaf265ddbdd491ce3cebb8cf990aabe9274f16d2c"
+)
 PUBLIC_BROKER = (
     "rabbitmq:4.4.1@sha256:183272aa2ff82718cabeef343de8d9a900931ea65fda4e563fed2a6d9efde578"
 )
@@ -64,6 +67,18 @@ def test_each_script_given_the_release_images_takes_every_one_in_release_order(
     if not before:
         exported = " ".join(f"{key}=${index}" for index, key in enumerate(PACKAGES, start=1))
         assert f"export {exported}" in source
+
+
+def test_the_built_broker_starts_on_the_data_of_the_four_image_releases_broker_and_back() -> None:
+    script = (ROOT / "deploy" / "test-broker-rollback.sh").read_text(encoding="utf-8")
+    started = [line for line in script.splitlines() if line.startswith("start_broker ")]
+
+    assert f"\nprevious={FOUR_IMAGE_RELEASE_BROKER}\n" in script
+    assert started == [
+        'start_broker "$previous"',
+        'start_broker "$built"',
+        'start_broker "$previous"',
+    ]
 
 
 @pytest.mark.parametrize(

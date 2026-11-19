@@ -44,6 +44,10 @@ IMAGES: dict[str, tuple[str, tuple[str, ...]]] = {
         "rabbitmq",
         ("deploy/rabbitmq/Dockerfile", ".github/workflows/ci.yml", "README.md"),
     ),
+    "RabbitMQ of the releases before the built broker": (
+        "rabbitmq",
+        ("deploy/test-broker-rollback.sh",),
+    ),
     "SBOM scanner": ("docker/buildkit-syft-scanner", (".github/workflows/ci.yml",)),
     "Skopeo": ("quay.io/containers/skopeo", ("deploy/oci-images.sh",)),
     "Trivy": ("aquasec/trivy", ("deploy/scan-images.sh",)),

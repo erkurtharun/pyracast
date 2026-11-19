@@ -122,6 +122,7 @@ SCANNED = [
     "bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "
     '"$POSTGRES_IMAGE" "$RABBITMQ_IMAGE"',
 ]
+BROKER_ROUND_TRIP = "Move queued work to the built broker and back to the previous public broker"
 HANDED_TO_SMOKE = [
     'echo "POSTGRES_IMAGE=$POSTGRES_IMAGE" >> "$GITHUB_ENV"',
     'echo "RABBITMQ_IMAGE=$RABBITMQ_IMAGE" >> "$GITHUB_ENV"',
@@ -173,6 +174,20 @@ def test_the_compose_smoke_runs_the_five_images_ci_built_and_scanned() -> None:
     assert smoke["run"] == (
         "bash deploy/smoke.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "
         '"$POSTGRES_IMAGE" "$RABBITMQ_IMAGE"'
+    )
+
+
+def test_ci_moves_queued_work_to_the_built_broker_and_back_before_it_keeps_the_images() -> None:
+    deployment = ci_jobs()["deployment"]
+    round_trip = step(deployment, BROKER_ROUND_TRIP)
+
+    assert round_trip["run"] == (
+        'bash deploy/test-broker-rollback.sh pyracast-backend:ci "$RABBITMQ_IMAGE"'
+    )
+    assert (
+        step_index(deployment, "deploy/smoke.sh")
+        < deployment["steps"].index(round_trip)
+        < step_index(deployment, "actions/upload-artifact")
     )
 
 
