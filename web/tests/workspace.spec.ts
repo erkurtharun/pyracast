@@ -520,6 +520,39 @@ test("a date picked while a forecast view switch loads keeps the chosen view", a
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-27");
 });
 
+test("Back to the irradiance view does not keep an archived generation source", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(new Date("2026-03-28T12:00:00Z"));
+    await mockApi(page);
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    const button = (name: string) =>
+        page.getByRole("button", { name, exact: true });
+    await button("Irradiance").click();
+    await expect(page).toHaveURL(/\/forecast\/\?view=irradiance$/);
+    await button("Production").click();
+    await expect(page).toHaveURL(/\/production\/$/);
+    await button("Forecast").click();
+    await expect(page).toHaveURL(/\/forecast\/$/);
+    await page.getByLabel("Data source").selectOption("archived_forecast");
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-28$/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/production\/$/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/forecast\/\?view=irradiance$/);
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-29");
+    await expect(page.getByLabel("Data source")).toHaveValue("auto");
+    await expect(
+        page.getByText(
+            "Choose today or an earlier day for archived forecasts.",
+        ),
+    ).toHaveCount(0);
+});
+
 test("region collection schedule validates and saves distinct local times", async ({
     page,
 }) => {
