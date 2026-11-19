@@ -442,7 +442,12 @@ test("open regional and plant forecasts refresh after new data arrives", async (
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    const irradiance = page.getByRole("button", {
+        name: "Irradiance",
+        exact: true,
+    });
+    await irradiance.click();
+    await expect(irradiance).toHaveAttribute("aria-current", "page");
     await expect(
         page.getByRole("heading", { name: "No forecast for this day yet" }),
     ).toBeVisible();
@@ -454,7 +459,12 @@ test("open regional and plant forecasts refresh after new data arrives", async (
         }),
     ).toBeVisible();
     revised = false;
-    await page.getByRole("button", { name: "Generation", exact: true }).click();
+    const generation = page.getByRole("button", {
+        name: "Generation",
+        exact: true,
+    });
+    await generation.click();
+    await expect(generation).toHaveAttribute("aria-current", "page");
     await expect(
         page.getByRole("heading", { name: "No forecast for this day yet" }),
     ).toBeVisible();

@@ -701,13 +701,15 @@ test("saved reminder fields stay unavailable until the refreshed settings arrive
     await address.fill("custom@example.test");
     await page.getByRole("button", { name: "Save reminders" }).click();
     try {
+        await expect(address).toHaveValue("custom@example.test");
+        await expect(address).toBeDisabled();
         await expect(
-            page.getByText("Loading email reminders…", { exact: true }),
-        ).toBeVisible();
-        await expect(address).toHaveCount(0);
+            page.getByRole("button", { name: "Saving…" }),
+        ).toBeDisabled();
     } finally {
         refresh.resolve();
     }
+    await expect(address).toBeEnabled();
     await expect(address).toHaveValue("custom@example.test");
 });
 
