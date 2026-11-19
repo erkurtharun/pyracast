@@ -1,5 +1,4 @@
 import logging
-from collections.abc import Iterator
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -20,7 +19,7 @@ from django.db.models import (
 )
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
-from pyracast.background.failures import isolate
+from pyracast.background.failures import ItemsFailedError, isolate
 
 logger = logging.getLogger(__name__)
 BATCH_SIZE = 500
@@ -97,32 +96,33 @@ def sweep_accounts(now: datetime) -> None:
 def reclaim_abandoned_signups(now: datetime) -> int:
     cutoff = now - ABANDONED_AFTER
     candidates = _abandoned(cutoff).order_by("pk").values_list("pk", flat=True)
-    reclaimed = 0
-
-    def scan() -> Iterator[int]:
-        # The scan moves past kept and failing candidates, which stay eligible for the next run,
-        # so they never hold back later ones.
-        after = 0
-        while reclaimed < BATCH_SIZE and (
-            page := list(candidates.filter(pk__gt=after)[: BATCH_SIZE - reclaimed])
-        ):
-            yield from page
-            after = page[-1]
+    reclaimed, failed, after = 0, 0, 0
 
     def reclaim(user_id: int) -> None:
         nonlocal reclaimed
         reclaimed += reclaim_signup(user_id, cutoff)
 
     try:
-        isolate(
-            scan(),
-            reclaim,
-            logger=logger,
-            event="signup_reclaim_failed",
-            name=lambda user_id: f"account:{user_id}",
-            back_off=lambda _user_id: None,
-        )
+        # The scan moves past kept and failing candidates, which stay eligible for the next run,
+        # so they never hold back later ones.
+        while reclaimed < BATCH_SIZE and (
+            page := list(candidates.filter(pk__gt=after)[: BATCH_SIZE - reclaimed])
+        ):
+            after = page[-1]
+            try:
+                isolate(
+                    page,
+                    reclaim,
+                    logger=logger,
+                    event="signup_reclaim_failed",
+                    name=lambda user_id: f"account:{user_id}",
+                    back_off=lambda _user_id: None,
+                )
+            except ItemsFailedError as error:
+                failed += error.count
     finally:
         if reclaimed:
             logger.info("abandoned_signups_reclaimed count=%s", reclaimed)
+    if failed:
+        raise ItemsFailedError(failed)
     return reclaimed
