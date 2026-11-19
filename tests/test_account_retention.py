@@ -1,3 +1,4 @@
+import contextlib
 from collections.abc import Callable
 from concurrent.futures import Future
 from datetime import datetime, timedelta
@@ -9,10 +10,13 @@ from allauth.socialaccount.models import SocialAccount
 from allauth.usersessions.models import UserSession
 from django.contrib.auth.models import User
 from django.contrib.sessions.models import Session
+from django.core.management import CommandError, call_command
 from django.db.models.deletion import Collector
 from django.test import override_settings
 from django.utils import timezone
+from dramatiq.brokers.stub import StubBroker
 
+from pyracast import trash
 from pyracast.accounts import headless, retention
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import (
@@ -23,9 +27,15 @@ from pyracast.accounts.models import (
     WorkspaceRole,
 )
 from pyracast.forecasts.management.commands import dispatch
+from pyracast.forecasts.models import DispatcherStatus
+from pyracast.plants.models import Plant
+from pyracast.regions.models import Region
+from pyracast.trash import RETENTION, trash_region
 from tests.support.account_sessions import alongside, browser, elsewhere, session_user
 from tests.support.auth_lifecycle import submit
 from tests.support.company_registration import mailed_code, signup
+from tests.support.domain import NOW
+from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 LOCAL_MAIL = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
@@ -310,3 +320,101 @@ def test_signup_reclaim_removes_a_bounded_batch_per_run(monkeypatch: pytest.Monk
     assert counts == [2, 1, 0]
     assert not User.objects.exists()
     assert not Tenant.objects.exists()
+
+
+def dispatch_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dispatch, "make_broker", StubBroker)
+    with contextlib.suppress(CommandError):
+        call_command("dispatch")
+
+
+def retention_error() -> str:
+    return DispatcherStatus.objects.get(phase="retention").last_error
+
+
+def expired_region(monkeypatch: pytest.MonkeyPatch, *, failing: bool) -> Region:
+    system, _ = make_plant(monkeypatch)
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    Region.objects.update(deleted_at=NOW - RETENTION - timedelta(days=1))
+    if failing:
+
+        def purge(region: Region, plants: list[Plant], budget: trash._Budget) -> None:
+            raise RuntimeError("private purge detail")
+
+        monkeypatch.setattr(trash, "_purge_region", purge)
+    return system.region
+
+
+def failing_session_step(now: datetime) -> int:
+    raise RuntimeError("private session detail")
+
+
+def test_a_failing_region_purge_still_ends_sessions_and_reclaims_signups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    region = expired_region(monkeypatch, failing=True)
+    session("expired", NOW - timedelta(seconds=1))
+    abandoned = signup_account("abandoned")
+
+    dispatch_once(monkeypatch)
+
+    assert Region.objects.filter(pk=region.pk).exists()
+    assert not Session.objects.exists()
+    assert not User.objects.filter(pk=abandoned.pk).exists()
+    assert retention_error() == "items_failed:1"
+
+
+def test_a_failing_account_sweep_keeps_the_committed_region_purge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    region = expired_region(monkeypatch, failing=False)
+    monkeypatch.setattr(retention, "end_expired_sessions", failing_session_step)
+
+    dispatch_once(monkeypatch)
+
+    assert not Region.objects.filter(pk=region.pk).exists()
+    assert retention_error() == "RuntimeError"
+
+
+def test_when_purge_items_and_the_account_sweep_fail_the_sweep_failure_is_recorded(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    region = expired_region(monkeypatch, failing=True)
+    monkeypatch.setattr(retention, "end_expired_sessions", failing_session_step)
+
+    dispatch_once(monkeypatch)
+
+    assert retention_error() == "RuntimeError"
+    assert f"retention_purge_failed item=region:{region.pk}" in pyracast_logs.text
+    assert "dispatch_phase_failed phase=retention error_type=RuntimeError" in pyracast_logs.text
+    assert "private" not in pyracast_logs.text
+
+
+def test_a_failing_signup_reclaim_does_not_stop_the_others_and_is_retried(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    failing = signup_account("failing-owner")
+    signup_account("later-owner")
+    session("expired", timezone.now() - timedelta(seconds=1))
+    original = retention.reclaim_signup
+
+    def reclaim(user_id: int, cutoff: datetime) -> bool:
+        if user_id == failing.pk:
+            raise RuntimeError(f"private {failing.email} {failing.username}")
+        return original(user_id, cutoff)
+
+    monkeypatch.setattr(retention, "reclaim_signup", reclaim)
+    dispatch_once(monkeypatch)
+
+    assert list(User.objects.values_list("pk", flat=True)) == [failing.pk]
+    assert not Session.objects.exists()
+    assert retention_error() == "items_failed:1"
+    assert f"signup_reclaim_failed item=account:{failing.pk}" in pyracast_logs.text
+    assert "private" not in pyracast_logs.text
+    assert "failing-owner" not in pyracast_logs.text
+
+    monkeypatch.setattr(retention, "reclaim_signup", original)
+    dispatch_once(monkeypatch)
+
+    assert not User.objects.exists()
+    assert retention_error() == ""
