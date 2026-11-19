@@ -1465,6 +1465,64 @@ test("recycle bin disables expired records", async ({ page }) => {
     expect(scan.violations).toEqual([]);
 });
 
+test("a failed reload after a restore keeps the remaining plants until a retry loads them", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const deleted = [91, 92].map((id) => ({
+        id,
+        name: `Deleted plant ${id}`,
+        deleted_at: "2026-11-10T12:00:00Z",
+        purge_after: "2026-12-10T12:00:00Z",
+        can_restore: true,
+    }));
+    let restored = false;
+    let unavailable = false;
+    await page.route("**/trash/regions/", (route) =>
+        unavailable
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", "Recycle bin is busy."),
+              })
+            : route.fulfill({
+                  json: paged(restored ? deleted.slice(1) : deleted),
+              }),
+    );
+    await page.route("**/regions/91/restore/", (route) => {
+        restored = true;
+        unavailable = true;
+        return route.fulfill({ json: { ...region, id: 91 } });
+    });
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: "Recycle bin", exact: true })
+        .click();
+    await page
+        .getByRole("button", { name: "Restore Deleted plant 91", exact: true })
+        .click();
+    const notice = page
+        .getByRole("alert")
+        .filter({ hasText: "Could not refresh" });
+    await expect(notice).toContainText("Recycle bin is busy.");
+    const remaining = page.getByRole("button", {
+        name: "Restore Deleted plant 92",
+        exact: true,
+    });
+    await expect(remaining).toBeVisible();
+    unavailable = false;
+    await notice
+        .getByRole("button", { name: "Try again", exact: true })
+        .click();
+    await expect(notice).toHaveCount(0);
+    await expect(remaining).toBeVisible();
+    await expect(
+        page.getByRole("button", {
+            name: "Restore Deleted plant 91",
+            exact: true,
+        }),
+    ).toHaveCount(0);
+});
+
 test("recycle bin ignores a prior workspace response and restores only in the selected workspace", async ({
     page,
 }) => {

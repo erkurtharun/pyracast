@@ -890,6 +890,60 @@ for (const removal of ["decision", "concurrent"] as const) {
     });
 }
 
+test("a poll that was already reading cannot bring a decided request back to the first page", async ({
+    page,
+}) => {
+    await page.clock.install({ time: new Date("2026-11-10T12:00:00Z") });
+    await mockApi(page);
+    let decided = false;
+    let holding = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let reading!: () => void;
+    const held = new Promise<void>((resolve) => {
+        reading = resolve;
+    });
+    await page.route("**/change-requests/?*", async (route) => {
+        const answer = paged(decided ? [] : [proposal(1)]);
+        if (holding) {
+            holding = false;
+            reading();
+            await gate;
+        }
+        await route.fulfill({ json: answer }).catch(() => {});
+    });
+    await page.route("**/change-requests/1/", (route) =>
+        route.fulfill({ json: proposal(1) }),
+    );
+    await page.route("**/change-requests/1/approve/", (route) => {
+        decided = true;
+        return route.fulfill({
+            json: { ...proposal(1), status: "approved", can_review: false },
+        });
+    });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /^Inbox/ }).click();
+    await page
+        .getByRole("button", { name: "Review details", exact: true })
+        .click();
+    holding = true;
+    await page.clock.runFor(30_000);
+    await held;
+    await page
+        .getByRole("button", { name: "Approve and apply", exact: true })
+        .click();
+    await expect(
+        page.getByRole("status").filter({ hasText: /^Approved$/ }),
+    ).toBeVisible();
+    release();
+    await expect(
+        page.getByText("No submissions here.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".inbox-card")).toHaveCount(0);
+});
+
 test("the inbox label counts several updates in the plural", async ({
     page,
 }) => {

@@ -1,6 +1,7 @@
 import { expect, test } from "./support/test";
 import { mockApi } from "./support/workspace";
 import AxeBuilder from "@axe-core/playwright";
+import { errorBody } from "./support/errors";
 
 test("available historical model days appear without empty grid rows", async ({
     page,
@@ -173,4 +174,85 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
     await expect(comparison.getByRole("listitem")).toHaveText([
         "Configuration was not available before this day: 30 days",
     ]);
+});
+
+test("a failed refresh on return keeps the comparison until a retry loads it", async ({
+    page,
+}) => {
+    await page.clock.install({ time: new Date("2026-11-11T12:00:00Z") });
+    await mockApi(page);
+    let unavailable = false;
+    await page.route("**/plants/21/performance/**", (route) =>
+        unavailable
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", "Comparison service is busy."),
+              })
+            : route.fulfill({
+                  json: {
+                      comparison: "archived_forecast",
+                      start_date: "2026-11-09",
+                      end_date: "2026-11-10",
+                      matched_days: 1,
+                      requested_days: 2,
+                      missing_days: 1,
+                      metrics: {
+                          daily_mae_mwh: 2,
+                          daily_bias_mwh: 2,
+                          source_positive_mae_mw: 0.2,
+                      },
+                      baseline_metrics: { daily_mae_mwh: 3 },
+                      days: [
+                          {
+                              date: "2026-11-09",
+                              status: "missing",
+                              reason: "forecast_not_available",
+                              measured_energy_mwh: null,
+                              predicted_energy_mwh: null,
+                              error_mwh: null,
+                          },
+                          {
+                              date: "2026-11-10",
+                              status: "matched",
+                              reason: null,
+                              measured_energy_mwh: 10,
+                              predicted_energy_mwh: 12,
+                              error_mwh: 2,
+                          },
+                      ],
+                  },
+              }),
+    );
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
+    await page.getByRole("button", { name: "Comparison", exact: true }).click();
+    const missing = page.locator(".stat").filter({ hasText: "Missing days" });
+    await expect(missing).toContainText("1");
+    await page.clock.runFor(5_000);
+    unavailable = true;
+    const failed = page.waitForResponse(
+        (response) =>
+            response.url().includes("/performance/") &&
+            response.status() === 503,
+    );
+    await page.evaluate(() =>
+        document.dispatchEvent(
+            new Event("visibilitychange", { bubbles: true }),
+        ),
+    );
+    await failed;
+    const notice = page
+        .getByRole("alert")
+        .filter({ hasText: "Could not refresh" });
+    await expect(notice).toContainText("Comparison service is busy.");
+    await expect(missing).toContainText("1");
+    unavailable = false;
+    await notice
+        .getByRole("button", { name: "Try again", exact: true })
+        .click();
+    await expect(notice).toHaveCount(0);
+    await expect(missing).toContainText("1");
 });
