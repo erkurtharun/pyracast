@@ -34,6 +34,16 @@ export function OwnPendingRequests({
     return <Notice>{t("pendingContext", { count })}</Notice>;
 }
 
+function firstPending(tenantId: number) {
+    return {
+        path: "/api/tenants/{tenant_id}/change-requests/",
+        options: {
+            path: { tenant_id: tenantId },
+            query: { scope: "pending", page: 1 },
+        },
+    };
+}
+
 export function OperationalInbox({ tenant }: { tenant: Tenant }) {
     const t = useTranslations("ChangeRequests");
     const refresh = useRefresh();
@@ -41,8 +51,8 @@ export function OperationalInbox({ tenant }: { tenant: Tenant }) {
     const [update, setUpdate] = useState<{
         revision: number;
         outcome: Decision | null;
-        reset: boolean;
-    }>({ revision: 0, outcome: null, reset: false });
+        reuse: boolean;
+    }>({ revision: 0, outcome: null, reuse: false });
     const feedback = useRef<HTMLDivElement>(null);
     const [page, setPage] = useState(1);
     const admin = tenant.role === "admin";
@@ -53,25 +63,19 @@ export function OperationalInbox({ tenant }: { tenant: Tenant }) {
             outcome !== "seen" &&
             effectiveScope === "pending";
         if (reset) setPage(1);
+        // A first-page read already running when the decision was answered may predate it; only one started afterwards is reused.
+        const reuse = reset && !refresh.reading(firstPending(tenant.id));
         setUpdate((value) => ({
             revision: value.revision + 1,
             outcome,
-            reset,
+            reuse,
         }));
     };
     useEffect(() => {
         if (update.revision > 0)
             void refresh.workspace(
                 tenant.id,
-                update.reset
-                    ? {
-                          path: "/api/tenants/{tenant_id}/change-requests/",
-                          options: {
-                              path: { tenant_id: tenant.id },
-                              query: { scope: "pending", page: 1 },
-                          },
-                      }
-                    : undefined,
+                update.reuse ? firstPending(tenant.id) : undefined,
             );
         if (update.outcome) feedback.current?.focus();
     }, [update, refresh, tenant.id]);

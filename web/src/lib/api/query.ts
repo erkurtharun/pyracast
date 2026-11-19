@@ -149,7 +149,7 @@ export function useApiList<P extends ListPath>(
     );
 }
 
-// A query under `mounted` that is already reading was mounted after the change, so its read stands instead of being cancelled and repeated.
+// Pass `mounted` only when no read of it was running as the change was answered: a read running now started afterwards and stands instead of being cancelled and repeated.
 export function invalidate(
     client: QueryClient,
     queryKey: QueryKey,
@@ -173,19 +173,17 @@ export function useRefresh() {
     return useMemo(() => {
         const refresh = (queryKey: QueryKey) =>
             client.invalidateQueries({ queryKey });
+        const key = (request: Request) =>
+            keys.request(owner, request.path, request.options, locale);
         return {
+            reading: (request: Request) =>
+                client.isFetching({ queryKey: key(request) }) > 0,
             workspace: (tenant: number, mounted?: Request) =>
                 Promise.all([
                     invalidate(
                         client,
                         keys.workspace(owner, tenant),
-                        mounted &&
-                            keys.request(
-                                owner,
-                                mounted.path,
-                                mounted.options,
-                                locale,
-                            ),
+                        mounted && key(mounted),
                     ),
                     refresh(keys.path(owner, "/api/tenants/")),
                 ]),

@@ -8,7 +8,7 @@ import { api } from "@/lib/api/client";
 import { useApiList } from "@/lib/api/query";
 import { useProposalKey } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
-import { ActionForm, Field, Notice, Select, Tag } from "./ui";
+import { ActionForm, Field, Notice, RefreshFailed, Select, Tag } from "./ui";
 import { CsvDownload } from "./csv-download";
 
 type Outage = components["schemas"]["IncidentOutput"];
@@ -232,12 +232,15 @@ export function Outages({
                     </div>
                 </section>
             )}
-            {resource.loading ? (
-                <p role="status">{t("loadingOutages")}</p>
-            ) : resource.error ? (
-                <Notice error>{resource.error}</Notice>
+            {resource.data === undefined ? (
+                resource.error ? (
+                    <Notice error>{resource.error}</Notice>
+                ) : (
+                    <p role="status">{t("loadingOutages")}</p>
+                )
             ) : (
                 <>
+                    <RefreshFailed resource={resource} />
                     <div className="toolbar">
                         <CsvDownload
                             label={t("downloadOutagesCSV")}

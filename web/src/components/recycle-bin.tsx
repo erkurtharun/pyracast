@@ -5,7 +5,7 @@ import type { RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import type { components } from "@/lib/schema";
 import { useApiList, useRefresh } from "@/lib/api/query";
-import { Empty, Notice } from "./ui";
+import { Empty, Notice, RefreshFailed } from "./ui";
 
 type DeletedRegion = components["schemas"]["TrashedRegionOutput"];
 
@@ -128,10 +128,13 @@ export function RecycleBin({ tenant }: { tenant: number }) {
             {message && <Notice>{message}</Notice>}
             <section className="panel">
                 <h2>{t("deletedPlants")}</h2>
-                {regions.loading ? (
-                    <p role="status">{t("loadingDeletedPlants")}</p>
-                ) : regions.error ? (
-                    <Notice error>{regions.error}</Notice>
+                <RefreshFailed resource={regions} />
+                {regions.data === undefined ? (
+                    regions.error ? (
+                        <Notice error>{regions.error}</Notice>
+                    ) : (
+                        <p role="status">{t("loadingDeletedPlants")}</p>
+                    )
                 ) : rows.length ? (
                     <ul className="trash-list" aria-label={t("deletedPlants")}>
                         {rows.map((row) => (

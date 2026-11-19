@@ -1,10 +1,9 @@
 "use client";
 import { useTranslations, useFormatter } from "next-intl";
-import { useState } from "react";
 import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { useApiList, useRefresh } from "@/lib/api/query";
-import { ActionForm, Field, Notice, Tag } from "./ui";
+import { ActionForm, Field, Notice, RefreshFailed, Tag } from "./ui";
 
 export function RegionSettings({
     region,
@@ -14,22 +13,12 @@ export function RegionSettings({
     scope: RegionScope;
 }) {
     const t = useTranslations("RegionSettings");
-    const refresh = useRefresh();
-    const [version, setVersion] = useState(0);
     return (
         <section className="panel">
             <h2>{t("plantLocation")}</h2>
             <details>
                 <summary>{t("requestLocationChange")}</summary>
-                <LocationRequests
-                    key={version}
-                    region={region}
-                    scope={scope}
-                    onSubmitted={async () => {
-                        await refresh.workspace(scope.tenant_id);
-                        setVersion((value) => value + 1);
-                    }}
-                />
+                <LocationRequests region={region} scope={scope} />
             </details>
         </section>
     );
@@ -38,14 +27,13 @@ export function RegionSettings({
 function LocationRequests({
     region,
     scope,
-    onSubmitted,
 }: {
     region: Region;
     scope: RegionScope;
-    onSubmitted: () => void;
 }) {
     const t = useTranslations("RegionSettings");
     const format = useFormatter();
+    const refresh = useRefresh();
 
     const requests = useApiList(
         "/api/tenants/{tenant_id}/regions/{region_id}/location-change-requests/",
@@ -70,10 +58,13 @@ function LocationRequests({
                 })}
             </p>
             <p>{t("approvalHelp")}</p>
-            {requests.loading ? (
-                <p role="status">{t("loadingRequests")}</p>
-            ) : requests.error ? (
-                <Notice error>{requests.error}</Notice>
+            <RefreshFailed resource={requests} />
+            {requests.data === undefined ? (
+                requests.error ? (
+                    <Notice error>{requests.error}</Notice>
+                ) : (
+                    <p role="status">{t("loadingRequests")}</p>
+                )
             ) : pending ? (
                 <div>
                     <Tag>{pending.status}</Tag>{" "}
@@ -108,7 +99,7 @@ function LocationRequests({
                                 },
                             },
                         );
-                        onSubmitted();
+                        await refresh.workspace(scope.tenant_id);
                     }}
                 >
                     <div className="form-grid">

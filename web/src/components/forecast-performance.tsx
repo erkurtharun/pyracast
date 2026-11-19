@@ -7,7 +7,7 @@ import { localDay } from "./data-source";
 import type { PlantScope } from "@/lib/api";
 import type { RequestOptions } from "@/lib/api/client";
 import { useApiQuery } from "@/lib/api/query";
-import { Notice, Stat } from "./ui";
+import { Notice, RefreshFailed, Stat } from "./ui";
 import { CsvDownload } from "./csv-download";
 
 type PerformanceQuery = RequestOptions<
@@ -181,13 +181,16 @@ function PerformanceResults({
     }
     return (
         <>
-            {resource.loading ? (
-                <p role="status">{t("loading_performance")}</p>
-            ) : resource.error ? (
-                <Notice error>{resource.error}</Notice>
+            {resource.data === undefined ? (
+                resource.error ? (
+                    <Notice error>{resource.error}</Notice>
+                ) : (
+                    <p role="status">{t("loading_performance")}</p>
+                )
             ) : (
                 resource.data && (
                     <>
+                        <RefreshFailed resource={resource} />
                         <div className="toolbar">
                             <CsvDownload
                                 filename={`performance-${resource.data.start_date}-${resource.data.end_date}`}
