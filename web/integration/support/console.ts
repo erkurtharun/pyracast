@@ -59,10 +59,11 @@ export async function signInToConsole(
     await expect(
         page.getByRole("heading", { name: "Two-factor authentication" }),
     ).toBeVisible();
-    const signInPeriod = Math.floor(Date.now() / 30_000);
+    const signedInAt = Date.now();
+    const signInPeriod = Math.floor(signedInAt / 30_000);
     await page
         .getByLabel("Authenticator or recovery code")
-        .fill(totp(totpSeed));
+        .fill(totp(totpSeed, signedInAt));
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(page).toHaveURL("/admin/");
     // Console writes need a confirmation after sign-in, and a code is accepted only once.
