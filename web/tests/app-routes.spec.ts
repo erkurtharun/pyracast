@@ -164,19 +164,24 @@ test("the document keeps its title while the workspace changes address", async (
     page,
 }) => {
     await mockApi(page);
-    await page.goto("/app/w/1/");
-    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
-    await page.evaluate(() => {
-        const untitled: string[] = [];
-        Object.assign(window, { untitled });
+    await page.addInitScript(() => {
+        const titles: string[] = [];
+        Object.assign(window, { titles });
         new MutationObserver(() => {
-            if (!document.title) untitled.push(location.pathname);
+            const count = document.querySelectorAll("title").length;
+            if (count || titles.length)
+                titles.push(`${count}:${document.title}`);
         }).observe(document, {
             subtree: true,
             childList: true,
             characterData: true,
         });
     });
+    const response = await page.goto("/app/w/1/");
+    expect(
+        (await response!.text()).match(/<title>[^<]+<\/title>/g),
+    ).toHaveLength(1);
+    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
     await page.getByRole("button", { name: /East array/ }).click();
     await expect(page).toHaveURL(/\/plants\/\d+\/forecast\/$/);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -186,11 +191,18 @@ test("the document keeps its title while the workspace changes address", async (
     await page.getByRole("button", { name: "Account" }).click();
     await expect(page).toHaveURL("/app/account/");
     await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    const titles = await page.evaluate(
+        () => (window as unknown as { titles: string[] }).titles,
+    );
+    expect(titles.length).toBeGreaterThan(0);
     expect(
-        await page.evaluate(
-            () => (window as unknown as { untitled: string[] }).untitled,
-        ),
+        titles.filter((title) => title !== "1:Pyracast workspace | Pyracast"),
     ).toEqual([]);
+    await page.goto("/app/w/1/plants/11/unknown/");
+    await expect(
+        page.getByRole("heading", { name: "Page not found" }),
+    ).toBeVisible();
+    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
     expect(await page.locator("title").count()).toBe(1);
 });
 

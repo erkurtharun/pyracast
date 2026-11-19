@@ -196,7 +196,7 @@ test("a portfolio of 101 plants over three pages keeps the request budget while 
     await page.route(
         (url) => url.pathname === "/api/tenants/1/sites/",
         (route) => {
-            if (++siteReads === 4) polled();
+            if (++siteReads === 6) polled();
             const number = Number(
                 new URL(route.request().url()).searchParams.get("page") ?? "1",
             );
@@ -220,5 +220,6 @@ test("a portfolio of 101 plants over three pages keeps the request budget while 
     expect(siteReads).toBe(3);
     await page.clock.runFor(FIVE_MINUTES);
     await pollRead;
+    expect(siteReads).toBe(6);
     expect(requests.value).toBeLessThanOrEqual(25);
 });
