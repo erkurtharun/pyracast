@@ -5,7 +5,7 @@ import re
 import tarfile
 from pathlib import Path
 
-IMAGES = ("backend", "web", "gateway", "postgres")
+IMAGES = ("backend", "web", "gateway", "postgres", "rabbitmq")
 INDEX = "application/vnd.oci.image.index.v1+json"
 MANIFEST = "application/vnd.oci.image.manifest.v1+json"
 PROVENANCE = {"https://slsa.dev/provenance/v0.2", "https://slsa.dev/provenance/v1"}

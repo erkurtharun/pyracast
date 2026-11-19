@@ -6,17 +6,18 @@ refuse() {
   echo "$1" >&2
   exit 2
 }
-[[ $# == 7 && $EUID == 0 ]] || refuse 'Usage (root): install-release.sh SHA BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE BUNDLE MIGRATION_JSON'
+[[ $# == 8 && $EUID == 0 ]] || refuse 'Usage (root): install-release.sh SHA BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE RABBITMQ_IMAGE BUNDLE MIGRATION_JSON'
 revision=$1
 backend=$2
 web=$3
 gateway=$4
 postgres=$5
-bundle=$(realpath "$6")
-migration=$(realpath "$7")
+rabbitmq=$6
+bundle=$(realpath "$7")
+migration=$(realpath "$8")
 [[ $revision =~ ^[0-9a-f]{40}$ ]] || refuse 'Invalid revision; expected a full lowercase commit SHA.'
 repository='[a-z0-9-]+-docker\.pkg\.dev/[a-z0-9-]+/[a-z0-9_-]+'
-for image in backend web gateway postgres; do
+for image in backend web gateway postgres rabbitmq; do
   [[ ${!image} =~ ^${repository}/${image}@sha256:[0-9a-f]{64}$ ]] \
     || refuse "Invalid $image image reference; expected an Artifact Registry digest."
 done
@@ -152,7 +153,7 @@ cleanup() {
 trap cleanup EXIT
 
 # A rebuild of a live revision has new digests and so its own directory; the live one is never written.
-references=$(printf '%s\n' "$backend" "$web" "$gateway" "$postgres" | sha256sum)
+references=$(printf '%s\n' "$backend" "$web" "$gateway" "$postgres" "$rabbitmq" | sha256sum)
 release="/opt/pyracast/releases/$revision-${references:0:12}"
 if [[ $previous == "$release" ]]; then
   refuse "Release $revision with these images is already live; nothing was changed."
@@ -162,7 +163,7 @@ mkdir -p "$release"
 cp -a "$bundle/deploy" "$release/"
 chown -R root:root "$release"
 chmod -R go-w "$release"
-python3 "$release/deploy/release_environment.py" /etc/pyracast/host.json "$release/deploy/release.env" "$secrets" "$backend" "$web" "$gateway" "$postgres"
+python3 "$release/deploy/release_environment.py" /etc/pyracast/host.json "$release/deploy/release.env" "$secrets" "$backend" "$web" "$gateway" "$postgres" "$rabbitmq"
 site_address=$(sed -n 's/^SITE_ADDRESS=//p' "$release/deploy/release.env")
 bash "$release/deploy/install-units.sh" verify "$release"
 python3 "$release/deploy/runtime_secrets.py" /etc/pyracast/host.json

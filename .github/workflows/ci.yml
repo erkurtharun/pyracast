@@ -111,14 +111,28 @@ jobs:
           labels: org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=postgres-linux-amd64,timeout=2m
           cache-to: type=gha,scope=postgres-linux-amd64,mode=max,ignore-error=true,timeout=2m
+      - name: Build the production RabbitMQ image
+        id: rabbitmq
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/rabbitmq
+          platforms: linux/amd64
+          tags: pyracast-rabbitmq:ci
+          outputs: type=oci,dest=${{ runner.temp }}/release-images/rabbitmq.oci.tar
+          provenance: mode=max
+          sbom: generator=docker/buildkit-syft-scanner:stable-1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=rabbitmq-linux-amd64,timeout=2m
+          cache-to: type=gha,scope=rabbitmq-linux-amd64,mode=max,ignore-error=true,timeout=2m
       - name: Bind the image archives to this exact CI run
         env:
           BACKEND_DIGEST: ${{ steps.backend.outputs.digest }}
           WEB_DIGEST: ${{ steps.web.outputs.digest }}
           GATEWAY_DIGEST: ${{ steps.gateway.outputs.digest }}
           POSTGRES_DIGEST: ${{ steps.postgres.outputs.digest }}
+          RABBITMQ_DIGEST: ${{ steps.rabbitmq.outputs.digest }}
         run: |
-          for image in backend web gateway postgres; do
+          for image in backend web gateway postgres rabbitmq; do
             variable="${image^^}_DIGEST"
             printf '%s\n' "${!variable}" > "$RUNNER_TEMP/release-images/$image.digest"
           done
@@ -127,11 +141,14 @@ jobs:
       - name: Scan every image; block every high or critical vulnerability
         run: |
           POSTGRES_IMAGE=$(docker image inspect pyracast-postgres:ci --format '{{.Id}}')
+          RABBITMQ_IMAGE=$(docker image inspect pyracast-rabbitmq:ci --format '{{.Id}}')
           [[ "$POSTGRES_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$RABBITMQ_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "POSTGRES_IMAGE=$POSTGRES_IMAGE" >> "$GITHUB_ENV"
-          bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE"
+          echo "RABBITMQ_IMAGE=$RABBITMQ_IMAGE" >> "$GITHUB_ENV"
+          bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE" "$RABBITMQ_IMAGE"
       - name: Exercise the production images and Compose boundary
-        run: bash deploy/smoke.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE"
+        run: bash deploy/smoke.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE" "$RABBITMQ_IMAGE"
       - name: Retain tested main images for the release
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

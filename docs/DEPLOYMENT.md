@@ -117,17 +117,21 @@ unused root privilege-switching helper removed. PostgreSQL always runs as UID/GI
 70. Alpine uses musl rather than glibc; a new database uses its own locale behavior.
 Do not mount an existing Debian database directory into this image; use a tested
 logical dump and restore when moving existing data.
+`deploy/rabbitmq/Dockerfile` is the official RabbitMQ image without the base's `pebble`
+service manager, which the broker never runs but the scan counts; no production image
+comes from a public registry.
 
 Artifact Registry SHA tags locate builds; deployment, scanning and smoke tests use
 the resolved immutable digest. Tags remain mutable so cleanup can remove old
 artifacts. The policy selects versions older than 30 days for deletion, retains
 the 20 newest versions of each package and always keeps `production` tags. Image
 indexes, SBOMs and provenance can consume multiple versions per release; 20
-versions does not mean 20 complete releases. Release reads only the four image
-identities from the VM's current `release.env`, validates their repository and
+versions does not mean 20 complete releases. Release reads only the image
+identities from the VM's current `release.env` (four for a release from before the
+built broker image, which ran the public one), validates their repository and
 digests and verifies `production` retention tags before publishing. Access or
 malformed-release errors stop the release; only an absent current release is
-treated as first deployment. Successful deployment moves the four retention tags
+treated as first deployment. Successful deployment moves the five retention tags
 to the verified new digests. This preserves an older running version even after
 many failed builds. Cleanup starts in dry-run mode. Inspect its results and verify
 the live retention tags before setting `artifact_cleanup_dry_run = false` in
@@ -351,9 +355,9 @@ successful `main` CI runs trigger it automatically. The workflow:
    ends as a skip; only the deploy job waits for another release, and it checks `main`
    again just before the transfer. A run that `main` passes after the scan's check
    therefore ends cancelled, not skipped, and transfers nothing.
-2. Publishes the backend, web, gateway and PostgreSQL images without rebuilding. OCI
-   digests, SBOM and provenance are preserved; all four release references are
-   immutable.
+2. Publishes the backend, web, gateway, PostgreSQL and RabbitMQ images without
+   rebuilding. OCI digests, SBOM and provenance are preserved; all five release
+   references are immutable.
 3. Transfers the release through IAP using a short-lived OIDC identity and starts the
    installer in the transient unit `pyracast-release-<sha>-<run>-<attempt>.service`,
    so a cancelled job or a dropped tunnel does not stop it; the job follows its journal
@@ -780,7 +784,7 @@ release's directory and images for a reviewed rollback.
 
 ## Verification boundary
 
-`deploy/smoke.sh BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE` runs the actual production Compose
+`deploy/smoke.sh BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE RABBITMQ_IMAGE` runs the actual production Compose
 services with disposable PostgreSQL, volumes and locally issued TLS certificates.
 HTTPS checks validate the certificate chain and hostname. It provisions the database
 twice, changes both roles' passwords while the server logs, samples and parses every

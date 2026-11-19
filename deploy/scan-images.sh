@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-[[ $# == 4 ]] || { echo 'Usage: scan-images.sh BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE' >&2; exit 2; }
+[[ $# == 5 ]] || { echo 'Usage: scan-images.sh BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE RABBITMQ_IMAGE' >&2; exit 2; }
 root=$(cd "$(dirname "$0")/.." && pwd)
 reports=$(mktemp -d)
 cache="pyracast-trivy-${GITHUB_RUN_ID:-local}-$$"
@@ -9,7 +9,7 @@ cleanup() {
   rm -rf -- "$reports"
 }
 trap cleanup EXIT
-export BACKEND_IMAGE=$1 WEB_IMAGE=$2 GATEWAY_IMAGE=$3 POSTGRES_IMAGE=$4 SITE_ADDRESS=scan.invalid ACME_EMAIL=scan@example.com
+export BACKEND_IMAGE=$1 WEB_IMAGE=$2 GATEWAY_IMAGE=$3 POSTGRES_IMAGE=$4 RABBITMQ_IMAGE=$5 SITE_ADDRESS=scan.invalid ACME_EMAIL=scan@example.com
 export DATABASE_ENV_FILE=/dev/null RUNTIME_ENV_FILE=/dev/null BROKER_ENV_FILE=/dev/null MIGRATION_ENV_FILE=/dev/null
 docker compose --env-file /dev/null -f "$root/deploy/compose.yaml" config --format json >"$reports/compose.json"
 docker volume create "$cache" >/dev/null
@@ -19,12 +19,6 @@ for service in backend web gateway rabbitmq postgres; do
     web) image=$WEB_IMAGE ;;
     *) image=$(jq -er --arg service "$service" '.services[$service].image' "$reports/compose.json") ;;
   esac
-  # Only RabbitMQ comes from a public registry; the release builds every other image itself.
-  if [[ $service == rabbitmq && ! $image =~ @sha256:[0-9a-f]{64}$ ]]; then
-    echo "Pin the $service image to an immutable digest." >&2
-    exit 1
-  fi
-  if ! docker image inspect "$image" >/dev/null 2>&1; then docker pull "$image"; fi
   identity=$(docker image inspect "$image" --format '{{.Id}}')
   printf '%s\n' "$identity" >"$reports/$service.image"
   docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$reports:/reports" -v "$cache:/cache" \

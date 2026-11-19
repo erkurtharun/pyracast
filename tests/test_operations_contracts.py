@@ -876,7 +876,8 @@ def test_each_release_reads_the_secrets_staged_for_it() -> None:
     assert f'secrets="{runtime_secrets.SECRETS.as_posix()}/${{release##*/}}"' in script
     assert (
         'python3 "$release/deploy/release_environment.py" /etc/pyracast/host.json '
-        '"$release/deploy/release.env" "$secrets" "$backend" "$web" "$gateway" "$postgres"\n'
+        '"$release/deploy/release.env" "$secrets" "$backend" "$web" "$gateway" "$postgres" '
+        '"$rabbitmq"\n'
     ) in script
     assert "/run/pyracast/runtime.env" not in script
     assert "environment_files" not in script

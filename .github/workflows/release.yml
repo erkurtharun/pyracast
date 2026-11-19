@@ -175,8 +175,10 @@ jobs:
       - name: Scan every image; block every high or critical vulnerability
         run: |
           POSTGRES_IMAGE=$(docker image inspect pyracast-postgres:ci --format '{{.Id}}')
+          RABBITMQ_IMAGE=$(docker image inspect pyracast-rabbitmq:ci --format '{{.Id}}')
           [[ "$POSTGRES_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
-          bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE"
+          [[ "$RABBITMQ_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
+          bash deploy/scan-images.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE" "$RABBITMQ_IMAGE"
       - name: Read the current main commit
         id: main
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -321,7 +323,7 @@ jobs:
           gcloud compute scp "$local_stage/release.tar.gz" "$local_stage/migration.json" "$GCP_INSTANCE:$stage/" \
             --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap --ssh-key-expire-after=1h --quiet
           status=0
-          "${ssh[@]}" --command="tar -xzf '$stage/release.tar.gz' -C '$stage/bundle' && sudo python3 '$stage/bundle/deploy/release_unit.py' start '$stage' '$RELEASE_SHA' '$BACKEND_IMAGE' '$WEB_IMAGE' '$GATEWAY_IMAGE' '$POSTGRES_IMAGE'" || status=$?
+          "${ssh[@]}" --command="tar -xzf '$stage/release.tar.gz' -C '$stage/bundle' && sudo python3 '$stage/bundle/deploy/release_unit.py' start '$stage' '$RELEASE_SHA' '$BACKEND_IMAGE' '$WEB_IMAGE' '$GATEWAY_IMAGE' '$POSTGRES_IMAGE' '$RABBITMQ_IMAGE'" || status=$?
           attempt=0
           while (( status == 255 && attempt < 30 )); do
             attempt=$((attempt + 1))
@@ -337,7 +339,7 @@ jobs:
         run: python3 deploy/pin_release_images.py published
       - name: Record the deployed digests
         run: |
-          printf 'Released %s\n\nBackend: %s\n\nWeb: %s\n\nGateway: %s\n\nPostgreSQL: %s\n' "$RELEASE_SHA" "$BACKEND_IMAGE" "$WEB_IMAGE" "$GATEWAY_IMAGE" "$POSTGRES_IMAGE" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Released %s\n\nBackend: %s\n\nWeb: %s\n\nGateway: %s\n\nPostgreSQL: %s\n\nRabbitMQ: %s\n' "$RELEASE_SHA" "$BACKEND_IMAGE" "$WEB_IMAGE" "$GATEWAY_IMAGE" "$POSTGRES_IMAGE" "$RABBITMQ_IMAGE" >> "$GITHUB_STEP_SUMMARY"
       - name: Probe the public origin through the edge
         env:
           PYRACAST_PUBLIC_ORIGIN: ${{ vars.PYRACAST_PUBLIC_ORIGIN }}
