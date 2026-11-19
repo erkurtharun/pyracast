@@ -594,6 +594,12 @@ test("the displayed section clicked while another section loads keeps its date a
     );
     await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-26");
+    // No product event marks a discarded answer as handled, so a further change probes the base after it.
+    await page.getByLabel("Forecast date").fill("2026-03-25");
+    await expect(page).toHaveURL(
+        /\/forecast\/\?date=2026-03-25&view=irradiance$/,
+    );
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
 });
 
 test("a forecast control used while a failing section change loads applies to the forecast", async ({
