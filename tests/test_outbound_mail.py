@@ -41,6 +41,7 @@ class Transport(BaseEmailBackend):
     sent: ClassVar[list[EmailMessage]] = []
     open_failure: ClassVar[BaseException | None] = None
     send_failure: ClassVar[BaseException | None] = None
+    failure_after_acceptance: ClassVar[BaseException | None] = None
     delay: ClassVar[float] = 0.0
 
     def open(self) -> bool:
@@ -54,13 +55,15 @@ class Transport(BaseEmailBackend):
             raise self.send_failure
         time.sleep(self.delay)
         self.sent.extend(email_messages)
+        if self.failure_after_acceptance is not None:
+            raise self.failure_after_acceptance
         return len(email_messages)
 
 
 @pytest.fixture(autouse=True)
 def transport() -> Iterator[type[Transport]]:
     Transport.sent = []
-    Transport.open_failure = Transport.send_failure = None
+    Transport.open_failure = Transport.send_failure = Transport.failure_after_acceptance = None
     Transport.delay = 0.0
     with override_settings(MAILERS={"default": {"BACKEND": "tests.test_outbound_mail.Transport"}}):
         yield Transport
@@ -239,19 +242,35 @@ def test_a_crash_before_transmission_is_retried_once_the_lease_ends(
     assert outbound_state() == [("sent", 2, "")]
 
 
-def test_a_crash_during_transmission_is_never_sent_again(
+def test_an_intent_its_worker_abandoned_is_reported_once_its_lease_ends(
     workspace: tuple[Tenant, User], transport: type[Transport]
 ) -> None:
     invite(workspace)
-    transport.send_failure = WorkerCrash()
+    transport.open_failure = WorkerCrash()
     with pytest.raises(WorkerCrash):
         deliver_mail()
-    transport.send_failure = None
+
+    assert delivery_health(timezone.now(), timedelta(minutes=5))["overdue_outbound_mail"] == 0
+    health = delivery_health(after_the_lease(), timedelta(minutes=5))
+    assert health["overdue_outbound_mail"] == 1
+
+
+@pytest.mark.parametrize(
+    ("interruption", "transmitted"), [("send_failure", 0), ("failure_after_acceptance", 1)]
+)
+def test_an_interruption_after_the_transmit_marker_is_reported_and_never_sent_again(
+    workspace: tuple[Tenant, User], transport: type[Transport], interruption: str, transmitted: int
+) -> None:
+    invite(workspace)
+    setattr(transport, interruption, WorkerCrash())
+    with pytest.raises(WorkerCrash):
+        deliver_mail()
+    setattr(transport, interruption, None)
 
     for moment in (after_the_lease(), after_the_lease() + timedelta(hours=1)):
         assert deliver_mail(moment) == 0
 
-    assert transport.sent == []
+    assert len(transport.sent) == transmitted
     assert outbound_state() == [("uncertain", 1, "interrupted_send")]
     assert WorkspaceInvitation.objects.get().delivery_status == "uncertain"
     health = delivery_health(timezone.now() + timedelta(hours=2), timedelta(minutes=5))

@@ -27,8 +27,6 @@ from tests.support.notification_recipient_validation import recipient
 from tests.support.notifications import SLOT, addresses, configured, store_recipients
 
 pytestmark = pytest.mark.django_db(transaction=True)
-# A saved address the validator refuses; the column holds at most 254 characters.
-INVALID = "private-invalid-recipient"
 
 
 def another_tenant_schedule(system: System) -> ReminderSchedule:
@@ -97,7 +95,8 @@ def test_invalid_saved_recipient_records_a_skipped_slot_without_blocking_another
 ) -> None:
     system, broken = configured()
     healthy = another_tenant_schedule(system)
-    store_recipients(broken, [INVALID])
+    address = recipient(255)
+    store_recipients(broken, [address])
     actor = MagicMock()
     logger = logging.getLogger("test.notifications.scheduler")
     monkeypatch.setattr("pyracast.notifications.scheduler.logger", logger)
@@ -111,8 +110,8 @@ def test_invalid_saved_recipient_records_a_skipped_slot_without_blocking_another
     assert (paused.status, paused.last_error) == ("skipped", "invalid_recipient")
     assert (paused.recipients.exists(), paused.snapshot_id) == (False, None)
     actor.send.assert_called_once_with(deliveries[0].pk)
-    assert addresses(broken) == [INVALID]
-    assert INVALID not in caplog.text
+    assert addresses(broken) == [address]
+    assert address not in caplog.text
     assert f"schedule_id={broken.pk} reason=invalid_recipient" in caplog.text
     assert invalid_reminder_recipient_count() == 1
 
@@ -151,7 +150,7 @@ def test_slot_database_failure_rolls_back_its_recipients_before_another_tenant_c
 def test_invalid_recipient_health_count_only_includes_current_approved_schedules() -> None:
     system, schedule = configured()
     assert invalid_reminder_recipient_count() == 0
-    store_recipients(schedule, [INVALID])
+    store_recipients(schedule, [recipient(255)])
     assert invalid_reminder_recipient_count() == 1
     ReminderSchedule.objects.filter(pk=schedule.pk).update(enabled=False)
     assert invalid_reminder_recipient_count() == 0

@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from django.apps.registry import Apps
@@ -9,8 +10,10 @@ from django.db.migrations.executor import MigrationExecutor
 
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.forecasts.models import CollectionSchedule
+from pyracast.notifications.models import NotificationDelivery
 from tests.support.domain import NOW, System, make_system
 from tests.support.migrations import checks, forward, migrate
+from tests.support.notifications import addresses
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -139,42 +142,172 @@ def test_a_collection_schedule_without_a_time_list_is_emptied(
     assert CollectionSchedule.objects.get(region=system.region).times == []
 
 
-def test_repeated_and_oversized_addresses_are_skipped_and_counted(
+def stored_schedule(apps: Apps, system: System, **values: Any) -> models.Model:
+    return historical(apps, "notifications.ReminderSchedule").create(
+        region_id=system.region.pk,
+        times=["10:00"],
+        effective_from=NOW,
+        language="en",
+        **values,
+    )
+
+
+def stored_delivery(
+    apps: Apps, system: System, schedule: models.Model, **values: Any
+) -> models.Model:
+    return historical(apps, "notifications.NotificationDelivery").create(
+        schedule_id=schedule.pk,
+        binding_id=system.binding.pk,
+        available_at=NOW,
+        preparation_deadline=NOW,
+        revoked_recipients=[],
+        **values,
+    )
+
+
+def test_an_oversized_address_stays_an_invalid_recipient_and_a_repeat_is_kept_once(
     previous: tuple[System, Apps], capsys: pytest.CaptureFixture[str]
 ) -> None:
     system, apps = previous
     oversized = "x" * 250 + "@example.com"
-    schedule = historical(apps, "notifications.ReminderSchedule").create(
-        region_id=system.region.pk,
+    schedule = stored_schedule(
+        apps,
+        system,
+        enabled=True,
         recipients=["ext@example.com", "EXT@example.com", oversized],
         recipient_memberships={},
-        times=["10:00"],
-        effective_from=NOW,
-        language="en",
     )
-    delivery = historical(apps, "notifications.NotificationDelivery").create(
-        schedule_id=schedule.pk,
-        binding_id=system.binding.pk,
+    delivery = stored_delivery(
+        apps,
+        system,
+        schedule,
         scheduled_for=NOW,
-        available_at=NOW,
-        preparation_deadline=NOW,
         status="sent",
         recipients=["ext@example.com", "Ext@example.com", oversized],
         recipient_memberships={},
-        revoked_recipients=[],
     )
 
     forward()
 
-    from pyracast.notifications.models import DeliveryRecipient, ReminderRecipient
+    from pyracast.notifications.models import DeliveryRecipient, ReminderSchedule
+    from pyracast.notifications.scheduler import slot_recipients
 
-    assert list(ReminderRecipient.objects.values_list("email", flat=True)) == ["ext@example.com"]
+    migrated = ReminderSchedule.objects.get(pk=schedule.pk)
+    assert addresses(migrated) == ["ext@example.com", oversized]
+    assert migrated.enabled
+    assert slot_recipients(migrated, 5) == ([], "invalid_recipient")
     assert list(
         DeliveryRecipient.objects.filter(delivery_id=delivery.pk).values_list("email", flat=True)
-    ) == ["ext@example.com"]
+    ) == ["ext@example.com", oversized]
+    assert "2 repeated recipient address(es) were kept once" in capsys.readouterr().out
+
+
+def test_an_address_too_long_to_index_pauses_its_schedule(
+    previous: tuple[System, Apps], capsys: pytest.CaptureFixture[str]
+) -> None:
+    system, apps = previous
+    unindexable = "x" * 2100 + "@example.com"
+    schedule = stored_schedule(
+        apps,
+        system,
+        enabled=True,
+        recipients=["ext@example.com", unindexable],
+        recipient_memberships={},
+    )
+    delivery = stored_delivery(
+        apps,
+        system,
+        schedule,
+        scheduled_for=NOW,
+        status="sent",
+        recipients=[unindexable, "ext@example.com"],
+        recipient_memberships={},
+    )
+
+    forward()
+
+    from pyracast.notifications.models import ReminderSchedule
+
+    migrated = ReminderSchedule.objects.get(pk=schedule.pk)
+    assert (addresses(migrated), migrated.enabled) == (["ext@example.com"], False)
+    assert addresses(NotificationDelivery.objects.get(pk=delivery.pk)) == ["ext@example.com"]
     printed = capsys.readouterr().out
-    assert "2 repeated recipient address(es) were kept once" in printed
-    assert "2 recipient address(es) longer than 254 characters were not kept" in printed
+    assert "2 recipient address(es) over 2000 bytes were not kept" in printed
+    assert "1 reminder schedule(s) holding such an address were paused" in printed
+
+
+def test_membership_ids_beyond_the_identifier_range_keep_the_address_refused(
+    previous: tuple[System, Apps],
+) -> None:
+    system, apps = previous
+    member = Membership.objects.get(user=system.member).pk
+    schedule = stored_schedule(
+        apps,
+        system,
+        enabled=True,
+        recipients=["far@example.com", "member@example.com"],
+        recipient_memberships={"far@example.com": [2**63], "member@example.com": [float(member)]},
+    )
+    delivery = stored_delivery(
+        apps,
+        system,
+        schedule,
+        scheduled_for=NOW,
+        status="pending",
+        recipients=["far@example.com", "member@example.com"],
+        recipient_memberships={"far@example.com": [2**63], "member@example.com": [float(member)]},
+    )
+
+    forward()
+
+    from pyracast.notifications.models import DeliveryRecipient, ReminderSchedule
+    from pyracast.notifications.recipients import permitted_recipients
+
+    assert addresses(ReminderSchedule.objects.get(pk=schedule.pk)) == ["member@example.com"]
+    assert list(
+        DeliveryRecipient.objects.filter(delivery_id=delivery.pk).values_list(
+            "email", "membership_id", "revoked"
+        )
+    ) == [("far@example.com", None, True), ("member@example.com", member, False)]
+    assert permitted_recipients(NotificationDelivery.objects.get(pk=delivery.pk)) == [
+        "member@example.com"
+    ]
+
+
+def test_an_address_pinned_to_several_members_stays_eligible_through_any_active_one(
+    previous: tuple[System, Apps],
+) -> None:
+    system, apps = previous
+    member = Membership.objects.get(user=system.member).pk
+    inactive = Membership.objects.create(
+        tenant=system.tenant,
+        user=User.objects.create_user(username="former", is_active=False),
+        role=WorkspaceRole.VIEWER,
+    ).pk
+    shared = {
+        "inactive-first@example.com": [inactive, member],
+        "removed-first@example.com": [999_999, member],
+    }
+    schedule = stored_schedule(
+        apps, system, enabled=True, recipients=list(shared), recipient_memberships=shared
+    )
+    delivery = stored_delivery(
+        apps,
+        system,
+        schedule,
+        scheduled_for=NOW,
+        status="pending",
+        recipients=list(shared),
+        recipient_memberships=shared,
+    )
+
+    forward()
+
+    from pyracast.notifications.models import ReminderSchedule
+    from pyracast.notifications.recipients import effective_recipients, permitted_recipients
+
+    assert effective_recipients(ReminderSchedule.objects.get(pk=schedule.pk)) == list(shared)
+    assert permitted_recipients(NotificationDelivery.objects.get(pk=delivery.pk)) == list(shared)
 
 
 def test_valid_collection_times_are_kept_as_stored(

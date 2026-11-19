@@ -72,8 +72,8 @@ PRECEDENCE_EXCEPTIONS: dict[tuple[str, int, int], str] = {
 
 class CommitClient(Client):
     def request(self, **request: Any) -> Any:
-        # A rolled-back test transaction never commits: run the request's commit callbacks, such as
-        # account mail, once the request finishes.
+        # A rolled-back test transaction never commits: run the request's commit callbacks once
+        # the request finishes.
         with TestCase.captureOnCommitCallbacks(execute=True):
             return super().request(**request)
 

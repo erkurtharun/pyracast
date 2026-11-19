@@ -3,7 +3,7 @@ import logging
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from threading import Barrier, BrokenBarrierError, Event
 from types import SimpleNamespace
@@ -18,6 +18,7 @@ from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.contrib.auth.models import User
 from django.core import mail
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connections
 from django.http import HttpRequest
@@ -771,19 +772,78 @@ def test_a_new_lock_after_a_password_reset_is_announced_again(clock: Clock) -> N
     assert lock_notices() == [("member@example.com", "sent"), ("member@example.com", "pending")]
 
 
-def test_a_lock_is_not_announced_without_a_daily_rate_or_its_record_lock(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from contextlib import contextmanager
+class Interrupted(BaseException):
+    pass
 
-    from pyracast.accounts.login_limits import daily_lock_reached
 
-    assert not daily_lock_reached(ratelimit.RateLimitUsage(usage=[]))
+def busy_record_lock(monkeypatch: pytest.MonkeyPatch, refusals: int | None) -> None:
+    # The finished-failure record reports its lock taken `refusals` times (always when None),
+    # as when an earlier holder stopped without releasing it.
+    cache_lock = ratelimit.cache_lock
+    refused = 0
 
     @contextmanager
-    def busy(_key: str) -> Iterator[bool]:
-        yield False
+    def record_lock(key: str) -> Iterator[bool]:
+        nonlocal refused
+        if key.endswith(":finished") and (refusals is None or refused < refusals):
+            refused += 1
+            yield False
+            return
+        with cache_lock(key) as locked:
+            yield locked
 
-    monkeypatch.setattr(ratelimit, "cache_lock", busy)
+    monkeypatch.setattr(ratelimit, "cache_lock", record_lock)
+
+
+def test_a_record_lock_held_past_one_wait_still_announces_the_lock(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    fail_daily(client, user.email, 99, clock)
+    busy_record_lock(monkeypatch, refusals=2)
+
+    fail_daily(client, user.email, 1, clock)
+
+    assert lock_notices() == [("member@example.com", "pending")]
+
+
+def test_a_lock_notice_is_stored_before_the_lock_is_recorded_as_announced(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.accounts import login_limits
+
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    fail_daily(client, user.email, 99, clock)
+
+    def interrupted(key: str, value: Any, timeout: Any = None) -> None:
+        if key.endswith(":finished"):
+            raise Interrupted
+        cache.set(key, value, timeout)
+
+    monkeypatch.setattr(login_limits, "cache", SimpleNamespace(get=cache.get, set=interrupted))
+
+    with pytest.raises(Interrupted):
+        login(client, user.email, WRONG)
+
+    assert lock_notices() == [("member@example.com", "pending")]
+
+
+def test_a_failure_without_a_daily_rate_or_a_free_record_announces_nothing(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    from pyracast.accounts.login_limits import record_finished_failure
+
+    announced: list[None] = []
+    record_finished_failure(ratelimit.RateLimitUsage(usage=[]), lambda: announced.append(None))
+    busy_record_lock(monkeypatch, refusals=None)
+    monkeypatch.setattr(ratelimit, "CACHE_LOCK_TIMEOUT", 0)
     slot = ratelimit.SingleRateLimitUsage(cache_key="daily", cache_duration=86400, timestamp=1.0)
-    assert not daily_lock_reached(ratelimit.RateLimitUsage(usage=[slot]))
+
+    record_finished_failure(ratelimit.RateLimitUsage(usage=[slot]), lambda: announced.append(None))
+
+    assert announced == []
+    assert [record.getMessage() for record in pyracast_logs.records] == [
+        "login_failure_unrecorded reason=record_busy"
+    ]

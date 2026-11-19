@@ -19,6 +19,7 @@ from django.test import Client, override_settings
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.mail.errors import NotSentError
+from pyracast.notifications.models import OutboundMail
 from tests.support.admin_recovery_security import RECOVERY, authenticated_account
 from tests.support.admin_recovery_security import submit as submit_to
 from tests.support.auth_lifecycle import PASSWORD, member, submit
@@ -125,6 +126,30 @@ def mail_failure_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRe
     ]
 
 
+def mail_failure_log(caplog: pytest.LogCaptureFixture) -> list[tuple[int, str]]:
+    return [(record.levelno, record.getMessage()) for record in mail_failure_records(caplog)]
+
+
+def expected_failure_log(kind: str) -> list[tuple[int, str]]:
+    subject = f"mail_id={OutboundMail.objects.get(kind=kind).pk} kind={kind}"
+    error = FailingBackend.raised[-1]
+    if isinstance(error, NotSentError):
+        return [
+            (logging.WARNING, f"outbound_mail_retry {subject} attempts=1 error_code={error.code}")
+        ]
+    return [
+        (
+            logging.WARNING,
+            f"outbound_mail_send_failed {subject} error_type={type(error).__name__}"
+            " transmitting=True",
+        ),
+        (
+            logging.ERROR,
+            f"outbound_mail_failed {subject} status=uncertain error_code=mail_outcome_uncertain",
+        ),
+    ]
+
+
 def signed_in(user: User, *, reauthenticated: bool = False) -> Client:
     client = Client(enforce_csrf_checks=True)
     assert (
@@ -150,11 +175,9 @@ def test_signup_with_failing_mail_reaches_verification_stage(
     assert Membership.objects.get(user=user).tenant == Tenant.objects.get()
     assert not EmailAddress.objects.get(user=user).verified
     assert [message.to for message in FailingBackend.attempted] == [["owner@example.com"]]
-    records = mail_failure_records(caplog)
-    assert records
-    assert all("kind=account/email/email_confirmation_signup" in r.getMessage() for r in records)
-    assert all(user.email not in r.getMessage() for r in records)
-    assert all(user.get_username() not in r.getMessage() for r in records)
+    assert mail_failure_log(caplog) == expected_failure_log(
+        "account/email/email_confirmation_signup"
+    )
 
     FailingBackend.failure = None
     cache.clear()
@@ -286,17 +309,9 @@ def test_account_mail_failure_is_logged_by_the_mailer_without_address_or_code(
     assert response.status_code == 200
     assert_no_failure_detail(response)
     code = attempted_code()
-    records = mail_failure_records(caplog)
-    assert records
-    assert all(record.exc_info is None for record in records)
+    assert mail_failure_log(caplog) == expected_failure_log("account/email/login_code")
+    assert all(record.exc_info is None for record in mail_failure_records(caplog))
     error = FailingBackend.raised[-1]
-    assert all("kind=account/email/login_code" in r.getMessage() for r in records)
-    expected = (
-        f"error_code={error.code}"
-        if isinstance(error, NotSentError)
-        else f"error_type={type(error).__name__}"
-    )
-    assert any(expected in record.getMessage() for record in records)
     assert user.email not in caplog.text
     assert code not in caplog.text
     assert str(error) not in caplog.text

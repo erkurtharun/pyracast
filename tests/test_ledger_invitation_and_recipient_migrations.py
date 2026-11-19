@@ -85,7 +85,6 @@ RULES = {
     ),
     "regions_auditevent": (AUDIT_DETAILS_RULE,),
 }
-# The state these migrations produced, before the reminder recipients became rows.
 # These migrations end here; the reminder recipients became rows after them.
 MIGRATED = {
     "accounts": ("accounts", "0005_schema_naming_convention"),
