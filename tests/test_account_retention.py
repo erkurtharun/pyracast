@@ -449,3 +449,51 @@ def test_a_failing_signup_reclaim_does_not_stop_the_others_and_is_retried(
     assert not User.objects.exists()
     assert not Tenant.objects.exists()
     assert retention_error() == ""
+
+
+def test_signup_reclaim_failures_on_different_pages_do_not_hide_a_later_healthy_signup(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    first = signup_account("first-failing")
+    second = signup_account("second-failing")
+    healthy = signup_account("healthy")
+    monkeypatch.setattr(retention, "BATCH_SIZE", 1)
+    failing = {first.pk, second.pk}
+
+    def fail_reclaim(sender: type[User], instance: User, **_: Any) -> None:
+        if instance.pk in failing:
+            raise RuntimeError("private reclaim detail")
+
+    pre_delete.connect(fail_reclaim, sender=User)
+    try:
+        dispatch_once(monkeypatch)
+    finally:
+        pre_delete.disconnect(fail_reclaim, sender=User)
+
+    assert set(User.objects.values_list("pk", flat=True)) == failing
+    assert not User.objects.filter(pk=healthy.pk).exists()
+    assert f"signup_reclaim_failed item=account:{first.pk}" in pyracast_logs.text
+    assert f"signup_reclaim_failed item=account:{second.pk}" in pyracast_logs.text
+    assert retention_error() == "items_failed:2"
+
+
+def test_a_failed_region_purge_and_a_failed_signup_reclaim_add_up_in_one_cycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expired_region(monkeypatch, failing=True)
+    failing = signup_account("failing-owner")
+    session("expired", NOW - timedelta(seconds=1), User.objects.create_user(username="signed-in"))
+
+    def fail_reclaim(sender: type[User], instance: User, **_: Any) -> None:
+        if instance.pk == failing.pk:
+            raise RuntimeError("private reclaim detail")
+
+    pre_delete.connect(fail_reclaim, sender=User)
+    try:
+        dispatch_once(monkeypatch)
+    finally:
+        pre_delete.disconnect(fail_reclaim, sender=User)
+
+    assert not Session.objects.exists()
+    assert User.objects.filter(pk=failing.pk).exists()
+    assert retention_error() == "items_failed:2"
