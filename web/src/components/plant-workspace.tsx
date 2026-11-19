@@ -217,7 +217,7 @@ export function PlantWorkspace({
                                 if (
                                     (next === "estimated_actuals" ||
                                         next === "archived_forecast") &&
-                                    date > today
+                                    (base.date ?? localDay(timezone, 1)) > today
                                 )
                                     setDate(today);
                             }}
