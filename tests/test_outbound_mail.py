@@ -14,6 +14,7 @@ from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
 from django.core.mail.backends.base import BaseEmailBackend
 from django.db import close_old_connections, connection, connections
+from django.db.models import F
 from django.test import Client, override_settings
 from django.utils import timezone
 from psycopg import sql
@@ -28,6 +29,7 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, Wo
 from pyracast.errors import DomainError
 from pyracast.forecasts.monitoring import delivery_health
 from pyracast.mail.errors import NotSentError, PermanentlyNotSentError, SendCancelledError
+from tests.support.api import verified_admin
 from tests.support.outbox import after_the_lease, deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
@@ -274,7 +276,72 @@ def test_an_interruption_after_the_transmit_marker_is_reported_and_never_sent_ag
     assert outbound_state() == [("uncertain", 1, "interrupted_send")]
     assert WorkspaceInvitation.objects.get().delivery_status == "uncertain"
     health = delivery_health(timezone.now() + timedelta(hours=2), timedelta(minutes=5))
-    assert health["failed_outbound_mail"] == 1
+    assert (health["uncertain_outbound_mail"], health["failed_outbound_mail"]) == (1, 0)
+
+
+def test_an_uncertain_invitation_holds_no_token_and_can_be_sent_again(
+    workspace: tuple[Tenant, User], transport: type[Transport]
+) -> None:
+    tenant, administrator = workspace
+    invite(workspace)
+    transport.failure_after_acceptance = WorkerCrash()
+    with pytest.raises(WorkerCrash):
+        deliver_mail()
+    transport.failure_after_acceptance = None
+    assert deliver_mail(after_the_lease()) == 0
+    (unknown,) = transport.sent
+    assert outbound_state() == [("uncertain", 1, "interrupted_send")]
+    assert tables_holding(mailed_token(unknown)) == []
+    from pyracast.notifications.outbox import LEASE_DURATION
+
+    # The outcome is known once the lease ends, five minutes after the invitation.
+    WorkspaceInvitation.objects.update(created_at=F("created_at") - LEASE_DURATION)
+    client = Client()
+    client.force_login(administrator)
+
+    response = client.post(
+        f"/api/tenants/{tenant.pk}/invitations/",
+        {"email": "guest@example.com"},
+        content_type="application/json",
+    )
+
+    assert (response.status_code, response.json()["delivery_status"]) == (201, "pending")
+    assert deliver_mail() == 1
+    guest = User.objects.create_user(username="guest", email="guest@example.com")
+    guest.emailaddress_set.create(email=guest.email, verified=True, primary=True)
+    assert accept_workspace_invitation(guest, mailed_token(transport.sent[-1])).tenant_id == (
+        tenant.pk
+    )
+
+
+def test_uncertain_intents_are_counted_apart_from_failed_ones_and_listed_in_the_console(
+    workspace: tuple[Tenant, User], transport: type[Transport]
+) -> None:
+    from pyracast.notifications.models import OutboundMail
+    from pyracast.notifications.outbox import send_outbound_mail
+
+    tenant, administrator = workspace
+    invite(workspace)
+    invite_workspace_member(administrator, tenant.pk, "second@example.com")
+    unknown, refused = OutboundMail.objects.order_by("pk")
+    transport.failure_after_acceptance = WorkerCrash()
+    with pytest.raises(WorkerCrash):
+        send_outbound_mail(unknown.pk, timezone.now())
+    transport.failure_after_acceptance = None
+    transport.send_failure = PermanentlyNotSentError("mailbox unknown")
+    assert not send_outbound_mail(refused.pk, timezone.now())
+    assert not send_outbound_mail(unknown.pk, after_the_lease())
+
+    health = delivery_health(after_the_lease(), timedelta(minutes=5))
+    assert (health["uncertain_outbound_mail"], health["failed_outbound_mail"]) == (1, 1)
+    console, _ = verified_admin()
+    (check,) = [
+        check
+        for check in console.get("/admin/").context["health_summary"].checks
+        if check.key == "uncertain_outbound_mail"
+    ]
+    listed = console.get(check.action_url).context["cl"].result_list
+    assert [mail.pk for mail in listed] == [unknown.pk]
 
 
 def test_concurrent_workers_send_one_intent_once(

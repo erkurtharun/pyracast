@@ -61,12 +61,14 @@ def configured() -> tuple[System, ReminderSchedule]:
 
 
 def addresses(owner: ReminderSchedule | NotificationDelivery) -> list[str]:
-    """A schedule's stored addresses, or the addresses a delivery still goes to, in order."""
-    if isinstance(owner, ReminderSchedule):
-        return list(owner.recipients.order_by("pk").values_list("email", flat=True))
-    return list(
-        owner.recipients.filter(revoked=False).order_by("pk").values_list("email", flat=True)
+    """A schedule's stored addresses, or the addresses a delivery still goes to, each once in
+    order."""
+    rows = (
+        owner.recipients.all()
+        if isinstance(owner, ReminderSchedule)
+        else owner.recipients.filter(revoked=False)
     )
+    return list(dict.fromkeys(rows.order_by("pk").values_list("email", flat=True)))
 
 
 def revoked(delivery: NotificationDelivery) -> list[str]:
@@ -82,26 +84,25 @@ def store_recipients(
     memberships: dict[str, list[int]] | None = None,
     revoked: Iterable[str] = (),
 ) -> None:
-    """Replace the stored rows; an address keeps the first membership it is pinned to."""
-    pins = {address: ids[0] for address, ids in (memberships or {}).items() if ids}
+    """Replace the stored rows: one for each membership an address is pinned to, else one."""
+    pins = {address.casefold(): ids for address, ids in (memberships or {}).items()}
     withdrawn = {address.casefold() for address in revoked}
     owner.recipients.all().delete()
+    ties = [(address, pin) for address in stored for pin in pins.get(address.casefold()) or (None,)]
     if isinstance(owner, ReminderSchedule):
         ReminderRecipient.objects.bulk_create(
-            ReminderRecipient(
-                schedule=owner, email=address, membership_id=pins.get(address.casefold())
-            )
-            for address in stored
+            ReminderRecipient(schedule=owner, email=address, membership_id=pin)
+            for address, pin in ties
         )
     else:
         DeliveryRecipient.objects.bulk_create(
             DeliveryRecipient(
                 delivery=owner,
                 email=address,
-                membership_id=pins.get(address.casefold()),
+                membership_id=pin,
                 revoked=address.casefold() in withdrawn,
             )
-            for address in stored
+            for address, pin in ties
         )
 
 

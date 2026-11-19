@@ -7,9 +7,11 @@ from django.core.validators import validate_email
 from pyracast.background import failures
 from pyracast.background.failures import ItemsFailedError
 from pyracast.notifications import runtime
-from pyracast.notifications.operations import validate_recipient
+from pyracast.notifications.operations import configure_reminders, validate_recipient
 from pyracast.notifications.serializers import ReminderInput
+from tests.support.domain import NOW
 from tests.support.notification_recipient_validation import recipient
+from tests.support.notifications import addresses, configured
 
 
 @pytest.mark.parametrize("length", [255, 320])
@@ -40,19 +42,33 @@ def test_application_rejects_valid_email_addresses_that_do_not_fit_delivery_stor
         validate_recipient(address)
 
 
+@pytest.mark.django_db(transaction=True)
 def test_exact_delivery_storage_limit_is_accepted_at_both_boundaries() -> None:
     address = recipient(254)
+    padded = f" {address} "
     serializer = ReminderInput(
         data={
             "enabled": True,
             "include_workspace_members": False,
-            "recipients": [address],
+            "recipients": [padded],
             "times": ["10:00"],
             "language": "en",
         }
     )
     assert serializer.is_valid(), serializer.errors
-    validate_recipient(address)
+    assert serializer.validated_data["recipients"] == [address]
+    system, _ = configured()
+    schedule = configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        recipients=[padded],
+        times=["10:00"],
+        language="en",
+        now=NOW,
+    )
+    assert addresses(schedule) == [address]
 
 
 def test_pending_messages_are_dispatched_before_a_scheduling_failure_is_reported(

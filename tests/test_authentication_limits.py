@@ -17,12 +17,13 @@ from allauth.mfa.models import Authenticator
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.contrib.auth.models import User
+from django.contrib.sites.shortcuts import get_current_site
 from django.core import mail
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connections
 from django.http import HttpRequest
-from django.test import Client, override_settings
+from django.test import Client, RequestFactory, override_settings
 
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.audit import logger as security_logger
@@ -795,17 +796,47 @@ def busy_record_lock(monkeypatch: pytest.MonkeyPatch, refusals: int | None) -> N
     monkeypatch.setattr(ratelimit, "cache_lock", record_lock)
 
 
-def test_a_record_lock_held_past_one_wait_still_announces_the_lock(
+def daily_failure_key(email: str) -> str:
+    request = RequestFactory().get("/")
+    return ratelimit.get_cache_key(
+        request,
+        app="allauth.account",
+        action="login_failed",
+        rate=ratelimit.parse_rate("100/d/key"),
+        key=f"{get_current_site(request).domain}:{email.lower()}",
+    )
+
+
+def test_a_daily_lock_is_announced_once_while_its_completion_lock_stays_held(
     clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = member()
     client = Client(enforce_csrf_checks=True)
-    fail_daily(client, user.email, 99, clock)
-    busy_record_lock(monkeypatch, refusals=2)
+    fail_daily(client, user.email, 98, clock)
+    monkeypatch.setattr(ratelimit, "CACHE_LOCK_TIMEOUT", 1)
+    assert cache.add(f"{daily_failure_key(user.email)}:finished:lock", True, timeout=3600)
+    hold_password_checks(monkeypatch, 2)
 
-    fail_daily(client, user.email, 1, clock)
+    last = in_parallel(
+        [lambda: error_codes(login(Client(enforce_csrf_checks=True), user.email, WRONG))] * 2
+    )
 
+    assert last == [["email_password_mismatch"]] * 2
+    assert error_codes(login(client, user.email, PASSWORD)) == ["too_many_login_attempts"]
     assert lock_notices() == [("member@example.com", "pending")]
+    deliver_mail()
+    reset = Client(enforce_csrf_checks=True)
+    assert submit(reset, "auth/password/request", {"email": user.email}).status_code == 401
+    password = PASSWORD + "new"
+    assert (
+        submit(
+            reset, "auth/password/reset", {"key": mailed_code(), "password": password}
+        ).status_code
+        == 401
+    )
+    clock.advance(3600)
+    fail_daily(client, user.email, 100, clock)
+    assert lock_notices() == [("member@example.com", "sent"), ("member@example.com", "pending")]
 
 
 def test_a_lock_notice_is_stored_before_the_lock_is_recorded_as_announced(

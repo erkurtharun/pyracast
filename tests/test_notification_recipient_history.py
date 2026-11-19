@@ -2,21 +2,29 @@ from datetime import timedelta
 
 import pytest
 from allauth.account.models import EmailAddress
+from django.contrib.auth.models import User
 from django.core import mail
 
 from pyracast.accounts.models import Membership
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.notifications.jobs import process_notification
-from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.models import (
+    NotificationDelivery,
+    NotificationSettings,
+    ReminderSchedule,
+)
+from pyracast.notifications.operations import configure_reminders
+from pyracast.notifications.overview import plants_at_recipient_limit
 from pyracast.notifications.recipients import effective_recipients
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.operations import submit_region
-from tests.support.domain import NOW
+from tests.support.domain import NOW, System
 from tests.support.notification_groups import group, member
 from tests.support.notifications import (
     SLOT,
     addresses,
     configured,
+    reminder_schedule_payload,
     revoked,
     store_recipients,
     stored_addresses,
@@ -124,3 +132,68 @@ def test_historical_alias_does_not_revoke_a_different_pinned_member() -> None:
     assert revoked(historical) == []
     assert process_notification(pending.pk, SLOT)
     assert mail.outbox[0].bcc == [current.email]
+
+
+def two_members_with_one_address(system: System) -> tuple[User, User]:
+    """`shared@example.com` is the verified address of one member and the account address of
+    another."""
+    verified = member(system, "shared@example.com")
+    account = User.objects.create(username="account-holder", email="SHARED@example.com")
+    Membership.objects.create(tenant=system.tenant, user=account)
+    return verified, account
+
+
+def save_shared(system: System, *, include_workspace_members: bool = False) -> ReminderSchedule:
+    return configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        recipients=["shared@example.com"],
+        include_workspace_members=include_workspace_members,
+        times=["10:00"],
+        language="en",
+        now=NOW,
+    )
+
+
+def test_an_address_of_two_members_is_mailed_until_both_ties_end() -> None:
+    system, _ = configured()
+    first, second = two_members_with_one_address(system)
+    save_shared(system)
+
+    def mailed(day: int) -> list[str]:
+        slot = SLOT + timedelta(days=day)
+        before = len(mail.outbox)
+        process_notification(enqueue_due(slot)[-1], slot)
+        return [address for message in mail.outbox[before:] for address in message.bcc]
+
+    assert mailed(0) == ["shared@example.com"]
+    User.objects.filter(pk=first.pk).update(is_active=False)
+    assert mailed(1) == ["shared@example.com"]
+    User.objects.filter(pk=first.pk).update(is_active=True)
+    remove_workspace_member(system.member, system.tenant.pk, first.pk)
+    assert mailed(2) == ["shared@example.com"]
+    remove_workspace_member(system.member, system.tenant.pk, second.pk)
+    assert mailed(3) == []
+
+
+def test_an_address_of_two_members_counts_once() -> None:
+    system, _ = configured()
+    two_members_with_one_address(system)
+    NotificationSettings.objects.update_or_create(pk=1, defaults={"max_recipients": 1})
+    schedule = save_shared(system, include_workspace_members=True)
+    assert process_notification(enqueue_due(SLOT)[-1], SLOT)
+
+    viewer = reminder_schedule_payload(schedule, SLOT, administrator=False)
+    administrator = reminder_schedule_payload(schedule, SLOT)
+    assert (viewer["state"], viewer["recipient_count"], viewer["recipient_limit_exceeded"]) == (
+        "sending",
+        1,
+        False,
+    )
+    assert viewer["deliveries"][0]["recipient_count"] == 1
+    assert administrator["addresses"]["recipients"] == ["shared@example.com"]
+    assert administrator["deliveries"][0]["recipients"] == ["shared@example.com"]
+    NotificationSettings.objects.update(max_recipients=2)
+    assert plants_at_recipient_limit(system.tenant.pk) == 0

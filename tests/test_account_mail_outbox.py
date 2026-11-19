@@ -1,3 +1,4 @@
+import re
 from collections.abc import Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -16,23 +17,31 @@ from psycopg import sql
 
 from tests.support.auth_lifecycle import PASSWORD, member, submit
 from tests.support.company_registration import signup
-from tests.support.outbox import deliver_mail
+from tests.support.outbox import after_the_lease, deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
 
+class WorkerCrash(BaseException):
+    pass
+
+
 class Transport(BaseEmailBackend):
     sent: ClassVar[list[EmailMessage]] = []
+    crash_after_acceptance: ClassVar[bool] = False
 
     def send_messages(self, email_messages: Sequence[EmailMessage] | None) -> int:
         assert email_messages is not None
         self.sent.extend(email_messages)
+        if self.crash_after_acceptance:
+            raise WorkerCrash
         return len(email_messages)
 
 
 @pytest.fixture(autouse=True)
 def transport() -> Iterator[type[Transport]]:
     Transport.sent = []
+    Transport.crash_after_acceptance = False
     with override_settings(
         MAILERS={"default": {"BACKEND": "tests.test_account_mail_outbox.Transport"}}
     ):
@@ -105,6 +114,42 @@ def test_a_mailed_code_rests_only_sealed_and_is_erased_once_sent(
     assert code in str(transport.sent[0].body)
     row.refresh_from_db()
     assert (row.status, row.sealed_code) == ("sent", "")
+
+
+def mailed_code(message: EmailMessage) -> str:
+    codes: list[str] = re.findall(r"^\s*([A-Z0-9]{4}-[A-Z0-9]{4})\s*$", str(message.body), re.M)
+    (code,) = codes
+    return code
+
+
+def test_an_uncertain_code_mail_holds_no_code_and_a_new_code_is_mailed_at_once(
+    transport: type[Transport],
+) -> None:
+    from pyracast.notifications.models import OutboundMail
+
+    user = member()
+    client = visitor(0)
+    assert submit(client, "auth/password/request", {"email": user.email}).status_code == 401
+    transport.crash_after_acceptance = True
+    with pytest.raises(WorkerCrash):
+        deliver_mail()
+    transport.crash_after_acceptance = False
+    assert deliver_mail(after_the_lease()) == 0
+    lost = mailed_code(transport.sent[0])
+
+    assert list(OutboundMail.objects.values_list("status", "sealed_code")) == [("uncertain", "")]
+    assert not mail_row_holds(lost)
+    assert submit(client, "auth/password/request", {"email": user.email}).status_code == 401
+    assert deliver_mail() == 1
+    code = mailed_code(transport.sent[-1])
+    assert code != lost
+    password = PASSWORD + "-renewed"
+    reset = submit(client, "auth/password/reset", {"key": code, "password": password})
+    assert reset.status_code == 401
+    assert (
+        submit(visitor(1), "auth/login", {"email": user.email, "password": password}).status_code
+        == 200
+    )
 
 
 def test_an_unsent_code_is_erased_when_it_expires(transport: type[Transport]) -> None:
