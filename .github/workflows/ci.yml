@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: 0.13.8
+          version: 0.13.9
           enable-cache: false
       - name: Validate GitHub workflows and deployment scripts
         run: >-
@@ -181,7 +181,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: 0.13.8
+          version: 0.13.9
           enable-cache: true
       - run: uv sync --locked --no-build
       - run: uv run --locked --no-sync --no-build python -m scripts.start_postgres --ephemeral --non-durable
@@ -315,7 +315,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: 0.13.8
+          version: 0.13.9
           enable-cache: true
       - run: uv sync --locked --no-build
       # Empty artifact IDs would make download-artifact fetch every artifact of the run.
@@ -359,7 +359,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: 0.13.8
+          version: 0.13.9
           enable-cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -435,7 +435,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: 0.13.8
+          version: 0.13.9
           enable-cache: true
           cache-suffix: scientific
       - name: Check scientific dependencies
@@ -456,7 +456,7 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: 0.13.8
+          version: 0.13.9
           enable-cache: true
       - run: uv sync --locked --no-build
       - run: uv export --locked --all-groups --all-extras --no-emit-project --no-hashes --output-file audit-requirements.txt
