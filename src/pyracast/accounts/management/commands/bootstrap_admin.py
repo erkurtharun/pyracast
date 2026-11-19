@@ -15,6 +15,7 @@ from django.db import transaction
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authorization import requires_admin_mfa
+from pyracast.accounts.inputs import sign_in_password
 from pyracast.accounts.management.operator import OperatorCommand, operator_address
 from pyracast.accounts.mfa import MFAAdapter
 
@@ -118,6 +119,7 @@ class Command(OperatorCommand):
         if self.ask("New password again: ", secret=True) != password:
             raise CommandError(PASSWORDS_DIFFER)
         try:
+            sign_in_password(password)
             validate_password(password, user)
         except ValidationError as error:
             raise CommandError(" ".join([POLICY_REFUSED, *error.messages])) from None

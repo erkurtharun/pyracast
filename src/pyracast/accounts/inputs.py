@@ -49,6 +49,12 @@ class LoginInput(PasswordInput, AllauthLoginInput):
     pass
 
 
+def sign_in_password(password: str) -> str:
+    # Raises ValidationError for a password the sign-in form would refuse to read.
+    cleaned: str = LoginInput().fields["password"].clean(password)
+    return cleaned
+
+
 class RequestPasswordResetInput(AllauthRequestPasswordResetInput):
     users: list[User]
 
