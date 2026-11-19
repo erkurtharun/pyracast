@@ -64,6 +64,7 @@ from tests.support.account_sessions import (
 from tests.support.admin_mfa_bootstrap import TEST_PASSWORD, administrator
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit, totp_code
 from tests.support.company_registration import signup
+from tests.support.outbox import deliver_mail
 from tests.support.social_accounts import (
     PROVIDERS,
     begin,
@@ -96,6 +97,7 @@ class Pending:
 
     def nothing_pending(self) -> tuple[int, Any]:
         client = signed_in(self.user) if self.signed_in else browser()
+        deliver_mail()
         mail.outbox.clear()
         return answer(submit(client, self.endpoint, self.data))
 
@@ -236,6 +238,7 @@ def test_a_pending_process_dies_when_its_authority_changes(
     response = submit(pending.client, pending.endpoint, pending.data)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert stored(pending.user) == before
     assert answer(submit(pending.client, pending.endpoint, pending.data)) == expected
@@ -251,11 +254,13 @@ def test_a_reset_code_dies_when_the_password_is_changed_in_another_session() -> 
     change = {"current_password": PASSWORD, "new_password": PASSWORD + "changed"}
     assert submit(signed_in(user), "account/password/change", change).status_code == 401
     expected = answer(submit(browser(), "auth/password/reset", data))
+    deliver_mail()
     mail.outbox.clear()
 
     response = submit(reset, "auth/password/reset", data)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     user.refresh_from_db()
     assert user.check_password(PASSWORD + "changed")
@@ -277,6 +282,7 @@ def test_a_reset_answers_like_nothing_pending_when_the_password_changes_during_i
     response = submit(pending.client, pending.endpoint, pending.data)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     pending.user.refresh_from_db()
     assert pending.user.check_password(PASSWORD + "changed")
@@ -299,6 +305,7 @@ def test_a_verification_answers_like_nothing_pending_when_the_account_is_deactiv
     response = submit(pending.client, pending.endpoint, pending.data)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert not EmailAddress.objects.get(email=OWNER).verified
 
@@ -332,6 +339,7 @@ def test_a_completion_answers_like_nothing_pending_when_its_authority_changes_du
     response = submit(pending.client, pending.endpoint, pending.data)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert (session_user(pending.client) == pending.user.pk) is pending.signed_in
 
@@ -403,6 +411,7 @@ def test_a_change_started_while_a_second_factor_is_checked_waits_and_ends_the_si
 
     assert response.status_code == 200
     assert applied(pending.user)
+    deliver_mail()
     assert mail.outbox == []
     assert session_user(pending.client) is None
     assert waited
@@ -521,11 +530,13 @@ def test_a_reset_code_dies_when_its_authority_changes_after_the_code_is_sent(
     committed_first(changes)
     data = {"key": mailed_code(), "password": PASSWORD + "reset"}
     expected = answer(submit(browser(), "auth/password/reset", data))
+    deliver_mail()
     mail.outbox.clear()
 
     response = submit(client, "auth/password/reset", data)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     user.refresh_from_db()
     assert user.check_password(password)
@@ -562,11 +573,13 @@ def test_a_reauthentication_code_dies_when_its_address_is_replaced_after_the_cod
     committed_first(changes)
     data = {"code": mailed_code()}
     expected = answer(submit(signed_in(user), "auth/reauthenticate/code/confirm", data))
+    deliver_mail()
     mail.outbox.clear()
 
     response = submit(client, "auth/reauthenticate/code/confirm", data)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
 
 
@@ -627,6 +640,7 @@ def test_a_pending_provider_signup_dies_when_its_identity_is_connected_elsewhere
     response = submit(client, "auth/provider/signup", provider_details(provider))
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert list(User.objects.values_list("username", flat=True)) == ["other"]
     assert session_user(client) is None
@@ -649,6 +663,7 @@ def test_a_provider_signup_answers_like_nothing_pending_when_its_identity_is_con
     response = submit(client, "auth/provider/signup", provider_details(provider))
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert list(User.objects.values_list("username", flat=True)) == ["other"]
     assert session_user(client) is None
@@ -672,6 +687,7 @@ def test_a_provider_signup_answers_like_nothing_pending_when_its_address_is_veri
     committed = committed_first(changes)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert list(User.objects.values_list("username", flat=True)) == ["other"]
     assert list(
@@ -798,6 +814,7 @@ def test_a_change_of_any_credential_field_ends_a_pending_second_factor_step(
     response = submit(pending.client, pending.endpoint, pending.data)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert session_user(pending.client) is None
 
@@ -906,11 +923,13 @@ def test_a_password_change_started_while_a_reset_code_is_requested_waits_and_end
     waited = not committed_first(changes)
     data = {"key": mailed_code(), "password": PASSWORD + "reset"}
     expected = answer(submit(browser(), "auth/password/reset", data))
+    deliver_mail()
     mail.outbox.clear()
 
     response = submit(client, "auth/password/reset", data)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     user.refresh_from_db()
     assert user.check_password(PASSWORD + "changed")
@@ -934,11 +953,13 @@ def test_an_address_replacement_started_while_a_reauthentication_code_is_request
     waited = not committed_first(changes)
     data = {"code": mailed_code()}
     expected = answer(submit(signed_in(user), "auth/reauthenticate/code/confirm", data))
+    deliver_mail()
     mail.outbox.clear()
 
     response = submit(client, "auth/reauthenticate/code/confirm", data)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert waited
 
@@ -955,11 +976,13 @@ def test_an_address_replacement_started_while_an_address_change_starts_waits_and
     waited = not committed_first(changes)
     data = {"key": mailed_code()}
     expected = answer(submit(signed_in(user), "auth/email/verify", data))
+    deliver_mail()
     mail.outbox.clear()
 
     response = submit(client, "auth/email/verify", data)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert list(EmailAddress.objects.values_list("email", flat=True)) == [OWNER]
     assert waited
@@ -1074,6 +1097,7 @@ def test_a_start_refused_by_its_budget_waits_for_no_lock(start: str) -> None:
     spend, endpoint, data, refusal = SPENT_BUDGETS[start]
     user = account("owner")
     client = spend(user)
+    deliver_mail()
     mail.outbox.clear()
 
     with account_held(user) as held:
@@ -1082,6 +1106,7 @@ def test_a_start_refused_by_its_budget_waits_for_no_lock(start: str) -> None:
 
     assert still_held
     assert (response.status_code, error_codes(response)) == refusal
+    deliver_mail()
     assert mail.outbox == []
 
 
@@ -1095,6 +1120,7 @@ def test_a_reauthentication_code_admitted_after_its_budget_looked_spent_sends_no
     response = submit(client, "auth/reauthenticate/code/request", {"email": OWNER})
 
     assert response.status_code == 429
+    deliver_mail()
     assert mail.outbox == []
     assert REAUTHENTICATION_CODE_SESSION_KEY not in client.session
 
@@ -1104,12 +1130,14 @@ def test_an_address_change_whose_budget_is_spent_after_it_looked_available_is_re
 ) -> None:
     user = account("owner")
     client = spent_address_change(user)
+    deliver_mail()
     mail.outbox.clear()
     monkeypatch.setattr(headless, "spent", lambda *args, **kwargs: False)
 
     response = submit(client, "account/email", {"email": CHANGED})
 
     assert response.status_code == 429
+    deliver_mail()
     assert mail.outbox == []
     assert not EmailAddress.objects.filter(email=CHANGED).exists()
 
@@ -1220,6 +1248,7 @@ def test_a_signup_that_changes_its_address_while_verifying_completes_with_the_ne
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pending = signup_code(monkeypatch)
+    deliver_mail()
     mail.outbox.clear()
 
     assert submit(pending.client, "account/email", {"email": CHANGED}).status_code == 200
@@ -1238,12 +1267,14 @@ def test_a_signup_address_change_after_its_account_changed_ends_the_verification
     changes = changed_once_steps_are_checked(
         monkeypatch, lambda: password_changed(User.objects.get(pk=pending.user.pk))
     )
+    deliver_mail()
     mail.outbox.clear()
 
     response = submit(pending.client, "account/email", {"email": CHANGED})
 
     assert committed_first(changes)
     assert response.status_code == 409
+    deliver_mail()
     assert mail.outbox == []
     assert answer(submit(pending.client, pending.endpoint, pending.data)) == (
         pending.nothing_pending()

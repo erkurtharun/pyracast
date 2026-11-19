@@ -15,7 +15,7 @@ from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.debug import sensitive_variables
 
-from pyracast.accounts.authentication import email_identity
+from pyracast.accounts.authentication import login_identity
 from pyracast.accounts.language import user_language
 from pyracast.notifications.models import OutboundMail, OutboundMailError, OutboundMailKind
 
@@ -170,7 +170,7 @@ def compose_account_mail(
 ) -> EmailMultiAlternatives | OutboundMailError:
     recipient = mail.recipient
     if mail.kind == OutboundMailKind.LOGIN_LOCKED:
-        user = email_identity(mail.recipient)
+        user = login_identity(mail.recipient)
         if user is None or not user.is_active:
             return OutboundMailError.NO_ACCOUNT
         recipient = EmailAddress.objects.get_primary_email(user) or user.email

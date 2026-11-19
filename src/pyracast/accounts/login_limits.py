@@ -1,5 +1,6 @@
 import hashlib
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from allauth.account import app_settings as account_settings
@@ -10,6 +11,7 @@ from allauth.core.internal import ratelimit
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.http import HttpRequest
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
@@ -66,7 +68,7 @@ def record_finished_failure(
 
     Each finished failure is its own entry, so no lock is contested and every finishing
     failure of a lock reaches the same decision; `announce` stores at most one notice per key.
-    The lock is recorded as announced after `announce` returns. A check still in flight (its
+    The lock is recorded as announced once the notice has committed. A check still in flight (its
     hit already in allauth's history) never completes a lock, and a password reset clears the
     history, so failures after it form a new lock.
     """
@@ -87,7 +89,7 @@ def record_finished_failure(
         return
     newest = max(history)
     announce(hashlib.sha256(f"{slot.cache_key}:{newest!r}".encode()).hexdigest())
-    cache.set(announced_key, newest, slot.cache_duration)
+    transaction.on_commit(partial(cache.set, announced_key, newest, slot.cache_duration))
 
 
 def check_second_factor(

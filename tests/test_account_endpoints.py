@@ -6,6 +6,7 @@ from django.test import override_settings
 
 from tests.support.account_sessions import account, browser, signed_in
 from tests.support.auth_lifecycle import AUTH, submit
+from tests.support.outbox import deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -31,6 +32,7 @@ def test_the_account_email_endpoint_answers_only_reads_changes_and_removals(meth
     )
 
     assert (response.status_code, response.json()["code"]) == (405, "method_not_allowed")
+    deliver_mail()
     assert mail.outbox == []
 
 
@@ -43,6 +45,7 @@ def test_address_change_requests_are_limited_per_account() -> None:
     ]
 
     assert statuses == [200, 200, 200, 429]
+    deliver_mail()
     assert len(mail.outbox) == 3
 
 
@@ -59,6 +62,7 @@ def test_the_password_reset_request_route_answers_only_posts(method: str) -> Non
     )
 
     assert (response.status_code, response.json()["code"]) == (405, "method_not_allowed")
+    deliver_mail()
     assert mail.outbox == []
 
 

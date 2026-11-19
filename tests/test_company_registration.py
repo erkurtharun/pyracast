@@ -486,6 +486,7 @@ def test_a_signup_whose_address_mail_limit_is_met_meanwhile_records_one_throttle
 
     throttled = {"event": "authentication_request_throttled", "user_id": None}
     assert records == [[throttled | {"client_ip": "127.0.0.1"}]] * 2
+    deliver_mail()
     assert mail.outbox == []
 
 
