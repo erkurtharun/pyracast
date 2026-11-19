@@ -6,7 +6,7 @@ import {
     type QueryKey,
 } from "@tanstack/react-query";
 import { useLocale } from "next-intl";
-import { createContext, useContext } from "react";
+import { createContext, useContext, useMemo } from "react";
 import { browserErrors } from "@/i18n/browser";
 import {
     buildUrl,
@@ -151,14 +151,33 @@ export function useApiList<P extends ListPath>(
 export function useRefresh() {
     const client = useQueryClient();
     const owner = useOwner();
-    const refresh = (queryKey: QueryKey) =>
-        client.invalidateQueries({ queryKey });
-    return {
-        workspace: (tenant: number) =>
-            Promise.all([
-                refresh(keys.workspace(owner, tenant)),
-                refresh(keys.path(owner, "/api/tenants/")),
-            ]),
-        tenants: () => refresh(keys.path(owner, "/api/tenants/")),
-    };
+    return useMemo(() => {
+        const refresh = (queryKey: QueryKey) =>
+            client.invalidateQueries({ queryKey });
+        return {
+            workspace: (tenant: number) =>
+                Promise.all([
+                    refresh(keys.workspace(owner, tenant)),
+                    refresh(keys.path(owner, "/api/tenants/")),
+                ]),
+            requests: (tenant: number) =>
+                Promise.all([
+                    refresh(
+                        keys.path(
+                            owner,
+                            "/api/tenants/{tenant_id}/change-requests/",
+                            {
+                                tenant_id: tenant,
+                            },
+                        ),
+                    ),
+                    refresh(keys.path(owner, "/api/tenants/")),
+                ]),
+            tenants: () => refresh(keys.path(owner, "/api/tenants/")),
+            discard: (path: string, parameters: object) =>
+                client.removeQueries({
+                    queryKey: keys.path(owner, path, parameters),
+                }),
+        };
+    }, [client, owner]);
 }

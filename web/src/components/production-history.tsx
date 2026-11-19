@@ -202,10 +202,10 @@ export function ProductionHistory({
         },
         { poll: editor.status === "closed" ? cadence.live : false },
     );
-    const [reconciledAt, setReconciledAt] = useState(0);
-    if (reading.data && reading.updatedAt !== reconciledAt) {
+    const [reconciled, setReconciled] = useState<History>();
+    if (reading.data && reading.data !== reconciled) {
         const fresh = reading.data;
-        setReconciledAt(reading.updatedAt);
+        setReconciled(fresh);
         setEditor((previous) =>
             reconcileEditor(previous, fresh, t("interval_changed")),
         );

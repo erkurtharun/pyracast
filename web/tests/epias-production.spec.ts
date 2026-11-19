@@ -42,7 +42,7 @@ async function productionApi(page: Page, viewer = false) {
             },
         }),
     );
-    await page.route("**/production/?*", (route) => {
+    await page.route("**/api/**/production/?*", (route) => {
         const url = new URL(route.request().url());
         const date = url.searchParams.get("start_date")!;
         const intervals = provider.map((energy, hour) => {
@@ -391,7 +391,7 @@ test("generation filtering preserves native intervals and repeated local hours a
                 ? null
                 : { ...template.effective, energy_mwh: energy },
     }));
-    await page.route("**/production/?*", (route) =>
+    await page.route("**/api/**/production/?*", (route) =>
         route.fulfill({
             json: {
                 ...oneInterval(1),
@@ -481,7 +481,7 @@ test("reloading a conflict preserves the draft when the native interval disappea
     await expect(
         page.getByRole("alert").filter({ hasText: "Production changed." }),
     ).toBeVisible();
-    await page.route("**/production/?*", (route) =>
+    await page.route("**/api/**/production/?*", (route) =>
         route.fulfill({
             json: {
                 timezone: region.timezone,
@@ -539,7 +539,7 @@ test("importing a different native interval preserves an open draft for recovery
 }) => {
     const state = await productionApi(page);
     let imported = false;
-    await page.route("**/production/?*", (route) => {
+    await page.route("**/api/**/production/?*", (route) => {
         if (!imported) return route.fallback();
         const history = oneInterval(0.25);
         const [interval] = history.intervals;
@@ -607,7 +607,7 @@ test("a failed import refresh preserves the draft and releases an invalidated pe
     const pendingReload = new Promise<void>((resolve) => {
         reloadRequested = resolve;
     });
-    await page.route("**/production/?*", async (route) => {
+    await page.route("**/api/**/production/?*", async (route) => {
         if (failRefresh)
             return route.fulfill({
                 status: 503,
@@ -700,7 +700,7 @@ test("production polling pauses during editing and hidden documents and retains 
     const state = await productionApi(page);
     let requests = 0;
     let fail = false;
-    await page.route("**/production/?*", (route) => {
+    await page.route("**/api/**/production/?*", (route) => {
         requests++;
         return fail
             ? route.fulfill({
@@ -776,7 +776,7 @@ test("a held production poll is not overlapped by the next one", async ({
     });
     await openProduction(page);
     await expect(table(page)).toBeVisible();
-    await page.route("**/production/?*", async (route) => {
+    await page.route("**/api/**/production/?*", async (route) => {
         const current = ++polls;
         if (current === 1) await gate;
         return route.fulfill({ json: oneInterval(current === 1 ? 4 : 5) });
@@ -917,7 +917,7 @@ test("native timeline preserves half-hour and offset-hour corrections with their
         quality: "valid",
         source: "meter",
     });
-    await page.route("**/production/?*", (route) => {
+    await page.route("**/api/**/production/?*", (route) => {
         expect(
             new URL(route.request().url()).searchParams.get("native_intervals"),
         ).toBe("true");
@@ -1053,7 +1053,7 @@ test("changing dates hides the old production export and ignores late responses"
     const pending = new Promise<void>((resolve) => {
         requested = resolve;
     });
-    await page.route("**/production/?*", async (route) => {
+    await page.route("**/api/**/production/?*", async (route) => {
         const date = new URL(route.request().url()).searchParams.get(
             "start_date",
         );
@@ -1085,7 +1085,7 @@ test("failed production requests stop loading without exposing stale values", as
     page,
 }) => {
     await productionApi(page);
-    await page.route("**/production/?*", (route) =>
+    await page.route("**/api/**/production/?*", (route) =>
         route.fulfill({
             status: 503,
             json: errorBody("busy", "Production is temporarily unavailable."),
@@ -1124,7 +1124,7 @@ test("Turkish production at 320px keeps native corrections, decimal commas and i
             },
         }),
     );
-    await page.route("**/production/?*", (route) =>
+    await page.route("**/api/**/production/?*", (route) =>
         route.fulfill({
             json: {
                 timezone: region.timezone,

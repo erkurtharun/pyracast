@@ -306,6 +306,7 @@ export function PlantWorkspace({
                                                 },
                                             ),
                                         );
+                                        await changed();
                                     }}
                                 >
                                     <PlantConfigurationFields

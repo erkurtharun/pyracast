@@ -47,7 +47,7 @@ async function setup(page: Page) {
     await page.route("**/calibrations/40/", (route) =>
         route.fulfill({ json: calibration }),
     );
-    await page.route("**/outages/", (route) =>
+    await page.route("**/api/**/outages/", (route) =>
         route.fulfill({ json: paged([]) }),
     );
     await page.route("**/trash/regions/", (route) =>
@@ -63,7 +63,7 @@ async function setup(page: Page) {
             ),
         }),
     );
-    await page.route("**/forecast/**", (route) => {
+    await page.route("**/api/**/forecast/**", (route) => {
         const target =
             new URL(route.request().url()).searchParams.get("date") ??
             "2026-01-08";
@@ -113,7 +113,7 @@ async function setup(page: Page) {
             },
         });
     });
-    await page.route("**/production/?**", (route) => {
+    await page.route("**/api/**/production/?**", (route) => {
         const query = new URL(route.request().url()).searchParams;
         expect(query.get("native_intervals")).toBe("true");
         const date = query.get("start_date") ?? "2026-01-07";
@@ -621,7 +621,7 @@ for (const width of [320, 390, 1440]) {
                     ]),
                 }),
             );
-            await page.route("**/members/", (route) =>
+            await page.route("**/api/**/members/", (route) =>
                 route.fulfill({
                     json: {
                         members: [
@@ -637,7 +637,7 @@ for (const width of [320, 390, 1440]) {
             await page.route("**/invitations/", (route) =>
                 route.fulfill({ json: { invitations: [] } }),
             );
-            await page.route("**/trash/**", (route) =>
+            await page.route("**/api/**/trash/**", (route) =>
                 route.fulfill({ json: paged([]) }),
             );
             await page.goto("/app/");

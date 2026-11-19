@@ -50,16 +50,19 @@ export function OperationalInbox({ tenant }: { tenant: Tenant }) {
         if (outcome && outcome !== "seen" && effectiveScope === "pending")
             setPage(1);
         setUpdate((value) => ({ revision: value.revision + 1, outcome }));
-        void refresh.workspace(tenant.id);
     };
     useEffect(() => {
+        if (update.revision > 0) void refresh.workspace(tenant.id);
         if (update.outcome) feedback.current?.focus();
-    }, [update]);
+    }, [update, refresh, tenant.id]);
     return (
         <>
             <div className="page-heading">
                 <h1>{t("inbox")}</h1>
-                <button className="button secondary" onClick={() => changed()}>
+                <button
+                    className="button secondary"
+                    onClick={() => void refresh.requests(tenant.id)}
+                >
                     {t("refreshList")}
                 </button>
             </div>

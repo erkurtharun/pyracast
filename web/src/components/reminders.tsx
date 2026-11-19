@@ -269,8 +269,15 @@ export function Reminders(props: ReminderProps) {
             key={`${props.scope.region_id}-${version}`}
             {...props}
             onSaved={async () => {
-                await refresh.workspace(props.scope.tenant_id);
+                refresh.discard(
+                    "/api/tenants/{tenant_id}/regions/{region_id}/reminders/",
+                    {
+                        tenant_id: props.scope.tenant_id,
+                        region_id: props.scope.region_id,
+                    },
+                );
                 setVersion((current) => current + 1);
+                await refresh.workspace(props.scope.tenant_id);
             }}
         />
     );

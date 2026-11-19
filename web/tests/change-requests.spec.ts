@@ -108,7 +108,7 @@ test("member submits a native production correction with a stable retry key and 
         )
             direct.push(request.url());
     });
-    await page.route("**/production/?*", (route) => {
+    await page.route("**/api/**/production/?*", (route) => {
         const date = new URL(route.request().url()).searchParams.get(
             "start_date",
         )!;
@@ -226,7 +226,7 @@ test("member submits a native production correction with a stable retry key and 
 
 test("a server error shows its reference", async ({ page }) => {
     await member(page);
-    await page.route("**/production/?*", (route) => {
+    await page.route("**/api/**/production/?*", (route) => {
         const date = new URL(route.request().url()).searchParams.get(
             "start_date",
         )!;
@@ -291,7 +291,7 @@ test("member outage reports remain proposals and use explicit action envelopes",
         status: "active",
         declared_configuration_id: 31,
     };
-    await page.route("**/outages/", (route) => {
+    await page.route("**/api/**/outages/", (route) => {
         expect(route.request().method()).toBe("GET");
         return route.fulfill({ json: paged([outage]) });
     });
@@ -918,7 +918,7 @@ async function routeUnavailableRows(
     reasons: (string | null)[],
     role: "member" | "admin",
 ) {
-    await page.route("**/production/?*", (route) => {
+    await page.route("**/api/**/production/?*", (route) => {
         const date = new URL(route.request().url()).searchParams.get(
             "start_date",
         );

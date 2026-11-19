@@ -56,7 +56,7 @@ test("refresh and Back keep the workspace, the view and the forecast date", asyn
     await expect(page).toHaveURL("/app/w/1/members/");
     await page.reload();
     await expect(
-        page.getByRole("heading", { name: "Members", exact: true }),
+        page.getByRole("heading", { name: "Members", exact: true, level: 1 }),
     ).toBeVisible();
     await page.goBack();
     await expect(page).toHaveURL("/app/w/1/");

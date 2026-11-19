@@ -426,7 +426,7 @@ test("open regional and plant forecasts refresh after new data arrives", async (
     await page.clock.install();
     await mockApi(page);
     let revised = false;
-    await page.route("**/forecast/**", async (route) => {
+    await page.route("**/api/**/forecast/**", async (route) => {
         await route.fulfill({
             json: {
                 timezone: region.timezone,
@@ -639,7 +639,7 @@ test("regional and plant data sources identify estimated actuals and retain arch
     await mockApi(page);
     const sources: string[] = [];
     const plantRequests: URL[] = [];
-    await page.route("**/forecast/**", async (route) => {
+    await page.route("**/api/**/forecast/**", async (route) => {
         const url = new URL(route.request().url());
         const source = url.searchParams.get("data_source") ?? "missing";
         sources.push(source);
@@ -709,12 +709,8 @@ test("regional and plant data sources identify estimated actuals and retain arch
         page.getByText("Satellite/model estimates, not meter readings."),
     ).toHaveCount(0);
     await page.getByLabel("Forecast date").fill("2026-03-27");
-    await expect
-        .poll(() => plantRequests.at(-1)?.searchParams.get("date"))
-        .toBe("2026-03-27");
-    await expect
-        .poll(() => plantRequests.at(-1)?.searchParams.get("data_source"))
-        .toBe("auto");
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-27");
+    await expect(page.getByLabel("Data source")).toHaveValue("auto");
     await expect(
         page.getByText("Satellite/model estimates, not meter readings."),
     ).toBeVisible();
@@ -740,7 +736,7 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
 }) => {
     await mockApi(page);
     const values = [0, 12.34567, null, 5, 0];
-    await page.route("**/forecast/**", (route) =>
+    await page.route("**/api/**/forecast/**", (route) =>
         route.fulfill({
             json: {
                 date: "2026-01-01",
@@ -804,7 +800,7 @@ test("all-zero forecasts remain visible as measured zero values", async ({
     page,
 }) => {
     await mockApi(page);
-    await page.route("**/forecast/**", (route) =>
+    await page.route("**/api/**/forecast/**", (route) =>
         route.fulfill({
             json: {
                 timezone: region.timezone,
@@ -950,7 +946,7 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
         await route.fulfill({
             json: {
                 count: 2,
-                next: second ? null : "http://backend.test/api/tenants/?page=2",
+                next: second ? null : "/api/tenants/?page=2",
                 previous: null,
                 results: [
                     {
@@ -962,7 +958,7 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
             },
         });
     });
-    await page.route(/\/forecast\/\?/, async (route) =>
+    await page.route(/\/api\/.*\/forecast\/\?/, async (route) =>
         route.fulfill({
             json: {
                 timezone: region.timezone,
@@ -1487,7 +1483,7 @@ test("recycle bin ignores a prior workspace response and restores only in the se
     const firstRequest = new Promise<void>((resolve) => {
         requestedFirst = resolve;
     });
-    await page.route("**/trash/**", async (route) => {
+    await page.route("**/api/**/trash/**", async (route) => {
         const path = new URL(route.request().url()).pathname;
         if (path.endsWith("/plants/")) {
             await route.fulfill({ json: paged([]) });

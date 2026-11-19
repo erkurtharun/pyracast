@@ -69,7 +69,7 @@ test("viewer reads shared settings without write controls or requests", async ({
             ]),
         }),
     );
-    await page.route("**/outages/", (route) =>
+    await page.route("**/api/**/outages/", (route) =>
         route.fulfill({ json: paged([]) }),
     );
     const writes: string[] = [];

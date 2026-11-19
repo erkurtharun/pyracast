@@ -54,15 +54,19 @@ async function workspace(
         else if (path === "/api/tenants/")
             data = paged([tenantRow({ id: 1, name: "Tenant", role })]);
         else if (path.endsWith("/change-requests/")) data = paged([]);
-        else if (path.endsWith("/sites/")) data = paged([region]);
-        else if (path.endsWith("/plants/"))
+        else if (path.endsWith("/sites/"))
             data = paged([
                 {
-                    id: 21,
-                    name: "Outage plant",
-                    region_id: 11,
-                    current_configuration: configured ? configuration : null,
-                    submission: configured ? null : configuration,
+                    ...region,
+                    plant: {
+                        id: 21,
+                        name: "Outage plant",
+                        region_id: 11,
+                        current_configuration: configured
+                            ? configuration
+                            : null,
+                        submission: configured ? null : configuration,
+                    },
                 },
             ]);
         else if (path.endsWith("/performance/"))
@@ -164,7 +168,7 @@ async function workspace(
         await route.fulfill({ json: data });
     });
     await page.goto("/app/");
-    await page.getByRole("button", { name: /Outage region/ }).click();
+    await page.getByRole("button", { name: /Outage plant/ }).click();
     return {
         reads: () => outageReads,
         incident: () => incident,
