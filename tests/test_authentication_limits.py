@@ -30,7 +30,15 @@ from pyracast.accounts import adapters, login_limits
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.audit import logger as security_logger
 from pyracast.accounts.models import UserLanguagePreference
-from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, member, submit, totp_code
+from tests.support.auth_lifecycle import (
+    AUTH,
+    LONGEST_ADDRESS,
+    PASSWORD,
+    mailed_code,
+    member,
+    submit,
+    totp_code,
+)
 from tests.support.company_registration import signup
 from tests.support.outbox import deliver_mail
 
@@ -714,17 +722,20 @@ def test_a_full_day_of_failed_passwords_mails_the_account_owner_once(clock: Cloc
     assert lock_notices() == [("alias@example.com", "sent")]
 
 
+@pytest.mark.parametrize(
+    "address", ["absent@example.com", LONGEST_ADDRESS], ids=["short", "longest"]
+)
 def test_the_daily_lock_of_an_unknown_address_writes_the_same_intent_and_mails_nobody(
-    clock: Clock,
+    clock: Clock, address: str
 ) -> None:
     client = Client(enforce_csrf_checks=True)
-    fail_daily(client, "absent@example.com", 100, clock)
-    assert error_codes(login(client, "absent@example.com", WRONG)) == ["too_many_login_attempts"]
+    fail_daily(client, address, 100, clock)
+    assert error_codes(login(client, address, WRONG)) == ["too_many_login_attempts"]
 
-    assert lock_notices() == [("absent@example.com", "pending")]
+    assert lock_notices() == [(address, "pending")]
     assert deliver_mail() == 0
     assert mail.outbox == []
-    assert lock_notices() == [("absent@example.com", "skipped")]
+    assert lock_notices() == [(address, "skipped")]
 
 
 def test_a_check_still_in_flight_does_not_announce_a_lock(
@@ -986,8 +997,9 @@ def test_ninety_nine_failures_after_an_errored_sign_in_do_not_lock(clock: Clock)
     user = member()
     client = Client(enforce_csrf_checks=True)
     errored_sign_in(client, user)
-    clock.advance(601)
 
+    # The first five failures share the errored attempt's ten-minute window, which keeps any
+    # reservation it left; only the daily history forgets one after the request ceiling.
     fail_daily(client, user.email, 99, clock)
 
     assert login(client, user.email, PASSWORD).status_code == 200
@@ -1051,6 +1063,37 @@ def test_two_failures_recorded_at_one_time_count_as_two_and_lock_with_one_notice
 
     assert error_codes(login(client, user.email, PASSWORD)) == ["too_many_login_attempts"]
     assert lock_notices() == [("member@example.com", "pending")]
+
+
+def test_a_check_in_flight_recorded_at_the_time_of_a_finished_failure_does_not_count(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = member()
+    fail_daily(Client(enforce_csrf_checks=True), user.email, 98, clock)
+    clock.step = 0.0
+    assert error_codes(login(Client(enforce_csrf_checks=True), user.email, WRONG)) == [
+        "email_password_mismatch"
+    ]
+    held, release = hold_correct_password(monkeypatch)
+
+    def beside_the_held_check() -> tuple[list[str], list[tuple[str, str]]]:
+        assert held.wait(timeout=10)
+        try:
+            refusal = error_codes(login(Client(enforce_csrf_checks=True), user.email, WRONG))
+            return refusal, lock_notices()
+        finally:
+            release.set()
+
+    success, beside = in_parallel(
+        [
+            lambda: login(Client(enforce_csrf_checks=True), user.email, PASSWORD).status_code,
+            beside_the_held_check,
+        ]
+    )
+
+    assert beside == (["too_many_login_attempts"], [])
+    assert success == 200
+    assert lock_notices() == []
 
 
 def test_a_failure_in_flight_beside_a_refusal_announces_the_lock_once_it_finishes(

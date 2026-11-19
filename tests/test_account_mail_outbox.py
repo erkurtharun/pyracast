@@ -16,7 +16,7 @@ from django.utils import timezone
 from psycopg import sql
 
 from pyracast.mail.errors import PermanentlyNotSentError
-from tests.support.auth_lifecycle import PASSWORD, member, submit
+from tests.support.auth_lifecycle import LONGEST_ADDRESS, PASSWORD, member, submit
 from tests.support.company_registration import signup
 from tests.support.outbox import after_the_lease, deliver_mail
 
@@ -232,6 +232,31 @@ def test_asking_again_for_a_code_answers_alike_for_an_address_with_and_without_a
 
     assert answers[0] == answers[1]
     assert answers[0][0] == (200 if outcome in ("failed", "uncertain") else 429)
+
+
+def test_a_reset_for_the_longest_accepted_address_answers_alike_and_is_mailed(
+    transport: type[Transport],
+) -> None:
+    longest = request_reset(0, LONGEST_ADDRESS)
+    short = request_reset(1, "absent@example.com")
+
+    assert (longest.status_code, longest.json()) == (short.status_code, short.json())
+    assert intents() == [
+        ("account/email/unknown_account", LONGEST_ADDRESS),
+        ("account/email/unknown_account", "absent@example.com"),
+    ]
+    assert deliver_mail() == 2
+    assert transport.sent[0].to == [LONGEST_ADDRESS]
+
+
+def test_an_address_change_to_the_longest_accepted_address_mails_its_code(
+    transport: type[Transport],
+) -> None:
+    pending_address_change(0, LONGEST_ADDRESS)
+
+    assert intents() == [("account/email/email_confirmation", LONGEST_ADDRESS)]
+    assert deliver_mail() == 1
+    assert transport.sent[0].to == [LONGEST_ADDRESS]
 
 
 def test_a_late_refusal_never_reopens_an_intent_recovered_as_uncertain(
