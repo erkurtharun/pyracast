@@ -92,7 +92,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0003_delivery_lease_check",
             "0004_recipient_and_time_shape_checks",
             "0005_schema_naming_convention",
-            "0006_outbound_mail_and_recipient_rows",
+            "0006_outbound_mail",
         ),
         "plants": (
             "0002_plant_event_action_and_calibration_error_checks",

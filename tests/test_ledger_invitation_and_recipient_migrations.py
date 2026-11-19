@@ -41,7 +41,7 @@ from tests.support.invariants import (
     REVOKED_RECIPIENTS_RULE,
     violations,
 )
-from tests.support.migrations import constraints, leaf_nodes, migrate
+from tests.support.migrations import constraints, forward, leaf_nodes, migrate
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -84,12 +84,6 @@ RULES = {
         MEMBERSHIPS_RULE,
     ),
     "regions_auditevent": (AUDIT_DETAILS_RULE,),
-}
-# These migrations end here; the reminder recipients became rows after them.
-MIGRATED = {
-    "accounts": ("accounts", "0005_schema_naming_convention"),
-    "forecasts": ("forecasts", "0004_schema_naming_convention"),
-    "notifications": ("notifications", "0005_schema_naming_convention"),
 }
 ADDRESS = "recipient@example.com"
 WEEK = timedelta(days=7)
@@ -148,30 +142,20 @@ def invited(
     return int(row.pk)
 
 
-def forward() -> None:
-    migrate(*(node for node in leaf_nodes() if node[0] not in MIGRATED), *MIGRATED.values())
-
-
-def stored_model(name: str) -> models.Manager[models.Model]:
-    state = MigrationExecutor(connection).loader.project_state([MIGRATED["notifications"]])
-    model: type[models.Model] = state.apps.get_model("notifications", name)
-    return model._default_manager
-
-
-def schedule_and_delivery(case: RequestCase) -> tuple[models.Model, models.Model]:
+def schedule_and_delivery(case: RequestCase) -> tuple[ReminderSchedule, NotificationDelivery]:
     pinned = {ADDRESS: [Membership.objects.get(user=case.proposer).pk]}
-    schedule = stored_model("ReminderSchedule").create(
-        region_id=case.system.region.pk,
+    schedule = ReminderSchedule.objects.create(
+        region=case.system.region,
         effective_from=NOW,
         recipients=[ADDRESS],
         recipient_memberships=pinned,
         times=["06:30", "18:00"],
     )
-    delivery = stored_model("NotificationDelivery").create(
-        schedule_id=schedule.pk,
+    delivery = NotificationDelivery.objects.create(
+        schedule=schedule,
         scheduled_for=NOW,
         available_at=NOW,
-        binding_id=case.system.binding.pk,
+        binding=case.system.binding,
         preparation_deadline=NOW,
         recipients=[ADDRESS],
         recipient_memberships=pinned,
@@ -205,7 +189,6 @@ def test_migrations_close_superseded_invitations_and_keep_every_valid_row(
     rejected = production_request(case)
     reject_request(member, case.system.tenant.pk, rejected.pk, reason="Meter replaced")
     incident_request(case)
-    forward()
     schedule_and_delivery(case)
     WorkspaceAdminChange.objects.create(
         tenant=case.system.tenant,
@@ -333,7 +316,7 @@ def incident_ending_at_its_start(case: RequestCase) -> models.QuerySet[Any]:
 def schedule_shape(**changes: object) -> Callable[[RequestCase], models.QuerySet[Any]]:
     def write(case: RequestCase) -> models.QuerySet[Any]:
         schedule, _ = schedule_and_delivery(case)
-        rows = stored_model("ReminderSchedule").filter(pk=schedule.pk)
+        rows = ReminderSchedule.objects.filter(pk=schedule.pk)
         rows.update(**changes)
         return rows
 
@@ -343,7 +326,7 @@ def schedule_shape(**changes: object) -> Callable[[RequestCase], models.QuerySet
 def delivery_shape(**changes: object) -> Callable[[RequestCase], models.QuerySet[Any]]:
     def write(case: RequestCase) -> models.QuerySet[Any]:
         _, delivery = schedule_and_delivery(case)
-        rows = stored_model("NotificationDelivery").filter(pk=delivery.pk)
+        rows = NotificationDelivery.objects.filter(pk=delivery.pk)
         rows.update(**changes)
         return rows
 

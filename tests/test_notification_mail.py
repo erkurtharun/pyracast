@@ -23,6 +23,7 @@ def test_a_prepared_delivery_restores_its_frozen_message_and_workbook() -> None:
     workbook = b"PK\x03\x04 frozen workbook"
     delivery = NotificationDelivery(
         id=18,
+        recipients=["recipient@example.com"],
         prepared_message={
             "subject": "Saved forecast",
             "body": "Frozen text",
@@ -33,7 +34,11 @@ def test_a_prepared_delivery_restores_its_frozen_message_and_workbook() -> None:
         },
     )
     message = build_message(delivery)
-    assert (message.subject, message.body, message.bcc) == ("Saved forecast", "Frozen text", [])
+    assert (message.subject, message.body, message.bcc) == (
+        "Saved forecast",
+        "Frozen text",
+        ["recipient@example.com"],
+    )
     assert message.alternatives[0][0] == "<p>Frozen text</p>"
     assert message.attachments == [("forecast-2026-11-15.xlsx", workbook, XLSX_MIME)]
     assert message.extra_headers["Message-ID"] == (

@@ -9,7 +9,7 @@ from pyracast.notifications.models import (
     ReminderState,
 )
 from pyracast.notifications.operations import effective_recipients, recipient_limit
-from pyracast.notifications.recipients import stored_recipients, workspace_recipients
+from pyracast.notifications.recipients import workspace_recipients
 from pyracast.notifications.scheduler import slot_recipients
 from pyracast.regions.models import Region, RegionStatus
 
@@ -96,7 +96,7 @@ def _delivery(
 ) -> ReminderDelivery:
     message = delivery.prepared_message or {}
     age = _source_age(delivery, now)
-    addresses = delivery.addresses()
+    addresses = list(delivery.recipients)
     return ReminderDelivery(
         id=delivery.pk,
         scheduled_for=delivery.scheduled_for,
@@ -127,7 +127,6 @@ def reminder_overview(
     deliveries = (
         NotificationDelivery.objects.filter(schedule__region_id=schedule.region_id)
         .select_related("snapshot")
-        .prefetch_related("recipients")
         .order_by("-scheduled_for", "-pk")[:20]
     )
     return ReminderOverview(
@@ -141,9 +140,7 @@ def reminder_overview(
         workspace_member_count=len(members),
         recipient_limit_exceeded=len(effective) > limit,
         daily_reminder_limit=binding.provider_account.daily_quota if binding else None,
-        addresses=ReminderAddresses(stored_recipients(schedule), members)
-        if administrator
-        else None,
+        addresses=ReminderAddresses(list(schedule.recipients), members) if administrator else None,
         deliveries=[
             _delivery(delivery, now, administrator=administrator) for delivery in deliveries
         ],

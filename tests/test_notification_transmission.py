@@ -15,7 +15,7 @@ from pyracast.notifications.mail import build_message
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationSettings,
-    ReminderRecipient,
+    ReminderSchedule,
 )
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.scheduler import MAX_LATENESS
@@ -125,8 +125,8 @@ def test_open_connection_does_not_authorize_a_changed_delivery(
             delivery.schedule.save(update_fields=("enabled",))
         elif change == "limit":
             NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
-            ReminderRecipient.objects.create(
-                schedule_id=delivery.schedule_id, email="other@example.com"
+            ReminderSchedule.objects.filter(pk=delivery.schedule_id).update(
+                recipients=[*delivery.recipients, "other@example.com"]
             )
         elif change == "deadline":
             clock[0] = 2

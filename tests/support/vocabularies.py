@@ -773,8 +773,6 @@ FREE_TEXT = frozenset(
         ("plants.ForecastIssuance", "model_version"),
         ("incidents.PlantIncident", "title"),
         ("incidents.PlantIncident", "notes"),
-        ("notifications.ReminderRecipient", "email"),
-        ("notifications.DeliveryRecipient", "email"),
         ("notifications.OutboundMail", "recipient"),
         ("notifications.OutboundMail", "lock_key"),
     }

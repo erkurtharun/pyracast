@@ -1,151 +1,20 @@
-import sys
-from collections import defaultdict
 from typing import ClassVar
 
 import django.db.models.deletion
-import django.db.models.functions.text
 import django.db.models.lookups
-from django.apps.registry import Apps
-from django.conf import settings
 from django.db import migrations, models
-from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.migrations.operations.base import Operation
-from psycopg import sql
 
 import pyracast.db
-
-BIGINT_MAX = 2**63 - 1
-
-
-def _rows(
-    apps: Apps, schema_editor: BaseDatabaseSchemaEditor, label: str
-) -> models.QuerySet[models.Model]:
-    app_label, model_name = label.split(".")
-    stored: type[models.Model] = apps.get_model(app_label, model_name)
-    return stored._default_manager.using(schema_editor.connection.alias).all()
-
-
-def _addresses(
-    schema_editor: BaseDatabaseSchemaEditor, model: type[models.Model]
-) -> dict[int, list[tuple[str, str]]]:
-    """Each list's addresses in order with the database's lower(), so a repeat is judged
-    exactly as the unique index judges it."""
-    listed: dict[int, list[tuple[str, str]]] = defaultdict(list)
-    with schema_editor.connection.cursor() as cursor:
-        cursor.execute(
-            sql.SQL(
-                "SELECT stored.id, item.address, lower(item.address) FROM {} AS stored"
-                " CROSS JOIN LATERAL jsonb_array_elements_text(stored.recipients)"
-                " WITH ORDINALITY AS item(address, position) ORDER BY stored.id, item.position"
-            ).format(sql.Identifier(model._meta.db_table))
-        )
-        for pk, address, lowered in cursor.fetchall():
-            listed[pk].append((address, lowered))
-    return listed
-
-
-def _ties(pins: list[object]) -> list[int]:
-    """The pins that can be membership ids, each once, in order."""
-    return list(
-        dict.fromkeys(
-            int(pin) for pin in pins if isinstance(pin, int | float) and 1 <= pin <= BIGINT_MAX
-        )
-    )
-
-
-def copy_recipients_to_rows(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
-    """Every stored address becomes rows in its list's order, invalid and overlong ones
-    included: one for each membership it is pinned to, or one without. A schedule keeps the
-    pins whose membership exists and a delivery every pin that can be an id, so an address
-    stays eligible while any of them is active. Skipped and counted: a repeat of an address in
-    the same list, and a schedule address pinned only to removed memberships (never sent to;
-    the membership's cascade removes such a row). A delivery address pinned only to ids no
-    membership can have stays refused as revoked. The envelope of a delivery that reached its
-    transmit marker is the addresses it had not revoked."""
-    members = set(_rows(apps, schema_editor, "accounts.Membership").values_list("pk", flat=True))
-    schedule_rows = _rows(apps, schema_editor, "notifications.ReminderRecipient")
-    delivery_rows = _rows(apps, schema_editor, "notifications.DeliveryRecipient")
-    removed = repeated = 0
-    schedules = _rows(apps, schema_editor, "notifications.ReminderSchedule")
-    listed = _addresses(schema_editor, schedules.model)
-    for pk, pins in schedules.values_list("pk", "recipient_memberships").iterator():
-        kept: list[models.Model] = []
-        seen: set[str] = set()
-        for address, lowered in listed[pk]:
-            pinned = pins.get(address.casefold(), [])
-            ties = [membership for membership in _ties(pinned) if membership in members]
-            if lowered in seen:
-                repeated += 1
-            elif pinned and not ties:
-                removed += 1
-            else:
-                seen.add(lowered)
-                kept.extend(
-                    schedule_rows.model(schedule_id=pk, email=address, membership_id=membership)
-                    for membership in ties or (None,)
-                )
-        schedule_rows.bulk_create(kept)
-    deliveries = _rows(apps, schema_editor, "notifications.NotificationDelivery")
-    listed = _addresses(schema_editor, deliveries.model)
-    for pk, pins, revoked, status, marked in deliveries.values_list(
-        "pk", "recipient_memberships", "revoked_recipients", "status", "transmit_started_at"
-    ).iterator():
-        attempted = status in ("sent", "uncertain") or marked is not None
-        frozen: list[models.Model] = []
-        seen = set()
-        for address, lowered in listed[pk]:
-            if lowered in seen:
-                repeated += 1
-                continue
-            seen.add(lowered)
-            pinned = pins.get(address.casefold(), [])
-            ties = _ties(pinned)
-            withdrawn = address.casefold() in revoked or bool(pinned and not ties)
-            frozen.extend(
-                delivery_rows.model(
-                    delivery_id=pk,
-                    email=address,
-                    membership_id=membership,
-                    revoked=withdrawn,
-                    authorized=attempted and not withdrawn,
-                )
-                for membership in ties or (None,)
-            )
-        delivery_rows.bulk_create(frozen)
-    for count, what in (
-        (removed, "reminder recipient(s) pinned only to removed memberships were not kept"),
-        (repeated, "repeated recipient address(es) were kept once"),
-    ):
-        if count:
-            sys.stdout.write(f"\n  notifications: {count} {what}.")
 
 
 class Migration(migrations.Migration):
     dependencies: ClassVar = [
         ("accounts", "0007_invitation_token_minted_at_send"),
         ("notifications", "0005_schema_naming_convention"),
-        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations: ClassVar[list[Operation]] = [
-        migrations.CreateModel(
-            name="DeliveryRecipient",
-            fields=[
-                (
-                    "id",
-                    models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
-                    ),
-                ),
-                ("email", models.CharField()),
-                ("membership_id", models.PositiveBigIntegerField(null=True)),
-                ("revoked", models.BooleanField(default=False)),
-                ("authorized", models.BooleanField(default=False)),
-            ],
-            options={
-                "ordering": ("pk",),
-            },
-        ),
         migrations.CreateModel(
             name="OutboundMail",
             fields=[
@@ -246,50 +115,6 @@ class Migration(migrations.Migration):
                 ("lock_key", models.CharField(max_length=64, null=True)),
             ],
         ),
-        migrations.CreateModel(
-            name="ReminderRecipient",
-            fields=[
-                (
-                    "id",
-                    models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
-                    ),
-                ),
-                ("email", models.CharField()),
-            ],
-            options={
-                "ordering": ("pk",),
-            },
-        ),
-        migrations.RemoveConstraint(
-            model_name="notificationdelivery",
-            name="notificationdelivery_recipients_chk",
-        ),
-        migrations.RemoveConstraint(
-            model_name="notificationdelivery",
-            name="notificationdelivery_recipient_memberships_chk",
-        ),
-        migrations.RemoveConstraint(
-            model_name="notificationdelivery",
-            name="notificationdelivery_revoked_recipients_chk",
-        ),
-        migrations.RemoveConstraint(
-            model_name="reminderschedule",
-            name="reminderschedule_recipients_chk",
-        ),
-        migrations.RemoveConstraint(
-            model_name="reminderschedule",
-            name="reminderschedule_recipient_memberships_chk",
-        ),
-        migrations.AddField(
-            model_name="deliveryrecipient",
-            name="delivery",
-            field=models.ForeignKey(
-                on_delete=django.db.models.deletion.CASCADE,
-                related_name="recipients",
-                to="notifications.notificationdelivery",
-            ),
-        ),
         migrations.AddField(
             model_name="outboundmail",
             name="invitation",
@@ -297,53 +122,6 @@ class Migration(migrations.Migration):
                 null=True,
                 on_delete=django.db.models.deletion.CASCADE,
                 to="accounts.workspaceinvitation",
-            ),
-        ),
-        migrations.AddField(
-            model_name="reminderrecipient",
-            name="membership",
-            field=models.ForeignKey(
-                null=True, on_delete=django.db.models.deletion.CASCADE, to="accounts.membership"
-            ),
-        ),
-        migrations.AddField(
-            model_name="reminderrecipient",
-            name="schedule",
-            field=models.ForeignKey(
-                on_delete=django.db.models.deletion.CASCADE,
-                related_name="recipients",
-                to="notifications.reminderschedule",
-            ),
-        ),
-        migrations.RunPython(copy_recipients_to_rows, migrations.RunPython.noop),
-        migrations.RemoveField(
-            model_name="notificationdelivery",
-            name="recipient_memberships",
-        ),
-        migrations.RemoveField(
-            model_name="notificationdelivery",
-            name="recipients",
-        ),
-        migrations.RemoveField(
-            model_name="notificationdelivery",
-            name="revoked_recipients",
-        ),
-        migrations.RemoveField(
-            model_name="reminderschedule",
-            name="recipient_memberships",
-        ),
-        migrations.RemoveField(
-            model_name="reminderschedule",
-            name="recipients",
-        ),
-        migrations.AddConstraint(
-            model_name="deliveryrecipient",
-            constraint=models.UniqueConstraint(
-                models.F("delivery"),
-                django.db.models.functions.text.MD5(django.db.models.functions.text.Lower("email")),
-                models.F("membership_id"),
-                name="deliveryrecipient_delivery_email_uniq",
-                nulls_distinct=False,
             ),
         ),
         migrations.AddIndex(
@@ -526,16 +304,6 @@ class Migration(migrations.Migration):
                     _connector="OR",
                 ),
                 name="outboundmail_lock_key_chk",
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name="reminderrecipient",
-            constraint=models.UniqueConstraint(
-                models.F("schedule"),
-                django.db.models.functions.text.MD5(django.db.models.functions.text.Lower("email")),
-                models.F("membership"),
-                name="reminderrecipient_schedule_email_uniq",
-                nulls_distinct=False,
             ),
         ),
     ]

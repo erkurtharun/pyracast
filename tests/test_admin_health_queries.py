@@ -24,7 +24,6 @@ from pyracast.notifications.scheduler import PREPARATION_GRACE
 from pyracast.regions.models import Region
 from tests.support.domain import System, make_system
 from tests.support.metering import connected
-from tests.support.notifications import store_recipients
 
 pytestmark = pytest.mark.django_db(transaction=True)
 NOW = datetime(2026, 11, 15, 12, tzinfo=UTC)
@@ -144,6 +143,7 @@ def delivery(
     return NotificationDelivery.objects.create(
         schedule=ReminderSchedule.objects.create(region=region, effective_from=NOW),
         binding=SiteBinding.objects.get(region=schedule.region),
+        recipients=[f"recipient-{count}@example.com"],
         scheduled_for=scheduled,
         preparation_deadline=scheduled + PREPARATION_GRACE,
         available_at=available,
@@ -432,33 +432,30 @@ def test_stale_region_filter_uses_successful_published_current_binding_forecast_
 
 @pytest.mark.parametrize("recipients", [["invalid"], ["recipient@example.com", "invalid"]])
 def test_invalid_recipient_filter_matches_validation_and_current_enabled_region_scope(
-    recipients: list[str],
+    recipients: object,
 ) -> None:
     system = make_system(approved=True)
-    target = ReminderSchedule.objects.create(region=system.region, effective_from=NOW, enabled=True)
-    store_recipients(target, recipients)
+    target = ReminderSchedule.objects.create(
+        region=system.region, effective_from=NOW, enabled=True, recipients=recipients
+    )
     disabled, _ = another_region(system, "Disabled schedule")
-    store_recipients(
-        ReminderSchedule.objects.create(region=disabled, effective_from=NOW, enabled=False),
-        ["invalid"],
+    ReminderSchedule.objects.create(
+        region=disabled, effective_from=NOW, enabled=False, recipients=["invalid"]
     )
     disabled_collection, _ = another_region(system, "Disabled collection")
     CollectionSchedule.objects.create(region=disabled_collection, enabled=False, effective_from=NOW)
-    store_recipients(
-        ReminderSchedule.objects.create(
-            region=disabled_collection, effective_from=NOW, enabled=True
-        ),
-        ["invalid"],
+    ReminderSchedule.objects.create(
+        region=disabled_collection, effective_from=NOW, enabled=True, recipients=["invalid"]
     )
     valid, _ = another_region(system, "Valid")
-    store_recipients(
-        ReminderSchedule.objects.create(region=valid, effective_from=NOW, enabled=True),
-        ["recipient@example.com"],
+    ReminderSchedule.objects.create(
+        region=valid, effective_from=NOW, enabled=True, recipients=["recipient@example.com"]
     )
     matches = regions_for_issue("invalid_reminder_recipients", NOW)
     assert set(matches.values_list("pk", flat=True)) == {system.region.pk, disabled_collection.pk}
     assert matches.count() == delivery_health(NOW, LAG)["invalid_reminder_recipients"]
-    store_recipients(target, [])
+    target.recipients = []
+    target.save(update_fields=["recipients"])
     system.account.enabled = False
     system.account.save(update_fields=["enabled"])
     assert not regions_for_issue("invalid_reminder_recipients", NOW).exists()

@@ -310,7 +310,7 @@ def recent_work_context(
             "id": row.pk,
             "plant_name": row.display_plant_name,
             "company": row.schedule.region.tenant.name,
-            "recipient": ", ".join(row.addresses()),
+            "recipient": ", ".join(row.recipients),
             "status": row.status,
             "status_label": {
                 "sent": _("Accepted by email service"),
@@ -330,9 +330,9 @@ def recent_work_context(
                 else ""
             ),
         }
-        for row in delivery_rows.select_related("schedule__region__tenant")
-        .prefetch_related("recipients")
-        .order_by("-scheduled_for", "-pk")[:limit]
+        for row in delivery_rows.select_related("schedule__region__tenant").order_by(
+            "-scheduled_for", "-pk"
+        )[:limit]
     ]
     metering = [
         {

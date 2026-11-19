@@ -16,11 +16,10 @@ from pyracast.errors import DomainError, ErrorCode
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationSettings,
-    ReminderRecipient,
     ReminderSchedule,
 )
 from pyracast.notifications.recipients import effective_recipients as effective_recipients
-from pyracast.notifications.recipients import recipient_rows, stored_recipients
+from pyracast.notifications.recipients import pin_recipient_memberships
 from pyracast.regions.models import Region, RegionStatus, active_region
 
 RECIPIENT_MAX_LENGTH = 254
@@ -40,16 +39,12 @@ def validate_recipient(address: str) -> None:
 
 def invalid_reminder_recipient_count() -> int:
     invalid = 0
-    for schedule in (
-        ReminderSchedule.objects.filter(
-            active_region("region__"),
-            enabled=True,
-            region__status=RegionStatus.APPROVED,
-            region__approved_binding__provider_account__enabled=True,
-        )
-        .select_related("region")
-        .prefetch_related("recipients")
-    ):
+    for schedule in ReminderSchedule.objects.filter(
+        active_region("region__"),
+        enabled=True,
+        region__status=RegionStatus.APPROVED,
+        region__approved_binding__provider_account__enabled=True,
+    ).select_related("region"):
         try:
             for address in effective_recipients(schedule):
                 validate_recipient(address)
@@ -77,7 +72,7 @@ class ReminderSettings:
 def _stored_settings(schedule: ReminderSchedule) -> ReminderSettings:
     return ReminderSettings(
         schedule.enabled,
-        tuple(stored_recipients(schedule)),
+        tuple(schedule.recipients),
         schedule.include_workspace_members,
         tuple(schedule.times),
         schedule.language,
@@ -181,12 +176,11 @@ def configure_reminders(
         if enabled and (created or not stored.enabled):
             _check_enabling(region)
         current = len(effective_recipients(schedule))
-        rows = recipient_rows(schedule, list(submitted.recipients))
-        if [(row.email, row.membership_id) for row in rows] != [
-            (row.email, row.membership_id) for row in schedule.recipients.all()
-        ]:
-            schedule.recipients.all().delete()
-            ReminderRecipient.objects.bulk_create(rows)
+        stored_memberships = dict(schedule.recipient_memberships)
+        schedule.recipient_memberships = pin_recipient_memberships(
+            schedule, list(submitted.recipients)
+        )
+        schedule.recipients = list(submitted.recipients)
         schedule.include_workspace_members = include_workspace_members
         unchanged_pause = not enabled and replace(submitted, enabled=stored.enabled) == stored
         _check_recipient_limit(len(effective_recipients(schedule)), current, limit, unchanged_pause)
@@ -199,4 +193,6 @@ def configure_reminders(
             schedule.configured_by = actor
             schedule.effective_from = now
             schedule.save()
+        elif schedule.recipient_memberships != stored_memberships:
+            schedule.save(update_fields=("recipient_memberships",))
         return schedule

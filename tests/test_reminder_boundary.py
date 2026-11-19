@@ -13,7 +13,7 @@ from django.test import Client
 
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.connections.models import ProviderAccount
-from pyracast.notifications.models import NotificationSettings, ReminderRecipient, ReminderSchedule
+from pyracast.notifications.models import NotificationSettings, ReminderSchedule
 from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT, configure_reminders
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import Region
@@ -369,6 +369,8 @@ def test_an_enabled_schedule_of_a_plant_out_of_approval_waits(
 def test_an_invalid_saved_recipient_names_its_state() -> None:
     system = approved()
     schedule = save(system)
-    ReminderRecipient.objects.create(schedule=schedule, email="not-an-address")
+    ReminderSchedule.objects.filter(pk=schedule.pk).update(
+        recipients=[*schedule.recipients, "not-an-address"]
+    )
 
     assert client_for(system.member).get(url(system)).json()["state"] == "invalid_recipient"

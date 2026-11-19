@@ -175,6 +175,7 @@ class JsonPathExists(models.Func):
     output_field = models.BooleanField()
 
 
+TEXT_ITEMS = 'strict $[*] ? (@.type() != "string")'
 TIME_ITEMS = (
     'strict $[*] ? (@.type() != "string" || !(@ like_regex "^([01][0-9]|2[0-3]):[0-5][0-9]$"))'
 )

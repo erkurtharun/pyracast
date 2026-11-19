@@ -250,8 +250,6 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     before = project_rows()
     assert all(before[table] for table in COLUMNS)
 
-    migrate(*NAMING)
-    assert project_rows() == renamed(before)
     forward()
 
     assert catalog() == fresh
@@ -268,4 +266,5 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     assert all(row["purge_started_at"] is None for row in after["regions_region"])
     for row in after["regions_region"]:
         del row["purge_started_at"]
+    assert after.pop("notifications_outboundmail") == []
     assert after == renamed(before)

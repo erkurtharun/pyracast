@@ -40,23 +40,23 @@ LEASE_DURATION = timedelta(minutes=5)
 logger = logging.getLogger(__name__)
 
 
-def _skip_reason(delivery: NotificationDelivery, limit: int) -> tuple[str | None, list[str]]:
+def _skip_reason(delivery: NotificationDelivery, limit: int) -> str | None:
     schedule = delivery.schedule
     clock = delivery.scheduled_for.astimezone(ZoneInfo(schedule.region.timezone)).strftime("%H:%M")
     if not schedule.enabled or clock not in schedule.times:
-        return NotificationDeliveryError.CANCELLED_BY_SETTINGS_CHANGE, []
+        return NotificationDeliveryError.CANCELLED_BY_SETTINGS_CHANGE
     if reason := slot_recipients(schedule, limit)[1]:
-        return reason, []
-    permitted = permitted_recipients(delivery)
-    if not permitted:
-        return NotificationDeliveryError.NO_RECIPIENTS, []
+        return reason
+    delivery.recipients = permitted_recipients(delivery)
+    if not delivery.recipients:
+        return NotificationDeliveryError.NO_RECIPIENTS
     if (
         schedule.region_id != delivery.binding.region_id
         or clock not in schedule.times[: delivery.binding.provider_account.daily_quota]
         or not binding_can_notify(delivery.binding)
     ):
-        return NotificationDeliveryError.SCHEDULE_OR_AUTHORITY_CHANGED, []
-    return None, permitted
+        return NotificationDeliveryError.SCHEDULE_OR_AUTHORITY_CHANGED
+    return None
 
 
 def _recover_interrupted(delivery: NotificationDelivery, now: datetime) -> None:
@@ -115,7 +115,7 @@ def _mark_transmit(
             or delivery.lease_token != token
         ):
             return False
-        reason, permitted = _skip_reason(delivery, limit)
+        reason = _skip_reason(delivery, limit)
         now += timedelta(seconds=time.monotonic() - started)
         if delivery.lease_expires_at is None or delivery.lease_expires_at <= now:
             _recover_interrupted(delivery, now)
@@ -128,10 +128,8 @@ def _mark_transmit(
             delivery.save()
             return False
         delivery.transmit_started_at = now
-        delivery.save(update_fields=("transmit_started_at",))
-        delivery.recipients.filter(email__in=permitted).update(authorized=True)
-        delivery.recipients.exclude(email__in=permitted).update(revoked=True, authorized=False)
-        message.bcc = permitted
+        delivery.save(update_fields=("recipients", "transmit_started_at"))
+        message.bcc = list(delivery.recipients)
         return True
 
 
@@ -162,8 +160,7 @@ def process_notification(
             or delivery.available_at > now
         ):
             return False
-        reason, permitted = _skip_reason(delivery, limit)
-        if reason is not None:
+        if (reason := _skip_reason(delivery, limit)) is not None:
             delivery.status, delivery.last_error = NotificationDeliveryStatus.SKIPPED, reason
             delivery.save()
             return False
@@ -192,7 +189,6 @@ def process_notification(
                     cast(str, frozen.get("prepared_at", delivery.scheduled_for.isoformat()))
                 )
             message, delivery.prepared_message = build_unavailable_message(delivery, prepared_at)
-        message.bcc = permitted
         token = uuid.uuid4()
         delivery.status, delivery.lease_token = NotificationDeliveryStatus.SENDING, token
         delivery.lease_expires_at = now + LEASE_DURATION

@@ -18,6 +18,7 @@ def test_message_id_is_unique_per_delivery_and_stable_across_attempts() -> None:
         scheduled_for=delivery.scheduled_for.replace(minute=1),
         available_at=delivery.available_at,
         preparation_deadline=delivery.preparation_deadline,
+        recipients=delivery.recipients,
         binding=delivery.binding,
         snapshot=delivery.snapshot,
     )

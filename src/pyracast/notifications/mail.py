@@ -72,6 +72,7 @@ def build_unavailable_message(
         subject=payload["subject"],
         body=payload["body"],
         from_email=settings.DEFAULT_FROM_EMAIL,
+        bcc=delivery.recipients,
         headers={"Message-ID": message_id(delivery)},
     ), payload
 
@@ -83,6 +84,7 @@ def _restore_message(
         subject=payload["subject"],
         body=payload["body"],
         from_email=settings.DEFAULT_FROM_EMAIL,
+        bcc=delivery.recipients,
         headers={"Message-ID": message_id(delivery)},
     )
     message.attach_alternative(payload["html"], "text/html")

@@ -28,7 +28,6 @@ from tests.support.invariants import stored_again
 from tests.support.notification_preparation import complete_saved
 from tests.support.notifications import (
     SLOT,
-    addresses,
     attached_sheet,
     configured,
     reminder_schedule_payload,
@@ -467,7 +466,7 @@ def test_notification_settings_remain_editable_after_provider_credentials_rotate
         now=NOW,
     )
     assert schedule.enabled
-    assert addresses(schedule) == ["updated@example.com"]
+    assert schedule.recipients == ["updated@example.com"]
     assert schedule.times == ["11:00"]
 
 

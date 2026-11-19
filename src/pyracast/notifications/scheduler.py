@@ -12,7 +12,6 @@ from pyracast.background.failures import BACK_OFF, Deferrals, isolate
 from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
-    DeliveryRecipient,
     NotificationDelivery,
     NotificationDeliveryError,
     NotificationDeliveryStatus,
@@ -23,7 +22,7 @@ from pyracast.notifications.operations import (
     recipient_limit,
     validate_recipient,
 )
-from pyracast.notifications.recipients import delivery_rows
+from pyracast.notifications.recipients import pin_recipient_memberships
 from pyracast.notifications.schedule import local_slot
 from pyracast.regions.models import Region, active_region
 
@@ -111,6 +110,8 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                     paused = NotificationDelivery.objects.create(
                         schedule=current,
                         scheduled_for=slot,
+                        recipients=[],
+                        recipient_memberships={},
                         language=current.language,
                         binding=binding,
                         preparation_deadline=slot + PREPARATION_GRACE,
@@ -134,6 +135,8 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                 delivery = NotificationDelivery.objects.create(
                     schedule=current,
                     scheduled_for=slot,
+                    recipients=recipients,
+                    recipient_memberships=pin_recipient_memberships(current, recipients),
                     language=current.language,
                     snapshot=snapshot,
                     binding=binding,
@@ -146,6 +149,5 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                     if now - slot > MAX_LATENESS
                     else "",
                 )
-                DeliveryRecipient.objects.bulk_create(delivery_rows(delivery, current, recipients))
                 ids.append(delivery.pk)
     return ids

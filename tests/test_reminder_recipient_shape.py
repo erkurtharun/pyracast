@@ -4,19 +4,27 @@ from typing import Any
 import pytest
 from django.db import IntegrityError, models, transaction
 
-from pyracast.accounts.models import Membership
 from pyracast.db import violated_constraint
 from pyracast.forecasts.models import CollectionSchedule
-from pyracast.notifications.models import (
-    DeliveryRecipient,
-    NotificationDelivery,
-    ReminderRecipient,
-    ReminderSchedule,
-)
-from tests.support.notifications import addresses, configured, ready
+from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from tests.support.notifications import configured, ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
+ADDRESS = "member@example.com"
+TEXT_LISTS = [
+    ("not_a_list", ADDRESS),
+    ("object", {ADDRESS: 1}),
+    ("number_item", [ADDRESS, 5]),
+    ("null_item", [None]),
+]
+MEMBERSHIP_MAPS = [
+    ("list", [ADDRESS]),
+    ("scalar_members", {ADDRESS: 3}),
+    ("text_member", {ADDRESS: ["3"]}),
+    ("zero_member", {ADDRESS: [0]}),
+    ("fractional_member", {ADDRESS: [1.5]}),
+]
 TIMES = [
     ("text", "10:00"),
     ("hour_out_of_range", ["24:00"]),
@@ -33,71 +41,67 @@ def refusal(rows: models.QuerySet[Any], **changes: object) -> str | None:
     return violated_constraint(raised.value)
 
 
-def cases(values: Sequence[tuple[str, object]]) -> list[Any]:
-    return [pytest.param(value, id=name) for name, value in values]
+def cases(field: str, values: Sequence[tuple[str, object]]) -> list[Any]:
+    return [pytest.param(field, value, id=f"{field}-{name}") for name, value in values]
 
 
-@pytest.mark.parametrize("value", cases(TIMES))
-def test_the_database_refuses_schedule_times_of_another_shape(value: object) -> None:
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        *cases("recipients", TEXT_LISTS),
+        *cases("recipient_memberships", MEMBERSHIP_MAPS),
+        *cases("times", TIMES),
+    ],
+)
+def test_the_database_refuses_a_reminder_schedule_of_another_shape(
+    field: str, value: object
+) -> None:
+    _, schedule = configured()
+    rows = ReminderSchedule.objects.filter(pk=schedule.pk)
+
+    assert refusal(rows, **{field: value}) == f"reminderschedule_{field}_chk"
+
+
+@pytest.mark.parametrize(("field", "value"), cases("times", TIMES))
+def test_the_database_refuses_collection_times_of_another_shape(field: str, value: object) -> None:
     system, schedule = configured()
     collection = CollectionSchedule.objects.create(
         region=system.region, times=["10:00"], effective_from=schedule.effective_from
     )
 
-    assert refusal(ReminderSchedule.objects.filter(pk=schedule.pk), times=value) == (
-        "reminderschedule_times_chk"
-    )
-    assert refusal(CollectionSchedule.objects.filter(pk=collection.pk), times=value) == (
+    assert refusal(CollectionSchedule.objects.filter(pk=collection.pk), **{field: value}) == (
         "collectionschedule_times_chk"
     )
 
 
-@pytest.mark.parametrize("pinned", [True, False])
-def test_an_address_is_stored_once_per_list_and_membership_whatever_its_case(
-    pinned: bool,
-) -> None:
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        *cases("recipients", TEXT_LISTS),
+        *cases("revoked_recipients", TEXT_LISTS),
+        *cases("recipient_memberships", MEMBERSHIP_MAPS),
+    ],
+)
+def test_the_database_refuses_a_delivery_of_another_shape(field: str, value: object) -> None:
+    rows = NotificationDelivery.objects.filter(pk=ready().pk)
+
+    assert refusal(rows, **{field: value}) == f"notificationdelivery_{field}_chk"
+
+
+def test_empty_and_well_formed_recipients_and_times_are_stored() -> None:
     delivery = ready()
-    membership = ReminderRecipient.objects.get(schedule=delivery.schedule).membership_id
-    if not pinned:
-        ReminderRecipient.objects.filter(schedule=delivery.schedule).update(membership=None)
-        delivery.recipients.update(membership_id=None)
-        membership = None
+    schedules = ReminderSchedule.objects.filter(pk=delivery.schedule_id)
+    deliveries = NotificationDelivery.objects.filter(pk=delivery.pk)
+    memberships = {ADDRESS: [1, 2]}
 
-    with pytest.raises(IntegrityError) as schedule_row, transaction.atomic():
-        ReminderRecipient.objects.create(
-            schedule=delivery.schedule, email="DEFAULT@example.com", membership_id=membership
-        )
-    with pytest.raises(IntegrityError) as delivery_row, transaction.atomic():
-        DeliveryRecipient.objects.create(
-            delivery=delivery, email="Default@Example.com", membership_id=membership
-        )
-
-    assert violated_constraint(schedule_row.value) == "reminderrecipient_schedule_email_uniq"
-    assert violated_constraint(delivery_row.value) == "deliveryrecipient_delivery_email_uniq"
-
-
-def test_a_removed_membership_takes_its_saved_rows_and_leaves_the_delivery_history() -> None:
-    delivery = ready()
-    schedule = delivery.schedule
-    ReminderRecipient.objects.create(schedule=schedule, email="external@example.com")
-    pinned = ReminderRecipient.objects.get(schedule=schedule, email="default@example.com")
-    assert pinned.membership_id is not None
-
-    Membership.objects.filter(pk=pinned.membership_id).delete()
-
-    assert addresses(schedule) == ["external@example.com"]
-    assert list(
-        NotificationDelivery.objects.get(pk=delivery.pk).recipients.values_list(
-            "email", "membership_id"
-        )
-    ) == [("default@example.com", pinned.membership_id)]
-
-
-def test_empty_and_well_formed_times_are_stored() -> None:
-    _, schedule = configured()
-    schedules = ReminderSchedule.objects.filter(pk=schedule.pk)
-
-    schedules.update(times=[])
-    schedules.update(times=["00:00", "23:59"])
+    schedules.update(recipients=[], recipient_memberships={}, times=[])
+    schedules.update(
+        recipients=[ADDRESS], recipient_memberships=memberships, times=["00:00", "23:59"]
+    )
+    deliveries.update(recipients=[], recipient_memberships={}, revoked_recipients=[])
+    deliveries.update(
+        recipients=[ADDRESS], recipient_memberships=memberships, revoked_recipients=[ADDRESS]
+    )
 
     assert schedules.values_list("times", flat=True).get() == ["00:00", "23:59"]
+    assert deliveries.values_list("recipient_memberships", flat=True).get() == memberships

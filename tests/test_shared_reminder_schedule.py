@@ -16,7 +16,6 @@ from pyracast.notifications.operations import configure_reminders, get_reminder_
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, make_system
-from tests.support.notifications import addresses
 
 pytestmark = pytest.mark.django_db(transaction=True)
 SLOT = NOW + timedelta(days=1, hours=-6)
@@ -67,7 +66,7 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
     identifiers = enqueue_due(SLOT)
     assert len(identifiers) == 1
     delivery = NotificationDelivery.objects.get(pk=identifiers[0])
-    assert addresses(delivery) == ["original@example.com"]
+    assert delivery.recipients == ["original@example.com"]
     assert delivery.language == "tr"
     messages: list[EmailMultiAlternatives] = []
     assert process_notification(delivery.pk, SLOT, sender=messages.append)
@@ -78,12 +77,12 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
     schedule.refresh_from_db()
     assert ReminderSchedule.objects.filter(region=system.region).count() == 1
     assert schedule.configured_by_id == replacement.pk
-    assert addresses(schedule) == ["new@example.com"]
+    assert schedule.recipients == ["new@example.com"]
     assert schedule.times == ["11:00"]
     assert schedule.language == "en"
     delivery.refresh_from_db()
     assert delivery.language == "tr"
-    assert addresses(delivery) == ["original@example.com"]
+    assert delivery.recipients == ["original@example.com"]
     assert response.json()["deliveries"][0]["id"] == delivery.pk
     system.member.refresh_from_db()
     system.member.is_active = True
@@ -153,8 +152,9 @@ def test_schedule_survives_configurer_departure_and_other_workspaces_are_isolate
     response = client.get(f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/")
     assert response.status_code == 403
     other_schedule.refresh_from_db()
-    assert addresses(other_schedule) == ["private@example.com"]
-    assert addresses(schedule) == ["shared@example.com"]
+    assert other_schedule.recipients == ["private@example.com"]
+    schedule.refresh_from_db()
+    assert schedule.recipients == ["shared@example.com"]
 
 
 def test_reminder_language_is_explicit_and_a_paused_schedule_may_keep_no_recipient() -> None:
@@ -182,7 +182,8 @@ def test_reminder_language_is_explicit_and_a_paused_schedule_may_keep_no_recipie
         language="en",
         now=NOW,
     )
-    assert addresses(schedule) == []
+    schedule.refresh_from_db()
+    assert schedule.recipients == []
     client = Client()
     client.force_login(system.member)
     response = client.put(

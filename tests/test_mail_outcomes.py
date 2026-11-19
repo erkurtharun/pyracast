@@ -201,7 +201,7 @@ def test_reminder_stores_the_relay_outcome(
 ) -> None:
     delivery = ready()
     if phase == "rcpt":
-        relay.recipient_replies = dict.fromkeys(delivery.addresses(), reply)
+        relay.recipient_replies = dict.fromkeys(delivery.recipients, reply)
     else:
         script_reply(relay, phase, reply)
 

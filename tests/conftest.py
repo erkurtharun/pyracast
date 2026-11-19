@@ -91,11 +91,11 @@ SUBPROCESS = frozenset(
 MIGRATION = frozenset(
     {
         "test_calibration_requests",
+        "test_collection_times_migration",
         "test_invariant_migrations",
         "test_invitation_link_migration",
         "test_invitation_role_migration",
         "test_ledger_invitation_and_recipient_migrations",
-        "test_reminder_recipient_migration",
         "test_schema_naming_migrations",
         "test_vocabulary_migrations",
         "test_workspace_name_migration",

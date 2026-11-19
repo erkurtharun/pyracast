@@ -87,7 +87,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | HistoricalReferenceImport | Authorized source settings, immutable export digest and actual acquisition time |
 | ReferenceCapacityNormalization | Authorized capacity-only copies, original source lineage and conversion availability |
 | ForecastIssuance, PlantEvent | Immutable published electrical forecast and audited plant operations |
-| NotificationSettings, ReminderSchedule, ReminderRecipient, NotificationDelivery, DeliveryRecipient, OutboundMail | Shared plant email schedule, recipient rows and language, pinned saved forecasts, grouped delivery outcomes and account and invitation mail intents |
+| NotificationSettings, ReminderSchedule, NotificationDelivery, OutboundMail | Shared plant email schedule, explicit recipients and language, pinned saved forecasts, grouped delivery outcomes and account and invitation mail intents |
 | AuditEvent | Actor, action, target, the details its action declares and timestamp for privileged changes |
 
 Regions select explicit provider accounts rather than embedding credentials. One canonical record per account spans tenants and credential rotations; duplicate records must not create independent quota budgets.
@@ -663,12 +663,10 @@ times, extra recipient addresses and an English or Turkish email language. Works
 administrators edit it; other members see its settings, recipient counts and delivery
 history but no address. Optional workspace membership inclusion adds active members'
 verified account addresses. Membership changes update this group automatically. An
-enabled schedule needs an address or that option. Extra addresses retain their
-saved value; a known member address keeps a tie to every member it belonged to when
-saved, even after an email change, and stays a recipient while any of them is active.
-Removing a member ends only that member's ties and their unpinned saved addresses; an
-address is counted once however many members it belongs to. The configuring user is
-nullable audit information, not the schedule owner.
+enabled schedule needs an address or that option. Extra addresses retain their saved
+value; known member addresses retain their membership identity even after an email
+change. Removing a member also removes their saved addresses from current schedules.
+The configuring user is nullable audit information, not the schedule owner.
 
 The default limit is five distinct, case-insensitively compared addresses per plant,
 including automatically included members,
