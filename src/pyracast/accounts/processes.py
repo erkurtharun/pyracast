@@ -297,15 +297,32 @@ def stamp_reauthentication(request: HttpRequest, user: AbstractBaseUser) -> None
     request.session[PROOF_STAMP] = [user.pk, state]
 
 
-def end_stale_reauthentication(request: HttpRequest) -> None:
+def _end_unless_given_under(
+    request: HttpRequest, user: AbstractBaseUser, state: str | None
+) -> None:
     # A reauthentication holds while the account's credential state equals the one it was given
     # under; any change of that state ends it.
-    user = request.user
-    if not user.is_authenticated or not (proofs := _proofs(request, user)):
-        return
-    if request.session.get(PROOF_STAMP) != [user.pk, account_state(user.pk)]:
+    proofs = _proofs(request, user)
+    if proofs and request.session.get(PROOF_STAMP) != [user.pk, state]:
         _end(request, proofs)
         request.session.pop(PROOF_STAMP, None)
+
+
+def end_stale_reauthentication(request: HttpRequest) -> None:
+    # Read unlocked as a request starts: a change committed after this read ends the proof for
+    # the next request; credential writes read the state again under the locks.
+    user = request.user
+    if user.is_authenticated and _proofs(request, user):
+        _end_unless_given_under(request, user, account_state(user.pk))
+
+
+def require_current_proof(request: HttpRequest) -> None:
+    # A write that changes the account's own credentials calls this first in its transaction,
+    # before any gate reads a proof: the account's locks hold its state until the write commits,
+    # so the write never commits after another session's credential change.
+    user = request.user
+    if user.is_authenticated:
+        _end_unless_given_under(request, user, account_state(user.pk, lock=True))
 
 
 class PendingProcessAuthority:

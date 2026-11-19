@@ -33,6 +33,7 @@ from pyracast.accounts.processes import (
     continuing,
     lock_account,
     require_authority,
+    require_current_proof,
 )
 from pyracast.accounts.security import Factor, strongest_factor
 from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor, require_recent_mfa
@@ -190,18 +191,20 @@ class ChangePasswordView(StepUpAnswers, views.ChangePasswordView):
     input_class = inputs.ChangePasswordInput
 
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        # The current password proves only the password; an account with an authenticator also
-        # proves the authenticator.
         user = request.user
-        if (
-            request.method == "POST"
-            and user.is_authenticated
-            and strongest_factor(user) is Factor.MFA
-        ):
-            refused = require_recent_mfa(request)
-            if refused is not None:
-                return refused
-        return super().handle(request, *args, **kwargs)
+        if request.method != "POST" or not user.is_authenticated:
+            return super().handle(request, *args, **kwargs)
+        with transaction.atomic():
+            require_current_proof(request)
+            # The current password is checked against the password as locked here.
+            request.user = User.objects.get(pk=user.pk)
+            # The current password proves only the password; an account with an authenticator
+            # also proves the authenticator.
+            if strongest_factor(request.user) is Factor.MFA:
+                refused = require_recent_mfa(request)
+                if refused is not None:
+                    return refused
+            return super().handle(request, *args, **kwargs)
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         response: HttpResponse = super().post(request, *args, **kwargs)
@@ -217,11 +220,21 @@ class ReauthenticateView(StrongestFactor, views.ReauthenticateView):
 
 
 class ManageEmailView(StepUpAnswers, StartingView, views.ManageEmailView):
+    def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        if request.method != "DELETE" or not request.user.is_authenticated:
+            return super().handle(request, *args, **kwargs)
+        with transaction.atomic():
+            require_current_proof(request)
+            return super().handle(request, *args, **kwargs)
+
     def handle_input(self, data: Any) -> ErrorResponse | None:
         if self.request.method == "POST":
             if spent(self.request, "request_email_change", user=self.user):
                 raise throttled(self.request)
-            lock_account(self.user.pk)
+            if self.request.user.is_authenticated:
+                require_current_proof(self.request)
+            else:
+                lock_account(self.user.pk)
         return super().handle_input(data)
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:

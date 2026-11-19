@@ -24,10 +24,10 @@ from django.http import HttpRequest, HttpResponseRedirect
 from pyracast.accounts.audit import SecurityEvent, record_security_event, refusal_throttle
 from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.processes import (
-    account_state,
     identified_accounts,
     identifying,
     lock_account,
+    require_current_proof,
 )
 
 
@@ -80,13 +80,13 @@ class UnavailableSocialAppError(SocialApp.DoesNotExist, ValueError):
 
 @contextmanager
 def locked_social_user(request: HttpRequest, user_id: int) -> Iterator[User | None]:
+    # Connecting and removing an identity are credential writes of the session's own account.
     with transaction.atomic():
-        exists = account_state(user_id, lock=True) is not None
+        if request.user.pk == user_id:
+            require_current_proof(request)
         request.user = get_user(request)
         yield (
-            request.user
-            if exists and request.user.is_authenticated and request.user.pk == user_id
-            else None
+            request.user if request.user.is_authenticated and request.user.pk == user_id else None
         )
 
 

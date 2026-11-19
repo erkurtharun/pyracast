@@ -6,7 +6,6 @@ from allauth.headless.internal.restkit.inputs import Input
 from allauth.headless.mfa import views
 from allauth.headless.mfa.views import ManageRecoveryCodesView as AllauthRecoveryCodesView
 from allauth.headless.mfa.views import ManageTOTPView as AllauthTOTPView
-from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.http import HttpRequest, HttpResponseBase
@@ -17,7 +16,11 @@ from pyracast.accounts.inputs import (
     SecondFactorReauthenticateInput,
     TOTPActivationInput,
 )
-from pyracast.accounts.processes import AuthorityChangedError, require_authority
+from pyracast.accounts.processes import (
+    AuthorityChangedError,
+    require_authority,
+    require_current_proof,
+)
 from pyracast.accounts.security import Factor
 from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor, require_recent_mfa
 
@@ -50,7 +53,7 @@ class ManageRecoveryCodesView(AllauthRecoveryCodesView):
         if request.method not in {"GET", "HEAD", "POST"} or not request.user.is_authenticated:
             return super().handle(request, *args, **kwargs)
         with transaction.atomic():
-            request.user = User.objects.select_for_update().get(pk=request.user.pk)
+            require_current_proof(request)
             response = require_recent_mfa(request)
             if response is not None:
                 return response
@@ -68,7 +71,7 @@ class ManageTOTPView(StepUpAnswers, AllauthTOTPView):
         if request.method not in {"POST", "DELETE"} or not user.is_authenticated:
             return super().handle(request, *args, **kwargs)
         with transaction.atomic():
-            request.user = User.objects.select_for_update().get(pk=user.pk)
+            require_current_proof(request)
             response = require_recent_mfa(request) if request.method == "DELETE" else None
             if response is not None:
                 return response

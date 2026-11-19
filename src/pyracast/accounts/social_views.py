@@ -35,7 +35,12 @@ from django.http import (
 from django.template.loader import render_to_string
 from django.views.decorators.http import require_GET
 
-from pyracast.accounts.processes import PROVIDER_SIGNUP_SESSION_KEY, lock_account, starting
+from pyracast.accounts.processes import (
+    PROVIDER_SIGNUP_SESSION_KEY,
+    lock_account,
+    require_current_proof,
+    starting,
+)
 from pyracast.accounts.social import (
     locked_social_user,
     record_social_refusal,
@@ -102,17 +107,19 @@ class ProviderSignupView(AllauthProviderSignupView):
             return ConflictResponse(request)
 
 
+def connection_needs_reauthentication(request: HttpRequest) -> bool:
+    with transaction.atomic():
+        require_current_proof(request)
+        return reauthentication.is_reauthentication_required(request, app="allauth.socialaccount")
+
+
 class RedirectToProviderView(AllauthRedirectToProviderView):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         callback = social_callback_url()
         refused = HttpResponseRedirect(f"{callback}&error=invalid_request")
         if request.POST.get("callback_url") != callback:
             return refused
-        if request.POST.get(
-            "process"
-        ) == "connect" and reauthentication.is_reauthentication_required(
-            request, app="allauth.socialaccount"
-        ):
+        if request.POST.get("process") == "connect" and connection_needs_reauthentication(request):
             return HttpResponseRedirect(
                 f"{callback}&error=reauthentication_required&error_process=connect"
             )

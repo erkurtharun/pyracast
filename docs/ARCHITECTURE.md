@@ -153,7 +153,12 @@ verification; other addresses use Pyracast's email verification.
 Connections require an authenticated session and recent reauthentication. A
 reauthentication uses the strongest factor the account holds: its authenticator, else its
 password, else a code sent to its verified email; it ends when the account's credential
-state changes. Linking is
+state changes. A credential change ends the account's reauthentications for every request
+that starts after it commits, as a revocation ends a session, so a request already past its
+check, such as a console write of business data, still finishes. A write of the account's own
+credentials (recovery codes, authenticator, password, addresses, provider identities) checks
+its reauthentication again under the account's locks in its own transaction, so it never
+commits after another session's credential change. Linking is
 bound to the initiating user, and disconnects lock the user record to preserve a
 working login method. Provider sign-in retains Pyracast's local MFA requirements.
 
