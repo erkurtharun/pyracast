@@ -794,6 +794,7 @@ test("mobile platform administrator can reach administration and customer naviga
     await page.setViewportSize({ width: 320, height: 740 });
     await mockApi(page, { admin: true });
     await page.goto("/app/w/");
+    await expect(page).toHaveURL(/\/app\/w\/1\/$/);
     const navigation = page.getByRole("navigation", {
         name: "Main navigation",
     });

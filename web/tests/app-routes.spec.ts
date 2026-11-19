@@ -160,6 +160,40 @@ test("an unknown workspace in the address shows no other workspace's plants", as
     );
 });
 
+test("the document keeps its title while the workspace changes address", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.goto("/app/w/1/");
+    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    await page.evaluate(() => {
+        const untitled: string[] = [];
+        Object.assign(window, { untitled });
+        new MutationObserver(() => {
+            if (!document.title) untitled.push(location.pathname);
+        }).observe(document, {
+            subtree: true,
+            childList: true,
+            characterData: true,
+        });
+    });
+    await page.getByRole("button", { name: /East array/ }).click();
+    await expect(page).toHaveURL(/\/plants\/\d+\/forecast\/$/);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page).toHaveURL(/\/plants\/\d+\/settings\/$/);
+    await page.getByRole("button", { name: "Forecast", exact: true }).click();
+    await expect(page).toHaveURL(/\/plants\/\d+\/forecast\/$/);
+    await page.getByRole("button", { name: "Account" }).click();
+    await expect(page).toHaveURL("/app/account/");
+    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    expect(
+        await page.evaluate(
+            () => (window as unknown as { untitled: string[] }).untitled,
+        ),
+    ).toEqual([]);
+    expect(await page.locator("title").count()).toBe(1);
+});
+
 test("account settings have their own address", async ({ page }) => {
     await mockApi(page);
     await page.goto("/app/account/");

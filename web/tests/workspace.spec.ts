@@ -477,6 +477,49 @@ test("open regional and plant forecasts refresh after new data arrives", async (
     ).toBeVisible();
 });
 
+test("a date picked while a forecast view switch loads keeps the chosen view", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(new Date("2026-03-28T12:00:00Z"));
+    await mockApi(page);
+    let holding = false;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route(
+        (url) =>
+            url.searchParams.has("_rsc") && url.pathname.endsWith("/forecast/"),
+        async (route) => {
+            if (holding) {
+                holding = false;
+                await held;
+            }
+            await route.fallback();
+        },
+    );
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    const irradiance = page.getByRole("button", {
+        name: "Irradiance",
+        exact: true,
+    });
+    await irradiance.click();
+    await expect(irradiance).toHaveAttribute("aria-current", "page");
+    holding = true;
+    const generation = page.getByRole("button", {
+        name: "Generation",
+        exact: true,
+    });
+    await generation.click();
+    await page.getByLabel("Forecast date").fill("2026-03-27");
+    release();
+    await expect(page).toHaveURL(/\/forecast\/\?date=2026-03-27$/);
+    await expect(generation).toHaveAttribute("aria-current", "page");
+    await expect(page.getByLabel("Resolution")).toBeVisible();
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-27");
+});
+
 test("region collection schedule validates and saves distinct local times", async ({
     page,
 }) => {

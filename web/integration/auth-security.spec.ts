@@ -122,7 +122,7 @@ test("verified email and a recovery code protect a real browser session", async 
     await page.getByLabel("Authenticator or recovery code").fill(recoveryCode);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
-        page.getByRole("heading", { name: "Plants", exact: true }),
+        page.getByRole("heading", { name: "Account settings", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Account" }).click();
     const newPassword = `${password}-new`;
@@ -161,7 +161,7 @@ test("verified email and a recovery code protect a real browser session", async 
         .fill(secondRecoveryCode);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
-        page.getByRole("heading", { name: "Plants", exact: true }),
+        page.getByRole("heading", { name: "Account settings", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.getByRole("button", { name: "Forgot password?" }).click();
@@ -212,6 +212,6 @@ test("verified email and a recovery code protect a real browser session", async 
         .fill(thirdRecoveryCode);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
-        page.getByRole("heading", { name: "Plants", exact: true }),
+        page.getByRole("heading", { name: "Account settings", exact: true }),
     ).toBeVisible();
 });

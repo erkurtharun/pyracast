@@ -191,10 +191,12 @@ test("a portfolio of 101 plants over three pages keeps the request budget while 
               },
     );
     let siteReads = 0;
+    let polled = () => {};
+    const pollRead = new Promise<void>((resolve) => (polled = resolve));
     await page.route(
         (url) => url.pathname === "/api/tenants/1/sites/",
         (route) => {
-            siteReads++;
+            if (++siteReads === 4) polled();
             const number = Number(
                 new URL(route.request().url()).searchParams.get("page") ?? "1",
             );
@@ -217,6 +219,6 @@ test("a portfolio of 101 plants over three pages keeps the request budget while 
     await expect(page.locator(".region-card")).toHaveCount(101);
     expect(siteReads).toBe(3);
     await page.clock.runFor(FIVE_MINUTES);
-    expect(siteReads).toBeGreaterThan(3);
+    await pollRead;
     expect(requests.value).toBeLessThanOrEqual(25);
 });
