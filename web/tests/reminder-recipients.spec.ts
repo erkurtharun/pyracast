@@ -690,10 +690,14 @@ test("saved reminder fields stay unavailable until the refreshed settings arrive
 }) => {
     await reminderApi(page);
     const refresh = Promise.withResolvers<void>();
+    const reloading = Promise.withResolvers<void>();
     let saving = false;
     await page.route("**/reminders/", async (route) => {
         if (route.request().method() === "PUT") saving = true;
-        else if (saving) await refresh.promise;
+        else if (saving) {
+            reloading.resolve();
+            await refresh.promise;
+        }
         await route.fallback();
     });
     await openReminders(page);
@@ -701,6 +705,8 @@ test("saved reminder fields stay unavailable until the refreshed settings arrive
     await address.fill("custom@example.test");
     await page.getByRole("button", { name: "Save reminders" }).click();
     try {
+        // The reload starts only after the save was answered, so the form is checked in that window.
+        await reloading.promise;
         await expect(address).toHaveValue("custom@example.test");
         await expect(address).toBeDisabled();
         await expect(
