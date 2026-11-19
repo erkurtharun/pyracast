@@ -356,9 +356,11 @@ test("edits survive provider refresh and revert explicitly restores the latest p
         .click();
     await input.fill("0");
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    expect(state.writes[2]).toMatchObject({
-        changes: [{ expected_revision_id: 2, energy: 0 }],
-    });
+    await expect
+        .poll(() => state.writes[2])
+        .toMatchObject({
+            changes: [{ expected_revision_id: 2, energy: 0 }],
+        });
     await expect(row(page, "08:00–09:00")).toContainText("Corrected");
     await page
         .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
@@ -816,9 +818,11 @@ test("production uses the server total and exposes invalid saved quality", async
     await expect(page.getByLabel("Data quality")).toHaveValue("invalid");
     await page.getByLabel("Data quality").selectOption("valid");
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    expect(state.writes[0]).toMatchObject({
-        changes: [{ quality: "valid", energy: 9 }],
-    });
+    await expect
+        .poll(() => state.writes[0])
+        .toMatchObject({
+            changes: [{ quality: "valid", energy: 9 }],
+        });
 });
 
 test("CSV preview reviews effective values and unit changes require a new preview", async ({

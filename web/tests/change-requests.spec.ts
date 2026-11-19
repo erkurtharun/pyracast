@@ -318,15 +318,17 @@ test("member outage reports remain proposals and use explicit action envelopes",
         await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(320);
     await editor.getByRole("button", { name: "Send for approval" }).click();
-    expect(submissions[0]).toMatchObject({
-        action: "create",
-        values: {
-            title: "New outage",
-            available_dc_mw: null,
-            available_inverter_mw: null,
-            available_export_mw: null,
-        },
-    });
+    await expect
+        .poll(() => submissions[0])
+        .toMatchObject({
+            action: "create",
+            values: {
+                title: "New outage",
+                available_dc_mw: null,
+                available_inverter_mw: null,
+                available_export_mw: null,
+            },
+        });
     await page
         .getByRole("button", { name: "Suggest changes", exact: true })
         .click();
@@ -334,34 +336,40 @@ test("member outage reports remain proposals and use explicit action envelopes",
     await page
         .getByRole("button", { name: "Send for approval", exact: true })
         .click();
-    expect(submissions[1]).toMatchObject({
-        action: "update",
-        incident_id: 4,
-        expected_revision: 2,
-        values: { title: "Corrected title" },
-    });
+    await expect
+        .poll(() => submissions[1])
+        .toMatchObject({
+            action: "update",
+            incident_id: 4,
+            expected_revision: 2,
+            values: { title: "Corrected title" },
+        });
     await page
         .getByRole("button", { name: "Submit resolution", exact: true })
         .click();
     await page
         .getByRole("button", { name: "Send for approval", exact: true })
         .click();
-    expect(submissions[2]).toMatchObject({
-        action: "resolve",
-        incident_id: 4,
-        expected_revision: 2,
-        ends_at: expect.any(String),
-    });
+    await expect
+        .poll(() => submissions[2])
+        .toMatchObject({
+            action: "resolve",
+            incident_id: 4,
+            expected_revision: 2,
+            ends_at: expect.any(String),
+        });
     await page.getByText("Request cancellation", { exact: true }).click();
     await page.getByRole("checkbox").check();
     await page
         .getByRole("button", { name: "Send for approval", exact: true })
         .click();
-    expect(submissions[3]).toMatchObject({
-        action: "cancel",
-        incident_id: 4,
-        expected_revision: 2,
-    });
+    await expect
+        .poll(() => submissions[3])
+        .toMatchObject({
+            action: "cancel",
+            incident_id: 4,
+            expected_revision: 2,
+        });
     await expect(
         page.getByRole("heading", { name: "Inverter offline" }),
     ).toBeVisible();
