@@ -11,8 +11,8 @@ from allauth.usersessions.models import UserSession
 from django.contrib.auth.models import User
 from django.contrib.sessions.models import Session
 from django.core.management import CommandError, call_command
-from django.db.models.signals import pre_delete
 from django.db.models.deletion import Collector
+from django.db.models.signals import pre_delete
 from django.test import override_settings
 from django.utils import timezone
 from dramatiq.brokers.stub import StubBroker
@@ -27,6 +27,7 @@ from pyracast.accounts.models import (
     WorkspaceInvitation,
     WorkspaceRole,
 )
+from pyracast.background import failures
 from pyracast.forecasts.management.commands import dispatch
 from pyracast.forecasts.models import DispatcherStatus
 from pyracast.plants.models import Plant
@@ -318,10 +319,9 @@ def test_scanning_past_kept_signups_retains_at_most_one_page_of_results(
         referenced(signup_account(f"kept-{index}"))
     monkeypatch.setattr(retention, "BATCH_SIZE", 1)
     retained: list[int] = []
-    isolate = retention.isolate
 
     def recording(*args: Any, **kwargs: Any) -> list[Any]:
-        results = isolate(*args, **kwargs)
+        results = failures.isolate(*args, **kwargs)
         retained.append(len(results))
         return results
 
