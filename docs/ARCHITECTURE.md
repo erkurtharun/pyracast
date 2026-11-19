@@ -494,6 +494,12 @@ origin. The Next.js development server proxies Django routes and assets; the
 production gateway owns this routing. Django owns authentication and
 authorization; the allauth browser API enforces CSRF even before login. Sessions
 use HttpOnly, SameSite=Lax cookies, with Secure and a `__Host-` prefix in production.
+The session cookie lasts until the browser closes. A response sets it only when its
+request created or rotated the session key and deletes it only when its request ended
+the stored session the cookie named, so an answer arriving after a newer one never
+replaces or deletes the newer key; a request whose session no longer exists answers as
+signed out. The web client treats that answer as the end of the session only after a
+session read sent after it agrees, and otherwise repeats the refused request once.
 Revoke sessions after 12 hours or 30 minutes without requests; automatic polling
 counts as activity. Sessions predating the lifetime markers fail closed. A request
 whose session another session of the account ended while it ran answers 400

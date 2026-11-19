@@ -284,7 +284,7 @@ def test_the_session_middleware_order_is_checked() -> None:
 
     assert check_session_middleware_order() == []
     swapped = list(settings.MIDDLEWARE)
-    first = swapped.index("django.contrib.sessions.middleware.SessionMiddleware")
+    first = swapped.index("pyracast.accounts.session_cookie.SessionCookie")
     second = swapped.index("django.contrib.auth.middleware.AuthenticationMiddleware")
     swapped[first], swapped[second] = swapped[second], swapped[first]
     missing = [name for name in settings.MIDDLEWARE if "SessionLifetime" not in name]

@@ -59,7 +59,7 @@ MIDDLEWARE = [
     # Outside the session lock, so a sign-up's session is free while its answer waits.
     "pyracast.accounts.signup.SignupMinimumAnswerTime",
     "pyracast.accounts.session_lock.SessionRequestSerialization",
-    "django.contrib.sessions.middleware.SessionMiddleware",
+    "pyracast.accounts.session_cookie.SessionCookie",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "pyracast.accounts.middleware.SessionLifetime",
     "pyracast.accounts.processes.PendingProcessAuthority",
@@ -177,8 +177,8 @@ HEADLESS_FRONTEND_URLS = {
     "account_reset_password": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_reset_password_from_key": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_signup": f"{PYRACAST_PUBLIC_ORIGIN}/app/?signup=1",
-    "socialaccount_login_error": f"{PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1",
 }
+HEADLESS_ADAPTER = "pyracast.accounts.social.HeadlessAdapter"
 MFA_SUPPORTED_TYPES = ["totp", "recovery_codes"]
 MFA_ADAPTER = "pyracast.accounts.mfa.MFAAdapter"
 MFA_REAUTHENTICATION_REQUIRED = True
@@ -286,6 +286,7 @@ USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 STATIC_URL = "static/"
 STATIC_ROOT = os.environ.get("PYRACAST_STATIC_ROOT", "staticfiles")
+SESSION_ENGINE = "pyracast.accounts.session_cookie"
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True

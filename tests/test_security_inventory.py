@@ -14,7 +14,6 @@ from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from allauth.socialaccount.models import SocialAccount
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import mail
 from django.test import Client, override_settings
@@ -26,7 +25,6 @@ from tests.support.auth_lifecycle import PASSWORD, mailed_code, member, submit, 
 from tests.support.company_registration import signup
 from tests.support.social_accounts import (
     AUTH,
-    CALLBACK,
     PROVIDERS,
     begin,
     complete,
@@ -95,8 +93,6 @@ def social_providers(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     serve_provider_profile(monkeypatch)
     with override_settings(
         SOCIALACCOUNT_PROVIDERS=PROVIDERS,
-        HEADLESS_FRONTEND_URLS=settings.HEADLESS_FRONTEND_URLS
-        | {"socialaccount_login_error": CALLBACK},
     ):
         yield
 

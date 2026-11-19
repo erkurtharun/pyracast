@@ -6,6 +6,7 @@ from allauth.account import signals as account_signals
 from allauth.account.internal.flows import reauthentication
 from allauth.account.models import EmailAddress
 from allauth.core.exceptions import ImmediateHttpResponse
+from allauth.headless.adapter import DefaultHeadlessAdapter
 from allauth.mfa.models import Authenticator
 from allauth.socialaccount import signals as social_signals
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
@@ -50,6 +51,13 @@ def connect_identity_recovery() -> None:
 
 def social_callback_url() -> str:
     return f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1"
+
+
+class HeadlessAdapter(DefaultHeadlessAdapter):
+    def get_frontend_url(self, urlname: str, **kwargs: Any) -> str | None:
+        if urlname == "socialaccount_login_error":
+            return social_callback_url()
+        return super().get_frontend_url(urlname, **kwargs)
 
 
 def record_social_refusal(

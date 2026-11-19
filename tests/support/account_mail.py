@@ -891,8 +891,6 @@ def matrix_settings() -> dict[str, Any]:
         "MAILERS": {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}},
         "TIME_ZONE": "Europe/Istanbul",
         "SOCIALACCOUNT_PROVIDERS": PROVIDERS,
-        "HEADLESS_FRONTEND_URLS": settings.HEADLESS_FRONTEND_URLS
-        | {"socialaccount_login_error": CALLBACK},
     }
 
 

@@ -20,7 +20,6 @@ from allauth.socialaccount.adapter import get_adapter
 from allauth.socialaccount.internal.flows.connect import do_connect
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialLogin, SocialToken
 from allauth.socialaccount.providers.google.provider import GoogleProvider
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.db import IntegrityError, close_old_connections, connections, transaction
@@ -51,8 +50,6 @@ pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth
 def social_settings() -> Iterator[None]:
     with override_settings(
         SOCIALACCOUNT_PROVIDERS=PROVIDERS,
-        HEADLESS_FRONTEND_URLS=settings.HEADLESS_FRONTEND_URLS
-        | {"socialaccount_login_error": CALLBACK},
         MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}},
     ):
         yield

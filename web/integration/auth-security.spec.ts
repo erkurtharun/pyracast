@@ -46,7 +46,6 @@ test("verified email and a recovery code protect a real browser session", async 
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Account" }).click();
-    await page.waitForLoadState("networkidle");
     const sessionResponse = await page.request.get("/api/session/");
     expect(sessionResponse.status()).toBe(200);
     const session = (await sessionResponse.json()) as { csrf_token: string };

@@ -64,7 +64,6 @@ from tests.support.admin_mfa_bootstrap import TEST_PASSWORD, administrator
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit, totp_code
 from tests.support.company_registration import signup
 from tests.support.social_accounts import (
-    CALLBACK,
     PROVIDERS,
     begin,
     complete,
@@ -81,8 +80,6 @@ CHANGED = "changed@example.com"
 def local_mail_and_providers() -> Iterator[None]:
     with override_settings(
         SOCIALACCOUNT_PROVIDERS=PROVIDERS,
-        HEADLESS_FRONTEND_URLS=settings.HEADLESS_FRONTEND_URLS
-        | {"socialaccount_login_error": CALLBACK},
         MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}},
     ):
         yield

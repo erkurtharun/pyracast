@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialLogin
 from allauth.socialaccount.providers.google.provider import GoogleProvider
-from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, User
 from django.core.exceptions import PermissionDenied
 from django.test import Client, RequestFactory, override_settings
@@ -32,8 +31,6 @@ def social_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     serve_provider_profile(monkeypatch)
     with override_settings(
         SOCIALACCOUNT_PROVIDERS=PROVIDERS,
-        HEADLESS_FRONTEND_URLS=settings.HEADLESS_FRONTEND_URLS
-        | {"socialaccount_login_error": CALLBACK},
     ):
         yield
 

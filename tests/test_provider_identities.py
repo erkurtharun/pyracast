@@ -8,7 +8,6 @@ from allauth.account.internal.flows.email_verification import (
 )
 from allauth.account.models import EmailAddress
 from allauth.socialaccount.models import SocialAccount
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import mail
 from django.db import connection
@@ -41,8 +40,6 @@ pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth
 def social_settings() -> Iterator[None]:
     with override_settings(
         SOCIALACCOUNT_PROVIDERS=PROVIDERS,
-        HEADLESS_FRONTEND_URLS=settings.HEADLESS_FRONTEND_URLS
-        | {"socialaccount_login_error": CALLBACK},
         MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}},
     ):
         yield

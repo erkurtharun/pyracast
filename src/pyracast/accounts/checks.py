@@ -40,7 +40,7 @@ def validate_public_origin() -> None:
 # the session's limits, then the pending account processes resting on that account.
 SESSION_MIDDLEWARE = (
     "pyracast.accounts.session_lock.SessionRequestSerialization",
-    "django.contrib.sessions.middleware.SessionMiddleware",
+    "pyracast.accounts.session_cookie.SessionCookie",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "pyracast.accounts.middleware.SessionLifetime",
     "pyracast.accounts.processes.PendingProcessAuthority",
