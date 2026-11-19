@@ -12,10 +12,18 @@ import { browserErrors } from "@/i18n/browser";
 
 export type Session = components["schemas"]["SessionOutput"];
 export type SessionUser = components["schemas"]["SessionUserOutput"];
-export type SessionState = { session?: Session; ended: boolean };
+// signals counts the session changes other tabs announced; unconfirmed holds until a session read
+// sent after the latest one answers.
+export type SessionState = {
+    session?: Session;
+    ended: boolean;
+    signals: number;
+    unconfirmed: boolean;
+};
 
-let state: SessionState = { ended: false };
-let flight: { epoch: number; promise: Promise<Session> } | undefined;
+let state: SessionState = { ended: false, signals: 0, unconfirmed: false };
+let flight:
+    { epoch: number; signal: number; promise: Promise<Session> } | undefined;
 let confirming: Promise<boolean> | undefined;
 let signingOut = false;
 const listeners = new Set<() => void>();
@@ -35,7 +43,27 @@ export function useSessionState() {
     return useSyncExternalStore(subscribeSession, sessionState, sessionState);
 }
 
+function notify() {
+    for (const listener of listeners) listener();
+}
+
+// Tabs share the session cookie, so a sign-in or sign-out in one tab tells the others that their
+// session is unconfirmed; the message carries no account and no data.
+const channel =
+    typeof window !== "undefined" && "BroadcastChannel" in window
+        ? new BroadcastChannel("pyracast-session")
+        : undefined;
+channel?.addEventListener("message", () => {
+    state = { ...state, signals: state.signals + 1, unconfirmed: true };
+    notify();
+});
+
 export function adoptSession(session: Session) {
+    adopt(session, false);
+}
+
+function adopt(session: Session, confirmed: boolean) {
+    const previous = state;
     state = {
         session,
         ended: session.user
@@ -44,21 +72,31 @@ export function adoptSession(session: Session) {
               (state.ended ||
                   confirming !== undefined ||
                   Boolean(state.session?.user)),
+        signals: state.signals,
+        unconfirmed: state.unconfirmed && !confirmed,
     };
     setCsrfToken(session.csrf_token);
-    for (const listener of listeners) listener();
+    notify();
+    if (
+        previous.session &&
+        !previous.unconfirmed &&
+        previous.session.user?.id !== session.user?.id
+    )
+        channel?.postMessage("changed");
 }
 
 export function loadSession(): Promise<Session> {
     const epoch = mutationEpoch();
-    if (flight?.epoch === epoch) return flight.promise;
+    const signal = state.signals;
+    if (flight?.epoch === epoch && flight.signal === signal)
+        return flight.promise;
     const promise = send<Session>({ method: "GET", url: "/api/session/" }).then(
         (session) => {
-            adoptSession(session);
+            adopt(session, signal === state.signals);
             return session;
         },
     );
-    const current = { epoch, promise };
+    const current = { epoch, signal, promise };
     flight = current;
     promise
         .finally(() => {

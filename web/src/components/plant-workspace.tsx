@@ -1,7 +1,7 @@
 "use client";
 import { useTranslations, useFormatter } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useOptimistic, useState } from "react";
 import { useCanManageWorkspace } from "./workspace-access";
 import { Reminders } from "./reminders";
 import { CollectionSchedule } from "./collection-schedule";
@@ -62,45 +62,26 @@ export function PlantWorkspace({
     const currentPlant = latestPlant(plant, savedPlant);
     if (savedPlant && currentPlant === plant) setSavedPlant(undefined);
     const portfolio = routes.portfolio(scope.tenant_id);
-    const shown = routes.plant(scope.tenant_id, scope.region_id, tab, address);
-    // An address change that has not arrived yet is the base for the next one, so a quick second change cannot restore the old address.
-    const requested = useRef<{
-        section: PlantSection;
-        address: PlantAddress;
-        urls: string[];
-    }>(undefined);
-    useEffect(() => {
-        const urls = requested.current?.urls ?? [];
-        const arrived = urls.indexOf(shown);
-        if (arrived >= 0 && arrived < urls.length - 1) return;
-        requested.current = undefined;
-    }, [shown]);
+    // Lives as long as the router transition: a committed, superseded, restored or failed
+    // navigation returns it to the displayed address.
+    const [pending, setPending] = useOptimistic({ section: tab, address });
+    // Controls belong to the displayed section; only a pending change of that section is their base.
+    const base = pending.section === tab ? pending.address : address;
     const navigate = (
         section: PlantSection,
         next: PlantAddress,
         mode: "push" | "replace",
-    ) => {
-        const url = routes.plant(
-            scope.tenant_id,
-            scope.region_id,
-            section,
-            next,
-        );
-        requested.current = {
-            section,
-            address: next,
-            urls: [...(requested.current?.urls ?? []), url],
-        };
-        router[mode](url);
-    };
-    const selectTab = (next: PlantSection) => {
-        const current = requested.current ?? { section: tab, address };
-        navigate(next, next === current.section ? current.address : {}, "push");
-    };
-    const show = (next: PlantAddress) => {
-        const current = requested.current ?? { section: tab, address };
-        navigate(current.section, { ...current.address, ...next }, "replace");
-    };
+    ) =>
+        startTransition(() => {
+            setPending({ section, address: next });
+            router[mode](
+                routes.plant(scope.tenant_id, scope.region_id, section, next),
+            );
+        });
+    const selectTab = (next: PlantSection) =>
+        navigate(next, next === tab ? base : {}, "push");
+    const show = (next: PlantAddress) =>
+        navigate(tab, { ...base, ...next }, "replace");
     const setDate = (next: string) => show({ date: next });
     const changed = () => refresh.workspace(scope.tenant_id);
     const today = localDay(timezone);

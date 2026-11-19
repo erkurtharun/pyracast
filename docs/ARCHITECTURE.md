@@ -505,6 +505,9 @@ sent after it agrees, and otherwise repeats the refused request once; a repeat r
 again goes through the same read and is not sent a third time. A sign-out whose session
 read still shows a signed-in session is sent once more with the current key, and
 reported if the session is still signed in after it.
+A tab whose session changes (sign-in, sign-out, another account) tells the origin's other
+tabs over a `BroadcastChannel` message that names no account; each hides its workspace
+and accepts no action until a session read sent after that message answers.
 Revoke sessions after 12 hours or 30 minutes without requests; polling of a visible
 tab counts as activity, and hidden tabs do not poll. Sessions predating the lifetime markers fail closed. A request
 whose session another session of the account ended while it ran answers 400

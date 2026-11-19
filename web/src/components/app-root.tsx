@@ -11,7 +11,7 @@ import { Notice } from "./ui";
 
 export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
-    const { session, failure, retry } = useSessionBootstrap();
+    const { session, unconfirmed, failure, retry } = useSessionBootstrap();
     const handoff = useLanguageHandoff(session);
     const user = session?.user?.id;
     useForeignCacheRemoval(client, user);
@@ -24,7 +24,7 @@ export function AppRoot({ children }: { children: ReactNode }) {
                         : session?.language
                 }
             >
-                {session && handoff.status === "ready" ? (
+                {session && !unconfirmed && handoff.status === "ready" ? (
                     <QueryOwner value={user}>{children}</QueryOwner>
                 ) : (
                     <Bootstrap
@@ -77,17 +77,18 @@ function Bootstrap({
 
 function useSessionBootstrap() {
     const [attempt, setAttempt] = useState(0);
-    const [failure, setFailure] = useState<string>();
-    const { session } = useSessionState();
+    const { session, signals, unconfirmed } = useSessionState();
+    const read = `${attempt}:${signals}`;
+    const [failure, setFailure] = useState<{ read: string; message: string }>();
     useEffect(() => {
         let active = true;
         loadSession().catch((error: Error) => {
-            if (active) setFailure(error.message);
+            if (active) setFailure({ read, message: error.message });
         });
         return () => {
             active = false;
         };
-    }, [attempt]);
+    }, [read]);
     useEffect(() => {
         if (!session) return;
         const refresh = () => {
@@ -103,11 +104,9 @@ function useSessionBootstrap() {
     }, [session]);
     return {
         session,
-        failure,
-        retry: () => {
-            setFailure(undefined);
-            setAttempt((value) => value + 1);
-        },
+        unconfirmed,
+        failure: failure?.read === read ? failure.message : undefined,
+        retry: () => setAttempt((value) => value + 1),
     };
 }
 
