@@ -137,17 +137,12 @@ def end_by_sign_out(client: Client, monkeypatch: pytest.MonkeyPatch) -> Any:
     return client.delete(AUTH + "auth/session", HTTP_X_CSRFTOKEN=token)
 
 
-def end_by_idle_expiry(client: Client, monkeypatch: pytest.MonkeyPatch) -> Any:
-    monkeypatch.setattr(account_middleware, "time", moment(time.time() + 30 * 60))
-    return client.get("/api/session/")
-
-
 def end_by_password_change(client: Client, monkeypatch: pytest.MonkeyPatch) -> Any:
     change = {"current_password": PASSWORD, "new_password": PASSWORD + "changed"}
     return submit(client, "account/password/change", change)
 
 
-@pytest.mark.parametrize("end", [end_by_sign_out, end_by_idle_expiry, end_by_password_change])
+@pytest.mark.parametrize("end", [end_by_sign_out, end_by_password_change])
 def test_a_request_that_ends_its_session_deletes_the_cookie(
     end: Callable[[Client, pytest.MonkeyPatch], Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -158,6 +153,58 @@ def test_a_request_that_ends_its_session_deletes_the_cookie(
 
     assert session_cookie(response) == ("", 0, "Thu, 01 Jan 1970 00:00:00 GMT")
     assert not Session.objects.filter(session_key=key).exists()
+
+
+LAPSES = pytest.mark.parametrize(
+    "seconds",
+    [settings.PYRACAST_SESSION_IDLE_SECONDS, settings.PYRACAST_SESSION_ABSOLUTE_SECONDS],
+    ids=["idle", "absolute"],
+)
+
+
+def after_lapse(client: Client, seconds: int, monkeypatch: pytest.MonkeyPatch) -> Any:
+    with monkeypatch.context() as later:
+        later.setattr(account_middleware, "time", moment(time.time() + seconds))
+        return client.get("/api/tenants/")
+
+
+@LAPSES
+def test_a_request_that_finds_its_session_expired_ends_it_and_leaves_the_cookie(
+    seconds: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = signed_in(account("owner"))
+    key = session_key(client)
+
+    response = after_lapse(client, seconds, monkeypatch)
+
+    assert (response.status_code, response.json()["code"]) == (401, "not_authenticated")
+    assert session_cookie(response) is None
+    assert not Session.objects.filter(session_key=key).exists()
+    assert session_user(client) is None
+
+
+@LAPSES
+def test_a_late_expiry_answer_keeps_the_session_signed_in_after_it(
+    seconds: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = account("owner")
+    client = signed_in(user)
+    old = session_key(client)
+    background = browser()
+    background.cookies[settings.SESSION_COOKIE_NAME] = old
+
+    expiry = after_lapse(background, seconds, monkeypatch)
+    signing_in = submit(client, "auth/login", {"email": user.email, "password": PASSWORD})
+    assert (expiry.status_code, expiry.json()["code"]) == (401, "not_authenticated")
+    assert signing_in.status_code == 200
+    jar = browser()
+    jar.cookies[settings.SESSION_COOKIE_NAME] = old
+
+    arrive(jar, signing_in, expiry)
+
+    assert session_key(jar) == session_key(client) != old
+    assert session_user(jar) == user.pk
+    assert not Session.objects.filter(session_key=old).exists()
 
 
 def read_session(client: Client, token: str) -> Any:
