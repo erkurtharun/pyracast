@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.db.models import Exists, OuterRef, QuerySet
+from django.db.models import Exists, OuterRef, Q, QuerySet
 
 from pyracast.accounts.language import user_language
 from pyracast.accounts.mail_intents import enqueue_mail
@@ -77,7 +77,7 @@ def enqueue_role_mail(change: WorkspaceAdminChange, now: datetime) -> None:
     members = {
         membership.user_id: membership.user
         for membership in reachable_members(change.tenant_id).filter(
-            user_id__in=(change.administrator_id, change.previous_administrator_id)
+            Q(user_id=change.administrator_id) | Q(user_id=change.previous_administrator_id)
         )
     }
     for user_id, kind in (
