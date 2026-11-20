@@ -3,6 +3,7 @@ import {
     MISSING,
     formatNumber,
     formatQuantity,
+    formatSignificant,
 } from "../src/lib/format/number";
 import {
     formatTime,
@@ -18,6 +19,12 @@ test("numbers keep three fractional digits and show a missing value as one dash"
     expect(MISSING).toBe("—");
     for (const value of [null, undefined, Number.NaN, "5"])
         expect(formatNumber("en", value)).toBe(MISSING);
+});
+
+test("significant digits round to the requested precision", () => {
+    expect(formatSignificant("tr", 1234.5, 4)).toBe("1.235");
+    expect(formatSignificant("en", 0.000123456, 2)).toBe("0.00012");
+    expect(formatSignificant("en", null, 4)).toBe(MISSING);
 });
 
 test("quantities carry their unit and missing quantities carry none", () => {

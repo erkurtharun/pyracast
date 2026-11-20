@@ -1,7 +1,7 @@
 "use client";
 import { useLocale } from "next-intl";
 import { useMemo } from "react";
-import { formatNumber, formatQuantity } from "./number";
+import { formatNumber, formatQuantity, formatSignificant } from "./number";
 import {
     deviceZone,
     formatTime,
@@ -26,6 +26,8 @@ export function useFormat() {
         () => ({
             number: (value: unknown, digits?: number) =>
                 formatNumber(locale, value, digits),
+            significant: (value: unknown, digits: number) =>
+                formatSignificant(locale, value, digits),
             quantity: (value: unknown, unit: string, digits?: number) =>
                 formatQuantity(locale, value, unit, digits),
             time: (

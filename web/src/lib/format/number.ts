@@ -10,6 +10,18 @@ export function formatNumber(
         : MISSING;
 }
 
+export function formatSignificant(
+    locale: string,
+    value: unknown,
+    maximumSignificantDigits: number,
+): string {
+    return typeof value === "number" && Number.isFinite(value)
+        ? new Intl.NumberFormat(locale, { maximumSignificantDigits }).format(
+              value,
+          )
+        : MISSING;
+}
+
 export function formatQuantity(
     locale: string,
     value: unknown,
