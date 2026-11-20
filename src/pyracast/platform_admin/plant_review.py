@@ -176,6 +176,8 @@ def _applied(form: forms.Form, operation: Callable[[], Notice | None]) -> Notice
         )
     except ProviderError as error:
         form.add_error(None, validation_failure_message(error))
+    except ConflictError as refusal:
+        form.add_error(None, str(refusal.message))
     except ObjectDoesNotExist, ValidationError, APIValidationError:
         form.add_error(None, str(SETUP_REFUSED))
     return None
@@ -236,20 +238,16 @@ def approve(request: HttpRequest, page: PlantPage) -> Notice | None:
     for name in ("expected_status", "declaration"):
         form.fields[name].required = True
 
-    def run() -> Notice | None:
+    def run() -> Notice:
         current = form.current_binding(page.region)
         seen = ReviewSnapshot(
             form.cleaned_data["expected_status"],
             form.cleaned_data["expected_revision"],
             form.cleaned_data["declaration"],
         )
-        try:
-            approval = approve_region(
-                _actor(request), page.region.pk, current.pk, timezone.now(), seen=seen
-            )
-        except ConflictError as refusal:
-            form.add_error(None, str(refusal.message))
-            return None
+        approval = approve_region(
+            _actor(request), page.region.pk, current.pk, timezone.now(), seen=seen
+        )
         if approval.changed:
             return messages.SUCCESS, _(
                 "Plant approved. The first saved forecast is being prepared."
@@ -265,12 +263,13 @@ def clear_cooldown(request: HttpRequest, page: PlantPage) -> Notice | None:
 
     def run() -> Notice:
         current = form.current_binding(page.region)
-        clear_provider_cooldown(
+        if not clear_provider_cooldown(
             _actor(request),
             current.provider_account_id,
             form.cleaned_data["credential_revision"],
             expected_blocked_until=form.cleaned_data["expected_cooldown_until"],
-        )
+        ):
+            return messages.INFO, _("There is no provider wait to clear.")
         return messages.SUCCESS, _(
             "Provider wait cleared. Queued collection can resume within the remaining quota."
         )
@@ -283,12 +282,12 @@ def unknown(request: HttpRequest, page: PlantPage) -> None:
         page.action_form.add_error(None, str(SETUP_REFUSED))
 
 
-def _epias(page: PlantPage, operation: Callable[[Plant], object], done: str) -> Notice | None:
+def _epias(page: PlantPage, operation: Callable[[Plant], Notice]) -> Notice | None:
     form = page.epias_form
     try:
         if page.plant is None:
             raise DomainError(ErrorCode.CONFIGURATION_UNAVAILABLE)
-        operation(page.plant)
+        return operation(page.plant)
     except EpiasError as error:
         form.add_error(
             None,
@@ -307,8 +306,6 @@ def _epias(page: PlantPage, operation: Callable[[Plant], object], done: str) -> 
                 "Approve its current setup and reload before connecting."
             ),
         )
-    else:
-        return messages.SUCCESS, done
     return None
 
 
@@ -316,19 +313,25 @@ def epias_connect(request: HttpRequest, page: PlantPage) -> Notice | None:
     form = page.epias_form
     if not form.is_valid():
         return None
-    return _epias(
-        page,
-        lambda plant: connect_epias(plant.pk, actor=_actor(request), **form.cleaned_data),
-        _("EPİAŞ connection saved. Initial production collection is queued."),
-    )
+
+    def connect(plant: Plant) -> Notice:
+        connect_epias(plant.pk, actor=_actor(request), **form.cleaned_data)
+        return messages.SUCCESS, _(
+            "EPİAŞ connection saved. Initial production collection is queued."
+        )
+
+    return _epias(page, connect)
 
 
 def epias_disconnect(request: HttpRequest, page: PlantPage) -> Notice | None:
-    return _epias(
-        page,
-        lambda plant: disconnect_epias(plant.pk, actor=_actor(request)),
-        _("EPİAŞ connection disconnected. Saved production remains available."),
-    )
+    def disconnect(plant: Plant) -> Notice:
+        if disconnect_epias(plant.pk, actor=_actor(request)):
+            return messages.SUCCESS, _(
+                "EPİAŞ connection disconnected. Saved production remains available."
+            )
+        return messages.INFO, _("This plant is not connected to EPİAŞ.")
+
+    return _epias(page, disconnect)
 
 
 ACTIONS: dict[str, Action] = {

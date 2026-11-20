@@ -2702,3 +2702,33 @@ msgstr "%(member)s zaten çalışma alanı yöneticisi."
 
 msgid "Last changed"
 msgstr "Son değişiklik"
+
+msgid "%(name)s is already the workspace name."
+msgstr "Çalışma alanının adı zaten %(name)s."
+
+msgid "There is no provider wait to clear."
+msgstr "Kaldırılacak bir sağlayıcı beklemesi yok."
+
+msgid "This plant is not connected to EPİAŞ."
+msgstr "Bu santral EPİAŞ'a bağlı değil."
+
+msgid "The account changed. Reload before confirming recovery."
+msgstr "Hesap değişti. Kurtarmayı onaylamadan önce sayfayı yeniden yükleyin."
+
+msgid "The provider delay changed. Reload before confirming recovery."
+msgstr ""
+"Sağlayıcı beklemesi değişti. Kurtarmayı onaylamadan önce sayfayı yeniden "
+"yükleyin."
+
+msgid "This account already exists. Select the existing account."
+msgstr "Bu hesap zaten var. Mevcut hesabı seçin."
+
+msgid "This provider binding is no longer current."
+msgstr "Bu sağlayıcı bağlantısı artık güncel değil. Sayfayı yeniden yükleyin."
+
+msgid ""
+"This connection is being validated now. Reload the page in a minute to see "
+"the result."
+msgstr ""
+"Bu bağlantı şu anda doğrulanıyor. Sonucu görmek için sayfayı bir dakika "
+"sonra yeniden yükleyin."

@@ -1,11 +1,12 @@
 from datetime import datetime
 
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.models import ProviderAccount
+from pyracast.errors import ConflictError, ErrorCode
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction
 
@@ -16,16 +17,22 @@ def clear_provider_cooldown(
     credential_revision: int,
     *,
     expected_blocked_until: datetime | None,
-) -> None:
+) -> bool:
     require_platform_admin(actor)
     with transaction.atomic():
         account = ProviderAccount.objects.select_for_update().get(pk=account_id)
         if account.credential_revision != credential_revision:
-            raise ValidationError("The account changed. Reload before confirming recovery.")
+            raise ConflictError(
+                ErrorCode.CONFLICT,
+                gettext("The account changed. Reload before confirming recovery."),
+            )
         if account.request_blocked_until is None:
-            return
+            return False
         if account.request_blocked_until != expected_blocked_until:
-            raise ValidationError("The provider delay changed. Reload before confirming recovery.")
+            raise ConflictError(
+                ErrorCode.CONFLICT,
+                gettext("The provider delay changed. Reload before confirming recovery."),
+            )
         account.request_blocked_until = None
         account.save(update_fields=("request_blocked_until",))
         record_audit(
@@ -34,3 +41,4 @@ def clear_provider_cooldown(
             action=AuditAction.PROVIDER_COOLDOWN_CLEARED,
             revision=account.credential_revision,
         )
+    return True

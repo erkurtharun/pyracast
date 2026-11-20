@@ -19,6 +19,7 @@ from pyracast.connections.setup import SetupOutcome, save_provider_setup
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.platform_admin.forms import BindingActionForm, ProviderSetupForm
+from pyracast.provider_retry import retryable_status
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import AuditEvent, Region
 from tests.support.admin_setup import (
@@ -389,8 +390,10 @@ def test_failed_validation_shows_its_cause_once_and_logs_one_line(
     system = admin_system()
     client, _ = verified_admin()
 
+    retryable = status is None or retryable_status(status)
+
     def fail() -> None:
-        raise ProviderError(code, status_code=status)
+        raise ProviderError(code, retryable=retryable, status_code=status)
 
     monkeypatch.setattr(
         "pyracast.platform_admin.plant_review.adapter_for", lambda binding: FakeAdapter(fail)
@@ -412,7 +415,7 @@ def test_failed_validation_shows_its_cause_once_and_logs_one_line(
     assert RequestAttempt.objects.get().outcome == "failed"
     system.binding.refresh_from_db()
     system.account.refresh_from_db()
-    transient = code == "provider_request_failed" and status not in {401, 403, 404}
+    transient = code == "provider_request_failed" and retryable
     assert system.binding.health == ("unknown" if transient else "error")
     assert (system.account.authentication_failed_revision is not None) is (status == 401)
     assert (system.account.request_blocked_until is not None) is (status == 429)

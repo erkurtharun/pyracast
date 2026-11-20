@@ -1,11 +1,18 @@
+from datetime import timedelta
+
 import pytest
 from django.contrib.admin.models import LogEntry
 from django.contrib.auth.models import User
+from django.db.models import F
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceAdminChange, WorkspaceRole
+from pyracast.connections.models import ProviderAccount
 from pyracast.notifications.models import NotificationSettings
+from pyracast.regions.models import AuditAction, AuditEvent, Region
+from tests.support.admin_setup import admin_system, review_fields, setup_input, setup_url
 from tests.support.api import verified_admin
 
 pytestmark = pytest.mark.django_db
@@ -16,6 +23,11 @@ LIMIT_UNCHANGED = "The recipient limit is already 5."
 NOW_ADMINISTRATOR = "viewer@example.com is now the workspace administrator."
 ALREADY_ADMINISTRATOR = "viewer@example.com is already the workspace administrator."
 OWNER_ALREADY_ADMINISTRATOR = "owner@example.com is already the workspace administrator."
+RENAMED = "Sunny workspace is the new workspace name."
+ALREADY_NAMED = "Sunny workspace is already the workspace name."
+WAIT_CLEARED = "Provider wait cleared. Queued collection can resume within the remaining quota."
+NO_WAIT = "There is no provider wait to clear."
+PLANT_CHANGED = "The plant changed. Reload this page before saving."
 
 
 def notices(client: Client, url: str, data: dict[str, object]) -> tuple[int, list[str]]:
@@ -65,6 +77,48 @@ def test_a_double_submitted_reassignment_reports_the_change_once() -> None:
     assert notices(client, url, change) == (302, [NOW_ADMINISTRATOR])
     assert notices(client, url, change) == (302, [ALREADY_ADMINISTRATOR])
     assert WorkspaceAdminChange.objects.count() == 1
+
+
+def test_a_double_submitted_rename_reports_the_change_once() -> None:
+    tenant, _, _ = workspace()
+    client, _ = verified_admin()
+    url = f"/admin/workspaces/{tenant.pk}/name/"
+    change: dict[str, object] = {"name": "Sunny workspace", "expected_name": "Solar workspace"}
+
+    assert notices(client, url, change) == (302, [RENAMED])
+    assert notices(client, url, change) == (302, [ALREADY_NAMED])
+    assert LogEntry.objects.count() == 1
+
+
+def test_a_double_submitted_provider_wait_clearance_reports_it_once() -> None:
+    system = admin_system()
+    until = timezone.now().replace(microsecond=0) + timedelta(hours=1)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(request_blocked_until=until)
+    client, _ = verified_admin()
+    clearance: dict[str, object] = {
+        "action": "clear_cooldown",
+        "expected_revision": system.region.revision,
+        "binding_id": system.binding.pk,
+        "credential_revision": system.account.credential_revision,
+        "expected_cooldown_until": until.isoformat(),
+        "provider_recovered": "on",
+        **review_fields(system),
+    }
+
+    assert notices(client, setup_url(system), clearance) == (302, [WAIT_CLEARED])
+    assert notices(client, setup_url(system), clearance) == (302, [NO_WAIT])
+    assert AuditEvent.objects.filter(action=AuditAction.PROVIDER_COOLDOWN_CLEARED).count() == 1
+
+
+def test_a_refused_provider_setup_names_its_reason() -> None:
+    system = admin_system()
+    client, _ = verified_admin()
+    Region.objects.filter(pk=system.region.pk).update(revision=F("revision") + 1)
+
+    response = client.post(setup_url(system), setup_input(system, site_id="moved-site"))
+
+    assert response.status_code == 400
+    assert PLANT_CHANGED in response.content.decode()
 
 
 def test_choosing_the_current_administrator_says_nothing_changed() -> None:

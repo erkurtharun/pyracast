@@ -294,9 +294,7 @@ def _move(actor: User, change: RegionLocationChangeRequest, region: Region, reas
     region.longitude = change.longitude
     region.timezone = change.timezone
     region.revision += 1
-    region.save(update_fields=("latitude", "longitude", "timezone", "revision"))
-    if region.status != RegionStatus.PENDING:
-        set_review_status(region, RegionStatus.PENDING)
+    _save_reopened(region, "latitude", "longitude", "timezone", "revision")
     _close(actor, change, LocationChangeStatus.APPROVED, reason)
     record_audit(
         actor=actor,
@@ -377,11 +375,18 @@ def withdraw_location_change(
         return change
 
 
+def _save_reopened(region: Region, *fields: str) -> None:
+    # One UPDATE: a second UPDATE of the row in the same transaction re-checks its tenant key
+    # (FOR KEY SHARE) and deadlocks with a writer that locked the tenant before the region.
+    if region.status == RegionStatus.PENDING:
+        region.save(update_fields=fields)
+    else:
+        set_review_status(region, RegionStatus.PENDING, fields=fields)
+
+
 def _start_revision(actor: User, region: Region) -> None:
     region.revision += 1
-    region.save(update_fields=("revision",))
-    if region.status != RegionStatus.PENDING:
-        set_review_status(region, RegionStatus.PENDING)
+    _save_reopened(region, "revision")
     if RegionLocationChangeRequest.objects.filter(
         region=region, status=LocationChangeStatus.PENDING
     ).update(base_revision=region.revision):

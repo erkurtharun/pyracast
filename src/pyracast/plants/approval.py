@@ -172,7 +172,6 @@ def approve_region(
 def decide_review(
     actor: User, region_id: int, decision: str, *, seen: ReviewSnapshot | None = None
 ) -> bool:
-    """Rejects or suspends; False when the plant already has that status."""
     require_platform_admin(actor)
     if decision not in ReviewDecision.values:
         raise ValidationError("Choose a review decision.")

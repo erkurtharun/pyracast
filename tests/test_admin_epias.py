@@ -80,6 +80,31 @@ def test_admin_connects_without_membership_and_disconnects_after_approval_is_wit
     assert provider.calls == 1
 
 
+def test_a_double_submitted_disconnect_reports_it_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = make_plant(monkeypatch)
+    monkeypatch.setattr("pyracast.metering.operations.get_epias_client", FixtureClient)
+    client, _ = verified_admin()
+    url = reverse("admin:workspace_plant", args=(system.region.pk,))
+    client.post(url, connection_input())
+    client.get(url)
+
+    notices = [
+        [
+            str(notice)
+            for notice in client.post(url, {"action": "epias_disconnect"}, follow=True).context[
+                "messages"
+            ]
+        ]
+        for _ in range(2)
+    ]
+
+    assert notices == [
+        ["EPİAŞ connection disconnected. Saved production remains available."],
+        ["This plant is not connected to EPİAŞ."],
+    ]
+    assert PlantEvent.objects.filter(plant=plant, action="epias_disconnected").count() == 1
+
+
 @pytest.mark.parametrize(
     "changes",
     [

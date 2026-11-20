@@ -107,7 +107,7 @@ def connect_epias(
         return connection
 
 
-def disconnect_epias(plant_id: int, *, actor: User) -> None:
+def disconnect_epias(plant_id: int, *, actor: User) -> bool:
     require_platform_admin(actor)
     plant = Plant.objects.active().select_related("region").get(pk=plant_id)
     with transaction.atomic():
@@ -116,7 +116,7 @@ def disconnect_epias(plant_id: int, *, actor: User) -> None:
         require_platform_admin(User.objects.select_for_update().get(pk=actor.pk))
         connection = EpiasConnection.objects.select_for_update().filter(plant=plant).first()
         if connection is None or not connection.enabled:
-            return
+            return False
         connection.enabled = False
         connection.save(update_fields=("enabled", "updated_at"))
         record_plant_event(
@@ -133,6 +133,7 @@ def disconnect_epias(plant_id: int, *, actor: User) -> None:
             connection=connection,
             status__in=(EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING),
         ).update(status=EpiasJobStatus.SUPERSEDED, lease_token=None, lease_expires_at=None)
+    return True
 
 
 def get_epias_status(plant_id: int, *, actor: User) -> dict[str, object]:

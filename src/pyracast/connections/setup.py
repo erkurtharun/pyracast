@@ -3,7 +3,6 @@ from datetime import date
 from enum import StrEnum
 
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils.translation import gettext
 from django.views.decorators.debug import sensitive_variables
@@ -11,6 +10,7 @@ from django.views.decorators.debug import sensitive_variables
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.models import PowerBasis, Provider, ProviderAccount, SiteBinding
 from pyracast.connections.operations import create_account, rotate_secret
+from pyracast.errors import ConflictError, ErrorCode
 from pyracast.regions.models import Region
 from pyracast.regions.operations import configure_binding
 
@@ -65,15 +65,18 @@ def save_provider_setup(
     with transaction.atomic():
         region = Region.objects.active().select_for_update().get(pk=region_id)
         if region.revision != expected_revision:
-            raise ValidationError(gettext("The plant changed. Reload this page before saving."))
+            raise ConflictError(
+                ErrorCode.CONFLICT, gettext("The plant changed. Reload this page before saving.")
+            )
         current_id = (
             SiteBinding.objects.filter(region=region, region_revision=region.revision)
             .values_list("pk", flat=True)
             .first()
         )
         if current_id != expected_binding_id:
-            raise ValidationError(
-                gettext("The provider setup changed. Reload this page before saving.")
+            raise ConflictError(
+                ErrorCode.CONFLICT,
+                gettext("The provider setup changed. Reload this page before saving."),
             )
         account_id, key_replaced = _account(actor, account)
         saved = configure_binding(
@@ -101,7 +104,9 @@ def _account(actor: User, account: NewAccount | ExistingAccount) -> tuple[int, b
         pk=account.account_id, provider=Provider.SOLCAST, enabled=True
     )
     if existing.credential_revision != account.credential_revision:
-        raise ValidationError(gettext("The account changed. Reload this page before saving."))
+        raise ConflictError(
+            ErrorCode.CONFLICT, gettext("The account changed. Reload this page before saving.")
+        )
     if account.replacement_key:
         rotate_secret(actor, existing.pk, account.replacement_key)
     return existing.pk, bool(account.replacement_key)

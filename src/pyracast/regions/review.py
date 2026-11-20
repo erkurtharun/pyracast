@@ -34,7 +34,11 @@ def require_seen_status(region: Region, status: str | None) -> None:
 
 
 def set_review_status(
-    region: Region, target: RegionStatus, *, binding: SiteBinding | None = None
+    region: Region,
+    target: RegionStatus,
+    *,
+    binding: SiteBinding | None = None,
+    fields: tuple[str, ...] = (),
 ) -> None:
     """The only writer of `Region.status`; the caller holds the region row lock. A suspended
     plant keeps its approved binding, so its saved forecasts stay readable as stale."""
@@ -45,4 +49,4 @@ def set_review_status(
         region.approved_binding = binding
     elif target == RegionStatus.PENDING:
         region.approved_binding = None
-    region.save(update_fields=("status", "approved_binding"))
+    region.save(update_fields=("status", "approved_binding", *fields))

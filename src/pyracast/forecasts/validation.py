@@ -5,10 +5,12 @@ from datetime import datetime, timedelta
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
+from pyracast.errors import ConflictError, ErrorCode
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
@@ -23,6 +25,10 @@ from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus, active_region
 
 logger = logging.getLogger(__name__)
+
+# An unanswered validation attempt younger than this is still in flight: it outlasts the
+# whole-request read deadline of a provider answer (outbound.READ_DEADLINE_SECONDS).
+VALIDATION_IN_FLIGHT = timedelta(minutes=1)
 
 
 def refuses_binding(error: ProviderError) -> bool:
@@ -47,7 +53,22 @@ def validate_binding(
     with transaction.atomic():
         current = Region.objects.active().select_for_update().filter(pk=binding.region_id).first()
         if current is None or current.revision != binding.region_revision:
-            raise ValidationError("This provider binding is no longer current.")
+            raise ConflictError(
+                ErrorCode.CONFLICT, gettext("This provider binding is no longer current.")
+            )
+        if RequestAttempt.objects.filter(
+            binding=binding,
+            purpose=RequestPurpose.VALIDATION,
+            outcome=RequestOutcome.UNCERTAIN,
+            created_at__gt=now - VALIDATION_IN_FLIGHT,
+        ).exists():
+            raise ConflictError(
+                ErrorCode.CONFLICT,
+                gettext(
+                    "This connection is being validated now. "
+                    "Reload the page in a minute to see the result."
+                ),
+            )
         attempt = reserve_request(binding, now, purpose=RequestPurpose.VALIDATION)
     try:
         adapter.validate(binding)
