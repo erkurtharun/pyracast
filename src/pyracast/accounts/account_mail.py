@@ -17,7 +17,7 @@ from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.authentication import login_identity
 from pyracast.accounts.language import user_language
-from pyracast.notifications.models import OutboundMail, OutboundMailError, OutboundMailKind
+from pyracast.accounts.models import OutboundMail, OutboundMailError, OutboundMailKind
 
 
 @dataclass(frozen=True)

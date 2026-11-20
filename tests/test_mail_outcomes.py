@@ -9,7 +9,13 @@ from django.template import TemplateSyntaxError
 from django.test import Client, override_settings
 
 from pyracast.accounts.invitations import invite_workspace_member
-from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
+from pyracast.accounts.models import (
+    Membership,
+    OutboundMail,
+    Tenant,
+    WorkspaceInvitation,
+    WorkspaceRole,
+)
 from pyracast.mail.errors import (
     DeliveryUncertainError,
     MailFailure,
@@ -18,7 +24,6 @@ from pyracast.mail.errors import (
 )
 from pyracast.mail.send import send
 from pyracast.notifications.jobs import process_notification
-from pyracast.notifications.models import OutboundMail
 from tests.smtp_server import Script, loopback_smtp
 from tests.support.auth_lifecycle import submit
 from tests.support.notifications import SLOT, candidates, ready

@@ -276,7 +276,7 @@ def test_worker_drain_timeout_preserves_active_notification() -> None:
 @pytest.mark.django_db(transaction=True)
 def test_worker_drain_waits_for_outbound_mail_being_sent() -> None:
     from pyracast.accounts.invitations import invite_workspace_member
-    from pyracast.notifications.models import OutboundMail
+    from pyracast.accounts.models import OutboundMail
     from tests.support.domain import NOW, make_system
 
     system = make_system()

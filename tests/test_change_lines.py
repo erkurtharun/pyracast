@@ -16,11 +16,16 @@ from django.contrib.auth.models import User
 from django.db import DatabaseError, transaction
 from django.test import Client, override_settings
 
-from pyracast.accounts import adapters, processes
+from pyracast.accounts import adapters, mail_intents, processes
 from pyracast.accounts.audit import failure_logger, logger, refusal_throttle
-from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
-from pyracast.notifications import intents
-from pyracast.notifications.models import OutboundMail, OutboundMailKind
+from pyracast.accounts.models import (
+    Membership,
+    OutboundMail,
+    OutboundMailKind,
+    Tenant,
+    WorkspaceInvitation,
+    WorkspaceRole,
+)
 from tests.support.account_mail import one_minute_later
 from tests.support.account_sessions import (
     account,
@@ -93,7 +98,7 @@ def prepared(client: Client, path: str, data: dict[str, Any]) -> Callable[[], An
 def failing_notice(kind: str) -> Callable[[], AbstractContextManager[None]]:
     @contextmanager
     def failing() -> Iterator[None]:
-        store = intents.enqueue_mail
+        store = mail_intents.enqueue_mail
 
         def refused(mail_kind: OutboundMailKind, *args: Any, **kwargs: Any) -> None:
             if mail_kind == kind:
@@ -177,7 +182,7 @@ def address_change_resend(monkeypatch: pytest.MonkeyPatch) -> Attempt:
     @contextmanager
     def changed_before_the_check() -> Iterator[None]:
         # The account's state changes after the code is queued, before the resend's check.
-        store = intents.enqueue_mail
+        store = mail_intents.enqueue_mail
 
         def stored_then_changed(*args: Any, **kwargs: Any) -> None:
             store(*args, **kwargs)

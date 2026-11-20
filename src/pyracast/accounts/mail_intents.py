@@ -4,9 +4,8 @@ from django.db import connections, transaction
 from django.utils import timezone
 from django.views.decorators.debug import sensitive_variables
 
-from pyracast.accounts.models import WorkspaceInvitation
+from pyracast.accounts.models import CODED_MAIL, OutboundMail, OutboundMailKind, WorkspaceInvitation
 from pyracast.encryption import secret_cipher
-from pyracast.notifications.models import CODED_MAIL, OutboundMail, OutboundMailKind
 
 CODE_CONTEXT = b"pyracast-outbound-mail-code"
 # The failure history of a sign-in lives in the authentication cache; its notice is written

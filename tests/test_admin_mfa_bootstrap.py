@@ -18,7 +18,7 @@ from django.core.management.base import CommandError
 from django.test import Client, RequestFactory, override_settings
 
 from pyracast.accounts.mfa import MFAAdapter
-from pyracast.notifications.models import OutboundMail
+from pyracast.accounts.models import OutboundMail
 from tests.support.account_sessions import capture_security_events, session_user
 from tests.support.admin_mfa_bootstrap import (
     NEW_PASSWORD,

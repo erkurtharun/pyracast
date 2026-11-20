@@ -51,11 +51,6 @@ ORCHESTRATION_MODULES = {"forecasts.monitoring"}
 
 # Each entry is an import against the layer order that is not resolved yet, with its reason.
 BACK_EDGES: dict[tuple[str, str], str] = {
-    ("accounts.account_mail", "notifications.models"): "account mail goes through the outbox",
-    ("accounts.adapters", "notifications.intents"): "account mail goes through the outbox",
-    ("accounts.adapters", "notifications.models"): "account mail goes through the outbox",
-    ("accounts.invitations", "notifications.intents"): "account mail goes through the outbox",
-    ("accounts.invitations", "notifications.models"): "account mail goes through the outbox",
     (
         "accounts.operations",
         "notifications.recipients",

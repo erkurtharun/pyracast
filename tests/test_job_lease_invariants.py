@@ -8,7 +8,7 @@ from django.core.mail import EmailMessage
 from django.db import IntegrityError, models, transaction
 
 from pyracast.accounts.invitations import invite_workspace_member
-from pyracast.accounts.models import Membership
+from pyracast.accounts.models import Membership, OutboundMail
 from pyracast.epias import EpiasDay, EpiasError, EpiasPlant
 from pyracast.forecasts.jobs.claim import LEASE_DURATION, claim
 from pyracast.forecasts.jobs.ready import pending_job_ids
@@ -19,7 +19,7 @@ from pyracast.metering.jobs import claim_epias_job, pending_epias_ids, run_epias
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.metering.operations import disconnect_epias
 from pyracast.notifications.jobs import process_notification
-from pyracast.notifications.models import NotificationDelivery, OutboundMail
+from pyracast.notifications.models import NotificationDelivery
 from pyracast.plants import training
 from pyracast.plants.models import CalibrationRun
 from pyracast.plants.training import pending_calibration_ids, run_calibration

@@ -19,10 +19,8 @@ from django.db import DatabaseError
 from django.test import Client, override_settings
 from django.utils import timezone
 
-from pyracast.accounts import adapters
-from pyracast.accounts.models import UserLanguagePreference
-from pyracast.notifications import intents
-from pyracast.notifications.models import OutboundMail
+from pyracast.accounts import adapters, mail_intents
+from pyracast.accounts.models import OutboundMail, UserLanguagePreference
 from pyracast.notifications.outbox import publish_due_mail, send_outbound_mail
 from tests.support.account_sessions import (
     answer,
@@ -164,7 +162,7 @@ def test_a_reset_that_fails_after_storing_its_notice_keeps_everything_and_mails_
     client = session_of(user)
     before = state(user)
     signed_in = len(events())
-    store = intents.enqueue_mail
+    store = mail_intents.enqueue_mail
 
     def stored_then_failed(*args: Any, **kwargs: Any) -> None:
         store(*args, **kwargs)

@@ -412,9 +412,10 @@ def wait_for_jobs(timeout: float = DRAIN.total_seconds()) -> None:
     import django
 
     django.setup()
+    from pyracast.accounts.models import OutboundMail
     from pyracast.forecasts.models import CollectionJob
     from pyracast.metering.models import EpiasCollectionJob
-    from pyracast.notifications.models import NotificationDelivery, OutboundMail
+    from pyracast.notifications.models import NotificationDelivery
     from pyracast.plants.models import CalibrationRun
 
     deadline = time.monotonic() + timeout

@@ -9,6 +9,7 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from pyracast.accounts.invitations import invite_workspace_member
+from pyracast.accounts.models import OutboundMail
 from pyracast.background.deadlines import LEASE
 from pyracast.connections.contracts import ProviderData
 from pyracast.epias import EpiasDay, EpiasPlant
@@ -21,7 +22,7 @@ from pyracast.metering.jobs import claim_epias_job, pending_epias_ids, run_epias
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.notifications import outbox
 from pyracast.notifications.jobs import pending_notification_ids, process_notification
-from pyracast.notifications.models import NotificationDelivery, OutboundMail
+from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import configure_reminders
 from pyracast.plants import training
 from pyracast.plants.models import CalibrationRun

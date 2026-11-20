@@ -20,11 +20,14 @@ from django.views.decorators.debug import sensitive_variables
 from pyracast.accounts.audit import SecurityEvent, record_security_event, refusal_throttle
 from pyracast.accounts.authorization import authorize_workspace_admin
 from pyracast.accounts.language import user_language
+from pyracast.accounts.mail_intents import enqueue_mail
 from pyracast.accounts.models import (
     InvitationDeliveryStatus,
     InvitationRevocation,
     InvitationState,
     Membership,
+    OutboundMailError,
+    OutboundMailKind,
     Tenant,
     WorkspaceAdminChange,
     WorkspaceInvitation,
@@ -32,8 +35,6 @@ from pyracast.accounts.models import (
 )
 from pyracast.accounts.processes import lock_account
 from pyracast.errors import ConflictError, DomainError, ErrorCode, ForbiddenError
-from pyracast.notifications.intents import enqueue_mail
-from pyracast.notifications.models import OutboundMailError, OutboundMailKind
 
 INVITATION_LIFETIME = timedelta(days=7)
 # Two-key advisory lock space ("PYIV") that serializes budget checks per sender and per address.

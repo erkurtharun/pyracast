@@ -10,7 +10,16 @@ from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.account_mail import compose_account_mail
 from pyracast.accounts.invitations import compose_invitation
-from pyracast.accounts.models import InvitationDeliveryStatus, WorkspaceInvitation
+from pyracast.accounts.mail_intents import CODE_CONTEXT
+from pyracast.accounts.models import (
+    ANONYMOUS_MAIL,
+    OPEN_MAIL,
+    InvitationDeliveryStatus,
+    OutboundMail,
+    OutboundMailError,
+    OutboundMailStatus,
+    WorkspaceInvitation,
+)
 from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS, PUBLISH_BATCH
 from pyracast.background.lease import carries, claimable, expired, release, take
@@ -24,14 +33,6 @@ from pyracast.mail.errors import (
     SendCancelledError,
 )
 from pyracast.mail.send import send
-from pyracast.notifications.intents import CODE_CONTEXT
-from pyracast.notifications.models import (
-    ANONYMOUS_MAIL,
-    OPEN_MAIL,
-    OutboundMail,
-    OutboundMailError,
-    OutboundMailStatus,
-)
 
 logger = logging.getLogger(__name__)
 

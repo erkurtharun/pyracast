@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 
 from django.db.models import Count, F, OuterRef, Q, Subquery
 
+from pyracast.accounts.models import OutboundMail, OutboundMailStatus
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -17,8 +18,6 @@ from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationDeliveryError,
     NotificationDeliveryStatus,
-    OutboundMail,
-    OutboundMailStatus,
     PreparedMessageKind,
 )
 from pyracast.notifications.operations import invalid_reminder_recipient_count
