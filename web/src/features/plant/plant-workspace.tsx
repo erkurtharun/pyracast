@@ -1,15 +1,9 @@
 "use client";
-import { useTranslations, useFormatter } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { startTransition, useOptimistic, useState } from "react";
-import { useCanManageWorkspace } from "@/ui/workspace-access";
-import { Reminders } from "./reminders";
-import { CollectionSchedule } from "./collection-schedule";
-import { RegionSettings } from "./region-settings";
-import { CsvDownload } from "@/ui/csv-download";
-import type { Forecast, Plant, PlantScope, Region } from "@/lib/api";
-import { api } from "@/lib/api/client";
-import { cadence, useApiQuery, useRefresh, type Loaded } from "@/lib/api/query";
+import { useState } from "react";
+import type { Plant, PlantScope, Region } from "@/lib/api";
+import { useRefresh } from "@/lib/api/query";
 import {
     plantView,
     routes,
@@ -17,23 +11,22 @@ import {
     type PlantSection,
 } from "@/lib/routes";
 import { Calibrations } from "@/features/calibration/calibrations";
-import { ActionForm, Notice, RefreshFailed, Tag } from "@/ui/ui";
-import { ProductionHistory } from "@/features/production/production-history";
-import { MoveToRecycleBin } from "@/features/trash/recycle-bin";
-import { ForecastPanel } from "@/features/forecast/forecast-panel";
-import { ForecastPerformance } from "@/features/forecast/forecast-performance";
-import { Outages } from "./outages";
+import { localDay } from "@/features/forecast/data-source";
 import { OwnPendingRequests } from "@/features/inbox/operational-inbox";
-import {
-    PlantConfigurationFields,
-    configurationInput,
-} from "@/features/portfolio/plant-configuration-fields";
-import {
-    DataSourceControl,
-    localDay,
-    type DataSource,
-} from "@/features/forecast/data-source";
+import { ViewNav } from "@/ui/action";
 import { usePageTitle } from "@/ui/page-title";
+import { Notice, Tag } from "@/ui/ui";
+import { useCanManageWorkspace } from "@/ui/workspace-access";
+import { Outages } from "./outages";
+import {
+    ForecastSection,
+    type ForecastOptions,
+} from "./workspace/forecast-section";
+import { latestPlant } from "./workspace/latest-plant";
+import { usePlantNavigation } from "./workspace/navigation";
+import { ProductionSection } from "./workspace/production-section";
+import { SettingsSection } from "./workspace/settings-section";
+
 export function PlantWorkspace({
     plant,
     scope,
@@ -50,63 +43,27 @@ export function PlantWorkspace({
     address: PlantAddress;
 }) {
     const t = useTranslations("PlantWorkspace");
-    const format = useFormatter();
     const canManage = useCanManageWorkspace();
     const router = useRouter();
     const refresh = useRefresh();
-    const date = address.date ?? localDay(timezone, 1);
+    const navigation = usePlantNavigation(scope, tab, address);
     const forecastView = plantView("forecast", address);
-    const productionView = plantView("production", address);
-    const settingsView = plantView("settings", address);
-    const [resolution, setResolution] = useState("60"),
-        [source, setSource] = useState<DataSource>("auto");
+    const [forecastOptions, setForecastOptions] = useState<ForecastOptions>({
+        resolution: "60",
+        source: "auto",
+    });
     // Archived forecasts exist only for generation; the view also changes through Back and Forward.
-    if (forecastView === "irradiance" && source === "archived_forecast")
-        setSource("auto");
+    if (
+        forecastView === "irradiance" &&
+        forecastOptions.source === "archived_forecast"
+    )
+        setForecastOptions({ ...forecastOptions, source: "auto" });
     const [savedPlant, setSavedPlant] = useState<Plant>();
     const currentPlant = latestPlant(plant, savedPlant);
     if (savedPlant && currentPlant === plant) setSavedPlant(undefined);
     const portfolio = routes.portfolio(scope.tenant_id);
-    // Lives as long as the router transition: a committed, superseded, restored or failed
-    // navigation returns it to the displayed address.
-    const [pending, setPending] = useOptimistic({ section: tab, address });
-    // Controls belong to the displayed section; only a pending change of that section is their base.
-    const base = pending.section === tab ? pending.address : address;
-    const navigating =
-        routes.plant(
-            scope.tenant_id,
-            scope.region_id,
-            pending.section,
-            pending.address,
-        ) !== routes.plant(scope.tenant_id, scope.region_id, tab, address);
-    // Controls only the outgoing view has rest until the pending view change commits. A disabled
-    // fieldset stops only form controls, so the outgoing body is also inert (disclosures, links).
-    const leaving = (section: "forecast" | "production" | "settings") =>
-        pending.section === tab &&
-        tab === section &&
-        plantView(section, pending.address) !== plantView(section, address);
-    const leavingGeneration =
-        leaving("forecast") && forecastView === "generation";
-    const navigate = (
-        section: PlantSection,
-        next: PlantAddress,
-        mode: "push" | "replace",
-    ) =>
-        startTransition(() => {
-            setPending({ section, address: next });
-            router[mode](
-                routes.plant(scope.tenant_id, scope.region_id, section, next),
-            );
-        });
-    const selectTab = (next: PlantSection) =>
-        navigate(next, next === tab ? base : {}, "push");
-    const show = (next: PlantAddress) =>
-        navigate(tab, { ...base, ...next }, "replace");
-    const setDate = (next: string) => show({ date: next });
     const changed = () => refresh.workspace(scope.tenant_id);
-    const today = localDay(timezone);
     const configuration = currentPlant.current_configuration;
-    const metadata = configuration ?? currentPlant.submission;
     usePageTitle(`${t(tab)} · ${currentPlant.name} | Pyracast`);
     return (
         <>
@@ -140,134 +97,33 @@ export function PlantWorkspace({
                           })}
                 </Notice>
             )}
-            <nav
-                className="tabs"
-                aria-label={t("plantSections")}
-                aria-busy={navigating || undefined}
-            >
-                {(
-                    [
-                        ["forecast", t("forecast")],
-                        ["production", t("production")],
-                        ["calibration", t("calibration")],
-                        ["outages", t("outages")],
-                        ["settings", t("settings")],
-                    ] as const
-                ).map(([key, label]) => (
-                    <button
-                        key={key}
-                        className={tab === key ? "active" : ""}
-                        aria-current={tab === key ? "page" : undefined}
-                        onFocus={(event) =>
-                            event.currentTarget.scrollIntoView({
-                                block: "nearest",
-                                inline: "nearest",
-                            })
-                        }
-                        onClick={() => selectTab(key)}
-                    >
-                        {label}
-                    </button>
-                ))}
-            </nav>
+            <ViewNav
+                tabs
+                label={t("plantSections")}
+                busy={navigation.navigating}
+                views={[
+                    ["forecast", t("forecast")],
+                    ["production", t("production")],
+                    ["calibration", t("calibration")],
+                    ["outages", t("outages")],
+                    ["settings", t("settings")],
+                ]}
+                current={tab}
+                onSelect={navigation.selectTab}
+            />
             {tab === "forecast" ? (
-                <>
-                    <nav className="subnav" aria-label={t("forecastViews")}>
-                        {(
-                            [
-                                ["generation", t("generation")],
-                                ["irradiance", t("irradiance")],
-                            ] as const
-                        ).map(([key, label]) => (
-                            <button
-                                key={key}
-                                className={forecastView === key ? "active" : ""}
-                                aria-current={
-                                    forecastView === key ? "page" : undefined
-                                }
-                                onClick={() => show({ view: key })}
-                            >
-                                {label}
-                            </button>
-                        ))}
-                    </nav>
-                    <div
-                        className="forecast-controls"
-                        aria-busy={leaving("forecast") || undefined}
-                    >
-                        <label className="field">
-                            {t("forecastDate")}
-                            <input
-                                type="date"
-                                value={date}
-                                max={
-                                    source === "estimated_actuals"
-                                        ? today
-                                        : source === "archived_forecast"
-                                          ? today
-                                          : undefined
-                                }
-                                onChange={(event) =>
-                                    setDate(event.target.value)
-                                }
-                            />
-                        </label>
-                        <DataSourceControl
-                            allowArchivedForecast={
-                                forecastView === "generation"
-                            }
-                            archivedForecastDisabled={leavingGeneration}
-                            value={source}
-                            onChange={(next) => {
-                                setSource(next);
-                                if (
-                                    (next === "estimated_actuals" ||
-                                        next === "archived_forecast") &&
-                                    (base.date || localDay(timezone, 1)) > today
-                                )
-                                    setDate(today);
-                            }}
-                        />
-                        {forecastView === "generation" && (
-                            <label className="field">
-                                {t("resolution")}
-                                <select
-                                    value={resolution}
-                                    disabled={leavingGeneration}
-                                    onChange={(event) =>
-                                        setResolution(event.target.value)
-                                    }
-                                >
-                                    <option value="30">{t("minutes30")}</option>
-                                    <option value="60">{t("minutes60")}</option>
-                                </select>
-                            </label>
-                        )}
-                        <span className="fine">
-                            {t("localDates", { timezone })}
-                        </span>
-                    </div>
-                    {source === "estimated_actuals" && date > today ? (
-                        <Notice>{t("selectTodayOrPastDay")}</Notice>
-                    ) : source === "archived_forecast" && date > today ? (
-                        <Notice>{t("selectArchivedDay")}</Notice>
-                    ) : (
-                        <PlantForecast
-                            key={`${forecastView}-${date}-${resolution}-${source}-${configuration?.id}`}
-                            scope={scope}
-                            electrical={forecastView === "generation"}
-                            date={date}
-                            resolution={resolution === "30" ? 30 : 60}
-                            source={source}
-                            poll={
-                                source !== "archived_forecast" &&
-                                date >= localDay(timezone, -1)
-                                    ? cadence.live
-                                    : false
-                            }
-                        />
-                    )}
-                </>
+                <ForecastSection
+                    scope={scope}
+                    timezone={timezone}
+                    configurationId={configuration?.id}
+                    view={forecastView}
+                    date={address.date ?? localDay(timezone, 1)}
+                    baseDate={navigation.base.date}
+                    leaving={navigation.leaving("forecast")}
+                    options={forecastOptions}
+                    onOptions={setForecastOptions}
+                    show={navigation.show}
+                />
             ) : tab === "outages" ? (
                 <Outages
                     configuration={configuration}
@@ -276,161 +132,33 @@ export function PlantWorkspace({
                     onChanged={changed}
                 />
             ) : tab === "settings" ? (
-                <>
-                    <details>
-                        <summary>{t("location")}</summary>
-                        <p>
-                            {t("locationSummary", {
-                                latitude: format.number(region.latitude, {
-                                    maximumFractionDigits: 6,
-                                }),
-                                longitude: format.number(region.longitude, {
-                                    maximumFractionDigits: 6,
-                                }),
-                                timezone,
-                            })}
-                        </p>
-                        <CsvDownload
-                            label={t("downloadPlantCSV")}
-                            filename={`plant-${currentPlant.id}`}
-                            records={[currentPlant]}
-                            metadata={{ timezone }}
-                        />
-                    </details>
-                    <nav className="subnav" aria-label={t("plantSettings")}>
-                        {(
-                            [
-                                ["configuration", t("technicalDetails")],
-                                ["location", t("location")],
-                                ["collection", t("dataCollection")],
-                                ["reminders", t("emailReminders")],
-                            ] as const
-                        ).map(([key, label]) => (
-                            <button
-                                key={key}
-                                className={settingsView === key ? "active" : ""}
-                                aria-current={
-                                    settingsView === key ? "page" : undefined
-                                }
-                                onClick={() => show({ view: key })}
-                            >
-                                {label}
-                            </button>
-                        ))}
-                    </nav>
-                    <fieldset
-                        disabled={leaving("settings")}
-                        inert={leaving("settings")}
-                        aria-busy={leaving("settings") || undefined}
-                    >
-                        {settingsView === "configuration" ? (
-                            <section className="panel">
-                                <h2>{t("technicalDetails")}</h2>
-                                {metadata ? (
-                                    <ActionForm
-                                        submit={t("saveConfiguration")}
-                                        onSubmit={async (data) => {
-                                            setSavedPlant(
-                                                await api.put(
-                                                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/",
-                                                    {
-                                                        path: scope,
-                                                        body: configurationInput(
-                                                            data,
-                                                        ),
-                                                    },
-                                                ),
-                                            );
-                                            await changed();
-                                        }}
-                                    >
-                                        <PlantConfigurationFields
-                                            name={currentPlant.name}
-                                            configuration={metadata}
-                                        />
-                                        {configuration && (
-                                            <p className="fine">
-                                                {t("calibrationChangeNote")}
-                                            </p>
-                                        )}
-                                    </ActionForm>
-                                ) : (
-                                    <Notice>
-                                        {t("approvalDetailsRequired")}
-                                    </Notice>
-                                )}
-                            </section>
-                        ) : settingsView === "location" ? (
-                            <RegionSettings region={region} scope={scope} />
-                        ) : settingsView === "collection" ? (
-                            <CollectionSchedule scope={scope} region={region} />
-                        ) : (
-                            <Reminders scope={scope} region={region} />
-                        )}
-                    </fieldset>
-                    {canManage && (
-                        <section className="panel">
-                            <h2>{t("deletePlant")}</h2>
-                            <p>{t("deletionHelp")}</p>
-                            <MoveToRecycleBin
-                                name={currentPlant.name}
-                                scope={scope}
-                                onDeleted={async () => {
-                                    await changed();
-                                    router.push(portfolio);
-                                }}
-                            />
-                        </section>
-                    )}
-                </>
+                <SettingsSection
+                    plant={currentPlant}
+                    scope={scope}
+                    region={region}
+                    timezone={timezone}
+                    view={plantView("settings", address)}
+                    leaving={navigation.leaving("settings")}
+                    show={navigation.show}
+                    onSaved={setSavedPlant}
+                    onChanged={changed}
+                    onDeleted={async () => {
+                        await changed();
+                        router.push(portfolio);
+                    }}
+                />
             ) : tab === "production" ? (
-                <>
-                    <nav className="subnav" aria-label={t("productionViews")}>
-                        {(
-                            [
-                                ["actuals", t("actuals")],
-                                ["comparison", t("comparison")],
-                            ] as const
-                        ).map(([key, label]) => (
-                            <button
-                                key={key}
-                                className={
-                                    productionView === key ? "active" : ""
-                                }
-                                aria-current={
-                                    productionView === key ? "page" : undefined
-                                }
-                                onClick={() => show({ view: key })}
-                            >
-                                {label}
-                            </button>
-                        ))}
-                    </nav>
-                    <fieldset
-                        disabled={leaving("production")}
-                        inert={leaving("production")}
-                        aria-busy={leaving("production") || undefined}
-                    >
-                        {productionView === "comparison" ? (
-                            <ForecastPerformance
-                                key={configuration?.id}
-                                scope={scope}
-                                timezone={timezone}
-                            />
-                        ) : (
-                            <ProductionHistory
-                                key={`history-${configuration?.id}`}
-                                scope={scope}
-                                configuration={configuration?.id}
-                                timezone={timezone}
-                                day={address.date}
-                                baseDay={base.date}
-                                onDay={setDate}
-                                onSaved={changed}
-                            />
-                        )}
-                    </fieldset>
-                </>
+                <ProductionSection
+                    scope={scope}
+                    timezone={timezone}
+                    configurationId={configuration?.id}
+                    view={plantView("production", address)}
+                    day={address.date}
+                    baseDay={navigation.base.date}
+                    leaving={navigation.leaving("production")}
+                    show={navigation.show}
+                    onSaved={changed}
+                />
             ) : !configuration ? (
                 <Notice>{t("calibrationUnavailable")}</Notice>
             ) : (
@@ -441,126 +169,5 @@ export function PlantWorkspace({
                 />
             )}
         </>
-    );
-}
-function latestPlant(server: Plant, saved?: Plant): Plant {
-    if (!saved) return server;
-    const incoming = server.current_configuration;
-    const edited = saved.current_configuration;
-    if (
-        incoming &&
-        (!edited ||
-            incoming.revision > edited.revision ||
-            (incoming.id === edited.id && server.name === saved.name))
-    )
-        return server;
-    const incomingSubmission = server.submission;
-    const editedSubmission = saved.submission;
-    if (
-        !edited &&
-        !incoming &&
-        incomingSubmission &&
-        editedSubmission &&
-        server.name === saved.name &&
-        (
-            [
-                "dc_capacity_mw",
-                "inverter_capacity_mw",
-                "export_limit_mw",
-                "measurement_basis",
-                "mounting_type",
-                "surface_tilt_degrees",
-                "surface_azimuth_degrees",
-            ] as const
-        ).every(
-            (field) => incomingSubmission[field] === editedSubmission[field],
-        )
-    )
-        return server;
-    return saved;
-}
-type ForecastQuery = {
-    scope: PlantScope;
-    date: string;
-    resolution: 30 | 60;
-    source: DataSource;
-    poll: number | false;
-};
-function PlantForecast({
-    electrical,
-    ...query
-}: ForecastQuery & { electrical: boolean }) {
-    return electrical ? (
-        <GenerationForecast {...query} />
-    ) : (
-        <IrradianceForecast {...query} />
-    );
-}
-function GenerationForecast({
-    scope,
-    date,
-    resolution,
-    source,
-    poll,
-}: ForecastQuery) {
-    const resource = useApiQuery(
-        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/forecast/",
-        {
-            path: scope,
-            query: {
-                date,
-                resolution_minutes: resolution,
-                data_source: source,
-            },
-        },
-        { poll },
-    );
-    return <ForecastResource resource={resource} electrical />;
-}
-function IrradianceForecast({ scope, date, source, poll }: ForecastQuery) {
-    const resource = useApiQuery(
-        "/api/tenants/{tenant_id}/regions/{region_id}/forecast/",
-        {
-            path: {
-                tenant_id: scope.tenant_id,
-                region_id: scope.region_id,
-            },
-            query: {
-                date,
-                data_source: source === "archived_forecast" ? "auto" : source,
-            },
-        },
-        { poll },
-    );
-    return <ForecastResource resource={resource} electrical={false} />;
-}
-function ForecastResource({
-    resource,
-    electrical,
-}: {
-    resource: Loaded<Forecast>;
-    electrical: boolean;
-}) {
-    const t = useTranslations("PlantWorkspace");
-    return (
-        <section className="panel">
-            {resource.loading ? (
-                <p role="status">
-                    {electrical
-                        ? t("loadingGeneration")
-                        : t("loadingIrradiance")}
-                </p>
-            ) : resource.data ? (
-                <>
-                    <RefreshFailed resource={resource} />
-                    <ForecastPanel
-                        forecast={resource.data}
-                        electrical={electrical}
-                    />
-                </>
-            ) : (
-                <Notice error>{resource.error}</Notice>
-            )}
-        </section>
     );
 }

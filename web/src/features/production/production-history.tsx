@@ -1,165 +1,34 @@
 "use client";
 import { useLocale, useTranslations } from "next-intl";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { cadence, useApiQuery } from "@/lib/api/query";
 import { useProposalKey } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
 import { dataIntervalRange, intervalTimeFormatter } from "@/lib/intervals";
-import { QUALITIES, qualityOf, type Quality } from "@/lib/production";
+import { qualityOf } from "@/lib/production";
 import { CsvDownload } from "@/ui/csv-download";
-import { localDay } from "@/features/forecast/data-source";
-import { ProductionImport } from "./production-import";
-import { ScrollRegion } from "@/ui/scroll-region";
+import { CheckboxField, ControlField } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
+import { localDay } from "@/features/forecast/data-source";
+import { ProductionDayNav } from "./history/day-nav";
+import { IntervalEditor } from "./history/interval-editor";
+import {
+    intervalKey,
+    mostFrequentReason,
+    productionCsvRecords,
+    reconcileEditor,
+    type Editor,
+    type History,
+    type Interval,
+} from "./history/model";
+import { ProductionTable } from "./history/production-table";
+import { ProductionSourceDetails } from "./history/source-details";
+import { ProductionImport } from "./production-import";
 
-type History = components["schemas"]["ProductionHistoryOutput"];
-type Interval = components["schemas"]["ProductionIntervalOutput"];
 type ChangeRow = components["schemas"]["ProductionChangeRow"];
-
-type Editor =
-    | { status: "closed" }
-    | {
-          status: "editing" | "saving" | "reloading" | "failed" | "orphaned";
-          key: string;
-          energy: string;
-          reason?: string;
-          quality: Quality;
-          expectedRevision: number | null;
-          error?: string;
-          pendingWrite?: boolean;
-      };
-
-function shiftDay(day: string, offset: number) {
-    const date = new Date(`${day}T12:00:00Z`);
-    date.setUTCDate(date.getUTCDate() + offset);
-    return date.toISOString().slice(0, 10);
-}
-
-function reconcileEditor(
-    editor: Editor,
-    history: History,
-    unavailableMessage: string,
-): Editor {
-    if (editor.status === "closed" || editor.status === "orphaned")
-        return editor;
-    const row = history.intervals.find(
-        (row) => `${row.starts_at}/${row.ends_at}` === editor.key,
-    );
-    if (!row || !(row.can_edit || row.can_propose))
-        return {
-            ...editor,
-            status: "orphaned",
-            error: unavailableMessage,
-            pendingWrite: editor.status === "saving",
-        };
-    return editor.status === "reloading"
-        ? {
-              ...editor,
-              status: "editing",
-              expectedRevision: row.revision_id,
-              error: undefined,
-          }
-        : editor;
-}
-
-function mostFrequentReason(rows: Interval[]) {
-    const counts = new Map<string, number>();
-    for (const row of rows) {
-        const code = row.proposal_unavailable_reason;
-        if (code) counts.set(code, (counts.get(code) ?? 0) + 1);
-    }
-    let best: Interval | undefined;
-    let most = 0;
-    for (const row of rows) {
-        const count = counts.get(row.proposal_unavailable_reason ?? "") ?? 0;
-        if (count > most) {
-            best = row;
-            most = count;
-        }
-    }
-    return best;
-}
-
-function ProductionReading({
-    row,
-    timeFormatter,
-}: {
-    row: Interval;
-    timeFormatter: Intl.DateTimeFormat;
-}) {
-    const t = useTranslations("ProductionHistory");
-    const locale = useLocale();
-    const number = (value: number) =>
-        new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(
-            value,
-        );
-    const time = (value: string) => timeFormatter.format(new Date(value));
-    const corrected =
-        row.observation != null || row.effective?.aggregated === true;
-    const originals = row.provider_originals?.length
-        ? row.provider_originals
-        : row.provider_original
-          ? [row.provider_original]
-          : [];
-    const source =
-        row.effective?.source_kind === "settlement_injection"
-            ? "settlement"
-            : row.effective?.source_kind === "realtime_generation"
-              ? "provisional"
-              : "manual";
-    const quality = row.effective?.quality;
-    return (
-        <>
-            <div className="production-value">
-                {row.effective == null
-                    ? t("missing")
-                    : number(row.effective.energy_mwh)}{" "}
-                {corrected ? (
-                    <span className="production-correction">
-                        {t("corrected")}
-                    </span>
-                ) : (
-                    row.effective && <span className="fine">{t(source)}</span>
-                )}
-            </div>
-            {quality && quality !== "valid" && (
-                <div className="fine">
-                    {t.has(quality) ? t(quality) : quality}
-                </div>
-            )}
-            {corrected &&
-                (originals.length ? (
-                    originals.map((original) => (
-                        <div
-                            className="production-original"
-                            key={`${original.snapshot_id}/${original.starts_at}`}
-                        >
-                            {t(
-                                originals.length > 1 ||
-                                    Date.parse(original.starts_at) !==
-                                        Date.parse(row.starts_at) ||
-                                    Date.parse(original.ends_at) !==
-                                        Date.parse(row.ends_at)
-                                    ? "provider_original_interval"
-                                    : "provider_original",
-                                {
-                                    interval: `${time(original.starts_at)}–${time(original.ends_at)}`,
-                                    value: `${number(original.energy_mwh)} MWh`,
-                                },
-                            )}
-                        </div>
-                    ))
-                ) : (
-                    <div className="production-original">
-                        {t("provider_original", { value: t("missing") })}
-                    </div>
-                ))}
-        </>
-    );
-}
 
 export function ProductionHistory({
     scope,
@@ -194,10 +63,6 @@ export function ProductionHistory({
     const editButtons = useRef(new Map<string, HTMLButtonElement>());
     const pendingFocus = useRef<string | null>(null);
     const summaryRef = useRef<HTMLDivElement>(null);
-    const connection = useApiQuery(
-        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production-source/",
-        { path: scope },
-    );
     const reading = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/",
         {
@@ -251,15 +116,8 @@ export function ProductionHistory({
     const time = (value: string) => timeFormatter.format(new Date(value));
     const intervalLabel = (row: Interval) =>
         `${time(row.starts_at)}–${time(row.ends_at)}`;
-    const key = (row: Interval) => `${row.starts_at}/${row.ends_at}`;
-    const qualityLabel = (quality: string) =>
-        ({
-            valid: t("valid"),
-            invalid: t("invalid"),
-            outage: t("outage"),
-            curtailed: t("curtailed"),
-            mixed: t("mixed"),
-        })[quality] ?? quality;
+    const canAct = (row: Interval) =>
+        canManage ? row.can_edit : row.can_propose;
     const saving =
         editor.status === "saving" ||
         editor.status === "reloading" ||
@@ -271,6 +129,10 @@ export function ProductionHistory({
         setEditor({ status: "closed" });
         setMessage("");
     }
+    function close(key: string) {
+        pendingFocus.current = key;
+        setEditor({ status: "closed" });
+    }
     async function reloadEditor() {
         if (editor.status === "closed" || saving) return;
         const attempt = editor;
@@ -278,9 +140,9 @@ export function ProductionHistory({
         try {
             const updated = await reading.reload();
             const row = updated.intervals.find(
-                (row) => key(row) === attempt.key,
+                (row) => intervalKey(row) === attempt.key,
             );
-            if (row && (canManage ? row.can_edit : row.can_propose)) {
+            if (row && canAct(row)) {
                 setEditor({
                     ...attempt,
                     status: "editing",
@@ -313,16 +175,16 @@ export function ProductionHistory({
             !(canManage || row.can_propose) ||
             saving ||
             !history ||
-            !(canManage ? row.can_edit : row.can_propose) ||
+            !canAct(row) ||
             (action === "revert" &&
                 !(canManage ? row.can_revert : row.can_propose_revert))
         )
             return;
         const attempt =
-            editor.status !== "closed" && editor.key === key(row)
+            editor.status !== "closed" && editor.key === intervalKey(row)
                 ? editor
                 : {
-                      key: key(row),
+                      key: intervalKey(row),
                       energy: row.effective?.energy_mwh.toString() ?? "",
                       quality: qualityOf(row.observation?.quality),
                       expectedRevision: row.revision_id,
@@ -373,10 +235,7 @@ export function ProductionHistory({
             if (canManage) {
                 await api.post(
                     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
-                    {
-                        path: scope,
-                        body: payload,
-                    },
+                    { path: scope, body: payload },
                 );
             } else {
                 const proposal = {
@@ -440,49 +299,19 @@ export function ProductionHistory({
         <section className="panel production-workspace">
             <h2 className="sr-only">{t("actuals")}</h2>
             <div className="production-controls">
-                <div className="archive-date-nav">
-                    <button
-                        className="button secondary"
-                        type="button"
-                        aria-label={t("previous_day")}
-                        disabled={saving}
-                        onClick={() => selectDate(shiftDay(stepFrom, -1))}
-                    >
-                        ←
-                    </button>
-                    <label className="field">
-                        {t("day")}
-                        <input
-                            type="date"
-                            value={date}
-                            max={yesterday}
-                            disabled={saving}
-                            onChange={(event) => selectDate(event.target.value)}
-                        />
-                    </label>
-                    <button
-                        className="button secondary"
-                        type="button"
-                        aria-label={t("next_day")}
-                        disabled={saving || stepFrom >= yesterday}
-                        onClick={() => selectDate(shiftDay(stepFrom, 1))}
-                    >
-                        →
-                    </button>
-                </div>
-                <label className="field">
-                    <span>
-                        <input
-                            type="checkbox"
-                            checked={showFullDay}
-                            disabled={editor.status !== "closed"}
-                            onChange={(event) =>
-                                setShowFullDay(event.target.checked)
-                            }
-                        />{" "}
-                        {t("show_full_day")}
-                    </span>
-                </label>
+                <ProductionDayNav
+                    date={date}
+                    stepFrom={stepFrom}
+                    yesterday={yesterday}
+                    disabled={saving}
+                    onSelect={selectDate}
+                />
+                <CheckboxField
+                    label={t("show_full_day")}
+                    checked={showFullDay}
+                    disabled={editor.status !== "closed"}
+                    onChange={setShowFullDay}
+                />
                 {!history && refreshButton}
             </div>
             {message && <Notice>{message}</Notice>}
@@ -494,20 +323,18 @@ export function ProductionHistory({
             {editor.status === "orphaned" && (
                 <div className="production-row-editor">
                     <Notice error>{editor.error}</Notice>
-                    <label className="field">
-                        {t("attempted_energy", {
+                    <ControlField
+                        label={t("attempted_energy", {
                             interval: editor.key.split("/").map(time).join("–"),
                         })}
+                    >
                         <input value={editor.energy} readOnly />
-                    </label>
+                    </ControlField>
                     <button
                         className="button secondary"
                         type="button"
                         disabled={saving}
-                        onClick={() => {
-                            pendingFocus.current = editor.key;
-                            setEditor({ status: "closed" });
-                        }}
+                        onClick={() => close(editor.key)}
                     >
                         {t("cancel")}
                     </button>
@@ -518,536 +345,116 @@ export function ProductionHistory({
             ) : !history ? (
                 <Notice error>{reading.error}</Notice>
             ) : (
-                history && (
-                    <>
-                        <div
-                            className="production-summary"
-                            role="group"
-                            aria-label={t("production_intervals")}
-                            tabIndex={-1}
-                            ref={summaryRef}
-                        >
-                            <strong>
-                                {!hasValues
-                                    ? t("no_values")
-                                    : day?.total_mwh == null
-                                      ? t("total_unavailable")
-                                      : t("total", {
-                                            total: number(day.total_mwh),
-                                        })}
-                            </strong>
-                            {refreshButton}
-                            {rows.some((row) => row.effective == null) && (
-                                <span>
-                                    {t("missing_intervals", {
-                                        count: rows.filter(
-                                            (row) => row.effective == null,
-                                        ).length,
+                <>
+                    <div
+                        className="production-summary"
+                        role="group"
+                        aria-label={t("production_intervals")}
+                        tabIndex={-1}
+                        ref={summaryRef}
+                    >
+                        <strong>
+                            {!hasValues
+                                ? t("no_values")
+                                : day?.total_mwh == null
+                                  ? t("total_unavailable")
+                                  : t("total", {
+                                        total: number(day.total_mwh),
                                     })}
-                                </span>
-                            )}
-                        </div>
-                        {!canManage &&
-                            rows.length > 0 &&
-                            !rows.some((row) => row.can_propose) && (
-                                <Notice>
-                                    {t("none_available", {
-                                        reason: unavailable(
-                                            mostFrequentReason(rows),
-                                        ),
-                                    })}
-                                </Notice>
-                            )}
-                        {!rows.length ? (
-                            <p>{t("no_intervals")}</p>
-                        ) : (
-                            <ScrollRegion label={t("production_intervals")}>
-                                <table className="production-table">
-                                    <caption>
-                                        {t("production_intervals")} ·{" "}
-                                        {history.timezone}
-                                    </caption>
-                                    <thead>
-                                        <tr>
-                                            <th>{t("local_interval")}</th>
-                                            <th>{t("production_mwh")}</th>
-                                            {(canManage ||
-                                                rows.some(
-                                                    (row) => row.can_propose,
-                                                )) && <th>{t("actions")}</th>}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {visibleRows.map((row) => {
-                                            const editing =
-                                                editor.status !== "closed" &&
-                                                editor.status !== "orphaned" &&
-                                                editor.key === key(row);
-                                            return (
-                                                <Fragment key={key(row)}>
-                                                    <tr>
-                                                        <th scope="row">
-                                                            {intervalLabel(row)}
-                                                        </th>
-                                                        <td>
-                                                            <ProductionReading
-                                                                row={row}
-                                                                timeFormatter={
-                                                                    timeFormatter
-                                                                }
-                                                            />
-                                                        </td>
-                                                        {(canManage ||
-                                                            rows.some(
-                                                                (row) =>
-                                                                    (
-                                                                        row as Interval
-                                                                    )
-                                                                        .can_propose,
-                                                            )) && (
-                                                            <td>
-                                                                {(canManage
-                                                                    ? row.can_edit
-                                                                    : (
-                                                                          row as Interval
-                                                                      )
-                                                                          .can_propose) &&
-                                                                configuration ? (
-                                                                    <button
-                                                                        ref={(
-                                                                            button,
-                                                                        ) => {
-                                                                            if (
-                                                                                button
-                                                                            )
-                                                                                editButtons.current.set(
-                                                                                    key(
-                                                                                        row,
-                                                                                    ),
-                                                                                    button,
-                                                                                );
-                                                                            else
-                                                                                editButtons.current.delete(
-                                                                                    key(
-                                                                                        row,
-                                                                                    ),
-                                                                                );
-                                                                        }}
-                                                                        className="button secondary"
-                                                                        type="button"
-                                                                        disabled={
-                                                                            editor.status !==
-                                                                            "closed"
-                                                                        }
-                                                                        aria-label={t(
-                                                                            canManage
-                                                                                ? "edit_interval"
-                                                                                : "propose_interval",
-                                                                            {
-                                                                                interval:
-                                                                                    intervalLabel(
-                                                                                        row,
-                                                                                    ),
-                                                                            },
-                                                                        )}
-                                                                        onClick={() =>
-                                                                            setEditor(
-                                                                                {
-                                                                                    status: "editing",
-                                                                                    key: key(
-                                                                                        row,
-                                                                                    ),
-                                                                                    energy:
-                                                                                        row.effective?.energy_mwh.toString() ??
-                                                                                        "",
-                                                                                    quality:
-                                                                                        row
-                                                                                            .observation
-                                                                                            ?.quality ??
-                                                                                        "valid",
-                                                                                    expectedRevision:
-                                                                                        row.revision_id,
-                                                                                },
-                                                                            )
-                                                                        }
-                                                                    >
-                                                                        {canManage
-                                                                            ? t(
-                                                                                  "edit",
-                                                                              )
-                                                                            : proposals(
-                                                                                  "proposeCorrection",
-                                                                              )}
-                                                                    </button>
-                                                                ) : (
-                                                                    <span className="fine">
-                                                                        {unavailable(
-                                                                            row,
-                                                                        )}
-                                                                    </span>
-                                                                )}
-                                                            </td>
-                                                        )}
-                                                    </tr>
-                                                    {editing && (
-                                                        <tr>
-                                                            <td
-                                                                colSpan={
-                                                                    canManage ||
-                                                                    rows.some(
-                                                                        (row) =>
-                                                                            (
-                                                                                row as Interval
-                                                                            )
-                                                                                .can_propose,
-                                                                    )
-                                                                        ? 3
-                                                                        : 2
-                                                                }
-                                                            >
-                                                                <form
-                                                                    className="production-row-editor"
-                                                                    onSubmit={(
-                                                                        event,
-                                                                    ) => {
-                                                                        event.preventDefault();
-                                                                        void save(
-                                                                            row,
-                                                                            "set",
-                                                                        );
-                                                                    }}
-                                                                >
-                                                                    <label className="field">
-                                                                        {t(
-                                                                            "edit_energy",
-                                                                            {
-                                                                                interval:
-                                                                                    intervalLabel(
-                                                                                        row,
-                                                                                    ),
-                                                                            },
-                                                                        )}
-                                                                        <input
-                                                                            inputMode="decimal"
-                                                                            autoFocus
-                                                                            value={
-                                                                                editor.energy
-                                                                            }
-                                                                            disabled={
-                                                                                saving
-                                                                            }
-                                                                            onChange={(
-                                                                                event,
-                                                                            ) =>
-                                                                                setEditor(
-                                                                                    {
-                                                                                        ...editor,
-                                                                                        status: "editing",
-                                                                                        energy: event
-                                                                                            .target
-                                                                                            .value,
-                                                                                        error: undefined,
-                                                                                    },
-                                                                                )
-                                                                            }
-                                                                        />
-                                                                    </label>
-                                                                    <label className="field">
-                                                                        {t(
-                                                                            "quality",
-                                                                        )}
-                                                                        <select
-                                                                            value={
-                                                                                editor.quality
-                                                                            }
-                                                                            disabled={
-                                                                                saving
-                                                                            }
-                                                                            onChange={(
-                                                                                event,
-                                                                            ) =>
-                                                                                setEditor(
-                                                                                    {
-                                                                                        ...editor,
-                                                                                        status: "editing",
-                                                                                        quality:
-                                                                                            qualityOf(
-                                                                                                event
-                                                                                                    .target
-                                                                                                    .value,
-                                                                                            ),
-                                                                                        error: undefined,
-                                                                                    },
-                                                                                )
-                                                                            }
-                                                                        >
-                                                                            {QUALITIES.map(
-                                                                                (
-                                                                                    quality,
-                                                                                ) => (
-                                                                                    <option
-                                                                                        key={
-                                                                                            quality
-                                                                                        }
-                                                                                        value={
-                                                                                            quality
-                                                                                        }
-                                                                                    >
-                                                                                        {qualityLabel(
-                                                                                            quality,
-                                                                                        )}
-                                                                                    </option>
-                                                                                ),
-                                                                            )}
-                                                                        </select>
-                                                                    </label>
-                                                                    {!canManage && (
-                                                                        <label className="field">
-                                                                            {proposals(
-                                                                                "reason",
-                                                                            )}
-                                                                            <textarea
-                                                                                required
-                                                                                maxLength={
-                                                                                    500
-                                                                                }
-                                                                                value={
-                                                                                    editor.reason ??
-                                                                                    ""
-                                                                                }
-                                                                                disabled={
-                                                                                    saving
-                                                                                }
-                                                                                onChange={(
-                                                                                    event,
-                                                                                ) =>
-                                                                                    setEditor(
-                                                                                        {
-                                                                                            ...editor,
-                                                                                            status: "editing",
-                                                                                            reason: event
-                                                                                                .target
-                                                                                                .value,
-                                                                                            error: undefined,
-                                                                                        },
-                                                                                    )
-                                                                                }
-                                                                            />
-                                                                            <span className="field-hint">
-                                                                                {proposals(
-                                                                                    "approvalHelp",
-                                                                                )}
-                                                                            </span>
-                                                                        </label>
-                                                                    )}
-                                                                    <div className="button-group">
-                                                                        <button
-                                                                            className="button"
-                                                                            type="submit"
-                                                                            disabled={
-                                                                                saving ||
-                                                                                (canManage &&
-                                                                                    editor.status ===
-                                                                                        "failed")
-                                                                            }
-                                                                        >
-                                                                            {saving
-                                                                                ? t(
-                                                                                      "saving",
-                                                                                  )
-                                                                                : canManage
-                                                                                  ? t(
-                                                                                        "save",
-                                                                                    )
-                                                                                  : proposals(
-                                                                                        "send",
-                                                                                    )}
-                                                                        </button>
-                                                                        <button
-                                                                            className="button secondary"
-                                                                            type="button"
-                                                                            disabled={
-                                                                                saving
-                                                                            }
-                                                                            onClick={() => {
-                                                                                pendingFocus.current =
-                                                                                    key(
-                                                                                        row,
-                                                                                    );
-                                                                                proposalKey.reset();
-                                                                                setEditor(
-                                                                                    {
-                                                                                        status: "closed",
-                                                                                    },
-                                                                                );
-                                                                            }}
-                                                                        >
-                                                                            {t(
-                                                                                "cancel",
-                                                                            )}
-                                                                        </button>
-                                                                    </div>
-                                                                    {(canManage
-                                                                        ? row.can_revert
-                                                                        : (
-                                                                              row as Interval
-                                                                          )
-                                                                              .can_propose_revert) && (
-                                                                        <button
-                                                                            className="button secondary"
-                                                                            type="button"
-                                                                            disabled={
-                                                                                saving ||
-                                                                                (canManage &&
-                                                                                    editor.status ===
-                                                                                        "failed")
-                                                                            }
-                                                                            aria-label={
-                                                                                canManage
-                                                                                    ? t(
-                                                                                          "revert_interval",
-                                                                                          {
-                                                                                              interval:
-                                                                                                  intervalLabel(
-                                                                                                      row,
-                                                                                                  ),
-                                                                                          },
-                                                                                      )
-                                                                                    : proposals(
-                                                                                          "proposeRevertInterval",
-                                                                                          {
-                                                                                              interval:
-                                                                                                  intervalLabel(
-                                                                                                      row,
-                                                                                                  ),
-                                                                                          },
-                                                                                      )
-                                                                            }
-                                                                            onClick={() =>
-                                                                                void save(
-                                                                                    row,
-                                                                                    "revert",
-                                                                                )
-                                                                            }
-                                                                        >
-                                                                            {canManage
-                                                                                ? t(
-                                                                                      "use_provider",
-                                                                                  )
-                                                                                : proposals(
-                                                                                      "proposeRevert",
-                                                                                  )}
-                                                                        </button>
-                                                                    )}
-                                                                    {editor.status ===
-                                                                        "failed" && (
-                                                                        <>
-                                                                            <Notice
-                                                                                error
-                                                                            >
-                                                                                {
-                                                                                    editor.error
-                                                                                }
-                                                                            </Notice>
-                                                                            <button
-                                                                                className="button secondary"
-                                                                                type="button"
-                                                                                onClick={() =>
-                                                                                    void reloadEditor()
-                                                                                }
-                                                                            >
-                                                                                {t(
-                                                                                    "reload_values",
-                                                                                )}
-                                                                            </button>
-                                                                        </>
-                                                                    )}
-                                                                </form>
-                                                            </td>
-                                                        </tr>
-                                                    )}
-                                                </Fragment>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </ScrollRegion>
-                        )}
-                        <CsvDownload
-                            label={t("download_csv")}
-                            filename={`production-${date}`}
-                            records={rows.map((row) => {
-                                const originals = row.provider_originals?.length
-                                    ? row.provider_originals
-                                    : row.provider_original
-                                      ? [row.provider_original]
-                                      : [];
-                                return {
-                                    starts_at: row.starts_at,
-                                    ends_at: row.ends_at,
-                                    energy: row.effective?.energy_mwh ?? null,
-                                    quality: row.effective?.quality ?? "",
-                                    source: row.effective?.source ?? "",
-                                    provider_energy_mwh: originals
-                                        .map((original) => original.energy_mwh)
-                                        .join("; "),
-                                    provider_intervals: originals
-                                        .map(
-                                            (original) =>
-                                                `${original.starts_at}/${original.ends_at}`,
-                                        )
-                                        .join("; "),
-                                    provider_source: originals
-                                        .map((original) => original.source_kind)
-                                        .join("; "),
-                                };
-                            })}
-                            metadata={{
-                                timezone: history.timezone,
-                                unit: "MWh",
-                            }}
-                        />
-                    </>
-                )
-            )}
-            <details className="production-source">
-                <summary>{t("source_details")}</summary>
-                <p>{t("source_policy")}</p>
-                {connection.loading ? (
-                    <p role="status">{t("loading_source")}</p>
-                ) : connection.error ? (
-                    <Notice error>{connection.error}</Notice>
-                ) : (
-                    connection.data && (
-                        <>
-                            <p>
-                                <strong>
-                                    {connection.data.name || "EPİAŞ"}
-                                </strong>{" "}
-                                ·{" "}
-                                {connection.data.connected
-                                    ? t("connected")
-                                    : t("not_connected")}
-                            </p>
-                            {!connection.data.connected && (
-                                <p>{t("source_disconnected")}</p>
-                            )}
-                            <p className="fine">
-                                {t("archived_days", {
-                                    count: connection.data.archived_days,
+                        </strong>
+                        {refreshButton}
+                        {rows.some((row) => row.effective == null) && (
+                            <span>
+                                {t("missing_intervals", {
+                                    count: rows.filter(
+                                        (row) => row.effective == null,
+                                    ).length,
                                 })}
-                            </p>
-                            {connection.data.connected &&
-                                connection.data.last_error && (
-                                    <Notice error>
-                                        {connection.data.last_error}
-                                    </Notice>
-                                )}
-                        </>
-                    )
-                )}
-                <p className="fine">{t("correction_policy")}</p>
-            </details>
+                            </span>
+                        )}
+                    </div>
+                    {!canManage &&
+                        rows.length > 0 &&
+                        !rows.some((row) => row.can_propose) && (
+                            <Notice>
+                                {t("none_available", {
+                                    reason: unavailable(
+                                        mostFrequentReason(rows),
+                                    ),
+                                })}
+                            </Notice>
+                        )}
+                    {!rows.length ? (
+                        <p>{t("no_intervals")}</p>
+                    ) : (
+                        <ProductionTable
+                            rows={rows}
+                            visibleRows={visibleRows}
+                            timezone={history.timezone}
+                            timeFormatter={timeFormatter}
+                            intervalLabel={intervalLabel}
+                            canManage={canManage}
+                            canAct={canAct}
+                            hasConfiguration={Boolean(configuration)}
+                            editorOpen={editor.status !== "closed"}
+                            editingKey={
+                                editor.status !== "closed" &&
+                                editor.status !== "orphaned"
+                                    ? editor.key
+                                    : undefined
+                            }
+                            editButtons={editButtons}
+                            unavailable={unavailable}
+                            onOpen={(row) =>
+                                setEditor({
+                                    status: "editing",
+                                    key: intervalKey(row),
+                                    energy:
+                                        row.effective?.energy_mwh.toString() ??
+                                        "",
+                                    quality:
+                                        row.observation?.quality ?? "valid",
+                                    expectedRevision: row.revision_id,
+                                })
+                            }
+                            renderEditor={(row) =>
+                                editor.status !== "closed" && (
+                                    <IntervalEditor
+                                        row={row}
+                                        editor={editor}
+                                        interval={intervalLabel(row)}
+                                        canManage={canManage}
+                                        saving={saving}
+                                        onChange={(change) =>
+                                            setEditor({
+                                                ...editor,
+                                                status: "editing",
+                                                ...change,
+                                                error: undefined,
+                                            })
+                                        }
+                                        onSave={(action) =>
+                                            void save(row, action)
+                                        }
+                                        onCancel={() => {
+                                            proposalKey.reset();
+                                            close(intervalKey(row));
+                                        }}
+                                        onReload={() => void reloadEditor()}
+                                    />
+                                )
+                            }
+                        />
+                    )}
+                    <CsvDownload
+                        label={t("download_csv")}
+                        filename={`production-${date}`}
+                        records={productionCsvRecords(rows)}
+                        metadata={{ timezone: history.timezone, unit: "MWh" }}
+                    />
+                </>
+            )}
+            <ProductionSourceDetails scope={scope} />
             {canManage && configuration && (
                 <details className="production-import" id="production-import">
                     <summary role="button" aria-label={t("import_csv")}>

@@ -7,7 +7,8 @@ import { localDay } from "./data-source";
 import type { PlantScope } from "@/lib/api";
 import type { RequestOptions } from "@/lib/api/client";
 import { useApiQuery } from "@/lib/api/query";
-import { Notice, RefreshFailed, Stat } from "@/ui/ui";
+import { Resource } from "@/ui/resource";
+import { Notice, Stat } from "@/ui/ui";
 import { CsvDownload } from "@/ui/csv-download";
 
 type PerformanceQuery = RequestOptions<
@@ -181,61 +182,49 @@ function PerformanceResults({
     }
     return (
         <>
-            {resource.data === undefined ? (
-                resource.error ? (
-                    <Notice error>{resource.error}</Notice>
-                ) : (
-                    <p role="status">{t("loading_performance")}</p>
-                )
-            ) : (
-                resource.data && (
+            <Resource resource={resource} loading={t("loading_performance")}>
+                {(data) => (
                     <>
-                        <RefreshFailed resource={resource} />
                         <div className="toolbar">
                             <CsvDownload
-                                filename={`performance-${resource.data.start_date}-${resource.data.end_date}`}
-                                records={resource.data.days}
+                                filename={`performance-${data.start_date}-${data.end_date}`}
+                                records={data.days}
                                 metadata={{
-                                    ...resource.data,
+                                    ...data,
                                     days: undefined,
                                     timezone,
                                 }}
                             />
                         </div>
-                        {resource.data.metrics && (
+                        {data.metrics && (
                             <>
                                 <div className="stats">
                                     <Stat
                                         label={t("matched_days")}
-                                        value={resource.data.matched_days}
+                                        value={data.matched_days}
                                     />
                                     <Stat
                                         label={t("missing_days")}
                                         value={
-                                            resource.data.missing_days ??
-                                            resource.data.requested_days -
-                                                resource.data.matched_days
+                                            data.missing_days ??
+                                            data.requested_days -
+                                                data.matched_days
                                         }
                                     />
-                                    {(resource.data.excluded_days ?? 0) > 0 && (
+                                    {(data.excluded_days ?? 0) > 0 && (
                                         <Stat
                                             label={t("excluded_days")}
-                                            value={resource.data.excluded_days}
+                                            value={data.excluded_days}
                                         />
                                     )}
                                     <Stat
                                         label={t("daylight_energy_error")}
-                                        value={
-                                            resource.data.metrics?.daily_mae_mwh
-                                        }
+                                        value={data.metrics?.daily_mae_mwh}
                                         unit="MWh"
                                     />
                                     <Stat
                                         label={t("daylight_energy_bias")}
-                                        value={
-                                            resource.data.metrics
-                                                ?.daily_bias_mwh
-                                        }
+                                        value={data.metrics?.daily_bias_mwh}
                                         unit="MWh"
                                     />
                                 </div>
@@ -249,7 +238,7 @@ function PerformanceResults({
                                                 "baseline_daylight_energy_error",
                                             )}
                                             value={
-                                                resource.data.baseline_metrics
+                                                data.baseline_metrics
                                                     ?.daily_mae_mwh
                                             }
                                             unit="MWh"
@@ -259,19 +248,18 @@ function PerformanceResults({
                                                 "generatinginterval_error",
                                             )}
                                             value={
-                                                resource.data.metrics
+                                                data.metrics
                                                     ?.source_positive_mae_mw
                                             }
                                             unit="MW"
                                         />
                                     </div>
-                                    {resource.data.scored_intervals != null && (
+                                    {data.scored_intervals != null && (
                                         <p className="fine">
                                             {t("scored_coverage", {
-                                                count: resource.data
-                                                    .scored_intervals,
+                                                count: data.scored_intervals,
                                                 hours: format(
-                                                    resource.data.scored_hours,
+                                                    data.scored_hours,
                                                 ),
                                             })}
                                         </p>
@@ -297,7 +285,7 @@ function PerformanceResults({
                                     )}
                             </p>
                         )}
-                        {!resource.data.metrics && (
+                        {!data.metrics && (
                             <Notice>
                                 {t(
                                     "no_complete_production_and_reference_pairs_are",
@@ -320,8 +308,8 @@ function PerformanceResults({
                                                 ? t("historical_daylight_model")
                                                 : t("daylight_replay")}{" "}
                                             {t("date_range", {
-                                                start: resource.data.start_date,
-                                                end: resource.data.end_date,
+                                                start: data.start_date,
+                                                end: data.end_date,
                                             })}
                                         </caption>
                                         <thead>
@@ -379,8 +367,8 @@ function PerformanceResults({
                                 <summary>
                                     {t("unavailable_dates", {
                                         count:
-                                            resource.data.requested_days -
-                                            resource.data.matched_days,
+                                            data.requested_days -
+                                            data.matched_days,
                                     })}
                                 </summary>
                                 <ul>
@@ -398,8 +386,8 @@ function PerformanceResults({
                             </details>
                         )}
                     </>
-                )
-            )}
+                )}
+            </Resource>
         </>
     );
 }

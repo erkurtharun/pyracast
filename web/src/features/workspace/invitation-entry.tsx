@@ -10,7 +10,7 @@ import {
     storeInvitation,
     useStoredInvitation,
 } from "./workspace-invitation";
-import { AcceptInvitation } from "./workspace-members";
+import { AcceptInvitation } from "./accept-invitation";
 
 function takeFragmentToken() {
     const fragment = new URLSearchParams(window.location.hash.slice(1));

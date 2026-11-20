@@ -5,7 +5,8 @@ import type { RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import type { components } from "@/lib/schema";
 import { useApiList, useRefresh } from "@/lib/api/query";
-import { Empty, Notice, RefreshFailed } from "@/ui/ui";
+import { Resource } from "@/ui/resource";
+import { Empty, Notice } from "@/ui/ui";
 
 type DeletedRegion = components["schemas"]["TrashedRegionOutput"];
 
@@ -128,66 +129,86 @@ export function RecycleBin({ tenant }: { tenant: number }) {
             {message && <Notice>{message}</Notice>}
             <section className="panel">
                 <h2>{t("deletedPlants")}</h2>
-                <RefreshFailed resource={regions} />
-                {regions.data === undefined ? (
-                    regions.error ? (
-                        <Notice error>{regions.error}</Notice>
-                    ) : (
-                        <p role="status">{t("loadingDeletedPlants")}</p>
-                    )
-                ) : rows.length ? (
-                    <ul className="trash-list" aria-label={t("deletedPlants")}>
-                        {rows.map((row) => (
-                            <li className="trash-item" key={row.id}>
-                                <div>
-                                    <strong>{row.name}</strong>
-                                    <dl className="trash-meta">
+                <Resource
+                    resource={regions}
+                    loading={t("loadingDeletedPlants")}
+                >
+                    {() =>
+                        rows.length ? (
+                            <ul
+                                className="trash-list"
+                                aria-label={t("deletedPlants")}
+                            >
+                                {rows.map((row) => (
+                                    <li className="trash-item" key={row.id}>
                                         <div>
-                                            <dt>{t("deleted")}</dt>
-                                            <dd>
-                                                <time dateTime={row.deleted_at}>
-                                                    {date(row.deleted_at)}
-                                                </time>
-                                            </dd>
+                                            <strong>{row.name}</strong>
+                                            <dl className="trash-meta">
+                                                <div>
+                                                    <dt>{t("deleted")}</dt>
+                                                    <dd>
+                                                        <time
+                                                            dateTime={
+                                                                row.deleted_at
+                                                            }
+                                                        >
+                                                            {date(
+                                                                row.deleted_at,
+                                                            )}
+                                                        </time>
+                                                    </dd>
+                                                </div>
+                                                <div>
+                                                    <dt>
+                                                        {t("permanentDeletion")}
+                                                    </dt>
+                                                    <dd>
+                                                        <time
+                                                            dateTime={
+                                                                row.purge_after
+                                                            }
+                                                        >
+                                                            {date(
+                                                                row.purge_after,
+                                                            )}
+                                                        </time>
+                                                    </dd>
+                                                </div>
+                                            </dl>
                                         </div>
                                         <div>
-                                            <dt>{t("permanentDeletion")}</dt>
-                                            <dd>
-                                                <time
-                                                    dateTime={row.purge_after}
-                                                >
-                                                    {date(row.purge_after)}
-                                                </time>
-                                            </dd>
+                                            <button
+                                                className="button secondary"
+                                                disabled={
+                                                    working !== null ||
+                                                    !row.can_restore
+                                                }
+                                                onClick={() =>
+                                                    void restore(row)
+                                                }
+                                            >
+                                                {working === row.id
+                                                    ? t("restoring")
+                                                    : t("restore", {
+                                                          name: row.name,
+                                                      })}
+                                            </button>
+                                            {!row.can_restore && (
+                                                <p className="fine">
+                                                    {t("restoreExpired")}
+                                                </p>
+                                            )}
                                         </div>
-                                    </dl>
-                                </div>
-                                <div>
-                                    <button
-                                        className="button secondary"
-                                        disabled={
-                                            working !== null || !row.can_restore
-                                        }
-                                        onClick={() => void restore(row)}
-                                    >
-                                        {working === row.id
-                                            ? t("restoring")
-                                            : t("restore", { name: row.name })}
-                                    </button>
-                                    {!row.can_restore && (
-                                        <p className="fine">
-                                            {t("restoreExpired")}
-                                        </p>
-                                    )}
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                ) : (
-                    <Empty title={t("noDeletedPlants")}>
-                        {t("nothingToRestore")}
-                    </Empty>
-                )}
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <Empty title={t("noDeletedPlants")}>
+                                {t("nothingToRestore")}
+                            </Empty>
+                        )
+                    }
+                </Resource>
             </section>
         </>
     );

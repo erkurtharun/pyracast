@@ -5,7 +5,8 @@ import type { components } from "@/lib/schema";
 import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { cadence, useApiQuery, useRefresh } from "@/lib/api/query";
-import { ActionForm, Notice, RefreshFailed, Stat } from "@/ui/ui";
+import { Resource } from "@/ui/resource";
+import { ActionForm, Notice, Stat } from "@/ui/ui";
 
 type Schedule = components["schemas"]["CollectionScheduleOutput"];
 
@@ -24,24 +25,18 @@ export function CollectionSchedule({
         { path: { tenant_id, region_id } },
         { poll: cadence.live },
     );
-    const data = schedule.data;
-    if (!data)
-        return schedule.error ? (
-            <Notice error>{schedule.error}</Notice>
-        ) : (
-            <p role="status">{t("loadingCollectionSchedule")}</p>
-        );
     return (
-        <>
-            <RefreshFailed resource={schedule} />
-            <ScheduleEditor
-                key={JSON.stringify([data.enabled, data.times])}
-                data={data}
-                scope={scope}
-                region={region}
-                onSaved={() => refresh.workspace(tenant_id)}
-            />
-        </>
+        <Resource resource={schedule} loading={t("loadingCollectionSchedule")}>
+            {(data) => (
+                <ScheduleEditor
+                    key={JSON.stringify([data.enabled, data.times])}
+                    data={data}
+                    scope={scope}
+                    region={region}
+                    onSaved={() => refresh.workspace(tenant_id)}
+                />
+            )}
+        </Resource>
     );
 }
 
