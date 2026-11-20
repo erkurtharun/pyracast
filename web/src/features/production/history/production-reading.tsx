@@ -81,7 +81,10 @@ export function ProductionReading({
                         {
                             revision: observation.configuration_revision,
                             interval: `${time(observation.starts_at)}–${time(observation.ends_at)}`,
-                            value: format.quantity(observation.energy_mwh, "MWh"),
+                            value: format.quantity(
+                                observation.energy_mwh,
+                                "MWh",
+                            ),
                         },
                     )}
                 </div>
