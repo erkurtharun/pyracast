@@ -4,7 +4,6 @@ import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadSession } from "@/lib/session-client";
 import { ApiError } from "@/lib/api/errors";
-import { browserErrors } from "@/i18n/browser";
 import {
     authRequest,
     type AuthenticatorRecord,
@@ -12,87 +11,24 @@ import {
 } from "@/lib/auth-api";
 import {
     getReauthMode,
-    ReauthenticationForm,
     refreshExpiredSession,
-    type ReauthMode,
 } from "./security-reauthentication";
 import { AuthenticatorSetup } from "./authenticator-setup";
 import { RecoveryCodes } from "./recovery-codes";
-import { Tag } from "@/ui/ui";
-
-type RecoveryCounts = {
-    unused: number;
-    total: number;
-};
-
-type PendingOperation =
-    | { type: "startSetup" }
-    | { type: "activateTotp"; code: string }
-    | { type: "getRecovery"; afterActivation: boolean }
-    | { type: "replaceRecovery" }
-    | { type: "removeTotp" };
-
-type TwoFactorView =
-    | { kind: "loading" }
-    | {
-          kind: "loadError";
-          reason?: "sessionExpired" | "identityRequired";
-          message?: string;
-      }
-    | { kind: "disabled" }
-    | { kind: "enrolling"; secret: string; totpUrl: string }
-    | { kind: "enabled"; recovery?: RecoveryCounts }
-    | {
-          kind: "recoverySaving";
-          recovery?: RecoveryCounts;
-          codes: string[];
-      }
-    | { kind: "recoveryViewed"; recovery?: RecoveryCounts }
-    | { kind: "confirmReplace"; recovery?: RecoveryCounts }
-    | { kind: "confirmRemove"; recovery?: RecoveryCounts }
-    | {
-          kind: "reauth";
-          mode: ReauthMode;
-          operation: PendingOperation;
-          returnView: TwoFactorView;
-          afterActivation: boolean;
-      };
-
-type StatusNotice =
-    | "authenticatorActivated"
-    | "authenticatorRemoved"
-    | "codesCopied"
-    | "codesDownloaded"
-    | "codesReplaced"
-    | "recoverySavedAck"
-    | "setupKeyCopied";
-
-type LocalFeedback = {
-    text: string;
-    locale: string;
-};
-
-function parseAuthenticators(records: AuthenticatorRecord[] | undefined): {
-    totpEnabled: boolean;
-    recovery?: RecoveryCounts;
-} {
-    if (
-        !Array.isArray(records) ||
-        records.some((item) => !item || typeof item.type !== "string")
-    ) {
-        throw new ApiError(browserErrors()("invalidResponse"));
-    }
-    const list = records;
-    const totpEnabled = list.some((item) => item.type === "totp");
-    const recoveryItem = list.find((item) => item.type === "recovery_codes");
-    const recovery = recoveryItem
-        ? {
-              unused: recoveryItem.unused_code_count ?? 0,
-              total: recoveryItem.total_code_count ?? 0,
-          }
-        : undefined;
-    return { totpEnabled, recovery };
-}
+import { ConfirmStep } from "./two-factor/confirm-step";
+import { EnabledPanel } from "./two-factor/enabled-panel";
+import { LoadError } from "./two-factor/load-error";
+import {
+    parseAuthenticators,
+    type LocalFeedback,
+    type PendingOperation,
+    type RecoveryCounts,
+    type StatusNotice,
+    type TwoFactorView,
+} from "./two-factor/model";
+import { ReauthStep } from "./two-factor/reauth-step";
+import { RecoveryViewed } from "./two-factor/recovery-viewed";
+import { TwoFactorStatusTag } from "./two-factor/status-tag";
 
 export function TwoFactorSettings({
     mfaRequired,
@@ -570,24 +506,18 @@ export function TwoFactorSettings({
         setStatusNotice("codesDownloaded");
     }
 
+    function showStep(next: TwoFactorView) {
+        hasInteractedRef.current = true;
+        clearTransientFeedback();
+        setView(next);
+        focusStepHeading();
+    }
+
     const activeError =
         errorFeedback?.locale === locale ? errorFeedback.text : undefined;
     const activeCodeError =
         codeFieldError?.locale === locale ? codeFieldError.text : undefined;
     const isBusy = pendingAction !== null || view.kind === "loading";
-
-    const statusTag = (() => {
-        if (view.kind === "loading" || view.kind === "loadError") return null;
-        const current = view.kind === "reauth" ? view.returnView : view;
-        if (current.kind === "disabled" || current.kind === "enrolling") {
-            return (
-                <Tag tone={mfaRequired ? "warning" : "neutral"}>
-                    {mfaRequired ? t("statusRequired") : t("statusDisabled")}
-                </Tag>
-            );
-        }
-        return <Tag tone="success">{t("statusEnabled")}</Tag>;
-    })();
 
     return (
         <section className="panel narrow" aria-busy={isBusy || undefined}>
@@ -595,7 +525,7 @@ export function TwoFactorSettings({
                 <h2 ref={panelHeadingRef} tabIndex={-1}>
                     {t("twoFactor")}
                 </h2>
-                {statusTag}
+                <TwoFactorStatusTag view={view} mfaRequired={mfaRequired} />
             </div>
             {view.kind === "disabled" && <p>{t("authenticatorHelp")}</p>}
 
@@ -624,28 +554,16 @@ export function TwoFactorSettings({
             )}
 
             {view.kind === "loadError" && (
-                <div>
-                    <div className="notice error" role="alert">
-                        {view.reason === "sessionExpired"
-                            ? t("sessionExpired")
-                            : view.reason === "identityRequired"
-                              ? t("confirmIdentityFirst")
-                              : view.message || t("loadFailed")}
-                    </div>
-                    <button
-                        className="button secondary"
-                        type="button"
-                        disabled={isBusy}
-                        onClick={() => {
-                            hasInteractedRef.current = true;
-                            clearTransientFeedback();
-                            setView({ kind: "loading" });
-                            setLoadCount((count) => count + 1);
-                        }}
-                    >
-                        {t("retry")}
-                    </button>
-                </div>
+                <LoadError
+                    view={view}
+                    busy={isBusy}
+                    onRetry={() => {
+                        hasInteractedRef.current = true;
+                        clearTransientFeedback();
+                        setView({ kind: "loading" });
+                        setLoadCount((count) => count + 1);
+                    }}
+                />
             )}
 
             {view.kind === "disabled" && (
@@ -709,129 +627,47 @@ export function TwoFactorSettings({
             )}
 
             {view.kind === "enabled" && (
-                <div className="mfa-subpanel">
-                    {view.recovery && (
-                        <p>
-                            {t("recoveryCount", {
-                                unused: view.recovery.unused,
-                                total: view.recovery.total,
-                            })}
-                        </p>
-                    )}
-                    {view.recovery && view.recovery.unused <= 2 && (
-                        <div className="notice" role="status">
-                            {t("recoveryLowWarning")}
-                        </div>
-                    )}
-                    {mfaRequired && (
-                        <p className="fine">{t("policyRequiredNote")}</p>
-                    )}
-                    <div className="button-group mfa-actions">
-                        <button
-                            className="button secondary"
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() =>
-                                void executeOperation(
-                                    {
-                                        type: "getRecovery",
-                                        afterActivation: false,
-                                    },
-                                    { isReplay: false, fallbackView: view },
-                                )
-                            }
-                        >
-                            {pendingAction === "getRecovery"
-                                ? t("working")
-                                : t("showRecovery")}
-                        </button>
-                        <button
-                            className="button secondary"
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => {
-                                hasInteractedRef.current = true;
-                                clearTransientFeedback();
-                                setView({
-                                    kind: "confirmReplace",
-                                    recovery: view.recovery,
-                                });
-                                focusStepHeading();
-                            }}
-                        >
-                            {t("replaceRecovery")}
-                        </button>
-                        {!mfaRequired && (
-                            <button
-                                className="text-button"
-                                type="button"
-                                disabled={isBusy}
-                                onClick={() => {
-                                    hasInteractedRef.current = true;
-                                    clearTransientFeedback();
-                                    setView({
-                                        kind: "confirmRemove",
-                                        recovery: view.recovery,
-                                    });
-                                    focusStepHeading();
-                                }}
-                            >
-                                {t("removeAuthenticator")}
-                            </button>
-                        )}
-                    </div>
-                </div>
+                <EnabledPanel
+                    recovery={view.recovery}
+                    mfaRequired={mfaRequired}
+                    busy={isBusy}
+                    loadingRecovery={pendingAction === "getRecovery"}
+                    onShowRecovery={() =>
+                        void executeOperation(
+                            { type: "getRecovery", afterActivation: false },
+                            { isReplay: false, fallbackView: view },
+                        )
+                    }
+                    onReplace={() =>
+                        showStep({
+                            kind: "confirmReplace",
+                            recovery: view.recovery,
+                        })
+                    }
+                    onRemove={() =>
+                        showStep({
+                            kind: "confirmRemove",
+                            recovery: view.recovery,
+                        })
+                    }
+                />
             )}
 
             {view.kind === "recoveryViewed" && (
-                <div className="mfa-subpanel">
-                    <h3 ref={stepHeadingRef} tabIndex={-1}>
-                        {t("recoveryCodesTitle")}
-                    </h3>
-                    <p>{t("recoveryAlreadyViewed")}</p>
-                    {view.recovery && (
-                        <p className="fine">
-                            {t("recoveryCount", {
-                                unused: view.recovery.unused,
-                                total: view.recovery.total,
-                            })}
-                        </p>
-                    )}
-                    <div className="button-group mfa-actions">
-                        <button
-                            className="button"
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => {
-                                hasInteractedRef.current = true;
-                                clearTransientFeedback();
-                                setView({
-                                    kind: "confirmReplace",
-                                    recovery: view.recovery,
-                                });
-                                focusStepHeading();
-                            }}
-                        >
-                            {t("replaceRecovery")}
-                        </button>
-                        <button
-                            className="button secondary"
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => {
-                                hasInteractedRef.current = true;
-                                clearTransientFeedback();
-                                setView({
-                                    kind: "enabled",
-                                    recovery: view.recovery,
-                                });
-                                focusStepHeading();
-                            }}
-                        >
-                            {t("back")}
-                        </button>
-                    </div>
-                </div>
+                <RecoveryViewed
+                    headingRef={stepHeadingRef}
+                    recovery={view.recovery}
+                    busy={isBusy}
+                    onReplace={() =>
+                        showStep({
+                            kind: "confirmReplace",
+                            recovery: view.recovery,
+                        })
+                    }
+                    onBack={() =>
+                        showStep({ kind: "enabled", recovery: view.recovery })
+                    }
+                />
             )}
 
             {view.kind === "recoverySaving" && (
@@ -857,137 +693,61 @@ export function TwoFactorSettings({
             )}
 
             {view.kind === "confirmReplace" && (
-                <div className="mfa-subpanel">
-                    <h3 ref={stepHeadingRef} tabIndex={-1}>
-                        {t("replaceConfirmTitle")}
-                    </h3>
-                    <p>{t("replaceConfirmBody")}</p>
-                    <div className="button-group mfa-actions">
-                        <button
-                            className="button"
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() =>
-                                void executeOperation(
-                                    { type: "replaceRecovery" },
-                                    { isReplay: false, fallbackView: view },
-                                )
-                            }
-                        >
-                            {pendingAction === "replaceRecovery"
-                                ? t("working")
-                                : t("confirmReplace")}
-                        </button>
-                        <button
-                            className="button secondary"
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => {
-                                hasInteractedRef.current = true;
-                                clearTransientFeedback();
-                                setView({
-                                    kind: "enabled",
-                                    recovery: view.recovery,
-                                });
-                                focusStepHeading();
-                            }}
-                        >
-                            {t("cancel")}
-                        </button>
-                    </div>
-                </div>
+                <ConfirmStep
+                    headingRef={stepHeadingRef}
+                    action="replace"
+                    busy={isBusy}
+                    working={pendingAction === "replaceRecovery"}
+                    onConfirm={() =>
+                        void executeOperation(
+                            { type: "replaceRecovery" },
+                            { isReplay: false, fallbackView: view },
+                        )
+                    }
+                    onCancel={() =>
+                        showStep({ kind: "enabled", recovery: view.recovery })
+                    }
+                />
             )}
 
             {view.kind === "confirmRemove" && !mfaRequired && (
-                <div className="mfa-subpanel">
-                    <h3 ref={stepHeadingRef} tabIndex={-1}>
-                        {t("removeConfirmTitle")}
-                    </h3>
-                    <p>{t("removeConfirmBody")}</p>
-                    <div className="button-group mfa-actions">
-                        <button
-                            className="button danger"
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() =>
-                                void executeOperation(
-                                    { type: "removeTotp" },
-                                    { isReplay: false, fallbackView: view },
-                                )
-                            }
-                        >
-                            {pendingAction === "removeTotp"
-                                ? t("working")
-                                : t("confirmRemove")}
-                        </button>
-                        <button
-                            className="button secondary"
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() => {
-                                hasInteractedRef.current = true;
-                                clearTransientFeedback();
-                                setView({
-                                    kind: "enabled",
-                                    recovery: view.recovery,
-                                });
-                                focusStepHeading();
-                            }}
-                        >
-                            {t("cancel")}
-                        </button>
-                    </div>
-                </div>
+                <ConfirmStep
+                    headingRef={stepHeadingRef}
+                    action="remove"
+                    busy={isBusy}
+                    working={pendingAction === "removeTotp"}
+                    onConfirm={() =>
+                        void executeOperation(
+                            { type: "removeTotp" },
+                            { isReplay: false, fallbackView: view },
+                        )
+                    }
+                    onCancel={() =>
+                        showStep({ kind: "enabled", recovery: view.recovery })
+                    }
+                />
             )}
 
             {view.kind === "reauth" && (
-                <div className="mfa-subpanel">
-                    <h3 ref={stepHeadingRef} tabIndex={-1}>
-                        {view.mode === "mfa"
-                            ? t("reauthMfaTitle")
-                            : view.mode === "email"
-                              ? t("emailReauthTitle")
-                              : t("reauthPasswordTitle")}
-                    </h3>
-                    {view.afterActivation ? (
-                        <div className="notice" role="status">
-                            {t("nextUnusedCodeHint")}
-                        </div>
-                    ) : (
-                        <p>
-                            {view.mode === "mfa"
-                                ? t("reauthMfaDescription")
-                                : view.mode === "email"
-                                  ? t("emailReauthDescription")
-                                  : t("reauthPasswordDescription")}
-                        </p>
-                    )}
-                    <ReauthenticationForm
-                        key={view.mode}
-                        mode={view.mode}
-                        email={email}
-                        autoFocus
-                        disabled={isBusy}
-                        onCancel={() => {
-                            hasInteractedRef.current = true;
-                            clearTransientFeedback();
+                <ReauthStep
+                    headingRef={stepHeadingRef}
+                    view={view}
+                    email={email}
+                    busy={isBusy}
+                    onCancel={() => showStep(view.returnView)}
+                    onVerified={async () => {
+                        if (view.operation.type === "activateTotp") {
+                            setSetupCode("");
                             setView(view.returnView);
                             focusStepHeading();
-                        }}
-                        onVerified={async () => {
-                            if (view.operation.type === "activateTotp") {
-                                setSetupCode("");
-                                setView(view.returnView);
-                                focusStepHeading();
-                                return;
-                            }
-                            await executeOperation(view.operation, {
-                                isReplay: true,
-                                fallbackView: view.returnView,
-                            });
-                        }}
-                    />
-                </div>
+                            return;
+                        }
+                        await executeOperation(view.operation, {
+                            isReplay: true,
+                            fallbackView: view.returnView,
+                        });
+                    }}
+                />
             )}
         </section>
     );

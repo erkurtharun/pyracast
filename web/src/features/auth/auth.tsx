@@ -8,27 +8,20 @@ import { loadSession, useSessionState } from "@/lib/session-client";
 import { isLanguage } from "@/i18n/language";
 import { publicPath } from "@/lib/public-metadata";
 import { addressWithout, appQuery, callbackParams, routes } from "@/lib/routes";
-import { ActionForm, Field, Notice } from "@/ui/ui";
+import { ActionForm, Notice } from "@/ui/ui";
 import { SocialProviderButtons } from "./social-provider-buttons";
 import { LanguageSelect } from "@/ui/language-select";
 import { clearWorkspaceInvitation } from "@/features/workspace/workspace-invitation";
-
-type Mode =
-    | "login"
-    | "register"
-    | "verify"
-    | "mfa"
-    | "forgot"
-    | "reset"
-    | "socialSignup";
-type AuthMessage =
-    | ""
-    | "codeSent"
-    | "resetSent"
-    | "resetDone"
-    | "verified"
-    | "codeRequested"
-    | "passwordChanged";
+import { AuthFields } from "./steps/auth-fields";
+import { AuthStory } from "./steps/auth-story";
+import {
+    modeForPendingFlow,
+    takePasswordChanged,
+    type AuthMessage,
+    type Mode,
+} from "./steps/modes";
+import { ResendCode } from "./steps/resend-code";
+import { submitAuth } from "./steps/submit";
 
 export function Auth({
     invitationToken,
@@ -57,15 +50,15 @@ export function Auth({
             await loadSession();
             return;
         }
-        const pending = result.data?.flows?.find((flow) => flow.is_pending)?.id;
-        if (pending === "provider_signup") {
+        const pending = modeForPendingFlow(result);
+        if (pending === "socialSignup") {
             setMode("socialSignup");
             setMessage("");
-        } else if (pending === "verify_email") {
+        } else if (pending === "verify") {
             setMode("verify");
             setMessage("codeSent");
             setCodeSentAt(Date.now());
-        } else if (pending === "mfa_authenticate") {
+        } else if (pending === "mfa") {
             setMode("mfa");
             setMessage("");
         } else {
@@ -92,33 +85,8 @@ export function Auth({
             .then((result) => {
                 if (!active) return;
                 setSocialError(callbackError);
-                try {
-                    if (
-                        window.sessionStorage.getItem(
-                            "pyracast.passwordChanged",
-                        )
-                    ) {
-                        window.sessionStorage.removeItem(
-                            "pyracast.passwordChanged",
-                        );
-                        setMessage("passwordChanged");
-                    }
-                } catch {
-                    // Browser privacy settings can disable session storage.
-                }
-                const pending = result.data?.flows?.find(
-                    (flow) => flow.is_pending,
-                )?.id;
-                const next =
-                    pending === "provider_signup"
-                        ? "socialSignup"
-                        : pending === "verify_email"
-                          ? "verify"
-                          : pending === "mfa_authenticate"
-                            ? "mfa"
-                            : pending === "password_reset_by_code"
-                              ? "reset"
-                              : undefined;
+                if (takePasswordChanged()) setMessage("passwordChanged");
+                const next = modeForPendingFlow(result);
                 if (next === "socialSignup") {
                     authRequest<{ email?: { email: string }[] }>(
                         "auth/provider/signup",
@@ -159,24 +127,7 @@ export function Auth({
     return (
         <main className="auth-page">
             <div className="auth-layout">
-                <section className="auth-story" aria-label="Pyracast">
-                    <div className="brand">
-                        pyracast<span className="brand-dot">.</span>
-                    </div>
-                    <div>
-                        <p className="eyebrow">{t("solarIntelligence")}</p>
-                        <h2>
-                            {t("portfolio")}
-                            <br />
-
-                            {t("oneView")}
-                        </h2>
-                        <p>{t("intro")}</p>
-                    </div>
-                    <div className="auth-story-footer">
-                        {t("builtForEnergy")}
-                    </div>
-                </section>
+                <AuthStory />
                 <section
                     className="auth-form-panel"
                     aria-labelledby="auth-title"
@@ -239,162 +190,22 @@ export function Auth({
                                 invitationToken
                             )
                                 payload.invitation_token = invitationToken;
-                            if (mode === "forgot") {
-                                await authRequest(
-                                    "auth/password/request",
-                                    "POST",
-                                    payload,
-                                );
-                                setMessage("resetSent");
-                                setMode("reset");
-                            } else if (mode === "reset") {
-                                const result = await authRequest(
-                                    "auth/password/reset",
-                                    "POST",
-                                    {
-                                        key: payload.key,
-                                        password: payload.password,
-                                    },
-                                );
-                                if (
-                                    result.status !== 200 &&
-                                    (result.status !== 401 ||
-                                        result.errors?.length ||
-                                        result.data?.flows?.some(
-                                            (flow) =>
-                                                flow.id ===
-                                                    "password_reset_by_code" &&
-                                                flow.is_pending,
-                                        ))
-                                )
-                                    throw new ApiError(
-                                        result.errors
-                                            ?.map((error) => error.message)
-                                            .join(" ") || t("invalidReset"),
-                                    );
-                                setMode("login");
-                                setMessage("resetDone");
-                            } else {
-                                const path = {
-                                    login: "auth/login",
-                                    register: "auth/signup",
-                                    socialSignup: "auth/provider/signup",
-                                    verify: "auth/email/verify",
-                                    mfa: "auth/2fa/authenticate",
-                                }[mode];
-                                const result = await authRequest(
-                                    path,
-                                    "POST",
-                                    payload,
-                                ).catch((error: unknown) => {
-                                    if (
-                                        error instanceof ApiError &&
-                                        error.status === 429
-                                    )
-                                        throw new ApiError(
-                                            t(
-                                                mode === "login"
-                                                    ? "tooManyAttempts"
-                                                    : "tooManyRequests",
-                                            ),
-                                        );
-                                    throw error;
-                                });
-                                if (
-                                    mode === "verify" &&
-                                    !result.meta?.is_authenticated &&
-                                    !result.errors?.length &&
-                                    !result.data?.flows?.some(
-                                        (flow) =>
-                                            flow.id === "verify_email" &&
-                                            flow.is_pending,
-                                    )
-                                ) {
-                                    setMode("login");
-                                    setMessage("verified");
-                                } else {
-                                    await finish(result);
-                                }
+                            const step = await submitAuth(mode, payload, t);
+                            if ("result" in step) {
+                                await finish(step.result);
+                                return;
                             }
+                            setMode(step.mode);
+                            setMessage(step.message);
                         }}
                     >
-                        {(mode === "register" || mode === "socialSignup") &&
-                            !invitationToken && (
-                                <Field
-                                    label={t("company")}
-                                    name="company_name"
-                                    autoComplete="organization"
-                                    maxLength={200}
-                                />
-                            )}
-                        {(mode === "verify" || mode === "reset") && (
-                            <Field
-                                label={t("emailCode")}
-                                name="key"
-                                autoComplete="one-time-code"
-                            />
-                        )}
-                        {(mode === "login" ||
-                            mode === "register" ||
-                            mode === "socialSignup" ||
-                            mode === "forgot") && (
-                            <Field
-                                label={t("email")}
-                                name="email"
-                                defaultValue={
-                                    mode === "socialSignup"
-                                        ? socialEmail
-                                        : undefined
-                                }
-                                key={
-                                    mode === "socialSignup"
-                                        ? socialEmail
-                                        : "email"
-                                }
-                                type="email"
-                                autoComplete="email"
-                                maxLength={254}
-                            />
-                        )}
-                        {(mode === "login" ||
-                            mode === "register" ||
-                            mode === "reset") && (
-                            <>
-                                <Field
-                                    label={t("password")}
-                                    name="password"
-                                    type={showPassword ? "text" : "password"}
-                                    autoComplete={
-                                        mode === "login"
-                                            ? "current-password"
-                                            : "new-password"
-                                    }
-                                    minLength={
-                                        mode === "login" ? undefined : 15
-                                    }
-                                    maxLength={1024}
-                                />
-                                <button
-                                    type="button"
-                                    className="text-button password-toggle"
-                                    aria-pressed={showPassword}
-                                    onClick={() =>
-                                        setShowPassword(!showPassword)
-                                    }
-                                >
-                                    {showPassword
-                                        ? t("hidePassword")
-                                        : t("showPassword")}
-                                </button>
-                            </>
-                        )}
-                        {mode === "mfa" && (
-                            <Field
-                                label={t("authenticatorCode")}
-                                name="code"
-                                autoComplete="one-time-code"
-                            />
-                        )}
+                        <AuthFields
+                            mode={mode}
+                            invitationToken={invitationToken}
+                            socialEmail={socialEmail}
+                            showPassword={showPassword}
+                            onShowPassword={setShowPassword}
+                        />
                     </ActionForm>
                     {mode === "verify" && (
                         <ResendCode
@@ -445,103 +256,5 @@ export function Auth({
                 </section>
             </div>
         </main>
-    );
-}
-
-// Matches the confirm_email rate limit of one code per minute.
-const RESEND_SECONDS = 60;
-const RESEND_MILLISECONDS = RESEND_SECONDS * 1000;
-
-function ResendCode({
-    sentAt,
-    onSent,
-}: {
-    sentAt: number;
-    onSent: () => void;
-}) {
-    const t = useTranslations("Auth");
-    const [availableAt, setAvailableAt] = useState(
-        sentAt && sentAt + RESEND_MILLISECONDS,
-    );
-    const [seconds, setSeconds] = useState(sentAt ? RESEND_SECONDS : 0);
-    const [state, setState] = useState<
-        | { status: "idle" | "pending" }
-        | { status: "error"; message: string; final: boolean }
-    >({ status: "idle" });
-    useEffect(() => {
-        if (!availableAt) return;
-        const timer = window.setInterval(() => {
-            const remaining = Math.max(
-                0,
-                Math.ceil((availableAt - Date.now()) / 1000),
-            );
-            setSeconds(remaining);
-            if (!remaining) window.clearInterval(timer);
-        }, 1000);
-        return () => window.clearInterval(timer);
-    }, [availableAt]);
-
-    async function resend() {
-        setState({ status: "pending" });
-        try {
-            const result = await authRequest(
-                "auth/email/verify/resend",
-                "POST",
-                {},
-            );
-            if (result.status === 200) {
-                onSent();
-                return;
-            }
-            setState({
-                status: "error",
-                message: t("resendLimit"),
-                final: true,
-            });
-        } catch (error) {
-            const status = error instanceof ApiError ? error.status : undefined;
-            if (status === 429) {
-                setAvailableAt(Date.now() + RESEND_MILLISECONDS);
-                setSeconds(RESEND_SECONDS);
-            }
-            setState({
-                status: "error",
-                message:
-                    status === 429
-                        ? t("resendWait")
-                        : status === 409
-                          ? t("resendLimit")
-                          : (error as Error).message,
-                final: status === 409,
-            });
-        }
-    }
-
-    return (
-        <form
-            onSubmit={(event) => {
-                event.preventDefault();
-                void resend();
-            }}
-        >
-            {state.status === "error" && (
-                <p className="notice error" role="alert">
-                    {state.message}
-                </p>
-            )}
-            <div className="form-footer">
-                <button
-                    className="button"
-                    type="submit"
-                    disabled={
-                        seconds > 0 ||
-                        state.status === "pending" ||
-                        (state.status === "error" && state.final)
-                    }
-                >
-                    {seconds > 0 ? t("resendIn", { seconds }) : t("resendCode")}
-                </button>
-            </div>
-        </form>
     );
 }
