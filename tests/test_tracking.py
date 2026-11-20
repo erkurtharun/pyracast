@@ -293,6 +293,21 @@ def test_non_tracking_configurations_keep_the_direct_reference_transfer() -> Non
     ) == pytest.approx(0.4738 * 130)
 
 
+@pytest.mark.parametrize("mounting", ["tracking", "fixed"])
+def test_an_unknown_recorded_transfer_model_is_refused(mounting: str) -> None:
+    configuration = _configuration()
+    configuration.mounting_type = mounting
+    start = datetime(2026, 6, 21, 5, 0, tzinfo=UTC)
+    with pytest.raises(ValueError, match="transfer model"):
+        reference_power_mw(
+            configuration,
+            start,
+            start + timedelta(minutes=30),
+            473.8,
+            model_version="tracking-geometry-transfer-v3",
+        )
+
+
 @pytest.mark.parametrize("default", [MODEL_V1, MODEL_V2])
 def test_tracking_transfer_applies_the_default_gain_to_loss_free_reference_power(
     monkeypatch: pytest.MonkeyPatch, default: str

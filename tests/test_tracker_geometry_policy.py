@@ -255,7 +255,7 @@ def test_fixed_plants_are_identical_under_both_default_versions(
     assert results[0] == results[1]
 
 
-def test_a_v1_calibrated_plant_keeps_its_production_diagnostic_under_the_v2_default(
+def test_production_diagnostic_needs_evidence_fitted_under_the_forecast_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant, _ = _tracking_plant(monkeypatch)
@@ -264,17 +264,22 @@ def test_a_v1_calibrated_plant_keeps_its_production_diagnostic_under_the_v2_defa
     first = _calibration(system, plant, MODEL_V1)
     _activate(system, plant, first)
     publish_snapshot(snapshot_for(system, NOW.date(), collected_at=NOW))
-    first.result["derating"] = {
+    evidence = {
         "policy": DERATING_POLICY,
         "status": "suspected",
         "baseline_factor": 0.5,
         "latest_matched_day": "2026-11-08",
     }
+    first.result["derating"] = evidence
     first.save(update_fields=("result",))
     _default(monkeypatch, MODEL_V2)
     outlook = _outlook(system, plant, NOW.date())
     assert cast(dict[str, Any], outlook["result"])["model_version"] == MODEL_V1
     assert cast(dict[str, Any], outlook["production_diagnostic"])["calibration_id"] == first.pk
+    other = _calibration(system, plant, MODEL_V2)
+    other.result["derating"] = evidence
+    other.save(update_fields=("result",))
+    assert _outlook(system, plant, NOW.date())["production_diagnostic"] is None
 
 
 @pytest.mark.parametrize("calibrated", VERSIONS)
@@ -322,4 +327,5 @@ def test_a_recomputed_performance_day_uses_the_version_of_its_calibration(
             comparison="historical_model",
         )["days"][0]
         assert day["factor"] == 0.8
+        assert day["model_version"] == calibrated
         assert day["predicted_energy_mwh"] == pytest.approx(expected, rel=1e-12)

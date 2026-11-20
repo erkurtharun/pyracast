@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import redirect_stdout
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from math import cos, radians
 from pathlib import Path
 from typing import Any
@@ -57,8 +57,14 @@ IDS = {
     "fixed": (734230, 845330, 956430),
     "unmodeled": (734240, 845340, 956440),
     "broken": (734250, 845350, 956450),
+    "disabled": (734260, 845360, 956460),
+    "generation": (734270, 845370, 956470),
+    "sparse": (734280, 845380, 956480),
 }
-OTHER_IDS = (REGION_ID, 987654, 987655, 991001, 7_000_001)
+REVISION_ID = 845329
+EIC = "40W0000SECRETEIC"
+PROVIDER_IDS = {"realtime_generation": 987654, "settlement_injection": 987655}
+OTHER_IDS = (REGION_ID, REVISION_ID, 987654, 987655, 991001, 7_000_001)
 
 type Database = psycopg.Connection[Any]
 
@@ -139,6 +145,8 @@ class Plant:
     model: str = MODEL_V1
     dc_capacity_kw: float | None = 1000.0
     timezone: str = "Europe/Istanbul"
+    basis: str = "net_export"
+    enabled: bool = True
     hours: dict[datetime, float] = field(default_factory=dict)
 
     @property
@@ -193,37 +201,41 @@ class Archive:
                 "automatic_calibration_enabled": False,
             },
         )
+        self.configuration(plant, configuration_id, 1)
+        _insert(
+            self.connection,
+            "metering_epiasconnection",
+            {
+                "id": plant_id,
+                "provider_plant_id": PROVIDER_IDS["realtime_generation"],
+                "eic": EIC,
+                "name": "Secret Sun Farm",
+                "enabled": plant.enabled,
+                "revision": 1,
+                "created_at": COLLECTED,
+                "updated_at": COLLECTED,
+                "connected_by_id": 1,
+                "plant_id": plant_id,
+                "settlement_plant_id": PROVIDER_IDS["settlement_injection"],
+            },
+        )
+
+    def configuration(self, plant: Plant, identifier: int, revision: int) -> None:
+        plant_id, _, binding_id = plant.ids
         _insert(
             self.connection,
             "plants_plantconfiguration",
             {
-                "id": configuration_id,
-                "revision": 1,
+                "id": identifier,
+                "revision": revision,
                 "dc_capacity_mw": 130.0,
-                "measurement_basis": "net_export",
+                "measurement_basis": plant.basis,
                 "created_at": COLLECTED,
                 "binding_id": binding_id,
                 "created_by_id": 1,
                 "plant_id": plant_id,
                 "mounting_type": plant.mounting,
                 "region_id": REGION_ID,
-            },
-        )
-        _insert(
-            self.connection,
-            "metering_epiasconnection",
-            {
-                "id": plant_id,
-                "provider_plant_id": 987654,
-                "eic": "40W0000SECRETEIC",
-                "name": "Secret Sun Farm",
-                "enabled": True,
-                "revision": 1,
-                "created_at": COLLECTED,
-                "updated_at": COLLECTED,
-                "connected_by_id": 1,
-                "plant_id": plant_id,
-                "settlement_plant_id": 987655,
             },
         )
 
@@ -252,6 +264,8 @@ class Archive:
         readings: object,
         *,
         collected: datetime = COLLECTED,
+        provider: dict[str, object] | None = None,
+        policy: str = "hour-start-istanbul-v1",
     ) -> None:
         plant_id, configuration_id, _ = plant.ids
         identifier = self.identifier()
@@ -272,8 +286,8 @@ class Archive:
                 "connection_id": plant_id,
                 "job_id": identifier,
                 "endpoint": "PROVIDER-SECRET",
-                "normalization_policy": "hour-start-istanbul-v1",
-                "provider_plant": Jsonb({"id": 987654, "eic": "40W0000SECRETEIC"}),
+                "normalization_policy": policy,
+                "provider_plant": Jsonb(provider or {"id": PROVIDER_IDS[kind], "eic": EIC}),
                 "source_kind": kind,
             },
         )
@@ -309,7 +323,7 @@ def _day_hours(plant: Plant, day: date) -> list[datetime]:
     return sorted(hour for hour in plant.hours if hour.astimezone(ZONE).date() == day)
 
 
-def _generate(archive: Archive, plant: Plant) -> None:
+def _generate(archive: Archive, plant: Plant, days: range | tuple[int, ...] = range(DAYS)) -> None:
     configuration = PlantConfiguration(
         binding=SiteBinding(
             capacity_kw=1000.0,
@@ -322,7 +336,7 @@ def _generate(archive: Archive, plant: Plant) -> None:
         dc_capacity_mw=130.0,
         mounting_type=plant.mounting,
     )
-    for index in range(DAYS):
+    for index in days:
         day = FIRST_DAY + timedelta(days=index)
         intervals = [(start, end, _reference_kw(start, index)) for start, end in _half_hours(day)]
         archive.reference(
@@ -431,15 +445,53 @@ def _populate(connection: Database) -> None:
         broken,
     ):
         archive.plant(plant)
+    archive.configuration(by_v2, REVISION_ID, 2)
     _generate(archive, by_v1)
     _generate(archive, by_v2)
     _malformed(archive, by_v2)
     archive.production(broken, FIRST_DAY, "realtime_generation", [])
 
 
+def _local_hours(day: date) -> list[datetime]:
+    return [datetime.combine(day, time(hour), ZONE) for hour in range(24)]
+
+
+def _populate_selection(connection: Database) -> None:
+    archive = Archive(connection)
+    connected, disabled = Plant("v1"), Plant("disabled", enabled=False)
+    generation, sparse = Plant("generation", basis="ac_generation"), Plant("sparse")
+    for plant in (connected, disabled, generation, sparse):
+        archive.plant(plant)
+    hours = _local_hours(FIRST_DAY)
+    whole_day = [_reading(hour, "1.000000000") for hour in hours]
+    for plant in (connected, disabled, generation):
+        archive.production(plant, FIRST_DAY, "realtime_generation", whole_day)
+    later = COLLECTED + timedelta(days=1)
+    noon = [_reading(hours[12], "999")]
+    for kind, provider in (
+        ("realtime_generation", {"id": 111, "eic": EIC}),
+        ("realtime_generation", {"id": PROVIDER_IDS["realtime_generation"], "eic": "OTHER"}),
+        ("settlement_injection", {"id": PROVIDER_IDS["realtime_generation"], "eic": EIC}),
+    ):
+        archive.production(connected, FIRST_DAY, kind, noon, collected=later, provider=provider)
+    archive.production(
+        connected,
+        FIRST_DAY + timedelta(days=1),
+        "realtime_generation",
+        [_reading(hour, "1") for hour in _local_hours(FIRST_DAY + timedelta(days=1))],
+        policy="hour-start-utc-v0",
+    )
+    _generate(archive, sparse, (0, 7))
+
+
 @pytest.fixture(scope="module")
 def archive() -> Iterator[str]:
     yield from _database(_populate)
+
+
+@pytest.fixture(scope="module")
+def selection_archive() -> Iterator[str]:
+    yield from _database(_populate_selection)
 
 
 @pytest.fixture
@@ -584,6 +636,51 @@ def test_the_evaluation_counts_malformed_rows_without_showing_them(run: Run) -> 
     assert "Traceback" not in run.output
 
 
+def _evaluate(database: str, **patches: object) -> tuple[int, str]:
+    output = io.StringIO()
+    with pytest.MonkeyPatch.context() as patch, redirect_stdout(output):
+        for name, value in patches.items():
+            patch.setattr(f"scripts.evaluate_tracker_geometry.{name}", value)
+        code = evaluation.main(environment(database))
+    return code, output.getvalue()
+
+
+@pytest.fixture(scope="module")
+def selection(selection_archive: str) -> str:
+    code, output = _evaluate(selection_archive)
+    assert code == 0
+    return output
+
+
+def test_production_comes_only_from_the_enabled_connection_and_its_provider_plants(
+    selection: str,
+) -> None:
+    connected = _skipped(_section(selection, 1))
+    assert connected.pop("unsupported normalization policy") == 1
+    assert set(connected) <= {"outside daylight", "reference missing"}
+    assert sum(connected.values()) == 24
+    assert "  skipped: none" in _section(selection, 2)
+
+
+def test_unusable_measurements_and_fits_are_counted_by_reason(
+    selection_archive: str, selection: str
+) -> None:
+    assert _skipped(_section(selection, 3)) == {"measurement basis not net export": 1}
+    sparse = _section(selection, 4)
+    assert "  days: complete 2, evaluated 0; weeks: scored 0, skipped 1" in sparse
+    assert "  decision: no" in sparse
+    insufficient = _skipped(sparse)["fit insufficient"]
+    assert insufficient > 0
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise RuntimeError
+
+    code, output = _evaluate(selection_archive, fit_calibration=fail)
+    assert code == 0
+    assert _skipped(_section(output, 4))["fit failed: RuntimeError"] == insufficient
+    assert "Traceback" not in output
+
+
 def test_the_output_holds_no_identifying_value(run: Run) -> None:
     for value in SECRETS:
         assert value not in run.output
@@ -614,6 +711,20 @@ def test_the_session_is_read_only(archive: str) -> None:
             connection.execute("DELETE FROM plants_plant")
     finally:
         connection.close()
+
+
+def test_a_session_that_is_not_read_only_is_refused(
+    archive: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    connect = psycopg.connect
+
+    def writable(*args: Any, **kwargs: Any) -> Any:
+        del kwargs["options"]
+        return connect(*args, **kwargs)
+
+    monkeypatch.setattr(psycopg, "connect", writable)
+    assert evaluation.main(environment(archive)) == 1
+    assert capsys.readouterr().out == "evaluation failed: ReadOnlyRefusedError\n"
 
 
 def test_an_archive_without_tracking_plants_decides_no(
