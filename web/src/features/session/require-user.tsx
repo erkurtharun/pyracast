@@ -5,7 +5,6 @@ import { Fragment, type ReactNode } from "react";
 import { appQuery } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
 import { Auth } from "@/features/auth/auth";
-import { WorkspaceAccess } from "@/ui/workspace-access";
 import { useStoredInvitation } from "@/features/workspace/workspace-invitation";
 
 export function RequireUser({
@@ -28,11 +27,9 @@ export function RequireUser({
             </main>
         );
     return (
-        <WorkspaceAccess value={true}>
-            <Auth
-                invitationToken={invitationToken ?? stored}
-                initialMode={signup ? "register" : "login"}
-            />
-        </WorkspaceAccess>
+        <Auth
+            invitationToken={invitationToken ?? stored}
+            initialMode={signup ? "register" : "login"}
+        />
     );
 }
