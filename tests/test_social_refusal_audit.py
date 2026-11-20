@@ -6,18 +6,12 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
-from allauth.socialaccount.models import SocialAccount, SocialApp, SocialLogin
-from allauth.socialaccount.providers.google.provider import GoogleProvider
-from django.contrib.auth.models import AnonymousUser, User
-from django.core.exceptions import PermissionDenied
+from allauth.socialaccount.models import SocialAccount
+from django.contrib.auth.models import User
 from django.test import Client, RequestFactory, override_settings
 
 from pyracast.accounts.audit import logger, refusal_throttle
-from pyracast.accounts.social import (
-    SocialAccountAdapter,
-    authorize_connection,
-    record_social_refusal,
-)
+from pyracast.accounts.social import record_social_refusal
 from tests.support.auth_lifecycle import PASSWORD, member, submit
 from tests.support.social_accounts import (
     CALLBACK,
@@ -102,8 +96,7 @@ def test_a_refused_connection_records_one_line_for_its_current_caller(
 
     response = complete(client, state)
 
-    assert response.status_code == 302
-    assert "error=permission_denied" in response["Location"]
+    assert response.status_code == 401
     assert not SocialAccount.objects.exists()
     [line] = refusals()
     assert line["user_id"] == actor_id
@@ -157,22 +150,3 @@ def test_social_refusal_lines_are_throttled_separately_by_actor_provider_and_rea
     assert [(line["user_id"], line["provider"], line["reason"]) for line in refusals()] == [
         (None if actor is None else actor.pk, provider, reason) for actor, provider, reason in cases
     ]
-
-
-def test_a_reported_connection_refusal_is_not_recorded_again_as_a_provider_error(
-    refusals: Callable[[], list[dict[str, Any]]],
-) -> None:
-    request = RequestFactory().get("/api/accounts/google/login/callback/")
-    request.user = AnonymousUser()
-    adapter = SocialAccountAdapter(request)
-    login = SocialLogin(account=SocialAccount(provider="google", uid="provider-identity"))
-    with pytest.raises(PermissionDenied) as denied:
-        authorize_connection(request, login)
-
-    provider = GoogleProvider(request, app=SocialApp(provider="google"))
-    adapter.on_authentication_error(request, provider, exception=denied.value)
-
-    [line] = refusals()
-    assert line["reason"] == "initiating_user_missing"
-    assert line["provider"] == "google"
-    assert line["user_id"] is None

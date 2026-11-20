@@ -36,7 +36,6 @@ from tests.support.api import verified_admin
 from tests.support.auth_lifecycle import PASSWORD, mailed_code, member, submit, totp_code
 from tests.support.company_registration import signup
 from tests.support.social_accounts import (
-    CALLBACK,
     PROVIDERS,
     begin,
     complete,
@@ -95,7 +94,7 @@ def by_provider(monkeypatch: pytest.MonkeyPatch, _now: float) -> tuple[Client, U
     user = member()
     SocialAccount.objects.create(user=user, provider="google", uid="google-identity")
     client = browser()
-    assert complete(client, begin(client))["Location"] == CALLBACK
+    assert complete(client, begin(client)).status_code == 200
     return client, user
 
 
@@ -365,6 +364,24 @@ def test_a_session_without_an_authority_record_confirms_before_it_completes_an_a
     assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     assert submit(client, "auth/email/verify", code).status_code == 200
     assert EmailAddress.objects.filter(user=user, email=ADDED, verified=True).exists()
+
+
+def test_a_signed_in_session_completes_a_sign_up_code_of_another_account_by_that_code() -> None:
+    # The code was mailed to a sign-up this browser started before it signed in to another
+    # account; the session's own authority record plays no part in it.
+    client = browser()
+    assert signup(client).status_code == 401
+    code = {"key": mailed_code()}
+    user = member()
+    credentials = {"email": user.email, "password": PASSWORD}
+    assert submit(client, "auth/login", credentials).status_code == 200
+    EmailAddress.objects.create(user=user, email=SECOND, verified=True)
+
+    response = submit(client, "auth/email/verify", code)
+
+    assert response.status_code == 200
+    assert EmailAddress.objects.get(email="owner@example.com").verified
+    assert session_user(client) == user.pk
 
 
 def change_password(client: Client) -> Any:

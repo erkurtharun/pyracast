@@ -14,9 +14,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize(
     "signal",
     [
-        mfa_signals.authenticator_added,
         mfa_signals.authenticator_removed,
-        mfa_signals.authenticator_reset,
         account_signals.email_changed,
     ],
 )

@@ -16,7 +16,6 @@ from allauth.headless.socialaccount.inputs import SignupInput
 from allauth.mfa.models import Authenticator
 from allauth.mfa.totp.internal.auth import generate_totp_secret
 from allauth.socialaccount.adapter import get_adapter
-from allauth.socialaccount.internal.flows.connect import do_connect
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialLogin, SocialToken
 from allauth.socialaccount.providers.google.provider import GoogleProvider
 from django.contrib.auth.models import User
@@ -25,7 +24,7 @@ from django.db import IntegrityError, close_old_connections, connections, transa
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import Client, override_settings
 
-from pyracast.accounts import processes, social
+from pyracast.accounts import processes
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
 from pyracast.accounts.social import SocialAccountAdapter
@@ -36,6 +35,7 @@ from tests.support.social_accounts import (
     CALLBACK,
     PROVIDERS,
     begin,
+    callback,
     complete,
     provider_destination,
     serve_provider_profile,
@@ -146,8 +146,11 @@ def test_provider_signup_creates_workspace_atomically(
     client = Client(enforce_csrf_checks=True)
     state = begin(client, provider)
     response = complete(client, state, provider)
-    assert response.status_code == 302
-    assert response["Location"] == CALLBACK
+    assert response.status_code == 401
+    assert any(
+        flow["id"] == "provider_signup" and flow.get("is_pending")
+        for flow in response.json()["data"]["flows"]
+    )
     session = client.get(AUTH + "auth/session").json()
     assert any(flow["id"] == "provider_signup" for flow in session["data"]["flows"])
     pending = client.session["socialaccount_sociallogin"]
@@ -239,7 +242,8 @@ def test_social_link_and_unlink_require_reauthentication_and_emit_audit(
     assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     with caplog.at_level("INFO", logger="pyracast.security"):
         response = complete(client, begin(client, process="connect"))
-    assert response["Location"] == CALLBACK
+    assert response.status_code == 200
+    assert [listed["uid"] for listed in response.json()["data"]] == ["google-identity"]
     account = SocialAccount.objects.get(user=user)
     assert account.extra_data == {"email": oauth_profile["email"]}
     assert "social_account_connected" in caplog.text
@@ -323,7 +327,7 @@ def test_existing_social_login_preserves_staff_enrollment_and_local_mfa(
     client = Client()
     response = complete(client, begin(client))
     if staff and not totp:
-        assert "error=permission_denied" in response["Location"]
+        assert response.status_code == 403
         assert client.get("/api/session/").json()["user"] is None
     elif totp:
         flows = client.get(AUTH + "auth/session").json()["data"]["flows"]
@@ -340,11 +344,11 @@ def test_callback_state_is_session_bound_single_use_and_errors_are_safe(
     client = Client()
     state = begin(client)
     outsider = Client()
-    assert "error=" in complete(outsider, state)["Location"]
-    assert "error=" in complete(client, state, "microsoft")["Location"]
+    assert "error=" in callback(outsider, state)["Location"]
+    assert "error=" in callback(client, state, "microsoft")["Location"]
     assert not SocialAccount.objects.exists()
-    assert complete(client, state)["Location"] == CALLBACK
-    assert "error=" in complete(client, state)["Location"]
+    assert callback(client, state)["Location"] == CALLBACK
+    assert "error=" in callback(client, state)["Location"]
     state = begin(client)
     response = client.get(
         "/api/accounts/google/login/callback/", {"state": state, "error": "access_denied"}
@@ -415,13 +419,13 @@ def test_provider_callbacks_reject_unsupported_methods_without_consuming_state(
     client = Client()
     state = begin(client, provider)
     query = urlencode({"state": state, "code": "provider-code"})
-    callback = f"/api/accounts/{provider}/login/callback/?{query}"
+    path = f"/api/accounts/{provider}/login/callback/?{query}"
     for method in ("POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"):
-        response = client.generic(method, callback)
+        response = client.generic(method, path)
         assert response.status_code == 405
         assert response["Allow"] == "GET"
     assert not User.objects.exists()
-    assert complete(client, state, provider)["Location"] == CALLBACK
+    assert callback(client, state, provider)["Location"] == CALLBACK
 
 
 @pytest.mark.parametrize(
@@ -470,7 +474,7 @@ def test_connect_callback_remains_bound_to_original_recently_reauthenticated_use
         session["account_authentication_methods"] = records
         session.save()
     response = complete(client, state)
-    assert "error=permission_denied" in response["Location"]
+    assert response.status_code == 401
     assert SocialAccount.objects.count() == 1
     existing.refresh_from_db()
     assert existing.user_id == other.pk
@@ -489,7 +493,8 @@ def test_connect_rejects_identity_owned_by_other_user(oauth_profile: dict[str, A
     submit(client, "auth/login", {"email": user.email, "password": PASSWORD})
     submit(client, "auth/reauthenticate", {"password": PASSWORD})
     response = complete(client, begin(client, process="connect"))
-    assert "error=connected_other" in response["Location"]
+    assert response.status_code == 400
+    assert [error["code"] for error in response.json()["errors"]] == ["connected_other"]
     identity = SocialAccount.objects.get()
     assert (identity.user_id, identity.extra_data) == (other.pk, {"email": "old@gmail.com"})
 
@@ -503,7 +508,7 @@ def test_disabling_provider_expires_pending_signup_and_callback(
     with override_settings(SOCIALACCOUNT_PROVIDERS={}):
         assert client.get(AUTH + "auth/provider/signup").status_code == 409
         assert client.get(AUTH + "auth/session").status_code == 401
-        assert "error=provider_unavailable" in complete(client, state)["Location"]
+        assert "error=provider_unavailable" in callback(client, state)["Location"]
         token = client.get("/api/session/").json()["csrf_token"]
         response = client.post(
             AUTH + "auth/provider/redirect",
@@ -753,12 +758,13 @@ def test_connect_rechecks_current_user_after_provider_exchange(
         response = future.result(timeout=20)
     if change == "renamed":
         # A change outside the credential state keeps the reauthentication.
-        assert response["Location"] == CALLBACK
+        assert response.status_code == 200
         assert SocialAccount.objects.get().user_id == user.pk
     else:
         # The staff flags are part of the credential state, so changing them ends the
-        # reauthentication the connection rests on.
-        assert "error=permission_denied" in response["Location"]
+        # reauthentication the connection rests on; a password change signs the session out,
+        # which leaves no login stored for it.
+        assert response.status_code == (409 if change == "password" else 401)
         assert not SocialAccount.objects.exists()
         if change == "password":
             user.refresh_from_db()
@@ -788,26 +794,29 @@ def test_concurrent_provider_claim_rejects_second_user_without_losing_identity(
         submit(client, "auth/reauthenticate", {"password": PASSWORD})
         states.append(begin(client, process="connect"))
     barrier = Barrier(2)
-    original = do_connect
+    original = SocialLogin.connect
 
-    def synchronized_connect(request: HttpRequest, login: SocialLogin) -> Any:
+    def synchronized_connect(login: SocialLogin, request: HttpRequest, user: User) -> None:
         barrier.wait(timeout=10)
-        return original(request, login)
+        original(login, request, user)
 
-    monkeypatch.setattr(social, "do_connect", synchronized_connect)
+    monkeypatch.setattr(SocialLogin, "connect", synchronized_connect)
 
-    def callback(index: int) -> str:
+    def connect(index: int) -> Any:
         close_old_connections()
         try:
-            return str(complete(clients[index], states[index])["Location"])
+            return complete(clients[index], states[index])
         finally:
             connections.close_all()
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(callback, index) for index in range(2)]
-        locations = [future.result(timeout=20) for future in futures]
-    assert locations.count(CALLBACK) == 1
-    assert sum("error=connected_other" in location for location in locations) == 1
+        futures = [pool.submit(connect, index) for index in range(2)]
+        answers = sorted(
+            (future.result(timeout=20) for future in futures),
+            key=lambda answer: int(answer.status_code),
+        )
+    assert [answer.status_code for answer in answers] == [200, 400]
+    assert [error["code"] for error in answers[1].json()["errors"]] == ["connected_other"]
     assert SocialAccount.objects.count() == 1
     assert SocialAccount.objects.get().user_id in {user.pk for user in users}
 
@@ -822,12 +831,12 @@ def test_unrelated_connect_database_failure_is_not_misreported(
     submit(client, "auth/reauthenticate", {"password": PASSWORD})
     Tenant.objects.create(name="Existing workspace")
 
-    def failed_connect(request: HttpRequest, login: SocialLogin) -> None:
+    def failed_connect(login: SocialLogin, request: HttpRequest, user: User) -> None:
         if other_unique_table:
             Tenant.objects.create(name="Existing workspace")
         raise IntegrityError("unrelated connection failure")
 
-    monkeypatch.setattr(social, "do_connect", failed_connect)
+    monkeypatch.setattr(SocialLogin, "connect", failed_connect)
     with pytest.raises(IntegrityError):
         complete(client, begin(client, process="connect"))
     assert not SocialAccount.objects.exists()
@@ -957,7 +966,7 @@ def test_provider_network_failure_returns_safe_frontend_error(
 
     monkeypatch.setattr(requests.Session, "request", failure)
     client = Client()
-    response = complete(client, begin(client))
+    response = callback(client, begin(client))
     assert response.status_code == 302
     assert "error=" in response["Location"]
     assert "confidential" not in response["Location"]

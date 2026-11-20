@@ -14,7 +14,9 @@ from allauth.account import app_settings as account_settings
 from allauth.account.internal.flows import reauthentication
 from allauth.account.internal.flows.login import AUTHENTICATION_METHODS_SESSION_KEY
 from allauth.account.models import EmailAddress
+from allauth.mfa import signals as mfa_signals
 from allauth.mfa.models import Authenticator
+from allauth.mfa.recovery_codes.internal import flows as recovery_code_flows
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal import flows as totp_flows
@@ -24,10 +26,11 @@ from allauth.socialaccount.models import SocialAccount
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
 from django.core import mail
-from django.db import DatabaseError, transaction
+from django.db import DatabaseError, connection, transaction
 from django.test import Client, override_settings
+from django.test.utils import CaptureQueriesContext
 
-from pyracast.accounts import adapters, processes, security, step_up
+from pyracast.accounts import adapters, processes, security, social_views, step_up
 from pyracast.accounts import middleware as account_middleware
 from pyracast.accounts.audit import refusal_throttle
 from pyracast.accounts.sessions import end_sessions
@@ -53,7 +56,9 @@ from tests.support.social_accounts import (
     CALLBACK,
     PROVIDERS,
     begin,
+    callback,
     complete,
+    finish,
     provider_destination,
     serve_provider_profile,
 )
@@ -480,6 +485,11 @@ def connection_started(client: Client, _now: float) -> str:
     return begin(client, process="connect")
 
 
+def connection_verified(client: Client, now: float) -> None:
+    verified = callback(client, connection_started(client, now))
+    assert verified["Location"] == CALLBACK
+
+
 @dataclass(frozen=True)
 class CredentialWrite:
     # A step-up-gated write of the account's own credentials, sent by one session of the account.
@@ -494,8 +504,6 @@ class CredentialWrite:
     changes_state: bool = True
 
     def send(self, client: Client, token: str, prepared: Any) -> Any:
-        if self.method == "callback":
-            return complete(client, prepared)
         if self.method == "form":
             return client.post(self.path, self.data, HTTP_X_CSRFTOKEN=token)
         return getattr(client, self.method)(
@@ -577,12 +585,12 @@ WRITES = {
     ),
     "connect": CredentialWrite(
         "password",
-        "callback",
-        CALLBACK_PATH,
+        "post",
+        AUTH + "auth/provider/complete",
         lambda user, _before, _response: (
             credentials(user)["identities"] == [("google", "google-identity")]
         ),
-        prepare=connection_started,
+        prepare=connection_verified,
     ),
 }
 
@@ -709,10 +717,7 @@ def competing(
 
 def assert_refused(write: CredentialWrite, response: Any, user: User) -> None:
     # The refusal asks for the factor the account's state after the change demands.
-    if write.method == "callback":
-        assert response.status_code == 302
-        assert "error=permission_denied" in response["Location"]
-    elif write.method == "form":
+    if write.method == "form":
         assert response.status_code == 302
         assert "error=reauthentication_required" in response["Location"]
     else:
@@ -724,12 +729,8 @@ def assert_refused(write: CredentialWrite, response: Any, user: User) -> None:
 NOTHING_PENDING = CALLBACK + "&error=unknown&error_process=login"
 
 
-def assert_ended(write: CredentialWrite, response: Any) -> None:
+def assert_ended(response: Any) -> None:
     # The change revoked this session while its request ran.
-    if write.method == "callback":
-        # A provider callback whose session ended answers as one that finds nothing pending.
-        assert (response.status_code, response["Location"]) == (302, NOTHING_PENDING)
-        return
     assert (response.status_code, response.json()["code"]) == (400, "session_ended")
 
 
@@ -864,7 +865,7 @@ def test_a_credential_write_is_refused_after_another_sessions_credential_change_
         assert competitor.answered(answers[0])
     assert competitor.applied(user)
     if competitor.revokes_sessions:
-        assert_ended(case, response)
+        assert_ended(response)
     else:
         assert_refused(case, response, user)
     # Ending the proofs changes the session's data under its key; no answer sends the cookie.
@@ -1082,7 +1083,7 @@ def test_a_provider_callback_whose_session_ended_while_it_ran_answers_like_nothi
     monkeypatch.setattr(refusal_throttle, "_seen", OrderedDict())
     events = capture_security_events(caplog, monkeypatch)
 
-    response = complete(client, state)
+    response = callback(client, state)
 
     refusals = [
         (event["reason"], event["user_id"])
@@ -1098,7 +1099,7 @@ def test_a_provider_callback_whose_session_ended_while_it_ran_answers_like_nothi
     arrive(jar, response)
     assert session_user(jar) == user.pk
     # The same browser's callback, its session gone, finds nothing pending and answers alike.
-    assert complete(client, state)["Location"] == response["Location"]
+    assert callback(client, state)["Location"] == response["Location"]
 
 
 def test_a_provider_callback_whose_session_save_times_out_answers_busy_and_keeps_its_state(
@@ -1109,7 +1110,7 @@ def test_a_provider_callback_whose_session_save_times_out_answers_busy_and_keeps
     client.raise_request_exception = False
 
     with session_row_held(session_key(client)):
-        response = complete(client, state)
+        response = callback(client, state)
 
     assert response.status_code == 503
     assert response.json()["code"] == "busy"
@@ -1146,12 +1147,13 @@ def test_a_change_attempted_while_the_connect_redirect_saves_its_state_commits_a
     state = parse_qs(urlsplit(provider_destination(response)).query)["state"][0]
     assert competitor.answered(answers[0])
     assert competitor.applied(user)
-    callback = complete(client, state)
+    verified = callback(client, state)
     if competitor.revokes_sessions:
         # The pending connection ended with the session the change ended.
-        assert callback["Location"] == NOTHING_PENDING
+        assert verified["Location"] == NOTHING_PENDING
     else:
-        assert "error=permission_denied" in callback["Location"]
+        assert verified["Location"] == CALLBACK
+        assert_refused(WRITES["connect"], finish(client), user)
     assert credentials(user)["identities"] == []
 
 
@@ -1171,7 +1173,8 @@ def test_a_refused_connection_leaves_an_existing_identity_as_it_was(
 
         response = complete(client, state)
 
-    assert "error=permission_denied" in response["Location"]
+    # Removing the password signed the session out, so no login is stored for it.
+    assert response.status_code == 409
     assert list(SocialAccount.objects.values_list("user_id", "uid", "extra_data")) == [
         (user.pk, "google-identity", {"email": "old@gmail.com"})
     ]
@@ -1254,13 +1257,14 @@ def test_a_change_during_the_provider_exchange_waits_for_nothing_and_ends_the_co
     # The callback held no lock while it waited for the provider.
     assert finished
     assert competitor.applied(user)
-    assert (response.status_code, response["Location"]) == (302, NOTHING_PENDING)
+    # The completion finds no login stored for the session that ended.
+    assert response.status_code == 409
     assert credentials(user)["identities"] == []
     assert session_user(client) is None
 
 
 @pytest.mark.parametrize("change", AGAINST_THE_CALLBACK)
-def test_a_change_attempted_while_the_callback_completes_waits_for_the_connection(
+def test_a_change_attempted_while_the_completion_connects_waits_for_the_connection(
     change: str, now: float, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     competitor = AGAINST_THE_CALLBACK[change]
@@ -1275,7 +1279,7 @@ def test_a_change_attempted_while_the_callback_completes_waits_for_the_connectio
     waited.result(timeout=10)
 
     assert not committed
-    assert response["Location"] == CALLBACK
+    assert response.status_code == 200
     assert credentials(user)["identities"] == [("google", "google-identity")]
     if change == "operator-reset":
         assert competitor.applied(user)
@@ -1308,7 +1312,7 @@ def test_no_provider_request_runs_inside_a_database_transaction(
             _user, client, _other = arranged(WRITES["connect"])
             state = connection_started(client, now)
 
-        response = complete(client, state)
+        response = callback(client, state)
 
     assert response["Location"] == CALLBACK
     # The token request and the profile request.
@@ -1438,3 +1442,130 @@ def test_a_factor_write_that_cannot_end_the_other_sessions_stores_nothing(
     assert credentials(user) == before
     assert (response.status_code, response.json()["code"]) == (503, "busy")
     assert session_user(other) == user.pk
+
+
+def test_a_same_browser_request_does_not_wait_for_the_provider_exchange(
+    now: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = serve_provider_profile(monkeypatch)
+    with override_settings(SOCIALACCOUNT_PROVIDERS=PROVIDERS):
+        _user, client, _other = arranged(WRITES["connect"])
+        state = connection_started(client, now)
+        key = session_key(client)
+        started: Changes = []
+
+        def same_browser_during_the_exchange() -> None:
+            if not started:
+                future = alongside(lambda: carrying_key(key).get("/api/session/"))
+                started.append((future.done(), future))
+
+        profile["_before_profile"] = same_browser_during_the_exchange
+
+        response = callback(client, state)
+    [(finished, future)] = started
+    future.result(timeout=10)
+
+    assert finished
+    assert response["Location"] == CALLBACK
+
+
+def test_a_connect_redirect_whose_session_ends_after_its_commit_sends_no_session_cookie(
+    providers: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = WRITES["connect-redirect"]
+    user, client, _other = arranged(case)
+    token = token_of(client)
+    post = social_views.RedirectToProviderView.post
+
+    def committed_then_ended(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        response = post(self, request, *args, **kwargs)
+        elsewhere(lambda: end_sessions(user.pk, "mfa_reset"))
+        return response
+
+    monkeypatch.setattr(social_views.RedirectToProviderView, "post", committed_then_ended)
+
+    response = case.send(client, token, None)
+
+    assert provider_destination(response)
+    assert session_cookie(response) is None
+
+
+def test_a_provider_exchange_that_fails_after_its_session_ended_sends_no_session_cookie(
+    now: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = serve_provider_profile(monkeypatch)
+    with override_settings(SOCIALACCOUNT_PROVIDERS=PROVIDERS):
+        user, client, _other = arranged(WRITES["connect"])
+        state = connection_started(client, now)
+
+        def ended_then_failed() -> None:
+            elsewhere(lambda: end_sessions(user.pk, "mfa_reset"))
+            raise requests.ConnectionError("The provider is unreachable.")
+
+        profile["_before_profile"] = ended_then_failed
+
+        response = callback(client, state)
+
+    assert response["Location"] == CALLBACK + "&error=unknown&error_process=connect"
+    assert session_cookie(response) is None
+    assert session_user(client) is None
+
+
+class SignalAfterSignIn:
+    # Signs a new session of the account in after the write committed, before the library sends
+    # its signal from that commit.
+    def __init__(self, signal: Any, user: User, signed: list[Client]) -> None:
+        self.signal, self.user, self.signed = signal, user, signed
+
+    def send(self, **kwargs: Any) -> Any:
+        if not self.signed:
+            elsewhere(self.sign_in)
+        return self.signal.send(**kwargs)
+
+    def sign_in(self) -> None:
+        client = signed_in(self.user)
+        token_of(client)
+        self.signed.append(client)
+
+
+@pytest.mark.parametrize("write", ["add-authenticator", "regenerate-recovery-codes"])
+def test_a_factor_write_ends_the_other_sessions_once_in_its_transaction(
+    write: str, now: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = WRITES[write]
+    user, client, other = arranged(case)
+    prepared = case.prepare(client, now)
+    token = token_of(client)
+    token_of(other)
+    signed: list[Client] = []
+    sent = SimpleNamespace(
+        **{
+            name: SignalAfterSignIn(getattr(mfa_signals, name), user, signed)
+            for name in ("authenticator_added", "authenticator_removed", "authenticator_reset")
+        }
+    )
+    for flows in (totp_flows, recovery_code_flows):
+        monkeypatch.setattr(flows, "signals", sent)
+
+    response = case.send(client, token, prepared)
+
+    assert response.status_code == 200
+    assert session_user(other) is None
+    [later] = signed
+    assert session_user(later) == user.pk
+
+
+def test_a_refused_address_change_does_not_save_its_session() -> None:
+    case = WRITES["add-address"]
+    _user, client, _other = arranged(case)
+    token = token_of(client)
+
+    with CaptureQueriesContext(connection) as queries:
+        response = api(client, token, "post", "account/email", {"email": "not-an-address"})
+
+    assert response.status_code == 400
+    assert not [
+        query
+        for query in queries.captured_queries
+        if query["sql"].startswith('UPDATE "django_session"')
+    ]

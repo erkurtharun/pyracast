@@ -294,13 +294,7 @@ class Endpoint:
     provider: bool = False
     mfa: bool = False
 
-    def route(self, provider: str) -> str:
-        return (
-            self.path.format(provider=provider) if self.path.startswith("/") else AUTH + self.path
-        )
 
-
-CALLBACK_ROUTE = "/api/accounts/{provider}/login/callback/"
 ENDPOINTS = {
     "signup": Endpoint("POST", "auth/signup", True),
     "login": Endpoint("POST", "auth/login", True),
@@ -319,8 +313,8 @@ ENDPOINTS = {
     "recovery-codes": Endpoint("POST", "account/authenticators/recovery-codes", False, mfa=True),
     "disconnect": Endpoint("DELETE", "account/providers", False, provider=True),
     "provider-signup": Endpoint("POST", "auth/provider/signup", True, provider=True),
-    "provider-login": Endpoint("GET", CALLBACK_ROUTE, True, provider=True),
-    "provider-connect": Endpoint("GET", CALLBACK_ROUTE, False, provider=True),
+    "provider-login": Endpoint("POST", "auth/provider/complete", True, provider=True),
+    "provider-connect": Endpoint("POST", "auth/provider/complete", False, provider=True),
 }
 GATED = {
     "signup": SIGNED,
@@ -749,29 +743,32 @@ EXPECTED: tuple[Expect, ...] = (
     expect(
         "provider-signup", Mail(EXISTS, "target", "inactive", 401), targets={"inactive-account"}
     ),
-    expect("provider-login", NoMail(302, "a signed-in session is refused"), states=SIGNED),
+    expect("provider-login", NoMail(403, "a signed-in session is refused"), states=SIGNED),
     expect(
         "provider-login",
-        Mail(SIGNUP_CODE, "target", "member", 302),
+        Mail(SIGNUP_CODE, "target", "member", 401),
         targets={"own-primary"},
         shapes={"unverified-new"},
     ),
     expect(
         "provider-login",
-        Mail(CHANGE_CODE, "target", "member", 302),
+        Mail(CHANGE_CODE, "target", "member", 401),
         targets={"own-primary"},
         shapes={"unverified-returning"},
     ),
     expect(
         "provider-login",
-        NoMail(302, "signs in, asks for the sign-up form or refuses an inactive account"),
+        NoMail(401, "asks for the sign-up form or refuses an inactive account"),
+        targets={"unknown", "inactive-account"},
     ),
+    expect("provider-login", NoMail(401, "refuses an inactive account"), shapes={"inactive"}),
+    expect("provider-login", NoMail(200, "signs in")),
     expect(
         "provider-connect",
         NoMail(302, "connecting needs a reauthenticated session"),
         states=GATED["provider-connect"],
     ),
-    expect("provider-connect", Mail(CONNECTED, "primary", "member", 302)),
+    expect("provider-connect", Mail(CONNECTED, "primary", "member", 200)),
 )
 
 

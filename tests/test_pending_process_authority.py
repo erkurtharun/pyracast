@@ -988,7 +988,7 @@ def test_an_address_replacement_started_while_an_address_change_starts_waits_and
     assert waited
 
 
-def test_a_provider_sign_in_whose_identity_is_connected_after_the_callback_looked_is_refused(
+def test_a_provider_sign_in_whose_identity_is_connected_after_its_lookup_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     serve_provider_profile(monkeypatch)
@@ -1005,7 +1005,7 @@ def test_a_provider_sign_in_whose_identity_is_connected_after_the_callback_looke
     response = complete(client, state)
 
     assert committed_first(changes)
-    assert "error=permission_denied" in response["Location"]
+    assert response.status_code == 403
     assert session_user(client) is None
 
 
