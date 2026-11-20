@@ -1,13 +1,36 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { useFormatter, useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import type { Tenant } from "@/lib/api";
 import { api, buildUrl } from "@/lib/api/client";
+import { DisplayError } from "@/lib/api/errors";
 import { cadence, useApiQuery, useRefresh } from "@/lib/api/query";
+import { MISSING } from "@/lib/format/number";
+import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
-import { ActionForm, Notice, RefreshFailed, Tag } from "@/ui/ui";
+import { ActionForm, TextAreaField, useErrorMessage } from "@/ui/form";
+import { Notice, RefreshFailed } from "@/ui/ui";
+import { StatusTag, useLabel } from "@/ui/vocabulary";
+
+const SHORT_TIME: Intl.DateTimeFormatOptions = {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+};
+const ZONED_TIME: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "shortOffset",
+};
 
 type ChangeRequest = components["schemas"]["ChangeRequestOutput"];
+type IncidentKind = components["schemas"]["IncidentKindEnum"];
+// The serializer types the stored choice as a string; the column holds only these values.
+type ObservationQuality = components["schemas"]["ObservationQualityEnum"];
 type Summary = components["schemas"]["ChangeRequestSummaryOutput"];
 type Scope = "pending" | "history" | "mine";
 type Reading = components["schemas"]["ProductionValueOutput"];
@@ -153,6 +176,7 @@ function InboxPage({
     onPage: (page: number) => void;
 }) {
     const t = useTranslations("ChangeRequests");
+    const label = useLabel();
     const path = { tenant_id: tenantId };
     const base = buildUrl("/api/tenants/{tenant_id}/change-requests/", {
         path,
@@ -190,27 +214,12 @@ function InboxPage({
                         <div className="section-heading">
                             <div>
                                 <p className="eyebrow">{item.plant_name}</p>
-                                <h2>
-                                    {t(
-                                        item.kind === "production"
-                                            ? "production"
-                                            : "incident",
-                                    )}
-                                </h2>
+                                <h2>{label("ChangeRequestKind", item.kind)}</h2>
                             </div>
-                            <Tag
-                                tone={
-                                    item.status === "approved"
-                                        ? "success"
-                                        : item.status === "rejected"
-                                          ? "danger"
-                                          : item.status === "pending"
-                                            ? "warning"
-                                            : "neutral"
-                                }
-                            >
-                                <>{t(item.status)}</>
-                            </Tag>
+                            <StatusTag
+                                group="ChangeRequestStatus"
+                                value={item.status}
+                            />
                         </div>
                         {item.unread && (
                             <p className="inbox-unread">{t("unread")}</p>
@@ -272,24 +281,19 @@ function InboxPage({
 
 function Triage({ item }: { item: Summary }) {
     const t = useTranslations("ChangeRequests");
-    const locale = useLocale();
-    const time = new Intl.DateTimeFormat(locale, {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: item.timezone,
-    });
+    const format = useFormat();
+    const time = (value: string) =>
+        format.time(value, item.timezone, SHORT_TIME);
     return (
         <>
             <p>
                 <time dateTime={item.period_start}>
-                    {time.format(new Date(item.period_start))}
+                    {time(item.period_start)}
                 </time>{" "}
                 –{" "}
                 {item.period_end ? (
                     <time dateTime={item.period_end}>
-                        {time.format(new Date(item.period_end))}
+                        {time(item.period_end)}
                     </time>
                 ) : (
                     t("ongoing")
@@ -308,19 +312,10 @@ function Triage({ item }: { item: Summary }) {
 
 function SubmissionTime({ value }: { value: string }) {
     const t = useTranslations("ChangeRequests");
-    const format = useFormatter();
+    const format = useFormat();
     return (
         <p className="fine">
-            {t("submittedAt", {
-                time: format.dateTime(new Date(value), {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    timeZoneName: "short",
-                }),
-            })}
+            {t("submittedAt", { time: format.deviceTime(value) })}
         </p>
     );
 }
@@ -335,6 +330,7 @@ function RequestDetail({
     onChanged: (action: Decision) => void;
 }) {
     const t = useTranslations("ChangeRequests");
+    const errorMessage = useErrorMessage();
     const path = { tenant_id: tenantId, request_id: id };
     const resource = useApiQuery(
         "/api/tenants/{tenant_id}/change-requests/{request_id}/",
@@ -361,7 +357,7 @@ function RequestDetail({
             onChanged(action);
         } catch (error) {
             if (action === "approve") setBlockedContext(item ?? null);
-            setState({ status: "error", message: (error as Error).message });
+            setState({ status: "error", message: errorMessage(error) });
             throw error;
         }
     }
@@ -469,7 +465,9 @@ function RequestDetail({
                                         data.get("reason") ?? "",
                                     ).trim();
                                     if (!reason)
-                                        throw new Error(t("rejectReason"));
+                                        throw new DisplayError(
+                                            t("rejectReason"),
+                                        );
                                     await act("reject", () =>
                                         api.post(
                                             "/api/tenants/{tenant_id}/change-requests/{request_id}/reject/",
@@ -478,14 +476,12 @@ function RequestDetail({
                                     );
                                 }}
                             >
-                                <label className="field">
-                                    {t("rejectReason")}
-                                    <textarea
-                                        required
-                                        name="reason"
-                                        maxLength={500}
-                                    />
-                                </label>
+                                <TextAreaField
+                                    label={t("rejectReason")}
+                                    name="reason"
+                                    maxLength={500}
+                                    required
+                                />
                             </ActionForm>
                         </div>
                     )}
@@ -540,36 +536,18 @@ function ProductionProposal({
     closed: boolean;
 }) {
     const t = useTranslations("ChangeRequests");
-    const format = useFormatter();
-    const locale = useLocale();
-    const evidenceTime = new Intl.DateTimeFormat(locale, {
-        timeZone: timezone,
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZoneName: "shortOffset",
-    });
+    const format = useFormat();
+    const evidenceTime = (value: string) =>
+        format.time(value, timezone, ZONED_TIME);
     return (
         <section className="proposal-comparison">
             <h4>
-                {new Intl.DateTimeFormat(locale, {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
+                {evidenceTime(row.starts_at)} –{" "}
+                {format.time(row.ends_at, timezone, {
                     hour: "2-digit",
                     minute: "2-digit",
-                    timeZone: timezone,
                     timeZoneName: "shortOffset",
-                }).format(new Date(row.starts_at))}{" "}
-                –{" "}
-                {new Intl.DateTimeFormat(locale, {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    timeZone: timezone,
-                    timeZoneName: "shortOffset",
-                }).format(new Date(row.ends_at))}
+                })}
             </h4>
             {row.action === "revert" && <p>{t("revert")}</p>}
             <div className="proposal-values">
@@ -586,7 +564,7 @@ function ProductionProposal({
                 {t("atSubmission")}:{" "}
                 {row.baseline_energy_mwh === null
                     ? t("noReading")
-                    : `${format.number(row.baseline_energy_mwh, { maximumFractionDigits: 6 })} MWh`}
+                    : format.quantity(row.baseline_energy_mwh, "MWh", 6)}
             </p>
             {(row.baseline_energy_mwh !== (row.current?.energy_mwh ?? null) ||
                 row.baseline_source_kind !==
@@ -596,8 +574,8 @@ function ProductionProposal({
             {(row.warnings ?? []).map((warning) => (
                 <Notice key={`${warning.code}:${warning.starts_at}`}>
                     {t("providerHourIncomplete", {
-                        start: evidenceTime.format(new Date(warning.starts_at)),
-                        end: evidenceTime.format(new Date(warning.ends_at)),
+                        start: evidenceTime(warning.starts_at),
+                        end: evidenceTime(warning.ends_at),
                     })}
                 </Notice>
             ))}
@@ -609,18 +587,9 @@ function ProductionProposal({
                             <li
                                 key={`${interval.starts_at}:${interval.ends_at}`}
                             >
-                                {evidenceTime.format(
-                                    new Date(interval.starts_at),
-                                )}{" "}
-                                –{" "}
-                                {evidenceTime.format(
-                                    new Date(interval.ends_at),
-                                )}
-                                :{" "}
-                                {format.number(interval.energy_mwh, {
-                                    maximumFractionDigits: 6,
-                                })}{" "}
-                                MWh
+                                {evidenceTime(interval.starts_at)} –{" "}
+                                {evidenceTime(interval.ends_at)}:{" "}
+                                {format.quantity(interval.energy_mwh, "MWh", 6)}
                             </li>
                         ))}
                     </ul>
@@ -632,20 +601,19 @@ function ProductionProposal({
 
 function ReadingValue({ value }: { value: Reading | null }) {
     const t = useTranslations("ChangeRequests");
-    const format = useFormatter();
-    const label = (value: string) =>
-        t.has(value as Parameters<typeof t>[0])
-            ? t(value as Parameters<typeof t>[0])
-            : value;
+    const format = useFormat();
+    const label = useLabel();
     return value ? (
         <>
             <p className="proposal-energy">
-                {format.number(value.energy_mwh, { maximumFractionDigits: 6 })}{" "}
-                MWh
+                {format.quantity(value.energy_mwh, "MWh", 6)}
             </p>
             <p>
-                {label(value.quality)} ·{" "}
-                {value.source_kind === "manual" ? t("manual") : t("provider")}
+                {label(
+                    "ObservationQuality",
+                    value.quality as ObservationQuality,
+                )}{" "}
+                · {value.source_kind === "manual" ? t("manual") : t("provider")}
             </p>
         </>
     ) : (
@@ -663,8 +631,8 @@ function IncidentProposal({
     timezone: string;
 }) {
     const t = useTranslations("ChangeRequests");
-    const format = useFormatter();
-    const locale = useLocale();
+    const format = useFormat();
+    const label = useLabel();
     const before = incident.before;
     const proposed =
         incident.action === "create" || incident.action === "update"
@@ -686,21 +654,12 @@ function IncidentProposal({
     ) => {
         if (value === null || value === undefined)
             return name === "ends_at" ? t("ongoing") : t("unknown");
-        if (typeof value === "number")
-            return format.number(value, { maximumFractionDigits: 6 });
+        if (typeof value === "number") return format.number(value, 6);
         if (name === "starts_at" || name === "ends_at")
-            return new Intl.DateTimeFormat(locale, {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-                timeZone: timezone,
-                timeZoneName: "shortOffset",
-            }).format(new Date(value));
-        return name === "kind" && t.has(value as Parameters<typeof t>[0])
-            ? t(value as Parameters<typeof t>[0])
-            : value || "—";
+            return format.time(value, timezone, ZONED_TIME);
+        if (name === "kind")
+            return label("IncidentKind", value as IncidentKind);
+        return value || MISSING;
     };
     return (
         <section className="proposal-comparison">
