@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from pyracast.connections.contracts import ProviderError
 from pyracast.forecasts.validation import validate_binding
+from pyracast.plants.approval import ReviewDecision, decide_review
 from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
@@ -215,3 +216,23 @@ def test_a_double_location_approval_reports_the_approval_once() -> None:
     assert notices(client, url, seen) == (302, [LOCATION_APPROVED])
     assert notices(client, url, seen) == (302, [LOCATION_ALREADY_APPROVED])
     assert AuditEvent.objects.filter(action=AuditAction.LOCATION_CHANGE_APPROVED).count() == 1
+
+
+def test_a_location_decision_is_refused_after_the_review_status_changed() -> None:
+    system = admin_system()
+    change = request_location_change(
+        system.member,
+        system.region.pk,
+        system.tenant.pk,
+        expected_revision=system.region.revision,
+        latitude=41,
+        longitude=30,
+        timezone="UTC",
+    )
+    client, _ = verified_admin()
+    seen = {**review_decision(system.region, "reject_location"), "location_change_id": change.pk}
+    decide_review(system.admin, system.region.pk, ReviewDecision.REJECT)
+
+    assert notices(client, decision_url(system.region), seen) == (302, [STATUS_CHANGED])
+    change.refresh_from_db()
+    assert change.status == "pending"
