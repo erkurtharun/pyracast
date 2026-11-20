@@ -114,7 +114,7 @@ test("a customer manages one plant site through the real API", async ({
     await page.getByText("View interval data (12 intervals)").click();
     await expect(
         page
-            .getByRole("table", { name: "Forecast intervals, Europe/Istanbul" })
+            .getByRole("table", { name: "Forecast intervals" })
             .getByRole("columnheader"),
     ).toHaveText(["Time interval", "Energy (MWh)"]);
     await page.getByText("View interval data (12 intervals)").click();
