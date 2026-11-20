@@ -9,6 +9,7 @@ const day = (index: number) =>
 test("available historical model days appear without empty grid rows", async ({
     page,
 }) => {
+    await page.clock.setFixedTime(new Date("2026-11-11T12:00:00Z"));
     await page.setViewportSize({ width: 320, height: 844 });
     await mockApi(page);
     let query = "";
@@ -67,6 +68,7 @@ test("available historical model days appear without empty grid rows", async ({
     await expect.poll(() => query).toContain("comparison=archived_forecast");
     await comparison.getByRole("button", { name: "Model check" }).click();
     await expect.poll(() => query).toContain("comparison=historical_model");
+    expect(query).toContain("start_date=2026-10-12&end_date=2026-11-10");
     await expect(comparison.getByText("Advanced", { exact: true })).toHaveCount(
         0,
     );
