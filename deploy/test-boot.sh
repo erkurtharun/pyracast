@@ -184,9 +184,10 @@ installed_host
 render "$host_json"
 mkdir -p /etc/pyracast /etc/docker /etc/systemd/system/docker.service.d /usr/local/sbin /var/lib/pyracast
 printf '%s' "$host_json" >/etc/pyracast/host.json
-template_file /etc/docker/daemon.json >/etc/docker/daemon.json
-template_file /etc/systemd/system/docker.service.d/pyracast-data.conf \
-  >/etc/systemd/system/docker.service.d/pyracast-data.conf
+daemon_json=$(template_file /etc/docker/daemon.json)
+data_conf=$(template_file /etc/systemd/system/docker.service.d/pyracast-data.conf)
+printf '%s\n' "$daemon_json" >/etc/docker/daemon.json
+printf '%s\n' "$data_conf" >/etc/systemd/system/docker.service.d/pyracast-data.conf
 printf '#!/bin/bash\necho network-guard >>/calls\n' >/usr/local/sbin/pyracast-network-guard
 printf '[Unit]\nDescription=Pyracast application containers\n' >/etc/systemd/system/pyracast.service
 echo 'UUID=1111-2222 /var/lib/pyracast ext4 defaults,nodev,nosuid 0 2' >>/etc/fstab
