@@ -251,7 +251,7 @@ def process_notification(
     trashed = Q(last_error=NotificationDeliveryError.DEFINITION_TRASHED)
     stored_status: Case | NotificationDeliveryStatus = status
     stored_error: Case | str = error_code
-    if status == NotificationDeliveryStatus.RETRY:
+    if status in (NotificationDeliveryStatus.RETRY, NotificationDeliveryStatus.FAILED):
         # Decided on the row version this update locks, so a trash committed meanwhile wins.
         stored_status = Case(
             When(trashed, then=Value(NotificationDeliveryStatus.CANCELLED)), default=Value(status)

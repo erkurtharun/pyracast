@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from pyracast import trash
 from pyracast.accounts.models import Membership
-from pyracast.mail.errors import NotSentError
+from pyracast.mail.errors import NotSentError, PermanentlyNotSentError
 from pyracast.notifications import jobs
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import NotificationDelivery
@@ -207,19 +207,28 @@ def test_a_delivery_trashed_before_its_transmission_marker_is_cancelled_not_unce
 
 @pytest.mark.parametrize(
     ("outcome", "status", "error"),
-    [("accepted", "sent", ""), ("not_sent", "cancelled", "definition_trashed")],
+    [
+        ("accepted", "sent", ""),
+        ("not_sent", "cancelled", "definition_trashed"),
+        ("last_not_sent", "cancelled", "definition_trashed"),
+        ("rejected", "cancelled", "definition_trashed"),
+    ],
 )
 def test_a_delivery_trashed_while_transmitting_waits_for_its_late_outcome(
     outcome: str, status: str, error: str
 ) -> None:
     delivery = ready()
+    if outcome == "last_not_sent":
+        NotificationDelivery.objects.filter(pk=delivery.pk).update(attempts=7)
     seen: list[tuple[str, str, bool]] = []
 
     def trash_while_sending(message: EmailMultiAlternatives) -> None:
         _trash_location(delivery)
         row = NotificationDelivery.objects.get(pk=delivery.pk)
         seen.append((row.status, row.last_error, row.lease_token is not None))
-        if outcome == "not_sent":
+        if outcome == "rejected":
+            raise PermanentlyNotSentError("recipient refused")
+        if outcome in {"not_sent", "last_not_sent"}:
             raise NotSentError("connection refused before DATA")
 
     process_notification(delivery.pk, SLOT, sender=trash_while_sending)

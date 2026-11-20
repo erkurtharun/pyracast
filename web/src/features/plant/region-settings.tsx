@@ -75,6 +75,7 @@ function LocationRequests({
                             />
                         ) : (
                             <ActionForm
+                                key={region.revision}
                                 submit={t("submitLocationRequest")}
                                 onSubmit={async (data) => {
                                     await api.post(

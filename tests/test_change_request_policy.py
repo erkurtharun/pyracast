@@ -11,7 +11,10 @@ from django.test import Client
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Membership
 from pyracast.accounts.operations import remove_workspace_member
+from pyracast.change_requests import queries
 from pyracast.change_requests.models import ChangeRequest
+from pyracast.change_requests.operations import reject_request
+from pyracast.change_requests.preparation import production_context
 from pyracast.change_requests.serializers import (
     ChangeRequestOutput,
     ChangeRequestSummaryOutput,
@@ -138,6 +141,22 @@ def test_only_a_reviewer_receives_the_review_fingerprint(monkeypatch: pytest.Mon
 
     assert own["review_fingerprint"] is None
     assert reviewed["review_fingerprint"].startswith("v1:")
+
+
+def test_the_detail_describes_one_read_of_the_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    case = make_request_case(monkeypatch)
+    proposal = production_request(case)
+
+    def closed_meanwhile(request: ChangeRequest) -> list[dict[str, Any]]:
+        reject_request(case.system.member, case.system.tenant.pk, proposal.pk, reason="Late")
+        return production_context(request)
+
+    monkeypatch.setattr(queries, "production_context", closed_meanwhile)
+
+    detail = client_for(case.system.member).get(case.detail_path(proposal)).json()
+
+    assert (detail["status"], detail["decision_reason"]) == ("pending", "")
+    assert detail["review_fingerprint"].startswith("v1:")
 
 
 def test_a_day_of_intervals_is_one_request_inside_the_pending_quota(

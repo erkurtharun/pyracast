@@ -227,6 +227,40 @@ test("withdraws a pending location request and offers the form again", async ({
     ).toBeVisible();
 });
 
+test("a direct move of a never-approved plant refills the form with the stored location", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let current = region;
+    let rows: object[] = [];
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.fulfill({ json: paged([{ ...current, plant }]) }),
+    );
+    await page.route("**/location-change-requests/", async (route) => {
+        if (route.request().method() !== "POST")
+            return route.fulfill({ json: paged(rows) });
+        const moved = {
+            ...pendingRequest,
+            latitude: 37.123457,
+            reason: "",
+            status: "approved",
+            reviewed_at: "2026-01-02T00:00:00Z",
+        };
+        current = { ...region, latitude: 37.123457, revision: 2 };
+        rows = [moved];
+        await route.fulfill({ status: 201, json: moved });
+    });
+    await openLocationSettings(page);
+    await page.getByLabel("Latitude (°)").fill("37.1234567");
+    await page.getByLabel("Reason (optional)").fill("Survey");
+    await page.getByRole("button", { name: "Submit location request" }).click();
+    await expect(
+        page.getByText("Location change approved on Jan 2, 2026."),
+    ).toBeVisible();
+    await expect(page.getByLabel("Latitude (°)")).toHaveValue("37.123457");
+    await expect(page.getByLabel("Reason (optional)")).toHaveValue("");
+});
+
 test("shows the operator's decision and note on the latest request", async ({
     page,
 }) => {

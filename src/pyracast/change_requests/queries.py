@@ -23,6 +23,7 @@ from pyracast.change_requests.policy import (
     inbox_requests,
     is_unread,
     request_for,
+    visible_requests,
 )
 from pyracast.change_requests.preparation import (
     digest,
@@ -129,10 +130,15 @@ def _summary(row: Any, membership: Membership, *, former: bool) -> dict[str, Any
     }
 
 
-def _summary_of(membership: Membership, request_id: int) -> dict[str, Any]:
-    row = _with_triage(ChangeRequest.objects.filter(pk=request_id)).get()
+def _single_summary(row: Any, membership: Membership) -> dict[str, Any]:
     former = former_proposers(membership.tenant_id, [row])
     return _summary(row, membership, former=row.pk in former)
+
+
+def _summary_of(membership: Membership, request_id: int) -> dict[str, Any]:
+    return _single_summary(
+        _with_triage(ChangeRequest.objects.filter(pk=request_id)).get(), membership
+    )
 
 
 @transaction.atomic
@@ -140,7 +146,7 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
     membership = tenant_membership(actor, tenant_id)
     request = request_for(membership, request_id)
     plant = lock_incident_plant(tenant_id, request.plant.region_id, request.plant_id, lock=False)
-    request = request_for(membership, request_id)
+    request = _with_triage(visible_requests(membership)).get(pk=request_id)
     items = production_context(request) if request.kind == ChangeRequestKind.PRODUCTION else []
     conflict = None
     if request.status == ChangeRequestStatus.PENDING:
@@ -182,7 +188,7 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
             "applied_revision_id": change.applied_revision_id,
         }
     return {
-        **_summary_of(membership, request.pk),
+        **_single_summary(request, membership),
         "conflict": conflict,
         "review_fingerprint": fingerprint,
         "production_items": items,
