@@ -15,7 +15,7 @@ export default async function AppLayout({
 }: Readonly<{ children: React.ReactNode }>) {
     await connection();
     return (
-        <NextIntlClientProvider>
+        <NextIntlClientProvider messages={null}>
             <title>Pyracast workspace | Pyracast</title>
             <Suspense>
                 <AppRoot>{children}</AppRoot>
