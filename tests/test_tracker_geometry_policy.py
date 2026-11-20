@@ -174,7 +174,7 @@ def test_an_outage_scenario_replays_the_version_recorded_in_its_forecast(
             "calibration_id": first.pk,
             "result": forecast_payload(configuration, snapshot, first, DAY, 60),
         }
-        return cast(dict[str, Any], incident_scenario(outlook, DAY, 60, NOW))
+        return cast(dict[str, Any], incident_scenario(outlook, DAY, 60, NOW).scenario)
 
     under_v1 = scenario()
     _default(monkeypatch, MODEL_V2)
