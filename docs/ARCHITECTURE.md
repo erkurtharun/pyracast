@@ -530,7 +530,8 @@ no session cookie. API
 responses are private and non-cacheable. The frontend reads stored results and
 never handles provider credentials. A fixed public HTTPS origin determines
 security-email navigation. Account and invitation mail is stored as an outbound mail
-intent in the request's transaction and sent by the notification worker, so no answer
+intent in the transaction of its request (or of `reset_mfa`, for its notice) and sent by
+the notification worker, so no answer
 waits for or reveals delivery; a code is kept only sealed with the application key and
 erased when the intent ends, and unknown-account and account-exists notices share 20 a
 hour. Every mail is transmitted at most once: an intent interrupted before its transmit

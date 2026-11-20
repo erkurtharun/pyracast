@@ -241,6 +241,7 @@ class OutboundMailKind(models.TextChoices):
     EMAIL_DELETED = "account/email/email_deleted", "Email address removed"
     TOTP_ACTIVATED = "mfa/email/totp_activated", "Two-factor authentication on"
     TOTP_DEACTIVATED = "mfa/email/totp_deactivated", "Two-factor authentication off"
+    SECOND_FACTOR_RESET = "account/email/second_factor_reset", "Second factor reset"
     RECOVERY_CODES_GENERATED = "mfa/email/recovery_codes_generated", "Recovery codes generated"
     ACCOUNT_CONNECTED = "socialaccount/email/account_connected", "Sign-in provider connected"
     ACCOUNT_DISCONNECTED = (

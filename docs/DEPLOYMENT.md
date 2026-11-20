@@ -424,7 +424,8 @@ put it in logs or tickets. For an existing administrator the address must be ver
 that account or be its only, primary address, so that it can sign in with it; otherwise the
 command stores nothing. A lost or compromised authenticator is removed with
 `pyracast reset_mfa --email ADDRESS --reason lost_device|compromised`, which ends the
-account's sessions, mails the account and writes an audit line; an administrator then
+account's sessions, queues a notice that the notification worker mails to the account and
+writes an audit line; an administrator then
 runs `bootstrap_admin` again. Both commands take `--dry-run`.
 Run `pyracast check_mail --send-to YOUR_ADDRESS` in the `api` container to send one
 reminder-shaped test mail; without `--send-to` it only opens the transport, as the

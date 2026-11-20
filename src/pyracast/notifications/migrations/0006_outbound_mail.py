@@ -41,6 +41,7 @@ class Migration(migrations.Migration):
                             ("account/email/email_deleted", "Email address removed"),
                             ("mfa/email/totp_activated", "Two-factor authentication on"),
                             ("mfa/email/totp_deactivated", "Two-factor authentication off"),
+                            ("account/email/second_factor_reset", "Second factor reset"),
                             ("mfa/email/recovery_codes_generated", "Recovery codes generated"),
                             ("socialaccount/email/account_connected", "Sign-in provider connected"),
                             (
@@ -151,6 +152,7 @@ class Migration(migrations.Migration):
                             "account/email/email_deleted",
                             "mfa/email/totp_activated",
                             "mfa/email/totp_deactivated",
+                            "account/email/second_factor_reset",
                             "mfa/email/recovery_codes_generated",
                             "socialaccount/email/account_connected",
                             "socialaccount/email/account_disconnected",
