@@ -1,0 +1,9 @@
+{% load i18n %}{% autoescape off %}Pyracast
+
+{{ sentence }}
+{% if reason %}
+{% translate "Reason" %}: {{ reason }}
+{% endif %}
+{{ action_label }}: {{ action_url }}
+
+{{ footer }}{% endautoescape %}

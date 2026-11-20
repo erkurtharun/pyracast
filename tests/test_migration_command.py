@@ -99,6 +99,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0005_schema_naming_convention",
             "0006_outbound_mail",
             "0007_reminder_recipient_rows",
+            "0008_review_and_role_mail",
         ),
         "plants": (
             "0002_plant_event_action_and_calibration_error_checks",

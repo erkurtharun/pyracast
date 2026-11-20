@@ -8,9 +8,11 @@ from zoneinfo import ZoneInfo
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.authorization import authorize_workspace_admin, require_platform_admin
+from pyracast.accounts.event_mail import enqueue_review_mail
 from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.forecasts.models import CollectionJob
@@ -149,13 +151,14 @@ def approve_region(
             raise ConflictError(ErrorCode.CONFLICT, DECLARATION_CHANGED)
         set_review_status(region, RegionStatus.APPROVED, binding=binding)
         activate_submitted_plants(actor, region, binding)
-        record_audit(
+        event = record_audit(
             actor=actor,
             region=region,
             action=AuditAction.REGION_APPROVED,
             revision=region.revision,
             details={"binding_id": binding.pk},
         )
+        enqueue_review_mail(region.tenant_id, event.pk, RegionStatus.APPROVED, now)
         job, _ = CollectionJob.objects.get_or_create(
             binding=binding,
             endpoint="forecasts",
@@ -200,13 +203,14 @@ def decide_review(
             return False
         _require_seen(region, seen)
         set_review_status(region, target)
-        record_audit(
+        event = record_audit(
             actor=actor,
             region=region,
             action=action,
             revision=region.revision,
             details={"reason": reason},
         )
+        enqueue_review_mail(region.tenant_id, event.pk, target, timezone.now())
     return True
 
 

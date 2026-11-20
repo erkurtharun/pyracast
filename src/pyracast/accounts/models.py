@@ -16,6 +16,7 @@ MAIL_CONTEXT_KEYS = (
     "timestamp",
     "ip",
     "user_agent",
+    "subject_id",
 )
 CONTEXT_ITEMS = (
     'strict $.keyvalue() ? (@.value.type() != "string"'
@@ -241,8 +242,22 @@ class OutboundMailKind(models.TextChoices):
     UNKNOWN_ACCOUNT = "account/email/unknown_account", "Account not found"
     ACCOUNT_ALREADY_EXISTS = "account/email/account_already_exists", "Account already exists"
     LOGIN_LOCKED = "account/email/login_locked", "Password sign-in paused"
+    PLANT_APPROVED = "plant_approved", "Plant approved"
+    PLANT_REJECTED = "plant_rejected", "Plant rejected"
+    PLANT_SUSPENDED = "plant_suspended", "Plant suspended"
+    WORKSPACE_ADMIN_ASSIGNED = "workspace_admin_assigned", "Administrator role received"
+    WORKSPACE_ADMIN_RELEASED = "workspace_admin_released", "Administrator role moved away"
 
 
+# Mail about a workspace event: its context names only the row it reports (`subject_id`), and
+# the mailer renders it from that row while the recipient is still an active member.
+EVENT_MAIL = (
+    OutboundMailKind.PLANT_APPROVED,
+    OutboundMailKind.PLANT_REJECTED,
+    OutboundMailKind.PLANT_SUSPENDED,
+    OutboundMailKind.WORKSPACE_ADMIN_ASSIGNED,
+    OutboundMailKind.WORKSPACE_ADMIN_RELEASED,
+)
 CODED_MAIL = (
     OutboundMailKind.EMAIL_CONFIRMATION_SIGNUP,
     OutboundMailKind.EMAIL_CONFIRMATION,
@@ -271,6 +286,8 @@ class OutboundMailError(models.TextChoices):
     BUDGET_EXHAUSTED = "budget_exhausted", "Hourly budget exhausted"
     INVITATION_UNAVAILABLE = "invitation_unavailable", "Invitation closed"
     NO_ACCOUNT = "no_account", "No account"
+    SUBJECT_UNAVAILABLE = "subject_unavailable", "Reported item no longer available"
+    RECIPIENT_UNAVAILABLE = "recipient_unavailable", "Recipient no longer a member"
     INTERRUPTED_SEND = "interrupted_send", "Interrupted during sending"
     INTERRUPTED_CONNECTION = "interrupted_connection", "Interrupted before sending"
     MAIL_NOT_SENT = MailFailure.NOT_SENT, "Mail not sent"

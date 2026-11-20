@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authorization import authorize_workspace_admin, require_platform_admin
+from pyracast.accounts.event_mail import enqueue_role_mail
 from pyracast.accounts.models import (
     InvitationRevocation,
     Membership,
@@ -108,12 +109,13 @@ def reassign_workspace_admin(
     WorkspaceInvitation.objects.filter(
         Q(expires_at__gt=now) | Q(role=WorkspaceRole.ADMIN), tenant_id=tenant_id
     ).revoke(now, InvitationRevocation.ADMINISTRATOR_CHANGED)
-    WorkspaceAdminChange.objects.create(
+    change = WorkspaceAdminChange.objects.create(
         tenant_id=tenant_id,
         actor=actor,
         administrator_id=user_id,
         previous_administrator_id=current_admin_id,
     )
+    enqueue_role_mail(change, now)
     record_security_event(
         SecurityEvent.WORKSPACE_ADMIN_REASSIGNED,
         user_id=actor.pk,
