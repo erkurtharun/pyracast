@@ -1407,6 +1407,23 @@ def test_an_address_change_whose_session_cannot_be_saved_sends_no_code(
     assert session_user(client) == user.pk
 
 
+def test_a_reauthentication_code_whose_session_cannot_be_saved_is_not_queued() -> None:
+    user, _secret = holder("code")
+    client = signed_in(user)
+    token = token_of(client)
+    client.raise_request_exception = False
+
+    with session_row_held(session_key(client)):
+        response = api(
+            client, token, "post", "auth/reauthenticate/code/request", {"email": user.email}
+        )
+
+    assert list(OutboundMail.objects.values_list("kind", flat=True)) == []
+    assert mailed_to() == []
+    assert (response.status_code, response.json()["code"]) == (503, "busy")
+    assert session_user(client) == user.pk
+
+
 @pytest.mark.parametrize("write", ["add-authenticator", "regenerate-recovery-codes"])
 def test_a_factor_write_whose_notice_cannot_be_stored_stores_nothing(
     write: str, now: float, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
