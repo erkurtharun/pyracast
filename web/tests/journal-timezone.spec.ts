@@ -63,6 +63,7 @@ for (const role of ["admin", "viewer"] as const) {
             const index = writes.length;
             expect(body).toEqual({
                 configuration_id: 31,
+                confirm_implausible: false,
                 unit: "MWh",
                 changes: [
                     {
