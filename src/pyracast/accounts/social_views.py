@@ -269,8 +269,6 @@ class ProviderCallbackView(OAuth2CallbackView):
                 request, app, client, pkce_code_verifier=state.get("pkce_code_verifier")
             )
             token = adapter.parse_token(access_token)
-            if app.pk:
-                token.app = app
             login = adapter.complete_login(request, app, token, response=access_token)
             login.token = token
             login.state = state

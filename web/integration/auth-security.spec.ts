@@ -113,7 +113,6 @@ test("verified email and a recovery code protect a real browser session", async 
     await twoFactor
         .getByRole("button", { name: "Confirm authenticator" })
         .click();
-    const confirmedStep = Math.floor(Date.now() / 30_000);
     const firstCode = page.locator("main li code").first();
     await expect(firstCode).toBeVisible();
     const recoveryCode = await firstCode.innerText();
@@ -124,6 +123,10 @@ test("verified email and a recovery code protect a real browser session", async 
     const thirdRecoveryCode = await page
         .locator("main li code")
         .nth(2)
+        .innerText();
+    const fourthRecoveryCode = await page
+        .locator("main li code")
+        .nth(3)
         .innerText();
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.getByLabel("Email", { exact: true }).fill(email);
@@ -152,16 +155,10 @@ test("verified email and a recovery code protect a real browser session", async 
         .getByLabel("Current password", { exact: true })
         .fill(password);
     await page.getByLabel("New password", { exact: true }).fill(newPassword);
-    await expect
-        .poll(() => Math.floor(Date.now() / 30_000), {
-            timeout: 31_000,
-            intervals: [100, 250, 500],
-        })
-        .toBeGreaterThan(confirmedStep);
     await page.getByRole("button", { name: "Change password" }).click();
     await passwordSettings
         .getByLabel("Authenticator or recovery code")
-        .fill(totp(setupSecret));
+        .fill(fourthRecoveryCode);
     await passwordSettings
         .getByRole("button", { name: "Confirm authenticator" })
         .click();

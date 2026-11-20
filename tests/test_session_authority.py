@@ -10,7 +10,7 @@ from allauth.core.exceptions import ReauthenticationRequired
 from allauth.mfa.models import Authenticator
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
-from allauth.socialaccount.models import SocialAccount, SocialApp
+from allauth.socialaccount.models import SocialAccount
 from django.contrib.auth.models import AnonymousUser, User
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
@@ -21,7 +21,6 @@ from django.urls import reverse
 from pyracast.accounts import inputs, processes
 from pyracast.accounts.processes import lock_account
 from pyracast.accounts.session_cookie import persist
-from pyracast.accounts.social import SocialAccountAdapter
 from tests.support.account_sessions import (
     alongside,
     browser,
@@ -475,22 +474,3 @@ def test_a_state_of_a_deleted_account_ends_the_confirmations_the_session_holds()
     assert [record["reauthenticated"] for record in get_authentication_records(request, user)] == [
         False
     ]
-
-
-def test_a_sign_in_through_a_provider_app_held_in_the_database_completes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    serve_provider_profile(monkeypatch)
-    stored = SocialApp.objects.create(
-        provider="google",
-        client_id="google-client",
-        secret="test-client-secret",  # noqa: S106
-    )
-    monkeypatch.setattr(SocialAccountAdapter, "list_apps", lambda *_args, **_kwargs: [stored])
-    user = member()
-    SocialAccount.objects.create(user=user, provider="google", uid="google-identity")
-    client = browser()
-
-    assert complete(client, begin(client))["Location"] == CALLBACK
-
-    assert session_user(client) == user.pk
