@@ -40,6 +40,7 @@ from pyracast.accounts.processes import (
     require_authority,
 )
 from pyracast.accounts.security import Factor, strongest_factor
+from pyracast.accounts.session_cookie import persist
 from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor, require_recent_mfa
 from pyracast.db import violated_constraint
 
@@ -181,6 +182,9 @@ class ResendEmailVerificationCodeView(views.ResendEmailVerificationCodeView):
                 if (process := EmailVerificationProcess.resume(request)) is not None:
                     process.abort()
                 return ConflictResponse(request)
+            # The rotated code is saved before the commit, so the mail never names a code the
+            # session lost.
+            persist(request)
         return response
 
 
