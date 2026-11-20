@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 export function ViewNav<K extends string>({
     label,
@@ -64,6 +64,8 @@ export function ConfirmAction({
     onCancel: () => void;
     onConfirm: () => void;
 }) {
+    const cancelRef = useRef<HTMLButtonElement>(null);
+    useEffect(() => cancelRef.current?.focus(), []);
     return (
         <section className="notice" aria-label={label}>
             {children}
@@ -71,7 +73,7 @@ export function ConfirmAction({
                 <button
                     type="button"
                     className="button secondary"
-                    autoFocus
+                    ref={cancelRef}
                     disabled={pending}
                     onClick={onCancel}
                 >

@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { QUALITIES, qualityOf, type Quality } from "@/lib/production";
 import { ControlField } from "@/ui/form";
@@ -37,6 +38,8 @@ export function IntervalEditor({
             outage: t("outage"),
             curtailed: t("curtailed"),
         })[quality];
+    const energyRef = useRef<HTMLInputElement>(null);
+    useEffect(() => energyRef.current?.focus(), []);
     const blocked = saving || (canManage && editor.status === "failed");
     return (
         <form
@@ -49,7 +52,7 @@ export function IntervalEditor({
             <ControlField label={t("edit_energy", { interval })}>
                 <input
                     inputMode="decimal"
-                    autoFocus
+                    ref={energyRef}
                     value={editor.energy}
                     disabled={saving}
                     onChange={(event) =>
