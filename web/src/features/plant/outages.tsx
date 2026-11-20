@@ -234,23 +234,23 @@ export function Outages({
                 </section>
             )}
             <Resource resource={resource} loading={t("loadingOutages")}>
-                {(data) => (
+                {(list) => (
                     <>
                         <div className="toolbar">
                             <CsvDownload
                                 label={t("downloadOutagesCSV")}
                                 filename="plant-outages"
-                                records={data.results}
+                                records={list.results}
                                 metadata={{
                                     timezone: deviceTimezone,
                                     plant_timezone: timezone,
                                 }}
                             />
                         </div>
-                        {!data.results.length && (
+                        {!list.results.length && (
                             <p>{t("noOutagesRecorded")}</p>
                         )}
-                        {data.results.map((outage) => (
+                        {list.results.map((outage) => (
                             <article key={outage.id} className="provenance">
                                 <div className="section-heading">
                                     <h3>{outage.title}</h3>
