@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timedelta
 from functools import partial
 from itertools import takewhile
-from typing import Any
+from typing import Any, cast
 
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -52,8 +52,8 @@ from pyracast.regions.models import (
     Region,
     RegionLocationChangeRequest,
     RegionStatus,
+    location_coordinate,
 )
-from pyracast.regions.operations import require_available_location
 
 RETENTION = timedelta(days=30)
 PURGE_BATCH_SIZE = 100
@@ -64,11 +64,37 @@ logger = logging.getLogger(__name__)
 _deferrals = Deferrals(BACK_OFF)
 
 
-def _restore_deadline(region: Region, now: datetime) -> None:
+def with_restore_facts(regions: QuerySet[Region]) -> QuerySet[Region]:
+    """Annotates `location_taken`, which `restore_blocker` reads; restore holds the tenant lock
+    while it reads it, so no location writer can interleave."""
+    located = regions.annotate(
+        location_latitude=location_coordinate("latitude"),
+        location_longitude=location_coordinate("longitude"),
+    )
+    occupants = (
+        Region.objects.active()
+        .filter(tenant_id=OuterRef("tenant_id"))
+        .exclude(pk=OuterRef("pk"))
+        .annotate(
+            location_latitude=location_coordinate("latitude"),
+            location_longitude=location_coordinate("longitude"),
+        )
+        .filter(
+            location_latitude=OuterRef("location_latitude"),
+            location_longitude=OuterRef("location_longitude"),
+        )
+    )
+    return located.annotate(location_taken=Exists(occupants))
+
+
+def restore_blocker(region: Region, now: datetime) -> ErrorCode | None:
     if region.purge_started_at is not None or (
         region.deleted_at is not None and now >= region.deleted_at + RETENTION
     ):
-        raise DomainError(ErrorCode.TRASH_RETENTION_EXPIRED)
+        return ErrorCode.TRASH_RETENTION_EXPIRED
+    if region.__dict__["location_taken"]:
+        return ErrorCode.LOCATION_ALREADY_EXISTS
+    return None
 
 
 def _cancel_calibrations(plants: list[int], now: datetime) -> None:
@@ -110,11 +136,17 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
             lease_token=None,
             lease_expires_at=None,
         )
-        deliveries.filter(status=NotificationDeliveryStatus.SENDING).update(
-            status=NotificationDeliveryStatus.UNCERTAIN,
+        sending = deliveries.filter(status=NotificationDeliveryStatus.SENDING)
+        sending.filter(transmit_started_at__isnull=True).update(
+            status=NotificationDeliveryStatus.CANCELLED,
             last_error=NotificationDeliveryError.DEFINITION_TRASHED,
             lease_token=None,
             lease_expires_at=None,
+        )
+        # Transmission may have begun: the row keeps its lease so the late outcome still lands.
+        sending.update(
+            status=NotificationDeliveryStatus.UNCERTAIN,
+            last_error=NotificationDeliveryError.DEFINITION_TRASHED,
         )
         record_audit(
             actor=actor, region=region, action=AuditAction.REGION_TRASHED, revision=region.revision
@@ -125,15 +157,16 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
 def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
     with transaction.atomic():
         tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
-        location = Region.objects.get(pk=region_id, tenant_id=tenant_id)
-        require_available_location(
-            tenant_id, location.latitude, location.longitude, exclude_region_id=region_id
+        region = (
+            with_restore_facts(Region.objects.filter(tenant_id=tenant_id))
+            .select_for_update(of=("self",))
+            .get(pk=region_id)
         )
-        region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
-        now = timezone.now()
-        _restore_deadline(region, now)
         if region.deleted_at is None:
             return region
+        now = timezone.now()
+        if (blocker := restore_blocker(region, now)) is not None:
+            raise DomainError(blocker)
         region.deleted_at = None
         region.save(update_fields=("deleted_at",))
         CollectionSchedule.objects.get_or_create(
@@ -311,8 +344,27 @@ def _purge_expired_region(region_id: int, moment: datetime, budget: _Budget) -> 
             region.purge_started_at = moment
             region.save(update_fields=("purge_started_at",))
         plants = list(Plant.objects.select_for_update().filter(region=region).order_by("pk"))
+        record = _purge_record(region, plants)
         try:
             _purge_region(region, plants, budget)
         except _BudgetSpentError:
             return None
+        transaction.on_commit(lambda: logger.info(record))
         return len(plants)
+
+
+def _purge_record(region: Region, plants: list[Plant]) -> str:
+    """Names what the purge removes for the operator's runbook, never a name, place or key."""
+    bindings = SiteBinding.objects.filter(region=region).order_by("pk")
+    sites = ",".join(
+        f"{provider}:{account}:{site}"
+        for provider, account, site in bindings.values_list(
+            "provider_account__provider", "provider_account_id", "site_id"
+        )
+    )
+    deleted_at = cast(datetime, region.deleted_at).isoformat()
+    return (
+        f"trash_purged kind=region region_id={region.pk} tenant_id={region.tenant_id} "
+        f"deleted_at={deleted_at} plant_ids=[{','.join(str(plant.pk) for plant in plants)}] "
+        f"bindings=[{sites}]"
+    )

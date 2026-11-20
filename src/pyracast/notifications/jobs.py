@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.db import DatabaseError, transaction
-from django.db.models import Q
+from django.db.models import Case, F, Q, Value, When
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
@@ -248,13 +248,22 @@ def process_notification(
             (status, available_at), error_code = retry_or_fail(), MailFailure.NOT_SENT
     else:
         status, error_code = NotificationDeliveryStatus.SENT, ""
+    trashed = Q(last_error=NotificationDeliveryError.DEFINITION_TRASHED)
+    stored_status: Case | NotificationDeliveryStatus = status
+    stored_error: Case | str = error_code
+    if status in (NotificationDeliveryStatus.RETRY, NotificationDeliveryStatus.FAILED):
+        # Decided on the row version this update locks, so a trash committed meanwhile wins.
+        stored_status = Case(
+            When(trashed, then=Value(NotificationDeliveryStatus.CANCELLED)), default=Value(status)
+        )
+        stored_error = Case(When(trashed, then=F("last_error")), default=Value(error_code))
     updated = NotificationDelivery.objects.filter(
         pk=delivery_id,
         lease_token=token,
         status__in=(NotificationDeliveryStatus.SENDING, NotificationDeliveryStatus.UNCERTAIN),
     ).update(
-        status=status,
-        last_error=error_code,
+        status=stored_status,
+        last_error=stored_error,
         sent_at=timezone.now() if status == NotificationDeliveryStatus.SENT else None,
         available_at=available_at,
         lease_token=None,

@@ -72,6 +72,7 @@ ROUTE_POLICIES: Mapping[str, Mapping[str, Policy]] = {
         "GET": MEMBER,
         "POST": Policy(Access.ADMIN, Throttle.SUBMISSION),
     },
+    REGION + "location-change-requests/<int:request_id>/withdraw/": {"POST": ADMIN},
     REGION + "plants/": {"GET": MEMBER, "POST": ADMIN},
     REGION + "reminders/": {"GET": MEMBER, "PUT": ADMIN},
     REGION + "restore/": {"POST": Policy(Access.ADMIN, Throttle.SUBMISSION)},

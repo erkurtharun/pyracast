@@ -1,7 +1,7 @@
 from typing import Any, cast
 
 from django.contrib.auth.models import User
-from django.db.models import Count, F, Q, QuerySet
+from django.db.models import QuerySet
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from pyracast import trash
-from pyracast.accounts.models import Tenant, WorkspaceRole
+from pyracast.accounts.models import Membership
 from pyracast.api.serializers import (
     ForecastOutput,
     ForecastQuery,
@@ -19,61 +19,41 @@ from pyracast.api.serializers import (
     LocationChangeOutput,
     TenantOutput,
 )
-from pyracast.change_requests.models import DECIDED, ChangeRequest, ChangeRequestStatus
+from pyracast.change_requests.policy import workspace_counters
 from pyracast.db import read_snapshot
 from pyracast.forecasts.history import regional_outlook
-from pyracast.plants.models import active_plant
+from pyracast.plants.serializers import EmptyInput
 from pyracast.regions.models import Region, RegionLocationChangeRequest
-from pyracast.regions.operations import request_location_change
+from pyracast.regions.operations import request_location_change, withdraw_location_change
 
 
 def tenant_region(tenant_id: int, region_id: int) -> Region:
     return get_object_or_404(Region.objects.active(), pk=region_id, tenant_id=tenant_id)
 
 
-class TenantsView(GenericAPIView[Tenant]):
-    serializer_class = TenantOutput
-
-    def get_queryset(self) -> QuerySet[Tenant]:
+class TenantsView(GenericAPIView[Membership]):
+    def get_queryset(self) -> QuerySet[Membership]:
         return (
-            Tenant.objects.filter(membership__user=cast(User, self.request.user))
-            .annotate(role=F("membership__role"), current_membership_id=F("membership__pk"))
-            .order_by("id")
+            Membership.objects.filter(user=cast(User, self.request.user))
+            .select_related("tenant")
+            .order_by("tenant_id")
         )
 
     @extend_schema(responses=TenantOutput(many=True))
-    def get(self, _request: Request) -> Response:
+    def get(self, request: Request) -> Response:
         page = list(self.paginate_queryset(self.get_queryset()) or [])
-        membership_ids = [row.__dict__["current_membership_id"] for row in page]
-        counters = (
-            ChangeRequest.objects.filter(
-                active_plant("plant__"),
-                plant__region__tenant_id__in=[row.pk for row in page],
-            )
-            .values("plant__region__tenant_id")
-            .annotate(
-                pending=Count("pk", filter=Q(status=ChangeRequestStatus.PENDING)),
-                unread=Count(
-                    "pk",
-                    filter=Q(
-                        proposed_by_id=self.request.user.pk,
-                        proposer_membership_id__in=membership_ids,
-                        status__in=DECIDED,
-                        outcome_seen_at__isnull=True,
-                    ),
-                ),
-            )
-        )
-        by_tenant = {row["plant__region__tenant_id"]: row for row in counters}
-        for row in page:
-            counts = by_tenant.get(row.pk)
-            row.__dict__["pending_review_count"] = (
-                (counts["pending"] if counts else 0)
-                if row.__dict__["role"] == WorkspaceRole.ADMIN
-                else None
-            )
-            row.__dict__["unread_outcome_count"] = counts["unread"] if counts else 0
-        return self.get_paginated_response(TenantOutput(page, many=True).data)
+        counters = workspace_counters(cast(User, request.user), page)
+        rows = [
+            {
+                "id": membership.tenant_id,
+                "name": membership.tenant.name,
+                "role": membership.role,
+                "pending_review_count": counters[membership.tenant_id][0],
+                "unread_outcome_count": counters[membership.tenant_id][1],
+            }
+            for membership in page
+        ]
+        return self.get_paginated_response(TenantOutput(cast(Any, rows), many=True).data)
 
 
 class RegionView(APIView):
@@ -106,6 +86,18 @@ class LocationChangeRequestsView(GenericAPIView[RegionLocationChangeRequest]):
             cast(User, request.user), region_id, tenant_id, **data.validated_data
         )
         return Response(LocationChangeOutput(change).data, status=201)
+
+
+class LocationChangeWithdrawView(APIView):
+    @extend_schema(request=EmptyInput, responses=LocationChangeOutput)
+    def post(self, request: Request, tenant_id: int, region_id: int, request_id: int) -> Response:
+        tenant_region(tenant_id, region_id)
+        data = EmptyInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        change = withdraw_location_change(
+            cast(User, request.user), tenant_id, region_id, request_id
+        )
+        return Response(LocationChangeOutput(change).data)
 
 
 class ForecastView(APIView):

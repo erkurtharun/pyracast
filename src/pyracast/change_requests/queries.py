@@ -7,18 +7,22 @@ from django.db import transaction
 from django.db.models import Count, Max, Min, OuterRef, QuerySet, Subquery
 
 from pyracast.accounts.authorization import tenant_membership
-from pyracast.accounts.models import Membership, WorkspaceRole
+from pyracast.accounts.models import Membership
 from pyracast.change_requests.models import (
-    DECIDED,
     INCIDENT_EDITS,
     ChangeRequest,
     ChangeRequestKind,
     ChangeRequestStatus,
     IncidentChangeAction,
 )
-from pyracast.change_requests.operations import (
-    _request,
-    _validate,
+from pyracast.change_requests.operations import _validate
+from pyracast.change_requests.policy import (
+    can_review,
+    can_withdraw,
+    former_proposers,
+    inbox_requests,
+    is_unread,
+    request_for,
     visible_requests,
 )
 from pyracast.change_requests.preparation import (
@@ -35,14 +39,7 @@ from pyracast.incidents.operations import lock_incident_plant
 def inbox(
     actor: User, tenant_id: int, *, scope: str = "pending", plant_id: int | None = None
 ) -> QuerySet[ChangeRequest]:
-    membership = tenant_membership(actor, tenant_id)
-    rows = visible_requests(actor, membership)
-    if membership.role != WorkspaceRole.ADMIN or scope == "mine":
-        rows = rows.filter(proposed_by=actor, proposer_membership_id=membership.pk)
-    if scope == "pending":
-        rows = rows.filter(status=ChangeRequestStatus.PENDING)
-    elif scope == "history":
-        rows = rows.exclude(status=ChangeRequestStatus.PENDING)
+    rows = inbox_requests(tenant_membership(actor, tenant_id), scope)
     if plant_id is not None:
         rows = rows.filter(plant_id=plant_id)
     return _with_triage(rows).order_by("-created_at", "-pk")
@@ -110,18 +107,48 @@ def _user(user: User | None) -> dict[str, Any] | None:
     )
 
 
+def _summary(row: Any, membership: Membership, *, former: bool) -> dict[str, Any]:
+    return {
+        "id": row.pk,
+        "kind": row.kind,
+        "status": row.status,
+        "plant_id": row.plant_id,
+        "region_id": row.plant.region_id,
+        "plant_name": row.plant.name,
+        "configuration_id": row.configuration_id,
+        "proposed_by": _user(row.proposed_by),
+        "reason": row.reason,
+        "created_at": row.created_at,
+        "reviewed_by": _user(row.reviewed_by),
+        "closed_at": row.closed_at,
+        "decision_reason": row.decision_reason,
+        "former_member": former,
+        "can_review": can_review(row, membership),
+        "can_withdraw": can_withdraw(row, membership),
+        "unread": is_unread(row, membership),
+        **_triage(row),
+    }
+
+
+def _single_summary(row: Any, membership: Membership) -> dict[str, Any]:
+    former = former_proposers(membership.tenant_id, [row])
+    return _summary(row, membership, former=row.pk in former)
+
+
+def _summary_of(membership: Membership, request_id: int) -> dict[str, Any]:
+    return _single_summary(
+        _with_triage(ChangeRequest.objects.filter(pk=request_id)).get(), membership
+    )
+
+
 @transaction.atomic
 def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, Any]:
-    request = _request(actor, tenant_id, request_id)
-    plant = lock_incident_plant(tenant_id, request.plant.region_id, request.plant_id, lock=False)
-    request = _request(actor, tenant_id, request_id)
     membership = tenant_membership(actor, tenant_id)
-    own = request.proposed_by_id == actor.pk and request.proposer_membership_id == membership.pk
-    if membership.role != WorkspaceRole.ADMIN and not own:
-        raise ChangeRequest.DoesNotExist
+    request = request_for(membership, request_id)
+    plant = lock_incident_plant(tenant_id, request.plant.region_id, request.plant_id, lock=False)
+    request = _with_triage(visible_requests(membership)).get(pk=request_id)
     items = production_context(request) if request.kind == ChangeRequestKind.PRODUCTION else []
     conflict = None
-    fingerprint = None
     if request.status == ChangeRequestStatus.PENDING:
         try:
             _validate(actor, request, plant, lock=False)
@@ -132,7 +159,11 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
                 if isinstance(error, ValidationError)
                 else str(MESSAGES[ErrorCode.REQUEST_CONFLICT]),
             }
-        fingerprint = "v1:" + digest(review_context(request, plant, production_items=items))
+    fingerprint = (
+        "v1:" + digest(review_context(request, plant, production_items=items))
+        if can_review(request, membership)
+        else None
+    )
     incident = None
     if request.kind == ChangeRequestKind.INCIDENT:
         change = request.incident_change
@@ -156,82 +187,22 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
             ),
             "applied_revision_id": change.applied_revision_id,
         }
-    former = not Membership.objects.filter(
-        pk=request.proposer_membership_id,
-        user_id=request.proposed_by_id,
-        user__is_active=True,
-        tenant_id=tenant_id,
-    ).exists()
     return {
-        "id": request.pk,
-        "kind": request.kind,
-        "status": request.status,
-        "plant_id": plant.pk,
-        "region_id": plant.region_id,
-        "plant_name": plant.name,
-        "configuration_id": request.configuration_id,
-        "proposed_by": _user(request.proposed_by),
-        "reason": request.reason,
-        "created_at": request.created_at,
-        "reviewed_by": _user(request.reviewed_by),
-        "closed_at": request.closed_at,
-        "decision_reason": request.decision_reason,
-        "former_member": former,
-        "can_review": membership.role == WorkspaceRole.ADMIN
-        and request.status == ChangeRequestStatus.PENDING,
-        "can_withdraw": own and request.status == ChangeRequestStatus.PENDING,
-        "unread": own and request.status in DECIDED and request.outcome_seen_at is None,
+        **_single_summary(request, membership),
         "conflict": conflict,
         "review_fingerprint": fingerprint,
         "production_items": items,
         "incident": incident,
-        **_triage(_with_triage(ChangeRequest.objects.filter(pk=request.pk)).get()),
     }
+
+
+def request_summary(actor: User, tenant_id: int, request: ChangeRequest) -> dict[str, Any]:
+    return _summary_of(tenant_membership(actor, tenant_id), request.pk)
 
 
 def request_summaries(
     actor: User, tenant_id: int, rows: list[ChangeRequest]
 ) -> list[dict[str, Any]]:
     membership = tenant_membership(actor, tenant_id)
-    if membership.role != WorkspaceRole.ADMIN:
-        rows = [
-            row
-            for row in rows
-            if row.proposed_by_id == actor.pk and row.proposer_membership_id == membership.pk
-        ]
-    active = set(
-        Membership.objects.filter(
-            pk__in=[row.proposer_membership_id for row in rows],
-            user__is_active=True,
-            tenant_id=tenant_id,
-        ).values_list("pk", flat=True)
-    )
-    return [
-        {
-            "id": row.pk,
-            "kind": row.kind,
-            "status": row.status,
-            "plant_id": row.plant_id,
-            "region_id": row.plant.region_id,
-            "plant_name": row.plant.name,
-            "configuration_id": row.configuration_id,
-            "proposed_by": _user(row.proposed_by),
-            "reason": row.reason,
-            "created_at": row.created_at,
-            "reviewed_by": _user(row.reviewed_by),
-            "closed_at": row.closed_at,
-            "decision_reason": row.decision_reason,
-            "former_member": row.proposer_membership_id not in active,
-            "can_review": membership.role == WorkspaceRole.ADMIN
-            and row.status == ChangeRequestStatus.PENDING,
-            "can_withdraw": row.proposed_by_id == actor.pk
-            and row.proposer_membership_id == membership.pk
-            and row.status == ChangeRequestStatus.PENDING,
-            "unread": row.proposed_by_id == actor.pk
-            and row.proposer_membership_id == membership.pk
-            and row.status in DECIDED
-            and row.outcome_seen_at is None,
-            **_triage(row),
-        }
-        for row in rows
-    ]
+    former = former_proposers(tenant_id, rows)
+    return [_summary(row, membership, former=row.pk in former) for row in rows]

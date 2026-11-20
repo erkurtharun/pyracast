@@ -15,7 +15,6 @@ from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.accounts.inputs import SecondFactorReauthenticateInput
-from pyracast.accounts.models import Tenant
 from pyracast.api.serializers import BindingInput
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import (
@@ -30,14 +29,15 @@ from pyracast.errors import DomainError, ErrorCode
 from pyracast.notifications.models import NotificationSettings
 from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT
 from pyracast.regions.models import (
-    LocationChangeStatus,
     Region,
     RegionLocationChangeRequest,
     RegionStatus,
+    active_region,
 )
 from pyracast.regions.operations import (
+    approve_location_change,
     configure_binding,
-    review_location_change,
+    reject_location_change,
     transition_region,
 )
 
@@ -417,41 +417,49 @@ class ReviewDecisionForm(forms.Form):
         ),
         widget=forms.HiddenInput,
     )
+    decision_reason = forms.CharField(
+        required=False,
+        max_length=500,
+        label=gettext_lazy("Note for the customer (optional)"),
+        widget=forms.Textarea(attrs={"rows": 2, "maxlength": 500}),
+    )
 
     def apply(self, actor: User, region_id: int) -> None:
         require_platform_admin(actor)
         data = self.cleaned_data
+        if data["action"] in LOCATION_DECISIONS:
+            change = RegionLocationChangeRequest.objects.get(
+                active_region("region__"), pk=data["location_change_id"], region_id=region_id
+            )
+            LOCATION_DECISIONS[data["action"]](
+                actor,
+                change.pk,
+                expected_revision=data["expected_revision"],
+                reason=data["decision_reason"],
+            )
+            return
         with transaction.atomic():
-            if data["action"] == "approve_location":
-                tenant_id = (
-                    Region.objects.active().values_list("tenant_id", flat=True).get(pk=region_id)
-                )
-                Tenant.objects.select_for_update().get(pk=tenant_id)
             region = Region.objects.active().select_for_update().get(pk=region_id)
             if (
                 region.revision != data["expected_revision"]
                 or region.status != data["expected_status"]
             ):
                 raise ValidationError(_("The plant changed. Reload before reviewing it."))
-            if data["action"] in {"reject", "suspend"}:
-                required_status = (
-                    RegionStatus.PENDING if data["action"] == "reject" else RegionStatus.APPROVED
+            required_status = (
+                RegionStatus.PENDING if data["action"] == "reject" else RegionStatus.APPROVED
+            )
+            if region.status != required_status:
+                raise ValidationError(
+                    _("This decision is unavailable for the current review status.")
                 )
-                if region.status != required_status:
-                    raise ValidationError(
-                        _("This decision is unavailable for the current review status.")
-                    )
-                transition_region(
-                    actor,
-                    region.pk,
-                    RegionStatus.REJECTED if data["action"] == "reject" else RegionStatus.SUSPENDED,
-                )
-            else:
-                change = RegionLocationChangeRequest.objects.get(
-                    pk=data["location_change_id"],
-                    region=region,
-                    status=LocationChangeStatus.PENDING,
-                )
-                review_location_change(
-                    actor, change.pk, approve=data["action"] == "approve_location"
-                )
+            transition_region(
+                actor,
+                region.pk,
+                RegionStatus.REJECTED if data["action"] == "reject" else RegionStatus.SUSPENDED,
+            )
+
+
+LOCATION_DECISIONS = {
+    "approve_location": approve_location_change,
+    "reject_location": reject_location_change,
+}

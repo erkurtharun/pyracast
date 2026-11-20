@@ -6,7 +6,13 @@ from pyracast.api import error_pages
 from pyracast.api.csp_reports import CSPReportView
 from pyracast.api.session import SessionLanguageView, SessionView
 from pyracast.api.trash import RestoreRegionView, TrashedRegionsView
-from pyracast.api.views import ForecastView, LocationChangeRequestsView, RegionView, TenantsView
+from pyracast.api.views import (
+    ForecastView,
+    LocationChangeRequestsView,
+    LocationChangeWithdrawView,
+    RegionView,
+    TenantsView,
+)
 from pyracast.api.workspaces import (
     InvitationAcceptanceView,
     WorkspaceInvitationsView,
@@ -60,6 +66,11 @@ urlpatterns = [
     path(
         "api/tenants/<int:tenant_id>/regions/<int:region_id>/location-change-requests/",
         LocationChangeRequestsView.as_view(),
+    ),
+    path(
+        "api/tenants/<int:tenant_id>/regions/<int:region_id>/location-change-requests/"
+        "<int:request_id>/withdraw/",
+        LocationChangeWithdrawView.as_view(),
     ),
     path(
         "api/tenants/<int:tenant_id>/regions/<int:region_id>/restore/",

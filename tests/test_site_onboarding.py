@@ -15,12 +15,11 @@ from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
 from pyracast.plants.operations import create_plant, revise_plant
 from pyracast.plants.sites import site_queryset, submit_site
-from pyracast.regions.models import Region
+from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import (
     approve_region,
     configure_binding,
     request_location_change,
-    review_location_change,
     submit_region,
 )
 from pyracast.trash import purge_expired, restore_region, trash_region
@@ -259,24 +258,22 @@ def test_one_plant_per_location_and_restore_rejects_a_replacement_location() -> 
     assert PlantSubmission.objects.filter(plant=plant).exists()
 
 
-def test_location_review_rejects_duplicate_without_changing_approval() -> None:
+def test_a_location_request_onto_another_plant_is_refused_without_changing_approval() -> None:
     system = make_system(approved=True)
     submit_site(system.member, system.tenant.pk, **site_values())
-    change = request_location_change(
-        system.member,
-        system.region.pk,
-        system.tenant.pk,
-        expected_revision=1,
-        latitude=41.1234562,
-        longitude=30.1234562,
-        timezone="UTC",
-    )
     with raises_code("location_already_exists"):
-        review_location_change(system.admin, change.pk, approve=True)
+        request_location_change(
+            system.member,
+            system.region.pk,
+            system.tenant.pk,
+            expected_revision=1,
+            latitude=41.1234562,
+            longitude=30.1234562,
+            timezone="UTC",
+        )
     system.region.refresh_from_db()
-    change.refresh_from_db()
     assert system.region.status == "approved"
-    assert change.status == "pending"
+    assert not RegionLocationChangeRequest.objects.exists()
 
 
 @pytest.mark.parametrize("kind", ["site", "plant"])

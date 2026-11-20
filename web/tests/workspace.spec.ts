@@ -1725,7 +1725,7 @@ test("recycle bin confirms deletion and restores a plant site with associated da
                                   name: entity.name,
                                   deleted_at: "2026-11-10T12:00:00Z",
                                   purge_after: "2026-12-10T12:00:00Z",
-                                  can_restore: true,
+                                  restore_blocker: null,
                               },
                           ]
                         : [],
@@ -1818,7 +1818,7 @@ test("recycle bin disables expired records", async ({ page }) => {
                     name: "Expired region",
                     deleted_at: "2026-01-01T00:00:00Z",
                     purge_after: "2026-01-31T00:00:00Z",
-                    can_restore: false,
+                    restore_blocker: "trash_retention_expired",
                 },
             ]),
         }),
@@ -1859,7 +1859,7 @@ test("a failed reload after a restore keeps the remaining plants until a retry l
         name: `Deleted plant ${id}`,
         deleted_at: "2026-11-10T12:00:00Z",
         purge_after: "2026-12-10T12:00:00Z",
-        can_restore: true,
+        restore_blocker: null,
     }));
     let restored = false;
     let unavailable = false;
@@ -1948,7 +1948,7 @@ test("recycle bin ignores a prior workspace response and restores only in the se
                         : "Second workspace deleted region",
                     deleted_at: "2026-11-10T00:00:00Z",
                     purge_after: "2026-12-10T00:00:00Z",
-                    can_restore: true,
+                    restore_blocker: null,
                 },
             ]),
         });

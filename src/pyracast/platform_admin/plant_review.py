@@ -371,6 +371,8 @@ def decision(request: HttpRequest, region_id: int) -> HttpResponse:
     if form.is_valid():
         try:
             form.apply(_actor(request), region_id)
+        except DomainError as error:
+            messages.error(request, " ".join(error.messages))
         except ObjectDoesNotExist, ValidationError:
             messages.error(
                 request,

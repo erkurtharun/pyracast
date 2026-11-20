@@ -1,6 +1,6 @@
 # Move a site to the recycle bin and restore it
 
-A workspace administrator uses "Delete plant" in plant settings, which soft-deletes the whole site (the region) with its one plant and stops its collection, calibration and reminders. A plant has no trash of its own: it leaves and returns with its location. The recycle bin lists every trashed region and restores it within 30 days if the location is still free. After the deadline the row stays listed with `can_restore` false until the dispatcher purges it (`trash-retention-purge`).
+A workspace administrator uses "Delete plant" in plant settings, which soft-deletes the whole site (the region) with its one plant and stops its collection, calibration and reminders. A plant has no trash of its own: it leaves and returns with its location. The recycle bin lists every trashed region and restores it within 30 days if the location is still free. After the deadline the row stays listed with `restore_blocker` set until the dispatcher purges it (`trash-retention-purge`).
 
 ## Entry points
 
@@ -74,7 +74,7 @@ sequenceDiagram
 
 - Lock order: tenant, region, plant. The tenant lock also serializes the location check with `submit_region` and location review. `purge_expired` takes no tenant lock.
 - Trash is idempotent and never extends the deadline.
-- Restore is strict (`now >= deleted_at + RETENTION` is expired) while purge is inclusive (`deleted_at <= now - RETENTION`), so no instant is both. `can_restore` uses the same bound but ignores location conflicts. Restore tests the location before the deadline, so `detail` names the location conflict first.
+- Restore is strict (`now >= deleted_at + RETENTION` is expired) while purge is inclusive (`deleted_at <= now - RETENTION`), so no instant is both. `restore_blocker` uses the same bound but ignores location conflicts. Restore tests the location before the deadline, so `detail` names the location conflict first.
 - Restore revives no work: stale jobs, superseded calibrations and cancelled deliveries stay; `effective_from = now` stops back-filling. Trash leaves EPIAS jobs untouched; a claim supersedes them while the region is trashed. A running job's lease is cleared on trash, so a late `publish` returns false.
 
 ## Tests

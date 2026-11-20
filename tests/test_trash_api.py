@@ -33,7 +33,7 @@ def test_trash_restore_hides_all_location_and_plant_routes(
     for path in ("production/", "calibrations/", "forecast/?date=2026-11-08"):
         assert client.get(detail + path).status_code == 404
     entry = client.get(tenant + "trash/regions/").json()["results"][0]
-    assert entry["can_restore"] is True
+    assert entry["restore_blocker"] is None
     assert datetime.fromisoformat(entry["purge_after"]) == NOW + timedelta(days=30)
     restored = client.post(region + "restore/", {}, content_type="application/json")
     assert restored.status_code == 200
@@ -77,7 +77,8 @@ def test_expired_trash_remains_visible_but_cannot_be_restored(
     assert client.delete(region).status_code == 204
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=30))
     client.force_login(system.member)
-    assert client.get(tenant + "trash/regions/").json()["results"][0]["can_restore"] is False
+    listed = client.get(tenant + "trash/regions/").json()["results"][0]
+    assert listed["restore_blocker"] == "trash_retention_expired"
     assert client.post(region + "restore/", {}, content_type="application/json").status_code == 400
     assert Plant.objects.filter(pk=plant.pk).exists()
     assert Region.objects.filter(pk=system.region.pk).exists()

@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { test, expect } from "./support/test";
 import { mockApi, paged, plant, region } from "./support/workspace";
 import AxeBuilder from "@axe-core/playwright";
@@ -82,6 +83,7 @@ test("requests a location change and preserves the current location", async ({
             status: "pending",
             created_at: "2026-01-01T00:00:00Z",
             reviewed_at: null,
+            decision_reason: "",
         };
         await route.fulfill({
             json:
@@ -134,6 +136,7 @@ test("a failed reload after a location request keeps the form until a retry show
         status: "pending",
         created_at: "2026-01-01T00:00:00Z",
         reviewed_at: null,
+        decision_reason: "",
     };
     await page.route("**/location-change-requests/", async (route) => {
         if (route.request().method() === "POST") {
@@ -168,4 +171,120 @@ test("a failed reload after a location request keeps the form until a retry show
         .click();
     await expect(notice).toHaveCount(0);
     await expect(page.getByText("37°, 31° · Europe/Istanbul")).toBeVisible();
+});
+
+const pendingRequest = {
+    id: 1,
+    base_revision: 1,
+    latitude: 37,
+    longitude: 31,
+    timezone: "Europe/Istanbul",
+    reason: "Move",
+    status: "pending",
+    created_at: "2026-01-01T00:00:00Z",
+    reviewed_at: null,
+    decision_reason: "",
+};
+
+async function openLocationSettings(page: Page) {
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Location", exact: true }).click();
+    await page.getByText("Request location change", { exact: true }).click();
+}
+
+test("withdraws a pending location request and offers the form again", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let rows: object[] = [pendingRequest];
+    await page.route(
+        "**/location-change-requests/1/withdraw/",
+        async (route) => {
+            expect(route.request().method()).toBe("POST");
+            const withdrawn = {
+                ...pendingRequest,
+                status: "withdrawn",
+                reviewed_at: "2026-01-02T00:00:00Z",
+            };
+            rows = [withdrawn];
+            await route.fulfill({ json: withdrawn });
+        },
+    );
+    await page.route("**/location-change-requests/", (route) =>
+        route.fulfill({ json: paged(rows) }),
+    );
+    await openLocationSettings(page);
+    await page.getByRole("button", { name: "Withdraw request" }).click();
+    await expect(
+        page.getByText("Location change withdrawn on Jan 2, 2026."),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Submit location request" }),
+    ).toBeVisible();
+});
+
+test("a direct move of a never-approved plant refills the form with the stored location", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let current = region;
+    let rows: object[] = [];
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.fulfill({ json: paged([{ ...current, plant }]) }),
+    );
+    await page.route("**/location-change-requests/", async (route) => {
+        if (route.request().method() !== "POST")
+            return route.fulfill({ json: paged(rows) });
+        const moved = {
+            ...pendingRequest,
+            latitude: 37.123457,
+            reason: "",
+            status: "approved",
+            reviewed_at: "2026-01-02T00:00:00Z",
+        };
+        current = { ...region, latitude: 37.123457, revision: 2 };
+        rows = [moved];
+        await route.fulfill({ status: 201, json: moved });
+    });
+    await openLocationSettings(page);
+    await page.getByLabel("Latitude (°)").fill("37.1234567");
+    await page.getByLabel("Reason (optional)").fill("Survey");
+    await page.getByRole("button", { name: "Submit location request" }).click();
+    await expect(
+        page.getByText("Location change approved on Jan 2, 2026."),
+    ).toBeVisible();
+    await expect(page.getByLabel("Latitude (°)")).toHaveValue("37.123457");
+    await expect(page.getByLabel("Reason (optional)")).toHaveValue("");
+});
+
+test("shows the operator's decision and note on the latest request", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/location-change-requests/", (route) =>
+        route.fulfill({
+            json: paged([
+                {
+                    ...pendingRequest,
+                    id: 2,
+                    status: "approved",
+                    reviewed_at: "2026-01-03T00:00:00Z",
+                    decision_reason: "Matches the grid connection record",
+                },
+            ]),
+        }),
+    );
+    await openLocationSettings(page);
+    await expect(
+        page.getByText(
+            "Location change approved on Jan 3, 2026. Forecasts pause until the new connection is approved.",
+        ),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Note: Matches the grid connection record"),
+    ).toBeVisible();
 });

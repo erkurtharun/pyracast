@@ -204,7 +204,7 @@ def test_region_trash_preserves_history_and_invalidates_pending_work(
     assert [row.status for row in states] == [
         "cancelled",
         "cancelled",
-        "uncertain",
+        "cancelled",
         "sent",
         "uncertain",
     ]

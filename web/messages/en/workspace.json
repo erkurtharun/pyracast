@@ -113,7 +113,12 @@
         "currentLocation": "Current location: {latitude}°, {longitude}° · {timezone}",
         "location": "{latitude}°, {longitude}° · {timezone}",
         "approvalHelp": "A location change requires administrator approval and a new connection verification.",
-        "ianaTimezone": "IANA timezone"
+        "ianaTimezone": "IANA timezone",
+        "latestApproved": "Location change approved on {date}. Forecasts pause until the new connection is approved.",
+        "latestRejected": "Location change rejected on {date}.",
+        "latestWithdrawn": "Location change withdrawn on {date}.",
+        "decisionNote": "Note: {reason}",
+        "withdraw": "Withdraw request"
     },
     "RegionWorkspace": {
         "allPlants": "All plants",
@@ -351,7 +356,10 @@
         "restore": "Restore {name}",
         "deletionHelp": "Collection will stop. You can restore this plant and its saved data for 30 days. After that, they are permanently deleted.",
         "retentionHelp": "Deleted plants and their data are kept for 30 days.",
-        "restoreExpired": "The 30-day restore period has ended."
+        "blockers": {
+            "trash_retention_expired": "The 30-day restore period has ended.",
+            "location_already_exists": "Another plant now uses this location. Move or delete that plant first."
+        }
     },
     "WorkspaceMembers": {
         "title": "Members",

@@ -16,10 +16,11 @@ from pyracast.connections.operations import create_account
 from pyracast.forecasts.validation import validate_binding
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
 from pyracast.regions.operations import (
+    approve_location_change,
     approve_region,
     configure_binding,
+    reject_location_change,
     request_location_change,
-    review_location_change,
 )
 from pyracast.trash import purge_expired, trash_region
 from tests.support.domain import NOW, FakeAdapter, System, make_system
@@ -80,7 +81,7 @@ def test_location_request_api_tenant_boundary_validation_and_soft_deletion() -> 
     assert client.get(path).status_code == 404
     assert client.post(path, data, content_type="application/json").status_code == 404
     with pytest.raises(Region.DoesNotExist):
-        review_location_change(system.admin, response.json()["id"], approve=True)
+        approve_location_change(system.admin, response.json()["id"], expected_revision=1)
     assert RegionLocationChangeRequest.objects.get().status == "pending"
 
 
@@ -97,13 +98,18 @@ def test_location_review_requires_new_binding_and_follows_binding_revisions() ->
         reason="Correct the reference site",
     )
     with pytest.raises(PermissionDenied):
-        review_location_change(system.member, change.pk, approve=True)
-    reviewed = review_location_change(system.admin, change.pk, approve=True)
+        approve_location_change(system.member, change.pk, expected_revision=change.base_revision)
+    reviewed = approve_location_change(
+        system.admin, change.pk, expected_revision=change.base_revision
+    )
     assert reviewed.reviewed_by_id == system.admin.pk
     assert reviewed.reviewed_at is not None
-    assert review_location_change(system.admin, change.pk, approve=True).pk == change.pk
+    assert (
+        approve_location_change(system.admin, change.pk, expected_revision=change.base_revision).pk
+        == change.pk
+    )
     with raises_code("location_change_already_reviewed"):
-        review_location_change(system.admin, change.pk, approve=False)
+        reject_location_change(system.admin, change.pk, expected_revision=change.base_revision)
     system.region.refresh_from_db()
     assert (system.region.latitude, system.region.longitude, system.region.timezone) == (
         41,
@@ -151,9 +157,14 @@ def test_location_review_requires_new_binding_and_follows_binding_revisions() ->
     )
     second.refresh_from_db()
     assert second.base_revision == 3
-    rejected = review_location_change(system.admin, second.pk, approve=False)
+    rejected = reject_location_change(
+        system.admin, second.pk, expected_revision=second.base_revision
+    )
     assert rejected.status == "rejected"
-    assert review_location_change(system.admin, second.pk, approve=False).pk == second.pk
+    assert (
+        reject_location_change(system.admin, second.pk, expected_revision=second.base_revision).pk
+        == second.pk
+    )
     system.region.refresh_from_db()
     assert (system.region.latitude, system.region.revision) == (41, 3)
 
@@ -169,7 +180,7 @@ def test_approved_location_requires_validated_replacement_before_collection_resu
         longitude=30,
         timezone="UTC",
     )
-    review_location_change(system.admin, change.pk, approve=True)
+    approve_location_change(system.admin, change.pk, expected_revision=change.base_revision)
     replacement = configure_binding(
         system.admin,
         system.region.pk,
@@ -252,7 +263,7 @@ def test_request_operation_validation_permissions_and_rejection_keep_active_regi
         longitude=30,
         timezone="UTC",
     )
-    review_location_change(system.admin, change.pk, approve=False)
+    reject_location_change(system.admin, change.pk, expected_revision=change.base_revision)
     system.region.refresh_from_db()
     assert (
         system.region.latitude,
@@ -310,7 +321,9 @@ def test_concurrent_reviews_apply_location_at_most_once() -> None:
         close_old_connections()
         try:
             barrier.wait(timeout=10)
-            return review_location_change(system.admin, change.pk, approve=True).status
+            return approve_location_change(
+                system.admin, change.pk, expected_revision=change.base_revision
+            ).status
         finally:
             connection.close()
 
@@ -337,7 +350,7 @@ def test_purge_removes_location_requests_without_deleting_review_actors() -> Non
         longitude=30,
         timezone="UTC",
     )
-    review_location_change(system.admin, change.pk, approve=False)
+    reject_location_change(system.admin, change.pk, expected_revision=change.base_revision)
     trash_region(system.member, system.tenant.pk, system.region.pk)
     assert purge_expired(timezone.now() + timedelta(days=31))["regions"] == 1
     assert not RegionLocationChangeRequest.objects.exists()
@@ -484,7 +497,12 @@ def test_binding_replacement_rebases_pending_location_request() -> None:
             longitude=31,
             timezone="UTC",
         )
-    assert review_location_change(system.admin, change.pk, approve=True).status == "approved"
+    assert (
+        approve_location_change(
+            system.admin, change.pk, expected_revision=change.base_revision
+        ).status
+        == "approved"
+    )
     system.region.refresh_from_db()
     assert (system.region.latitude, system.region.revision) == (41, 3)
 
@@ -530,4 +548,4 @@ def test_approval_requires_the_request_to_match_the_region_revision() -> None:
     change = _pending_location_request(system)
     Region.objects.filter(pk=system.region.pk).update(revision=2)
     with raises_code("region_revision_changed"):
-        review_location_change(system.admin, change.pk, approve=True)
+        approve_location_change(system.admin, change.pk, expected_revision=change.base_revision)
