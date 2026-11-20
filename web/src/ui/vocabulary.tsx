@@ -7,7 +7,11 @@ import { Tag, type Tone } from "./ui";
 type Group = keyof Vocabulary;
 
 const tones: { [G in Group]?: Partial<Record<Vocabulary[G], Tone>> } = {
-    RegionStatus: { approved: "success", pending: "warning", rejected: "danger" },
+    RegionStatus: {
+        approved: "success",
+        pending: "warning",
+        rejected: "danger",
+    },
     LocationChangeStatus: {
         approved: "success",
         pending: "warning",
@@ -25,13 +29,22 @@ const tones: { [G in Group]?: Partial<Record<Vocabulary[G], Tone>> } = {
         pending: "warning",
         rejected: "danger",
     },
+    NotificationDeliveryStatus: {
+        sent: "success",
+        pending: "warning",
+        retry: "warning",
+        uncertain: "warning",
+        failed: "danger",
+    },
 };
 
 export function useLabel() {
     const t = useTranslations("Enums");
     return useCallback(
-        <G extends Group>(group: G, value: Vocabulary[G]) =>
-            t(`${group}.${value}`),
+        <G extends Group>(group: G, value: Vocabulary[G]) => {
+            const key: string = `${group}.${value}`;
+            return t(key);
+        },
         [t],
     );
 }
