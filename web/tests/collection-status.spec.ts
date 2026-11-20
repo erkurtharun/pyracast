@@ -118,6 +118,24 @@ const inactive = [
     },
     {
         language: "en",
+        state: "paused",
+        reason: "not_validated",
+        label: "Paused",
+        sentence:
+            "Collection starts once the provider connection is validated.",
+        next: "Not scheduled",
+    },
+    {
+        language: "tr",
+        state: "paused",
+        reason: "binding_not_current",
+        label: "Duraklatıldı",
+        sentence:
+            "Sağlayıcı bağlantısı yeniden doğrulandığında veri toplama sürer.",
+        next: "Planlanmadı",
+    },
+    {
+        language: "en",
         state: "collecting",
         reason: "quota_too_low",
         label: "Collecting",

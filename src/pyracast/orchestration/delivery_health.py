@@ -2,7 +2,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import reduce
 from operator import or_
 from typing import Any, Literal
@@ -389,7 +389,7 @@ class BindingRequests:
 
 def _requests(window: Window) -> tuple[BindingRequests, ...]:
     today = window.now.astimezone(UTC).date()
-    days: dict[int, dict[object, int]] = defaultdict(dict)
+    days: dict[int, dict[date, int]] = defaultdict(dict)
     for row in (
         RequestAttempt.objects.filter(
             binding__isnull=False,
