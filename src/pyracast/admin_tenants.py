@@ -117,6 +117,7 @@ class WorkspaceNameForm(TenantForm):
 
 class WorkspaceForm(WorkspaceNameForm):
     administrator_email = forms.EmailField(
+        max_length=254,
         required=False,
         label=gettext_lazy("Administrator email (optional)"),
         help_text=gettext_lazy(
@@ -174,7 +175,7 @@ class WorkspaceRenameForm(WorkspaceNameForm):
 
 
 class InvitationForm(forms.Form):
-    email = forms.EmailField(label=gettext_lazy("Email address"))
+    email = forms.EmailField(max_length=254, label=gettext_lazy("Email address"))
     role = forms.ChoiceField(
         required=False,
         widget=forms.RadioSelect,

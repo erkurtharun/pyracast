@@ -3,6 +3,9 @@ from typing import Any
 from allauth.account.adapter import get_adapter
 from allauth.core import context
 from allauth.headless.account.inputs import (
+    AddEmailInput as AllauthAddEmailInput,
+)
+from allauth.headless.account.inputs import (
     ChangePasswordInput as AllauthChangePasswordInput,
 )
 from allauth.headless.account.inputs import (
@@ -53,6 +56,13 @@ def sign_in_password(password: str) -> str:
     # Raises ValidationError for a password the sign-in form would refuse to read.
     cleaned: str = LoginInput().fields["password"].clean(password)
     return cleaned
+
+
+class AddEmailInput(AllauthAddEmailInput):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # allauth accepts the 320 characters of Django's email field; account addresses hold 254.
+        self.fields["email"].validators.append(MaxLengthValidator(254))
 
 
 class RequestPasswordResetInput(AllauthRequestPasswordResetInput):

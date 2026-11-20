@@ -18,6 +18,7 @@ from allauth.account.models import EmailAddress
 from allauth.core import ratelimit
 from allauth.headless.account import views
 from allauth.headless.base.response import AuthenticationResponse, ConflictResponse
+from allauth.headless.internal.restkit.inputs import Input
 from allauth.headless.internal.restkit.response import ErrorResponse
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, ObjectNotUpdated
@@ -244,6 +245,11 @@ class ManageEmailView(StepUpAnswers, StartingView, views.ManageEmailView):
                 return super().handle(request, *args, **kwargs)
         with credential_write(request):
             return super().handle(request, *args, **kwargs)
+
+    def get_input_class(self) -> type[Input] | None:
+        if self.request.method == "POST":
+            return inputs.AddEmailInput
+        return super().get_input_class()
 
     def handle_input(self, data: Any) -> ErrorResponse | None:
         if self.request.method == "POST":
