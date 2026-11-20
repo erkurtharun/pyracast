@@ -9,7 +9,7 @@ export function nativeProductionHistory(
 ): components["schemas"]["ProductionHistoryOutput"] {
     const intervals: Interval[] = rows.map((row) => ({
         observation: null,
-        previous_configuration_observation: null,
+        previous_configuration_observations: [],
         revision_id: null,
         effective: null,
         provider_originals: [],

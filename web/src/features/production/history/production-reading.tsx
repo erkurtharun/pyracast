@@ -1,6 +1,6 @@
 "use client";
 import { useLocale, useTranslations } from "next-intl";
-import { providerOriginals, type Interval } from "./model";
+import { sameInterval, type Interval } from "./model";
 
 export function ProductionReading({
     row,
@@ -18,7 +18,7 @@ export function ProductionReading({
     const time = (value: string) => timeFormatter.format(new Date(value));
     const corrected =
         row.observation != null || row.effective?.aggregated === true;
-    const originals = providerOriginals(row);
+    const originals = row.provider_originals;
     const source =
         row.effective?.source_kind === "settlement_injection"
             ? "settlement"
@@ -54,10 +54,7 @@ export function ProductionReading({
                         >
                             {t(
                                 originals.length > 1 ||
-                                    Date.parse(original.starts_at) !==
-                                        Date.parse(row.starts_at) ||
-                                    Date.parse(original.ends_at) !==
-                                        Date.parse(row.ends_at)
+                                    !sameInterval(original, row)
                                     ? "provider_original_interval"
                                     : "provider_original",
                                 {
@@ -72,6 +69,20 @@ export function ProductionReading({
                         {t("provider_original", { value: t("missing") })}
                     </div>
                 ))}
+            {row.previous_configuration_observations.map((observation) => (
+                <div className="production-original" key={observation.id}>
+                    {t(
+                        sameInterval(observation, row)
+                            ? "recorded_under"
+                            : "recorded_under_interval",
+                        {
+                            revision: observation.configuration_revision,
+                            interval: `${time(observation.starts_at)}–${time(observation.ends_at)}`,
+                            value: `${number(observation.energy_mwh)} MWh`,
+                        },
+                    )}
+                </div>
+            ))}
         </>
     );
 }

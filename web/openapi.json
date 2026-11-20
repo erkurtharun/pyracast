@@ -8146,13 +8146,11 @@
                         ],
                         "nullable": true
                     },
-                    "previous_configuration_observation": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/EarlierConfigurationObservationOutput"
-                            }
-                        ],
-                        "nullable": true
+                    "previous_configuration_observations": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/EarlierConfigurationObservationOutput"
+                        }
                     },
                     "revision_id": {
                         "type": "integer",
@@ -8202,7 +8200,7 @@
                     "effective",
                     "ends_at",
                     "observation",
-                    "previous_configuration_observation",
+                    "previous_configuration_observations",
                     "proposal_unavailable_reason",
                     "provider_originals",
                     "revision_id",

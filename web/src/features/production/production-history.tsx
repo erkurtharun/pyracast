@@ -20,6 +20,7 @@ import {
     mostFrequentReason,
     productionCsvRecords,
     reconcileEditor,
+    saveFailure,
     type Editor,
     type History,
     type Interval,
@@ -107,10 +108,10 @@ export function ProductionHistory({
         rows.flatMap((row) => [
             row.starts_at,
             row.ends_at,
-            ...(
-                row.provider_originals ??
-                (row.provider_original ? [row.provider_original] : [])
-            ).flatMap((original) => [original.starts_at, original.ends_at]),
+            ...[
+                ...row.provider_originals,
+                ...row.previous_configuration_observations,
+            ].flatMap((other) => [other.starts_at, other.ends_at]),
         ]),
     );
     const time = (value: string) => timeFormatter.format(new Date(value));
@@ -135,7 +136,7 @@ export function ProductionHistory({
     }
     async function reloadEditor() {
         if (editor.status === "closed" || saving) return;
-        const attempt = editor;
+        const attempt = { ...editor, implausible: false };
         setEditor({ ...attempt, status: "reloading" });
         try {
             const updated = await reading.reload();
@@ -169,7 +170,11 @@ export function ProductionHistory({
             );
         }
     }
-    async function save(row: Interval, action: "set" | "revert") {
+    async function save(
+        row: Interval,
+        action: "set" | "revert",
+        confirmImplausible = false,
+    ) {
         if (
             !configuration ||
             !(canManage || row.can_propose) ||
@@ -235,7 +240,13 @@ export function ProductionHistory({
             if (canManage) {
                 await api.post(
                     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
-                    { path: scope, body: payload },
+                    {
+                        path: scope,
+                        body: {
+                            ...payload,
+                            confirm_implausible: confirmImplausible,
+                        },
+                    },
                 );
             } else {
                 const proposal = {
@@ -268,11 +279,7 @@ export function ProductionHistory({
             setEditor((current) =>
                 current.status === "orphaned" && current.key === attempt.key
                     ? { ...current, pendingWrite: false }
-                    : {
-                          ...attempt,
-                          status: "failed",
-                          error: (error as Error).message,
-                      },
+                    : { ...attempt, status: "failed", ...saveFailure(error) },
             );
         }
     }
@@ -431,10 +438,15 @@ export function ProductionHistory({
                                                 status: "editing",
                                                 ...change,
                                                 error: undefined,
+                                                implausible: false,
                                             })
                                         }
-                                        onSave={(action) =>
-                                            void save(row, action)
+                                        onSave={(action, confirmImplausible) =>
+                                            void save(
+                                                row,
+                                                action,
+                                                confirmImplausible,
+                                            )
                                         }
                                         onCancel={() => {
                                             proposalKey.reset();

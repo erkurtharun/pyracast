@@ -1,4 +1,5 @@
 import type { components } from "@/lib/schema";
+import { ApiError } from "@/lib/api/errors";
 import type { Quality } from "@/lib/production";
 
 export type History = components["schemas"]["ProductionHistoryOutput"];
@@ -12,6 +13,7 @@ export type Draft = {
     expectedRevision: number | null;
     error?: string;
     pendingWrite?: boolean;
+    implausible?: boolean;
 };
 
 export type Editor =
@@ -74,17 +76,27 @@ export function mostFrequentReason(rows: Interval[]) {
     return best;
 }
 
-export function providerOriginals(row: Interval) {
-    return row.provider_originals?.length
-        ? row.provider_originals
-        : row.provider_original
-          ? [row.provider_original]
-          : [];
+type Bounds = Pick<Interval, "starts_at" | "ends_at">;
+
+export function sameInterval(a: Bounds, b: Bounds) {
+    return (
+        Date.parse(a.starts_at) === Date.parse(b.starts_at) &&
+        Date.parse(a.ends_at) === Date.parse(b.ends_at)
+    );
+}
+
+export function saveFailure(error: unknown) {
+    return {
+        error: (error as Error).message,
+        implausible:
+            error instanceof ApiError &&
+            error.code === "production_implausible",
+    };
 }
 
 export function productionCsvRecords(rows: Interval[]) {
     return rows.map((row) => {
-        const originals = providerOriginals(row);
+        const originals = row.provider_originals;
         return {
             starts_at: row.starts_at,
             ends_at: row.ends_at,

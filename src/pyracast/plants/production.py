@@ -153,7 +153,8 @@ def _earlier_configuration_heads(
     return [
         (
             row,
-            ObservationOutput(row).data | {"configuration_revision": revisions[row.configuration_id]},
+            ObservationOutput(row).data
+            | {"configuration_revision": revisions[row.configuration_id]},
         )
         for row in earlier
     ]

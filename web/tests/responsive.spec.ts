@@ -202,7 +202,7 @@ async function setup(page: Page) {
                         proposal_unavailable_reason: null,
                         can_revert: observation !== null,
                         observation,
-                        previous_configuration_observation: null,
+                        previous_configuration_observations: [],
                         revision_id: observation?.id ?? null,
                         provider_originals: provider ? [provider] : [],
                         effective:

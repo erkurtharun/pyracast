@@ -25,7 +25,7 @@ export function IntervalEditor({
     canManage: boolean;
     saving: boolean;
     onChange: (change: DraftChange) => void;
-    onSave: (action: "set" | "revert") => void;
+    onSave: (action: "set" | "revert", confirmImplausible?: boolean) => void;
     onCancel: () => void;
     onReload: () => void;
 }) {
@@ -129,6 +129,15 @@ export function IntervalEditor({
             {editor.status === "failed" && (
                 <>
                     <Notice error>{editor.error}</Notice>
+                    {editor.implausible && (
+                        <button
+                            className="button"
+                            type="button"
+                            onClick={() => onSave("set", true)}
+                        >
+                            {t("save_implausible")}
+                        </button>
+                    )}
                     <button
                         className="button secondary"
                         type="button"

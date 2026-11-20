@@ -2077,9 +2077,7 @@ export interface components {
             /** Format: date-time */
             ends_at: string;
             observation: components["schemas"]["ObservationOutput"] | null;
-            previous_configuration_observation:
-                | components["schemas"]["EarlierConfigurationObservationOutput"]
-                | null;
+            previous_configuration_observations: components["schemas"]["EarlierConfigurationObservationOutput"][];
             revision_id: number | null;
             effective: components["schemas"]["ProductionValueOutput"] | null;
             provider_originals: components["schemas"]["ProductionProviderOutput"][];
