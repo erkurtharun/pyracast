@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getLocale } from "next-intl/server";
+import "@/styles/tokens.css";
 import "./globals.css";
 export const metadata: Metadata = {
     metadataBase: new URL("https://pyracast.app"),

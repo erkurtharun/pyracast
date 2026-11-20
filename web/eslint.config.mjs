@@ -3,6 +3,8 @@ import js from "@eslint/js";
 import ts from "typescript-eslint";
 import next from "@next/eslint-plugin-next";
 import hooks from "eslint-plugin-react-hooks";
+import css from "@eslint/css";
+import pyracast from "./eslint/design-tokens.mjs";
 
 // Imports point down: app -> features -> ui -> lib and i18n. A feature reaches another one only
 // through its top-level modules; nested folders are its internals.
@@ -73,4 +75,20 @@ export default defineConfig([
         "**/components/**",
         "**/features/*/*/**",
     ),
+    {
+        files: ["**/*.css"],
+        language: "css/css",
+        plugins: { css },
+    },
+    {
+        files: ["src/**/*.{ts,tsx,css}"],
+        plugins: { pyracast },
+        rules: { "pyracast/design-tokens": "error" },
+    },
+    {
+        files: ["src/styles/tokens.{ts,css}"],
+        rules: { "pyracast/design-tokens": "off" },
+    },
+    // Inline directives could switch the token rule off; no source file needs one.
+    { linterOptions: { noInlineConfig: true } },
 ]);

@@ -97,7 +97,7 @@ export function ForecastChart({
                             <div
                                 style={{
                                     height: `${typeof row.affected_mean_power_mw === "number" ? (row.affected_mean_power_mw / max) * 100 : 0}%`,
-                                    background: "#3874a1",
+                                    background: "var(--blue-575)",
                                 }}
                             />
                         )}

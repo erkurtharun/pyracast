@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { QRCodeSVG } from "qrcode.react";
 import { useId, type Ref } from "react";
+import { qrColours } from "@/styles/tokens";
 
 type AuthenticatorSetupProps = {
     headingRef: Ref<HTMLHeadingElement>;
@@ -45,8 +46,8 @@ export function AuthenticatorSetup({
                     value={totpUrl}
                     size={208}
                     marginSize={4}
-                    bgColor="#ffffff"
-                    fgColor="#000000"
+                    bgColor={qrColours.background}
+                    fgColor={qrColours.foreground}
                     role="img"
                     aria-label={t("qrCodeLabel")}
                 />

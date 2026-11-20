@@ -21,9 +21,7 @@ export function formatTime(
 ): string {
     const date = instant(value);
     return date
-        ? new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(
-              date,
-          )
+        ? new Intl.DateTimeFormat(locale, { ...options, timeZone }).format(date)
         : MISSING;
 }
 
