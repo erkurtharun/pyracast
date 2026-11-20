@@ -26,6 +26,7 @@ from pyracast.accounts.models import (
 )
 from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.errors import ConflictError, ErrorCode
+from pyracast.plants.automation import automated_plants
 from pyracast.plants.models import Plant
 from pyracast.platform_admin.read_models import summarize_plant, workspace_regions
 from pyracast.regions.models import active_region
@@ -208,6 +209,22 @@ def report_invitation(request: HttpRequest, invitation: WorkspaceInvitation) -> 
         _("The invitation to %(email)s is being sent; its state appears in the list.")
         % {"email": invitation.email},
     )
+
+
+def reassignment_impact(tenant: Tenant) -> dict[str, Any]:
+    """What `reassign_workspace_admin` changes, read from the queries it writes through."""
+    administrator = (
+        Membership.objects.filter(tenant=tenant, role=WorkspaceRole.ADMIN)
+        .select_related("user")
+        .first()
+    )
+    return {
+        "administrator": administrator and administrator.user,
+        "plants": list(automated_plants(tenant.pk).values_list("name", flat=True)),
+        "invitations": list(
+            pending_invitations(tenant.pk).order_by("email").values_list("email", flat=True)
+        ),
+    }
 
 
 def tenant_list_context(

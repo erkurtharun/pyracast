@@ -22,7 +22,6 @@ from pyracast.accounts.models import (
     WorkspaceRole,
 )
 from pyracast.accounts.operations import remove_workspace_member
-from pyracast.plants.models import Plant
 from pyracast.platform_admin.forms import form_data, form_page, submitted
 from pyracast.platform_admin.tenants import (
     InvitationForm,
@@ -31,6 +30,7 @@ from pyracast.platform_admin.tenants import (
     WorkspaceRenameForm,
     member_label,
     pending_invitations,
+    reassignment_impact,
     report_invitation,
     tenant_list_context,
     workspace_context,
@@ -126,13 +126,7 @@ def workspace_administrator(
         request,
         "workspace_administrator",
         _("Change administrator"),
-        {
-            "tenant": tenant,
-            "form": form,
-            "has_automatic_calibration": Plant.objects.filter(
-                region__tenant=tenant, automatic_calibration_enabled=True
-            ).exists(),
-        },
+        {"tenant": tenant, "form": form, "impact": reassignment_impact(tenant)},
     )
 
 

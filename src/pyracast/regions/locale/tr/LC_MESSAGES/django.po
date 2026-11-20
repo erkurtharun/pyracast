@@ -1533,13 +1533,6 @@ msgstr "Üyeler"
 msgid "Workspace pages"
 msgstr "Çalışma alanı sayfaları"
 
-msgid ""
-"After a change, the new administrator must enable automatic calibration "
-"again."
-msgstr ""
-"Değişiklikten sonra yeni yönetici otomatik kalibrasyonu yeniden "
-"etkinleştirmelidir."
-
 msgid "Action needed"
 msgstr "İşlem gerekiyor"
 
@@ -2165,16 +2158,8 @@ msgstr "Çalışma alanı oluştur"
 msgid "Save changes"
 msgstr "Değişiklikleri kaydet"
 
-msgid ""
-"The current administrator becomes a viewer and pending invitations are "
-"revoked."
-msgstr "Mevcut yönetici izleyici olur ve bekleyen davetler iptal edilir."
-
 msgid "Only active members can be chosen."
 msgstr "Yalnızca etkin üyeler seçilebilir."
-
-msgid "Pending invitations are revoked."
-msgstr "Bekleyen davetler iptal edilir."
 
 msgid "Change administrator"
 msgstr "Yöneticiyi değiştir"
@@ -2813,3 +2798,26 @@ msgstr "Yönetici gerekiyor"
 
 msgid "Inactive account"
 msgstr "Devre dışı hesap"
+
+msgid "What a change does"
+msgstr "Değişikliğin etkisi"
+
+#, python-format
+msgid "%(member)s becomes a viewer."
+msgstr "%(member)s izleyici olur."
+
+msgid ""
+"Automatic calibration stops on these plants; the new administrator can turn it "
+"on again:"
+msgstr ""
+"Bu santrallerde otomatik kalibrasyon durur; yeni yönetici yeniden "
+"açabilir:"
+
+msgid "No plant uses automatic calibration."
+msgstr "Otomatik kalibrasyon kullanan santral yok."
+
+msgid "These open invitations are revoked:"
+msgstr "Şu açık davetler iptal edilir:"
+
+msgid "No invitation is open."
+msgstr "Açık davet yok."
