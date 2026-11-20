@@ -1,4 +1,5 @@
 "use client";
+import { DisplayError, displayMessage } from "@/lib/api/errors";
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
@@ -107,17 +108,14 @@ export function LinkedAccounts({
                 if (result.status === 401) {
                     if (!result.meta?.is_authenticated)
                         await refreshExpiredSession(security("sessionExpired"));
-                    throw new Error(security("confirmIdentityFirst"));
+                    throw new DisplayError(security("confirmIdentityFirst"));
                 }
                 if (!Array.isArray(result.data))
-                    throw new Error(t("loadError"));
+                    throw new DisplayError(t("loadError"));
                 setAccounts(result.data);
             })
             .catch((err) => {
-                if (active)
-                    setError(
-                        err instanceof Error ? err.message : t("loadError"),
-                    );
+                if (active) setError(displayMessage(err, t("loadError")));
             });
         return () => {
             active = false;
@@ -143,7 +141,7 @@ export function LinkedAccounts({
                 pending: { kind: "connect" },
             });
         } catch (err) {
-            setError(err instanceof Error ? err.message : t("loadError"));
+            setError(displayMessage(err, t("loadError")));
         } finally {
             setBusy(false);
         }
@@ -160,7 +158,8 @@ export function LinkedAccounts({
             if (result.status === 401) {
                 if (!result.meta?.is_authenticated)
                     await refreshExpiredSession(security("sessionExpired"));
-                if (replay) throw new Error(security("reauthStillRequired"));
+                if (replay)
+                    throw new DisplayError(security("reauthStillRequired"));
                 setReauth({
                     mode: getReauthMode(result, hasPassword),
                     pending: { kind: "disconnect", account },
@@ -171,7 +170,7 @@ export function LinkedAccounts({
             setNotice("removed");
             setVersion((v) => v + 1);
         } catch (err) {
-            setError(err instanceof Error ? err.message : t("loadError"));
+            setError(displayMessage(err, t("loadError")));
         } finally {
             setBusy(false);
         }

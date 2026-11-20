@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { ApiError } from "@/lib/api/errors";
+import { ApiError, DisplayError } from "@/lib/api/errors";
 import { authRequest } from "@/lib/auth-api";
 import { loadSession } from "@/lib/session-client";
 import {
@@ -11,7 +11,8 @@ import {
     refreshExpiredSession,
     type ReauthMode,
 } from "./security-reauthentication";
-import { ActionForm, Field, Notice } from "@/ui/ui";
+import { ActionForm, Field } from "@/ui/form";
+import { Notice } from "@/ui/ui";
 
 type Step =
     | { status: "address" | "sent"; address: string }
@@ -74,6 +75,7 @@ export function EmailChange({
                         name="email"
                         type="email"
                         defaultValue={step.address}
+                        required
                     />
                 </ActionForm>
             )}
@@ -88,9 +90,9 @@ export function EmailChange({
                     if (result.status === 401) {
                         if (!result.meta?.is_authenticated) {
                             await loadSession();
-                            throw new Error(t("sessionExpired"));
+                            throw new DisplayError(t("sessionExpired"));
                         }
-                        throw new Error(t("confirmIdentity"));
+                        throw new DisplayError(t("confirmIdentity"));
                     }
                     await loadSession();
                 }}
@@ -99,6 +101,7 @@ export function EmailChange({
                     label={t("emailCode")}
                     name="key"
                     autoComplete="one-time-code"
+                    required
                 />
             </ActionForm>
         </details>

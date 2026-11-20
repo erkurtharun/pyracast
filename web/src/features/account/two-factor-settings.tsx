@@ -3,7 +3,7 @@
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadSession } from "@/lib/session-client";
-import { ApiError } from "@/lib/api/errors";
+import { ApiError, displayMessage } from "@/lib/api/errors";
 import {
     authRequest,
     type AuthenticatorRecord,
@@ -135,7 +135,7 @@ export function TwoFactorSettings({
                 if (!active || !mountedRef.current) return;
                 setView({
                     kind: "loadError",
-                    message: err instanceof Error ? err.message : undefined,
+                    message: displayMessage(err, ""),
                 });
             });
 
@@ -320,10 +320,7 @@ export function TwoFactorSettings({
                         if (!mountedRef.current) return;
                         setView({ kind: "enabled", recovery });
                         setErrorFeedback({
-                            text:
-                                recoveryErr instanceof Error
-                                    ? recoveryErr.message
-                                    : t("loadFailed"),
+                            text: displayMessage(recoveryErr, t("loadFailed")),
                             locale,
                         });
                         focusError();
@@ -452,8 +449,7 @@ export function TwoFactorSettings({
                     return;
                 }
             }
-            const message =
-                err instanceof Error ? err.message : t("loadFailed");
+            const message = displayMessage(err, t("loadFailed"));
             setErrorFeedback({ text: message, locale });
             if (err instanceof ApiError && err.fields.code) {
                 setCodeFieldError({ text: err.fields.code, locale });
