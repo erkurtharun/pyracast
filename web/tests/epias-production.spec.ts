@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "./support/test";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
+import AxeBuilder from "@axe-core/playwright";
 import { mockApi, paged, region, user, tenantRow } from "./support/workspace";
 import { errorBody } from "./support/errors";
 
@@ -1105,6 +1106,54 @@ test("failed production requests stop loading without exposing stale values", as
     await expect(
         page.getByRole("button", { name: "Download CSV" }),
     ).toHaveCount(0);
+});
+
+test("source details keep the cached source with a retry when its refresh fails", async ({
+    page,
+}) => {
+    await productionApi(page);
+    let sourceFails = false;
+    await page.route("**/production-source/", (route) =>
+        sourceFails
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", "Source details are busy."),
+              })
+            : route.fallback(),
+    );
+    await openProduction(page);
+    const details = page.locator(".production-source");
+    await details
+        .getByText("Source and correction details", { exact: true })
+        .click();
+    await expect(details.getByText("G4-BOR-1 GES · Connected")).toBeVisible();
+    sourceFails = true;
+    const reload = page.waitForResponse(
+        (response) =>
+            response.url().endsWith("/production-source/") &&
+            response.status() === 503,
+    );
+    await page
+        .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
+        .click();
+    await page.getByLabel("Production for 08:00–09:00 (MWh)").fill("2");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await reload;
+    const failure = details
+        .getByRole("alert")
+        .filter({ hasText: "Could not refresh" });
+    await expect(failure).toContainText("Source details are busy.");
+    await expect(details.getByText("G4-BOR-1 GES · Connected")).toBeVisible();
+    expect(
+        (await new AxeBuilder({ page }).include(".production-source").analyze())
+            .violations,
+    ).toEqual([]);
+    sourceFails = false;
+    await failure
+        .getByRole("button", { name: "Try again", exact: true })
+        .click();
+    await expect(failure).toHaveCount(0);
+    await expect(details.getByText("G4-BOR-1 GES · Connected")).toBeVisible();
 });
 
 test("Turkish production at 320px keeps native corrections, decimal commas and import review usable", async ({
