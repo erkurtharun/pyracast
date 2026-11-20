@@ -2744,3 +2744,24 @@ msgstr ""
 
 msgid "The session changed in another tab. The page now shows the current session."
 msgstr "Oturum başka bir sekmede değişti. Sayfa artık geçerli oturumu gösteriyor."
+
+msgid "Enter the reason the customer will read."
+msgstr "Müşterinin okuyacağı gerekçeyi yazın."
+
+msgid "Plant resubmitted for review"
+msgstr "Santral yeniden incelemeye gönderildi"
+
+msgid "Use at most 500 characters for the reason."
+msgstr "Gerekçe en fazla 500 karakter olabilir."
+
+msgid "Only a rejected plant can be resubmitted for review."
+msgstr "Yalnızca reddedilen bir santral yeniden incelemeye gönderilebilir."
+
+msgid "Last review decision"
+msgstr "Son inceleme kararı"
+
+msgid "Reason shown to the customer"
+msgstr "Müşteriye gösterilen gerekçe"
+
+msgid "Resubmitted by the customer"
+msgstr "Müşteri tarafından yeniden gönderildi"

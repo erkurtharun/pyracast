@@ -1,10 +1,10 @@
 from collections.abc import Callable, Iterator, Sequence
-from typing import ClassVar
+from typing import ClassVar, cast
 
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
-from django.core.mail import EmailMessage
+from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.core.mail.backends.base import BaseEmailBackend
 from django.db import connection, transaction
 from django.test import override_settings
@@ -82,7 +82,7 @@ def decide(system: System, decision: str, reason: str = REASON) -> bool:
     return decide_review(system.admin, system.region.pk, decision, reason=reason)
 
 
-TRIGGERS = {
+TRIGGERS: dict[str, tuple[bool, Callable[[System], bool], str]] = {
     "approved": (False, lambda system: approve(system), AuditAction.REGION_APPROVED),
     "rejected": (
         False,
@@ -239,7 +239,7 @@ def test_the_rejection_mail_names_the_plant_reason_and_a_link_from_the_configure
     assert message.subject == "Kayseri solar park was not approved"
     assert REASON in message.body
     assert link in message.body
-    html = message.alternatives[0][0]
+    html = str(cast(EmailMultiAlternatives, message).alternatives[0][0])
     assert REASON in html
     assert link in html
     assert "attacker" not in message.body + html

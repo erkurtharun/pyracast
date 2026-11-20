@@ -16,6 +16,7 @@ from pyracast.api.serializers import RegionOutput
 from pyracast.errors import ErrorCode
 from pyracast.plants.serializers import EmptyInput
 from pyracast.regions.models import Region
+from pyracast.regions.review import with_review_outcome
 
 RESTORE_BLOCKERS = (ErrorCode.TRASH_RETENTION_EXPIRED, ErrorCode.LOCATION_ALREADY_EXISTS)
 
@@ -65,4 +66,6 @@ class RestoreRegionView(APIView):
         data = EmptyInput(data=request.data)
         data.is_valid(raise_exception=True)
         region = trash.restore_region(cast(User, request.user), tenant_id, region_id)
-        return Response(RegionOutput(region).data)
+        return Response(
+            RegionOutput(with_review_outcome(Region.objects.all()).get(pk=region.pk)).data
+        )

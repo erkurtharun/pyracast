@@ -1,11 +1,11 @@
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import ClassVar
+from typing import ClassVar, cast
 
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
-from django.core.mail import EmailMessage
+from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.core.mail.backends.base import BaseEmailBackend
 from django.test import override_settings
 from django.utils import timezone
@@ -177,7 +177,9 @@ def test_the_warning_mail_names_the_plant_its_deletion_time_and_the_recycle_bin(
     assert "27" in message.body
     assert "12:00" in message.body
     assert f"{ORIGIN}/app/w/{region.tenant_id}/trash/" in message.body
-    assert f"{ORIGIN}/app/w/{region.tenant_id}/trash/" in message.alternatives[0][0]
+    assert f"{ORIGIN}/app/w/{region.tenant_id}/trash/" in str(
+        cast(EmailMultiAlternatives, message).alternatives[0][0]
+    )
 
 
 def test_the_purge_happens_on_time_when_the_warning_mail_cannot_be_sent(

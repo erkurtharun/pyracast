@@ -10,9 +10,9 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils.translation import gettext_lazy
 
-from pyracast.accounts.authorization import require_platform_admin
+from pyracast.accounts.authorization import authorize_workspace_admin, require_platform_admin
 from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
-from pyracast.errors import ConflictError, ErrorCode
+from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.forecasts.models import CollectionJob
 from pyracast.plants.models import CONFIGURATION_PARAMETERS, Plant, PlantSubmission
 from pyracast.plants.operations import activate_submitted_plants
@@ -26,6 +26,8 @@ UNDECLARED_FIELDS = frozenset({"id", "plant", "submitted_by", "created_at", "upd
 DECLARATION_CHANGED = gettext_lazy(
     "The declared plant details changed after this page opened. Review them again before approving."
 )
+NOT_RESUBMITTABLE = gettext_lazy("Only a rejected plant can be resubmitted for review.")
+REVIEW_REASON_MAX_LENGTH = 500
 
 
 class ApprovalBlocker(StrEnum):
@@ -166,12 +168,31 @@ def approve_region(
     return Approval(job, True)
 
 
+def review_reason(reason: str) -> str:
+    reason = reason.strip()
+    if not reason:
+        raise DomainError(ErrorCode.REVIEW_REASON_REQUIRED, field="reason")
+    if len(reason) > REVIEW_REASON_MAX_LENGTH:
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST,
+            gettext_lazy("Use at most 500 characters for the reason."),
+            field="reason",
+        )
+    return reason
+
+
 def decide_review(
-    actor: User, region_id: int, decision: str, *, seen: ReviewSnapshot | None = None
+    actor: User,
+    region_id: int,
+    decision: str,
+    *,
+    reason: str,
+    seen: ReviewSnapshot | None = None,
 ) -> bool:
     require_platform_admin(actor)
     if decision not in ReviewDecision.values:
         raise ValidationError("Choose a review decision.")
+    reason = review_reason(reason)
     target, action = DECISIONS[ReviewDecision(decision)]
     with transaction.atomic():
         region = Region.objects.active().select_for_update().get(pk=region_id)
@@ -179,5 +200,33 @@ def decide_review(
             return False
         _require_seen(region, seen)
         set_review_status(region, target)
-        record_audit(actor=actor, region=region, action=action, revision=region.revision)
+        record_audit(
+            actor=actor,
+            region=region,
+            action=action,
+            revision=region.revision,
+            details={"reason": reason},
+        )
+    return True
+
+
+def resubmit_region(actor: User, tenant_id: int, region_id: int, *, expected_revision: int) -> bool:
+    """Returns a rejected plant to review; False when it is already in review. Only the
+    operator's approval leaves review, so a resubmission never approves a plant."""
+    with transaction.atomic():
+        authorize_workspace_admin(actor, tenant_id)
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
+        if region.status == RegionStatus.PENDING:
+            return False
+        if region.status != RegionStatus.REJECTED:
+            raise ConflictError(ErrorCode.CONFLICT, NOT_RESUBMITTABLE)
+        if region.revision != expected_revision:
+            raise ConflictError(ErrorCode.REGION_REVISION_CHANGED)
+        set_review_status(region, RegionStatus.PENDING)
+        record_audit(
+            actor=actor,
+            region=region,
+            action=AuditAction.REGION_RESUBMITTED,
+            revision=region.revision,
+        )
     return True

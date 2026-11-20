@@ -427,7 +427,9 @@ LOCATION_DECISIONS = {
 def _decide(actor: User, region_id: int, form: ReviewDecisionForm) -> bool:
     action = form.cleaned_data["action"]
     if action in ReviewDecision.values:
-        return decide_review(actor, region_id, action, seen=form.seen())
+        return decide_review(
+            actor, region_id, action, reason=form.cleaned_data["decision_reason"], seen=form.seen()
+        )
     change = RegionLocationChangeRequest.objects.get(
         active_region("region__"), pk=form.cleaned_data["location_change_id"], region_id=region_id
     )

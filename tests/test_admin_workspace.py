@@ -56,6 +56,7 @@ def decision_input(region: Region, action: str, **changes: Any) -> dict[str, Any
         "expected_revision": region.revision,
         "expected_status": region.status,
         "action": action,
+        **({"decision_reason": "A review reason."} if action in {"reject", "suspend"} else {}),
         **changes,
     }
 

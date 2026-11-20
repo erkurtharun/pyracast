@@ -290,6 +290,7 @@ CUSTOMER_FIELDS = {
     "retry_after",
     "retry_until",
     "review_fingerprint",
+    "review_reason",
     "reviewed_at",
     "reviewed_by",
     "revision",

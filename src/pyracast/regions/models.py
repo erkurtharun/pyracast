@@ -43,6 +43,7 @@ class AuditAction(models.TextChoices):
     REGION_APPROVED = "region_approved", gettext_lazy("Plant approved")
     REGION_REJECTED = "region_rejected", gettext_lazy("Plant rejected")
     REGION_SUSPENDED = "region_suspended", gettext_lazy("Plant suspended")
+    REGION_RESUBMITTED = "region_resubmitted", gettext_lazy("Plant resubmitted for review")
     REGION_TRASHED = "region_trashed", gettext_lazy("Plant location moved to trash")
     REGION_RESTORED = "region_restored", gettext_lazy("Plant location restored")
     COLLECTION_SCHEDULE_UPDATED = (

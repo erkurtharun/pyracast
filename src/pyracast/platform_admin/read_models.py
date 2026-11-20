@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from django.core.paginator import Paginator
 from django.db.models import Count, OuterRef, Q, QuerySet, Subquery
+from django.db.models.fields.json import KT
 from django.db.models.functions import Coalesce
 from django.urls import reverse
 from django.utils import timezone
@@ -43,6 +44,7 @@ from pyracast.regions.models import (
     RegionStatus,
     active_region,
 )
+from pyracast.regions.review import REVIEW_DECISIONS
 
 if TYPE_CHECKING:
     from django_stubs_ext import StrOrPromise, WithAnnotations
@@ -397,6 +399,25 @@ def operations_context(issue: str = "") -> dict[str, Any]:
     }
 
 
+def review_history(region_id: int) -> dict[str, Any]:
+    """The latest review decision with its reason, and whether the customer resubmitted the
+    plant after it."""
+    events = list(
+        AuditEvent.objects.filter(
+            region_id=region_id, action__in=(*REVIEW_DECISIONS, AuditAction.REGION_RESUBMITTED)
+        )
+        .annotate(reason=KT("details__reason"))
+        .order_by("-created_at", "-pk")
+        .values("action", "reason", "created_at")[:2]
+    )
+    resubmitted = bool(events) and events[0]["action"] == AuditAction.REGION_RESUBMITTED
+    decision = events[1 if resubmitted else 0] if len(events) > resubmitted else None
+    return {
+        "decision": decision and {**decision, "label": AuditAction(decision["action"]).label},
+        "resubmitted_at": events[0]["created_at"] if resubmitted else None,
+    }
+
+
 def review_context(region_id: int) -> dict[str, Any]:
     region = workspace_regions().get(pk=region_id)
     summary = summarize_plant(region)
@@ -407,6 +428,7 @@ def review_context(region_id: int) -> dict[str, Any]:
         "recent_collections": work["collections"],
         "recent_deliveries": work["deliveries"],
         "recent_activity": recent_activity_context(region.pk),
+        "review_history": review_history(region.pk),
         "review_form": ReviewDecisionForm(
             initial={"expected_revision": region.revision, "expected_status": region.status}
         ),

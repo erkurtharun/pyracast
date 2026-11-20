@@ -9,6 +9,7 @@ from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant
 from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
+from pyracast.regions.review import with_review_outcome
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,7 @@ class Site:
 
 
 def site_queryset(tenant_id: int) -> QuerySet[Region]:
-    return Region.objects.active().filter(tenant_id=tenant_id).order_by("id")
+    return with_review_outcome(Region.objects.active().filter(tenant_id=tenant_id)).order_by("id")
 
 
 def sites(regions: Sequence[Region]) -> list[Site]:
