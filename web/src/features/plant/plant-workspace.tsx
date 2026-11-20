@@ -57,12 +57,6 @@ export function PlantWorkspace({
         resolution: "60",
         source: "auto",
     });
-    // Archived forecasts exist only for generation; the view also changes through Back and Forward.
-    if (
-        forecastView === "irradiance" &&
-        forecastOptions.source === "archived_forecast"
-    )
-        setForecastOptions({ ...forecastOptions, source: "auto" });
     const [savedPlant, setSavedPlant] = useState<Plant>();
     const currentPlant = latestPlant(plant, savedPlant);
     if (savedPlant && currentPlant === plant) setSavedPlant(undefined);

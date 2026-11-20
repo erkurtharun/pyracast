@@ -7,6 +7,8 @@ from django.utils.translation import gettext
 
 from pyracast.calculation import calculate
 from pyracast.errors import DomainError, ErrorCode
+from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
+from pyracast.forecasts.history import ARCHIVED, live_state, result_state
 from pyracast.forecasts.intraday import (
     apply_intraday_source,
     prepare_intraday_source,
@@ -116,7 +118,7 @@ def _composed_forecast(
             binding_id=configuration.binding_id, start=start, end=end, as_of=cutoff
         )
         forecasts = snapshots
-        try:
+        with stored_data("plant", plant.pk, target_date, "actuals", FROZEN_PAYLOAD_FAULTS):
             source = (
                 prepare_intraday_source(
                     configuration.binding,
@@ -129,8 +131,6 @@ def _composed_forecast(
                 if include_actuals or actuals_only
                 else None
             )
-        except (ValueError, ArithmeticError, KeyError, TypeError) as exc:
-            raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from exc
         if source is not None:
             snapshots = source.snapshots
             source_kind = source.source_kind
@@ -145,15 +145,13 @@ def _composed_forecast(
         ):
             calibration = None
         if snapshot is not None:
-            try:
+            with stored_data("plant", plant.pk, target_date, "forecast"):
                 composition = (
                     source.composition
                     if source is not None
                     else compose_snapshots(snapshots, start, end)
                 )
-                used_snapshots = [
-                    source for source in snapshots if source.pk in composition.snapshot_ids
-                ]
+                used_snapshots = [row for row in snapshots if row.pk in composition.snapshot_ids]
                 result = forecast_payload(
                     configuration,
                     snapshot,
@@ -185,8 +183,6 @@ def _composed_forecast(
                     )
                 else:
                     apply_composition(irradiance, snapshots, composition)
-            except (ValueError, ArithmeticError) as exc:
-                raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from exc
             if source is None:
                 cast(dict[str, object], result["provenance"])["selection_policy"] = SELECTION_POLICY
             if historical and configuration.pk != plant.current_configuration_id:
@@ -199,11 +195,16 @@ def _composed_forecast(
         "configuration_id": configuration.pk if configuration else None,
         "calibration_id": calibration.pk if calibration else None,
         "source_kind": source_kind,
-        "freshness": "missing"
-        if snapshot is None
-        else "fresh"
-        if all(source.collected_at >= now - timedelta(hours=24) for source in used_snapshots)
-        else "stale",
+        **result_state(
+            snapshot is not None,
+            ARCHIVED
+            if historical
+            else live_state(
+                connection_current=True,
+                oldest_collected_at=min((row.collected_at for row in used_snapshots), default=None),
+                now=now,
+            ),
+        ),
         "unavailable_reason": "configuration_unavailable"
         if configuration is None
         else "estimated_actuals_unavailable"

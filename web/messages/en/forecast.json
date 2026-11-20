@@ -121,6 +121,10 @@
             "provider_error": "provider error",
             "missing": "missing",
             "unknown": "{value}"
+        },
+        "stale_reason": {
+            "collection_overdue": "The newest provider collection is more than a day old.",
+            "connection_inactive": "The provider connection of this site is no longer active."
         }
     },
     "ForecastIntervals": {
@@ -146,9 +150,6 @@
         "how_comparison_is_measured": "How comparison is measured",
         "historical_model_uses_saved_weather_estimates_and": "Historical model uses saved weather estimates and the current configuration. Calibration applies from its training period onward. This retrospective comparison can include provisional production. It does not measure forecast accuracy.",
         "archived_forecast_description": "Compares the last forecast saved before daylight began, with its original calibration. Set a previous-day cutoff to compare an earlier forecast.",
-        "comparison": "Comparison",
-        "historical_model": "Historical model",
-        "archived_forecast_performance": "Archived forecast performance",
         "previousday_cutoff": "Previous-day cutoff (optional)",
         "start_date": "Start date",
         "end_date": "End date",
@@ -185,7 +186,6 @@
         "daily_comparison": "Daily comparison ({count, plural, one {# day} other {# days}})",
         "date_range": ": {start} to {end}",
         "unavailable_dates": "Unavailable dates ({count})",
-        "reason_count": "{reason}: {count, plural, one {# day} other {# days}}",
         "reasons": {
             "estimated_actuals_not_available": "Historical weather estimates are not available",
             "configuration_not_available": "Configuration was not available before this day",
@@ -193,7 +193,15 @@
             "configuration_not_comparable": "The measurement basis or timezone has changed",
             "incomplete_or_invalid_day": "Production or reference coverage is incomplete or invalid",
             "invalid_forecast_data": "Saved reference data is invalid"
-        }
+        },
+        "performance_views": "Performance views",
+        "forecast_accuracy": "Forecast accuracy",
+        "model_check": "Model check",
+        "advanced": "Advanced",
+        "relative_error": "Relative error",
+        "skill_score": "Skill vs uncalibrated model",
+        "skill_days": "Skill uses {count, plural, one {# day} other {# days}} outside the calibration's training period.",
+        "reason_dates": "{reason}: {dates}"
     },
     "Calibrations": {
         "calibration_history": "Calibration history",

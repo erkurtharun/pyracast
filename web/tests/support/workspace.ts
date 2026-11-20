@@ -43,7 +43,6 @@ export const plant = {
     current_configuration: {
         id: 31,
         revision: 1,
-        binding_id: 1,
         created_at: "2026-01-01T00:00:00Z",
         dc_capacity_mw: 5,
         inverter_capacity_mw: 4,

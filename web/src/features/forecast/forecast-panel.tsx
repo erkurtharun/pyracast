@@ -58,12 +58,11 @@ export function ForecastPanel({
     const metric = electrical ? "mean_power_mw" : "ghi_wm2",
         unit = electrical ? "MW" : "W/m²";
     const rows = chartIntervals(allRows, metric, showFullDay, result);
-    const time = (value: string) =>
-        format.time(value, forecast.timezone, {
-            hour: "2-digit",
-            minute: "2-digit",
-            hourCycle: "h23",
-        });
+    const intervalTime = format.intervals(
+        forecast.timezone,
+        allRows.map((row) => row.start),
+    );
+    const time = (value: string) => intervalTime.format(new Date(value));
     const scenarioLabel = t("with_outages_title");
     return (
         <>

@@ -1,6 +1,8 @@
 from typing import Any, cast
 
+from django.db import models
 from django.utils.translation import gettext
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from pyracast.accounts.models import Tenant, WorkspaceRole
@@ -112,15 +114,129 @@ class LocationChangeOutput(serializers.ModelSerializer[RegionLocationChangeReque
 class ForecastQuery(InputSerializer):
     date = serializers.DateField()
     data_source = serializers.ChoiceField(
-        choices=("auto", *SnapshotSourceKind.values), default=SnapshotSourceKind.FORECAST
+        choices=("auto", *SnapshotSourceKind.values, "archived_forecast"), default="auto"
     )
+
+
+def _optional_number() -> serializers.FloatField:
+    return serializers.FloatField(allow_null=True, required=False)
+
+
+def _flags() -> serializers.ListField:
+    return serializers.ListField(child=serializers.CharField(), required=False)
+
+
+def _snapshot_ids() -> serializers.ListField:
+    return serializers.ListField(child=serializers.IntegerField(), required=False)
+
+
+class TimeWindowOutput(serializers.Serializer[dict[str, Any]]):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+
+
+class DaylightOutput(serializers.Serializer[dict[str, Any]]):
+    policy = serializers.CharField(required=False)
+    energy_scope = serializers.CharField(required=False)
+    status = serializers.ChoiceField(choices=("normal", "polar_day", "polar_night"))
+    sunrise = serializers.DateTimeField(allow_null=True, required=False)
+    sunset = serializers.DateTimeField(allow_null=True, required=False)
+    windows = TimeWindowOutput(many=True, required=False)
+    duration_seconds = _optional_number()
+    coverage_seconds = _optional_number()
+    valid_coverage_seconds = _optional_number()
+    coverage_fraction = _optional_number()
+    input_coverage_seconds = _optional_number()
+    input_coverage_fraction = _optional_number()
+    complete = serializers.BooleanField(required=False)
+    energy_mwh = _optional_number()
+    partial_energy_mwh = _optional_number()
+    energy_kwh_m2 = _optional_number()
+    partial_energy_kwh_m2 = _optional_number()
+
+
+class SourceSnapshotOutput(serializers.Serializer[dict[str, Any]]):
+    snapshot_id = serializers.IntegerField()
+    collected_at = serializers.DateTimeField()
+    source_kind = serializers.CharField(required=False)
+
+
+class ForecastProvenanceOutput(serializers.Serializer[dict[str, Any]]):
+    selection_policy = serializers.CharField(required=False)
+    snapshot_id = serializers.IntegerField(allow_null=True, required=False)
+    source_kind = serializers.CharField(required=False)
+    collected_at = serializers.DateTimeField(allow_null=True, required=False)
+    published_at = serializers.DateTimeField(allow_null=True, required=False)
+    selection_cutoff = serializers.DateTimeField(allow_null=True, required=False)
+    source_snapshot_ids = _snapshot_ids()
+    source_snapshots = SourceSnapshotOutput(many=True, required=False)
+
+
+class WeatherReferenceOutput(serializers.Serializer[dict[str, Any]]):
+    status = serializers.ChoiceField(choices=("ready", "partial", "unavailable"))
+    energy_kwh_m2 = _optional_number()
+    partial_energy_kwh_m2 = _optional_number()
+    coverage_fraction = _optional_number()
+    quality_flags = _flags()
+
+
+class IrradianceIntervalOutput(serializers.Serializer[dict[str, Any]]):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+    ghi_wm2 = _optional_number()
+    quality_flags = _flags()
+    source_snapshot_ids = _snapshot_ids()
+    source_kinds = _flags()
+
+
+class IrradianceSummaryOutput(serializers.Serializer[dict[str, Any]]):
+    """Global horizontal irradiation in kWh/m2 for the local day."""
+
+    energy_kwh_m2 = _optional_number()
+    partial_energy_kwh_m2 = _optional_number()
+    complete = serializers.BooleanField(required=False)
+    quality_flags = _flags()
+
+
+class IrradianceResultOutput(IrradianceSummaryOutput):
+    local_date = serializers.DateField(required=False)
+    timezone = serializers.CharField(required=False)
+    start = serializers.DateTimeField(required=False)
+    end = serializers.DateTimeField(required=False)
+    energy_mj_m2 = _optional_number()
+    partial_energy_mj_m2 = _optional_number()
+    coverage_fraction = _optional_number()
+    daylight = DaylightOutput(required=False)
+    intervals = IrradianceIntervalOutput(many=True, required=False)
+    provenance = ForecastProvenanceOutput(required=False)
+    weather_reference = WeatherReferenceOutput(required=False)
+
+
+# Stored results are frozen JSON from earlier code versions: the typed components document
+# the contract while the payload passes through unchanged, keeping every provenance key.
+@extend_schema_field(IrradianceResultOutput(allow_null=True))
+class IrradianceResultField(serializers.JSONField):
+    pass
+
+
+class Freshness(models.TextChoices):
+    FRESH = "fresh"
+    STALE = "stale"
+    MISSING = "missing"
+    ARCHIVED = "archived"
+
+
+class StaleReason(models.TextChoices):
+    COLLECTION_OVERDUE = "collection_overdue"
+    CONNECTION_INACTIVE = "connection_inactive"
 
 
 class ForecastEnvelope(serializers.Serializer[dict[str, Any]]):
     date = serializers.DateField()
     timezone = serializers.CharField()
     source_kind = serializers.ChoiceField(choices=("forecast", "estimated_actuals", "mixed"))
-    freshness = serializers.ChoiceField(choices=("fresh", "stale", "missing"))
+    freshness = serializers.ChoiceField(choices=Freshness.choices)
+    stale_reason = serializers.ChoiceField(choices=StaleReason.choices, allow_null=True)
     unavailable_reason = serializers.ChoiceField(
         choices=(
             "configuration_unavailable",
@@ -129,10 +245,10 @@ class ForecastEnvelope(serializers.Serializer[dict[str, Any]]):
         ),
         allow_null=True,
     )
-    result = serializers.JSONField(allow_null=True)
 
 
 class ForecastOutput(ForecastEnvelope):
+    result = IrradianceResultField(allow_null=True)
     collected_at = serializers.DateTimeField(allow_null=True)
     issued_at = serializers.DateTimeField(allow_null=True)
     binding_id = serializers.IntegerField(allow_null=True)

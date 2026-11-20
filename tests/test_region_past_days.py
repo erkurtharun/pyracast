@@ -4,10 +4,12 @@ from typing import Any
 import pytest
 from django.test import Client
 
+from pyracast.forecasts.models import ForecastResult
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_archive import forecast_cutoff
 from tests.support.domain import System
 from tests.support.forecast_history import DAY, TODAY, add_history
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -131,3 +133,22 @@ def test_forecast_reads_default_to_the_automatic_source(
     response = client.get(url, {"date": str(DAY)})
     assert response.status_code == 200
     assert response.json()["source_kind"] == "estimated_actuals"
+
+
+def test_a_region_archive_whose_saved_payload_fails_validation_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _ = make_plant(monkeypatch)
+    start, _ = local_day_bounds(DAY, system.binding.timezone)
+    snapshot = snapshot_for(system, DAY, collected_at=start - timedelta(hours=3))
+    snapshot.available_at = snapshot.collected_at
+    stored_again(snapshot)
+    snapshot.job.status = "succeeded"
+    snapshot.job.save(update_fields=["status"])
+    ForecastResult.objects.create(
+        snapshot=snapshot, payload={"marker": "unvalidated"}, published_at=snapshot.collected_at
+    )
+    client = Client()
+    client.force_login(system.member)
+    body = _read(client, system, "archived_forecast").json()
+    assert (body["freshness"], body["result"]) == ("missing", None)

@@ -290,6 +290,15 @@ SPECTACULAR_SETTINGS = {
         "PreparedMessageFormatEnum": "pyracast.notifications.models.PreparedMessageFormat",
         "PreparedMessageKindEnum": "pyracast.notifications.models.PreparedMessageKind",
         "ReminderStateEnum": "pyracast.notifications.models.ReminderState",
+        "FreshnessEnum": "pyracast.api.serializers.Freshness",
+        "StaleReasonEnum": "pyracast.api.serializers.StaleReason",
+        "PerformanceDayReasonEnum": "pyracast.plants.performance.DayReason",
+        "PerformanceSelectionPolicyEnum": "pyracast.plants.performance.SelectionPolicy",
+        "DaylightStatusEnum": ["normal", "polar_day", "polar_night"],
+        "WeatherReferenceStatusEnum": ["ready", "partial", "unavailable"],
+        "OutageScenarioStatusEnum": ["estimated", "unknown_impact"],
+        "DiagnosticStatusEnum": ["suspected", "normal", "insufficient"],
+        "DiagnosticDayStatusEnum": ["shortfall", "within_threshold"],
     },
 }
 LANGUAGE_CODE = "en"

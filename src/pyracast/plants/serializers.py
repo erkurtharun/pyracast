@@ -5,7 +5,15 @@ from django.utils.translation import gettext
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from pyracast.api.serializers import FiniteFloat, ForecastEnvelope, InputSerializer
+from pyracast.api.serializers import (
+    DaylightOutput,
+    FiniteFloat,
+    ForecastEnvelope,
+    ForecastProvenanceOutput,
+    InputSerializer,
+    IrradianceSummaryOutput,
+    WeatherReferenceOutput,
+)
 from pyracast.change_requests.models import ProductionChangeAction
 from pyracast.plants.activation import ActivationBlocker, SelectionState, selection_state
 from pyracast.plants.automation_state import AutomationCause
@@ -22,6 +30,7 @@ from pyracast.plants.models import (
     PlantSubmission,
     ProductionObservation,
 )
+from pyracast.plants.performance import DayReason, SelectionPolicy
 from pyracast.plants.production_changes import PRODUCTION_BATCH_LIMIT
 
 
@@ -75,13 +84,10 @@ class PlantInput(InputSerializer):
 
 
 class ConfigurationOutput(serializers.ModelSerializer[PlantConfiguration]):
-    binding_id = serializers.IntegerField()
-
     class Meta:
         model = PlantConfiguration
         fields = (
             "id",
-            "binding_id",
             "revision",
             "dc_capacity_mw",
             "inverter_capacity_mw",
@@ -260,17 +266,19 @@ class PerformanceMetrics(serializers.Serializer[dict[str, Any]]):
 class PerformanceDay(serializers.Serializer[dict[str, Any]]):
     date = serializers.DateField()
     status = serializers.ChoiceField(choices=("matched", "missing"))
-    reason = serializers.CharField(allow_null=True)
+    reason = serializers.ChoiceField(choices=DayReason.choices, allow_null=True)
+    selection_policy = serializers.ChoiceField(choices=SelectionPolicy.choices, allow_null=True)
     snapshot_id = serializers.IntegerField(allow_null=True)
-    issuance_id = serializers.IntegerField(allow_null=True, required=False)
-    configuration_id = serializers.IntegerField(allow_null=True, required=False)
-    model_version = serializers.CharField(allow_null=True, required=False)
+    issuance_id = serializers.IntegerField(allow_null=True)
+    configuration_id = serializers.IntegerField(allow_null=True)
+    model_version = serializers.CharField(allow_null=True)
     source_snapshot_ids = serializers.ListField(child=serializers.IntegerField(), required=False)
     reference_provenance = serializers.JSONField(required=False)
     collected_at = serializers.DateTimeField(allow_null=True)
     available_at = serializers.DateTimeField(allow_null=True)
     selection_cutoff = serializers.DateTimeField(allow_null=True)
     calibration_id = serializers.IntegerField(allow_null=True)
+    calibration_in_sample = serializers.BooleanField(allow_null=True)
     factor = serializers.FloatField(allow_null=True)
     measured_energy_mwh = serializers.FloatField(allow_null=True)
     predicted_energy_mwh = serializers.FloatField(allow_null=True)
@@ -291,8 +299,7 @@ class PerformanceOutput(serializers.Serializer[dict[str, Any]]):
     start_date = serializers.DateField()
     end_date = serializers.DateField()
     evaluated_at = serializers.DateTimeField()
-    evaluation_kind = serializers.CharField()
-    selection_policy = serializers.CharField()
+    selection_policy = serializers.ChoiceField(choices=SelectionPolicy.choices)
     comparison = serializers.ChoiceField(choices=("archived_forecast", "historical_model"))
     issuance_cutoff = serializers.TimeField(allow_null=True)
     measurement_policy = serializers.CharField()
@@ -306,6 +313,15 @@ class PerformanceOutput(serializers.Serializer[dict[str, Any]]):
     excluded_days = serializers.IntegerField()
     scored_intervals = serializers.IntegerField()
     scored_hours = serializers.FloatField()
+    relative_error = serializers.FloatField(
+        allow_null=True, help_text="Sum of absolute daily errors over measured energy."
+    )
+    skill_score = serializers.FloatField(
+        allow_null=True,
+        help_text="One minus the absolute daily error over that of the uncalibrated reference, "
+        "on days the calibration did not train on.",
+    )
+    skill_days = serializers.IntegerField()
     metrics = PerformanceMetrics(allow_null=True)
     baseline_metrics = PerformanceMetrics(allow_null=True)
     days = PerformanceDay(many=True)
@@ -499,10 +515,96 @@ class CalibrationAutomationOutput(serializers.Serializer[dict[str, Any]]):
 class ForecastQuery(InputSerializer):
     date = serializers.DateField()
     data_source = serializers.ChoiceField(
-        choices=("auto", "forecast", "estimated_actuals", "archived_forecast"), default="forecast"
+        choices=("auto", "forecast", "estimated_actuals", "archived_forecast"), default="auto"
     )
     resolution_minutes = serializers.ChoiceField(choices=(30, 60), default=30)
     as_of = AwareDateTime(required=False)
+
+
+class PowerIntervalOutput(serializers.Serializer[dict[str, Any]]):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+    mean_power_mw = serializers.FloatField(allow_null=True, required=False)
+    energy_mwh = serializers.FloatField(allow_null=True, required=False)
+    partial_energy_mwh = serializers.FloatField(allow_null=True, required=False)
+    coverage_fraction = serializers.FloatField(allow_null=True, required=False)
+    complete = serializers.BooleanField(required=False)
+    quality_flags = serializers.ListField(child=serializers.CharField(), required=False)
+    source_snapshot_ids = serializers.ListField(child=serializers.IntegerField(), required=False)
+    source_kinds = serializers.ListField(child=serializers.CharField(), required=False)
+
+
+class PlantForecastResultOutput(serializers.Serializer[dict[str, Any]]):
+    """Energy in MWh and mean power in MW on the measurement basis of the plant."""
+
+    start = serializers.DateTimeField(required=False)
+    end = serializers.DateTimeField(required=False)
+    resolution_minutes = serializers.IntegerField(required=False)
+    limit_mw = serializers.FloatField(allow_null=True, required=False)
+    factor = serializers.FloatField(required=False)
+    energy_mwh = serializers.FloatField(allow_null=True, required=False)
+    partial_energy_mwh = serializers.FloatField(allow_null=True, required=False)
+    coverage_fraction = serializers.FloatField(allow_null=True, required=False)
+    complete = serializers.BooleanField(required=False)
+    model_version = serializers.CharField(required=False)
+    quality_flags = serializers.ListField(child=serializers.CharField(), required=False)
+    daylight = DaylightOutput(required=False)
+    intervals = PowerIntervalOutput(many=True, required=False)
+    provenance = ForecastProvenanceOutput(required=False)
+    weather_reference = WeatherReferenceOutput(required=False)
+
+
+class OutageScenarioOutput(serializers.Serializer[dict[str, Any]]):
+    evaluated_at = serializers.DateTimeField()
+    status = serializers.ChoiceField(choices=("estimated", "unknown_impact"))
+    incident_revision_ids = serializers.ListField(child=serializers.IntegerField())
+    incidents = serializers.ListField(child=serializers.DictField())
+    result = PlantForecastResultOutput()
+
+
+class DiagnosticDayOutput(serializers.Serializer[dict[str, Any]]):
+    day = serializers.DateField()
+    performance_index = serializers.FloatField()
+    hours = serializers.FloatField()
+    status = serializers.ChoiceField(choices=("shortfall", "within_threshold"))
+    observed_zero = serializers.BooleanField()
+
+
+class ProductionDiagnosticOutput(serializers.Serializer[dict[str, Any]]):
+    status = serializers.ChoiceField(choices=("suspected", "normal", "insufficient"))
+    performance_ratio = serializers.FloatField(allow_null=True)
+    reference_kind = serializers.ChoiceField(
+        choices=("active_calibration", "uncalibrated_reference")
+    )
+    window_start = serializers.DateField(allow_null=True)
+    window_end = serializers.DateField(allow_null=True)
+    days = DiagnosticDayOutput(many=True)
+    latest_matched_day = serializers.DateField(allow_null=True)
+    latest_day_status = serializers.ChoiceField(
+        choices=("shortfall", "within_threshold", "insufficient", "unavailable")
+    )
+    latest_performance_index = serializers.FloatField(allow_null=True)
+    evidence_state = serializers.ChoiceField(choices=("current", "stale"))
+
+
+@extend_schema_field(PlantForecastResultOutput(allow_null=True))
+class PlantForecastResultField(serializers.JSONField):
+    pass
+
+
+@extend_schema_field(IrradianceSummaryOutput(allow_null=True))
+class IrradianceSummaryField(serializers.JSONField):
+    pass
+
+
+@extend_schema_field(OutageScenarioOutput(allow_null=True))
+class OutageScenarioField(serializers.JSONField):
+    pass
+
+
+@extend_schema_field(ProductionDiagnosticOutput(allow_null=True))
+class ProductionDiagnosticField(serializers.JSONField):
+    pass
 
 
 class PlantForecastOutput(ForecastEnvelope):
@@ -512,6 +614,7 @@ class PlantForecastOutput(ForecastEnvelope):
     calibration_id = serializers.IntegerField(allow_null=True)
     issuance_id = serializers.IntegerField(allow_null=True, required=False)
     snapshot_id = serializers.IntegerField(allow_null=True, required=False)
-    regional_irradiance = serializers.JSONField(allow_null=True)
-    outage_scenario = serializers.JSONField(allow_null=True, default=None)
-    production_diagnostic = serializers.JSONField(allow_null=True, default=None)
+    result = PlantForecastResultField(allow_null=True)
+    regional_irradiance = IrradianceSummaryField(allow_null=True)
+    outage_scenario = OutageScenarioField(allow_null=True, default=None)
+    production_diagnostic = ProductionDiagnosticField(allow_null=True, default=None)

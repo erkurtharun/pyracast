@@ -129,18 +129,6 @@ def test_forecast_reads_reject_unknown_keys_and_empty_dates_by_code(
     assert list(body.get("fields", {})) == ([field] if field else [])
 
 
-def test_region_forecast_rejects_the_plant_only_archive_source(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    system, _ = make_plant(monkeypatch)
-    response = client_for(system.member).get(
-        region_path(system), {"date": DAY.isoformat(), "data_source": "archived_forecast"}
-    )
-    assert response.status_code == 400
-    assert response.json()["code"] == "invalid_request"
-    assert list(response.json()["fields"]) == ["data_source"]
-
-
 def test_past_day_plant_forecast_is_the_archived_forecast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -148,7 +136,9 @@ def test_past_day_plant_forecast_is_the_archived_forecast(
     publish_snapshot(snapshot_for(system, DAY))
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
     client = client_for(system.member)
-    forecast = client.get(plant_path(system, plant), {"date": DAY.isoformat()})
+    forecast = client.get(
+        plant_path(system, plant), {"date": DAY.isoformat(), "data_source": "forecast"}
+    )
     archived = client.get(
         plant_path(system, plant), {"date": DAY.isoformat(), "data_source": "archived_forecast"}
     )
@@ -197,6 +187,7 @@ ENVELOPE = {
     "timezone",
     "source_kind",
     "freshness",
+    "stale_reason",
     "unavailable_reason",
     "result",
 }
@@ -218,11 +209,11 @@ def test_each_forecast_read_sends_exactly_its_envelope(monkeypatch: pytest.Monke
     client = client_for(system.member)
     today = {"date": DAY.isoformat()}
     region = client.get(region_path(system), today).json()
-    issued = client.get(plant_path(system, plant), today).json()
+    issued = client.get(plant_path(system, plant), {**today, "data_source": "forecast"}).json()
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
     client = client_for(system.member)
     actuals = {**today, "data_source": "estimated_actuals"}
-    archived = client.get(plant_path(system, plant), today).json()
+    archived = client.get(plant_path(system, plant), {**today, "data_source": "forecast"}).json()
     plant_actuals = client.get(plant_path(system, plant), actuals).json()
     region_actuals = client.get(region_path(system), actuals).json()
 
@@ -269,7 +260,7 @@ def test_forecast_envelopes_share_one_documented_vocabulary() -> None:
     performance = components["PerformanceOutput"]
     assert set(region["properties"]) == REGION_ENVELOPE
     assert set(plant["properties"]) == PLANT_ENVELOPE | {"issuance_id", "snapshot_id"}
-    for field in ENVELOPE:
+    for field in ENVELOPE - {"result"}:
         assert region["properties"][field] == plant["properties"][field]
     assert set(performance["properties"]) & set(plant["properties"]) == {
         "timezone",
@@ -282,6 +273,7 @@ def test_forecast_envelopes_share_one_documented_vocabulary() -> None:
         "fresh",
         "stale",
         "missing",
+        "archived",
     ]
     for name in ("ForecastOutput", "PlantForecastOutput", "PerformanceOutput"):
         operations = [

@@ -4,7 +4,7 @@ from datetime import date, datetime
 from math import isfinite
 from typing import Any, Literal, cast
 
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.composition import (
@@ -123,20 +123,20 @@ def actual_coverage_complete(
     return _covers(rows, required)
 
 
-def native_actual_snapshots(
+def native_actual_queryset(
     binding: SiteBinding,
     start: datetime,
     end: datetime,
     knowledge_cutoff: datetime,
     *,
     actuals_grace_until: datetime | None = None,
-) -> list[ForecastSnapshot]:
+) -> QuerySet[ForecastSnapshot]:
     eligible = _actuals_available_by(knowledge_cutoff)
     if actuals_grace_until is not None:
         eligible |= Q(job__scheduled_for=knowledge_cutoff) & _actuals_available_by(
             actuals_grace_until
         )
-    return covering_snapshots(
+    return (
         ForecastSnapshot.objects.select_related("job", "binding")
         .filter(
             binding=binding,
@@ -149,7 +149,22 @@ def native_actual_snapshots(
         )
         .filter(eligible)
         .defer("raw_payload", "weather_payload")
-        .order_by("-collected_at", "-available_at", "-pk"),
+        .order_by("-collected_at", "-available_at", "-pk")
+    )
+
+
+def native_actual_snapshots(
+    binding: SiteBinding,
+    start: datetime,
+    end: datetime,
+    knowledge_cutoff: datetime,
+    *,
+    actuals_grace_until: datetime | None = None,
+) -> list[ForecastSnapshot]:
+    return covering_snapshots(
+        native_actual_queryset(
+            binding, start, end, knowledge_cutoff, actuals_grace_until=actuals_grace_until
+        ),
         start,
         end,
     )

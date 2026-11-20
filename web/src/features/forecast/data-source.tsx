@@ -2,19 +2,23 @@
 
 import { useTranslations } from "next-intl";
 import { Select } from "@/ui/form";
-export type DataSource =
-    "auto" | "forecast" | "estimated_actuals" | "archived_forecast";
+import type { DataSource } from "./date-bounds";
+
+export type { DataSource } from "./date-bounds";
+
+const SOURCES = [
+    ["auto", "automatic"],
+    ["forecast", "forecast_outlook"],
+    ["archived_forecast", "archived_forecast"],
+    ["estimated_actuals", "estimated_actuals"],
+] as const satisfies readonly (readonly [DataSource, string])[];
 
 export function DataSourceControl({
     value,
     onChange,
-    allowArchivedForecast = false,
-    archivedForecastDisabled = false,
 }: {
     value: DataSource;
     onChange: (source: DataSource) => void;
-    allowArchivedForecast?: boolean;
-    archivedForecastDisabled?: boolean;
 }) {
     const t = useTranslations("DataSource");
 
@@ -23,25 +27,19 @@ export function DataSourceControl({
             <Select
                 label={t("data_source")}
                 value={value}
-                onChange={(event) => onChange(event.target.value as DataSource)}
+                onChange={(event) =>
+                    onChange(
+                        SOURCES.find(
+                            ([source]) => source === event.target.value,
+                        )?.[0] ?? "auto",
+                    )
+                }
             >
-                <option value="auto">{t("automatic")}</option>
-                <option value="forecast">
-                    {allowArchivedForecast
-                        ? t("forecast_outlook")
-                        : t("archived_forecast")}
-                </option>
-                {allowArchivedForecast && (
-                    <option
-                        value="archived_forecast"
-                        disabled={archivedForecastDisabled}
-                    >
-                        {t("archived_forecast")}
+                {SOURCES.map(([source, label]) => (
+                    <option key={source} value={source}>
+                        {t(label)}
                     </option>
-                )}
-                <option value="estimated_actuals">
-                    {t("estimated_actuals")}
-                </option>
+                ))}
             </Select>
             {value === "estimated_actuals" && (
                 <span className="fine">

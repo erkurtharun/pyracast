@@ -112,7 +112,7 @@ def test_eligible_archived_forecast_survives_a_later_configuration(
     expected = dict(cast(dict[str, Any], archived["result"]))
     expected["quality_flags"] = [*expected["quality_flags"], "previous_configuration"]
     assert result["result"] == expected
-    assert result["freshness"] == "stale"
+    assert result["freshness"] == "archived"
 
 
 def test_archive_api_keeps_tenant_boundaries_after_source_changes(
@@ -123,16 +123,17 @@ def test_archive_api_keeps_tenant_boundaries_after_source_changes(
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
-    first = client.get(path, {"date": DAY.isoformat()})
+    query = {"date": DAY.isoformat(), "data_source": "archived_forecast"}
+    first = client.get(path, query)
     assert first.status_code == 200
     source.normalized_intervals[0]["power_kw"] = -1
     stored_again(source)
-    assert client.get(path, {"date": DAY.isoformat()}).json() == first.json()
+    assert client.get(path, query).json() == first.json()
     other = Tenant.objects.create(name="Other")
     user = User.objects.create_user("other-tenant")
     Membership.objects.create(tenant=other, user=user)
     client.force_login(user)
-    assert client.get(path, {"date": DAY.isoformat()}).status_code == 403
+    assert client.get(path, query).status_code == 403
     own_path = path.replace(f"tenants/{system.tenant.pk}", f"tenants/{other.pk}")
     assert client.get(own_path, {"date": DAY.isoformat()}).status_code == 404
 
@@ -170,7 +171,7 @@ def test_past_actuals_use_declared_configuration_without_backdating_or_replacing
     assert data["source_kind"] == "estimated_actuals"
     assert data["configuration_id"] == plant.current_configuration_id
     assert data["calibration_id"] is None
-    assert data["freshness"] == "fresh"
+    assert data["freshness"] == "archived"
     assert data["unavailable_reason"] is None
     assert data["result"]["energy_mwh"] == 1248
     assert len(data["result"]["intervals"]) == 48
@@ -232,7 +233,7 @@ def test_past_actuals_follow_configuration_at_day_start_after_binding_change(
     for source in ("auto", "estimated_actuals"):
         past = plant_outlook(*args, target_date=DAY, resolution_minutes=30, source=source)
         assert past["configuration_id"] == old_configuration_id
-        assert past["freshness"] == "stale"
+        assert past["freshness"] == "archived"
         payload = past["result"]
         assert isinstance(payload, dict)
         assert payload["provenance"]["snapshot_id"] == reference.pk
@@ -302,7 +303,7 @@ def test_history_selection_keeps_acquisition_and_publication_cutoffs(
         resolution_minutes=30,
         source="estimated_actuals",
     )
-    assert data["freshness"] == "stale"
+    assert data["freshness"] == "archived"
 
 
 def test_missing_history_falls_back_only_when_automatic(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -7,7 +7,6 @@ type WeatherReference = {
     energy_kwh_m2?: number | null;
     partial_energy_kwh_m2?: number | null;
     coverage_fraction?: number;
-    attribution: { changes: string };
 };
 
 export function WeatherReferenceCard({
@@ -63,11 +62,7 @@ export function WeatherReferenceCard({
                 <a href="https://creativecommons.org/licenses/by/4.0/">
                     CC BY 4.0
                 </a>
-                .{" "}
-                {reference.attribution?.changes ===
-                "Intervals normalized; daily energy calculated by Pyracast."
-                    ? t("normalized_attribution")
-                    : reference.attribution?.changes}
+                . {t("normalized_attribution")}
             </p>
         </section>
     );

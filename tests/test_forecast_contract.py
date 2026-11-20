@@ -4,7 +4,7 @@ from datetime import date
 import pytest
 from django.test import Client
 
-from tests.support.forecast_history import DAY, TODAY, UNCOVERED, add_history, usable_calibration
+from tests.support.forecast_history import TODAY, UNCOVERED, add_history, usable_calibration
 from tests.support.openapi import components, validate
 from tests.support.performance_history import FIRST, LAST, performance_history
 from tests.support.plant_operations import make_plant
@@ -94,7 +94,7 @@ def test_forecast_schema_declares_freshness_and_typed_payloads() -> None:
     ("scope", "component", "reads"),
     [
         ("plant", "PlantForecastOutput", PLANT_READS),
-        ("region", "ForecastOutput", (*REGION_READS, ("archived_forecast", DAY))),
+        ("region", "ForecastOutput", REGION_READS),
     ],
 )
 def test_every_forecast_branch_matches_its_schema(

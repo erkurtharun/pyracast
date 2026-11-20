@@ -3,10 +3,12 @@ import { useTranslations } from "next-intl";
 import type { PlantScope } from "@/lib/api";
 import { cadence } from "@/lib/api/query";
 import type { PlantAddress, PlantView } from "@/lib/routes";
+import { DataSourceControl } from "@/features/forecast/data-source";
 import {
-    DataSourceControl,
+    clampDate,
+    dateBounds,
     type DataSource,
-} from "@/features/forecast/data-source";
+} from "@/features/forecast/date-bounds";
 import { ViewNav } from "@/ui/action";
 import { plantDay } from "@/lib/format/time";
 import { ControlField, Select } from "@/ui/form";
@@ -41,8 +43,7 @@ export function ForecastSection({
     const t = useTranslations("PlantWorkspace");
     const { resolution, source } = options;
     const today = plantDay(timezone);
-    const pastOnly =
-        source === "estimated_actuals" || source === "archived_forecast";
+    const bounds = dateBounds(source, today);
     const leavingGeneration = leaving && view === "generation";
     const setDate = (next: string) => show({ date: next });
     return (
@@ -61,22 +62,21 @@ export function ForecastSection({
                     <input
                         type="date"
                         value={date}
-                        max={pastOnly ? today : undefined}
+                        min={bounds.min}
+                        max={bounds.max}
                         onChange={(event) => setDate(event.target.value)}
                     />
                 </ControlField>
                 <DataSourceControl
-                    allowArchivedForecast={view === "generation"}
-                    archivedForecastDisabled={leavingGeneration}
                     value={source}
                     onChange={(next) => {
                         onOptions({ ...options, source: next });
-                        if (
-                            (next === "estimated_actuals" ||
-                                next === "archived_forecast") &&
-                            (baseDate || plantDay(timezone, 1)) > today
-                        )
-                            setDate(today);
+                        const current = baseDate || plantDay(timezone, 1);
+                        const clamped = clampDate(
+                            current,
+                            dateBounds(next, today),
+                        );
+                        if (clamped !== current) setDate(clamped);
                     }}
                 />
                 {view === "generation" && (
@@ -98,10 +98,8 @@ export function ForecastSection({
                 )}
                 <span className="fine">{t("localDates")}</span>
             </div>
-            {source === "estimated_actuals" && date > today ? (
-                <Notice>{t("selectTodayOrPastDay")}</Notice>
-            ) : source === "archived_forecast" && date > today ? (
-                <Notice>{t("selectArchivedDay")}</Notice>
+            {clampDate(date, bounds) !== date ? (
+                <Notice>{t("selectDateInRange", bounds)}</Notice>
             ) : (
                 <PlantForecast
                     key={`${view}-${date}-${resolution}-${source}-${configurationId}`}

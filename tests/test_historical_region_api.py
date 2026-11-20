@@ -10,13 +10,15 @@ from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.forecast_archive import forecast_cutoff
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System, make_system
 from tests.support.invariants import stored_again
-from tests.support.plant_operations import snapshot_for
+from tests.support.plant_operations import publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 7)
+NEXT = date(2026, 11, 10)
 
 
 def actual_for(system: System) -> ForecastSnapshot:
@@ -48,13 +50,13 @@ def test_region_forecast_marks_invalidated_binding_stale(
 ) -> None:
     monkeypatch.setattr(timezone, "now", lambda: NOW)
     system = make_system(approved=True)
-    snapshot = snapshot_for(system, DAY, collected_at=NOW - timedelta(hours=1))
-    ForecastResult.objects.create(snapshot=snapshot, payload={"marker": "saved"}, published_at=NOW)
+    publish_snapshot(snapshot_for(system, NEXT, collected_at=NOW - timedelta(hours=1)))
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
-    query = {"date": DAY.isoformat(), "data_source": "forecast"}
-    assert client.get(path, query).json()["freshness"] == "fresh"
+    query = {"date": NEXT.isoformat(), "data_source": "forecast"}
+    current = client.get(path, query).json()
+    assert (current["freshness"], current["stale_reason"]) == ("fresh", None)
     if change == "region_revision":
         system.region.revision += 1
         system.region.save(update_fields=["revision"])
@@ -86,8 +88,14 @@ def test_region_forecast_marks_invalidated_binding_stale(
         system.region.save(update_fields=["approved_binding", "revision"])
     response = client.get(path, query)
     assert response.status_code == 200
-    assert response.json()["freshness"] == "stale"
-    assert response.json()["result"] == {"marker": "saved"}
+    if change == "superseded_binding":
+        assert (response.json()["freshness"], response.json()["result"]) == ("missing", None)
+        return
+    assert (response.json()["freshness"], response.json()["stale_reason"]) == (
+        "stale",
+        "connection_inactive",
+    )
+    assert response.json()["result"] == current["result"]
 
 
 @pytest.mark.parametrize(
@@ -148,20 +156,20 @@ def test_region_forecast_excludes_vintages_not_yet_available(
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
-    older = snapshot_for(system, DAY, collected_at=NOW - timedelta(hours=2))
-    ForecastResult.objects.create(snapshot=older, payload={"marker": "available"}, published_at=NOW)
-    newer = snapshot_for(system, DAY, collected_at=NOW - timedelta(hours=1))
-    if future_field in {"collected_at", "issued_at"}:
-        setattr(newer, future_field, NOW + timedelta(seconds=1))
-        stored_again(newer)
-    ForecastResult.objects.create(
-        snapshot=newer,
-        payload={"marker": "future"},
-        published_at=NOW + timedelta(seconds=1) if future_field == "published_at" else NOW,
+    cutoff = forecast_cutoff(DAY, system.binding)
+    older = publish_snapshot(snapshot_for(system, DAY, collected_at=cutoff - timedelta(hours=2)))
+    newer = snapshot_for(system, DAY, power_kw=0.6, collected_at=cutoff - timedelta(hours=1))
+    if future_field == "collected_at":
+        newer.collected_at = cutoff + timedelta(seconds=1)
+    if future_field == "issued_at":
+        newer.issued_at = cutoff
+    stored_again(newer)
+    publish_snapshot(
+        newer, published_at=cutoff if future_field == "published_at" else newer.collected_at
     )
-    response = client.get(path, {"date": DAY.isoformat(), "data_source": "forecast"})
+    response = client.get(path, {"date": DAY.isoformat(), "data_source": "archived_forecast"})
     assert response.status_code == 200
-    assert response.json()["result"] == {"marker": "available"}
+    assert response.json()["result"]["provenance"]["snapshot_id"] == older.pk
 
 
 def test_region_history_preserves_missing_actuals_and_explicit_forecast_archive(
@@ -187,9 +195,8 @@ def test_region_history_preserves_missing_actuals_and_explicit_forecast_archive(
     assert response.json()["source_kind"] == "estimated_actuals"
     assert response.json()["result"]["vintage"]["source_kind"] == "estimated_actuals"
     assert response.json()["collected_at"] == actual.collected_at.isoformat().replace("+00:00", "Z")
-    archive = client.get(path, {"date": DAY.isoformat(), "data_source": "forecast"}).json()
-    assert archive["source_kind"] == "forecast"
-    assert archive["result"] == {"marker": "archive"}
+    archive = client.get(path, {"date": DAY.isoformat(), "data_source": "forecast"})
+    assert (archive.status_code, archive.json()["code"]) == (400, "date_out_of_range")
     assert (
         client.get(path, {"date": "2026-11-10", "data_source": "estimated_actuals"}).status_code
         == 400
@@ -208,13 +215,13 @@ def test_region_history_respects_binding_status_and_tenant(monkeypatch: pytest.M
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
     query = {"date": DAY.isoformat(), "data_source": "estimated_actuals"}
-    assert client.get(path, query).json()["freshness"] == "fresh"
+    assert client.get(path, query).json()["freshness"] == "archived"
     Region.objects.filter(pk=system.region.pk).update(status="suspended")
-    assert client.get(path, query).json()["freshness"] == "stale"
+    assert client.get(path, query).json()["freshness"] == "archived"
     Region.objects.filter(pk=system.region.pk).update(
         status="approved", revision=system.region.revision + 1
     )
-    assert client.get(path, query).json()["freshness"] == "stale"
+    assert client.get(path, query).json()["freshness"] == "archived"
     replacement = SiteBinding.objects.create(
         region=system.region,
         provider_account=system.account,

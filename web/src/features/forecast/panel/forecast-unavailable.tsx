@@ -2,7 +2,7 @@
 import { useTranslations } from "next-intl";
 import type { Forecast } from "@/lib/api";
 import { Empty } from "@/ui/ui";
-import { StatusTag } from "@/ui/vocabulary";
+import { Freshness } from "./freshness";
 
 export function ForecastUnavailable({
     forecast,
@@ -14,7 +14,7 @@ export function ForecastUnavailable({
     const t = useTranslations("Forecast");
     return (
         <>
-            <StatusTag group="Freshness" value={forecast.freshness} />
+            <Freshness forecast={forecast} />
             {forecast.unavailable_reason === "estimated_actuals_unavailable" ? (
                 <Empty title={t("no_estimated_actuals_for_this_day")}>
                     {t("estimated_actuals_are_not_available_for_this")}

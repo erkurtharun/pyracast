@@ -35,7 +35,7 @@ REGION_READS = (
     ("auto", TODAY),
     ("estimated_actuals", TODAY),
     ("forecast", TOMORROW),
-    ("forecast", DAY),
+    ("archived_forecast", DAY),
     ("auto", DAY),
     ("estimated_actuals", DAY),
     ("auto", UNCOVERED),

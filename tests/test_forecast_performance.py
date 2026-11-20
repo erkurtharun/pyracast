@@ -42,7 +42,6 @@ def test_performance_reads_frozen_native_clipping_and_keeps_read_only(
     measurements(system, configuration, 90)
     selected_factor(system, configuration, NOW)
     result = forecast_performance(plant, start_date=DAY, end_date=DAY)
-    assert result["evaluation_kind"] == "archived_published_forecast"
     assert result["matched_days"] == result["requested_days"] == 1
     assert result["metrics"]["daily_mae_mwh"] == pytest.approx(0)
     assert result["days"][0]["predicted_energy_mwh"] == pytest.approx(2160)

@@ -12,10 +12,9 @@ from pyracast.api.public import public_source_data
 from pyracast.api.renderers import CustomerJSONRenderer
 from pyracast.connections.models import ProviderAccount
 from pyracast.connections.secrets import encrypt_secret
-from pyracast.forecasts.models import CollectionJob, ForecastResult, ForecastSnapshot
 from pyracast.notifications.mail import build_message
 from pyracast.plants.models import CalibrationRun
-from tests.support.domain import NOW, make_system
+from tests.support.domain import NOW
 from tests.support.notifications import attached_sheet, ready
 from tests.support.plant_operations import make_plant
 
@@ -232,66 +231,6 @@ def test_calibration_details_hide_nested_provider_identity_and_preserve_manifest
     }
     run.refresh_from_db()
     assert run.dataset_manifest == manifest
-
-
-@pytest.mark.django_db(transaction=True)
-def test_archived_forecast_hides_provider_identity_without_rewriting_archive() -> None:
-    system = make_system(approved=True)
-    job = CollectionJob.objects.get(binding=system.binding)
-    raw = {"provider": "solcast", "resource_id": "private-resource"}
-    snapshot = ForecastSnapshot.objects.create(
-        job=job,
-        binding=system.binding,
-        raw_payload=raw,
-        normalized_intervals=[],
-        collected_at=NOW,
-        source_kind="forecast",
-    )
-    payload = {
-        "energy_kwh_m2": None,
-        "partial_energy_kwh_m2": 1.25,
-        "complete": False,
-        "model_version": "solcast-legacy-proxy-v1",
-        "quality_flags": ["unvalidated", "solcast_provisional", "incomplete"],
-        "vintage": {
-            "provider": "solcast",
-            "source_kind": "forecast",
-            "provider_account_id": 17,
-            "external_account_id": "private-account",
-            "site_id": "private-site",
-            "resource_id": "private-resource",
-            "binding_revision": "7:2",
-        },
-        "provenance": {
-            "source_kind": "estimated_actuals",
-            "nested": [{"Solcast": "private", "detail": "Solcast response unavailable"}],
-            "source_url": "https://api.solcast.com.au/private-resource",
-            "production_provider": "epias",
-        },
-    }
-    saved = ForecastResult.objects.create(
-        snapshot=snapshot, payload=deepcopy(payload), published_at=NOW
-    )
-    client = Client()
-    client.force_login(system.member)
-    response = client.get(
-        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
-        f"?date={job.target_date}"
-    )
-    assert response.status_code == 200
-    public = response.json()["result"]
-    assert "solcast" not in response.content.decode().casefold()
-    assert "private-" not in response.content.decode()
-    assert public["energy_kwh_m2"] is None
-    assert public["partial_energy_kwh_m2"] == 1.25
-    assert public["quality_flags"] == ["unvalidated", "reference_provisional", "incomplete"]
-    assert public["vintage"] == {"source_kind": "forecast", "binding_revision": "7:2"}
-    assert public["provenance"]["source_kind"] == "estimated_actuals"
-    assert public["provenance"]["production_provider"] == "epias"
-    saved.refresh_from_db()
-    snapshot.refresh_from_db()
-    assert saved.payload == payload
-    assert snapshot.raw_payload == raw
 
 
 @pytest.mark.parametrize("technical", [False, True])

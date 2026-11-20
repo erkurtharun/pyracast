@@ -3,10 +3,10 @@ import { useTranslations } from "next-intl";
 import type { Forecast } from "@/lib/api";
 import { CsvDownload } from "@/ui/csv-download";
 import { Notice, Stat, Tag } from "@/ui/ui";
-import { StatusTag } from "@/ui/vocabulary";
 import type { ForecastInterval as Interval } from "../forecast-intervals";
 import { WeatherReferenceCard } from "../weather-reference";
 import { useFormat } from "@/lib/format/use-format";
+import { Freshness } from "./freshness";
 import {
     hasFlag,
     type DaylightSummary,
@@ -111,7 +111,7 @@ export function ForecastSummary({
                                 : {}),
                         }}
                     />
-                    <StatusTag group="Freshness" value={forecast.freshness} />
+                    <Freshness forecast={forecast} />
                     {forecast.source_kind === "mixed" && (
                         <Tag>{t("updated_estimates_and_forecast")}</Tag>
                     )}
