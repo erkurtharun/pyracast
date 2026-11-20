@@ -29,6 +29,7 @@ from django.utils.html import escape
 from pyracast.accounts.models import UserLanguagePreference
 from tests.support.auth_lifecycle import AUTH, PASSWORD, submit, totp_code
 from tests.support.company_registration import signup
+from tests.support.outbox import deliver_mail
 from tests.support.social_accounts import CALLBACK, PROVIDERS, complete, provider_destination
 
 FIREFOX = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:139.0) Gecko/20100101 Firefox/139.0"
@@ -940,6 +941,7 @@ def call(client: Client, method: str, path: str, data: dict[str, Any] | None = N
 
 
 def only_mail() -> EmailMultiAlternatives:
+    deliver_mail()
     (message,) = mail.outbox
     assert isinstance(message, EmailMultiAlternatives)
     return message
@@ -1318,11 +1320,13 @@ def run_case(
     assert case.expected is not None, f"no expectation declared for {case}"
     world = build_world(case)
     session = enter(case, world, profile, client_class)
+    deliver_mail()
     mail.outbox.clear()
     one_minute_later(monkeypatch)
     since = datetime.now(UTC)
 
     response = ACTIONS[case.combination.endpoint](Act(case, session, world, profile, monkeypatch))
+    deliver_mail()
 
     sent = [(message.extra_headers.get("X-Pyracast-Mail"), message.to) for message in mail.outbox]
     if isinstance(case.expected, NoMail):

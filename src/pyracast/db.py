@@ -176,6 +176,9 @@ class JsonPathExists(models.Func):
 
 
 TEXT_ITEMS = 'strict $[*] ? (@.type() != "string")'
+TIME_ITEMS = (
+    'strict $[*] ? (@.type() != "string" || !(@ like_regex "^([01][0-9]|2[0-3]):[0-5][0-9]$"))'
+)
 
 
 def json_shape(field: str, kind: str, breach: str = "") -> models.Q:

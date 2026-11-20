@@ -15,7 +15,7 @@ from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.scheduler import enqueue_due
 from tests.support.notification_groups import group, member
 from tests.support.notification_transmission import OpeningBackend
-from tests.support.notifications import SLOT, configured
+from tests.support.notifications import SLOT, configured, reminder_schedule_payload
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -102,6 +102,33 @@ def test_join_remove_and_rejoin_during_connection_open_cannot_restore_the_envelo
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.revoked_recipients == ["external@example.com"]
     assert delivery.recipients == [retained.email]
+
+
+def test_a_member_removed_after_authorization_stays_in_the_history_of_the_sent_delivery() -> None:
+    system, _ = configured()
+    member(system, "retained@example.com")
+    leaving = member(system, "leaving@example.com")
+    schedule = group(system)
+    (delivery_id,) = enqueue_due(SLOT)
+    envelopes: list[list[str]] = []
+
+    def accepted_after_removal(message: EmailMultiAlternatives) -> None:
+        envelopes.append(sorted(message.bcc))
+        remove_workspace_member(system.member, system.tenant.pk, leaving.pk)
+
+    assert process_notification(delivery_id, SLOT, sender=accepted_after_removal)
+
+    administrator, viewer = (
+        reminder_schedule_payload(schedule, SLOT, administrator=flag)["deliveries"][0]
+        for flag in (True, False)
+    )
+    assert envelopes == [["leaving@example.com", "retained@example.com"]]
+    assert (administrator["status"], sorted(administrator["recipients"])) == (
+        "sent",
+        envelopes[0],
+    )
+    assert (administrator["recipient_count"], viewer["recipient_count"]) == (2, 2)
+    assert viewer["recipients"] is None
 
 
 @pytest.mark.parametrize("recover_interrupted", [False, True])

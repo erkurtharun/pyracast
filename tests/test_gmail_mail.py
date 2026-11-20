@@ -28,6 +28,7 @@ from pyracast.mail.send import send
 from pyracast.notifications.jobs import process_notification
 from tests.support.company_registration import signup
 from tests.support.notifications import SLOT, ready
+from tests.support.outbox import deliver_mail
 
 SENDER = "Pyracast <info@pyracast.app>"
 OPTIONS = {
@@ -351,6 +352,8 @@ def test_allauth_signup_sends_verification_using_gmail(
     gmail_transport(respond)
     with override_settings(MAILERS=MAILERS, DEFAULT_FROM_EMAIL=SENDER):
         response = signup(Client(enforce_csrf_checks=True))
+        assert requests == []
+        deliver_mail()
     assert response.status_code == 401
     assert any(flow["id"] == "verify_email" for flow in response.json()["data"]["flows"])
     assert len(requests) == 2

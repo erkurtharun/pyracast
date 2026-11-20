@@ -23,6 +23,7 @@ from pyracast.accounts.models import (
 from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.errors import ConflictError, DomainError
 from tests.support.concurrency import behind_open_transaction
+from tests.support.outbox import deliver_mail
 from tests.support.workspaces import invitation_token
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
@@ -266,6 +267,7 @@ def test_invitation_mail_names_the_offered_role_in_the_requested_language(
         language="en",
         platform=True,
     )
+    deliver_mail()
     message = mail.outbox[-1]
     assert message.subject == "Pyracast workspace invitation"
     assert "makes you the workspace administrator" in str(message.body)
@@ -278,8 +280,10 @@ def test_invitation_mail_names_the_offered_role_in_the_requested_language(
         language="tr",
         platform=True,
     )
+    deliver_mail()
     assert "çal\u0131şma alan\u0131n\u0131n yöneticisi yapar" in str(mail.outbox[-1].body)
     invite_workspace_member(platform, tenant.pk, "izleyici@example.com", platform=True)
+    deliver_mail()
     assert "salt okunur erişim" in str(mail.outbox[-1].body)
 
 

@@ -69,6 +69,7 @@ def test_shutdown_finishes_active_work_and_closes_broker(
             command.make_broker = lambda: broker
             command.make_calibration_actor = MagicMock()
             command.make_notification_actor = MagicMock()
+            command.make_outbound_mail_actor = MagicMock()
             command.make_epias_actor = MagicMock()
             if role == "dispatch":
                 command.record_dispatch_phase = MagicMock()
@@ -103,6 +104,8 @@ def test_shutdown_finishes_active_work_and_closes_broker(
                 command.dispatch_calibrations = MagicMock()
                 command.dispatch_notifications = MagicMock()
                 command.dispatch_epias = MagicMock()
+                command.purge_finished_mail = MagicMock()
+                command.publish_outbound_mail = MagicMock()
                 command.Command().handle(loop=True, poll_seconds=60, stop_file=root / "stop")
             """
         ),

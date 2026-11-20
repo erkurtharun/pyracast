@@ -43,6 +43,13 @@ Caught exceptions in calibration, metering and collection scheduling use `pyraca
 error type and the innermost `pyracast` code location, never the exception message. Local launcher
 logs and process identities are development tooling.
 
+A `pyracast.security` line that reports a change (`audit.CHANGE_EVENTS`) and is written inside a
+transaction leaves with its commit, so a transaction or savepoint that rolls back writes none and a
+process that stops between the commit and its hooks loses it; a refusal, a failed attempt or a
+throttle is written at once, also when its transaction rolls back. The one exception is the daily
+sign-in lock: its notice is stored through the autocommitted authentication-cache connection, so it
+and its `login_locked` line stay when the sign-in rolls back.
+
 Worker and dispatcher entry points handle `SIGINT` and `SIGTERM` without raising
 asynchronous exceptions into database operations. The dispatcher finishes its current cycle; the worker stops
 taking new work, lets active tasks finish and returns buffered work through Dramatiq.
@@ -87,7 +94,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | HistoricalReferenceImport | Authorized source settings, immutable export digest and actual acquisition time |
 | ReferenceCapacityNormalization | Authorized capacity-only copies, original source lineage and conversion availability |
 | ForecastIssuance, PlantEvent | Immutable published electrical forecast and audited plant operations |
-| NotificationSettings, ReminderSchedule, NotificationDelivery | Shared plant email schedule, explicit recipients and language, pinned saved forecasts and grouped delivery outcomes |
+| NotificationSettings, ReminderSchedule, NotificationDelivery, OutboundMail | Shared plant email schedule, explicit recipients and language, pinned saved forecasts, grouped delivery outcomes and account and invitation mail intents |
 | AuditEvent | Actor, action, target, the details its action declares and timestamp for privileged changes |
 
 Regions select explicit provider accounts rather than embedding credentials. One canonical record per account spans tenants and credential rotations; duplicate records must not create independent quota budgets.
@@ -139,7 +146,11 @@ share an atomic PostgreSQL JSON/TTL cache; ingress limits and per-user API throt
 expensive endpoints additionally protect capacity.
 Failed sign-ins are limited per address (also per day) and, under a project action
 that no sign-in success or password reset clears, per client IP; a refused account
-answers and counts exactly like a wrong password.
+answers and counts exactly like a wrong password. Only finished failures make the daily
+lock: a check that ends in an error releases its slots and one that never ends stops
+counting after the 90-second request ceiling. Once a failure completes the lock, and at
+every refusal while it holds, the address is sure to have a pause notice from the last
+24 hours.
 
 Google and Microsoft sign-in use backend authorization-code exchanges with PKCE
 and session-bound state. A same-origin continuation page starts provider navigation
@@ -187,8 +198,8 @@ an audit entry and expires pending invitations for all known addresses of that u
 
 Invitations grant member access after explicit acceptance by the authenticated
 owner of the verified invited email. New invited accounts do not create another
-workspace. Invitations expire after seven days, store only a random token's hash,
-and can be cancelled. A replacement invitation or administrator transfer invalidates
+workspace. Invitations expire after seven days and can be cancelled. The notification
+worker mints each invitation's token when it sends the mail and stores only its hash. A replacement invitation or administrator transfer invalidates
 the previous pending grant. Issuance is rate-limited per workspace and recipient.
 
 Member proposals are immutable and separate from production and incident records.
@@ -306,8 +317,8 @@ operation limits; business deadlines are checked separately after database waits
 `check_delivery_health --max-lag-minutes 5` emits JSON and fails for missing, stale
 or failed phases, overdue ready jobs, expired active leases, recent
 failed/uncertain/unavailable or incomplete tomorrow deliveries, missed delivery
-deadlines, EPİAŞ failures, credential blocks, account cooldowns and mail
-authentication failures. Enabled approved regions without a successful forecast
+deadlines, EPİAŞ failures, credential blocks, account cooldowns, mail
+authentication failures and overdue, failed or uncertain account and invitation mail. Enabled approved regions without a successful forecast
 in 26 hours are unhealthy. Complete saved-forecast fallback remains informational.
 This check needs a working database; monitoring
 must also treat failure to execute it as unhealthy. Run the mailer with
@@ -525,10 +536,23 @@ provider exchange answers like one that finds nothing pending: it stores nothing
 no session cookie. API
 responses are private and non-cacheable. The frontend reads stored results and
 never handles provider credentials. A fixed public HTTPS origin determines
-security-email navigation. Verification and recovery codes expire after ten minutes,
-allow at most three attempts and are bound to the initiating browser session. A
-pending code or sign-in step, and a reauthentication kept in the session (a console
-confirmation included), rests on the credential state of its account (password,
+security-email navigation. Account and invitation mail is stored as an outbound mail
+intent in the transaction of its request (or of `reset_mfa`, for its notice) and sent by
+the notification worker, so no answer
+waits for or reveals delivery; a code is kept only sealed with the application key and
+erased when the intent ends, and unknown-account and account-exists notices share 20 a
+hour. Every mail is transmitted at most once: an intent interrupted before its transmit
+marker is retried, and one interrupted after it ends `uncertain`, holds no code, is
+reported in health and the console and is never resent. After a failed or uncertain
+mail the person asks for a new reset code at once and for a new verification code once
+its one-minute resend window has passed, which no mail outcome shortens, so that answer
+is alike whether the address has an account (which gets a notice instead of the code);
+the administrator sends a failed or uncertain invitation again at once, while an
+uncertain notice (the daily sign-in pause included) or reminder slot stays sent
+at most once and the next slot sends normally. Verification and recovery codes expire
+after ten minutes, allow at most three attempts and are bound to the initiating browser
+session. A pending code or sign-in step, and a reauthentication kept in the session (a
+console confirmation included), rests on the credential state of its account (password,
 active flag, addresses, provider identities, authenticators) as read under lock where
 the request identified the account or recorded the reauthentication; any change of that
 state ends every pending step and reauthentication of the account, the operator commands'
@@ -651,13 +675,13 @@ The plant-only `archived_forecast` source and explicit `as_of` queries read thes
 
 Each approved plant has one shared reminder schedule with daily local `HH:MM`
 times, extra recipient addresses and an English or Turkish email language. Workspace
-administrators edit it; other members can view it and its delivery history. Optional
-workspace membership inclusion adds active members' verified account addresses.
-Membership changes update this group automatically. Without that option, an empty
-list on save captures the administrator's current email. Extra addresses retain their
-saved value; known member addresses retain their membership identity even after an
-email change. Removing a member also removes their saved addresses from current
-schedules. The configuring user is nullable audit information, not the schedule owner.
+administrators edit it; other members see its settings, recipient counts and delivery
+history but no address. Optional workspace membership inclusion adds active members'
+verified account addresses. Membership changes update this group automatically. An
+enabled schedule needs an address or that option. Extra addresses retain their saved
+value; known member addresses retain their membership identity even after an email
+change. Removing a member also removes their saved addresses from current schedules.
+The configuring user is nullable audit information, not the schedule owner.
 
 The default limit is five distinct, case-insensitively compared addresses per plant,
 including automatically included members,
@@ -679,7 +703,8 @@ rejoining from reviving old slot authority, even when an address was originally
 external. Revocations survive late mail responses and safe retries without changing
 an already authorized envelope. Rejoining restores automatic inclusion in new slots.
 Tenant locking serializes membership changes with the transmission permission marker;
-removal after that marker cannot revoke an already authorized in-flight message.
+removal after that marker cannot revoke an already authorized in-flight message, and
+the history of a sent or uncertain delivery names that authorized envelope.
 If collection is scheduled at the same local time, preparation waits for that exact job to finish, for at most
 15 minutes. Its acquisition may become eligible within that grace period; every
 other acquisition must have been collected and published by the original reminder

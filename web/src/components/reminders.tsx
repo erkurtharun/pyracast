@@ -41,7 +41,7 @@ function DeliveryTimes({
         })),
     );
     const { prefix, focusRow } = useRowFocus(rows);
-    const limit = data.quota?.daily_reminder_limit;
+    const limit = data.daily_reminder_limit;
     return (
         <fieldset className="reminder-recipients">
             <legend>{t("deliveryTimes", { timezone })}</legend>
@@ -121,12 +121,32 @@ function DeliveryTimes({
 }
 function RecipientFields({ data }: { data: ReminderSchedule }) {
     const t = useTranslations("Reminders");
-
+    if (!data.addresses)
+        return (
+            <p className="recipient-count">
+                {t("recipientCountOnly", {
+                    count: data.recipient_count,
+                    limit: data.recipient_limit,
+                })}
+            </p>
+        );
+    return <RecipientRows data={data} addresses={data.addresses} />;
+}
+function RecipientRows({
+    data,
+    addresses,
+}: {
+    data: ReminderSchedule;
+    addresses: NonNullable<ReminderSchedule["addresses"]>;
+}) {
+    const t = useTranslations("Reminders");
     const [rows, setRows] = useState(() =>
-        (data.recipients.length ? data.recipients : [""]).map((value, id) => ({
-            id,
-            value,
-        })),
+        (addresses.recipients.length ? addresses.recipients : [""]).map(
+            (value, id) => ({
+                id,
+                value,
+            }),
+        ),
     );
     const { prefix, focusRow } = useRowFocus(rows);
     const [includeMembers, setIncludeMembers] = useState(
@@ -135,7 +155,7 @@ function RecipientFields({ data }: { data: ReminderSchedule }) {
     const count = new Set(
         [
             ...rows.map((row) => row.value.trim()).filter(Boolean),
-            ...(includeMembers ? data.workspace_recipients : []),
+            ...(includeMembers ? addresses.workspace_recipients : []),
         ].map((email) => email.toLowerCase()),
     ).size;
     return (
@@ -172,12 +192,12 @@ function RecipientFields({ data }: { data: ReminderSchedule }) {
             <details className="reminder-members">
                 <summary>
                     {t("workspaceMembers", {
-                        count: data.workspace_recipients.length,
+                        count: addresses.workspace_recipients.length,
                     })}
                 </summary>
-                {data.workspace_recipients.length ? (
+                {addresses.workspace_recipients.length ? (
                     <ul>
-                        {data.workspace_recipients.map((email) => (
+                        {addresses.workspace_recipients.map((email) => (
                             <li key={email}>{email}</li>
                         ))}
                     </ul>
@@ -281,6 +301,15 @@ function ReminderSettings({ scope, region }: ReminderProps) {
         skipped: t("skipped"),
         cancelled: t("cancelled"),
     };
+    const stateLabels: Record<ReminderSchedule["state"], string> = {
+        sending: t("enabled"),
+        paused_by_user: t("paused"),
+        waiting_for_approval: t("stateWaitingForApproval"),
+        provider_attention: t("stateProviderAttention"),
+        no_recipients: t("noRecipientsPaused"),
+        invalid_recipient: t("invalidRecipientPaused"),
+        over_recipient_limit: t("recipientLimitPaused"),
+    };
     const forecastLabels: Record<string, string> = {
         current: t("newForecast"),
         saved_complete: t("savedForecast"),
@@ -337,10 +366,10 @@ function ReminderSettings({ scope, region }: ReminderProps) {
                     <div>
                         <h2>{t("emailReminders")}</h2>
                     </div>
-                    <Tag tone="neutral">
-                        {data.enabled && !data.recipient_limit_exceeded
-                            ? t("enabled")
-                            : t("paused")}
+                    <Tag
+                        tone={data.state === "sending" ? "success" : "neutral"}
+                    >
+                        {stateLabels[data.state]}
                     </Tag>
                 </div>
                 <ActionForm
@@ -369,7 +398,8 @@ function ReminderSettings({ scope, region }: ReminderProps) {
                             [
                                 ...recipients,
                                 ...(includeWorkspaceMembers
-                                    ? data.workspace_recipients
+                                    ? (data.addresses?.workspace_recipients ??
+                                      [])
                                     : []),
                             ].map((email) => email.toLowerCase()),
                         ).size;
@@ -427,7 +457,6 @@ function ReminderSettings({ scope, region }: ReminderProps) {
                             type="checkbox"
                             name="enabled"
                             defaultChecked={data.enabled}
-                            disabled={region.status !== "approved"}
                         />{" "}
                         {t("enableForecastEmailsForThisPlant")}
                     </label>
@@ -452,16 +481,10 @@ function ReminderSettings({ scope, region }: ReminderProps) {
                         <p className="fine">
                             {t("reminderPolicy", {
                                 limit:
-                                    data.quota?.daily_reminder_limit == null
+                                    data.daily_reminder_limit == null
                                         ? "?"
                                         : format.number(
-                                              data.quota.daily_reminder_limit,
-                                          ),
-                                queries:
-                                    data.quota?.queries_per_email == null
-                                        ? "?"
-                                        : format.number(
-                                              data.quota.queries_per_email,
+                                              data.daily_reminder_limit,
                                           ),
                             })}
                         </p>
@@ -502,9 +525,17 @@ function ReminderSettings({ scope, region }: ReminderProps) {
                                             })}
                                         </td>
                                         <td className="delivery-recipients">
-                                            {row.recipients.map((email) => (
-                                                <div key={email}>{email}</div>
-                                            ))}
+                                            {row.recipients
+                                                ? row.recipients.map(
+                                                      (email) => (
+                                                          <div key={email}>
+                                                              {email}
+                                                          </div>
+                                                      ),
+                                                  )
+                                                : t("deliveryRecipientCount", {
+                                                      count: row.recipient_count,
+                                                  })}
                                         </td>
                                         <td>
                                             <Tag

@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from django.contrib.auth.models import User
@@ -11,16 +12,20 @@ from django.utils.translation import gettext
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Language, WorkspaceRole
 from pyracast.connections.models import MAX_DAILY_QUOTA
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationSettings,
     ReminderSchedule,
 )
 from pyracast.notifications.recipients import effective_recipients as effective_recipients
-from pyracast.notifications.recipients import recipient_memberships
+from pyracast.notifications.recipients import pin_recipient_memberships
 from pyracast.regions.models import Region, RegionStatus, active_region
 
 RECIPIENT_MAX_LENGTH = 254
+# The largest per-plant recipient limit the console accepts (a smallint column).
+MAX_RECIPIENT_LIMIT = 32767
+CLOCK = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]")
 
 
 def validate_recipient(address: str) -> None:
@@ -55,33 +60,84 @@ def recipient_limit(*, lock: bool = False) -> int:
     return NotificationSettings.objects.values_list("max_recipients", flat=True).first() or 5
 
 
-def normalize_recipients(recipients: list[str]) -> list[str]:
-    normalized = [address.strip() for address in recipients]
-    for address in normalized:
-        validate_recipient(address)
-    if len({address.casefold() for address in normalized}) != len(normalized):
-        raise ValidationError(gettext("Recipient addresses must be distinct (case-insensitive)."))
-    return normalized
+@dataclass(frozen=True)
+class ReminderSettings:
+    enabled: bool
+    recipients: tuple[str, ...]
+    include_workspace_members: bool
+    times: tuple[str, ...]
+    language: str
 
 
-def _reminder_settings(schedule: ReminderSchedule) -> tuple[object, ...]:
-    return (
+def _stored_settings(schedule: ReminderSchedule) -> ReminderSettings:
+    return ReminderSettings(
         schedule.enabled,
-        list(schedule.recipients),
+        tuple(schedule.recipients),
         schedule.include_workspace_members,
-        list(schedule.times),
+        tuple(schedule.times),
         schedule.language,
     )
 
 
 def get_reminder_schedule(
     actor: User, tenant_id: int, region_id: int, now: datetime
-) -> ReminderSchedule:
-    tenant_membership(actor, tenant_id)
+) -> tuple[ReminderSchedule, bool]:
+    """The plant's schedule, or an unsaved default, and whether the actor administers it."""
+    membership = tenant_membership(actor, tenant_id)
     region = Region.objects.active().get(pk=region_id, tenant_id=tenant_id)
-    return ReminderSchedule.objects.filter(region=region).first() or ReminderSchedule(
+    schedule = ReminderSchedule.objects.filter(region=region).first() or ReminderSchedule(
         region=region, effective_from=now, language=translation.get_language()
     )
+    return schedule, membership.role == WorkspaceRole.ADMIN
+
+
+def _check_recipients(submitted: ReminderSettings) -> None:
+    for address in submitted.recipients:
+        validate_recipient(address)
+    if len({address.casefold() for address in submitted.recipients}) != len(submitted.recipients):
+        raise DomainError(ErrorCode.DUPLICATE_RECIPIENTS, field="recipients")
+    if submitted.enabled and not (submitted.recipients or submitted.include_workspace_members):
+        raise DomainError(ErrorCode.RECIPIENT_REQUIRED, field="recipients")
+
+
+def _check_times(submitted: ReminderSettings, stored: ReminderSettings, region: Region) -> None:
+    if any(CLOCK.fullmatch(clock) is None for clock in submitted.times):
+        raise ValidationError(gettext("Reminder times must use HH:MM."))
+    if len(set(submitted.times)) != len(submitted.times):
+        raise DomainError(ErrorCode.DUPLICATE_REMINDER_TIMES, field="times")
+    if submitted.enabled and not submitted.times:
+        raise DomainError(ErrorCode.REMINDER_TIME_REQUIRED, field="times")
+    binding = region.approved_binding
+    limit = binding.provider_account.daily_quota if binding is not None else MAX_DAILY_QUOTA
+    # Times kept from before a quota reduction stay saved; only a longer list is refused.
+    if len(submitted.times) > limit and len(submitted.times) > len(stored.times):
+        raise DomainError(
+            ErrorCode.TOO_MANY_REMINDER_TIMES,
+            gettext("This plant allows at most %(limit)s delivery times a day.") % {"limit": limit},
+            field="times",
+        )
+
+
+def _check_enabling(region: Region) -> None:
+    binding = region.approved_binding
+    if region.status != RegionStatus.APPROVED or binding is None:
+        raise DomainError(ErrorCode.PLANT_NOT_APPROVED, field="enabled")
+    account = binding.provider_account
+    if not account.enabled or account.authorized_at is None:
+        raise DomainError(ErrorCode.PROVIDER_ACCOUNT_UNAVAILABLE, field="enabled")
+    if not binding_can_notify(binding):
+        raise DomainError(ErrorCode.PLANT_NOT_APPROVED, field="enabled")
+
+
+def _check_recipient_limit(count: int, current: int, limit: int, unchanged_pause: bool) -> None:
+    # A save that lowers an over-limit count, or only pauses the schedule, stays possible.
+    if count > limit and not (count < current or unchanged_pause):
+        raise DomainError(
+            ErrorCode.RECIPIENT_LIMIT_EXCEEDED,
+            gettext("This plant allows at most %(limit)s distinct recipient addresses in total.")
+            % {"limit": limit},
+            field="recipients",
+        )
 
 
 def configure_reminders(
@@ -93,75 +149,50 @@ def configure_reminders(
     recipients: list[str],
     times: list[str],
     language: str,
-    now: datetime,
     include_workspace_members: bool = False,
+    now: datetime,
 ) -> ReminderSchedule:
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     if language not in Language.values:
         raise ValidationError(gettext("A supported reminder language is required."))
+    submitted = ReminderSettings(
+        enabled,
+        tuple(address.strip() for address in recipients),
+        include_workspace_members,
+        tuple(sorted(times)),
+        language,
+    )
     with transaction.atomic():
         tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
-        address_limit = recipient_limit(lock=True)
-        actor.refresh_from_db(fields=["email"])
-        addresses = normalize_recipients(
-            recipients if recipients or include_workspace_members else [actor.email]
-        )
+        limit = recipient_limit(lock=True)
         region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         schedule, created = ReminderSchedule.objects.get_or_create(
             region=region, defaults={"effective_from": now}
         )
-        stored = _reminder_settings(schedule)
+        stored = _stored_settings(schedule)
+        _check_recipients(submitted)
+        _check_times(submitted, stored, region)
+        if enabled and (created or not stored.enabled):
+            _check_enabling(region)
+        current = len(effective_recipients(schedule))
         stored_memberships = dict(schedule.recipient_memberships)
-        current_count = len(effective_recipients(schedule))
-        disabling_unchanged = (
-            not enabled
-            and addresses == schedule.recipients
-            and sorted(times) == schedule.times
-            and include_workspace_members == schedule.include_workspace_members
+        schedule.recipient_memberships = pin_recipient_memberships(
+            schedule, list(submitted.recipients)
         )
-        schedule.recipients = addresses
+        schedule.recipients = list(submitted.recipients)
         schedule.include_workspace_members = include_workspace_members
-        known_members = recipient_memberships(tenant_id)
-        known_members.update(schedule.recipient_memberships)
-        schedule.recipient_memberships = {
-            address.casefold(): known_members[address.casefold()]
-            for address in addresses
-            if address.casefold() in known_members
-        }
-        proposed_count = len(effective_recipients(schedule))
-        if proposed_count > address_limit and not (
-            proposed_count < current_count or disabling_unchanged
-        ):
-            raise ValidationError(
-                gettext(
-                    "This plant allows at most %(limit)s distinct recipient addresses in total."
-                ),
-                params={"limit": address_limit},
-            )
-        binding = region.approved_binding
-        limit = binding.provider_account.daily_quota if binding is not None else MAX_DAILY_QUOTA
-        if len(times) != len(set(times)) or len(times) > limit:
-            raise ValidationError(
-                gettext("Provide at most %(limit)s distinct local HH:MM times."),
-                params={"limit": limit},
-            )
-        for clock in times:
-            if re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", clock) is None:
-                raise ValidationError(gettext("Reminder times must use HH:MM."))
-        if enabled and (not times or binding is None or not binding_can_notify(binding)):
-            raise ValidationError(
-                gettext("An approved current region and at least one time are required.")
-            )
-        schedule.enabled = enabled
-        schedule.recipients = addresses
-        schedule.times = sorted(times)
-        schedule.language = language
-        if not created and _reminder_settings(schedule) == stored:
-            if schedule.recipient_memberships != stored_memberships:
-                schedule.save(update_fields=["recipient_memberships"])
-            return schedule
-        schedule.configured_by = actor
-        schedule.effective_from = now
-        schedule.save()
+        unchanged_pause = not enabled and replace(submitted, enabled=stored.enabled) == stored
+        _check_recipient_limit(len(effective_recipients(schedule)), current, limit, unchanged_pause)
+        schedule.enabled, schedule.times, schedule.language = (
+            enabled,
+            list(submitted.times),
+            language,
+        )
+        if created or submitted != stored:
+            schedule.configured_by = actor
+            schedule.effective_from = now
+            schedule.save()
+        elif schedule.recipient_memberships != stored_memberships:
+            schedule.save(update_fields=("recipient_memberships",))
         return schedule

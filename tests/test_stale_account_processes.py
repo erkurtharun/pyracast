@@ -27,6 +27,7 @@ from django.test import Client, override_settings
 from pyracast.accounts.inputs import ResetPasswordInput
 from tests.support.auth_lifecycle import AUTH, PASSWORD, member, submit
 from tests.support.company_registration import signup
+from tests.support.outbox import deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 CODE = re.compile(r"^\s*([A-Z0-9]{4}-[A-Z0-9]{4}|[0-9]{6})\s*$", re.MULTILINE)
@@ -59,9 +60,11 @@ def browser(language: str | None = None) -> Client:
 
 
 def mailed_code() -> str:
+    deliver_mail()
     (message,) = mail.outbox
     match = CODE.search(str(message.body))
     assert match is not None
+    deliver_mail()
     mail.outbox.clear()
     return match.group(1)
 
@@ -98,6 +101,7 @@ def reset_elsewhere(email: str) -> None:
     assert submit(client, "auth/password/request", {"email": email}).status_code == 401
     reset = {"key": mailed_code(), "password": PASSWORD + "reset"}
     assert submit(client, "auth/password/reset", reset).status_code == 401
+    deliver_mail()
     mail.outbox.clear()
 
 
@@ -125,6 +129,7 @@ def test_endpoints_without_a_pending_process_answer_conflict(
 
     conflict = {"status": 409, "code": "conflict", "message": CONFLICT[language]}
     assert answer(response) == (409, conflict)
+    deliver_mail()
     assert mail.outbox == []
     assert PENDING not in client.get(AUTH + "auth/session").json()["data"].get("flows", [])
 
@@ -140,6 +145,7 @@ def test_resend_rate_limit_mails_nothing_and_allows_a_later_retry(
 
     throttled = {"status": 429, "code": "throttled", "message": THROTTLED[language]}
     assert answer(response) == (429, throttled)
+    deliver_mail()
     assert mail.outbox == []
     one_minute_later(monkeypatch)
     assert submit(client, "auth/email/verify/resend", {}).status_code == 200
@@ -157,6 +163,7 @@ def test_signup_code_for_an_address_verified_meanwhile_answers_like_no_pending_v
     response = submit(client, "auth/email/verify", {"key": code})
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert_signed_out_without_pending_verification(client)
 
@@ -172,6 +179,7 @@ def test_signup_resend_for_an_address_verified_meanwhile_mails_nothing(
     response = submit(client, "auth/email/verify/resend", {})
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert_signed_out_without_pending_verification(client)
 
@@ -192,6 +200,7 @@ def test_change_code_for_an_address_verified_out_of_band_answers_like_no_pending
     response = submit(client, "auth/email/verify", {"key": code})
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert signed_in_records(client) == methods
     assert EmailAddress.objects.get(user=user, primary=True).email == "member@example.com"
@@ -209,6 +218,7 @@ def test_change_resend_for_an_address_verified_out_of_band_mails_nothing(
     response = submit(client, "auth/email/verify/resend", {})
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
 
 
@@ -224,6 +234,7 @@ def test_verification_for_a_deleted_signup_account_answers_like_no_pending_verif
     response = submit(client, endpoint, {"key": code})
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert_signed_out_without_pending_verification(client)
 
@@ -239,6 +250,7 @@ def test_reset_for_a_deleted_account_answers_like_no_pending_reset() -> None:
     response = submit(client, "auth/password/reset", reset)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert client.get("/api/session/").json()["user"] is None
 
@@ -322,6 +334,7 @@ def test_signup_code_answers_like_nothing_pending_when_verified_before_completio
     response = submit(client, "auth/email/verify", {"key": code})
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert_signed_out_without_pending_verification(client)
     assert EmailAddress.objects.get(email="owner@example.com").verified
@@ -339,6 +352,7 @@ def test_change_code_answers_like_nothing_pending_when_verified_before_completio
     response = submit(client, "auth/email/verify", {"key": code})
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert signed_in_records(client) == methods
     assert EmailAddress.objects.get(user=user, email="new@example.com").verified
@@ -356,6 +370,7 @@ def test_signup_resend_mails_nothing_when_verified_before_the_code_is_sent(
     response = submit(client, "auth/email/verify/resend", {})
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert_signed_out_without_pending_verification(client)
     assert EmailAddress.objects.get(email="owner@example.com").verified
@@ -376,6 +391,7 @@ def test_change_resend_mails_nothing_when_verified_before_the_code_is_sent(
     response = submit(client, "auth/email/verify/resend", {})
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert signed_in_records(client) == methods
     assert EmailAddress.objects.get(user=user, email="new@example.com").verified
@@ -399,6 +415,7 @@ def test_reset_answers_like_nothing_pending_when_the_account_is_deleted_before_c
     response = submit(client, "auth/password/reset", reset)
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     assert not User.objects.filter(pk=user.pk).exists()
     assert client.get("/api/session/").json()["user"] is None
@@ -411,6 +428,7 @@ def account(email: str, username: str, *, verified: bool = True) -> User:
 
 
 def code_to(address: str) -> str:
+    deliver_mail()
     (message,) = [message for message in mail.outbox if message.to == [address]]
     match = CODE.search(str(message.body))
     assert match is not None
@@ -418,6 +436,7 @@ def code_to(address: str) -> str:
 
 
 def sent() -> list[tuple[str, list[str]]]:
+    deliver_mail()
     return [(message.extra_headers["X-Pyracast-Mail"], message.to) for message in mail.outbox]
 
 
@@ -440,6 +459,7 @@ def test_accounts_verifying_each_others_stored_address_both_complete(
     for client, address in changes:
         assert submit(client, "account/email", {"email": address}).status_code == 200
     keys = [code_to(address) for _, address in changes]
+    deliver_mail()
     mail.outbox.clear()
     together = threading.Barrier(2, timeout=10)
     finish = EmailVerificationProcess.finish
@@ -567,6 +587,7 @@ def test_verification_never_writes_over_an_address_reassigned_before_completion(
     response = verify(client, code)
 
     assert answer(response) == answer(verify(browser(), code))
+    deliver_mail()
     assert mail.outbox == []
     assert_signed_out_without_pending_verification(client)
     assert EmailAddress.objects.filter(
@@ -590,6 +611,7 @@ def test_verification_never_writes_back_an_address_edited_before_completion(
     response = verify(client, code)
 
     assert answer(response) == answer(verify(browser(), code))
+    deliver_mail()
     assert mail.outbox == []
     assert_signed_out_without_pending_verification(client)
     rows = EmailAddress.objects.values_list("email", "primary", "verified")
@@ -612,6 +634,7 @@ def test_change_answers_conflict_when_the_address_is_stored_before_completion(
     response = submit(client, "auth/email/verify", {"key": code})
 
     assert answer(response) == expected
+    deliver_mail()
     assert mail.outbox == []
     stored = [("member@example.com", True, True), ("new@example.com", False, False)]
     assert sorted(addresses(user)) == stored
@@ -644,6 +667,7 @@ def test_reset_never_writes_over_an_address_changed_before_completion(
     response = submit(client, "auth/password/reset", reset)
 
     assert answer(response) == nothing_pending
+    deliver_mail()
     assert mail.outbox == []
     owner.refresh_from_db()
     assert owner.check_password(PASSWORD)
@@ -739,6 +763,7 @@ def test_failed_verification_writes_nothing_and_discards_the_process(
     response = verify(client, code)
 
     assert answer(response) == answer(verify(browser(), code))
+    deliver_mail()
     assert mail.outbox == []
     assert not EmailAddress.objects.get(email="owner@example.com").verified
     assert_signed_out_without_pending_verification(client)
@@ -758,6 +783,7 @@ def test_failed_reset_writes_nothing_and_discards_the_process(
 
     nothing_pending = answer(submit(browser(), "auth/password/reset", reset))
     assert answer(response) == nothing_pending
+    deliver_mail()
     assert mail.outbox == []
     user.refresh_from_db()
     assert user.check_password(PASSWORD)
@@ -809,4 +835,5 @@ def test_completion_past_the_lock_timeout_answers_busy(
     busy = {"code": "busy", "message": BUSY[language], "retry_after": 1}
     assert answer(response) == (503, busy)
     assert response["Retry-After"] == "1"
+    deliver_mail()
     assert mail.outbox == []

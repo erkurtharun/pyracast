@@ -46,6 +46,7 @@ from tests.support.account_mail import (
 )
 from tests.support.auth_lifecycle import PASSWORD, member, submit
 from tests.support.company_registration import signup
+from tests.support.outbox import deliver_mail
 
 pytestmark = pytest.mark.django_db
 # Session gates precede account rules; otherwise a strictly narrower row wins.
@@ -71,8 +72,8 @@ PRECEDENCE_EXCEPTIONS: dict[tuple[str, int, int], str] = {
 
 class CommitClient(Client):
     def request(self, **request: Any) -> Any:
-        # A rolled-back test transaction never commits: run the request's commit callbacks, such as
-        # account mail, once the request finishes.
+        # A rolled-back test transaction never commits: run the request's commit callbacks once
+        # the request finishes.
         with TestCase.captureOnCommitCallbacks(execute=True):
             return super().request(**request)
 
@@ -189,6 +190,7 @@ def signed_in_actor(state: str, language: str) -> Client:
         assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     if state == "pending-change":
         assert submit(client, "account/email", {"email": CHANGE}).status_code == 200
+    deliver_mail()
     mail.outbox.clear()
     return client
 
@@ -221,12 +223,14 @@ def test_verification_resend_after_signup_with_a_taken_address_mails_nothing(
     account(PRIMARY, "member", "en")
     client = commit_browser()
     assert signup(client, {"email": PRIMARY}).status_code == 401
+    deliver_mail()
     mail.outbox.clear()
     one_minute_later(monkeypatch)
 
     response = submit(client, "auth/email/verify/resend", {})
 
     assert response.status_code == 200
+    deliver_mail()
     assert mail.outbox == []
 
 
@@ -241,6 +245,7 @@ def test_unrouted_reauthentication_code_resend_answers_404_and_mails_nothing() -
     response = submit(client, "auth/reauthenticate/code/resend", {})
 
     assert response.status_code == 404
+    deliver_mail()
     assert mail.outbox == []
 
 

@@ -166,7 +166,7 @@
         "emailAddress": "Email address {index, number}",
         "removeEmailAddress": "Remove email address {index, number}",
         "recipientLimit": "Use at most {limit, plural, one {# email address} other {# email addresses}}.",
-        "reminderPolicy": "Emails use the latest saved forecast and show its collection time and age; they do not request new provider data. Daylight-saving gaps are skipped and repeated local times run once. Daily limit: {limit}. Provider queries per email: {queries}.",
+        "reminderPolicy": "Emails use the latest saved forecast and show its collection time and age; they do not request new provider data. Daylight-saving gaps are skipped and repeated local times run once. Daily limit: {limit}.",
         "scheduled": "Scheduled ({timezone})",
         "sourceAge": "{hours, number}h {minutes, number}m",
         "statusUnavailable": "Status unavailable",
@@ -200,7 +200,11 @@
         "workspaceMembers": "Workspace members ({count, number})",
         "noWorkspaceMembers": "No active, verified members yet.",
         "otherAddresses": "Other addresses",
-        "groupPrivacy": "One email per send time. Recipients cannot see each other (BCC)."
+        "groupPrivacy": "One email per send time. Recipients cannot see each other (BCC).",
+        "recipientCountOnly": "{count, plural, one {# recipient} other {# recipients}} of at most {limit, number}. Only the workspace administrator sees the addresses.",
+        "deliveryRecipientCount": "{count, plural, one {# recipient} other {# recipients}}",
+        "stateWaitingForApproval": "Waiting for approval",
+        "stateProviderAttention": "Provider account needs attention"
     },
     "Outages": {
         "plantOutages": "Plant outages",
@@ -362,7 +366,8 @@
         "deliveryUncertain": "Email delivery could not be confirmed.",
         "deliveryFailed": "The invitation email was not sent. Cancel the invitation and invite again.",
         "useAnotherAccount": "Use another account",
-        "dismiss": "Cancel"
+        "dismiss": "Cancel",
+        "reminderLimitWarning": "{count, plural, one {# plant includes} other {# plants include}} the workspace members in its email reminders and already reaches the recipient limit. A new member will pause those reminders until the list is shortened."
     },
     "ChangeRequests": {
         "proposeRevert": "Request provider reading",

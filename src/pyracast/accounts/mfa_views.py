@@ -11,6 +11,7 @@ from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.http import HttpRequest, HttpResponseBase
 
+from pyracast.accounts.adapters import RECOVERY_CODES_GENERATED, TOTP_ACTIVATED, AccountAdapter
 from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.inputs import (
     SecondFactorInput,
@@ -29,12 +30,14 @@ from pyracast.accounts.sessions import revoke_other_sessions
 from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor, require_recent_mfa
 
 
-def end_other_sessions_on_change(request: HttpRequest, authorized: str, trigger: str) -> None:
-    # allauth signals an activation and a regeneration only after the commit; the other sessions
-    # end in the write's transaction, so the change never commits while they stay signed in.
+def finish_factor_change(request: HttpRequest, authorized: str, trigger: str, notice: str) -> None:
+    # allauth signals and mails an activation and a regeneration only after the commit; the other
+    # sessions end and the notice is stored in the write's transaction, so the change never
+    # commits while they stay signed in or without its notice.
     user = cast(User, request.user)
     if account_state(user.pk) != authorized:
         revoke_other_sessions(request, user, trigger)
+        AccountAdapter().notify(notice, user)
 
 
 class AuthenticateView(views.AuthenticateView):
@@ -76,7 +79,7 @@ class ManageRecoveryCodesView(StepUpAnswers, AllauthRecoveryCodesView):
                 return refused
             response = super().handle(request, *args, **kwargs)
             if request.method == "POST":
-                end_other_sessions_on_change(request, authorized, "mfa_reset")
+                finish_factor_change(request, authorized, "mfa_reset", RECOVERY_CODES_GENERATED)
             return response
 
 
@@ -96,5 +99,5 @@ class ManageTOTPView(StepUpAnswers, AllauthTOTPView):
                 return refused
             response = super().handle(request, *args, **kwargs)
             if request.method == "POST":
-                end_other_sessions_on_change(request, authorized, "mfa_added")
+                finish_factor_change(request, authorized, "mfa_added", TOTP_ACTIVATED)
             return response

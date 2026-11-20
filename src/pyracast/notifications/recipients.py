@@ -77,13 +77,15 @@ def effective_recipients(schedule: ReminderSchedule) -> list[str]:
 def pin_recipient_memberships(
     schedule: ReminderSchedule, addresses: list[str]
 ) -> dict[str, list[int]]:
-    known = recipient_memberships(schedule.region.tenant_id)
-    known.update(schedule.recipient_memberships)
-    return {
-        address.casefold(): known[address.casefold()]
-        for address in addresses
-        if address.casefold() in known
-    }
+    """Each address with its stored memberships and those of the members who hold it now, so
+    it stays a recipient while any of them is active."""
+    current = recipient_memberships(schedule.region.tenant_id)
+    pinned: dict[str, list[int]] = {}
+    for address in addresses:
+        key = address.casefold()
+        if members := [*schedule.recipient_memberships.get(key, []), *current.get(key, [])]:
+            pinned[key] = list(dict.fromkeys(members))
+    return pinned
 
 
 def permitted_recipients(delivery: NotificationDelivery) -> list[str]:

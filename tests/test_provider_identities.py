@@ -24,6 +24,7 @@ from tests.support.account_sessions import (
     signed_in,
 )
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit
+from tests.support.outbox import deliver_mail
 from tests.support.social_accounts import (
     CALLBACK,
     PROVIDERS,
@@ -57,6 +58,7 @@ def pending_signup(provider: str) -> Client:
 
 
 def sent() -> list[tuple[str, list[str]]]:
+    deliver_mail()
     return [(message.extra_headers["X-Pyracast-Mail"], message.to) for message in mail.outbox]
 
 
@@ -112,6 +114,7 @@ def test_a_provider_signup_that_meets_the_address_mail_limit_records_one_throttl
         event for event in events() if event["event"] == "authentication_request_throttled"
     ]
     assert (response.status_code, len(throttled)) == (429, 1)
+    deliver_mail()
     assert mail.outbox == []
 
 

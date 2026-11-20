@@ -2,18 +2,25 @@ from datetime import timedelta
 
 import pytest
 from allauth.account.models import EmailAddress
+from django.contrib.auth.models import User
 from django.core import mail
 
 from pyracast.accounts.models import Membership
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.notifications.jobs import process_notification
-from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.models import (
+    NotificationDelivery,
+    NotificationSettings,
+    ReminderSchedule,
+)
+from pyracast.notifications.operations import configure_reminders
+from pyracast.notifications.overview import plants_at_recipient_limit
 from pyracast.notifications.recipients import effective_recipients
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.operations import submit_region
-from tests.support.domain import NOW
+from tests.support.domain import NOW, System
 from tests.support.notification_groups import group, member
-from tests.support.notifications import SLOT, configured
+from tests.support.notifications import SLOT, configured, reminder_schedule_payload
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -123,3 +130,67 @@ def test_historical_alias_does_not_revoke_a_different_pinned_member() -> None:
     assert historical.revoked_recipients == []
     assert process_notification(pending.pk, SLOT)
     assert mail.outbox[0].bcc == [current.email]
+
+
+def two_members_with_one_address(system: System) -> tuple[User, User]:
+    """`shared@example.com` is the verified address of one member and the account address of
+    another."""
+    verified = member(system, "shared@example.com")
+    account = User.objects.create(username="account-holder", email="SHARED@example.com")
+    Membership.objects.create(tenant=system.tenant, user=account)
+    return verified, account
+
+
+def test_an_address_of_two_members_counts_once() -> None:
+    system, _ = configured()
+    two_members_with_one_address(system)
+    NotificationSettings.objects.update_or_create(pk=1, defaults={"max_recipients": 1})
+    schedule = configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        recipients=["shared@example.com"],
+        include_workspace_members=True,
+        times=["10:00"],
+        language="en",
+        now=NOW,
+    )
+    assert process_notification(enqueue_due(SLOT)[-1], SLOT)
+
+    viewer = reminder_schedule_payload(schedule, SLOT, administrator=False)
+    administrator = reminder_schedule_payload(schedule, SLOT)
+    assert (viewer["state"], viewer["recipient_count"], viewer["recipient_limit_exceeded"]) == (
+        "sending",
+        1,
+        False,
+    )
+    assert viewer["deliveries"][0]["recipient_count"] == 1
+    assert administrator["addresses"]["recipients"] == ["shared@example.com"]
+    assert administrator["deliveries"][0]["recipients"] == ["shared@example.com"]
+    NotificationSettings.objects.update(max_recipients=2)
+    assert plants_at_recipient_limit(system.tenant.pk) == 0
+
+
+def test_an_address_pinned_to_an_inactive_member_reaches_the_member_holding_it_now() -> None:
+    system, _ = configured()
+    former = member(system, "shared@example.com")
+    schedule = group(system, ["shared@example.com"])
+    assert schedule.recipient_memberships == {
+        "shared@example.com": [Membership.objects.get(user=former).pk]
+    }
+    User.objects.filter(pk=former.pk).update(is_active=False, email="former@example.com")
+    EmailAddress.objects.filter(user=former).delete()
+    holder = User.objects.create(username="holder", email="shared@example.com")
+    Membership.objects.create(tenant=system.tenant, user=holder)
+    EmailAddress.objects.create(
+        user=holder, email="shared@example.com", verified=True, primary=True
+    )
+    assert effective_recipients(schedule) == ["shared@example.com"]
+
+    (delivery_id,) = enqueue_due(SLOT)
+    process_notification(delivery_id, SLOT)
+
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert (delivery.status, delivery.last_error) == ("sent", "")
+    assert mail.outbox[0].bcc == ["shared@example.com"]

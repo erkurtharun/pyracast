@@ -416,7 +416,9 @@ test("a customer manages one plant site through the real API", async ({
     await page.getByRole("button", { name: "Email reminders" }).click();
     await page.getByLabel("Enable forecast emails for this plant").check();
     await page.getByLabel("Delivery time 1", { exact: true }).fill("10:00");
-    await page.getByLabel("Email address 1", { exact: true }).fill("");
+    await page
+        .getByLabel("Email address 1", { exact: true })
+        .fill("member@example.com");
     await page.getByRole("button", { name: "Save reminders" }).click();
     await expect(
         page.getByLabel("Email address 1", { exact: true }),

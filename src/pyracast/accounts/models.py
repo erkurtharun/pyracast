@@ -55,7 +55,8 @@ class Membership(models.Model):
 class WorkspaceInvitation(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
     email = models.EmailField()
-    token_hash = models.CharField(max_length=64, unique=True)
+    # The digest of the newest token the mailer minted; none until it first prepares the mail.
+    token_hash = models.CharField(max_length=64, unique=True, null=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()

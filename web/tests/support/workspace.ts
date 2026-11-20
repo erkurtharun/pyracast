@@ -232,18 +232,19 @@ export async function mockApi(
         else if (path.endsWith("/reminders/"))
             data = {
                 enabled: false,
+                state: "paused_by_user",
                 language: "en",
-                recipients: [user.email],
                 include_workspace_members: false,
-                workspace_recipients: [user.email],
+                addresses: {
+                    recipients: [user.email],
+                    workspace_recipients: [user.email],
+                },
                 recipient_limit: 5,
                 recipient_count: 1,
-                recipient_slots_remaining: 4,
+                workspace_member_count: 1,
                 recipient_limit_exceeded: false,
                 times: ["08:00"],
-                effective_recipients: [user.email],
-                timezone: region.timezone,
-                quota: { daily_reminder_limit: 10, queries_per_email: 0 },
+                daily_reminder_limit: 10,
                 deliveries: [],
             };
         else if (path.endsWith("/location-change-requests/")) data = paged([]);

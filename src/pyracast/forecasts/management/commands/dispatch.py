@@ -14,13 +14,21 @@ from pyracast.accounts.retention import sweep_accounts
 from pyracast.background.failures import ItemsFailedError, log_failure
 from pyracast.forecasts.monitoring import PhaseOutcome, record_dispatch_phase
 from pyracast.metering.runtime import dispatch_epias, make_epias_actor
-from pyracast.notifications.runtime import dispatch_notifications, make_notification_actor
+from pyracast.notifications.outbox import purge_finished_mail
+from pyracast.notifications.runtime import (
+    dispatch_notifications,
+    make_notification_actor,
+    make_outbound_mail_actor,
+    publish_outbound_mail,
+)
 from pyracast.plants.runtime import dispatch_calibrations, make_calibration_actor
 from pyracast.runtime import dispatch, make_actor, make_broker
-from pyracast.shutdown import shutdown_control
+from pyracast.shutdown import ShutdownRequest, shutdown_control
 from pyracast.trash import purge_expired
 
 logger = logging.getLogger(__name__)
+# Mail waits for a code in an open browser, so it is published between the regular cycles too.
+MAIL_TICK_SECONDS = 2.0
 
 
 def _published(operation: Callable[[], int]) -> Callable[[], PhaseOutcome]:
@@ -28,11 +36,11 @@ def _published(operation: Callable[[], int]) -> Callable[[], PhaseOutcome]:
 
 
 def _retention() -> PhaseOutcome:
-    # Item failures of one step do not skip the other; a step that fails as a whole outranks
+    # Item failures of one step do not skip the others; a step that fails as a whole outranks
     # them because its items are already logged one by one.
     now = timezone.now()
     failed = 0
-    for step in (purge_expired, sweep_accounts):
+    for step in (purge_expired, sweep_accounts, purge_finished_mail):
         try:
             step(now)
         except ItemsFailedError as error:
@@ -40,6 +48,21 @@ def _retention() -> PhaseOutcome:
     if failed:
         raise ItemsFailedError(failed)
     return PhaseOutcome()
+
+
+def _wait_publishing_mail(
+    shutdown: ShutdownRequest, interval: float, publish: Callable[[], object]
+) -> bool:
+    deadline = time.monotonic() + interval
+    while (remaining := deadline - time.monotonic()) > 0:
+        if shutdown.wait(min(MAIL_TICK_SECONDS, remaining)):
+            return True
+        try:
+            close_old_connections()
+            publish()
+        except Exception as error:
+            log_failure(logger, "mail_publication_failed", error)
+    return False
 
 
 class Command(BaseCommand):
@@ -64,11 +87,12 @@ class Command(BaseCommand):
                 actor = make_actor(broker)
                 calibration_actor = make_calibration_actor(broker)
                 notification_actor = make_notification_actor(broker)
+                mail_actor = make_outbound_mail_actor(broker)
                 epias_actor = make_epias_actor(broker)
                 phases: tuple[tuple[str, Callable[[], PhaseOutcome]], ...] = (
                     (
                         "notifications",
-                        _published(partial(dispatch_notifications, notification_actor)),
+                        _published(partial(dispatch_notifications, notification_actor, mail_actor)),
                     ),
                     ("collection", partial(dispatch, actor)),
                     ("calibration", _published(partial(dispatch_calibrations, calibration_actor))),
@@ -115,7 +139,9 @@ class Command(BaseCommand):
                             log_failure(logger, "dispatch_monitoring_failed", error, phase=name)
                     if failures and not options["loop"]:
                         raise CommandError("Failed dispatch phase(s): " + ", ".join(failures))
-                    if not options["loop"] or shutdown.wait(interval):
+                    if not options["loop"] or _wait_publishing_mail(
+                        shutdown, interval, partial(publish_outbound_mail, mail_actor)
+                    ):
                         break
             except KeyboardInterrupt:
                 pass

@@ -26,6 +26,7 @@ from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import request_location_change, submit_region
 from tests.support.api import verified_admin
 from tests.support.domain import System, make_system
+from tests.support.outbox import deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -48,6 +49,7 @@ def test_platform_authority_runs_workspace_operations_without_membership() -> No
 
     invitation = invite_workspace_member(platform, tenant_id, "guest@example.com", platform=True)
     assert (invitation.created_by, invitation.role) == (platform, WorkspaceRole.VIEWER)
+    deliver_mail()
     assert mail.outbox[-1].to == ["guest@example.com"]
     revoke_workspace_invitation(platform, tenant_id, invitation.pk, platform=True)
     invitation.refresh_from_db()

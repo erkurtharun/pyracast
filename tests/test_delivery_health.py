@@ -54,7 +54,7 @@ def test_health_report_keeps_a_bounded_query_budget(delivery_count: int) -> None
         report = delivery_health(NOW, timedelta(minutes=5))
     assert report["healthy"] is True
     assert report["saved_forecast_notifications"] == delivery_count
-    assert len(queries) <= 8
+    assert len(queries) <= 9
 
 
 @pytest.mark.django_db

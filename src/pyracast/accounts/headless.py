@@ -17,7 +17,9 @@ from allauth.account.internal.stagekit import LOGIN_SESSION_KEY
 from allauth.account.models import EmailAddress
 from allauth.core import ratelimit
 from allauth.headless.account import views
+from allauth.headless.account.inputs import AddEmailInput as AllauthAddEmailInput
 from allauth.headless.base.response import AuthenticationResponse, ConflictResponse
+from allauth.headless.internal.restkit.inputs import Input
 from allauth.headless.internal.restkit.response import ErrorResponse
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, ObjectNotUpdated
@@ -26,7 +28,6 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from psycopg.errors import DeadlockDetected
 
 from pyracast.accounts import inputs
-from pyracast.accounts.audit import lines_after_commit
 from pyracast.accounts.login_limits import spent, throttled
 from pyracast.accounts.processes import (
     AuthorityChangedError,
@@ -39,6 +40,7 @@ from pyracast.accounts.processes import (
     require_authority,
 )
 from pyracast.accounts.security import Factor, strongest_factor
+from pyracast.accounts.session_cookie import persist
 from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor, require_recent_mfa
 from pyracast.db import violated_constraint
 
@@ -104,6 +106,7 @@ class RequestReauthenticationCodeView(
     StrongestFactor, StartingView, views.RequestReauthenticationCodeView
 ):
     factor = Factor.CODE
+    persists_session = True
 
     def handle_input(self, data: Any) -> ErrorResponse | None:
         # With the code budget of the typed address spent, the input reads the account unlocked
@@ -179,6 +182,9 @@ class ResendEmailVerificationCodeView(views.ResendEmailVerificationCodeView):
                 if (process := EmailVerificationProcess.resume(request)) is not None:
                     process.abort()
                 return ConflictResponse(request)
+            # The rotated code is saved before the commit, so the mail never names a code the
+            # session lost.
+            persist(request)
         return response
 
 
@@ -187,7 +193,7 @@ class ConfirmReauthenticationCodeView(StrongestFactor, views.ConfirmReauthentica
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         try:
-            with lines_after_commit(), transaction.atomic():
+            with transaction.atomic():
                 require_authority(request, REAUTHENTICATION_CODE_SESSION_KEY)
                 return super().post(request, *args, **kwargs)
         except AuthorityChangedError:
@@ -236,14 +242,17 @@ class ManageEmailView(StepUpAnswers, StartingView, views.ManageEmailView):
     persists_session = True
 
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        if not request.user.is_authenticated or request.method not in {"POST", "DELETE"}:
+        # A POST runs in `starting`'s transaction, and handle_input checks first in it.
+        if not request.user.is_authenticated or request.method != "DELETE":
             return super().handle(request, *args, **kwargs)
-        if request.method == "POST":
-            # `starting` opens the transaction and handle_input checks first in it.
-            with lines_after_commit():
-                return super().handle(request, *args, **kwargs)
         with credential_write(request):
             return super().handle(request, *args, **kwargs)
+
+    def get_input_class(self) -> type[Input] | None:
+        input_class = super().get_input_class()
+        if input_class is AllauthAddEmailInput:
+            return inputs.AddEmailInput
+        return input_class
 
     def handle_input(self, data: Any) -> ErrorResponse | None:
         if self.request.method == "POST":

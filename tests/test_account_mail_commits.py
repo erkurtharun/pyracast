@@ -24,6 +24,7 @@ from tests.support.account_mail import (
 )
 from tests.support.auth_lifecycle import submit
 from tests.support.company_registration import signup
+from tests.support.outbox import deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 # These committed requests show that the matrix outcome holds under real commits and the database
@@ -81,10 +82,12 @@ def test_committed_request_sends_what_the_matrix_expects(
 def test_throttled_resend_is_refused_without_mail() -> None:
     client = browser()
     assert signup(client, {"email": FRESH, "company_name": "Throttled"}).status_code == 401
+    deliver_mail()
     mail.outbox.clear()
 
     response = submit(client, "auth/email/verify/resend", {})
 
+    deliver_mail()
     assert (response.status_code, mail.outbox) == (429, [])
 
 
@@ -106,10 +109,12 @@ def test_account_mail_waits_for_the_commit_and_is_dropped_on_rollback() -> None:
     with pytest.raises(RuntimeError):
         send_and_roll_back()
 
+    deliver_mail()
     assert mail.outbox == []
     with transaction.atomic():
         AccountAdapter().send_mail(CHANGED_NOTICE, PRIMARY, context)
         assert mail.outbox == []
+    deliver_mail()
     (message,) = mail.outbox
     assert message.to == [PRIMARY]
     assert message.extra_headers["X-Pyracast-Mail"] == CHANGED_NOTICE

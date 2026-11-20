@@ -40,7 +40,7 @@ from pyracast.forecasts.management.commands.check_delivery_health import (
 from pyracast.forecasts.management.commands.worker import Command as WorkerCommand
 from pyracast.mail import gmail
 from pyracast.metering.runtime import make_epias_actor
-from pyracast.notifications.runtime import make_notification_actor
+from pyracast.notifications.runtime import make_notification_actor, make_outbound_mail_actor
 from pyracast.plants.runtime import make_calibration_actor
 from pyracast.runtime import make_actor
 from pyracast.urls import urlpatterns
@@ -171,6 +171,7 @@ def test_every_actor_queue_is_consumed_by_exactly_one_compose_worker() -> None:
         make_actor(broker),
         make_calibration_actor(broker),
         make_notification_actor(broker),
+        make_outbound_mail_actor(broker),
         make_epias_actor(broker),
     )
     queues = {actor.queue_name for actor in actors}
@@ -376,6 +377,14 @@ def test_gateway_timeout_covers_gunicorn_and_grace_periods_fit_service_limits() 
     assert seconds(gateway["TRAEFIK_ENTRYPOINTS_WEBSECURE_TRANSPORT_LIFECYCLE_GRACETIMEOUT"]) < (
         seconds(services["gateway"]["stop_grace_period"])
     )
+
+
+def test_an_unfinished_sign_in_reservation_counts_as_long_as_the_longest_request() -> None:
+    from pyracast.accounts.login_limits import REQUEST_CEILING_SECONDS
+
+    gunicorn = runpy.run_path(str(DEPLOY / "gunicorn_conf.py"))
+
+    assert gunicorn["timeout"] == REQUEST_CEILING_SECONDS
 
 
 def body_limit(router: str) -> int:

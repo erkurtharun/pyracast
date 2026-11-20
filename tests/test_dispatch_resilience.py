@@ -8,10 +8,12 @@ from django.core.management import CommandError, call_command
 from django.db import OperationalError
 
 from pyracast import runtime
+from pyracast.background.failures import ItemsFailedError
 from pyracast.forecasts import scheduler
 from pyracast.forecasts.management.commands import dispatch as command
 from pyracast.forecasts.monitoring import PhaseOutcome
 from pyracast.forecasts.scheduler import CollectionSchedulingError
+from pyracast.shutdown import ShutdownRequest
 from tests.support.domain import make_system
 
 
@@ -34,9 +36,11 @@ def test_dispatch_failure_does_not_suppress_email_and_one_shot_reports_failure(
         "make_actor",
         "make_calibration_actor",
         "make_notification_actor",
+        "make_outbound_mail_actor",
         "make_epias_actor",
     ):
         monkeypatch.setattr(command, factory, MagicMock())
+    monkeypatch.setattr(command, "purge_finished_mail", MagicMock())
     operations = {}
     for name in (
         "purge_expired",
@@ -71,12 +75,20 @@ def test_dispatch_monitoring_failure_does_not_skip_other_phases(
         "make_actor",
         "make_calibration_actor",
         "make_notification_actor",
+        "make_outbound_mail_actor",
         "make_epias_actor",
     ):
         monkeypatch.setattr(command, factory, MagicMock())
     notifications = MagicMock()
     monkeypatch.setattr(command, "dispatch_notifications", notifications)
-    for name in ("purge_expired", "sweep_accounts", "dispatch_calibrations", "dispatch_epias"):
+    for name in (
+        "purge_expired",
+        "sweep_accounts",
+        "purge_finished_mail",
+        "publish_outbound_mail",
+        "dispatch_calibrations",
+        "dispatch_epias",
+    ):
         monkeypatch.setattr(command, name, MagicMock())
     monkeypatch.setattr(command, "dispatch", MagicMock(return_value=PhaseOutcome()))
     monkeypatch.setattr(command, "record_dispatch_phase", MagicMock(side_effect=ConnectionError))
@@ -94,12 +106,15 @@ def test_dispatch_loop_recovers_after_a_failed_cycle(
         "make_actor",
         "make_calibration_actor",
         "make_notification_actor",
+        "make_outbound_mail_actor",
         "make_epias_actor",
     ):
         monkeypatch.setattr(command, factory, MagicMock())
     for name in (
         "purge_expired",
         "sweep_accounts",
+        "purge_finished_mail",
+        "publish_outbound_mail",
         "dispatch_calibrations",
         "dispatch_notifications",
     ):
@@ -127,6 +142,7 @@ def mock_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
         "make_actor",
         "make_calibration_actor",
         "make_notification_actor",
+        "make_outbound_mail_actor",
         "make_epias_actor",
     ):
         monkeypatch.setattr(command, factory, MagicMock())
@@ -150,6 +166,7 @@ def test_phase_records_duration_and_published_count(
     monkeypatch.setattr(command, "dispatch_calibrations", MagicMock(return_value=1))
     monkeypatch.setattr(command, "purge_expired", MagicMock(return_value={"plants": 4}))
     monkeypatch.setattr(command, "sweep_accounts", MagicMock())
+    monkeypatch.setattr(command, "purge_finished_mail", MagicMock())
     monkeypatch.setattr(command, "dispatch_epias", MagicMock(return_value=0))
     call_command("dispatch")
     phases = recorded_phases(isolated_monitoring)
@@ -172,6 +189,25 @@ def test_phase_records_duration_and_published_count(
     )
 
 
+def test_the_mail_purge_runs_beside_retention_steps_whose_items_failed(
+    monkeypatch: pytest.MonkeyPatch, isolated_monitoring: MagicMock
+) -> None:
+    mock_runtime(monkeypatch)
+    for name in ("dispatch_notifications", "dispatch_calibrations", "dispatch_epias"):
+        monkeypatch.setattr(command, name, MagicMock(return_value=0))
+    monkeypatch.setattr(command, "dispatch", MagicMock(return_value=PhaseOutcome()))
+    monkeypatch.setattr(command, "purge_expired", MagicMock(side_effect=ItemsFailedError(1)))
+    monkeypatch.setattr(command, "sweep_accounts", MagicMock(side_effect=ItemsFailedError(2)))
+    purge_mail = MagicMock()
+    monkeypatch.setattr(command, "purge_finished_mail", purge_mail)
+
+    with pytest.raises(CommandError, match="retention"):
+        call_command("dispatch")
+
+    purge_mail.assert_called_once()
+    assert recorded_phases(isolated_monitoring)["retention"][:2] == ("items_failed:3", None)
+
+
 @pytest.mark.django_db(transaction=True)
 def test_collection_scheduling_failure_records_region_count_and_published_jobs(
     monkeypatch: pytest.MonkeyPatch,
@@ -189,6 +225,7 @@ def test_collection_scheduling_failure_records_region_count_and_published_jobs(
     for name in ("dispatch_notifications", "dispatch_calibrations", "dispatch_epias"):
         monkeypatch.setattr(command, name, MagicMock(return_value=0))
     monkeypatch.setattr(command, "purge_expired", MagicMock(return_value={}))
+    monkeypatch.setattr(command, "purge_finished_mail", MagicMock())
     with pytest.raises(CommandError, match="collection"):
         call_command("dispatch")
     assert recorded_phases(isolated_monitoring)["collection"][:2] == (
@@ -219,3 +256,26 @@ def test_collection_keeps_its_first_cause_when_publishing_fails(
     assert runtime.dispatch(actor) == PhaseOutcome(published=1, error=error)
     assert "collection_publish_failed published=1 error_type=ConnectionError" in pyracast_logs.text
     assert "private-broker-url" not in pyracast_logs.text
+
+
+def test_mail_is_published_between_dispatch_cycles_and_a_failure_does_not_end_the_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(command, "MAIL_TICK_SECONDS", 0.001)
+    calls: list[int] = []
+
+    def published() -> int:
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("private-broker-url")
+        return 1
+
+    shutdown = ShutdownRequest(tmp_path / "stop")
+
+    assert not command._wait_publishing_mail(shutdown, 0.05, published)
+
+    assert len(calls) >= 2
+    assert "mail_publication_failed" in pyracast_logs.text
+    assert "private-broker-url" not in pyracast_logs.text
+    (tmp_path / "stop").touch()
+    assert command._wait_publishing_mail(shutdown, 60, published)

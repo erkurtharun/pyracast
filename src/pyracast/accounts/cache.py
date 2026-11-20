@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterable
 from typing import Any
 
 from django.core.cache.backends.base import DEFAULT_TIMEOUT, BaseCache
@@ -65,6 +66,16 @@ class AuthenticationCache(BaseCache):
             )
             row = cursor.fetchone()
         return json.loads(row[0]) if row else default
+
+    def get_many(self, keys: Iterable[str], version: int | None = None) -> dict[str, Any]:
+        stored = {self.make_and_validate_key(key, version=version): key for key in keys}
+        with self._cursor() as cursor:
+            cursor.execute(
+                "SELECT cache_key, value::text FROM pyracast_authentication_cache "
+                "WHERE cache_key = ANY(%s) AND (expires IS NULL OR expires > clock_timestamp())",
+                [list(stored)],
+            )
+            return {stored[cache_key]: json.loads(value) for cache_key, value in cursor.fetchall()}
 
     def delete(self, key: str, version: int | None = None) -> bool:
         cache_key = self.make_and_validate_key(key, version=version)

@@ -1219,7 +1219,9 @@ test("mock contract: saves cached forecast reminders without provider queries", 
     });
     await page.getByText("Reminder details", { exact: true }).click();
     await expect(
-        page.getByText("Provider queries per email", { exact: false }),
+        page.getByText("they do not request new provider data", {
+            exact: false,
+        }),
     ).toBeVisible();
 });
 test("mock contract: visible API error, empty state and accessible mobile layout", async ({

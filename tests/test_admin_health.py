@@ -21,6 +21,9 @@ COUNTERS = [
     ("paused_notifications", "review", "deliveries"),
     ("unavailable_forecasts", "review", "deliveries"),
     ("partial_forecasts", "review", "deliveries"),
+    ("overdue_outbound_mail", "action", "mail"),
+    ("failed_outbound_mail", "review", "mail"),
+    ("uncertain_outbound_mail", "review", "uncertain_mail"),
     ("overdue_metering", "action", "metering"),
     ("interrupted_metering", "action", "metering"),
     ("failed_metering", "review", "metering"),
@@ -52,6 +55,12 @@ def test_each_health_reason_has_its_count_guidance_and_filtered_destination(
     assert check.action_label
     if target == "plants":
         assert check.action_url == f"{reverse('admin:workspace_plants')}?issue={key}"
+    elif target == "mail":
+        assert check.action_url == reverse("admin:notifications_outboundmail_changelist")
+    elif target == "uncertain_mail":
+        assert check.action_url == (
+            f"{reverse('admin:notifications_outboundmail_changelist')}?status__exact=uncertain"
+        )
     else:
         assert check.action_url == (
             f"{reverse('admin:workspace_operations')}?issue={key}#{target}-title"

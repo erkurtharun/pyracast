@@ -26,6 +26,7 @@ from pyracast.accounts.signup import CompanySignupInput
 from tests.support.account_sessions import capture_security_events
 from tests.support.auth_lifecycle import submit
 from tests.support.company_registration import AUTH, DETAILS, PASSWORD, mailed_code, signup
+from tests.support.outbox import deliver_mail
 from tests.support.workspaces import invitation_token
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
@@ -53,6 +54,7 @@ def test_signup_requires_verification_before_tenant_access() -> None:
     assert not EmailAddress.objects.get(user=user).verified
     assert client.get("/api/session/").json()["user"] is None
     assert client.get("/api/tenants/").status_code in {401, 403}
+    deliver_mail()
     assert len(mail.outbox) == 1
 
     code = mailed_code()
@@ -259,6 +261,7 @@ def test_concurrent_signup_for_one_mailbox_can_be_recovered_by_its_owner(
         submit(owner, "auth/login", {"email": DETAILS["email"], "password": PASSWORD}).status_code
         == 400
     )
+    deliver_mail()
     mail.outbox.clear()
     assert submit(owner, "auth/password/request", {"email": DETAILS["email"]}).status_code == 401
     code = mailed_code()
@@ -421,6 +424,7 @@ def test_a_signup_answers_alike_after_its_address_was_requested_as_a_new_email(
     addresses = ["new@example.com", "verified@example.com", "unverified@example.com"]
     for index, address in enumerate(addresses):
         request_as_new_email(address, f"requester-{index}")
+    deliver_mail()
     mail.outbox.clear()
     clock = answer_clock(monkeypatch, 100.0, 100.25, 200.0, 200.25, 300.0, 300.25)
 
@@ -432,6 +436,7 @@ def test_a_signup_answers_alike_after_its_address_was_requested_as_a_new_email(
     assert [answer.status_code for answer in answers] == [401, 401, 401]
     assert answers[0].json() == answers[1].json() == answers[2].json()
     assert clock.waits == [0.75, 0.75, 0.75]
+    deliver_mail()
     assert mail.outbox == []
 
 
@@ -481,6 +486,7 @@ def test_a_signup_whose_address_mail_limit_is_met_meanwhile_records_one_throttle
 
     throttled = {"event": "authentication_request_throttled", "user_id": None}
     assert records == [[throttled | {"client_ip": "127.0.0.1"}]] * 2
+    deliver_mail()
     assert mail.outbox == []
 
 
@@ -579,11 +585,12 @@ def test_the_signup_route_answers_other_methods_at_once(monkeypatch: pytest.Monk
         (True, "account/email/account_already_exists"),
     ],
 )
-def test_a_signup_waits_after_its_records_are_committed_and_its_mail_is_handed_over(
+def test_a_signup_waits_after_its_records_and_its_mail_intent_are_committed(
     address_has_account: bool, template: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     if address_has_account:
         assert signup(Client(enforce_csrf_checks=True)).status_code == 401
+    deliver_mail()
     mail.outbox.clear()
     observed: list[tuple[list[str], list[str], object]] = []
 
@@ -592,10 +599,12 @@ def test_a_signup_waits_after_its_records_are_committed_and_its_mail_is_handed_o
         with connections["auth_cache"].cursor() as cursor:
             cursor.execute("SELECT count(*) FROM auth_user WHERE email = %s", ["owner@example.com"])
             committed = cursor.fetchone()
+            cursor.execute("SELECT kind FROM notifications_outboundmail WHERE status = 'pending'")
+            intents = [kind for (kind,) in cursor.fetchall()]
         observed.append(
             (
                 [alias for alias in connections if connections[alias].in_atomic_block],
-                [message.extra_headers["X-Pyracast-Mail"] for message in mail.outbox],
+                intents,
                 committed,
             )
         )

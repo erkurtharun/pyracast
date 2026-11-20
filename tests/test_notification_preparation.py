@@ -22,7 +22,6 @@ from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import PREPARATION_GRACE, enqueue_due
 from pyracast.notifications.sources import eligible_saved_forecasts
-from pyracast.notifications.views import reminder_schedule_payload
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
 from tests.support.invariants import stored_again
@@ -31,6 +30,7 @@ from tests.support.notifications import (
     SLOT,
     attached_sheet,
     configured,
+    reminder_schedule_payload,
     saved,
 )
 
@@ -419,7 +419,7 @@ def test_default_collection_clock_waits_without_an_explicit_schedule_row() -> No
         system.region.pk,
         language="en",
         enabled=True,
-        recipients=[],
+        recipients=["default@example.com"],
         times=["16:00"],
         now=NOW,
     )

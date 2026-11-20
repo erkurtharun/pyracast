@@ -64,7 +64,7 @@ from pyracast.forecasts.models import (
 from pyracast.languages import explicit_language
 from pyracast.metering.models import EpiasConnection
 from pyracast.metering.operations import connect_epias, disconnect_epias
-from pyracast.notifications.models import NotificationDelivery, NotificationSettings
+from pyracast.notifications.models import NotificationDelivery, NotificationSettings, OutboundMail
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -436,6 +436,24 @@ class NotificationDeliveryAdmin(ReadOnlyAdmin):
         "transmit_started_at",
         "sent_at",
         "last_error",
+    )
+
+
+@admin.register(OutboundMail, site=site)
+class OutboundMailAdmin(ReadOnlyAdmin):
+    list_display = ("id", "kind", "status", "attempts", "last_error", "created_at", "finished_at")
+    list_filter = ("status", "kind")
+    fields = (
+        "kind",
+        "recipient",
+        "status",
+        "attempts",
+        "last_error",
+        "created_at",
+        "available_at",
+        "expires_at",
+        "transmit_started_at",
+        "finished_at",
     )
 
 

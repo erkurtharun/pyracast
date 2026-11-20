@@ -5,7 +5,7 @@ from django.db import models
 from django.db.models import F
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.db import choices_check, lease_check
+from pyracast.db import TIME_ITEMS, choices_check, json_shape_check, lease_check
 from pyracast.regions.models import Region
 
 
@@ -109,6 +109,9 @@ class CollectionSchedule(models.Model):
     enabled = models.BooleanField(default=True)
     times = models.JSONField(default=list)
     effective_from = models.DateTimeField()
+
+    class Meta:
+        constraints = (json_shape_check("times", "array", TIME_ITEMS),)
 
 
 class HistoricalReferenceImport(models.Model):

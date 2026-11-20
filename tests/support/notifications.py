@@ -20,7 +20,9 @@ from pyracast.notifications.models import (
     ReminderSchedule,
 )
 from pyracast.notifications.operations import configure_reminders
+from pyracast.notifications.overview import reminder_overview
 from pyracast.notifications.scheduler import enqueue_due
+from pyracast.notifications.serializers import ReminderOutput
 from tests.support.domain import NOW, System, make_system
 
 SLOT = NOW + timedelta(days=1) - timedelta(hours=6)
@@ -48,7 +50,7 @@ def configured() -> tuple[System, ReminderSchedule]:
         system.region.pk,
         language="en",
         enabled=True,
-        recipients=[],
+        recipients=["default@example.com"],
         times=["10:00"],
         now=NOW,
     )
@@ -113,3 +115,9 @@ def ready() -> NotificationDelivery:
     ids = enqueue_due(SLOT)
     assert len(ids) == 1
     return NotificationDelivery.objects.get(pk=ids[0])
+
+
+def reminder_schedule_payload(
+    schedule: ReminderSchedule, now: datetime, *, administrator: bool = True
+) -> dict[str, Any]:
+    return dict(ReminderOutput(reminder_overview(schedule, now, administrator=administrator)).data)

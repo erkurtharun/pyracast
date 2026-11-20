@@ -39,7 +39,8 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
     ).toBeVisible();
     await expect(
         page.getByRole("status").filter({
-            hasText: "The invitation to browser-owner@example.test was sent.",
+            hasText:
+                "The invitation to browser-owner@example.test is being sent; its state appears in the list.",
         }),
     ).toBeVisible();
     await checkPage(page, testInfo, "console-workspace-desktop");
@@ -108,7 +109,8 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
     await page.getByRole("button", { name: "Send invitation" }).click();
     await expect(
         page.getByRole("status").filter({
-            hasText: "The invitation to browser-viewer@example.test was sent.",
+            hasText:
+                "The invitation to browser-viewer@example.test is being sent; its state appears in the list.",
         }),
     ).toBeVisible();
     const member = process.env.BROWSER_REMOVABLE_MEMBER!;

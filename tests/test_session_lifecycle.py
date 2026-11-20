@@ -37,6 +37,7 @@ from tests.support.account_sessions import (
     with_totp,
 )
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit, totp_code
+from tests.support.outbox import deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -383,6 +384,7 @@ def test_a_resend_whose_account_another_session_changed_meanwhile_sends_no_code(
     competitor = signed_in(user, reauthenticated=True)
     assert submit(competitor, "account/email", {"email": "other@example.com"}).status_code == 200
     competitor_code = mailed_code()
+    deliver_mail()
     mail.outbox.clear()
     monkeypatch.setattr(ratelimit, "time", moment(time.time() + 61))
     resend = EmailVerificationProcess.resend
@@ -396,6 +398,7 @@ def test_a_resend_whose_account_another_session_changed_meanwhile_sends_no_code(
     response = submit(pending, "auth/email/verify/resend", {})
 
     assert (response.status_code, response.json()["code"]) == (400, "session_ended")
+    deliver_mail()
     recipients = sorted(message.to[0] for message in mail.outbox)
     assert recipients == ["owner@example.com"]
     assert session_user(pending) is None

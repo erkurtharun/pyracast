@@ -39,7 +39,7 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.monitoring import delivery_health
 from pyracast.metering.models import EpiasJobError, EpiasJobStatus
 from pyracast.notifications.models import NotificationSettings, PreparedMessageKind
-from pyracast.notifications.operations import recipient_limit
+from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT, recipient_limit
 from pyracast.plants.models import Plant
 from pyracast.regions.models import (
     AuditAction,
@@ -405,7 +405,7 @@ def operations_context(issue: str = "") -> dict[str, Any]:
 
 class WorkspaceSettingsForm(forms.Form):
     max_recipients = forms.IntegerField(
-        min_value=1, max_value=32767, label=gettext_lazy("Recipients per plant")
+        min_value=1, max_value=MAX_RECIPIENT_LIMIT, label=gettext_lazy("Recipients per plant")
     )
     expected_max_recipients = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
 

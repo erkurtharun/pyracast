@@ -6216,10 +6216,18 @@
                     "request_already_closed",
                     "request_conflict",
                     "review_context_changed",
-                    "workspace_admin_changed"
+                    "workspace_admin_changed",
+                    "reminder_time_required",
+                    "duplicate_reminder_times",
+                    "too_many_reminder_times",
+                    "recipient_required",
+                    "duplicate_recipients",
+                    "recipient_limit_exceeded",
+                    "plant_not_approved",
+                    "provider_account_unavailable"
                 ],
                 "type": "string",
-                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `request_too_large` - Request Too Large\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed"
+                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `request_too_large` - Request Too Large\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed\n* `reminder_time_required` - Reminder Time Required\n* `duplicate_reminder_times` - Duplicate Reminder Times\n* `too_many_reminder_times` - Too Many Reminder Times\n* `recipient_required` - Recipient Required\n* `duplicate_recipients` - Duplicate Recipients\n* `recipient_limit_exceeded` - Recipient Limit Exceeded\n* `plant_not_approved` - Plant Not Approved\n* `provider_account_unavailable` - Provider Account Unavailable"
             },
             "ForecastOutput": {
                 "type": "object",
@@ -8533,18 +8541,31 @@
                 },
                 "required": ["reason"]
             },
-            "ReminderDeliveryOutput": {
+            "ReminderAddressesOutput": {
                 "type": "object",
                 "properties": {
-                    "id": {
-                        "type": "integer"
-                    },
                     "recipients": {
                         "type": "array",
                         "items": {
                             "type": "string",
                             "format": "email"
                         }
+                    },
+                    "workspace_recipients": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "email"
+                        }
+                    }
+                },
+                "required": ["recipients", "workspace_recipients"]
+            },
+            "ReminderDeliveryOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
                     },
                     "scheduled_for": {
                         "type": "string",
@@ -8600,6 +8621,17 @@
                         "type": "string",
                         "format": "date-time",
                         "nullable": true
+                    },
+                    "recipient_count": {
+                        "type": "integer"
+                    },
+                    "recipients": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "email"
+                        },
+                        "nullable": true
                     }
                 },
                 "required": [
@@ -8609,6 +8641,7 @@
                     "id",
                     "last_error",
                     "late",
+                    "recipient_count",
                     "recipients",
                     "scheduled_for",
                     "sent_at",
@@ -8624,8 +8657,7 @@
                         "type": "boolean"
                     },
                     "include_workspace_members": {
-                        "type": "boolean",
-                        "default": false
+                        "type": "boolean"
                     },
                     "language": {
                         "$ref": "#/components/schemas/LanguageEnum"
@@ -8636,7 +8668,8 @@
                             "type": "string",
                             "format": "email",
                             "maxLength": 254
-                        }
+                        },
+                        "maxItems": 32767
                     },
                     "times": {
                         "type": "array",
@@ -8644,10 +8677,16 @@
                             "type": "string",
                             "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
                         },
-                        "maxItems": 1440
+                        "maxItems": 10
                     }
                 },
-                "required": ["enabled", "language", "recipients", "times"]
+                "required": [
+                    "enabled",
+                    "include_workspace_members",
+                    "language",
+                    "recipients",
+                    "times"
+                ]
             },
             "ReminderOutput": {
                 "type": "object",
@@ -8655,33 +8694,16 @@
                     "enabled": {
                         "type": "boolean"
                     },
+                    "state": {
+                        "$ref": "#/components/schemas/ReminderStateEnum"
+                    },
                     "include_workspace_members": {
                         "type": "boolean"
-                    },
-                    "workspace_recipients": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "format": "email"
-                        }
                     },
                     "language": {
                         "$ref": "#/components/schemas/LanguageEnum"
                     },
                     "times": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    },
-                    "recipients": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "format": "email"
-                        }
-                    },
-                    "effective_recipients": {
                         "type": "array",
                         "items": {
                             "type": "string"
@@ -8693,19 +8715,20 @@
                     "recipient_count": {
                         "type": "integer"
                     },
-                    "recipient_slots_remaining": {
+                    "workspace_member_count": {
                         "type": "integer"
                     },
                     "recipient_limit_exceeded": {
                         "type": "boolean"
                     },
-                    "timezone": {
-                        "type": "string"
+                    "daily_reminder_limit": {
+                        "type": "integer",
+                        "nullable": true
                     },
-                    "quota": {
+                    "addresses": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/ReminderQuotaOutput"
+                                "$ref": "#/components/schemas/ReminderAddressesOutput"
                             }
                         ],
                         "nullable": true
@@ -8718,33 +8741,32 @@
                     }
                 },
                 "required": [
+                    "addresses",
+                    "daily_reminder_limit",
                     "deliveries",
-                    "effective_recipients",
                     "enabled",
                     "include_workspace_members",
                     "language",
-                    "quota",
                     "recipient_count",
                     "recipient_limit",
                     "recipient_limit_exceeded",
-                    "recipient_slots_remaining",
-                    "recipients",
+                    "state",
                     "times",
-                    "timezone",
-                    "workspace_recipients"
+                    "workspace_member_count"
                 ]
             },
-            "ReminderQuotaOutput": {
-                "type": "object",
-                "properties": {
-                    "daily_reminder_limit": {
-                        "type": "integer"
-                    },
-                    "queries_per_email": {
-                        "type": "integer"
-                    }
-                },
-                "required": ["daily_reminder_limit", "queries_per_email"]
+            "ReminderStateEnum": {
+                "enum": [
+                    "sending",
+                    "paused_by_user",
+                    "waiting_for_approval",
+                    "provider_attention",
+                    "no_recipients",
+                    "invalid_recipient",
+                    "over_recipient_limit"
+                ],
+                "type": "string",
+                "description": "* `sending` - Sending\n* `paused_by_user` - Paused\n* `waiting_for_approval` - Waiting for approval\n* `provider_attention` - Provider account needs attention\n* `no_recipients` - No recipients\n* `invalid_recipient` - Invalid recipient\n* `over_recipient_limit` - Over the recipient limit"
             },
             "RequestOutcomeEnum": {
                 "enum": ["uncertain", "succeeded", "failed"],
@@ -9162,9 +9184,12 @@
                         "items": {
                             "$ref": "#/components/schemas/WorkspaceMemberOutput"
                         }
+                    },
+                    "plants_at_recipient_limit": {
+                        "type": "integer"
                     }
                 },
-                "required": ["members"]
+                "required": ["members", "plants_at_recipient_limit"]
             },
             "WorkspaceRoleEnum": {
                 "enum": ["admin", "viewer"],

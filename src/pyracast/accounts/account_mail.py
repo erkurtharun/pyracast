@@ -1,12 +1,23 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from datetime import datetime
+from typing import Any, cast
 
+from allauth.account.adapter import get_adapter
+from allauth.account.models import EmailAddress
 from django.conf import settings
+from django.contrib.auth.models import User
+from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
+from django.utils import translation
 from django.utils.functional import Promise
 from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
+from django.views.decorators.debug import sensitive_variables
+
+from pyracast.accounts.authentication import login_identity
+from pyracast.accounts.language import user_language
+from pyracast.notifications.models import OutboundMail, OutboundMailError, OutboundMailKind
 
 
 @dataclass(frozen=True)
@@ -83,6 +94,16 @@ NOTICES = {
         action_key="password_reset_url",
         action_label=_("Reset password"),
     ),
+    "account/email/login_locked": Notice(
+        _("Password sign-in is paused"),
+        _(
+            "After many failed sign-in attempts, password sign-in to your Pyracast account is "
+            "paused for up to 24 hours. Resetting your password ends the pause."
+        ),
+        security=False,
+        action_key="password_reset_url",
+        action_label=_("Reset password"),
+    ),
 }
 _SENTENCE_KEYS = ("from_email", "to_email", "deleted_email", "provider", "email")
 _BROWSERS = (
@@ -132,3 +153,42 @@ def render_notice(notice: Notice, context: Mapping[str, Any]) -> tuple[str, str,
         render_to_string("mail/notice.txt", template_context).strip(),
         render_to_string("mail/notice.html", template_context),
     )
+
+
+def _address_owner(address: str) -> User | None:
+    owner = (
+        EmailAddress.objects.filter(email__iexact=address, verified=True)
+        .select_related("user")
+        .first()
+    )
+    return owner.user if owner is not None else None
+
+
+@sensitive_variables("code", "context")
+def compose_account_mail(
+    mail: OutboundMail, code: str
+) -> EmailMultiAlternatives | OutboundMailError:
+    recipient = mail.recipient
+    if mail.kind == OutboundMailKind.LOGIN_LOCKED:
+        user = login_identity(mail.recipient)
+        if user is None or not user.is_active:
+            return OutboundMailError.NO_ACCOUNT
+        recipient = EmailAddress.objects.get_primary_email(user) or user.email
+    else:
+        user = _address_owner(mail.recipient)
+    context: dict[str, Any] = {
+        **mail.context,
+        "email": mail.recipient,
+        "signup_url": settings.HEADLESS_FRONTEND_URLS["account_signup"],
+        "password_reset_url": settings.HEADLESS_FRONTEND_URLS["account_reset_password"],
+    }
+    if "timestamp" in context:
+        context["timestamp"] = datetime.fromisoformat(context["timestamp"])
+    if code:
+        context["code"] = code
+    preference = user_language(user) if mail.owner_language and user is not None else None
+    language = preference or mail.language
+    with translation.override(language):
+        return cast(
+            EmailMultiAlternatives, get_adapter().render_mail(mail.kind, recipient, context)
+        )

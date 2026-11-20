@@ -45,7 +45,7 @@ def test_account_email_confirmation_ignores_notification_lock_and_preserves_save
         system.tenant.pk,
         system.region.pk,
         enabled=False,
-        recipients=[],
+        recipients=["old@example.com"],
         times=[],
         language="en",
         now=NOW,

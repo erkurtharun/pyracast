@@ -34,7 +34,6 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.utils.crypto import salted_hmac
 from django.utils.http import base36_to_int
 
-from pyracast.accounts.audit import lines_after_commit
 from pyracast.accounts.session_cookie import persist
 
 PROVIDER_SIGNUP_SESSION_KEY = "socialaccount_sociallogin"
@@ -343,7 +342,7 @@ def authorize_credential_write(request: HttpRequest) -> str:
 @contextmanager
 def credential_write(request: HttpRequest) -> Iterator[str]:
     # Yields the credential state the write was authorized under.
-    with lines_after_commit(), transaction.atomic():
+    with transaction.atomic():
         yield authorize_credential_write(request)
 
 
@@ -352,7 +351,7 @@ def confirmation(request: HttpRequest) -> Iterator[None]:
     # A confirmation checks its factor under the account's locks, in the transaction that records
     # the session's authority and rotates its key, so the record names the state the factor was
     # checked under and a confirmation that cannot rotate spends nothing.
-    with lines_after_commit(), transaction.atomic():
+    with transaction.atomic():
         lock_account(request.user.pk)
         yield
 

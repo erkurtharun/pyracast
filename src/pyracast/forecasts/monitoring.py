@@ -18,6 +18,8 @@ from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationDeliveryError,
     NotificationDeliveryStatus,
+    OutboundMail,
+    OutboundMailStatus,
     PreparedMessageKind,
 )
 from pyracast.notifications.operations import invalid_reminder_recipient_count
@@ -200,6 +202,22 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
             ),
         ),
         **notification_counts,
+        **OutboundMail.objects.aggregate(
+            overdue_outbound_mail=Count(
+                "pk",
+                filter=Q(
+                    status__in=(OutboundMailStatus.PENDING, OutboundMailStatus.RETRY),
+                    available_at__lt=cutoff,
+                )
+                | Q(status=OutboundMailStatus.SENDING) & expired_leases,
+            ),
+            failed_outbound_mail=Count(
+                "pk", filter=Q(status=OutboundMailStatus.FAILED, finished_at__gte=recent)
+            ),
+            uncertain_outbound_mail=Count(
+                "pk", filter=Q(status=OutboundMailStatus.UNCERTAIN, finished_at__gte=recent)
+            ),
+        ),
         **metering.aggregate(
             overdue_metering=Count(
                 "pk", filter=Q(status=EpiasJobStatus.PENDING, available_at__lt=cutoff)

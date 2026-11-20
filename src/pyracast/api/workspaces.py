@@ -16,6 +16,7 @@ from pyracast.accounts.invitations import (
 from pyracast.accounts.models import Membership, WorkspaceInvitation, WorkspaceRole
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.api.serializers import InputSerializer
+from pyracast.notifications.overview import plants_at_recipient_limit
 
 
 class InvitationInput(InputSerializer):
@@ -41,6 +42,7 @@ class WorkspaceMemberOutput(serializers.Serializer[dict[str, object]]):
 
 class WorkspaceMembersOutput(serializers.Serializer[dict[str, object]]):
     members = WorkspaceMemberOutput(many=True)
+    plants_at_recipient_limit = serializers.IntegerField()
 
 
 class WorkspaceInvitationsOutput(serializers.Serializer[dict[str, object]]):
@@ -65,7 +67,8 @@ class WorkspaceMembersView(APIView):
                 "members": [
                     {"id": member.user_id, "email": member.user.email, "role": member.role}
                     for member in memberships
-                ]
+                ],
+                "plants_at_recipient_limit": plants_at_recipient_limit(tenant_id),
             }
         )
 

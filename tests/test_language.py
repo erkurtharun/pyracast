@@ -6,7 +6,6 @@ import pytest
 from django.conf import LazySettings
 from django.contrib.auth.models import User
 from django.core import mail
-from django.core.mail import EmailMessage
 from django.db import IntegrityError, close_old_connections, connections, transaction
 from django.http import HttpResponse
 from django.test import Client, RequestFactory, override_settings
@@ -21,6 +20,7 @@ from pyracast.regions.models import AuditEvent
 from tests.support.admin_setup import admin_system
 from tests.support.api import verified_admin
 from tests.support.company_registration import signup
+from tests.support.outbox import deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -224,6 +224,7 @@ def test_signup_saves_the_form_language_as_preference(cookie: str | None) -> Non
     user = User.objects.get(email="owner@example.com")
     expected = cookie if cookie in {"tr", "en"} else "tr"
     assert UserLanguagePreference.objects.get(user=user).language == expected
+    deliver_mail()
     assert len(mail.outbox) == 1
 
 
@@ -288,25 +289,24 @@ def test_concurrent_devices_create_one_account_preference() -> None:
 
 
 @pytest.mark.parametrize("preference", ["tr", None])
-def test_authentication_mail_pins_language_until_transaction_commit(
-    monkeypatch: pytest.MonkeyPatch, preference: str | None
+def test_account_mail_keeps_the_language_resolved_when_it_was_requested(
+    preference: str | None,
 ) -> None:
     user = User.objects.create_user(username="owner")
     if preference:
         UserLanguagePreference.objects.create(user=user, language=preference)
-    languages = []
 
-    def capture(message: EmailMessage) -> None:
-        languages.append(translation.get_language())
-
-    monkeypatch.setattr("pyracast.accounts.adapters.send", capture)
     with transaction.atomic():
         with translation.override("en"):
             AccountAdapter().send_mail(
                 "account/email/password_changed", "owner@example.com", {"user": user}
             )
-        assert languages == []
-    assert languages == [preference or "en"]
+        assert mail.outbox == []
+    deliver_mail()
+
+    (message,) = mail.outbox
+    with translation.override(preference or "en"):
+        assert message.subject == translation.gettext("Your password was changed")
 
 
 def test_admin_switcher_requires_csrf_and_uses_account_preference() -> None:

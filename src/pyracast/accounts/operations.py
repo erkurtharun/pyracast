@@ -4,7 +4,7 @@ from django.db import transaction
 from django.db.models.functions import Lower
 from django.utils import timezone
 
-from pyracast.accounts.audit import SecurityEvent, record_on_commit
+from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authorization import authorize_workspace_admin, require_platform_admin
 from pyracast.accounts.models import (
     Membership,
@@ -52,7 +52,7 @@ def remove_workspace_member(
     ).update(expires_at=now, revoked_at=now)
     WorkspaceMemberRemoval.objects.create(tenant_id=tenant_id, actor=actor, user_id=user_id)
     membership.delete()
-    record_on_commit(
+    record_security_event(
         SecurityEvent.WORKSPACE_MEMBER_REMOVED,
         user_id=actor.pk,
         tenant_id=tenant_id,
@@ -97,7 +97,7 @@ def reassign_workspace_admin(
             administrator_id=user_id,
             previous_administrator_id=current_admin_id,
         )
-        record_on_commit(
+        record_security_event(
             SecurityEvent.WORKSPACE_ADMIN_REASSIGNED,
             user_id=actor.pk,
             tenant_id=tenant_id,

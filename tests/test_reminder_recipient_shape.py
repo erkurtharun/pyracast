@@ -5,6 +5,7 @@ import pytest
 from django.db import IntegrityError, models, transaction
 
 from pyracast.db import violated_constraint
+from pyracast.forecasts.models import CollectionSchedule
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from tests.support.notifications import configured, ready
 
@@ -59,6 +60,18 @@ def test_the_database_refuses_a_reminder_schedule_of_another_shape(
     rows = ReminderSchedule.objects.filter(pk=schedule.pk)
 
     assert refusal(rows, **{field: value}) == f"reminderschedule_{field}_chk"
+
+
+@pytest.mark.parametrize(("field", "value"), cases("times", TIMES))
+def test_the_database_refuses_collection_times_of_another_shape(field: str, value: object) -> None:
+    system, schedule = configured()
+    collection = CollectionSchedule.objects.create(
+        region=system.region, times=["10:00"], effective_from=schedule.effective_from
+    )
+
+    assert refusal(CollectionSchedule.objects.filter(pk=collection.pk), **{field: value}) == (
+        "collectionschedule_times_chk"
+    )
 
 
 @pytest.mark.parametrize(

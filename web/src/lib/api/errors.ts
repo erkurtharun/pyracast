@@ -95,6 +95,14 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     request_conflict: true,
     review_context_changed: true,
     workspace_admin_changed: true,
+    reminder_time_required: true,
+    duplicate_reminder_times: true,
+    too_many_reminder_times: true,
+    recipient_required: true,
+    duplicate_recipients: true,
+    recipient_limit_exceeded: true,
+    plant_not_approved: true,
+    provider_account_unavailable: true,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

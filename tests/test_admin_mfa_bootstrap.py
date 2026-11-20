@@ -18,6 +18,7 @@ from django.core.management.base import CommandError
 from django.test import Client, RequestFactory, override_settings
 
 from pyracast.accounts.mfa import MFAAdapter
+from pyracast.notifications.models import OutboundMail
 from tests.support.account_sessions import capture_security_events, session_user
 from tests.support.admin_mfa_bootstrap import (
     NEW_PASSWORD,
@@ -30,6 +31,7 @@ from tests.support.admin_mfa_bootstrap import (
     setup_link,
 )
 from tests.support.auth_lifecycle import mailed_code, submit, totp_code
+from tests.support.outbox import deliver_mail
 from tests.support.step_up import holds_current_authority
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
@@ -167,6 +169,7 @@ def test_a_dry_run_changes_nothing_and_asks_nothing(
     assert shown.rstrip().endswith("Nothing was changed.")
     assert "otpauth://" not in shown
     assert events() == []
+    assert not OutboundMail.objects.exists()
 
 
 def customer() -> User:
@@ -506,6 +509,7 @@ def test_an_enrollment_ends_the_pending_steps_of_the_administrator(now: float) -
     )
     user.refresh_from_db()
     assert user.check_password(NEW_PASSWORD)
+    deliver_mail()
     assert mail.outbox == []
 
 

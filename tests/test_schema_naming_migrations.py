@@ -151,12 +151,15 @@ def catalog() -> dict[str, set[tuple[Any, ...]]]:
 
 
 def project_rows() -> dict[str, list[dict[str, Any]]]:
+    """Every row of the project tables that exist in the migrated state."""
+    existing = set(connection.introspection.table_names())
     tables = sorted(
         {
             model._meta.db_table
             for model in apps.get_models(include_auto_created=True)
             if model.__module__.startswith("pyracast.")
         }
+        & existing
     )
     rows: dict[str, list[dict[str, Any]]] = {}
     with connection.cursor() as cursor:
@@ -263,4 +266,5 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     assert all(row["purge_started_at"] is None for row in after["regions_region"])
     for row in after["regions_region"]:
         del row["purge_started_at"]
+    assert after.pop("notifications_outboundmail") == []
     assert after == renamed(before)

@@ -88,6 +88,7 @@ def test_reminder_limit_translates_parameters_without_changing_english(
         path,
         {
             "enabled": False,
+            "include_workspace_members": False,
             "recipients": ["one@example.com", "two@example.com", "three@example.com"],
             "times": [],
             "language": "en",
@@ -96,7 +97,11 @@ def test_reminder_limit_translates_parameters_without_changing_english(
         HTTP_ACCEPT_LANGUAGE=language,
     )
     assert response.status_code == 400
-    assert response.json() == {"code": "invalid_request", "message": detail}
+    assert response.json() == {
+        "code": "recipient_limit_exceeded",
+        "message": detail,
+        "fields": {"recipients": detail},
+    }
 
 
 def test_turkish_forecast_completed_day_validation_preserves_its_code() -> None:

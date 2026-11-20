@@ -151,6 +151,33 @@ def summarize_health(report: Mapping[str, object]) -> HealthSummary:
             "deliveries",
         ),
         (
+            "overdue_outbound_mail",
+            _("Delayed account and invitation emails"),
+            _("Check the notification worker and the dispatcher."),
+            _("Review outbound emails"),
+            "action",
+            "mail",
+        ),
+        (
+            "failed_outbound_mail",
+            _("Failed account and invitation emails"),
+            _("Review the recorded error; the person or administrator can ask again."),
+            _("Review outbound emails"),
+            "review",
+            "mail",
+        ),
+        (
+            "uncertain_outbound_mail",
+            _("Account and invitation emails with an unknown outcome"),
+            _(
+                "They may have arrived and are never resent; the person or administrator "
+                "can ask again."
+            ),
+            _("Review outbound emails"),
+            "review",
+            "uncertain_mail",
+        ),
+        (
             "unavailable_forecasts",
             _("Notifications prepared without saved forecasts"),
             _("Review the plant collection history and approved connection."),
@@ -200,6 +227,11 @@ def summarize_health(report: Mapping[str, object]) -> HealthSummary:
             action_url=(
                 f"{reverse('admin:workspace_plants')}?issue={key}"
                 if target == "plants"
+                else reverse("admin:notifications_outboundmail_changelist")
+                if target == "mail"
+                else f"{reverse('admin:notifications_outboundmail_changelist')}"
+                "?status__exact=uncertain"
+                if target == "uncertain_mail"
                 else f"{reverse('admin:workspace_operations')}?issue={key}#{target}-title"
             ),
             action_label=action_label,

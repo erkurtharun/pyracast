@@ -52,7 +52,7 @@ def another_tenant_schedule(system: System) -> ReminderSchedule:
         region.pk,
         language="en",
         enabled=True,
-        recipients=[],
+        recipients=[user.email],
         times=["10:00"],
         now=NOW,
     )
@@ -76,7 +76,13 @@ def test_request_and_application_reject_oversized_recipients_without_changing_sc
     client.force_authenticate(system.member)
     response = client.put(
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/",
-        {"enabled": True, "recipients": [address], "times": ["10:00"], "language": "en"},
+        {
+            "enabled": True,
+            "include_workspace_members": False,
+            "recipients": [address],
+            "times": ["10:00"],
+            "language": "en",
+        },
         format="json",
     )
     assert response.status_code == 400
@@ -96,7 +102,7 @@ def test_invalid_saved_recipient_records_a_skipped_slot_without_blocking_another
     logger = logging.getLogger("test.notifications.scheduler")
     monkeypatch.setattr("pyracast.notifications.scheduler.logger", logger)
     with caplog.at_level(logging.INFO):
-        runtime.dispatch_notifications(actor, SLOT)
+        runtime.dispatch_notifications(actor, MagicMock(), SLOT)
     deliveries = list(NotificationDelivery.objects.filter(schedule=healthy))
     assert len(deliveries) == 1
     assert deliveries[0].status == "pending"
@@ -212,9 +218,47 @@ def test_a_failing_schedule_is_logged_with_its_origin_and_the_others_are_publish
     monkeypatch.setattr(notification_scheduler, "_enqueue_schedule", enqueue)
     actor = MagicMock()
     with pytest.raises(Exception, match=r"^1 "):
-        runtime.dispatch_notifications(actor, SLOT)
+        runtime.dispatch_notifications(actor, MagicMock(), SLOT)
     delivery = NotificationDelivery.objects.get(schedule=healthy)
     actor.send.assert_called_once_with(delivery.pk)
     assert f"item=schedule:{broken.pk}" in pyracast_logs.text
     assert "origin=pyracast." in pyracast_logs.text
     assert "private schedule detail" not in pyracast_logs.text
+
+
+def test_a_failing_schedule_leaves_the_mail_publication_and_code_erasure_of_its_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pyracast.notifications.intents import enqueue_mail
+    from pyracast.notifications.models import OutboundMail, OutboundMailKind
+
+    system, broken = configured()
+    healthy = another_tenant_schedule(system)
+    original = notification_scheduler._enqueue_schedule
+
+    def enqueue(schedule: ReminderSchedule, now: datetime) -> list[int]:
+        if schedule.pk == broken.pk:
+            raise RuntimeError("private schedule detail")
+        return original(schedule, now)
+
+    monkeypatch.setattr(notification_scheduler, "_enqueue_schedule", enqueue)
+    for recipient_address, asked in (("due@example.com", 5), ("expired@example.com", 20)):
+        enqueue_mail(
+            OutboundMailKind.PASSWORD_RESET_CODE,
+            recipient_address,
+            language="en",
+            code="ABCD-EFGH",
+            expires_at=SLOT - timedelta(minutes=asked - 10),
+            now=SLOT - timedelta(minutes=asked),
+        )
+    due, expired = OutboundMail.objects.order_by("pk")
+    actor, mail_actor = MagicMock(), MagicMock()
+
+    with pytest.raises(ItemsFailedError) as raised:
+        runtime.dispatch_notifications(actor, mail_actor, SLOT)
+
+    actor.send.assert_called_once_with(NotificationDelivery.objects.get(schedule=healthy).pk)
+    mail_actor.send.assert_called_once_with(due.pk)
+    expired.refresh_from_db()
+    assert (expired.status, expired.last_error, expired.sealed_code) == ("skipped", "expired", "")
+    assert (raised.value.count, raised.value.published) == (1, 2)

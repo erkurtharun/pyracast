@@ -1,6 +1,9 @@
 import base64
 import hmac
 import re
+import time
+from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from allauth.account.models import EmailAddress
@@ -8,10 +11,35 @@ from django.contrib.auth.models import User
 from django.core import mail
 from django.test import Client
 
+from tests.support.outbox import deliver_mail
+
 AUTH = "/api/auth/browser/v1/"
 
 
 PASSWORD = "test-only-" + "falcon-cloud-79!"
+# The longest address the sign-in and reset inputs accept (Django's `EmailValidator` allows 320
+# characters); no account holds one, because the account address columns keep 254.
+LONGEST_ADDRESS = "a" * 64 + "@" + ".".join(["b" * 63] * 3 + ["c" * 59, "com"])
+LONGEST_ACCOUNT_ADDRESS = "a" * 63 + "@" + ".".join(["b" * 63] * 2 + ["c" * 58, "com"])
+OVERLONG_ACCOUNT_ADDRESS = "a" + LONGEST_ACCOUNT_ADDRESS
+
+
+@dataclass
+class Clock:
+    now: float
+    # allauth rolls a hit back by its timestamp, so readings are distinct unless a test stops it.
+    step: float = 1e-6
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+    def read(self) -> float:
+        self.now += self.step
+        return self.now
+
+    def reading(self) -> SimpleNamespace:
+        """A stand-in for the `time` module of allauth's rate limits."""
+        return SimpleNamespace(time=self.read, monotonic=time.monotonic, sleep=time.sleep)
 
 
 def member() -> User:
@@ -28,6 +56,7 @@ def submit(client: Client, path: str, data: dict[str, Any]) -> Any:
 
 
 def mailed_code() -> str:
+    deliver_mail()
     for message in reversed(mail.outbox):
         for line in str(message.body).splitlines():
             if re.fullmatch(r"[A-Z0-9]{4}-[A-Z0-9]{4}", line.strip()):

@@ -45,8 +45,8 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
     new_client.force_login(replacement)
     url = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/"
     original = old_client.get(url).json()
-    assert new_client.get(url).json() == original
-    assert original["recipients"] == ["original@example.com"]
+    assert new_client.get(url).json() == {**original, "addresses": None}
+    assert original["addresses"]["recipients"] == ["original@example.com"]
     assert original["language"] == "tr"
     reassign_workspace_admin(
         system.admin, system.tenant.pk, replacement.pk, expected_admin_id=system.member.pk
@@ -54,6 +54,7 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
     assert new_client.get(url).json() == original
     values = {
         "enabled": True,
+        "include_workspace_members": False,
         "recipients": ["new@example.com"],
         "times": ["11:00"],
         "language": "en",
@@ -86,7 +87,14 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
     system.member.refresh_from_db()
     system.member.is_active = True
     system.member.save(update_fields=["is_active"])
-    assert old_client.get(url).json() == new_client.get(url).json()
+    administrator_view = new_client.get(url).json()
+    assert old_client.get(url).json() == {
+        **administrator_view,
+        "addresses": None,
+        "deliveries": [
+            {**delivery, "recipients": None} for delivery in administrator_view["deliveries"]
+        ],
+    }
 
 
 def test_schedule_survives_configurer_departure_and_other_workspaces_are_isolated(
@@ -149,7 +157,7 @@ def test_schedule_survives_configurer_departure_and_other_workspaces_are_isolate
     assert schedule.recipients == ["shared@example.com"]
 
 
-def test_reminder_language_is_explicit_and_empty_recipients_resolve_once() -> None:
+def test_reminder_language_is_explicit_and_a_paused_schedule_may_keep_no_recipient() -> None:
     system = make_system()
     system.member.email = "saved@example.com"
     system.member.save(update_fields=["email"])
@@ -174,9 +182,8 @@ def test_reminder_language_is_explicit_and_empty_recipients_resolve_once() -> No
         language="en",
         now=NOW,
     )
-    User.objects.filter(pk=system.member.pk).update(email="later@example.com")
     schedule.refresh_from_db()
-    assert schedule.recipients == ["saved@example.com"]
+    assert schedule.recipients == []
     client = Client()
     client.force_login(system.member)
     response = client.put(

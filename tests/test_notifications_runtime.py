@@ -44,9 +44,10 @@ def test_dispatch_recovers_pending_and_uses_injected_clock(monkeypatch: pytest.M
     monkeypatch.setattr(runtime, "datetime", SimpleNamespace(now=lambda _: SLOT))
     broker = StubBroker()
     actor = runtime.make_notification_actor(broker)
+    mail_actor = runtime.make_outbound_mail_actor(broker)
     try:
-        assert runtime.dispatch_notifications(actor, SLOT) == 1
-        assert runtime.dispatch_notifications(actor) == 1
+        assert runtime.dispatch_notifications(actor, mail_actor, SLOT) == 1
+        assert runtime.dispatch_notifications(actor, mail_actor) == 1
         assert broker.queues[actor.queue_name].qsize() == 2
         assert NotificationDelivery.objects.get().pk == delivery.pk
     finally:

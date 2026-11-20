@@ -117,6 +117,7 @@ class WorkspaceNameForm(TenantForm):
 
 class WorkspaceForm(WorkspaceNameForm):
     administrator_email = forms.EmailField(
+        max_length=254,
         required=False,
         label=gettext_lazy("Administrator email (optional)"),
         help_text=gettext_lazy(
@@ -174,7 +175,7 @@ class WorkspaceRenameForm(WorkspaceNameForm):
 
 
 class InvitationForm(forms.Form):
-    email = forms.EmailField(label=gettext_lazy("Email address"))
+    email = forms.EmailField(max_length=254, label=gettext_lazy("Email address"))
     role = forms.ChoiceField(
         required=False,
         widget=forms.RadioSelect,
@@ -204,27 +205,11 @@ class InvitationForm(forms.Form):
 
 
 def report_invitation(request: HttpRequest, invitation: WorkspaceInvitation) -> None:
-    values = {"email": invitation.email}
-    if invitation.delivery_status == InvitationDeliveryStatus.SENT:
-        messages.success(request, _("The invitation to %(email)s was sent.") % values)
-    elif invitation.delivery_status == InvitationDeliveryStatus.FAILED:
-        messages.error(
-            request,
-            _(
-                "The invitation to %(email)s could not be sent. "
-                "Check the mail service, then resend it."
-            )
-            % values,
-        )
-    else:
-        messages.warning(
-            request,
-            _(
-                "The invitation to %(email)s may not have been delivered. "
-                "Check the mail service before resending it."
-            )
-            % values,
-        )
+    messages.success(
+        request,
+        _("The invitation to %(email)s is being sent; its state appears in the list.")
+        % {"email": invitation.email},
+    )
 
 
 def tenant_list_context(query: str, page: str) -> dict[str, Any]:

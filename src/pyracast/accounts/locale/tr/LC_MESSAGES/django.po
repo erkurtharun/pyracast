@@ -294,3 +294,30 @@ msgid ""
 msgstr ""
 "Bir operatör Pyracast hesabınızın iki adımlı doğrulama yöntemlerini kaldırdı "
 "ve oturumlarını sonlandırdı."
+
+msgid "Password sign-in is paused"
+msgstr "Parolayla oturum açma duraklatıldı"
+
+msgid "After many failed sign-in attempts, password sign-in to your Pyracast account is paused for up to 24 hours. Resetting your password ends the pause."
+msgstr "Çok sayıda başarısız oturum açma denemesinden sonra Pyracast hesabınızda parolayla oturum açma en fazla 24 saat duraklatıldı. Parolanızı sıfırlamak duraklatmayı sona erdirir."
+
+msgid "Add at least one delivery time to turn reminders on."
+msgstr "Hatırlatmaları açmak için en az bir gönderim saati ekleyin."
+
+msgid "Use each delivery time once."
+msgstr "Her gönderim saatini bir kez kullanın."
+
+msgid "This plant allows fewer delivery times a day."
+msgstr "Bu santral günde daha az gönderim saatine izin verir."
+
+msgid "Add a recipient or include the workspace members."
+msgstr "Bir alıcı ekleyin veya çalışma alanı üyelerini dahil edin."
+
+msgid "This plant allows fewer recipient addresses."
+msgstr "Bu santral daha az alıcı adresine izin verir."
+
+msgid "Reminders can be turned on once the plant is approved."
+msgstr "Hatırlatmalar santral onaylandıktan sonra açılabilir."
+
+msgid "Reminders can be turned on once the plant's forecast provider account is enabled."
+msgstr "Hatırlatmalar santralin tahmin sağlayıcı hesabı etkinleştirildikten sonra açılabilir."

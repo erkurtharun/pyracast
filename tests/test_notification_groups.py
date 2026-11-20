@@ -19,10 +19,9 @@ from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.recipients import effective_recipients
 from pyracast.notifications.scheduler import enqueue_due
-from pyracast.notifications.views import reminder_schedule_payload
 from tests.support.notification_groups import group, member
 from tests.support.notification_transmission import OpeningBackend
-from tests.support.notifications import SLOT, configured
+from tests.support.notifications import SLOT, configured, reminder_schedule_payload
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -215,7 +214,8 @@ def test_group_setting_is_workspace_admin_only_and_viewers_can_read() -> None:
     client.force_authenticate(system.member)
     response = client.put(url, payload, format="json")
     assert response.status_code == 200
-    assert response.json()["effective_recipients"] == [viewer.email]
+    assert response.json()["recipient_count"] == 1
+    assert response.json()["addresses"]["workspace_recipients"] == [viewer.email]
     client.force_authenticate(viewer)
     assert client.get(url).json()["include_workspace_members"] is True
 

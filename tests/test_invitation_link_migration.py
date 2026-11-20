@@ -3,6 +3,8 @@ from datetime import timedelta
 
 import pytest
 from django.contrib.auth.models import User
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant, WorkspaceInvitation
@@ -12,6 +14,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 PREVIOUS = ("accounts", "0005_schema_naming_convention")
 EXPIRING = ("accounts", "0006_expire_invitations_with_the_previous_link")
+MINTED_AT_SEND = ("accounts", "0007_invitation_token_minted_at_send")
 
 
 @pytest.fixture
@@ -69,3 +72,32 @@ def test_the_link_migration_expires_only_the_invitations_still_open() -> None:
     assert not WorkspaceInvitation.objects.filter(
         accepted_at__isnull=True, revoked_at__isnull=True, expires_at__gt=after
     ).exists()
+
+
+@pytest.mark.usefixtures("at_previous_state")
+def test_the_link_expiry_runs_before_the_token_is_minted_at_send_and_keeps_every_hash() -> None:
+    tenant = Tenant.objects.create(name="Linked workspace")
+    sender = User.objects.create_user(username="sender")
+    now = timezone.now()
+    open_row = _invitation(tenant, sender, "open@example.com", timedelta(days=6))
+    accepted = _invitation(
+        tenant, sender, "accepted@example.com", timedelta(days=5), accepted_at=now
+    )
+    hashes = dict(WorkspaceInvitation.objects.values_list("pk", "token_hash"))
+    plan = MigrationExecutor(connection).migration_plan([MINTED_AT_SEND])
+
+    assert [
+        (migration.app_label, migration.name)
+        for migration, _ in plan
+        if migration.app_label == "accounts"
+    ] == [EXPIRING, MINTED_AT_SEND]
+
+    migrate(MINTED_AT_SEND)
+
+    assert WorkspaceInvitation.objects.get(pk=open_row.pk).expires_at <= timezone.now()
+    assert WorkspaceInvitation.objects.get(pk=accepted.pk).expires_at == accepted.expires_at
+    assert dict(WorkspaceInvitation.objects.values_list("pk", "token_hash")) == hashes
+    unsent = WorkspaceInvitation.objects.create(
+        tenant=tenant, email="unsent@example.com", created_by=sender, expires_at=now
+    )
+    assert WorkspaceInvitation.objects.get(pk=unsent.pk).token_hash is None

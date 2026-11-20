@@ -2,34 +2,33 @@ from rest_framework import serializers
 
 from pyracast.accounts.models import Language
 from pyracast.api.serializers import InputSerializer
+from pyracast.connections.models import MAX_DAILY_QUOTA
 from pyracast.notifications.models import (
     NotificationDeliveryError,
     NotificationDeliveryStatus,
     PreparedMessageKind,
+    ReminderState,
 )
-from pyracast.notifications.operations import RECIPIENT_MAX_LENGTH
+from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT, RECIPIENT_MAX_LENGTH
+from pyracast.notifications.overview import ReminderAddresses, ReminderDelivery, ReminderOverview
 
 
 class ReminderInput(InputSerializer):
     enabled = serializers.BooleanField()
-    include_workspace_members = serializers.BooleanField(default=False)
+    include_workspace_members = serializers.BooleanField()
     language = serializers.ChoiceField(choices=Language.choices)
     recipients = serializers.ListField(
-        child=serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH)
+        child=serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH),
+        max_length=MAX_RECIPIENT_LIMIT,
     )
     times = serializers.ListField(
-        child=serializers.RegexField(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"), max_length=1440
+        child=serializers.RegexField(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"),
+        max_length=MAX_DAILY_QUOTA,
     )
 
 
-class ReminderQuotaOutput(serializers.Serializer[dict[str, object]]):
-    daily_reminder_limit = serializers.IntegerField()
-    queries_per_email = serializers.IntegerField()
-
-
-class ReminderDeliveryOutput(serializers.Serializer[dict[str, object]]):
+class ReminderDeliveryOutput(serializers.Serializer[ReminderDelivery]):
     id = serializers.IntegerField()
-    recipients = serializers.ListField(child=serializers.EmailField())
     scheduled_for = serializers.DateTimeField()
     status = serializers.ChoiceField(choices=NotificationDeliveryStatus.choices)
     last_error = serializers.ChoiceField(
@@ -42,20 +41,25 @@ class ReminderDeliveryOutput(serializers.Serializer[dict[str, object]]):
     source_age_seconds = serializers.FloatField(allow_null=True)
     stale = serializers.BooleanField(allow_null=True)
     sent_at = serializers.DateTimeField(allow_null=True)
+    recipient_count = serializers.IntegerField()
+    recipients = serializers.ListField(child=serializers.EmailField(), allow_null=True)
 
 
-class ReminderOutput(serializers.Serializer[dict[str, object]]):
-    enabled = serializers.BooleanField()
-    include_workspace_members = serializers.BooleanField()
+class ReminderAddressesOutput(serializers.Serializer[ReminderAddresses]):
+    recipients = serializers.ListField(child=serializers.EmailField())
     workspace_recipients = serializers.ListField(child=serializers.EmailField())
+
+
+class ReminderOutput(serializers.Serializer[ReminderOverview]):
+    enabled = serializers.BooleanField()
+    state = serializers.ChoiceField(choices=ReminderState.choices)
+    include_workspace_members = serializers.BooleanField()
     language = serializers.ChoiceField(choices=Language.choices)
     times = serializers.ListField(child=serializers.CharField())
-    recipients = serializers.ListField(child=serializers.EmailField())
-    effective_recipients = serializers.ListField(child=serializers.CharField())
     recipient_limit = serializers.IntegerField()
     recipient_count = serializers.IntegerField()
-    recipient_slots_remaining = serializers.IntegerField()
+    workspace_member_count = serializers.IntegerField()
     recipient_limit_exceeded = serializers.BooleanField()
-    timezone = serializers.CharField()
-    quota = ReminderQuotaOutput(allow_null=True)
+    daily_reminder_limit = serializers.IntegerField(allow_null=True)
+    addresses = ReminderAddressesOutput(allow_null=True)
     deliveries = ReminderDeliveryOutput(many=True)

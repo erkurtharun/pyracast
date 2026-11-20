@@ -1,8 +1,10 @@
 import json
 import logging
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from queue import Queue
 from types import SimpleNamespace
 from typing import Any
@@ -13,7 +15,7 @@ from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.db import connection, connections
+from django.db import connection, connections, transaction
 from django.test import Client
 
 from pyracast.accounts.audit import logger as security_logger
@@ -133,6 +135,40 @@ def alongside(work: Callable[[], object]) -> Future[None]:
         assert time.monotonic() < deadline
         time.sleep(0.02)
     return running
+
+
+@contextmanager
+def session_row_held(key: str) -> Iterator[None]:
+    # Another connection holds the session's row, and this connection waits at most 200 ms.
+    held, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        try:
+            with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT 1 FROM django_session WHERE session_key = %s FOR UPDATE", [key]
+                )
+                held.set()
+                release.wait(10)
+        finally:
+            connections.close_all()
+
+    with connection.cursor() as cursor:
+        cursor.execute("SHOW lock_timeout")
+        row = cursor.fetchone()
+        assert row is not None
+        original = row[0]
+        cursor.execute("SET lock_timeout = '200ms'")
+    with ThreadPoolExecutor(1) as pool:
+        holding = pool.submit(hold)
+        try:
+            assert held.wait(10)
+            yield
+        finally:
+            release.set()
+            holding.result(timeout=10)
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('lock_timeout', %s, false)", [original])
 
 
 def capture_security_events(

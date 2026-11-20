@@ -858,9 +858,6 @@ msgstr "Geri alınabilecek elle girilmiş bir üretim kaydı yok."
 msgid "This field is required."
 msgstr "Bu alan zorunludur."
 
-msgid "Provide at most %(limit)s distinct local HH:MM times."
-msgstr "SS:DD biçiminde en fazla %(limit)s farklı yerel saat girin."
-
 msgid ""
 "Provide at most %(limit)s distinct local times; history uses one daily "
 "request."
@@ -2445,22 +2442,8 @@ msgstr "Yönetici: santralleri, üyeleri ve ayarları yönetir"
 msgid "Offered while the workspace has no administrator."
 msgstr "Çalışma alanının yöneticisi yokken sunulur."
 
-msgid "The invitation to %(email)s was sent."
-msgstr "%(email)s adresine davet gönderildi."
-
-msgid ""
-"The invitation to %(email)s could not be sent. Check the mail service, then "
-"resend it."
-msgstr ""
-"%(email)s adresine davet gönderilemedi. E-posta hizmetini kontrol edip "
-"daveti yeniden gönderin."
-
-msgid ""
-"The invitation to %(email)s may not have been delivered. Check the mail "
-"service before resending it."
-msgstr ""
-"%(email)s adresine gönderilen davet teslim edilmemiş olabilir. Yeniden "
-"göndermeden önce e-posta hizmetini kontrol edin."
+msgid "The invitation to %(email)s is being sent; its state appears in the list."
+msgstr "%(email)s adresine davet gönderiliyor; durumu listede görünür."
 
 msgid "Workspace %(name)s created."
 msgstr "%(name)s çalışma alanı oluşturuldu."
@@ -2585,3 +2568,28 @@ msgstr "Onayla"
 
 msgid "Confirmed with your authenticator."
 msgstr "Doğrulama uygulamanızla onaylandı."
+
+msgid "Delayed account and invitation emails"
+msgstr "Geciken hesap ve davet e-postaları"
+
+msgid "Check the notification worker and the dispatcher."
+msgstr "Bildirim çalışanını ve dağıtıcıyı kontrol edin."
+
+msgid "Review outbound emails"
+msgstr "Giden e-postaları inceleyin"
+
+msgid "Failed account and invitation emails"
+msgstr "Gönderilemeyen hesap ve davet e-postaları"
+
+msgid "Review the recorded error; the person or administrator can ask again."
+msgstr "Kaydedilen hatayı inceleyin; kişi veya yönetici yeniden isteyebilir."
+
+msgid "Account and invitation emails with an unknown outcome"
+msgstr "Sonucu bilinmeyen hesap ve davet e-postaları"
+
+msgid ""
+"They may have arrived and are never resent; the person or administrator can "
+"ask again."
+msgstr ""
+"Ulaşmış olabilirler ve yeniden gönderilmezler; kişi veya yönetici yeniden "
+"isteyebilir."

@@ -12,6 +12,7 @@ from django.utils import timezone
 from psycopg.errors import CheckViolation
 from rest_framework import serializers
 
+from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.language import save_user_language
 from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceInvitation
 from pyracast.api.serializers import BindingInput
@@ -33,6 +34,7 @@ from pyracast.incidents.operations import save_incident
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.notifications.models import (
     NotificationDelivery,
+    OutboundMail,
     PreparedMessageFormat,
     PreparedMessageKind,
     ReminderSchedule,
@@ -332,6 +334,12 @@ def _notification_delivery(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     return ready()
 
 
+def _outbound_mail(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    system = make_system()
+    invite_workspace_member(system.member, system.tenant.pk, "guest@example.com")
+    return OutboundMail.objects.get()
+
+
 def _prepared_delivery(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     delivery = ready()
     delivery.prepared_message = {
@@ -412,6 +420,10 @@ STORED_VOCABULARIES = (
         key="kind",
         enumeration=PreparedMessageKind,
     ),
+    StoredVocabulary(OutboundMail, "kind", _outbound_mail, published=False),
+    StoredVocabulary(OutboundMail, "status", _outbound_mail, published=False),
+    StoredVocabulary(OutboundMail, "language", _outbound_mail),
+    StoredVocabulary(OutboundMail, "last_error", _outbound_mail, published=False),
 )
 
 
@@ -699,7 +711,13 @@ INPUT_VOCABULARIES = (
     InputVocabulary(
         "reminder_language",
         ReminderInput,
-        {"enabled": True, "language": "en", "recipients": [], "times": ["10:00"]},
+        {
+            "enabled": True,
+            "include_workspace_members": False,
+            "language": "en",
+            "recipients": [],
+            "times": ["10:00"],
+        },
         "language",
         _configure_reminders,
         accepted="tr",
@@ -755,6 +773,7 @@ FREE_TEXT = frozenset(
         ("plants.ForecastIssuance", "model_version"),
         ("incidents.PlantIncident", "title"),
         ("incidents.PlantIncident", "notes"),
+        ("notifications.OutboundMail", "recipient"),
     }
 )
 # Exception class names and counted region failures written by the dispatcher: an open set.

@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Barrier
@@ -28,6 +29,7 @@ from pyracast.accounts.models import (
 from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.errors import DomainError
 from tests.support.company_registration import mailed_code, signup
+from tests.support.outbox import deliver_mail
 from tests.support.workspaces import invitation_token
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
@@ -113,8 +115,11 @@ def test_invitation_requires_admin_and_verified_matching_email_and_is_single_use
     invitation = invite_workspace_member(administrator, tenant.pk, " New@Example.COM ")
     token = invitation_token()
     assert invitation.email == "new@example.com"
+    deliver_mail()
     assert f"/app/invitation/#token={token}" in str(mail.outbox[-1].body)
+    deliver_mail()
     assert "?token=" not in str(mail.outbox[-1].body)
+    invitation.refresh_from_db()
     assert invitation.token_hash == invitation_digest(token)
     assert token not in str(WorkspaceInvitation.objects.values().get())
     invited = User.objects.create_user(username="invited", email="new@example.com")
@@ -265,7 +270,8 @@ def test_workspace_invitation_api_is_scoped_and_never_returns_secrets(
         "members": [
             {"id": administrator.pk, "email": administrator.email, "role": "admin"},
             {"id": viewer.pk, "email": viewer.email, "role": "viewer"},
-        ]
+        ],
+        "plants_at_recipient_limit": 0,
     }
     csrf = client.get("/api/session/").json()["csrf_token"]
     assert (
@@ -296,10 +302,12 @@ def test_workspace_invitation_api_is_scoped_and_never_returns_secrets(
     )
     assert invited.status_code == 201
     assert set(invited.json()) == {"id", "email", "expires_at", "delivery_status"}
-    assert invited.json()["delivery_status"] == "sent"
+    assert invited.json()["delivery_status"] == "pending"
     token = invitation_token()
     assert token not in invited.content.decode()
-    assert client.get(invitations_url).json() == {"invitations": [invited.json()]}
+    assert client.get(invitations_url).json() == {
+        "invitations": [{**invited.json(), "delivery_status": "sent"}]
+    }
     assert (
         client.post(
             invitations_url,
@@ -378,12 +386,14 @@ def test_invitation_email_failure_has_explicit_unknown_outcome(
 ) -> None:
     tenant, administrator, _ = workspace
 
-    def fail(*args: object, **kwargs: object) -> None:
+    def fail(message: object, *, before_send: Callable[[], bool]) -> None:
+        assert before_send()
         raise OSError("secret transport details")
 
-    monkeypatch.setattr("pyracast.accounts.invitations.send", fail)
+    monkeypatch.setattr("pyracast.notifications.outbox.send", fail)
     invitation = invite_workspace_member(administrator, tenant.pk, "new@example.com")
-    assert invitation.delivery_status == "uncertain"
+    deliver_mail()
+    assert invitation.delivery_status == "pending"
     assert WorkspaceInvitation.objects.get().delivery_status == "uncertain"
 
 
@@ -396,7 +406,9 @@ def test_invitation_mail_uses_administrators_saved_language(
     tenant, administrator, _ = workspace
     UserLanguagePreference.objects.create(user=administrator, language="tr")
     invite_workspace_member(administrator, tenant.pk, "new@example.com")
+    deliver_mail()
     assert mail.outbox[-1].subject == "Pyracast çalışma alanı daveti"  # noqa: RUF001 -- Turkish text.
+    deliver_mail()
     assert "salt okunur erişim" in str(mail.outbox[-1].body)
 
 
@@ -417,6 +429,7 @@ def test_invitation_without_preference_uses_request_language(
         HTTP_X_CSRFTOKEN=token,
     )
     assert response.status_code == 201
+    deliver_mail()
     assert "salt okunur erişim" in str(mail.outbox[-1].body)
 
 

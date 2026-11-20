@@ -4,6 +4,8 @@ from typing import Any
 from django.core import mail
 from django.test import Client
 
+from tests.support.outbox import deliver_mail
+
 PASSWORD = "test-only-" + "falcon-cloud-79!"
 
 
@@ -14,6 +16,7 @@ AUTH = "/api/auth/browser/v1/"
 
 
 def mailed_code() -> str:
+    deliver_mail()
     for message in reversed(mail.outbox):
         for line in str(message.body).splitlines():
             if re.fullmatch(r"[A-Z0-9]{4}-[A-Z0-9]{4}", line.strip()):

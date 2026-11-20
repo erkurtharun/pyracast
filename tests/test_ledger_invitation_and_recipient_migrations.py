@@ -88,15 +88,16 @@ RULES = {
 ADDRESS = "recipient@example.com"
 WEEK = timedelta(days=7)
 START = NOW - timedelta(days=20)
-# The invitation link migration after it expires open invitations; it has its own test.
-LINK_EXPIRY = ("accounts", "0006_expire_invitations_with_the_previous_link")
+# The invitation link migration expires open invitations and has its own test; the outbound
+# mail table follows it through the invitation token migration.
+BEFORE_LINK_EXPIRY = {
+    "accounts": ("accounts", "0005_schema_naming_convention"),
+    "notifications": ("notifications", "0005_schema_naming_convention"),
+}
 
 
 def through_checks() -> list[tuple[str, str]]:
-    return [
-        ("accounts", "0005_schema_naming_convention") if node == LINK_EXPIRY else node
-        for node in leaf_nodes()
-    ]
+    return [BEFORE_LINK_EXPIRY.get(app, (app, name)) for app, name in leaf_nodes()]
 
 
 @pytest.fixture

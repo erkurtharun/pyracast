@@ -76,9 +76,11 @@ NEW_CHECKS = {
     "notifications_notificationdelivery": {"notificationdelivery_lease_chk"},
 }
 PLANT_TABLES = ("plants_calibrationrun", "plants_plant")
-# The audit as the columns before the naming migrations spell it.
+# The audit as the columns before the naming migrations spell it, on the tables that exist then.
 PREVIOUS_RULES = tuple(
-    (table, rule.replace("scheduled_for", "scheduled_slot")) for table, rule in STORED_RULES
+    (table, rule.replace("scheduled_for", "scheduled_slot"))
+    for table, rule in STORED_RULES
+    if table != "notifications_outboundmail"
 )
 NEW_TRIGGERS = {
     "forecastsnapshot_publication_guard",
@@ -95,6 +97,7 @@ CLEAN = dict.fromkeys(
     ),
     0,
 )
+LEASES_CLEAN = dict.fromkeys(LEASE_RULES, 0)
 UNAVAILABLE = {
     "format": "plain",
     "kind": "unavailable",
@@ -212,7 +215,7 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
 
     assert stored_violations() == {}
     assert _installed() == _all_new()
-    assert lease_violations() == CLEAN
+    assert lease_violations() == LEASES_CLEAN
     released.refresh_from_db()
     assert (released.status, released.lease_token, released.lease_expires_at) == (
         "stale",
@@ -496,7 +499,7 @@ def test_lease_migrations_refuse_leases_no_writer_produces(
     rows.update(**correction)
     forward()
     assert check in checks(table)
-    assert lease_violations() == CLEAN
+    assert lease_violations() == LEASES_CLEAN
 
 
 @pytest.mark.usefixtures("leaf")

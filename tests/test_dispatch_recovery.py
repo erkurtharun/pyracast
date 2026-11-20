@@ -20,14 +20,15 @@ def test_dispatch_reconnects_after_its_postgresql_session_is_terminated(
         "make_actor",
         "make_calibration_actor",
         "make_notification_actor",
+        "make_outbound_mail_actor",
         "make_epias_actor",
     ):
         monkeypatch.setattr(command, factory, MagicMock())
-    for operation in ("dispatch", "dispatch_epias", "purge_expired"):
+    for operation in ("dispatch", "dispatch_epias", "purge_expired", "purge_finished_mail"):
         monkeypatch.setattr(command, operation, MagicMock())
     sessions: list[int] = []
 
-    def interrupt_notifications(_: object) -> None:
+    def interrupt_notifications(*_: object) -> None:
         with connection.cursor() as cursor:
             cursor.execute("SELECT pg_backend_pid()")
             sessions.append(cursor.fetchone()[0])
