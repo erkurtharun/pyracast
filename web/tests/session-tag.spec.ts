@@ -34,7 +34,7 @@ function answer(...answers: ((call: Call) => Answer)[]) {
     globalThis.fetch = async (input, init) => {
         const call = {
             method: init?.method ?? "GET",
-            url: String(input),
+            url: input instanceof Request ? input.url : String(input),
             tag: new Headers(init?.headers).get("X-Session-Tag"),
         };
         const next = answers[calls.length];

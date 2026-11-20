@@ -185,10 +185,11 @@ export function TwoFactorSettings({
             );
             // A confirmation that lapsed while the code was typed asks for it again; the code
             // has expired by then, so the setup asks for a fresh one.
-            const fresh = async () => {
+            const fresh = () => {
                 setSetupCode("");
                 setNotice("enterFreshCode");
                 show(enrolling);
+                return Promise.resolve();
             };
             if (await confirmedFirst(result, fresh)) return;
             setSetupCode("");

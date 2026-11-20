@@ -43,7 +43,10 @@ export function LinkedAccounts({
     const stepUp = useStepUp();
     const { ask } = stepUp;
     const [canConnect, setCanConnect] = useState(false);
-    const allowConnection = useCallback(async () => setCanConnect(true), []);
+    const allowConnection = useCallback(() => {
+        setCanConnect(true);
+        return Promise.resolve();
+    }, []);
     const [callbackError, setCallbackError] = useState(
         () =>
             typeof window !== "undefined" &&
