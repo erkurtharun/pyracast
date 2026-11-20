@@ -18,17 +18,8 @@ from pyracast.plants.availability import (
     reference_intervals,
 )
 from pyracast.plants.models import Plant, ProductionObservation
-<<<<<<< HEAD
-from pyracast.plants.numerics import PowerInterval
-from pyracast.plants.operations import revise_plant
-=======
 from pyracast.plants.numerics import MODEL_VERSION, PowerInterval
-from pyracast.plants.operations import (
-    ObservationInput,
-    import_observations,
-    revise_plant,
-)
->>>>>>> b5277e50 (Version the tracker geometry and replay each result under its version)
+from pyracast.plants.operations import revise_plant
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.regions.models import Region
