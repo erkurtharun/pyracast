@@ -769,6 +769,7 @@ FREE_TEXT = frozenset(
         ("forecasts.ReferenceCapacityNormalization", "authorization_reference"),
         ("metering.EpiasConnection", "eic"),
         ("metering.EpiasConnection", "name"),
+        ("metering.EpiasConnectionRevision", "eic"),
         ("metering.EpiasSnapshot", "endpoint"),
         ("metering.EpiasSnapshot", "normalization_policy"),
         ("metering.EpiasSnapshot", "content_sha256"),

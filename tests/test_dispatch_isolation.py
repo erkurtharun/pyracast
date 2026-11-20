@@ -202,10 +202,10 @@ def test_a_failing_connection_does_not_stop_other_connections_or_publication(
     EpiasCollectionJob.objects.filter(connection=failing).delete()
     broker = dispatch_once(monkeypatch)
 
-    assert sorted(published(broker, "epias")) == sorted(
-        EpiasCollectionJob.objects.filter(connection=healthy, status="pending").values_list(
-            "pk", flat=True
-        )
+    assert published(broker, "epias") == list(
+        EpiasCollectionJob.objects.filter(connection=healthy, status="pending")
+        .order_by("available_at", "pk")
+        .values_list("pk", flat=True)[:100]
     )
     assert DispatcherStatus.objects.get(phase="metering").last_error == "items_failed:1"
     assert f"item=connection:{failing.pk}" in pyracast_logs.text

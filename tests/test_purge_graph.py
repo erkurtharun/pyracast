@@ -63,6 +63,7 @@ FOREIGN_KEYS = {
     ("metering.EpiasCollectionJob", "connection"): ORDERED,
     ("metering.EpiasCollectionJob", "plant"): ORDERED,
     ("metering.EpiasConnection", "plant"): ORDERED,
+    ("metering.EpiasConnectionRevision", "connection"): ORDERED,
     ("metering.EpiasSnapshot", "configuration"): ORDERED,
     ("metering.EpiasSnapshot", "connection"): ORDERED,
     ("metering.EpiasSnapshot", "job"): ORDERED,
