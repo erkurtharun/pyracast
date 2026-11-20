@@ -93,26 +93,10 @@ test("verified email and a recovery code protect a real browser session", async 
             intervals: [100, 250, 500],
         })
         .toBeLessThan(25_000);
-    const enrollmentStep = Math.floor(Date.now() / 30_000);
     const code = totp(setupSecret);
     await page.getByLabel("Authenticator code", { exact: true }).fill(code);
     await page.getByRole("button", { name: "Activate authenticator" }).click();
     await expect(setupKey).not.toBeVisible();
-    await expect(
-        twoFactor.getByRole("button", { name: "Confirm authenticator" }),
-    ).toBeVisible();
-    await expect
-        .poll(() => Math.floor(Date.now() / 30_000), {
-            timeout: 31_000,
-            intervals: [100, 250, 500],
-        })
-        .toBeGreaterThan(enrollmentStep);
-    await twoFactor
-        .getByLabel("Authenticator or recovery code")
-        .fill(totp(setupSecret));
-    await twoFactor
-        .getByRole("button", { name: "Confirm authenticator" })
-        .click();
     const firstCode = page.locator("main li code").first();
     await expect(firstCode).toBeVisible();
     const recoveryCode = await firstCode.innerText();
@@ -237,5 +221,45 @@ test("verified email and a recovery code protect a real browser session", async 
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(
         page.getByRole("heading", { name: "Account settings", exact: true }),
+    ).toBeVisible();
+    const changedEmail = email.replace("@", "+changed@");
+    const emailChange = page.locator(".account-disclosure").filter({
+        has: page.getByText("Change email", { exact: true }),
+    });
+    await emailChange.getByText("Change email", { exact: true }).click();
+    await emailChange.getByLabel("New email address").fill(changedEmail);
+    await emailChange
+        .getByRole("button", { name: "Send verification code" })
+        .click();
+    await emailChange
+        .getByLabel("Authenticator or recovery code")
+        .fill(totp(setupSecret));
+    await emailChange
+        .getByRole("button", { name: "Confirm authenticator" })
+        .click();
+    await expect(emailChange.getByText(changedEmail)).toBeVisible();
+    let changeCode = "";
+    await expect
+        .poll(async () => {
+            try {
+                const messages = JSON.parse(
+                    await readFile(process.env.BROWSER_AUTH_MAILBOX!, "utf8"),
+                ) as { email: string; template: string; code: string }[];
+                changeCode =
+                    messages.findLast(
+                        (message) =>
+                            message.email === changedEmail &&
+                            message.template.includes("email_confirmation"),
+                    )?.code ?? "";
+            } catch {
+                /* Mailbox may be written while it is being read. */
+            }
+            return !!changeCode;
+        })
+        .toBe(true);
+    await emailChange.getByLabel("Email verification code").fill(changeCode);
+    await emailChange.getByRole("button", { name: "Verify new email" }).click();
+    await expect(
+        emailChange.getByText(`${changedEmail} is now your address.`),
     ).toBeVisible();
 });

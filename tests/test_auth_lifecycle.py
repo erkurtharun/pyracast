@@ -510,29 +510,25 @@ def test_totp_and_recovery_codes_gate_login_and_cannot_be_replayed(
     client = Client(enforce_csrf_checks=True)
     credentials = {"email": user.email, "password": PASSWORD}
     assert submit(client, "auth/login", credentials).status_code == 200
+    assert client.get(AUTH + "account/authenticators/totp").status_code == 401
+    assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     setup = client.get(AUTH + "account/authenticators/totp")
     assert setup.status_code == 404
     now = time.time()
     # Reauthentication and CSRF requests can cross the 30-second TOTP boundary.
     monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now))
-    assert (
-        submit(
-            client,
-            "account/authenticators/totp",
-            {"code": totp_code(setup.json()["meta"]["secret"], now)},
-        ).status_code
-        == 401
+    activation = submit(
+        client,
+        "account/authenticators/totp",
+        {"code": totp_code(setup.json()["meta"]["secret"], now)},
     )
-    assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+    assert activation.status_code == 200
+    codes = activation.json()["meta"]["recovery_codes"]
+    assert codes
     assert (
-        submit(
-            client,
-            "account/authenticators/totp",
-            {"code": totp_code(setup.json()["meta"]["secret"], now)},
-        ).status_code
-        == 200
+        "unused_codes"
+        not in client.get(AUTH + "account/authenticators/recovery-codes").json()["data"]
     )
-    assert client.get(AUTH + "account/authenticators/recovery-codes").status_code == 401
     monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now + 31))
     assert (
         submit(
@@ -541,13 +537,6 @@ def test_totp_and_recovery_codes_gate_login_and_cannot_be_replayed(
             {"code": totp_code(setup.json()["meta"]["secret"], now + 31)},
         ).status_code
         == 200
-    )
-    recovery = client.get(AUTH + "account/authenticators/recovery-codes")
-    codes = recovery.json()["data"]["unused_codes"]
-    assert codes
-    assert (
-        "unused_codes"
-        not in client.get(AUTH + "account/authenticators/recovery-codes").json()["data"]
     )
     token = client.get("/api/session/").json()["csrf_token"]
     client.delete(AUTH + "auth/session", HTTP_X_CSRFTOKEN=token)

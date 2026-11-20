@@ -1,5 +1,36 @@
-import { expect, test } from "./support/test";
-import { mockApi } from "./support/workspace";
+import { expect, test, type Page } from "./support/test";
+import { mockApi, signedInSession, user } from "./support/workspace";
+
+const askPassword = {
+    status: 401,
+    json: {
+        status: 401,
+        meta: { is_authenticated: true },
+        data: { flows: [{ id: "reauthenticate" }] },
+    },
+};
+
+async function pendingAddress(page: Page, email: string) {
+    await page.route("**/api/auth/browser/v1/account/email", (route) =>
+        route.request().method() === "GET"
+            ? route.fulfill({
+                  json: {
+                      status: 200,
+                      data: [
+                          { email: user.email, primary: true, verified: true },
+                          { email, primary: false, verified: false },
+                      ],
+                  },
+              })
+            : route.fallback(),
+    );
+}
+
+function emailChange(page: Page) {
+    return page.locator(".account-disclosure").filter({
+        has: page.getByText("Change email", { exact: true }),
+    });
+}
 
 test("an expired account session returns to sign in instead of asking for reauthentication", async ({
     page,
@@ -34,19 +65,13 @@ test("an expired account session returns to sign in instead of asking for reauth
     ).toBeVisible();
 });
 
-test("email confirmation requiring reauthentication does not report success", async ({
+test("an address code that needs a confirmation opens the prompt and reports no success", async ({
     page,
 }) => {
     await mockApi(page);
+    await pendingAddress(page, "new@example.test");
     await page.route("**/api/auth/browser/v1/auth/email/verify", (route) =>
-        route.fulfill({
-            status: 401,
-            json: {
-                status: 401,
-                meta: { is_authenticated: true },
-                data: { flows: [{ id: "reauthenticate", is_pending: true }] },
-            },
-        }),
+        route.fulfill(askPassword),
     );
     await page.goto("/app/");
     await page.getByRole("button", { name: "Account" }).click();
@@ -54,11 +79,11 @@ test("email confirmation requiring reauthentication does not report success", as
     await page.getByLabel("Email verification code").fill("ABCD-EFGH");
     await page.getByRole("button", { name: "Verify new email" }).click();
     await expect(
-        page.getByText("Please confirm your identity and try again."),
+        emailChange(page).getByRole("heading", {
+            name: "Confirm your password",
+        }),
     ).toBeVisible();
-    await expect(
-        page.getByRole("heading", { name: "Account settings" }),
-    ).toBeVisible();
+    await expect(page.getByText(/is now your address/)).toHaveCount(0);
 });
 
 test("administrator recovery codes request a fresh authenticator confirmation", async ({
@@ -73,11 +98,12 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
                 json: {
                     status: 401,
                     meta: { is_authenticated: true },
+                    data: { flows: [{ id: "mfa_reauthenticate" }] },
                     errors: [
                         {
                             code: "mfa_reauthentication_required",
                             message:
-                                "Verify an authenticator before managing administrator recovery codes.",
+                                "Confirm with your authenticator to continue.",
                         },
                     ],
                 },
@@ -85,7 +111,8 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
     );
     await page.goto("/app/w/");
     await page.getByRole("button", { name: "Account" }).click();
-    await page.getByRole("button", { name: "Show recovery codes" }).click();
+    await page.getByRole("button", { name: "Generate recovery codes" }).click();
+    await page.getByRole("button", { name: "Replace codes" }).click();
     await expect(
         page.getByRole("heading", { name: "Confirm with your authenticator" }),
     ).toBeVisible();
@@ -94,71 +121,175 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
     ).toBeVisible();
 });
 
-test("an email change that needs a fresh sign-in confirms the password and sends the code", async ({
+test("an email change confirms the password in the shared prompt, resumes the request and verifies the code", async ({
     page,
 }) => {
     await mockApi(page);
     const submitted: unknown[] = [];
     const confirmations: unknown[] = [];
+    let verified = false;
     await page.route("**/api/auth/browser/v1/account/email", (route) => {
+        if (route.request().method() === "GET") return route.fallback();
         submitted.push(route.request().postDataJSON());
         if (submitted.length === 2)
             expect(confirmations).toEqual([{ password: "current-password" }]);
         return route.fulfill(
-            submitted.length === 1
-                ? {
-                      status: 401,
-                      json: {
-                          status: 401,
-                          meta: { is_authenticated: true },
-                          data: {
-                              flows: [
-                                  { id: "reauthenticate", is_pending: true },
-                              ],
-                          },
-                      },
-                  }
-                : { json: { status: 200, data: [] } },
+            submitted.length === 1 ? askPassword : { json: { status: 200 } },
         );
     });
     await page.route("**/api/auth/browser/v1/auth/reauthenticate", (route) => {
         confirmations.push(route.request().postDataJSON());
-        expect(route.request().postDataJSON()).toEqual({
-            password: "current-password",
+        return route.fulfill({
+            json: { status: 200, meta: { is_authenticated: true } },
         });
+    });
+    await page.route("**/api/auth/browser/v1/auth/email/verify", (route) => {
+        expect(route.request().postDataJSON()).toEqual({ key: "ABCD-EFGH" });
+        verified = true;
         return route.fulfill({
             json: { status: 200, meta: { is_authenticated: true } },
         });
     });
     await page.goto("/app/");
     await page.getByRole("button", { name: "Account" }).click();
-    await page.getByText("Change email", { exact: true }).click();
-    await page.getByLabel("New email address").fill("new@example.test");
-    await page.getByRole("button", { name: "Send verification code" }).click();
-    const changeEmail = page.locator(".account-disclosure").filter({
-        has: page.getByText("Change email", { exact: true }),
-    });
-    await changeEmail
+    const change = emailChange(page);
+    await change.getByText("Change email", { exact: true }).click();
+    await expect(
+        change.getByText(/Other devices are signed out/),
+    ).toBeVisible();
+    await change.getByLabel("New email address").fill("new@example.test");
+    await change
+        .getByRole("button", { name: "Send verification code" })
+        .click();
+    await expect(
+        change.getByRole("heading", { name: "Confirm your password" }),
+    ).toBeVisible();
+    await change
         .getByLabel("Current password", { exact: true })
         .fill("current-password");
-    await changeEmail.getByRole("button", { name: "Confirm password" }).click();
-    await expect
-        .poll(() => submitted)
-        .toEqual([
-            { email: "new@example.test" },
-            { email: "new@example.test" },
-        ]);
-    await expect(page.getByLabel("Email verification code")).toBeVisible();
-    expect(confirmations).toEqual([{ password: "current-password" }]);
-    await expect(changeEmail.getByLabel("New email address")).toHaveValue(
-        "new@example.test",
-    );
+    await change.getByRole("button", { name: "Confirm password" }).click();
     await expect(
-        changeEmail.getByText(
-            "Enter the code sent to your email in this browser.",
+        change.getByText(
+            "Enter the code sent to new@example.test. It is valid for 10 minutes.",
         ),
     ).toBeVisible();
+    expect(submitted).toEqual([
+        { email: "new@example.test" },
+        { email: "new@example.test" },
+    ]);
+    expect(confirmations).toEqual([{ password: "current-password" }]);
+    await change.getByLabel("Email verification code").fill("ABCD-EFGH");
+    await change.getByRole("button", { name: "Verify new email" }).click();
     await expect(
-        page.getByText("Please confirm your identity and try again."),
-    ).toHaveCount(0);
+        change.getByText("new@example.test is now your address."),
+    ).toBeVisible();
+    expect(verified).toBe(true);
+});
+
+test("a pending address change resumes after a reload and can be replaced by another address", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await pendingAddress(page, "pending@example.test");
+    const removed: unknown[] = [];
+    await page.route("**/api/auth/browser/v1/account/email", (route) => {
+        if (route.request().method() !== "DELETE") return route.fallback();
+        removed.push(route.request().postDataJSON());
+        return route.fulfill({ json: { status: 200, data: [] } });
+    });
+    await page.goto("/app/account/");
+    const change = emailChange(page);
+    await change.getByText("Change email", { exact: true }).click();
+    await expect(change.getByText(/pending@example\.test/)).toBeVisible();
+    await change.getByRole("button", { name: "Use another address" }).click();
+    await expect(
+        change.getByText("The address change was cancelled."),
+    ).toBeVisible();
+    await expect(change.getByLabel("New email address")).toBeVisible();
+    expect(removed).toEqual([{ email: "pending@example.test" }]);
+});
+
+test("a password change asks for the factor the server names and resumes the same change", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const changes: unknown[] = [];
+    await page.route(
+        "**/api/auth/browser/v1/account/password/change",
+        (route) => {
+            changes.push(route.request().postDataJSON());
+            return route.fulfill(
+                changes.length === 1
+                    ? askPassword
+                    : {
+                          json: {
+                              status: 200,
+                              meta: { is_authenticated: true },
+                          },
+                      },
+            );
+        },
+    );
+    await page.route("**/api/auth/browser/v1/auth/reauthenticate", (route) =>
+        route.fulfill({
+            json: { status: 200, meta: { is_authenticated: true } },
+        }),
+    );
+    await page.goto("/app/account/");
+    const password = page.locator(".password-disclosure");
+    await password.locator("summary").click();
+    await password
+        .getByLabel("Current password", { exact: true })
+        .fill("current-password");
+    await password
+        .getByLabel("New password", { exact: true })
+        .fill("a-new-and-long-password");
+    await password.getByLabel("Show passwords").check();
+    await expect(
+        password.getByLabel("New password", { exact: true }),
+    ).toHaveAttribute("type", "text");
+    await password.getByRole("button", { name: "Change password" }).click();
+    await password
+        .getByLabel("Current password", { exact: true })
+        .fill("current-password");
+    await password.getByRole("button", { name: "Confirm password" }).click();
+    await expect.poll(() => changes).toHaveLength(2);
+    expect(changes[1]).toEqual(changes[0]);
+});
+
+test("the account lists where it is signed in and signs out another session", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const other = {
+        ...signedInSession,
+        id: 2,
+        ip: "198.51.100.4",
+        user_agent:
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1",
+        is_current: false,
+    };
+    const ended: unknown[] = [];
+    await page.route("**/api/auth/browser/v1/auth/sessions", (route) => {
+        if (route.request().method() === "DELETE") {
+            ended.push(route.request().postDataJSON());
+            return route.fulfill({
+                json: { status: 200, data: [signedInSession] },
+            });
+        }
+        return route.fulfill({
+            json: { status: 200, data: [other, signedInSession] },
+        });
+    });
+    await page.goto("/app/account/");
+    const devices = page.getByRole("region", {
+        name: "Where you are signed in",
+    });
+    await expect(devices.getByText("This device")).toBeVisible();
+    await expect(devices.getByText("Chrome · Windows")).toBeVisible();
+    await devices
+        .getByRole("button", { name: "Sign out Safari · iOS" })
+        .click();
+    await expect(devices.getByText("Safari · iOS")).toHaveCount(0);
+    expect(ended).toEqual([{ sessions: [2] }]);
 });

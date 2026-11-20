@@ -4,11 +4,33 @@ import { accessibilityViolations } from "./support/accessibility";
 import jsQR from "jsqr";
 import { PNG } from "pngjs";
 import { mockApi, paged, user, tenantRow } from "./support/workspace";
-import { allauthErrorBody } from "./support/errors";
+import { allauthErrorBody, errorBody } from "./support/errors";
 
 const secret = "JBSWY3DPEHPK3PXP";
 const provisioningUri = `otpauth://totp/Pyracast:solar%40example.test?secret=${secret}&issuer=Pyracast`;
 const authenticatorsPath = "/api/auth/browser/v1/account/authenticators";
+const askAuthenticator = {
+    status: 401,
+    json: {
+        status: 401,
+        meta: { is_authenticated: true },
+        data: { flows: [{ id: "mfa_reauthenticate" }] },
+        errors: [
+            {
+                code: "mfa_reauthentication_required",
+                message: "Confirm with your authenticator to continue.",
+            },
+        ],
+    },
+};
+const askPassword = {
+    status: 401,
+    json: {
+        status: 401,
+        meta: { is_authenticated: true },
+        data: { flows: [{ id: "reauthenticate" }] },
+    },
+};
 
 async function mockTwoFactor(
     page: Page,
@@ -34,7 +56,6 @@ async function mockTwoFactor(
         removals: 0,
         recoveryRequests: [] as string[],
         recoveryCodes: ["10000001", "10000002", "10000003"],
-        recoveryViewed: false,
     };
     await page.route(`**${authenticatorsPath}/**`, async (route) => {
         expect(route.request().headers()["x-csrftoken"]).toBe("signed-token");
@@ -53,7 +74,13 @@ async function mockTwoFactor(
             } else if (method === "POST") {
                 state.activations.push(route.request().postDataJSON().code);
                 state.enabled = true;
-                await route.fulfill({ json: { status: 200 } });
+                await route.fulfill({
+                    json: {
+                        status: 200,
+                        data: { type: "totp", created_at: 1767225600 },
+                        meta: { recovery_codes: state.recoveryCodes },
+                    },
+                });
             } else if (method === "DELETE") {
                 state.removals += 1;
                 state.enabled = false;
@@ -61,17 +88,13 @@ async function mockTwoFactor(
             } else throw new Error(`Unexpected TOTP method: ${method}`);
         } else if (path.endsWith("/recovery-codes")) {
             state.recoveryRequests.push(method);
-            if (method === "POST")
-                state.recoveryCodes = ["20000001", "20000002", "20000003"];
-            const unusedCodes =
-                method === "GET" && state.recoveryViewed
-                    ? []
-                    : state.recoveryCodes;
-            state.recoveryViewed = true;
+            if (method !== "POST")
+                throw new Error(`Unexpected recovery-code method: ${method}`);
+            state.recoveryCodes = ["20000001", "20000002", "20000003"];
             await route.fulfill({
                 json: {
                     status: 200,
-                    data: { unused_codes: unusedCodes },
+                    data: { unused_codes: state.recoveryCodes },
                 },
             });
         } else throw new Error(`Unexpected authenticator endpoint: ${path}`);
@@ -82,7 +105,11 @@ async function mockTwoFactor(
                 status: 200,
                 data: state.enabled
                     ? [
-                          { type: "totp" },
+                          {
+                              type: "totp",
+                              created_at: 1767225600,
+                              last_used_at: null,
+                          },
                           {
                               type: "recovery_codes",
                               unused_code_count: 3,
@@ -110,35 +137,20 @@ function twoFactorPanel(page: Page) {
     });
 }
 
-test("a viewer enrolls from a local scannable QR and preserves a leading-zero code", async ({
+async function replaceCodes(page: Page) {
+    const panel = twoFactorPanel(page);
+    await panel
+        .getByRole("button", { name: "Replace recovery codes", exact: true })
+        .click();
+    await panel
+        .getByRole("button", { name: "Replace codes", exact: true })
+        .click();
+}
+
+test("a viewer enrolls with one code and receives the recovery codes with the activation", async ({
     page,
 }) => {
     const state = await mockTwoFactor(page, { viewer: true });
-    let recentlyVerified = false;
-    await page.route(`**${authenticatorsPath}/recovery-codes`, (route) => {
-        if (recentlyVerified) return route.fallback();
-        return route.fulfill({
-            status: 401,
-            json: {
-                status: 401,
-                meta: { is_authenticated: true },
-                errors: [
-                    {
-                        code: "mfa_reauthentication_required",
-                        message: "Verify an authenticator.",
-                    },
-                ],
-            },
-        });
-    });
-    await page.route(
-        "**/api/auth/browser/v1/auth/2fa/reauthenticate",
-        (route) => {
-            expect(route.request().postDataJSON()).toEqual({ code: "012346" });
-            recentlyVerified = true;
-            return route.fulfill({ json: { status: 200 } });
-        },
-    );
     const leakedRequests: string[] = [];
     page.on("request", (request) => {
         const url = new URL(request.url());
@@ -151,7 +163,7 @@ test("a viewer enrolls from a local scannable QR and preserves a leading-zero co
     });
     await openSettings(page);
     await expect(
-        page.getByRole("button", { name: "Show recovery codes" }),
+        page.getByRole("button", { name: "Replace recovery codes" }),
     ).not.toBeVisible();
     await page.getByRole("button", { name: "Set up authenticator" }).click();
     const qr = page.getByRole("img", { name: /QR/i });
@@ -167,21 +179,15 @@ test("a viewer enrolls from a local scannable QR and preserves a leading-zero co
     ).not.toBeVisible();
     await page.getByLabel("Authenticator code", { exact: true }).fill("012345");
     await page.getByRole("button", { name: "Activate authenticator" }).click();
-    const panel = twoFactorPanel(page);
-    await expect(
-        panel.getByRole("heading", { name: "Confirm with your authenticator" }),
-    ).toBeVisible();
-    await expect(
-        panel.getByText(/Wait for a new code in your app/),
-    ).toBeVisible();
-    await expect(page.getByText(secret, { exact: true })).not.toBeVisible();
-    await panel.getByLabel("Authenticator or recovery code").fill("012346");
-    await panel.getByRole("button", { name: "Confirm authenticator" }).click();
     await expect(
         page.getByRole("heading", { name: "Save your recovery codes" }),
     ).toBeVisible();
+    await expect(page.getByText("10000001", { exact: true })).toBeVisible();
+    await expect(
+        twoFactorPanel(page).getByText(/Other devices were signed out/),
+    ).toBeVisible();
     expect(state.activations).toEqual(["012345"]);
-    expect(state.recoveryRequests).toEqual(["GET"]);
+    expect(state.recoveryRequests).toEqual([]);
     await expect(qr).not.toBeVisible();
     await expect(page.getByText(secret, { exact: true })).not.toBeVisible();
     expect(leakedRequests).toEqual([]);
@@ -198,6 +204,7 @@ test("a viewer enrolls from a local scannable QR and preserves a leading-zero co
     await expect(
         page.getByRole("button", { name: "Set up authenticator" }),
     ).not.toBeVisible();
+    await expect(page.getByText("10000001", { exact: true })).not.toBeVisible();
     expect(state.setupRequests).toBe(1);
 });
 
@@ -256,11 +263,10 @@ test("cancelling setup clears the provisioning key without enabling MFA", async 
     expect(state.activations).toEqual([]);
 });
 
-test("an authenticator read answered as signed out while the session stays signed in keeps the setup control", async ({
+test("an authenticator read refused for a renewed session key is read again after the session read", async ({
     page,
 }) => {
     const state = await mockTwoFactor(page);
-    // Account reads carry the key a reauthentication replaced until a session read follows a refusal.
     const reads: string[] = [];
     await page.route("**/api/session/", (route) => {
         if (reads.includes("refused")) reads.push("session");
@@ -273,8 +279,8 @@ test("an authenticator read answered as signed out while the session stays signe
         }
         reads.push("refused");
         return route.fulfill({
-            status: 401,
-            json: { status: 401, meta: { is_authenticated: false } },
+            status: 409,
+            json: errorBody("session_changed", "The session changed."),
         });
     });
     await openSettings(page);
@@ -293,7 +299,7 @@ test("an authenticator read answered as signed out while the session stays signe
 test("activation prevents duplicate submissions while the server is responding", async ({
     page,
 }) => {
-    const state = await mockTwoFactor(page);
+    await mockTwoFactor(page);
     let release: () => void = () => {};
     const responseReady = new Promise<void>((resolve) => {
         release = resolve;
@@ -303,8 +309,7 @@ test("activation prevents duplicate submissions while the server is responding",
         if (route.request().method() !== "POST") return route.fallback();
         submissions += 1;
         await responseReady;
-        state.enabled = true;
-        await route.fulfill({ json: { status: 200 } });
+        await route.fallback();
     });
     await openSettings(page);
     await page.getByRole("button", { name: "Set up authenticator" }).click();
@@ -361,36 +366,35 @@ test("MFA setup and recovery codes remain accessible on desktop and a 320px scre
     });
 });
 
-test("recovery codes clear after saved acknowledgement and replace only after confirmation", async ({
+test("an enabled authenticator shows its facts and replaces codes only after confirmation", async ({
     page,
 }) => {
     const state = await mockTwoFactor(page, { enabled: true });
     await openSettings(page);
-    await expect(page.getByText("3 of 3 recovery codes unused.")).toBeVisible();
-    await page.getByRole("button", { name: "Show recovery codes" }).click();
-    await expect(page.getByText("10000001", { exact: true })).toBeVisible();
-    await page
-        .getByRole("button", { name: "I have saved my codes", exact: true })
-        .click();
-    await expect(page.getByText("10000001", { exact: true })).not.toBeVisible();
-    await page.getByRole("button", { name: "Show recovery codes" }).click();
+    const panel = twoFactorPanel(page);
     await expect(
-        page.getByText(/Your recovery codes were already viewed/),
+        panel.getByText("3 of 3 recovery codes unused."),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Replace recovery codes" }).click();
+    await expect(panel.getByText(/Added on/)).toBeVisible();
+    await expect(panel.getByText(/Not used to sign in yet/)).toBeVisible();
+    await expect(
+        panel.getByRole("button", { name: "Show recovery codes" }),
+    ).toHaveCount(0);
+    await panel
+        .getByRole("button", { name: "Replace recovery codes", exact: true })
+        .click();
     await expect(
         page.getByRole("heading", { name: "Replace recovery codes?" }),
     ).toBeVisible();
-    expect(state.recoveryRequests).toEqual(["GET", "GET"]);
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
-    expect(state.recoveryRequests).toEqual(["GET", "GET"]);
-    await page.getByRole("button", { name: "Replace recovery codes" }).click();
-    await page
-        .getByRole("button", { name: "Replace codes", exact: true })
-        .click();
+    expect(state.recoveryRequests).toEqual([]);
+    await replaceCodes(page);
     await expect(page.getByText("20000001", { exact: true })).toBeVisible();
-    await expect(page.getByText("10000001", { exact: true })).not.toBeVisible();
-    expect(state.recoveryRequests).toEqual(["GET", "GET", "POST"]);
+    expect(state.recoveryRequests).toEqual(["POST"]);
+    await page
+        .getByRole("button", { name: "I have saved my codes", exact: true })
+        .click();
+    await expect(page.getByText("20000001", { exact: true })).not.toBeVisible();
     await page.reload();
     await page.getByRole("button", { name: "Account" }).click();
     await expect(page.getByText("20000001", { exact: true })).not.toBeVisible();
@@ -399,6 +403,20 @@ test("recovery codes clear after saved acknowledgement and replace only after co
             JSON.stringify({ ...localStorage, ...sessionStorage }),
         ),
     ).not.toContain("20000001");
+});
+
+test("an account without recovery codes generates them", async ({ page }) => {
+    await mockTwoFactor(page, { enabled: true });
+    await page.route(`**${authenticatorsPath}`, (route) =>
+        route.fulfill({ json: { status: 200, data: [{ type: "totp" }] } }),
+    );
+    await openSettings(page);
+    await expect(
+        twoFactorPanel(page).getByRole("button", {
+            name: "Generate recovery codes",
+            exact: true,
+        }),
+    ).toBeVisible();
 });
 
 test("removing an optional authenticator requires confirmation and cancellation preserves it", async ({
@@ -424,7 +442,7 @@ test("removing an optional authenticator requires confirmation and cancellation 
         page.getByRole("button", { name: "Set up authenticator" }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Show recovery codes" }),
+        page.getByRole("button", { name: "Replace recovery codes" }),
     ).not.toBeVisible();
     expect(state.removals).toBe(1);
 });
@@ -446,7 +464,7 @@ test("a platform administrator sees required MFA without customer enrollment or 
         page.getByRole("button", { name: "Set up authenticator" }),
     ).not.toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Show recovery codes" }),
+        page.getByRole("button", { name: "Replace recovery codes" }),
     ).toBeVisible();
     expect(state.removals).toBe(0);
 });
@@ -478,25 +496,18 @@ test("a failed authenticator list offers an explicit retry without guessing acco
     unavailable = false;
     await page.getByRole("button", { name: "Try again", exact: true }).click();
     await expect(
-        page.getByRole("button", { name: "Show recovery codes" }),
+        page.getByRole("button", { name: "Replace recovery codes" }),
     ).toBeVisible();
 });
 
-test("password reauthentication resumes setup and cancellation makes no enrollment request", async ({
+test("the setup asks for the password first, then shows the secret, and cancelling asks for nothing", async ({
     page,
 }) => {
     const state = await mockTwoFactor(page);
     let verified = false;
     await page.route(`**${authenticatorsPath}/totp`, (route) => {
         if (verified) return route.fallback();
-        return route.fulfill({
-            status: 401,
-            json: {
-                status: 401,
-                meta: { is_authenticated: true },
-                data: { flows: [{ id: "reauthenticate", is_pending: true }] },
-            },
-        });
+        return route.fulfill(askPassword);
     });
     await page.route("**/api/auth/browser/v1/auth/reauthenticate", (route) => {
         expect(route.request().postDataJSON()).toEqual({
@@ -511,7 +522,7 @@ test("password reauthentication resumes setup and cancellation makes no enrollme
     await expect(
         panel.getByRole("heading", { name: "Confirm your password" }),
     ).toBeVisible();
-    await expect(panel.getByText("Enabled", { exact: true })).not.toBeVisible();
+    await expect(panel.getByRole("img", { name: /QR/i })).not.toBeVisible();
     await panel.getByRole("button", { name: "Cancel", exact: true }).click();
     expect(state.setupRequests).toBe(0);
     await panel.getByRole("button", { name: "Set up authenticator" }).click();
@@ -526,7 +537,7 @@ test("password reauthentication resumes setup and cancellation makes no enrollme
 });
 
 for (const resumeAllowed of [true, false]) {
-    test(`MFA recovery reauthentication ${resumeAllowed ? "resumes the pending request" : "stops after one rejected replay"}`, async ({
+    test(`a recovery-code replacement ${resumeAllowed ? "resumes after the authenticator confirms" : "asks again when it is refused after the confirmation"}`, async ({
         page,
     }) => {
         await mockTwoFactor(page, { enabled: true });
@@ -536,20 +547,7 @@ for (const resumeAllowed of [true, false]) {
         await page.route(`**${authenticatorsPath}/recovery-codes`, (route) => {
             recoveryRequests += 1;
             if (verified && resumeAllowed) return route.fallback();
-            return route.fulfill({
-                status: 401,
-                json: {
-                    status: 401,
-                    meta: { is_authenticated: true },
-                    errors: [
-                        {
-                            code: "mfa_reauthentication_required",
-                            message:
-                                "Verify an authenticator before managing two-factor authentication.",
-                        },
-                    ],
-                },
-            });
+            return route.fulfill(askAuthenticator);
         });
         await page.route(
             "**/api/auth/browser/v1/auth/2fa/reauthenticate",
@@ -564,16 +562,11 @@ for (const resumeAllowed of [true, false]) {
         );
         await openSettings(page);
         const panel = twoFactorPanel(page);
-        await panel
-            .getByRole("button", { name: "Show recovery codes" })
-            .click();
+        await replaceCodes(page);
         await expect(
             panel.getByRole("heading", {
                 name: "Confirm with your authenticator",
             }),
-        ).toBeVisible();
-        await expect(
-            page.getByRole("heading", { name: "Account settings" }),
         ).toBeVisible();
         await panel.getByLabel("Authenticator or recovery code").fill("000001");
         await panel
@@ -581,21 +574,17 @@ for (const resumeAllowed of [true, false]) {
             .click();
         if (resumeAllowed)
             await expect(
-                panel.getByText("10000001", { exact: true }),
+                panel.getByText("20000001", { exact: true }),
             ).toBeVisible();
         else {
             await expect(
-                panel.getByRole("alert").filter({
-                    hasText:
-                        "Verification could not be completed. Please try again.",
+                panel.getByRole("heading", {
+                    name: "Confirm with your authenticator",
                 }),
             ).toBeVisible();
             await expect(
-                panel.getByText("10000001", { exact: true }),
+                panel.getByText("20000001", { exact: true }),
             ).not.toBeVisible();
-            await expect(
-                panel.getByRole("button", { name: "Show recovery codes" }),
-            ).toBeVisible();
         }
         expect(recoveryRequests).toBe(2);
         expect(verifications).toBe(1);
@@ -619,7 +608,7 @@ test("recovery codes can be copied or downloaded without persisting them in brow
         });
     });
     await openSettings(page);
-    await page.getByRole("button", { name: "Show recovery codes" }).click();
+    await replaceCodes(page);
     await page.getByRole("button", { name: "Copy codes", exact: true }).click();
     await expect(
         page.getByText("Recovery codes copied.", { exact: true }),
@@ -628,7 +617,7 @@ test("recovery codes can be copied or downloaded without persisting them in brow
         await page.evaluate(
             () => (window as Window & { copiedText?: string }).copiedText,
         ),
-    ).toBe("10000001\n10000002\n10000003");
+    ).toBe("20000001\n20000002\n20000003");
     const downloading = page.waitForEvent("download");
     await page
         .getByRole("button", { name: "Download (.txt)", exact: true })
@@ -636,13 +625,13 @@ test("recovery codes can be copied or downloaded without persisting them in brow
     const download = await downloading;
     expect(download.suggestedFilename()).toBe("pyracast-recovery-codes.txt");
     expect(await readFile(await download.path(), "utf8")).toBe(
-        "10000001\n10000002\n10000003\n",
+        "20000001\n20000002\n20000003\n",
     );
     expect(
         await page.evaluate(() =>
             JSON.stringify({ ...localStorage, ...sessionStorage }),
         ),
-    ).not.toContain("10000001");
+    ).not.toContain("20000001");
 });
 
 test("switching language preserves the in-progress QR, code draft and shown-once recovery codes", async ({
@@ -678,10 +667,10 @@ test("switching language preserves the in-progress QR, code draft and shown-once
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(page.locator("html")).toHaveAttribute("lang", "tr");
     await expect(page.getByText("10000001", { exact: true })).toBeVisible();
-    expect(state.recoveryRequests).toEqual(["GET"]);
+    expect(state.recoveryRequests).toEqual([]);
 });
 
-test("an activation interrupted by password reauthentication requires a fresh OTP", async ({
+test("an activation whose confirmation lapsed asks for a fresh code", async ({
     page,
 }) => {
     const state = await mockTwoFactor(page);
@@ -691,14 +680,7 @@ test("an activation interrupted by password reauthentication requires a fresh OT
         if (route.request().method() !== "POST") return route.fallback();
         activations += 1;
         if (verified) return route.fallback();
-        return route.fulfill({
-            status: 401,
-            json: {
-                status: 401,
-                meta: { is_authenticated: true },
-                data: { flows: [{ id: "reauthenticate", is_pending: true }] },
-            },
-        });
+        return route.fulfill(askPassword);
     });
     await page.route("**/api/auth/browser/v1/auth/reauthenticate", (route) => {
         verified = true;
@@ -720,6 +702,7 @@ test("an activation interrupted by password reauthentication requires a fresh OT
     await expect(
         panel.getByLabel("Authenticator code", { exact: true }),
     ).toHaveValue("");
+    await expect(panel.getByText(/Enter the current code/)).toBeVisible();
     expect(activations).toBe(1);
     expect(state.activations).toEqual([]);
     await panel
@@ -748,31 +731,46 @@ test("refreshing a masked CSRF token preserves displayed recovery codes", async 
             },
         }),
     );
+    await page.route("**/api/auth/browser/v1/account/email", (route) =>
+        route.fulfill({
+            json: {
+                status: 200,
+                data: [
+                    { email: user.email, primary: true, verified: true },
+                    {
+                        email: "new@example.test",
+                        primary: false,
+                        verified: false,
+                    },
+                ],
+            },
+        }),
+    );
     await page.route("**/api/auth/browser/v1/auth/email/verify", (route) => {
         refreshed = true;
         return route.fulfill({ json: { status: 200 } });
     });
     await openSettings(page);
-    await page.getByRole("button", { name: "Show recovery codes" }).click();
-    await expect(page.getByText("10000001", { exact: true })).toBeVisible();
+    await replaceCodes(page);
+    await expect(page.getByText("20000001", { exact: true })).toBeVisible();
     await page.getByText("Change email", { exact: true }).click();
     await page.getByLabel("Email verification code").fill("ABCD-EFGH");
     await page.getByRole("button", { name: "Verify new email" }).click();
     await expect(
         page.getByText("solar.refreshed", { exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("10000001", { exact: true })).toBeVisible();
+    await expect(page.getByText("20000001", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", {
             name: "I have saved my codes",
             exact: true,
         }),
     ).toBeVisible();
-    expect(state.recoveryRequests).toEqual(["GET"]);
+    expect(state.recoveryRequests).toEqual(["POST"]);
 });
 
 for (const operation of ["remove", "replace"] as const) {
-    test(`leaving settings during reauthentication cannot resume pending ${operation}`, async ({
+    test(`leaving settings during the confirmation cannot resume the pending ${operation}`, async ({
         page,
     }) => {
         const state = await mockTwoFactor(page, { enabled: true });
@@ -786,19 +784,7 @@ for (const operation of ["remove", "replace"] as const) {
                 resumedMutations += 1;
                 return route.fallback();
             }
-            return route.fulfill({
-                status: 401,
-                json: {
-                    status: 401,
-                    meta: { is_authenticated: true },
-                    errors: [
-                        {
-                            code: "mfa_reauthentication_required",
-                            message: "Verify an authenticator.",
-                        },
-                    ],
-                },
-            });
+            return route.fulfill(askAuthenticator);
         });
         let release: () => void = () => {};
         const authenticationReady = new Promise<void>((resolve) => {
@@ -852,7 +838,7 @@ for (const operation of ["remove", "replace"] as const) {
         await page.getByRole("button", { name: "Account" }).click();
         await expect(
             twoFactorPanel(page).getByRole("button", {
-                name: "Show recovery codes",
+                name: "Replace recovery codes",
             }),
         ).toBeVisible();
         expect(resumedMutations).toBe(0);
@@ -884,8 +870,8 @@ test("an activation committed before a lost response reconciles the actual enabl
     await expect(
         panel.getByRole("button", { name: "Set up authenticator" }),
     ).not.toBeVisible();
-    await panel.getByRole("button", { name: "Show recovery codes" }).click();
-    await expect(panel.getByText("10000001", { exact: true })).toBeVisible();
+    await replaceCodes(page);
+    await expect(panel.getByText("20000001", { exact: true })).toBeVisible();
     expect(activations).toBe(1);
 });
 
