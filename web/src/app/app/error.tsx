@@ -1,5 +1,5 @@
 "use client";
-import { RouteError } from "@/components/route-error";
+import { RouteError } from "@/ui/route-error";
 
 export default function AppError({
     retry,

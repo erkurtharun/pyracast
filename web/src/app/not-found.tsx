@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { SiteShell } from "@/components/public-site/site-shell";
-import styles from "@/components/public-site/public-site.module.css";
+import { SiteShell } from "@/features/public-site/site-shell";
+import styles from "@/features/public-site/public-site.module.css";
 import { publicPath } from "@/lib/public-metadata";
 
 export const metadata: Metadata = {

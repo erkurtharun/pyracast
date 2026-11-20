@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { PlantSite } from "@/components/plant-site";
+import { PlantSite } from "@/features/plant/plant-site";
 import { routeId } from "@/lib/routes";
 
 export default async function PlantLayout({
