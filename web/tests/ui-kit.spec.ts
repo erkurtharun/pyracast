@@ -452,13 +452,14 @@ test("a checkbox reports its field error like every other control", async ({
     await page
         .getByRole("button", { name: "Data collection", exact: true })
         .click();
-    await page
-        .getByRole("button", { name: "Save collection schedule", exact: true })
-        .click();
     const enabled = page.getByRole("checkbox", {
         name: "Enable data collection",
         exact: true,
     });
+    await enabled.uncheck();
+    await page
+        .getByRole("button", { name: "Save collection schedule", exact: true })
+        .click();
     await expect(enabled).toHaveAttribute("aria-invalid", "true");
     await expect(enabled).toHaveAccessibleDescription(
         "Approval is required first.",
