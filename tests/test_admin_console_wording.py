@@ -45,8 +45,9 @@ def test_plant_review_names_the_review_status_from_its_enumeration() -> None:
     Region.objects.filter(pk=system.region.pk).update(status="suspended")
     client, _ = verified_admin()
     html = client.get(setup_url(system), HTTP_ACCEPT_LANGUAGE="tr").content.decode()
-    assert html.count('<span class="badge badge--suspended">Askıya alındı</span>') == 1
-    assert '<span class="step-state">Askıya alındı</span>' in html
+    label = "Ask\u0131ya al\u0131nd\u0131"
+    assert html.count(f'<span class="badge badge--suspended">{label}</span>') == 1
+    assert f'<span class="step-state">{label}</span>' in html
 
 
 def test_plant_list_states_an_empty_filter_and_the_page_in_one_sentence() -> None:
