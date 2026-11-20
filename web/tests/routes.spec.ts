@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 import {
+    addressWithout,
+    appQuery,
+    callbackParams,
     isPlantSection,
     plantAddress,
     plantView,
@@ -110,4 +113,51 @@ test("a plant view falls back to the first view of its section", () => {
     expect(plantView("production", { view: "comparison" })).toBe("comparison");
     expect(plantView("settings", {})).toBe("configuration");
     expect(plantView("settings", { view: "reminders" })).toBe("reminders");
+});
+
+test("one parser reads the entry query and the social callback", () => {
+    const query = (value: string) => appQuery(new URLSearchParams(value));
+    expect(query("")).toEqual({ signup: false, socialCallback: "none" });
+    expect(query("signup=1&language=tr")).toEqual({
+        signup: true,
+        language: "tr",
+        socialCallback: "none",
+    });
+    expect(query("signup=yes&language=de")).toEqual({
+        signup: false,
+        socialCallback: "none",
+    });
+    expect(query("social_callback=1")).toEqual({
+        signup: false,
+        socialCallback: "succeeded",
+    });
+    expect(
+        query("social_callback=1&error=cancelled&error_process=connect"),
+    ).toEqual({ signup: false, socialCallback: "failed" });
+    expect(query("error=cancelled")).toEqual({
+        signup: false,
+        socialCallback: "none",
+    });
+});
+
+test("consumed parameters leave the address and keep the rest", () => {
+    expect(
+        addressWithout(
+            new URL(
+                "https://pyracast.test/app/account/?social_callback=1&error=x&error_process=connect&keep=1#part",
+            ),
+            callbackParams,
+        ),
+    ).toBe("/app/account/?keep=1#part");
+    expect(
+        addressWithout(
+            new URL("https://pyracast.test/app/?language=tr&signup=1"),
+            ["language"],
+        ),
+    ).toBe("/app/?signup=1");
+    expect(
+        addressWithout(new URL("https://pyracast.test/app/?language=tr"), [
+            "language",
+        ]),
+    ).toBe("/app/");
 });

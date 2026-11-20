@@ -674,6 +674,8 @@ test("Back while section changes load leaves the restored section in charge of i
     await settings.requested;
     await page.goBack();
     await expect(page).toHaveURL(/\/production\/$/);
+    await expect(page.getByLabel("Workspace")).toHaveValue("1");
+    await expect(page.getByRole("main")).not.toBeEmpty();
     await production.release();
     await settings.release();
     await expect(page).toHaveURL(/\/production\/$/);
@@ -684,6 +686,39 @@ test("Back while section changes load leaves the restored section in charge of i
     await button("Calibration").click();
     await expect(page).toHaveURL(/\/calibration\/$/);
     await expect(button("Calibration")).toHaveAttribute("aria-current", "page");
+});
+
+test("a superseded section change that fails loads its own section in full", async ({
+    page,
+}) => {
+    const button = await openPlant(page, "forecast/?view=irradiance");
+    await expect(button("Irradiance")).toHaveAttribute("aria-current", "page");
+    let seen!: () => void;
+    let fail!: () => void;
+    const requested = new Promise<void>((resolve) => (seen = resolve));
+    const failing = new Promise<void>((resolve) => (fail = resolve));
+    await page.route(
+        (url) =>
+            url.searchParams.has("_rsc") &&
+            url.pathname.endsWith("/production/"),
+        async (route) => {
+            seen();
+            await failing;
+            await route.fulfill({ status: 503, body: "unavailable" });
+        },
+        { times: 1 },
+    );
+    await button("Production").click();
+    await requested;
+    await button("Generation").click();
+    await expect(page).toHaveURL(/\/forecast\/$/);
+    await expect(button("Generation")).toHaveAttribute("aria-current", "page");
+    fail();
+    // Next.js answers a failed navigation request with a document load of its target,
+    // also after a later navigation committed.
+    await expect(page).toHaveURL(/\/production\/$/);
+    await expect(button("Production")).toHaveAttribute("aria-current", "page");
+    await expect(page.getByLabel("Day", { exact: true })).toBeVisible();
 });
 
 for (const overtaken of ["a section change", "Back"] as const)
