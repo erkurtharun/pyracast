@@ -94,10 +94,10 @@
                   </span>
                 </th>
                 <td data-label="{% translate "Data" %}"><span class="cell"><span>{{ job.kind }}</span><span class="row-meta">{{ job.target_date|date:"j M Y" }}</span></span></td>
-                <td data-label="{% translate "Status" %}"><span class="badge badge--{{ job.status|slugify }}">{% translate job.status_label %}</span></td>
+                <td data-label="{% translate "Status" %}"><span class="badge badge--{{ job.status|slugify }}">{{ job.status_label }}</span></td>
                 <td data-label="{% translate "Scheduled for" %}"><time datetime="{{ job.scheduled_for|date:'c' }}">{{ job.scheduled_for|date:"j M Y, H:i T" }}</time></td>
                 <td data-label="{% translate "Attempts" %}">{{ job.attempts }}</td>
-                <td data-label="{% translate "Last error" %}">{% if job.error_label %}{% translate job.error_label %}{% else %}<span class="muted">{% translate "None" %}</span>{% endif %}</td>
+                <td data-label="{% translate "Last error" %}">{% if job.error_label %}{{ job.error_label }}{% else %}<span class="muted">{% translate "None" %}</span>{% endif %}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -120,10 +120,10 @@
             {% for job in metering %}<tr>
               <th scope="row" data-label="{% translate "Plant" %}"><span class="cell"><a class="row-title" href="{{ job.review_url }}">{{ job.plant_name }}</a><span class="row-meta">{{ job.company }}</span></span></th>
               <td data-label="{% translate "Period" %}"><span class="cell"><span>{{ job.target_date|date:"j M Y" }}{% if job.period_end_day and job.period_end_day != job.target_date %} – {{ job.period_end_day|date:"j M Y" }}{% endif %}</span><span class="row-meta">{{ job.source_label }}</span></span></td>
-              <td data-label="{% translate "Status" %}"><span class="badge badge--{{ job.status|slugify }}">{% translate job.status_label %}</span></td>
+              <td data-label="{% translate "Status" %}"><span class="badge badge--{{ job.status|slugify }}">{{ job.status_label }}</span></td>
               <td data-label="{% translate "Scheduled for" %}"><time datetime="{{ job.scheduled_for|date:'c' }}">{{ job.scheduled_for|date:"j M Y, H:i T" }}</time></td>
               <td data-label="{% translate "Next attempt" %}">{% if job.status == "pending" %}<time datetime="{{ job.available_at|date:'c' }}">{{ job.available_at|date:"j M Y, H:i T" }}</time>{% else %}<span class="muted">—</span>{% endif %}</td>
-              <td data-label="{% translate "Last error" %}">{% if job.error_label %}{% translate job.error_label %}{% else %}<span class="muted">{% translate "None" %}</span>{% endif %}</td>
+              <td data-label="{% translate "Last error" %}">{% if job.error_label %}{{ job.error_label }}{% else %}<span class="muted">{% translate "None" %}</span>{% endif %}</td>
             </tr>{% endfor %}
           </tbody>
         </table>
@@ -143,10 +143,10 @@
             {% for run in calibrations %}<tr>
               <th scope="row" data-label="{% translate "Plant" %}"><span class="cell"><a class="row-title" href="{{ run.review_url }}">{{ run.plant_name }}</a><span class="row-meta">{{ run.company }}</span></span></th>
               <td data-label="{% translate "Period" %}">{{ run.window_start|date:"j M Y" }} – {{ run.window_end|date:"j M Y" }}</td>
-              <td data-label="{% translate "Status" %}"><span class="badge badge--{{ run.status|slugify }}">{% translate run.status_label %}</span></td>
+              <td data-label="{% translate "Status" %}"><span class="badge badge--{{ run.status|slugify }}">{{ run.status_label }}</span></td>
               <td data-label="{% translate "Requested" %}"><time datetime="{{ run.created_at|date:'c' }}">{{ run.created_at|date:"j M Y, H:i T" }}</time></td>
               <td data-label="{% translate "Attempts" %}">{{ run.attempts }}</td>
-              <td data-label="{% translate "Last error" %}">{% if run.error_label %}{% translate run.error_label %}{% else %}<span class="muted">{% translate "None" %}</span>{% endif %}</td>
+              <td data-label="{% translate "Last error" %}">{% if run.error_label %}{{ run.error_label }}{% else %}<span class="muted">{% translate "None" %}</span>{% endif %}</td>
             </tr>{% endfor %}
           </tbody>
         </table>
@@ -176,7 +176,7 @@
                 <td data-label="{% translate "Recipient" %}">{% if delivery.recipient %}<span class="wrap">{{ delivery.recipient }}</span>{% else %}<span class="muted">{% translate "Not set" %}</span>{% endif %}</td>
                 <td data-label="{% translate "Status" %}">
                   <span class="cell">
-                    <span class="badge badge--{{ delivery.status|slugify }}">{% translate delivery.status_label %}</span>
+                    <span class="badge badge--{{ delivery.status|slugify }}">{{ delivery.status_label }}</span>
                     {% if delivery.forecast_status %}<span class="row-meta">{{ delivery.forecast_status }}</span>{% endif %}
                     {% if delivery.status == "uncertain" %}<span class="row-meta">{% translate "The mail server's acceptance is unknown. Confirm with the mail provider before a manual resend." %}</span>{% endif %}
                   </span>
@@ -184,7 +184,7 @@
                 <td data-label="{% translate "Scheduled for" %}"><time datetime="{{ delivery.scheduled_for|date:'c' }}">{{ delivery.scheduled_for|date:"j M Y, H:i T" }}</time></td>
                 <td data-label="{% translate "Accepted" %}">{% if delivery.sent_at %}<time datetime="{{ delivery.sent_at|date:'c' }}">{{ delivery.sent_at|date:"j M Y, H:i T" }}</time>{% elif delivery.status == "uncertain" or delivery.status == "sending" %}<span class="muted">{% translate "Not confirmed" %}</span>{% else %}<span class="muted">{% translate "Not sent" %}</span>{% endif %}</td>
                 <td data-label="{% translate "Attempts" %}">{{ delivery.attempts }}</td>
-                <td data-label="{% translate "Last error" %}">{% if delivery.error_label %}{% translate delivery.error_label %}{% else %}<span class="muted">{% translate "None" %}</span>{% endif %}</td>
+                <td data-label="{% translate "Last error" %}">{% if delivery.error_label %}{{ delivery.error_label }}{% else %}<span class="muted">{% translate "None" %}</span>{% endif %}</td>
               </tr>
             {% endfor %}
           </tbody>

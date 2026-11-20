@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.core.paginator import Paginator
-from django.db.models import Count, OuterRef, Q, QuerySet, Subquery
+from django.db.models import Count, OuterRef, Q, QuerySet, Subquery, TextChoices
 from django.db.models.fields.json import KT
 from django.db.models.functions import Coalesce
 from django.urls import reverse
@@ -16,12 +16,17 @@ from django.utils.translation import gettext_lazy
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import (
     CollectionEndpoint,
+    CollectionJobError,
     CollectionJobStatus,
     ForecastSnapshot,
     SnapshotSourceKind,
 )
 from pyracast.metering.models import EpiasJobError, EpiasJobStatus
-from pyracast.notifications.models import PreparedMessageKind
+from pyracast.notifications.models import (
+    NotificationDeliveryError,
+    NotificationDeliveryStatus,
+    PreparedMessageKind,
+)
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.recipients import delivery_addresses
 from pyracast.orchestration.delivery_health import (
@@ -89,6 +94,10 @@ LISTED_BECAUSE = {
     "blocked_provider_credentials": gettext_lazy("The provider rejected the current key."),
     "provider_cooldowns": gettext_lazy("Provider delay until"),
 }
+
+
+def error_label(vocabulary: type[TextChoices], code: str) -> StrOrPromise:
+    return vocabulary(code).label if code else ""
 
 
 def own_check(issue: str, scopes: frozenset[Scope]) -> Check | None:
@@ -362,10 +371,10 @@ def recent_work_context(
             if row.endpoint == CollectionEndpoint.FORECASTS
             else _("Past estimates"),
             "target_date": row.target_date,
-            "status_label": row.status.replace("_", " ").capitalize(),
+            "status_label": CollectionJobStatus(row.status).label,
             "scheduled_for": row.scheduled_for,
             "last_error": row.last_error,
-            "error_label": row.last_error.replace("_", " ").capitalize(),
+            "error_label": error_label(CollectionJobError, row.last_error),
             "attempts": row.attempts,
             "review_url": reverse("admin:workspace_plant", args=(row.binding.region_id,)),
         }
@@ -383,11 +392,11 @@ def recent_work_context(
             "status_label": {
                 "sent": _("Accepted by email service"),
                 "uncertain": _("Acceptance unknown"),
-            }.get(row.status, row.status.replace("_", " ").capitalize()),
+            }.get(row.status, NotificationDeliveryStatus(row.status).label),
             "scheduled_for": row.scheduled_for,
             "sent_at": row.sent_at,
             "last_error": row.last_error,
-            "error_label": row.last_error.replace("_", " ").capitalize(),
+            "error_label": error_label(NotificationDeliveryError, row.last_error),
             "attempts": row.attempts,
             "review_url": reverse("admin:workspace_plant", args=(row.schedule.region_id,)),
             "forecast_status": (
@@ -420,13 +429,13 @@ def recent_work_context(
             "status_label": (
                 _("Waiting for provider publication")
                 if row.status == EpiasJobStatus.AWAITING_PUBLICATION
-                else row.status.replace("_", " ").capitalize()
+                else EpiasJobStatus(row.status).label
             ),
             "error_label": (
                 ""
                 if row.status == EpiasJobStatus.AWAITING_PUBLICATION
                 and row.last_error == EpiasJobError.UNPUBLISHED_DATA
-                else row.last_error.replace("_", " ").capitalize()
+                else error_label(EpiasJobError, row.last_error)
             ),
             "review_url": reverse("admin:workspace_plant", args=(row.plant.region_id,))
             + "#epias-title",
@@ -446,7 +455,7 @@ def recent_work_context(
             "status": run.status,
             "status_label": CalibrationStatus(run.status).label,
             "attempts": run.attempts,
-            "error_label": CalibrationError(run.last_error).label if run.last_error else "",
+            "error_label": error_label(CalibrationError, run.last_error),
             "review_url": reverse("admin:workspace_plant", args=(run.plant.region_id,)),
         }
         for run in calibration_rows.select_related("plant__region__tenant").order_by(

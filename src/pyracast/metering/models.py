@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.db import models
 from django.db.models import F, Q
+from django.utils.translation import gettext_lazy
 
 from pyracast.db import choices_check, lease_check
 
@@ -11,12 +12,12 @@ class EpiasSourceKind(models.TextChoices):
 
 
 class EpiasJobStatus(models.TextChoices):
-    PENDING = "pending", "Pending"
-    RUNNING = "running", "Running"
-    SUCCEEDED = "succeeded", "Succeeded"
-    FAILED = "failed", "Failed"
-    SUPERSEDED = "superseded", "Superseded"
-    AWAITING_PUBLICATION = "awaiting_publication", "Awaiting publication"
+    PENDING = "pending", gettext_lazy("Pending")
+    RUNNING = "running", gettext_lazy("Running")
+    SUCCEEDED = "succeeded", gettext_lazy("Succeeded")
+    FAILED = "failed", gettext_lazy("Failed")
+    SUPERSEDED = "superseded", gettext_lazy("Superseded")
+    AWAITING_PUBLICATION = "awaiting_publication", gettext_lazy("Awaiting publication")
 
 
 class EpiasState(models.TextChoices):
@@ -75,13 +76,13 @@ class EpiasConnectionRevision(models.Model):
 
 
 class EpiasJobError(models.TextChoices):
-    RETRY_WINDOW_EXPIRED = "retry_window_expired", "Retry window expired"
-    ATTEMPTS_EXHAUSTED = "attempts_exhausted", "Attempts exhausted"
-    PROVIDER_FAILURE = "epias_provider_failure", "Epias provider failure"
-    CREDENTIALS_MISSING = "epias_credentials_missing", "EPIAS credentials missing"
-    CREDENTIALS_REJECTED = "epias_credentials_rejected", "EPIAS credentials rejected"
-    UNPUBLISHED_DATA = "unpublished_data", "Unpublished data"
-    PARTIAL_DATA = "partial_data", "Partial data"
+    RETRY_WINDOW_EXPIRED = "retry_window_expired", gettext_lazy("Retry window expired")
+    ATTEMPTS_EXHAUSTED = "attempts_exhausted", gettext_lazy("Attempts exhausted")
+    PROVIDER_FAILURE = "epias_provider_failure", gettext_lazy("Epias provider failure")
+    CREDENTIALS_MISSING = "epias_credentials_missing", gettext_lazy("EPIAS credentials missing")
+    CREDENTIALS_REJECTED = "epias_credentials_rejected", gettext_lazy("EPIAS credentials rejected")
+    UNPUBLISHED_DATA = "unpublished_data", gettext_lazy("Unpublished data")
+    PARTIAL_DATA = "partial_data", gettext_lazy("Partial data")
 
 
 class EpiasCollectionJob(models.Model):

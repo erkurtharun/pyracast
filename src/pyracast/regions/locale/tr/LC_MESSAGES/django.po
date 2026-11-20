@@ -2982,3 +2982,96 @@ msgstr "Hazır"
 
 msgid "Insufficient"
 msgstr "Yetersiz"
+
+msgid "Binding not current"
+msgstr "Bağlantı güncel değil"
+
+msgid "Schedule disabled"
+msgstr "Plan kapalı"
+
+msgid "Slot not configured"
+msgstr "Bu saat planda yok"
+
+msgid "Schedule changed"
+msgstr "Plan değişti"
+
+msgid "History already archived"
+msgstr "Geçmiş veriler zaten arşivde"
+
+msgid "Provider allowance exhausted"
+msgstr "Sağlayıcı kullanım hakkı tükendi"
+
+msgid "Provider access denied"
+msgstr "Sağlayıcı erişimi reddetti"
+
+msgid "Provider site not found"
+msgstr "Sağlayıcıda konum bulunamadı"
+
+msgid "Provider server error"
+msgstr "Sağlayıcı sunucu hatası"
+
+msgid "Provider unreachable"
+msgstr "Sağlayıcıya ulaşılamadı"
+
+msgid "Provider invalid response"
+msgstr "Sağlayıcı geçersiz yanıt verdi"
+
+msgid "Provider configuration invalid"
+msgstr "Sağlayıcı ayarları geçersiz"
+
+msgid "Account unavailable"
+msgstr "Hesap kullanılamıyor"
+
+msgid "Lock contention"
+msgstr "Kilit çakışması"
+
+msgid "Publication failure"
+msgstr "Yayımlama başarısız"
+
+msgid "EPIAS credentials missing"
+msgstr "EPİAŞ kimlik bilgileri eksik"
+
+msgid "EPIAS credentials rejected"
+msgstr "EPİAŞ kimlik bilgileri reddedildi"
+
+msgid "Cancelled by settings change"
+msgstr "Ayar değişikliğiyle iptal edildi"
+
+msgid "Schedule or authority changed"
+msgstr "Plan veya yetki değişti"
+
+msgid "No recipients"
+msgstr "Alıcı yok"
+
+msgid "Invalid recipient"
+msgstr "Geçersiz alıcı"
+
+msgid "Recipient limit exceeded"
+msgstr "Alıcı sınırı aşıldı"
+
+msgid "Definition trashed"
+msgstr "Tanım çöp kutusunda"
+
+msgid "Interrupted during sending"
+msgstr "Gönderim sırasında kesildi"
+
+msgid "Interrupted before sending"
+msgstr "Gönderimden önce kesildi"
+
+msgid "Mail not sent"
+msgstr "E-posta gönderilmedi"
+
+msgid "Mail configuration invalid"
+msgstr "E-posta ayarları geçersiz"
+
+msgid "Mail credentials rejected"
+msgstr "E-posta kimlik bilgileri reddedildi"
+
+msgid "Mail authorization revoked"
+msgstr "E-posta yetkisi geri alındı"
+
+msgid "Mail rate limited"
+msgstr "E-posta gönderim sınırına ulaşıldı"
+
+msgid "Mail sender forbidden"
+msgstr "E-posta göndericisine izin verilmedi"

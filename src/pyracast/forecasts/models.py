@@ -27,12 +27,12 @@ class CollectionEndpoint(models.TextChoices):
 
 
 class CollectionJobStatus(models.TextChoices):
-    PENDING = "pending", "Pending"
-    RUNNING = "running", "Running"
-    RETRY = "retry", "Retry"
-    SUCCEEDED = "succeeded", "Succeeded"
-    FAILED = "failed", "Failed"
-    STALE = "stale", "Stale"
+    PENDING = "pending", gettext_lazy("Pending")
+    RUNNING = "running", gettext_lazy("Running")
+    RETRY = "retry", gettext_lazy("Retry")
+    SUCCEEDED = "succeeded", gettext_lazy("Succeeded")
+    FAILED = "failed", gettext_lazy("Failed")
+    STALE = "stale", gettext_lazy("Stale")
 
 
 class RequestPurpose(models.TextChoices):
@@ -71,40 +71,49 @@ class CollectionInactiveReason(models.TextChoices):
 
 
 class CollectionJobError(models.TextChoices):
-    HISTORY_WINDOW_CLOSED = "history_window_closed", "History window closed"
-    ATTEMPTS_EXHAUSTED = "attempts_exhausted", "Attempts exhausted"
-    FORECAST_SUPERSEDED = "forecast_superseded", "Forecast superseded"
-    BINDING_NOT_CURRENT = "binding_not_current", "Binding not current"
-    SCHEDULE_DISABLED = "schedule_disabled", "Schedule disabled"
-    SLOT_NOT_CONFIGURED = "slot_not_configured", "Slot not configured"
-    SCHEDULE_CHANGED = "schedule_changed", "Schedule changed"
-    HISTORY_INCOMPLETE = "history_incomplete", "History incomplete"
-    HISTORY_ALREADY_ARCHIVED = "history_already_archived", "History already archived"
+    HISTORY_WINDOW_CLOSED = "history_window_closed", gettext_lazy("History window closed")
+    ATTEMPTS_EXHAUSTED = "attempts_exhausted", gettext_lazy("Attempts exhausted")
+    FORECAST_SUPERSEDED = "forecast_superseded", gettext_lazy("Forecast superseded")
+    BINDING_NOT_CURRENT = "binding_not_current", gettext_lazy("Binding not current")
+    SCHEDULE_DISABLED = "schedule_disabled", gettext_lazy("Schedule disabled")
+    SLOT_NOT_CONFIGURED = "slot_not_configured", gettext_lazy("Slot not configured")
+    SCHEDULE_CHANGED = "schedule_changed", gettext_lazy("Schedule changed")
+    HISTORY_INCOMPLETE = "history_incomplete", gettext_lazy("History incomplete")
+    HISTORY_ALREADY_ARCHIVED = "history_already_archived", gettext_lazy("History already archived")
     PROVIDER_AUTHENTICATION_FAILED = (
         "provider_authentication_failed",
-        "Provider authentication failed",
+        gettext_lazy("Provider authentication failed"),
     )
-    PROVIDER_ALLOWANCE_EXHAUSTED = "provider_allowance_exhausted", "Provider allowance exhausted"
-    PROVIDER_ACCESS_DENIED = "provider_access_denied", "Provider access denied"
-    PROVIDER_SITE_NOT_FOUND = "provider_site_not_found", "Provider site not found"
-    PROVIDER_THROTTLED = "provider_throttled", "Provider throttled"
-    PROVIDER_SERVER_ERROR = "provider_server_error", "Provider server error"
-    PROVIDER_UNREACHABLE = "provider_unreachable", "Provider unreachable"
-    PROVIDER_INVALID_RESPONSE = "provider_invalid_response", "Provider invalid response"
+    PROVIDER_ALLOWANCE_EXHAUSTED = (
+        "provider_allowance_exhausted",
+        gettext_lazy("Provider allowance exhausted"),
+    )
+    PROVIDER_ACCESS_DENIED = "provider_access_denied", gettext_lazy("Provider access denied")
+    PROVIDER_SITE_NOT_FOUND = "provider_site_not_found", gettext_lazy("Provider site not found")
+    PROVIDER_THROTTLED = "provider_throttled", gettext_lazy("Provider throttled")
+    PROVIDER_SERVER_ERROR = "provider_server_error", gettext_lazy("Provider server error")
+    PROVIDER_UNREACHABLE = "provider_unreachable", gettext_lazy("Provider unreachable")
+    PROVIDER_INVALID_RESPONSE = (
+        "provider_invalid_response",
+        gettext_lazy("Provider invalid response"),
+    )
     PROVIDER_CONFIGURATION_INVALID = (
         "provider_configuration_invalid",
-        "Provider configuration invalid",
+        gettext_lazy("Provider configuration invalid"),
     )
-    ACCOUNT_UNAVAILABLE = "account_unavailable", "Account unavailable"
-    HISTORY_BUDGET_RESERVED = "history_budget_reserved", "History budget reserved"
-    QUOTA_EXHAUSTED = "quota_exhausted", "Quota exhausted"
+    ACCOUNT_UNAVAILABLE = "account_unavailable", gettext_lazy("Account unavailable")
+    HISTORY_BUDGET_RESERVED = "history_budget_reserved", gettext_lazy("History budget reserved")
+    QUOTA_EXHAUSTED = "quota_exhausted", gettext_lazy("Quota exhausted")
     # Any other provider answer: a status this vocabulary does not name.
-    PROVIDER_FAILURE = "provider_failure", "Provider failure"
-    PROVIDER_UNEXPECTED_FAILURE = "provider_unexpected_failure", "Provider unexpected failure"
-    INVALID_SOURCE_KIND = "invalid_source_kind", "Invalid source kind"
-    CALCULATION_FAILURE = "calculation_failure", "Calculation failure"
-    LOCK_CONTENTION = "lock_contention", "Lock contention"
-    PUBLICATION_FAILURE = "publication_failure", "Publication failure"
+    PROVIDER_FAILURE = "provider_failure", gettext_lazy("Provider failure")
+    PROVIDER_UNEXPECTED_FAILURE = (
+        "provider_unexpected_failure",
+        gettext_lazy("Provider unexpected failure"),
+    )
+    INVALID_SOURCE_KIND = "invalid_source_kind", gettext_lazy("Invalid source kind")
+    CALCULATION_FAILURE = "calculation_failure", gettext_lazy("Calculation failure")
+    LOCK_CONTENTION = "lock_contention", gettext_lazy("Lock contention")
+    PUBLICATION_FAILURE = "publication_failure", gettext_lazy("Publication failure")
 
 
 class SnapshotWeatherError(models.TextChoices):
