@@ -72,6 +72,7 @@ COLUMNS = {
     },
     "plants_productionobservation": {"recorded_at": "created_at"},
 }
+ADDED = {"forecasts_requestattempt": {"http_status": None}}
 NAME = r'"?\w+"?'
 RENAME = re.compile(
     rf"ALTER TABLE {NAME} RENAME (?:COLUMN|CONSTRAINT) {NAME} TO {NAME}"
@@ -175,7 +176,10 @@ def renamed(rows: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, A
     return {
         table: sorted(
             (
-                {COLUMNS.get(table, {}).get(key, key): value for key, value in row.items()}
+                {
+                    **{COLUMNS.get(table, {}).get(key, key): value for key, value in row.items()},
+                    **ADDED.get(table, {}),
+                }
                 for row in stored
             ),
             key=repr,
