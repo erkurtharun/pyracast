@@ -106,6 +106,7 @@ class RequestReauthenticationCodeView(
     StrongestFactor, StartingView, views.RequestReauthenticationCodeView
 ):
     factor = Factor.CODE
+    persists_session = True
 
     def handle_input(self, data: Any) -> ErrorResponse | None:
         # With the code budget of the typed address spent, the input reads the account unlocked
