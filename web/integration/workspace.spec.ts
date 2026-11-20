@@ -393,6 +393,7 @@ test("a customer manages one plant site through the real API", async ({
     await page
         .getByLabel("Day", { exact: true })
         .fill(process.env.BROWSER_HISTORY_DATE!);
+    await page.getByRole("checkbox", { name: "Show full day" }).check();
     const productionTable = page.getByRole("table", {
         name: "Production intervals",
     });
