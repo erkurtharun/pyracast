@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 import yaml
 
+from scripts import start_postgres
 from tests.support.workflows import WORKFLOWS
 
 ROOT = WORKFLOWS.parents[1]
@@ -39,10 +40,7 @@ IMAGES: dict[str, tuple[str, tuple[str, ...]]] = {
     "Go": ("golang", ("deploy/gateway/Dockerfile",)),
     "Node.js": ("node", ("web/Dockerfile",)),
     "PostgreSQL in development": ("postgres", ("scripts/start_postgres.py",)),
-    "PostgreSQL in production and CI": (
-        "postgres",
-        ("deploy/postgres/Dockerfile", "scripts/start_postgres.py"),
-    ),
+    "PostgreSQL in production and CI": ("postgres", ("deploy/postgres/Dockerfile",)),
     "Python": ("python", ("Dockerfile", ".github/workflows/ci.yml", "deploy/scan-images.sh")),
     "RabbitMQ": (
         "rabbitmq",
@@ -62,11 +60,6 @@ IMAGES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("deploy/gateway/Dockerfile",),
     ),
     "uv": ("ghcr.io/astral-sh/uv", ("Dockerfile",)),
-}
-# Both PostgreSQL images live in scripts/start_postgres.py; the tag tells them apart.
-TAGS = {
-    "PostgreSQL in development": r"\d+\.\d+",
-    "PostgreSQL in production and CI": r"\d+\.\d+-alpine\d+\.\d+",
 }
 
 
@@ -156,7 +149,6 @@ PINS: dict[str, list[Text | ActionInput]] = {
     ],
     "PostgreSQL in production and CI": [
         Text("deploy/postgres/Dockerfile", r"FROM postgres:(\d+\.\d+)-"),
-        Text("scripts/start_postgres.py", r'"postgres:(\d+\.\d+)-alpine'),
         Text("scripts/start_postgres.py", r'^THROWAWAY_ARCHIVE_VERSION = "(\d+\.\d+)"$'),
         Text("docs/DEPLOYMENT.md", r"PostgreSQL (\d+\.\d+) on Alpine"),
         Text("docs/STACK.md", r"PostgreSQL (\d+\.\d+) \(production image and CI tests\)"),
@@ -262,11 +254,11 @@ def test_the_postgresql_image_adds_packages_uncached_at_a_quoted_minimum_version
 
 def test_ci_clusters_run_the_production_postgresql_image() -> None:
     dockerfile = (ROOT / "deploy/postgres/Dockerfile").read_text(encoding="utf-8")
-    start_postgres = (ROOT / "scripts/start_postgres.py").read_text(encoding="utf-8")
     production = re.search(r"^FROM (postgres:\S+)$", dockerfile, re.M)
 
     assert production
-    assert f'THROWAWAY_POSTGRES_IMAGE = "{production[1]}"' in start_postgres
+    assert start_postgres.production_image() == production[1]
+    assert start_postgres.PRODUCTION_DOCKERFILE == ROOT / "deploy/postgres/Dockerfile"
 
 
 def test_the_one_remaining_postgresql_difference_is_the_shared_development_cluster() -> None:
@@ -276,7 +268,7 @@ def test_the_one_remaining_postgresql_difference_is_the_shared_development_clust
     development_locations = {location.path for location in PINS["PostgreSQL in development"]}
 
     assert {
-        path
+        found.relative_to(ROOT).as_posix()
         for path in (*IMAGE_SOURCES, "docs/ARCHITECTURE.md", "docs/STACK.md")
         for found in ROOT.glob(path)
         if re.search(
@@ -307,10 +299,9 @@ def pinned_images() -> list[tuple[str, str, str, str]]:
     ]
 
 
-def image_references(image: str, path: str, tag: str | None = None) -> set[str]:
+def image_references(image: str, path: str) -> set[str]:
     text = (ROOT / path).read_text(encoding="utf-8")
-    tagged = rf"(?::{tag}(?![\w.-]))" if tag else r"(?::[A-Za-z0-9][\w.-]*)?"
-    pattern = rf"(?<![\w./-]){re.escape(image)}{tagged}(?:@[\w:]+)?"
+    pattern = rf"(?<![\w./-]){re.escape(image)}(?::[A-Za-z0-9][\w.-]*)?(?:@[\w:]+)?"
     return set(re.findall(pattern, text)) - {image}
 
 
@@ -331,7 +322,7 @@ def test_the_image_table_lists_every_location_of_a_pinned_image() -> None:
 @pytest.mark.parametrize("name", sorted(IMAGES))
 def test_every_location_of_an_image_names_the_same_tag_and_digest(name: str) -> None:
     image, paths = IMAGES[name]
-    found = {path: image_references(image, path, TAGS.get(name)) for path in paths}
+    found = {path: image_references(image, path) for path in paths}
     references = set[str]().union(*found.values())
 
     assert all(found.values()), found

@@ -1,2 +1,2 @@
 bucket = "REPLACE_WITH_PRIVATE_VERSIONED_STATE_BUCKET"
-prefix = "pyracast/production"
+prefix = "production"

@@ -1,5 +1,6 @@
+from collections.abc import Iterable
 from email.utils import parseaddr
-from ipaddress import ip_address
+from ipaddress import IPv4Network, IPv6Network, ip_address, ip_network
 from socket import inet_aton
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -8,6 +9,7 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error, Tags, register
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.validators import validate_email
+from django.http.request import validate_host
 
 from pyracast.background.broker import check_broker_url
 from pyracast.mail.errors import NotSentError
@@ -36,6 +38,17 @@ def validate_public_origin() -> None:
         or origin.fragment
     ):
         raise ImproperlyConfigured("PYRACAST_PUBLIC_ORIGIN must be a valid public origin.")
+
+
+Network = IPv4Network | IPv6Network
+
+
+def parse_networks(name: str, values: Iterable[str]) -> tuple[Network, ...]:
+    entries = [entry for value in values for entry in value.replace(",", " ").split()]
+    try:
+        return tuple(ip_network(entry) for entry in entries)
+    except ValueError as error:
+        raise ImproperlyConfigured(f"{name} holds an invalid network: {error}") from None
 
 
 # Each entry reads what the one before it established: the session lock, the session, the user,
@@ -71,6 +84,54 @@ def check_authentication_origin(**_kwargs: Any) -> list[CheckMessage]:
     except ImproperlyConfigured as error:
         return [Error(str(error), id="accounts.E002")]
     return []
+
+
+def _proxy_problem() -> str | None:
+    if not settings.PYRACAST_TRUST_PROXY:
+        return (
+            "Set PYRACAST_TRUST_PROXY=1: behind the gateway every client would share its address."
+        )
+    try:
+        gateways = parse_networks(
+            "PYRACAST_TRUSTED_PROXY_CIDRS", settings.PYRACAST_TRUSTED_PROXY_CIDRS
+        )
+        edges = parse_networks(
+            "PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS", settings.PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS
+        )
+    except ImproperlyConfigured as error:
+        return str(error)
+    if not gateways:
+        return "Set PYRACAST_TRUSTED_PROXY_CIDRS to the gateway's address."
+    if not edges:
+        return "Set PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS to the edge's networks."
+    return None
+
+
+@register(Tags.security, deploy=True)
+def check_proxy_trust(**_kwargs: Any) -> list[CheckMessage]:
+    if settings.DEBUG or (problem := _proxy_problem()) is None:
+        return []
+    return [Error(problem, id="accounts.E004")]
+
+
+def _origin_problem() -> str | None:
+    try:
+        validate_public_origin()
+    except ImproperlyConfigured:
+        return None
+    origin = settings.PYRACAST_PUBLIC_ORIGIN
+    if list(settings.CSRF_TRUSTED_ORIGINS) != [origin]:
+        return "Set PYRACAST_CSRF_ORIGINS to exactly PYRACAST_PUBLIC_ORIGIN."
+    if not validate_host(urlsplit(origin).hostname or "", settings.ALLOWED_HOSTS):
+        return "Add the host of PYRACAST_PUBLIC_ORIGIN to PYRACAST_HOSTS."
+    return None
+
+
+@register(Tags.security, deploy=True)
+def check_origin_alignment(**_kwargs: Any) -> list[CheckMessage]:
+    if settings.DEBUG or (problem := _origin_problem()) is None:
+        return []
+    return [Error(problem, id="accounts.E005")]
 
 
 def _mail_problem() -> str | None:

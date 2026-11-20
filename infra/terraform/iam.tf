@@ -95,6 +95,14 @@ resource "google_project_iam_audit_config" "storage" {
   }
 }
 
+resource "google_project_iam_audit_config" "secret_manager" {
+  project = var.project_id
+  service = "secretmanager.googleapis.com"
+  audit_log_config {
+    log_type = "DATA_READ"
+  }
+}
+
 locals {
   ssh_members = merge(
     { deploy = google_service_account.deploy.member },
@@ -175,4 +183,54 @@ resource "google_service_account_iam_member" "github_deploy" {
   service_account_id = google_service_account.deploy.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository_id/${var.github_repository_id}"
+}
+
+# Its own pool: a token of the rescan workflow can never reach the release's deploy identity.
+resource "google_iam_workload_identity_pool" "rescan" {
+  count                     = var.image_rescan_reader ? 1 : 0
+  workload_identity_pool_id = "${var.name}-rescan"
+  display_name              = "Pyracast image rescan"
+  depends_on                = [google_project_service.required]
+}
+
+resource "google_iam_workload_identity_pool_provider" "rescan" {
+  count                              = var.image_rescan_reader ? 1 : 0
+  workload_identity_pool_id          = google_iam_workload_identity_pool.rescan[0].workload_identity_pool_id
+  workload_identity_pool_provider_id = "github"
+  attribute_mapping = {
+    "google.subject"          = "assertion.sub"
+    "attribute.repository_id" = "assertion.repository_id"
+  }
+  attribute_condition = join(" && ", [
+    "assertion.repository_id == '${var.github_repository_id}'",
+    "assertion.repository_owner_id == '${var.github_owner_id}'",
+    "assertion.ref == 'refs/heads/main'",
+    "assertion.workflow_ref == '${var.github_repository}/.github/workflows/image-rescan.yml@refs/heads/main'",
+  ])
+
+  oidc {
+    issuer_uri = "https://token.actions.githubusercontent.com"
+  }
+}
+
+resource "google_service_account" "rescan" {
+  count        = var.image_rescan_reader ? 1 : 0
+  account_id   = "${var.name}-rescan"
+  display_name = "Pyracast deployed image rescan"
+  depends_on   = [google_project_service.required]
+}
+
+resource "google_service_account_iam_member" "rescan_workflow" {
+  count              = var.image_rescan_reader ? 1 : 0
+  service_account_id = google_service_account.rescan[0].name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.rescan[0].name}/attribute.repository_id/${var.github_repository_id}"
+}
+
+resource "google_artifact_registry_repository_iam_member" "rescan_read" {
+  count      = var.image_rescan_reader ? 1 : 0
+  location   = google_artifact_registry_repository.application.location
+  repository = google_artifact_registry_repository.application.name
+  role       = "roles/artifactregistry.reader"
+  member     = google_service_account.rescan[0].member
 }

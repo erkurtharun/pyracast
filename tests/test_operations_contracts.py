@@ -24,6 +24,7 @@ from deploy import (
     authorize_gmail,
     backup,
     host,
+    host_contract,
     probe_origin_pull,
     rehearsal,
     release_state,
@@ -978,12 +979,11 @@ def test_each_release_reads_the_secrets_staged_for_it() -> None:
     compose = text(DEPLOY / "compose.yaml")
     script = installer()
     variables = set(re.findall(r"\$\{([A-Z]+_ENV_FILE):-", compose))
-    written = set(
-        re.findall(
-            r'"([A-Z]+_ENV_FILE)": f"\{secrets\}/[a-z]+\.env"',
-            text(DEPLOY / "release_environment.py"),
-        )
-    )
+    written = {
+        key
+        for key, name in host_contract.SECRET_FILES.items()
+        if name == key.removesuffix("_ENV_FILE").lower() + ".env"
+    }
 
     assert variables == {
         "RUNTIME_ENV_FILE",

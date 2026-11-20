@@ -39,16 +39,18 @@ resumable=0
 switched=0
 recorded=0
 promoted=0
+gated=0
 begin_maintenance() {
   maintenance_started=1
   touch /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast/release-blocked \
     && sync -f /var/lib/pyracast
 }
-# With origin pulls required, the public entrypoint of the release in $1 must refuse a handshake
-# without the edge's certificate: Traefik closes it instead when it rejects the TLS option.
-edge_enforced() {
-  if grep -qsx 'ORIGIN_PULL=required' "$1/deploy/release.env"; then
-    python3 "$release/deploy/probe_origin_pull.py" "$site_address"
+# With origin pulls required, only a request through the edge shows that the edge's certificate
+# is accepted: the site must answer it before this release can become current. In an upgrade the
+# previous release still answers through the new gateway, so the edge is tried before migrate.
+edge_answers() {
+  if grep -qsx 'ORIGIN_PULL=required' "$release/deploy/release.env"; then
+    python3 "$release/deploy/edge_gate.py" "$site_address" "${release##*/}"
   fi
 }
 # Probes the release in $1 through its gateway; one with the loopback entrypoint is probed there,
@@ -62,7 +64,7 @@ ready() {
   response=$(curl --fail --silent --show-error --noproxy '*' \
     --connect-timeout 5 --max-time 10 --retry 18 --retry-delay 5 --retry-max-time 180 \
     --retry-all-errors --resolve "$site_address:$port:127.0.0.1" "$url") || return $?
-  [[ $response == ok ]] && edge_enforced "$1"
+  [[ $response == ok ]]
 }
 # Sets the runtime role's password to the release's staged runtime secret, the version host.json
 # names. Only while no API or web container runs: their next connections would use another one.
@@ -224,7 +226,10 @@ if [[ -L /opt/pyracast/current ]]; then
   "${old[@]}" stop -t 660 worker notifications
   # The previous gateway may depend on api and web; this one answers with the notice once they stop.
   "${compose[@]}" up -d --no-deps --wait --wait-timeout 180 maintenance gateway
-  edge_enforced "$release"
+  if (( resumable == 1 )); then
+    edge_answers
+    gated=1
+  fi
   "${compose[@]}" stop -t 100 api web
 fi
 switch_runtime
@@ -252,6 +257,7 @@ rm -f "$secrets/migration.env"
 
 "${compose[@]}" up -d --wait --wait-timeout 180
 ready "$release"
+if (( gated == 0 )); then edge_answers; fi
 # A mail failure must not undo a healthy release; the warning reaches the release log.
 if ! "${compose[@]}" exec -T api pyracast check_mail; then
   echo "WARNING: the mail probe failed; run pyracast check_mail and fix mail before customers need it." >&2

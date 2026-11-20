@@ -1,4 +1,5 @@
 import http.client
+import time
 from collections.abc import Callable, Mapping
 
 import pytest
@@ -106,7 +107,7 @@ def test_main_states_each_outcome_in_one_line(
 ) -> None:
     fetch, _ = edge(*answers)
     monkeypatch.setattr(edge_gate, "fetch", fetch)
-    monkeypatch.setattr(edge_gate.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
     assert edge_gate.main([DOMAIN, RELEASE]) == status
 

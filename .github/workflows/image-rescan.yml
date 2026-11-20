@@ -17,17 +17,45 @@ jobs:
     name: Rescan the release images
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    permissions:
+      contents: read
+      id-token: write
     env:
       DOCKER_BUILD_RECORD_UPLOAD: 'false'
+      IMAGE_RESCAN: ${{ vars.GCP_IMAGE_RESCAN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Read the registry reader of the deployed images
+        id: reader
+        if: env.IMAGE_RESCAN != ''
+        run: python3 deploy/image_rescan.py "$IMAGE_RESCAN" >> "$GITHUB_OUTPUT"
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        id: google-auth
+        if: env.IMAGE_RESCAN != ''
+        with:
+          workload_identity_provider: ${{ steps.reader.outputs.provider }}
+          service_account: ${{ steps.reader.outputs.service_account }}
+          token_format: access_token
+      - name: Scan the deployed images; block every high or critical vulnerability
+        if: env.IMAGE_RESCAN != ''
+        env:
+          REGISTRY_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+          REPOSITORY: ${{ steps.reader.outputs.repository }}
+        run: |
+          printf '%s' "$REGISTRY_ACCESS_TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://${REPOSITORY%%/*}"
+          for image in backend web gateway postgres rabbitmq; do
+            docker pull --quiet --platform linux/amd64 "$REPOSITORY/$image:production"
+          done
+          bash deploy/scan-images.sh "$REPOSITORY/backend:production" "$REPOSITORY/web:production" "$REPOSITORY/gateway:production" "$REPOSITORY/postgres:production" "$REPOSITORY/rabbitmq:production"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: env.IMAGE_RESCAN == ''
         with:
           version: v0.39.0
           driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
       - name: Build the production backend
+        if: env.IMAGE_RESCAN == ''
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -37,6 +65,7 @@ jobs:
           load: true
           cache-from: type=gha,scope=backend-linux-amd64,timeout=2m
       - name: Build the production web
+        if: env.IMAGE_RESCAN == ''
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: web
@@ -46,6 +75,7 @@ jobs:
           load: true
           cache-from: type=gha,scope=web-linux-amd64,timeout=2m
       - name: Build the production gateway
+        if: env.IMAGE_RESCAN == ''
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: deploy/gateway
@@ -54,6 +84,7 @@ jobs:
           load: true
           cache-from: type=gha,scope=gateway-linux-amd64,timeout=2m
       - name: Build the production PostgreSQL image
+        if: env.IMAGE_RESCAN == ''
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: deploy/postgres
@@ -62,6 +93,7 @@ jobs:
           load: true
           cache-from: type=gha,scope=postgres-linux-amd64,timeout=2m
       - name: Build the production RabbitMQ image
+        if: env.IMAGE_RESCAN == ''
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: deploy/rabbitmq
@@ -70,6 +102,7 @@ jobs:
           load: true
           cache-from: type=gha,scope=rabbitmq-linux-amd64,timeout=2m
       - name: Scan every image; block every high or critical vulnerability
+        if: env.IMAGE_RESCAN == ''
         run: |
           POSTGRES_IMAGE=$(docker image inspect pyracast-postgres:ci --format '{{.Id}}')
           RABBITMQ_IMAGE=$(docker image inspect pyracast-rabbitmq:ci --format '{{.Id}}')

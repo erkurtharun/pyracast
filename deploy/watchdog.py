@@ -16,7 +16,7 @@ from typing import Any
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from deploy import host
+from deploy import host, probe_origin_pull
 from deploy.backup import compose_command
 from deploy.operations_log import report
 
@@ -39,6 +39,7 @@ DELIVERY_CHECKED = Path("/var/lib/pyracast/delivery-checked")
 MEMINFO = Path("/proc/meminfo")
 # Traefik renews at one third of the lifetime; below a quarter its renewal has failed for days.
 CERTIFICATE_WARNING_FRACTION = 0.25
+ORIGIN_PULL_WAIT_SECONDS = 5.0
 
 
 class Run:
@@ -238,17 +239,33 @@ def certificate_validity(
     return not_after - time.time(), not_after - not_before
 
 
+def release_settings(release: Path) -> dict[str, str]:
+    lines = (release / "deploy/release.env").read_text().splitlines()
+    return dict(line.split("=", 1) for line in lines if "=" in line)
+
+
 def check_certificate(release: Path) -> None:
-    site = next(
-        line.split("=", 1)[1]
-        for line in (release / "deploy/release.env").read_text().splitlines()
-        if line.startswith("SITE_ADDRESS=")
-    )
+    site = release_settings(release)["SITE_ADDRESS"]
     remaining, lifetime = certificate_validity(site, ("127.0.0.1", host.LOCAL_HTTPS_PORT))
     if remaining < lifetime * CERTIFICATE_WARNING_FRACTION:
         report(
             "pyracast_certificate_expiring", "WARNING", days_remaining=round(remaining / 86400, 1)
         )
+
+
+def check_origin_pull(release: Path) -> None:
+    settings = release_settings(release)
+    if settings.get("ORIGIN_PULL") != "required":
+        return
+    observation = probe_origin_pull.observe(
+        "127.0.0.1",
+        host.PUBLIC_HTTPS_PORT,
+        settings["SITE_ADDRESS"],
+        None,
+        ORIGIN_PULL_WAIT_SECONDS,
+    )
+    if observation != probe_origin_pull.ENFORCED:
+        report("pyracast_origin_pull_unenforced", "ERROR", observation=observation)
 
 
 def supervise(run: Run, release: Path) -> dict[str, str]:
@@ -264,6 +281,7 @@ def supervise(run: Run, release: Path) -> dict[str, str]:
     heartbeat = run.step("runtime", check_runtime, run, compose) or {"state": "ok"}
     run.step("delivery", check_delivery, run, compose)
     run.step("certificate", check_certificate, release)
+    run.step("origin_pull", check_origin_pull, release)
     return dict(heartbeat)
 
 

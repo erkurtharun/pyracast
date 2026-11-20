@@ -10,9 +10,9 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
-from deploy.host_contract import HostConfigError
 
 from deploy import host_contract, release_environment
+from deploy.host_contract import HostConfigError
 
 ROOT = Path(__file__).resolve().parents[1]
 TERRAFORM = ROOT / "infra" / "terraform"

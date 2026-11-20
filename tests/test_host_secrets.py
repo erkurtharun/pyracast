@@ -301,3 +301,14 @@ def test_set_and_rotate_need_the_files_create_wrote(
     assert run(tmp_path, "set", "EPIAS_USERNAME") == 2
 
     assert printed(capsys).count("runtime.json is missing or not a JSON object.") == 2
+
+
+def test_check_names_a_missing_runtime_file_without_reading_further(
+    created: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (created / "runtime.json").unlink()
+    capsys.readouterr()
+
+    assert run(created, "check") == 1
+
+    assert printed(capsys) == "runtime.json is missing or not a JSON object.\n"

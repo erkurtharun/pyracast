@@ -127,7 +127,8 @@ class Clock:
         self.now += seconds
 
 
-Answer = dict[str, Any] | BaseException
+# An int answers with that HTTP error status.
+Answer = dict[str, Any] | bytes | int | BaseException
 
 
 def secret_answer(payload: object) -> dict[str, Any]:
@@ -167,8 +168,12 @@ def serve(
         url = urlsplit(request.full_url)
         queue = answers[str(url.hostname) + url.path.rsplit(":", 1)[0].rsplit("/versions", 1)[0]]
         answer = queue.pop(0) if len(queue) > 1 else queue[0]
+        if isinstance(answer, int):
+            raise http_error(answer)
         if isinstance(answer, BaseException):
             raise answer
+        if isinstance(answer, bytes):
+            return io.BytesIO(answer)
         return io.BytesIO(json.dumps(answer).encode())
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
@@ -257,8 +262,8 @@ def test_a_transient_answer_is_retried_with_backoff_until_it_succeeds(
         {
             IDENTITY: [urllib.error.URLError("unreachable"), {"access_token": "instance-token"}],
             RUNTIME_RESOURCE: [
-                http_error(503),
-                http_error(429),
+                503,
+                429,
                 TimeoutError(),
                 secret_answer(RUNTIME),
             ],
@@ -292,7 +297,7 @@ def assert_refused(
     ("answers", "category", "secret", "message"),
     [
         pytest.param(
-            {IDENTITY: [http_error(404)]},
+            {IDENTITY: [404]},
             "identity",
             "host",
             "the metadata server gave no access token",
@@ -306,14 +311,28 @@ def assert_refused(
             id="identity-answer",
         ),
         pytest.param(
-            {IDENTITY: [{"access_token": "t"}], RUNTIME_RESOURCE: [http_error(403)]},
+            {IDENTITY: [{"access_token": ""}]},
+            "identity",
+            "host",
+            "the metadata server gave no access token",
+            id="identity-empty",
+        ),
+        pytest.param(
+            {IDENTITY: [{"access_token": "t"}], RUNTIME_RESOURCE: [b"<html>proxy</html>"]},
+            "format",
+            "runtime",
+            "the runtime secret is not a JSON object of environment strings",
+            id="format-answer",
+        ),
+        pytest.param(
+            {IDENTITY: [{"access_token": "t"}], RUNTIME_RESOURCE: [403]},
             "permission",
             "runtime",
             "Secret Manager refused the runtime secret to the VM's service account",
             id="permission",
         ),
         pytest.param(
-            {IDENTITY: [{"access_token": "t"}], RUNTIME_RESOURCE: [http_error(404)]},
+            {IDENTITY: [{"access_token": "t"}], RUNTIME_RESOURCE: [404]},
             "version",
             "runtime",
             "the pinned runtime secret version does not exist or is disabled",

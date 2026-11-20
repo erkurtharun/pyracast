@@ -175,12 +175,22 @@ variable "github_repository_id" {
   description = "Immutable GitHub repository ID."
   type        = string
   default     = "1451399734"
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_id))
+    error_message = "Use the numeric repository ID, not its name."
+  }
 }
 
 variable "github_owner_id" {
   description = "Immutable GitHub owner ID."
   type        = string
   default     = "49256548"
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_owner_id))
+    error_message = "Use the numeric owner ID, not its login."
+  }
 }
 
 variable "github_environment" {
@@ -193,4 +203,10 @@ variable "github_release_workflow" {
   description = "Workflow path permitted to impersonate the deployment service account."
   type        = string
   default     = ".github/workflows/release.yml"
+}
+
+variable "image_rescan_reader" {
+  description = "Create the registry reader the daily image rescan uses to scan the deployed digests. Off: the rescan rebuilds main's images."
+  type        = bool
+  default     = false
 }

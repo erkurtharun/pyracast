@@ -92,12 +92,15 @@ def test_the_docker_repository_key_is_trusted_only_with_its_published_fingerprin
 
 
 def test_docker_restarts_only_for_its_own_changed_configuration_while_no_release_runs() -> None:
-    restart = block("if (( docker_changed )); then")
+    pending = "/etc/docker/pyracast-restart-pending"
+    restart = block(f"if [[ -e {pending} ]]; then")
+    lock = host.RELEASE_LOCK.as_posix()
 
+    assert f"if (( docker_changed )); then touch {pending}; fi\n" in TEMPLATE
     assert TEMPLATE.count("systemctl restart") == 1
     assert "systemctl restart docker.service" in restart
-    lock = host.RELEASE_LOCK.as_posix()
     assert restart.index(f"flock --nonblock {lock} true") < restart.index("systemctl restart")
+    assert restart.index("systemctl restart") < restart.index(f"rm -f {pending}")
     assert "restart pyracast" not in TEMPLATE
 
 

@@ -1,4 +1,5 @@
 locals {
+  data_device_name = "pyracast-data"
   labels = {
     application = "pyracast"
     managed_by  = "terraform"
@@ -280,7 +281,7 @@ resource "google_compute_instance" "application" {
 
   attached_disk {
     source      = google_compute_disk.data.id
-    device_name = "pyracast-data"
+    device_name = local.data_device_name
   }
 
   network_interface {
@@ -312,6 +313,7 @@ resource "google_compute_instance" "application" {
     block-project-ssh-keys = "TRUE"
     serial-port-enable     = "FALSE"
     startup-script = templatefile("${path.module}/templates/startup.sh.tftpl", {
+      data_device_name     = local.data_device_name
       network_guard_base64 = filebase64("${path.module}/templates/network-guard.sh")
       # Off, daily_backups is absent, so host.json and the instance metadata stay unchanged.
       host_config_base64 = base64encode(jsonencode(merge({

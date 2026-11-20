@@ -198,6 +198,11 @@ def test_configured_smtp_passes_registered_production_mail_check(
     monkeypatch.setenv("PYRACAST_FROM_EMAIL", "Pyracast <accounts@example.com>")
     monkeypatch.setenv("PYRACAST_PUBLIC_ORIGIN", "https://app.example.com")
     monkeypatch.setenv("PYRACAST_EMAIL_HOST", "smtp.example.com")
+    monkeypatch.setenv("PYRACAST_HOSTS", "app.example.com")
+    monkeypatch.setenv("PYRACAST_CSRF_ORIGINS", "https://app.example.com")
+    monkeypatch.setenv("PYRACAST_TRUST_PROXY", "1")
+    monkeypatch.setenv("PYRACAST_TRUSTED_PROXY_CIDRS", "172.30.80.2/32")
+    monkeypatch.setenv("PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS", "173.245.48.0/20")
     if configured_backend is None:
         monkeypatch.delenv("PYRACAST_EMAIL_BACKEND", raising=False)
     else:
@@ -208,6 +213,13 @@ def test_configured_smtp_passes_registered_production_mail_check(
         MAILERS=configuration["MAILERS"],
         DEFAULT_FROM_EMAIL=configuration["DEFAULT_FROM_EMAIL"],
         PYRACAST_PUBLIC_ORIGIN=configuration["PYRACAST_PUBLIC_ORIGIN"],
+        ALLOWED_HOSTS=configuration["ALLOWED_HOSTS"],
+        CSRF_TRUSTED_ORIGINS=configuration["CSRF_TRUSTED_ORIGINS"],
+        PYRACAST_TRUST_PROXY=configuration["PYRACAST_TRUST_PROXY"],
+        PYRACAST_TRUSTED_PROXY_CIDRS=configuration["PYRACAST_TRUSTED_PROXY_CIDRS"],
+        PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS=configuration[
+            "PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS"
+        ],
     ):
         assert isinstance(mail.mailers["default"], SMTPEmailBackend)
         checks = run_checks(tags=[Tags.security], include_deployment_checks=True)

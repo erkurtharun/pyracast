@@ -4,6 +4,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import urllib.request
 import zipfile
 from contextlib import nullcontext
 from pathlib import Path
@@ -50,7 +51,9 @@ def windows_server_options(
         lambda command, **options: subprocess.CompletedProcess(command, 0, stdout=""),
     )
     monkeypatch.setattr(
-        start_postgres, "ARCHIVE_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest()
+        start_postgres,
+        "THROWAWAY_ARCHIVE_SHA256",
+        hashlib.sha256(archive.read_bytes()).hexdigest(),
     )
     monkeypatch.setenv("PYRACAST_POSTGRES_ARCHIVE", str(archive))
 
@@ -72,7 +75,7 @@ def linux_server_arguments(monkeypatch: pytest.MonkeyPatch, arguments: list[str]
     start_postgres.main()
 
     (container,) = commands
-    return list(container[container.index(start_postgres.POSTGRES_IMAGE) + 1 :])
+    return list(container[container.index(start_postgres.production_image()) + 1 :])
 
 
 def test_non_durable_flag_is_opt_in_on_both_platforms(
@@ -462,9 +465,20 @@ def test_a_throwaway_docker_cluster_runs_the_production_postgresql_image(
     assert start_postgres.provision_docker("docker", "55432", (), volume="data") == "created"
 
     throwaway, durable = commands
-    assert start_postgres.THROWAWAY_POSTGRES_IMAGE in throwaway
+    assert start_postgres.production_image() in throwaway
     assert start_postgres.POSTGRES_IMAGE not in throwaway
     assert start_postgres.POSTGRES_IMAGE in durable
+
+
+def test_a_dockerfile_without_a_pinned_postgresql_image_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text("FROM postgres:18-alpine\n", encoding="utf-8")
+    monkeypatch.setattr(start_postgres, "PRODUCTION_DOCKERFILE", dockerfile)
+
+    with pytest.raises(RuntimeError, match="names no pinned PostgreSQL image"):
+        start_postgres.production_image()
 
 
 def test_a_throwaway_windows_cluster_installs_the_production_minor(
@@ -480,7 +494,7 @@ def test_a_throwaway_windows_cluster_installs_the_production_minor(
         shutil.copyfile(content, path)
 
     monkeypatch.delenv("PYRACAST_POSTGRES_ARCHIVE", raising=False)
-    monkeypatch.setattr(start_postgres.urllib.request, "urlretrieve", retrieve)
+    monkeypatch.setattr(urllib.request, "urlretrieve", retrieve)
     digest = hashlib.sha256(content.read_bytes()).hexdigest()
     monkeypatch.setattr(start_postgres, "THROWAWAY_ARCHIVE_SHA256", digest)
 

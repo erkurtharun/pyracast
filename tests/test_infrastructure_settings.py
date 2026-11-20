@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from deploy import image_rescan
+from tests.support.workflows import ci_jobs, step, step_index
 
 ROOT = Path(__file__).resolve().parents[1]
 TERRAFORM = ROOT / "infra" / "terraform"
@@ -138,3 +139,27 @@ def test_the_state_backend_example_uses_the_documented_prefix() -> None:
     assert "-backend-config=prefix=production" in (ROOT / "docs" / "DEPLOYMENT.md").read_text(
         encoding="utf-8"
     )
+
+
+def test_ci_runs_the_boot_script_twice_and_more_on_a_stubbed_host() -> None:
+    deployment = ci_jobs()["deployment"]
+    boot = step(deployment, "Verify the boot script on a stubbed host without cloud access")
+    harness = (ROOT / "deploy" / "test-boot.sh").read_text(encoding="utf-8")
+
+    assert boot["run"] == (
+        "docker run --rm --network none --entrypoint bash "
+        '-v "$PWD/deploy:/source:ro" -v "$PWD/infra/terraform/templates:/templates:ro" '
+        "python:3.15.2-slim-trixie@sha256:"
+        "65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 "
+        "/source/test-boot.sh"
+    )
+    assert deployment["steps"].index(boot) < step_index(deployment, "terraform validate")
+    assert re.findall(r"^echo 'Boot regression passed: (.*)'$", harness, re.M) == [
+        "first boot",
+        "unchanged boot",
+        "changed host configuration",
+        "upgrade of a host the earlier script set up",
+        "Docker restart under the release lock",
+        "a used disk is refused",
+        "an unsupported host is refused",
+    ]

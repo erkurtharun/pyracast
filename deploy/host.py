@@ -19,6 +19,7 @@ BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
 UPTIME = Path("/proc/uptime")
 # The gateway's loopback entrypoint serves the public certificate without asking for the edge's.
 LOCAL_HTTPS_PORT = 8443
+PUBLIC_HTTPS_PORT = 443
 # Covers the hourly timer, its 300 s randomized delay and the backup's 600 s lock wait.
 BACKUP_MAX_AGE_SECONDS = 90 * 60
 # The weekly timer, its 30-minute randomized delay and the rehearsal's one-hour deadline.

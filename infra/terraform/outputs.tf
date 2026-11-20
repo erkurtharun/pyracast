@@ -73,3 +73,12 @@ output "github_environment_variables" {
     PYRACAST_PUBLIC_ORIGIN       = "https://${var.domain}"
   }
 }
+
+output "image_rescan_setting" {
+  description = "Value of the repository variable GCP_IMAGE_RESCAN once image_rescan_reader is on; null while it is off."
+  value = var.image_rescan_reader ? jsonencode({
+    provider        = google_iam_workload_identity_pool_provider.rescan[0].name
+    service_account = google_service_account.rescan[0].email
+    repository      = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.application.repository_id}"
+  }) : null
+}
