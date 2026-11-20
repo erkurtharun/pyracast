@@ -10,7 +10,7 @@ from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.activation import activate_calibration, reset_calibration
 from pyracast.plants.forecast_archive import forecast_cutoff
-from pyracast.plants.forecasting import archived_forecast, plant_forecast
+from pyracast.plants.forecasting import archived_forecast
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -58,7 +58,7 @@ def test_archive_replays_previous_binding_without_writing_cache(
     assert result["provenance"]["binding_id"] == old.binding_id
     assert "archived_forecast" in result["quality_flags"]
     assert "previous_configuration" in result["quality_flags"]
-    strict = plant_forecast(
+    strict = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
@@ -116,7 +116,7 @@ def test_archive_reuses_frozen_issuance_without_changing_it(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     publish_snapshot(snapshot_for(system, DAY))
-    strict = plant_forecast(
+    strict = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,

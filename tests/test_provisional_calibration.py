@@ -17,7 +17,6 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.plants.activation import activate_calibration
-from pyracast.plants.forecasting import plant_forecast
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 from pyracast.plants.models import CalibrationActivation, CalibrationRun, Plant, PlantConfiguration
@@ -111,13 +110,14 @@ def test_provisional_fit_freezes_sources_then_settlement_prepares_a_new_candidat
     monkeypatch.setattr(timezone, "now", lambda: moment)
     activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
     publish_snapshot(snapshot_for(system, date(2026, 11, 10), collected_at=moment))
-    outlook = plant_forecast(
+    outlook = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
         target_date=date(2026, 11, 10),
         resolution_minutes=60,
+        as_of=moment,
     )
     numerical = cast(dict[str, Any], outlook["result"])
     assert outlook["calibration_id"] == run.pk

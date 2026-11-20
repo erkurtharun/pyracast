@@ -13,12 +13,13 @@ from pyracast.plants.models import CONFIGURATION_PARAMETERS, Plant, PlantConfigu
 def automatic_forecast(
     plant: Plant, target_date: date, resolution_minutes: int, now: datetime
 ) -> dict[str, object]:
+    today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
     latest = current_forecast(
         plant,
         target_date,
         resolution_minutes,
         now,
-        include_actuals=target_date == now.astimezone(ZoneInfo(plant.region.timezone)).date(),
+        actuals="elapsed" if target_date == today else "none",
     )
     return reference_transition_forecast(plant, target_date, resolution_minutes, now, latest)
 

@@ -8,7 +8,8 @@ from django.test import Client
 
 from pyracast.plants import forecasting
 from pyracast.plants.activation import activate_calibration
-from pyracast.plants.forecasting import plant_forecast, power_intervals, power_limit
+from pyracast.plants.forecasting import power_intervals, power_limit
+from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -34,11 +35,12 @@ def test_native_clipping_zero_missingness_and_immutable_issuance(
     source.normalized_intervals[1]["power_kw"] = 80 / 130
     stored_again(source)
     publish_snapshot(source)
-    result = plant_forecast(
+    result = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
     )
@@ -50,11 +52,12 @@ def test_native_clipping_zero_missingness_and_immutable_issuance(
     assert cast(dict[str, Any], result["regional_irradiance"])["complete"] is False
     assert "geometry_not_modeled" in numerical["quality_flags"]
     as_of = source.collected_at + timedelta(minutes=10)
-    second = plant_forecast(
+    second = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
         as_of=as_of,
@@ -64,11 +67,12 @@ def test_native_clipping_zero_missingness_and_immutable_issuance(
     assert ForecastIssuance.objects.count() == 1
     source.normalized_intervals[1]["power_kw"] = None
     stored_again(source)
-    partial = plant_forecast(
+    partial = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=30,
     )
@@ -104,11 +108,12 @@ def test_snapshot_selection_excludes_future_issue_collection_and_actuals(
             source_kind="estimated_actuals",
         )
     )
-    result = plant_forecast(
+    result = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
     )
@@ -118,11 +123,12 @@ def test_snapshot_selection_excludes_future_issue_collection_and_actuals(
 
 def test_absent_configuration_and_source_are_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
     system, plant = make_plant(monkeypatch)
-    result = plant_forecast(
+    result = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=30,
     )
@@ -130,11 +136,12 @@ def test_absent_configuration_and_source_are_explicit(monkeypatch: pytest.Monkey
     assert result["unavailable_reason"] == "forecast_unavailable"
     assert result["result"] is None
     PlantConfiguration.objects.update(created_at=NOW)
-    result = plant_forecast(
+    result = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
     )
@@ -161,10 +168,24 @@ def test_forecast_input_bounds(monkeypatch: pytest.MonkeyPatch, arguments: dict[
     values: dict[str, Any] = {"target_date": DAY, "resolution_minutes": 60}
     values.update(arguments)
     with pytest.raises(ValidationError):
-        plant_forecast(system.member, system.tenant.pk, system.region.pk, plant.pk, **values)
+        plant_outlook(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            plant.pk,
+            source="archived_forecast",
+            **values,
+        )
     stranger = User.objects.create(username="stranger")
     with pytest.raises(PermissionDenied):
-        plant_forecast(stranger, system.tenant.pk, system.region.pk, plant.pk, **values)
+        plant_outlook(
+            stranger,
+            system.tenant.pk,
+            system.region.pk,
+            plant.pk,
+            source="archived_forecast",
+            **values,
+        )
 
 
 @pytest.mark.parametrize("future_field", [None, "completed_at", "cutoff_at", "created_at"])
@@ -185,11 +206,12 @@ def test_active_calibration_is_available_at_issuance(
     if future_field is not None:
         CalibrationRun.objects.filter(pk=run.pk).update(**{future_field: NOW})
     publish_snapshot(source)
-    result = plant_forecast(
+    result = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
     )
@@ -202,22 +224,24 @@ def test_historical_issuance_survives_revision_at_both_resolutions(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     publish_snapshot(snapshot_for(system, DAY))
-    original = plant_forecast(
+    original = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
     )
     revise_plant(
         system.member, system.tenant.pk, system.region.pk, plant.pk, name="New", dc_capacity_mw=140
     )
-    historical = plant_forecast(
+    historical = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
     )
@@ -225,11 +249,12 @@ def test_historical_issuance_survives_revision_at_both_resolutions(
     expected["quality_flags"].append("previous_configuration")
     assert historical["result"] == expected
     assert historical["freshness"] == "archived"
-    half_hourly = plant_forecast(
+    half_hourly = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=30,
     )
@@ -248,11 +273,12 @@ def test_archive_reader_never_recalculates_a_published_output(
         raise AssertionError("An archive must not execute the current transfer model.")
 
     monkeypatch.setattr(forecasting, "forecast", unavailable)
-    result = plant_forecast(
+    result = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
     )
@@ -271,11 +297,12 @@ def test_measurement_basis_determines_limits(monkeypatch: pytest.MonkeyPatch) ->
     assert power_limit(configuration) is None
     configuration.save()
     publish_snapshot(snapshot_for(system, DAY))
-    result = plant_forecast(
+    result = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
     )
@@ -311,11 +338,12 @@ def test_corrupt_source_metadata_and_changed_timezone(monkeypatch: pytest.Monkey
         power_intervals(source, configuration, model_version=MODEL_VERSION)
     system.region.timezone = "UTC"
     system.region.save()
-    replay = plant_forecast(
+    replay = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
     )
@@ -335,30 +363,33 @@ def test_latest_published_pre_daylight_source_replaces_previous_forecast(
     newest = publish_snapshot(
         snapshot_for(system, DAY, power_kw=0.9, collected_at=datetime(2026, 11, 8, 20, tzinfo=UTC))
     )
-    unavailable = plant_forecast(
+    unavailable = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
         as_of=acquired - timedelta(seconds=1),
     )
     assert unavailable["snapshot_id"] == old.pk
-    available = plant_forecast(
+    available = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
         as_of=acquired,
     )
-    later = plant_forecast(
+    later = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
+        source="archived_forecast",
         target_date=DAY,
         resolution_minutes=60,
     )

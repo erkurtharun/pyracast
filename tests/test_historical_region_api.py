@@ -112,7 +112,7 @@ def test_region_history_preserves_application_validation_response(
     def invalid_history(*args: object) -> dict[str, object]:
         raise ValidationError(errors)
 
-    monkeypatch.setattr("pyracast.forecasts.history.regional_history", invalid_history)
+    monkeypatch.setattr("pyracast.forecasts.outlook.regional_history", invalid_history)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
     response = client.get(path, {"date": DAY.isoformat(), "data_source": "estimated_actuals"})
     assert response.status_code == 400

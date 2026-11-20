@@ -26,6 +26,8 @@ from pyracast.solar import Daylight, daylight_energy_windows, daylight_window
 
 INTRADAY_POLICY = "estimated-actuals-then-forecast-v1"
 type IntradaySourceKind = Literal["forecast", "estimated_actuals", "mixed"]
+# Estimated actuals in a live outlook: none, those of the elapsed part of today, or only those.
+type ActualsMode = Literal["none", "elapsed", "only"]
 
 
 @dataclass(frozen=True)
