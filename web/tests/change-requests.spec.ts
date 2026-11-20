@@ -93,6 +93,39 @@ async function openPlant(page: Page, tab: string) {
     await page.getByRole("button", { name: tab, exact: true }).click();
 }
 
+test("the correction reason is named by its label and described by the approval help", async ({
+    page,
+}) => {
+    await member(page);
+    await page.route("**/api/**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        )!;
+        return route.fulfill({
+            json: nativeProductionHistory(date, "Europe/Istanbul", [
+                {
+                    starts_at: `${date}T08:00:00+03:00`,
+                    ends_at: `${date}T08:30:00+03:00`,
+                    effective: reading,
+                    can_edit: false,
+                    can_propose: true,
+                    can_propose_revert: false,
+                    revision_id: null,
+                    observation: null,
+                },
+            ]),
+        });
+    });
+    await openPlant(page, "Production");
+    await page.getByRole("button", { name: /^Suggest correction for/ }).click();
+    const reason = page
+        .locator(".production-row-editor")
+        .getByRole("textbox", { name: "Reason for correction", exact: true });
+    await expect(reason).toHaveAccessibleDescription(
+        "A workspace administrator reviews this submission before it changes live data.",
+    );
+});
+
 test("member submits a native production correction with a stable retry key and no live write", async ({
     page,
 }, testInfo) => {

@@ -31,6 +31,10 @@ test("view navigation names its group and marks the current view", async ({
         views.getByRole("button", { name: "Irradiance", exact: true }),
     ).toHaveAttribute("aria-current", "page");
     await expect(views.locator("[aria-current]")).toHaveCount(1);
+    for (const button of await page
+        .locator(".tabs button, .subnav button")
+        .all())
+        await expect(button).toHaveAttribute("type", "button");
     await scan(page, ".tabs");
     await scan(page, ".subnav");
 });
@@ -101,5 +105,43 @@ test("a confirmation names its question, focuses the safe choice and returns foc
     await expect(confirmation).toHaveCount(0);
     await expect(
         page.getByRole("heading", { name: "Members", level: 2 }),
+    ).toBeFocused();
+});
+
+test("a confirmation moved to another member focuses its safe choice again", async ({
+    page,
+}) => {
+    const first = { id: 2, email: "first@example.test", role: "viewer" };
+    const second = { id: 3, email: "second@example.test", role: "viewer" };
+    await mockApi(page);
+    await page.route("**/api/tenants/1/members/", (route) =>
+        route.fulfill({
+            json: {
+                members: [
+                    { id: user.id, email: user.email, role: "admin" },
+                    first,
+                    second,
+                ],
+            },
+        }),
+    );
+    await page.route("**/api/tenants/*/invitations/", (route) =>
+        route.fulfill({ json: { invitations: [] } }),
+    );
+    await page.goto("/app/");
+    await page.getByRole("button", { name: "Members", exact: true }).click();
+    for (const viewer of [first, second])
+        await page
+            .getByRole("button", {
+                name: `Remove from workspace: ${viewer.email}`,
+                exact: true,
+            })
+            .click();
+    const confirmation = page.getByRole("region", {
+        name: "Confirm member removal",
+    });
+    await expect(confirmation).toContainText(second.email);
+    await expect(
+        confirmation.getByRole("button", { name: "Cancel", exact: true }),
     ).toBeFocused();
 });
