@@ -2,15 +2,16 @@ import json
 import re
 import signal
 import subprocess
-import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import IO, Any, BinaryIO
 
 import pytest
 
 from deploy import backup, host, release_record
+
+COUNTS = {"django_migrations": 40, "plants_plant": 3}
 
 
 class BackupHost:
@@ -19,8 +20,13 @@ class BackupHost:
         self.release.mkdir()
         self.directory = root / "work"
         self.directory.mkdir()
+        self.kept = root / "reset"
         self.blocked = root / "release-blocked"
         self.last_backup = root / "last-backup.json"
+        self.boot_id = root / "boot_id"
+        self.boot_id.write_text("boot-a\n")
+        self.uptime = root / "uptime"
+        self.uptime.write_text("5000.00 9000.00\n")
         self.granted = True
         self.held = False
         self.on_lock: Callable[[], None] = lambda: None
@@ -62,6 +68,16 @@ class BackupHost:
             stream.write(b"PGDMP")
         return subprocess.CompletedProcess(command, 0, b"", b"")
 
+    def bounded_run(
+        self, command: list[str], *, stdout: IO[bytes], stderr: IO[bytes], **_options: Any
+    ) -> None:
+        self.commands.append(command)
+        self.dumps.append((command, self.held))
+        if self.dump_error is not None:
+            raise self.dump_error
+        stdout.write(b"PGDMP")
+        stderr.write(f"pyracast-counts {json.dumps(COUNTS)}\n".encode())
+
     def upload(self, _bucket: str, name: str, archive: Path) -> None:
         assert archive.read_bytes() == b"PGDMP"
         self.uploads.append((name, self.held))
@@ -75,10 +91,14 @@ def backup_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> BackupHost:
     fake = BackupHost(tmp_path)
     monkeypatch.setattr(host, "RELEASE_BLOCKED", fake.blocked)
     monkeypatch.setattr(host, "LAST_BACKUP", fake.last_backup)
+    monkeypatch.setattr(host, "RECOVERY_STATE", fake.kept, raising=False)
+    monkeypatch.setattr(host, "BOOT_ID", fake.boot_id, raising=False)
+    monkeypatch.setattr(host, "UPTIME", fake.uptime, raising=False)
     monkeypatch.setattr(host, "release_lock", fake.release_lock)
     monkeypatch.setattr(host, "holds_release_lock", fake.holds_release_lock)
     monkeypatch.setattr(backup, "upload_backup", fake.upload)
     monkeypatch.setattr(backup, "report", fake.report)
+    monkeypatch.setattr(backup, "bounded_run", fake.bounded_run, raising=False)
     monkeypatch.setattr(subprocess, "run", fake.run)
     monkeypatch.setattr(signal, "signal", fake.handlers.__setitem__)
     replace = Path.replace
@@ -94,7 +114,6 @@ def backup_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> BackupHost:
 def test_hourly_backup_holds_the_release_lock_until_the_pointer_names_its_upload(
     backup_host: BackupHost,
 ) -> None:
-    started = time.time()
     name = backup.create_backup(
         backup_host.release, "private-backups", "hourly", backup_host.directory
     )
@@ -102,12 +121,12 @@ def test_hourly_backup_holds_the_release_lock_until_the_pointer_names_its_upload
     assert backup_host.waits == [backup.HOURLY_LOCK_WAIT_SECONDS]
     assert [held for _, held in backup_host.dumps] == [True]
     assert backup_host.uploads == [(name, True)]
-    assert backup_host.replaced == [("last-backup.json", True)]
+    assert backup_host.replaced[-1] == ("last-backup.json", True)
+    assert all(held for _, held in backup_host.replaced)
     assert name is not None
     assert re.fullmatch(r"postgres/\d{4}/\d{2}/\d{2}/\d{8}T\d{6}Z-hourly-[0-9a-f]{32}\.dump", name)
     marker = json.loads(backup_host.last_backup.read_text())
     assert marker["object"] == name
-    assert started <= marker["completed_at"] <= time.time()
     ((event, severity, details),) = backup_host.events
     assert (event, severity) == ("pyracast_backup_succeeded", "INFO")
     assert details["object"] == name
@@ -179,8 +198,26 @@ def test_prerelease_backup_after_an_hourly_one_leaves_the_pointer_on_the_prerele
     assert hourly is not None
     assert prerelease is not None
     pointer = json.loads(backup_host.last_backup.read_text())
-    assert pointer.keys() == {"object", "completed_at"}
+    assert pointer.keys() == {"object", "kind", "size", "counts", "mark"}
     assert pointer["object"] == prerelease
+    assert pointer["kind"] == "prerelease"
+
+
+@pytest.mark.parametrize("kind", ["hourly", "prerelease"])
+def test_the_pointer_names_the_dump_its_counts_and_an_uptime_mark_but_no_wall_clock_time(
+    backup_host: BackupHost, kind: str
+) -> None:
+    name = backup.create_backup(
+        backup_host.release, "private-backups", kind, backup_host.directory, 9
+    )
+
+    assert json.loads(backup_host.last_backup.read_text()) == {
+        "object": name,
+        "kind": kind,
+        "size": 5,
+        "counts": COUNTS,
+        "mark": {"boot_id": "boot-a", "uptime_seconds": 5000.0},
+    }
 
 
 def test_prerelease_backup_records_its_object_in_the_release_directory(
@@ -191,8 +228,64 @@ def test_prerelease_backup_records_its_object_in_the_release_directory(
     )
 
     record = backup_host.release / host.PRERELEASE_RECORD
-    assert json.loads(record.read_text()) == {"object": name}
+    assert json.loads(record.read_text()) == {"object": name, "counts": COUNTS}
     assert [path.name for path in backup_host.release.iterdir()] == [record.name]
+
+
+def test_prerelease_backup_keeps_its_dump_where_the_recovery_helper_looks(
+    backup_host: BackupHost,
+) -> None:
+    name = backup.create_backup(
+        backup_host.release, "private-backups", "prerelease", backup_host.directory, 9
+    )
+
+    assert name is not None
+    kept = backup_host.kept / name.rsplit("/", 1)[-1]
+    assert kept.read_bytes() == b"PGDMP"
+    assert sorted(path.name for path in backup_host.kept.iterdir()) == [kept.name]
+    assert list(backup_host.directory.iterdir()) == []
+
+
+def test_an_hourly_dump_stays_in_its_temporary_directory(backup_host: BackupHost) -> None:
+    backup.create_backup(backup_host.release, "private-backups", "hourly", backup_host.directory)
+
+    assert not backup_host.kept.exists()
+
+
+def test_a_prerelease_dump_that_cannot_be_kept_fails_before_anything_is_uploaded(
+    backup_host: BackupHost,
+) -> None:
+    backup_host.kept.write_text("not a directory")
+
+    with pytest.raises((FileExistsError, NotADirectoryError)):
+        backup.create_backup(
+            backup_host.release, "private-backups", "prerelease", backup_host.directory, 9
+        )
+
+    assert backup_host.uploads == []
+    assert not backup_host.last_backup.exists()
+    assert list(backup_host.release.iterdir()) == []
+
+
+@pytest.mark.parametrize("failure", ["dump", "upload"])
+def test_a_failed_prerelease_backup_keeps_no_archive(
+    backup_host: BackupHost, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    def refused(_bucket: str, _name: str, _archive: Path) -> None:
+        raise OSError("upload refused")
+
+    if failure == "dump":
+        backup_host.dump_error = subprocess.CalledProcessError(3, ["psql"])
+    else:
+        monkeypatch.setattr(backup, "upload_backup", refused)
+
+    with pytest.raises((OSError, subprocess.CalledProcessError)):
+        backup.create_backup(
+            backup_host.release, "private-backups", "prerelease", backup_host.directory, 9
+        )
+
+    assert list(backup_host.kept.iterdir()) == []
+    assert not backup_host.last_backup.exists()
 
 
 def test_hourly_backup_writes_no_release_record(backup_host: BackupHost) -> None:

@@ -146,3 +146,60 @@ def test_a_closed_descriptor_or_a_missing_lock_file_holds_nothing(
         assert not host.holds_release_lock(stream.fileno())
     assert not (tmp_path / "missing.lock").exists()
     assert locks.calls == []
+
+
+class Boot:
+    def __init__(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.boot_id = root / "boot_id"
+        self.uptime = root / "uptime"
+        monkeypatch.setattr(host, "BOOT_ID", self.boot_id, raising=False)
+        monkeypatch.setattr(host, "UPTIME", self.uptime, raising=False)
+        self.set("boot-a", 1000.0)
+
+    def set(self, boot: str, uptime: float) -> None:
+        self.boot_id.write_text(f"{boot}\n")
+        self.uptime.write_text(f"{uptime:.2f} 3900.00\n")
+
+
+@pytest.fixture
+def boot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Boot:
+    return Boot(tmp_path, monkeypatch)
+
+
+@pytest.mark.parametrize("step", [-30 * 86400, 0, 30 * 86400])
+def test_a_mark_of_this_boot_ages_by_uptime_whatever_the_wall_clock_does(
+    boot: Boot, monkeypatch: pytest.MonkeyPatch, step: float
+) -> None:
+    mark = host.clock_mark()
+    boot.set("boot-a", 1600.0)
+    wall = host.time.time() + step
+    monkeypatch.setattr(host.time, "time", lambda: wall)
+
+    assert mark == {"boot_id": "boot-a", "uptime_seconds": 1000.0}
+    assert host.minimum_age(mark) == 600.0
+
+
+def test_a_mark_of_an_earlier_boot_is_at_least_as_old_as_this_boot(boot: Boot) -> None:
+    mark = host.clock_mark()
+    boot.set("boot-b", 120.0)
+
+    assert host.minimum_age(mark) == 120.0
+
+
+@pytest.mark.parametrize(
+    "mark",
+    [
+        None,
+        "boot-a",
+        [],
+        {},
+        {"boot_id": "boot-a"},
+        {"boot_id": "boot-a", "uptime_seconds": "900"},
+        {"boot_id": "boot-a", "uptime_seconds": 2000.0},
+        {"boot_id": "boot-a", "uptime_seconds": -1.0},
+    ],
+)
+def test_an_unreadable_or_impossible_mark_counts_as_old_as_this_boot(
+    boot: Boot, mark: object
+) -> None:
+    assert host.minimum_age(mark) == 1000.0

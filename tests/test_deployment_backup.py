@@ -2,15 +2,18 @@ import base64
 import hashlib
 import io
 import json
+import re
 import signal
 import subprocess
 import time
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from email.message import Message
 from http.client import HTTPException
 from pathlib import Path
-from typing import BinaryIO, cast
+from types import SimpleNamespace
+from typing import BinaryIO, NamedTuple, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
@@ -529,6 +532,323 @@ def test_a_rehearsal_restores_the_named_archive_and_takes_no_backup(
 
     assert backup.main(arguments) == 0
     assert rehearsed == [(tmp_path, "private-backups", "postgres/x.dump")]
+
+
+class Process:
+    def __init__(self, waits: list[int | None]) -> None:
+        self.waits = waits
+        self.killed = False
+
+    def __enter__(self) -> Process:
+        return self
+
+    def __exit__(self, *_exception: object) -> None:
+        return None
+
+    def wait(self, timeout: float) -> int:
+        assert timeout == 1
+        status = self.waits.pop(0)
+        if status is None:
+            raise subprocess.TimeoutExpired(["fixture"], timeout)
+        return status
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+class Disk(NamedTuple):
+    total: int
+    used: int
+    free: int
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    now = [0.0]
+    monkeypatch.setattr(backup, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    return now
+
+
+def bounded(
+    monkeypatch: pytest.MonkeyPatch, process: Process, free: list[int], clock: list[float]
+) -> list[list[str]]:
+    started: list[list[str]] = []
+
+    def popen(command: list[str], **_options: object) -> Process:
+        started.append(command)
+        return process
+
+    def usage(_path: Path) -> Disk:
+        clock[0] += 10
+        return Disk(100, 100 - free[0], free.pop(0) if len(free) > 1 else free[0])
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(backup.shutil, "disk_usage", usage)
+    return started
+
+
+def test_a_bounded_command_that_finishes_in_time_and_space_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: list[float]
+) -> None:
+    process = Process([None, None, 0])
+    started = bounded(monkeypatch, process, [50], clock)
+
+    backup.bounded_run(
+        ["pg_dump"], stdin=None, stdout=None, stderr=None, timeout=600, disk=tmp_path
+    )
+
+    assert started == [["pg_dump"]]
+    assert not process.killed
+
+
+def test_a_bounded_command_is_killed_when_its_disk_falls_below_the_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: list[float]
+) -> None:
+    process = Process([None, None])
+    bounded(monkeypatch, process, [50, 50, 9], clock)
+
+    with pytest.raises(backup.CapacityError):
+        backup.bounded_run(
+            ["pg_dump"], stdin=None, stdout=None, stderr=None, timeout=600, disk=tmp_path
+        )
+
+    assert process.killed
+
+
+def test_a_bounded_command_does_not_start_on_a_disk_already_below_the_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: list[float]
+) -> None:
+    process = Process([0])
+    started = bounded(monkeypatch, process, [5], clock)
+
+    with pytest.raises(backup.CapacityError):
+        backup.bounded_run(
+            ["pg_dump"], stdin=None, stdout=None, stderr=None, timeout=600, disk=tmp_path
+        )
+
+    assert started == []
+
+
+def test_a_bounded_command_is_killed_at_its_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: list[float]
+) -> None:
+    process = Process([None] * 10)
+    bounded(monkeypatch, process, [50], clock)
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        backup.bounded_run(
+            ["pg_restore"], stdin=None, stdout=None, stderr=None, timeout=25, disk=tmp_path
+        )
+
+    assert process.killed
+    assert clock[0] >= 25
+
+
+def test_a_bounded_command_that_fails_raises_its_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: list[float]
+) -> None:
+    bounded(monkeypatch, Process([3]), [50], clock)
+
+    with pytest.raises(subprocess.CalledProcessError) as failed:
+        backup.bounded_run(
+            ["psql"], stdin=None, stdout=None, stderr=None, timeout=600, disk=tmp_path
+        )
+
+    assert failed.value.returncode == 3
+
+
+def test_the_dump_counts_every_table_in_the_snapshot_it_exports_to_pg_dump(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[tuple[list[str], bytes, Path]] = []
+
+    def run(
+        command: list[str],
+        *,
+        stdin: BinaryIO,
+        stdout: BinaryIO,
+        stderr: BinaryIO,
+        timeout: float,
+        disk: Path,
+    ) -> None:
+        calls.append((command, stdin.read(), disk))
+        assert timeout == backup.DUMP_TIMEOUT_SECONDS
+        stdout.write(b"PGDMP")
+        stderr.write(b'pyracast-counts { "plants_plant" : 3, "django_migrations" : 40 }\n')
+        stderr.write(b"pg_dump: warning: fixture\n")
+
+    monkeypatch.setattr(backup, "bounded_run", run, raising=False)
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    archive = tmp_path / "database.dump"
+
+    counts = backup.dump_database(tmp_path, archive)
+
+    ((command, script, disk),) = calls
+    assert counts == {"plants_plant": 3, "django_migrations": 40}
+    assert archive.read_bytes() == b"PGDMP"
+    assert disk == tmp_path
+    assert command[command.index("exec") :] == [
+        "exec",
+        "-T",
+        "--env",
+        "PGAPPNAME=pyracast-backup",
+        "postgres",
+        "psql",
+        "-X",
+        "-q",
+        "-At",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-U",
+        "postgres",
+        "-d",
+        "pyracast",
+    ]
+    lines = script.decode().splitlines()
+    assert lines[0] == "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY;"
+    assert lines[1] == "SELECT pg_export_snapshot() AS snapshot \\gset"
+    assert lines.index("\\setenv PYRACAST_SNAPSHOT :snapshot") < next(
+        index for index, line in enumerate(lines) if line.startswith("\\! pg_dump ")
+    )
+    assert '--snapshot="$PYRACAST_SNAPSHOT"' in script.decode()
+    assert lines[-1] == "COMMIT;"
+    assert capsys.readouterr().err == "pg_dump: warning: fixture\n"
+
+
+@pytest.mark.parametrize("errors", ["", "pyracast-counts not json\n", "pyracast-counts []\n"])
+def test_a_dump_that_reports_no_table_counts_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, errors: str
+) -> None:
+    def run(command: list[str], *, stderr: BinaryIO, **_options: object) -> None:
+        stderr.write(errors.encode())
+
+    monkeypatch.setattr(backup, "bounded_run", run, raising=False)
+    monkeypatch.setattr(subprocess, "run", forbidden)
+
+    with pytest.raises(ValueError, match="no table counts"):
+        backup.dump_database(tmp_path, tmp_path / "database.dump")
+
+
+def rewrite(
+    responses: list[dict[str, object] | int],
+) -> tuple[list[urllib.request.Request], Callable[..., io.BytesIO]]:
+    requests: list[urllib.request.Request] = []
+
+    def urlopen(request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
+        requests.append(request)
+        response = responses.pop(0)
+        if isinstance(response, int):
+            raise refusal(request, response)
+        return io.BytesIO(json.dumps(response).encode())
+
+    return requests, urlopen
+
+
+def test_the_daily_copy_rewrites_the_backup_once_a_day_under_its_own_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests, urlopen = rewrite([{"done": False, "rewriteToken": "next"}, {"done": True}])
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+
+    copied = backup.copy_daily("private-backups", "postgres/2026/11/20/x-hourly-y.dump")
+
+    assert copied is not None
+    assert re.fullmatch(r"daily/\d{4}/\d{2}/\d{2}\.dump", copied)
+    first, second = (urlsplit(request.full_url) for request in requests)
+    assert first.path == (
+        "/storage/v1/b/private-backups/o/postgres%2F2026%2F11%2F20%2Fx-hourly-y.dump"
+        f"/rewriteTo/b/private-backups/o/{copied.replace('/', '%2F')}"
+    )
+    assert parse_qs(first.query) == {"ifGenerationMatch": ["0"]}
+    assert parse_qs(second.query) == {"ifGenerationMatch": ["0"], "rewriteToken": ["next"]}
+    assert {request.get_method() for request in requests} == {"POST"}
+
+
+def test_a_daily_copy_that_exists_already_is_left_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests, urlopen = rewrite([412])
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+
+    assert backup.copy_daily("private-backups", "postgres/x.dump") is None
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("responses", [[403], [{"done": False, "rewriteToken": "t"}] * 10])
+def test_a_daily_copy_that_cannot_finish_fails(
+    monkeypatch: pytest.MonkeyPatch, responses: list[dict[str, object] | int]
+) -> None:
+    _requests, urlopen = rewrite(list(responses))
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+
+    with pytest.raises((HTTPError, RuntimeError)):
+        backup.copy_daily("private-backups", "postgres/x.dump")
+
+
+@pytest.mark.parametrize(
+    ("enabled", "outcome", "events"),
+    [
+        (False, None, ["pyracast_backup_succeeded"]),
+        (
+            True,
+            "daily/2026/11/20.dump",
+            ["pyracast_backup_succeeded", "pyracast_backup_daily_copied"],
+        ),
+        (True, None, ["pyracast_backup_succeeded"]),
+        (
+            True,
+            OSError("private detail"),
+            ["pyracast_backup_succeeded", "pyracast_backup_daily_copy_failed"],
+        ),
+    ],
+)
+def test_the_hourly_backup_keeps_a_daily_copy_only_where_the_host_enables_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    enabled: bool,
+    outcome: str | Exception | None,
+    events: list[str],
+) -> None:
+    reports: list[tuple[str, str, dict[str, object]]] = []
+    copies: list[str] = []
+
+    @contextmanager
+    def release_lock(_wait: float) -> Iterator[bool]:
+        yield True
+
+    def store(_release: Path, _bucket: str, _kind: str, directory: Path) -> tuple[str, Path]:
+        archive = directory / "x.dump"
+        archive.write_bytes(b"PGDMP")
+        return "postgres/x-hourly-y.dump", archive
+
+    def copy(_bucket: str, name: str) -> str | None:
+        copies.append(name)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(host, "release_lock", release_lock)
+    monkeypatch.setattr(host, "RELEASE_BLOCKED", tmp_path / "release-blocked")
+    monkeypatch.setattr(backup, "store_backup", store)
+    monkeypatch.setattr(backup, "copy_daily", copy, raising=False)
+    monkeypatch.setattr(
+        backup,
+        "report",
+        lambda event, severity, **details: reports.append((event, severity, details)),
+    )
+    config = tmp_path / "host.json"
+    config.write_text(
+        json.dumps(
+            {"backup_bucket": "private-backups", **({"daily_backups": True} if enabled else {})}
+        )
+    )
+
+    assert backup.main([str(config), "--release-dir", str(tmp_path)]) == 0
+    assert [event for event, _, _ in reports] == events
+    assert copies == (["postgres/x-hourly-y.dump"] if enabled else [])
+    if isinstance(outcome, Exception):
+        assert reports[-1][1:] == ("WARNING", {"error": "OSError"})
 
 
 def test_a_refused_command_line_is_not_reported_as_a_failed_backup(
