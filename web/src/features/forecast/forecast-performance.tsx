@@ -127,6 +127,7 @@ export function ForecastPerformance({
                 key={JSON.stringify(query)}
                 scope={scope}
                 query={query}
+                timezone={timezone}
             />
         </section>
     );
@@ -135,9 +136,11 @@ export function ForecastPerformance({
 function PerformanceResults({
     scope,
     query,
+    timezone,
 }: {
     scope: PlantScope;
     query: PerformanceQuery;
+    timezone: string;
 }) {
     const t = useTranslations("ForecastPerformance");
     const formatter = useFormat();
@@ -176,7 +179,11 @@ function PerformanceResults({
                             <CsvDownload
                                 filename={`performance-${data.start_date}-${data.end_date}`}
                                 records={data.days}
-                                metadata={{ ...data, days: undefined }}
+                                metadata={{
+                                    ...data,
+                                    days: undefined,
+                                    timezone,
+                                }}
                             />
                         </div>
                         {data.metrics && (

@@ -130,12 +130,14 @@ test("available historical model days appear without empty grid rows", async ({
     expect(scan).toEqual([]);
     await comparison.getByText("Advanced", { exact: true }).click();
     await comparison.getByLabel("Previous-day cutoff").fill("09:30");
+    await comparison.getByLabel("Start date").fill("2026-10-22");
     await comparison.getByRole("button", { name: "Load performance" }).click();
     await expect
         .poll(() => new URLSearchParams(query).get("issuance_cutoff"))
         .toBe("09:30");
     await comparison.getByRole("button", { name: "Model check" }).click();
     await expect.poll(() => query).toContain("comparison=historical_model");
+    expect(query).toContain("start_date=2026-10-22");
     expect(query).not.toContain("issuance_cutoff");
     expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
