@@ -267,8 +267,6 @@ def forecast_payload(
         "capacity_normalization": normalization_provenance(snapshot),
         "source_kind": snapshot.source_kind,
         "collected_at": snapshot.collected_at.isoformat(),
-        "scheduled_slot": snapshot.job.scheduled_for.isoformat(),
-        "late": snapshot.collected_at > snapshot.job.scheduled_for,
         "lead_hours": (start - snapshot.collected_at).total_seconds() / 3600,
         "issued_at": snapshot.issued_at.isoformat() if snapshot.issued_at else None,
         "calibration_id": calibration.pk if calibration else None,

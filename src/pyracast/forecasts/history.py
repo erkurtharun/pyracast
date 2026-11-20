@@ -19,6 +19,7 @@ from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
 from pyracast.forecasts.intraday import (
+    VINTAGE_SCOPE,
     ActualsMode,
     apply_intraday_source,
     prepare_intraday_source,
@@ -323,7 +324,7 @@ def regional_composed_forecast(
                 "binding_id": binding.pk,
                 "source_kind": source_kind,
             }
-            cast(dict[str, object], result["vintage"])["scope"] = "primary_forecast_source"
+            cast(dict[str, object], result["vintage"])["scope"] = VINTAGE_SCOPE
             if source is not None:
                 apply_intraday_source(result, source)
                 preserve_forecast_weather(result, binding, target_date, forecasts)

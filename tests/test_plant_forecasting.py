@@ -399,7 +399,7 @@ def test_latest_published_pre_daylight_source_replaces_previous_forecast(
     assert provenance["snapshot_id"] == newest.pk
     assert provenance["snapshot_id"] != old.pk
     assert provenance["selection_policy"] == "latest-published-pre-daylight-issuance-v1"
-    assert provenance["late"] is False
+    assert provenance.keys().isdisjoint({"late", "scheduled_slot"})
     assert provenance["lead_hours"] == pytest.approx(1)
 
 

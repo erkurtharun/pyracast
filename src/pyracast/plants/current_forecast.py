@@ -5,6 +5,7 @@ from pyracast.calculation import calculate
 from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
 from pyracast.forecasts.history import ARCHIVED, live_state, result_state
 from pyracast.forecasts.intraday import (
+    VINTAGE_SCOPE,
     ActualsMode,
     apply_intraday_source,
     prepare_intraday_source,
@@ -158,7 +159,7 @@ def _composed_forecast(
                     "binding_id": configuration.binding_id,
                     "source_kind": source_kind,
                 }
-                cast(dict[str, object], irradiance["vintage"])["scope"] = "primary_forecast_source"
+                cast(dict[str, object], irradiance["vintage"])["scope"] = VINTAGE_SCOPE
                 if source is not None:
                     apply_intraday_source(irradiance, source)
                     preserve_forecast_weather(
