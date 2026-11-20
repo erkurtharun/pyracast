@@ -1,13 +1,16 @@
 "use client";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { ScrollRegion } from "@/ui/scroll-region";
 
 import { useState, type FormEvent } from "react";
-import { localDay } from "./data-source";
 import type { PlantScope } from "@/lib/api";
 import type { RequestOptions } from "@/lib/api/client";
 import { useApiQuery } from "@/lib/api/query";
+import { plantDay } from "@/lib/format/time";
+import { useFormat } from "@/lib/format/use-format";
+import { ControlField, Select } from "@/ui/form";
 import { Resource } from "@/ui/resource";
+import { useCodeLabel } from "@/ui/vocabulary";
 import { Notice, Stat } from "@/ui/ui";
 import { CsvDownload } from "@/ui/csv-download";
 
@@ -26,8 +29,8 @@ export function ForecastPerformance({
 }) {
     const t = useTranslations("ForecastPerformance");
 
-    const [start, setStart] = useState(() => localDay(timezone, -30));
-    const [end, setEnd] = useState(() => localDay(timezone, -1));
+    const [start, setStart] = useState(() => plantDay(timezone, -30));
+    const [end, setEnd] = useState(() => plantDay(timezone, -1));
     const [comparison, setComparison] =
         useState<Comparison>("historical_model");
     const [issuanceCutoff, setIssuanceCutoff] = useState("");
@@ -52,41 +55,36 @@ export function ForecastPerformance({
             <div className="section-heading">
                 <div>
                     <h2>{t("production_comparison")}</h2>
-                    <p className="fine">
-                        {t("comparison_description", { timezone })}
-                    </p>
+                    <p className="fine">{t("comparison_description")}</p>
                 </div>
             </div>
             <details>
                 <summary>{t("how_comparison_is_measured")}</summary>
                 <p>{t("historical_model_uses_saved_weather_estimates_and")}</p>
                 <p>{t("archived_forecast_description")}</p>
-                <p>{t("daylight_rules", { timezone })}</p>
+                <p>{t("daylight_rules")}</p>
             </details>
             <form className="forecast-controls" onSubmit={load}>
-                <label className="field">
-                    {t("comparison")}
-                    <select
-                        value={comparison}
-                        onChange={(event) =>
-                            setComparison(
-                                event.target.value === "archived_forecast"
-                                    ? "archived_forecast"
-                                    : "historical_model",
-                            )
-                        }
-                    >
-                        <option value="historical_model">
-                            {t("historical_model")}
-                        </option>
-                        <option value="archived_forecast">
-                            {t("archived_forecast_performance")}
-                        </option>
-                    </select>
-                </label>
+                <Select
+                    label={t("comparison")}
+                    value={comparison}
+                    onChange={(event) =>
+                        setComparison(
+                            event.target.value === "archived_forecast"
+                                ? "archived_forecast"
+                                : "historical_model",
+                        )
+                    }
+                >
+                    <option value="historical_model">
+                        {t("historical_model")}
+                    </option>
+                    <option value="archived_forecast">
+                        {t("archived_forecast_performance")}
+                    </option>
+                </Select>
                 {comparison === "archived_forecast" && (
-                    <label className="field">
-                        {t("previousday_cutoff")}
+                    <ControlField label={t("previousday_cutoff")}>
                         <input
                             type="time"
                             value={issuanceCutoff}
@@ -94,10 +92,9 @@ export function ForecastPerformance({
                                 setIssuanceCutoff(event.target.value)
                             }
                         />
-                    </label>
+                    </ControlField>
                 )}
-                <label className="field">
-                    {t("start_date")}
+                <ControlField label={t("start_date")}>
                     <input
                         type="date"
                         required
@@ -105,17 +102,16 @@ export function ForecastPerformance({
                         max={end}
                         onChange={(event) => setStart(event.target.value)}
                     />
-                </label>
-                <label className="field">
-                    {t("end_date")}
+                </ControlField>
+                <ControlField label={t("end_date")}>
                     <input
                         type="date"
                         required
                         value={end}
-                        max={localDay(timezone, -1)}
+                        max={plantDay(timezone, -1)}
                         onChange={(event) => setEnd(event.target.value)}
                     />
-                </label>
+                </ControlField>
                 <button className="button secondary" type="submit">
                     {t("load_performance")}
                 </button>
@@ -140,28 +136,9 @@ function PerformanceResults({
     timezone: string;
 }) {
     const t = useTranslations("ForecastPerformance");
-    const locale = useLocale();
-    const format = (value: number | null) =>
-        value === null
-            ? "—"
-            : new Intl.NumberFormat(locale, {
-                  maximumFractionDigits: 3,
-              }).format(value);
-    const reasons: Record<string, string> = {
-        estimated_actuals_not_available: t(
-            "historical_weather_estimates_are_not_available",
-        ),
-        configuration_not_available: t(
-            "configuration_was_not_available_before_this_day",
-        ),
-        forecast_not_available: t("archived_forecast_unavailable"),
-        configuration_not_comparable: t("configuration_not_comparable"),
-        incomplete_or_invalid_day: t(
-            "production_or_reference_coverage_is_incomplete_or",
-        ),
-        invalid_forecast_data: t("saved_reference_data_is_invalid"),
-    };
-
+    const formatter = useFormat();
+    const format = (value: number | null) => formatter.number(value);
+    const reasonLabel = useCodeLabel("ForecastPerformance.reasons");
     const resource = useApiQuery(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/performance/",
         {
@@ -175,9 +152,10 @@ function PerformanceResults({
     const missingReasons = new Map<string, number>();
     for (const day of resource.data?.days ?? []) {
         if (day.status === "matched") continue;
-        const reason =
-            (day.reason && reasons[day.reason]) ||
-            t("production_or_reference_data_is_unavailable");
+        const unavailable = t("production_or_reference_data_is_unavailable");
+        const reason = day.reason
+            ? reasonLabel(day.reason, unavailable)
+            : unavailable;
         missingReasons.set(reason, (missingReasons.get(reason) ?? 0) + 1);
     }
     return (

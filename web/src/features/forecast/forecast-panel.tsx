@@ -1,5 +1,6 @@
 "use client";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
+import { useFormat } from "@/lib/format/use-format";
 import { useState } from "react";
 import type { Forecast } from "@/lib/api";
 import { CheckboxField } from "@/ui/form";
@@ -28,7 +29,7 @@ export function ForecastPanel({
     electrical?: boolean;
 }) {
     const t = useTranslations("Forecast");
-    const locale = useLocale();
+    const format = useFormat();
     const [showFullDay, setShowFullDay] = useState(false);
     if (
         !forecast.result ||
@@ -58,12 +59,11 @@ export function ForecastPanel({
         unit = electrical ? "MW" : "W/m²";
     const rows = chartIntervals(allRows, metric, showFullDay, result);
     const time = (value: string) =>
-        new Intl.DateTimeFormat(locale, {
-            timeZone: forecast.timezone,
+        format.time(value, forecast.timezone, {
             hour: "2-digit",
             minute: "2-digit",
             hourCycle: "h23",
-        }).format(new Date(value));
+        });
     const scenarioLabel = t("with_outages_title");
     return (
         <>
@@ -92,7 +92,6 @@ export function ForecastPanel({
                         electrical={electrical}
                         scenario={Boolean(scenario)}
                         scenarioLabel={scenarioLabel}
-                        timezone={forecast.timezone}
                         time={time}
                     />
                     <ForecastIntervals
@@ -107,7 +106,6 @@ export function ForecastPanel({
                                   ? t("estimated_actual_intervals")
                                   : t("forecast_intervals")
                         }
-                        timezone={forecast.timezone}
                         formatTime={time}
                     />
                 </>

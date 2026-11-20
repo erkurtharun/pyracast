@@ -61,7 +61,7 @@
         "irradiance_chart": "Aralıklara göre ışınım. Değerler aşağıdaki tabloda yer alır. Eksik değerler boşluk olarak gösterilir.",
         "scenario_tooltip": "{time}: normal kapasite {normal} {unit}; kesintiler dahil {affected} MW",
         "interval_tooltip": "{time}: {value} {unit}",
-        "local_time": "Yerel saat · {timezone}",
+        "local_time": "Santral saati",
         "qualifying_days": " {count} uygun gün: {start} – {end}.",
         "median_ratio": " Medyan üretim/referans oranı: {ratio}.",
         "latest_within_threshold": " {date} tarihindeki son karşılaştırma eşik içinde.",
@@ -142,12 +142,6 @@
         "scenario_notes": "{scenario}: {flags}"
     },
     "ForecastPerformance": {
-        "historical_weather_estimates_are_not_available": "Geçmiş hava durumu tahminleri mevcut değil",
-        "configuration_was_not_available_before_this_day": "Bu günün öncesinde yapılandırma mevcut değildi",
-        "archived_forecast_unavailable": "Bu gün için arşivlenmiş tahmin yok",
-        "configuration_not_comparable": "Ölçüm esası veya saat dilimi değişmiş",
-        "production_or_reference_coverage_is_incomplete_or": "Üretim veya referans veri kapsamı eksik ya da geçersiz",
-        "saved_reference_data_is_invalid": "Kaydedilmiş referans verisi geçersiz",
         "production_comparison": "Üretim karşılaştırması",
         "how_comparison_is_measured": "Karşılaştırma nasıl hesaplanır?",
         "historical_model_uses_saved_weather_estimates_and": "Geçmiş model, kaydedilmiş hava durumu tahminlerini ve mevcut yapılandırmayı kullanır. Kalibrasyon, eğitim döneminden itibaren uygulanır. Bu geriye dönük karşılaştırma geçici üretim verilerini içerebilir. Tahmin doğruluğunu ölçmez.",
@@ -185,13 +179,21 @@
         "error_mwh": "Hata (MWh)",
         "provisional_production": "Geçici üretim verisi",
         "matched": "Eşleşti",
-        "comparison_description": "Geçmiş model veya arşivlenmiş tahmin ile gün ışığında üretim karşılaştırması · {timezone}",
-        "daylight_rules": "Gün ışığıyla kesişen aralıkların enerjisinin tamamı korunur. Gün ışığı kapsamı tam olmalıdır. {timezone} saat diliminde tamamlanmış en fazla 90 gün seçin.",
+        "comparison_description": "Geçmiş model veya arşivlenmiş tahmin ile gün ışığında üretim karşılaştırması",
+        "daylight_rules": "Gün ışığıyla kesişen aralıkların enerjisinin tamamı korunur. Gün ışığı kapsamı tam olmalıdır. Santral saatine göre tamamlanmış en fazla 90 gün seçin.",
         "scored_coverage": "Değerlendirilen: {count} aralık / {hours} saat.",
         "daily_comparison": "Günlük karşılaştırma ({count} gün)",
         "date_range": ": {start} – {end}",
         "unavailable_dates": "Verisi olmayan tarihler ({count})",
-        "reason_count": "{reason}: {count} gün"
+        "reason_count": "{reason}: {count} gün",
+        "reasons": {
+            "estimated_actuals_not_available": "Geçmiş hava durumu tahminleri mevcut değil",
+            "configuration_not_available": "Bu günün öncesinde yapılandırma mevcut değildi",
+            "forecast_not_available": "Bu gün için arşivlenmiş tahmin yok",
+            "configuration_not_comparable": "Ölçüm esası veya saat dilimi değişmiş",
+            "incomplete_or_invalid_day": "Üretim veya referans veri kapsamı eksik ya da geçersiz",
+            "invalid_forecast_data": "Kaydedilmiş referans verisi geçersiz"
+        }
     },
     "Calibrations": {
         "calibration_history": "Kalibrasyon geçmişi",

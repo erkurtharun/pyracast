@@ -61,7 +61,7 @@
         "irradiance_chart": "Irradiance by interval. Values are available in the following table. Missing values are gaps.",
         "scenario_tooltip": "{time}: normal capacity {normal} {unit}; with outages {affected} MW",
         "interval_tooltip": "{time}: {value} {unit}",
-        "local_time": "Local time · {timezone}",
+        "local_time": "Plant time",
         "qualifying_days": " {count} qualifying days: {start} to {end}.",
         "median_ratio": " Median production/reference ratio: {ratio}.",
         "latest_within_threshold": " Latest comparison within threshold on {date}.",
@@ -142,12 +142,6 @@
         "scenario_notes": "{scenario}: {flags}"
     },
     "ForecastPerformance": {
-        "historical_weather_estimates_are_not_available": "Historical weather estimates are not available",
-        "configuration_was_not_available_before_this_day": "Configuration was not available before this day",
-        "archived_forecast_unavailable": "No forecast was archived for this day",
-        "configuration_not_comparable": "The measurement basis or timezone has changed",
-        "production_or_reference_coverage_is_incomplete_or": "Production or reference coverage is incomplete or invalid",
-        "saved_reference_data_is_invalid": "Saved reference data is invalid",
         "production_comparison": "Production comparison",
         "how_comparison_is_measured": "How comparison is measured",
         "historical_model_uses_saved_weather_estimates_and": "Historical model uses saved weather estimates and the current configuration. Calibration applies from its training period onward. This retrospective comparison can include provisional production. It does not measure forecast accuracy.",
@@ -185,13 +179,21 @@
         "error_mwh": "Error (MWh)",
         "provisional_production": "Provisional production",
         "matched": "Matched",
-        "comparison_description": "Historical model or archived forecast vs daylight production · {timezone}",
-        "daylight_rules": "Whole intervals overlapping daylight retain their energy. Complete daylight coverage is required. Select up to 90 completed local days in {timezone}.",
+        "comparison_description": "Historical model or archived forecast vs daylight production",
+        "daylight_rules": "Whole intervals overlapping daylight retain their energy. Complete daylight coverage is required. Select up to 90 completed days in plant time.",
         "scored_coverage": "Scored: {count, plural, one {# interval} other {# intervals}} / {hours} hours.",
         "daily_comparison": "Daily comparison ({count, plural, one {# day} other {# days}})",
         "date_range": ": {start} to {end}",
         "unavailable_dates": "Unavailable dates ({count})",
-        "reason_count": "{reason}: {count, plural, one {# day} other {# days}}"
+        "reason_count": "{reason}: {count, plural, one {# day} other {# days}}",
+        "reasons": {
+            "estimated_actuals_not_available": "Historical weather estimates are not available",
+            "configuration_not_available": "Configuration was not available before this day",
+            "forecast_not_available": "No forecast was archived for this day",
+            "configuration_not_comparable": "The measurement basis or timezone has changed",
+            "incomplete_or_invalid_day": "Production or reference coverage is incomplete or invalid",
+            "invalid_forecast_data": "Saved reference data is invalid"
+        }
     },
     "Calibrations": {
         "calibration_history": "Calibration history",

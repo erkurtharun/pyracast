@@ -5,7 +5,7 @@ import { CsvDownload } from "@/ui/csv-download";
 import { Notice, Stat, Tag } from "@/ui/ui";
 import type { ForecastInterval as Interval } from "../forecast-intervals";
 import { WeatherReferenceCard } from "../weather-reference";
-import { useForecastNumber } from "./format";
+import { useFormat } from "@/lib/format/use-format";
 import {
     hasFlag,
     type DaylightSummary,
@@ -32,7 +32,7 @@ export function ForecastSummary({
     csvRows: Record<string, unknown>[];
 }) {
     const t = useTranslations("Forecast");
-    const number = useForecastNumber();
+    const { number } = useFormat();
     const daylight = result.daylight as DaylightSummary | undefined;
     const primary = daylight ?? result;
     const affectedDaylight = scenario?.result.daylight as

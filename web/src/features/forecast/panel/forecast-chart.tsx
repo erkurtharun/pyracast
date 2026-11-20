@@ -1,7 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import type { ForecastInterval as Interval } from "../forecast-intervals";
-import { useForecastNumber } from "./format";
+import { useFormat } from "@/lib/format/use-format";
 
 export function ForecastChart({
     rows,
@@ -10,7 +10,6 @@ export function ForecastChart({
     electrical,
     scenario,
     scenarioLabel,
-    timezone,
     time,
 }: {
     rows: Interval[];
@@ -19,11 +18,10 @@ export function ForecastChart({
     electrical: boolean;
     scenario: boolean;
     scenarioLabel: string;
-    timezone: string;
     time: (value: string) => string;
 }) {
     const t = useTranslations("Forecast");
-    const number = useForecastNumber();
+    const { number } = useFormat();
     const [firstRow] = rows;
     const lastRow = rows.at(-1);
     const max = Math.max(
@@ -108,7 +106,7 @@ export function ForecastChart({
             </div>
             <div className="chart-axis">
                 <span>{firstRow && time(firstRow.start)}</span>
-                <span>{t("local_time", { timezone })}</span>
+                <span>{t("local_time")}</span>
                 <span>{lastRow && time(lastRow.end)}</span>
             </div>
         </>
