@@ -937,6 +937,79 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/change-requests/seen/": {
+            "post": {
+                "operationId": "tenants_change_requests_seen_all_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SeenAllOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "description": "The request input was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Sign-in is required.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Access was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API failure.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/invitations/": {
             "get": {
                 "operationId": "tenants_invitations_retrieve",
@@ -10431,6 +10504,15 @@
                     }
                 },
                 "required": ["expected_revision"]
+            },
+            "SeenAllOutput": {
+                "type": "object",
+                "properties": {
+                    "marked": {
+                        "type": "integer"
+                    }
+                },
+                "required": ["marked"]
             },
             "SelectionStateEnum": {
                 "enum": [

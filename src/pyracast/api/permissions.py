@@ -60,6 +60,7 @@ ROUTE_POLICIES: Mapping[str, Mapping[str, Policy]] = {
     TENANT + "change-requests/<int:request_id>/approve/": {"POST": ADMIN},
     TENANT + "change-requests/<int:request_id>/reject/": {"POST": ADMIN},
     TENANT + "change-requests/<int:request_id>/seen/": {"POST": MEMBER},
+    TENANT + "change-requests/seen/": {"POST": MEMBER},
     TENANT + "change-requests/<int:request_id>/withdraw/": {"POST": MEMBER},
     TENANT + "invitations/": {"GET": ADMIN, "POST": ADMIN},
     TENANT + "invitations/<int:invitation_id>/": {"DELETE": ADMIN},

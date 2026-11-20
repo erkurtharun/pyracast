@@ -202,6 +202,7 @@ CUSTOMER_FIELDS = {
     "local_date",
     "longitude",
     "manual_observation_ids",
+    "marked",
     "matched_days",
     "max_forecast_times",
     "mean_power_mw",
