@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { configurationInput } from "../src/components/plant-configuration-fields";
+import { configurationInput } from "../src/features/portfolio/plant-configuration-fields";
 import { qualityOf } from "../src/lib/production";
 
 for (const field of ["measurement_basis", "mounting_type"]) {

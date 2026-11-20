@@ -1,4 +1,4 @@
-import { TrashPage } from "@/components/workspace-pages";
+import { TrashPage } from "@/features/workspace/workspace-pages";
 
 export default function Trash() {
     return <TrashPage />;

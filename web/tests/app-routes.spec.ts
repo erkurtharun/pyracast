@@ -183,9 +183,7 @@ test("the document keeps its title while the workspace changes address", async (
         );
         expect(titles.length).toBeGreaterThan(0);
         expect(
-            titles.filter(
-                (title) => title !== "1:Pyracast workspace | Pyracast",
-            ),
+            titles.filter((title) => !/^1:\S.* \| Pyracast$/.test(title)),
         ).toEqual([]);
     };
     // The observer starts at the first title; the server head shows the document starts with it.
@@ -236,6 +234,61 @@ test("the document keeps its title while the workspace changes address", async (
     await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
     expect(await page.locator("title").count()).toBe(1);
     await titlesKeptSinceFirst();
+});
+
+test("the workspace document carries no message catalog", async ({ page }) => {
+    await mockApi(page);
+    const html = await (await page.goto("/app/w/1/"))!.text();
+    expect(html).not.toContain(
+        "Language could not be saved. Please try again.",
+    );
+    await expect(
+        page.getByRole("button", { name: /East array/ }),
+    ).toBeVisible();
+});
+
+test("plant sections carry their own document title", async ({ page }) => {
+    await mockApi(page);
+    await page.goto("/app/w/1/plants/11/forecast/");
+    await expect(page).toHaveTitle("Forecast · East array | Pyracast");
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page).toHaveURL("/app/w/1/plants/11/settings/");
+    await expect(page).toHaveTitle("Settings · East array | Pyracast");
+    await page.getByRole("button", { name: /All plants/ }).click();
+    await expect(page).toHaveURL("/app/w/1/");
+    await expect(page).toHaveTitle("Pyracast workspace | Pyracast");
+    expect(await page.locator("title").count()).toBe(1);
+});
+
+test("a plant screen that fails to render keeps the workspace around its error", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route(
+        (url) =>
+            url.pathname.startsWith("/api/") &&
+            url.pathname.endsWith("/plants/21/forecast/"),
+        (route) =>
+            route.fulfill({
+                json: {
+                    timezone: region.timezone,
+                    freshness: "fresh",
+                    result: {},
+                    production_diagnostic: { days: null },
+                },
+            }),
+    );
+    await page.goto("/app/w/1/plants/11/forecast/");
+    await expect(
+        page.getByRole("heading", { name: "This page could not be displayed" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Workspace")).toHaveValue("1");
+    await expect(page.getByRole("main")).toHaveCount(1);
+    await page.getByRole("button", { name: /Plants/ }).click();
+    await expect(page).toHaveURL("/app/w/1/");
+    await expect(
+        page.getByRole("button", { name: /East array/ }),
+    ).toBeVisible();
 });
 
 test("account settings have their own address", async ({ page }) => {

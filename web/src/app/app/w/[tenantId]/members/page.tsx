@@ -1,4 +1,4 @@
-import { MembersPage } from "@/components/workspace-pages";
+import { MembersPage } from "@/features/workspace/workspace-pages";
 
 export default function Members() {
     return <MembersPage />;

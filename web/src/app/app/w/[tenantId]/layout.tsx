@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
-import { RequireUser } from "@/components/require-user";
-import { WorkspaceShell } from "@/components/workspace-shell";
+import { RequireUser } from "@/features/session/require-user";
+import { WorkspaceShell } from "@/features/workspace/workspace-shell";
 import { routeId } from "@/lib/routes";
 
 export default async function WorkspaceLayout({

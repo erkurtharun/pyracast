@@ -1,3 +1,5 @@
+import { isLanguage, type Language } from "@/i18n/language";
+
 export const plantSections = [
     "forecast",
     "production",
@@ -91,6 +93,36 @@ export function plantAddress(
             : {}),
         ...(view && viewsOf(section).includes(view) ? { view } : {}),
     };
+}
+
+export type SocialCallback = "none" | "succeeded" | "failed";
+export const callbackParams = [
+    "social_callback",
+    "error",
+    "error_process",
+] as const;
+
+export function appQuery(search: URLSearchParams): {
+    signup: boolean;
+    language?: Language;
+    socialCallback: SocialCallback;
+} {
+    const language = search.get("language");
+    return {
+        signup: search.get("signup") === "1",
+        ...(isLanguage(language) ? { language } : {}),
+        socialCallback: !search.has("social_callback")
+            ? "none"
+            : search.has("error")
+              ? "failed"
+              : "succeeded",
+    };
+}
+
+export function addressWithout(url: URL, names: readonly string[]) {
+    const address = new URL(url);
+    for (const name of names) address.searchParams.delete(name);
+    return `${address.pathname}${address.search}${address.hash}`;
 }
 
 export function plantView<S extends ViewSection>(

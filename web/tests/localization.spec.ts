@@ -161,7 +161,7 @@ for (const outcome of ["success", "failure"] as const) {
     });
 }
 
-test("failed public language selection offers a retry in the requested language before exposing authentication", async ({
+test("failed public language selection offers a retry in the session language before exposing authentication", async ({
     page,
 }) => {
     await mockLanguage(page, "en", true);
@@ -173,15 +173,52 @@ test("failed public language selection offers a retry in the requested language 
     });
     await page.goto("/app/?language=tr&signup=1");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
-        "Dil kaydedilemedi. Tekrar deneyin.",
+        "Language could not be saved. Please try again.",
     );
-    await expect(page.locator("html")).toHaveAttribute("lang", "tr");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: "Tekrar dene" }).click();
+    await page.getByRole("button", { name: "Try again" }).click();
     await expect(
         page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
     ).toBeVisible();
     expect(attempts).toBe(2);
+});
+
+test("focus reads wait while the language hand-off is pending or failed", async ({
+    page,
+}) => {
+    await mockLanguage(page, "en", true);
+    let reads = 0;
+    await page.route("**/api/session/", async (route) => {
+        reads += 1;
+        await route.fallback();
+    });
+    let attempts = 0;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/session/language/", async (route) => {
+        if (++attempts > 1) return route.fallback();
+        await held;
+        await route.fulfill({ status: 503, body: "unavailable" });
+    });
+    const requested = page.waitForRequest("**/api/session/language/");
+    await page.goto("/app/?language=tr&signup=1");
+    await requested;
+    const initial = reads;
+    const focus = () =>
+        page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await focus();
+    release();
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+        "Language could not be saved. Please try again.",
+    );
+    await focus();
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(
+        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+    ).toBeVisible();
+    expect(attempts).toBe(2);
+    expect(reads).toBe(initial);
 });
 
 test("a resolved account language overrides the browser and stale cookie without flashing another workspace", async ({

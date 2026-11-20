@@ -669,6 +669,9 @@ for (const width of [320, 390, 1440]) {
             await expect(
                 navigation.getByRole("button", { name: labels.trash }),
             ).toHaveCount(0);
+            await expect(
+                page.getByRole("heading", { level: 1, name: labels.plants }),
+            ).toBeVisible();
             await expect(page.locator("main .stats")).toHaveCount(0);
             await expect(
                 page.getByRole("combobox", { name: labels.workspace }),

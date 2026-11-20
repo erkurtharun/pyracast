@@ -1,6 +1,6 @@
-import { HomePage } from "@/components/public-site/home-page";
+import { HomePage } from "@/features/public-site/home-page";
 import { publicMetadata } from "@/lib/public-metadata";
-import { WebsiteData } from "@/components/public-site/website-data";
+import { WebsiteData } from "@/features/public-site/website-data";
 
 export const metadata = publicMetadata("en", "home");
 

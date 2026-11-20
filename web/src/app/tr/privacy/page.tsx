@@ -1,5 +1,5 @@
-import { LegalPage } from "@/components/public-site/legal-page";
-import { legalCopy } from "@/components/public-site/legal-copy";
+import { LegalPage } from "@/features/public-site/legal-page";
+import { legalCopy } from "@/features/public-site/legal-copy";
 import { publicMetadata } from "@/lib/public-metadata";
 
 export const metadata = publicMetadata("tr", "privacy");

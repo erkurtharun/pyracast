@@ -130,7 +130,7 @@ Public sign-in links apply their language to anonymous visitors through the exis
 CSRF-protected preference endpoint; signed-in account preferences take priority.
 Private pages carry `noindex`; this is not an authorization control. All HTML retains
 the nonce-based CSP and private, no-store caching policy. Legal operator information
-has one source in `web/src/components/public-site/legal-copy.ts`.
+has one source in `web/src/features/public-site/legal-copy.ts`.
 
 ## Approval flow
 
