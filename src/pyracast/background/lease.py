@@ -50,7 +50,7 @@ def release(row: Leased) -> None:
 
 
 def claimable(status: str, now: datetime) -> Q:
-    """Rows whose worker stopped before its lease ended; another worker may claim them."""
+    """Rows in the leased status whose lease has ended; another worker may claim them."""
     return Q(status=status, lease_expires_at__lte=now)
 
 
