@@ -9,12 +9,12 @@ import requests
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from allauth.socialaccount.models import SocialAccount, SocialLogin
 from django.contrib.auth.models import User
-from django.core import mail
 from django.db import DatabaseError, connections
 from django.test import Client, override_settings
 
 from pyracast.accounts import processes
 from pyracast.accounts.audit import logger
+from pyracast.notifications.models import OutboundMail, OutboundMailKind
 from tests.support.account_sessions import (
     account,
     browser,
@@ -79,6 +79,17 @@ def stored_logins() -> list[str]:
             "SELECT value::text FROM pyracast_authentication_cache WHERE value ? 'account'"
         )
         return [value for (value,) in cursor.fetchall()]
+
+
+def store_login(cache_key: str, value: str) -> None:
+    with connections["auth_cache"].cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO pyracast_authentication_cache (cache_key, value, expires) "
+            "VALUES (%s, %s::jsonb, clock_timestamp() + interval '10 minutes') "
+            "ON CONFLICT (cache_key) DO UPDATE SET value = EXCLUDED.value, "
+            "expires = EXCLUDED.expires",
+            [cache_key, value],
+        )
 
 
 @pytest.mark.usefixtures("profile")
@@ -168,13 +179,13 @@ def test_a_completion_without_its_stored_login_is_refused_and_changes_nothing(
     assert callback(client, state)["Location"] == CALLBACK
     client = WITHOUT_A_STORED_LOGIN[case](client)
     identities = list(SocialAccount.objects.values_list("user_id", "uid"))
-    mail.outbox.clear()
+    mails = list(OutboundMail.objects.values_list("kind", flat=True))
 
     response = finish(client)
 
     assert response.status_code == 409
     assert list(SocialAccount.objects.values_list("user_id", "uid")) == identities
-    assert mail.outbox == []
+    assert list(OutboundMail.objects.values_list("kind", flat=True)) == mails
 
 
 @pytest.mark.usefixtures("profile")
@@ -202,6 +213,38 @@ def test_a_completion_from_another_site_is_refused_and_keeps_the_stored_login() 
     assert not SocialAccount.objects.exists()
     assert finish(client).status_code == 200
     assert SocialAccount.objects.get().user_id == user.pk
+
+
+@pytest.mark.usefixtures("profile")
+def test_a_login_stored_while_a_completion_takes_its_own_stays_for_the_next_completion() -> None:
+    # The first completion refreshes an identity the account holds, so its credentials stay as
+    # they were and the next connection needs no new confirmation.
+    user, client, first = connecting("owner", identity="google-identity")
+    second = begin(client, "microsoft", process="connect")
+    assert callback(client, second, "microsoft")["Location"] == CALLBACK
+    [stored_meanwhile] = stored_logins()
+    assert callback(client, first)["Location"] == CALLBACK
+    taken: list[str] = []
+
+    def stored_after_the_first_read(
+        execute: Callable[..., Any], sql: str, params: Any, many: bool, context: Any
+    ) -> Any:
+        result = execute(sql, params, many, context)
+        key = next((value for value in params or () if "provider-login:" in str(value)), None)
+        if key is not None and not taken:
+            taken.append(key)
+            elsewhere(lambda: store_login(key, stored_meanwhile))
+        return result
+
+    with connections["auth_cache"].execute_wrapper(stored_after_the_first_read):
+        completed = finish(client)
+    completed_next = finish(client)
+
+    assert (completed.status_code, completed_next.status_code) == (200, 200)
+    assert set(SocialAccount.objects.values_list("user_id", "provider")) == {
+        (user.pk, "google"),
+        (user.pk, "microsoft"),
+    }
 
 
 def test_a_connection_refused_after_the_provider_exchange_names_the_factor_to_confirm(
@@ -328,7 +371,6 @@ def test_a_connection_that_rolls_back_leaves_no_line_and_no_mail(
         raise DatabaseError("The transaction failed after the connection.")
 
     monkeypatch.setattr(SocialLogin, "connect", connected_then_failed)
-    mail.outbox.clear()
     client.raise_request_exception = False
 
     response = finish(client)
@@ -336,7 +378,7 @@ def test_a_connection_that_rolls_back_leaves_no_line_and_no_mail(
     assert response.status_code >= 500
     assert not SocialAccount.objects.exists()
     assert "social_account_connected" not in lines()
-    assert mail.outbox == []
+    assert list(OutboundMail.objects.values_list("kind", flat=True)) == []
 
 
 @pytest.mark.usefixtures("profile")
@@ -344,14 +386,13 @@ def test_a_connection_writes_its_line_and_mail_with_its_commit(
     lines: Callable[[], list[str]],
 ) -> None:
     _user, client, state = connecting("owner")
-    mail.outbox.clear()
 
     response = complete(client, state)
 
     assert response.status_code == 200
     assert lines().count("social_account_connected") == 1
-    assert [message.extra_headers["X-Pyracast-Mail"] for message in mail.outbox] == [
-        "socialaccount/email/account_connected"
+    assert list(OutboundMail.objects.values_list("kind", flat=True)) == [
+        OutboundMailKind.ACCOUNT_CONNECTED
     ]
 
 

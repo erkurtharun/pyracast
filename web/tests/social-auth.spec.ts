@@ -722,3 +722,48 @@ test("a provider connection to another account's identity says so", async ({
     });
     await expect(accounts.getByRole("alert")).toContainText(message);
 });
+
+for (const [name, refusal] of [
+    ["finds no stored login", { status: 409, json: { status: 409 } }],
+    [
+        "leaves no pending step",
+        {
+            status: 401,
+            json: {
+                status: 401,
+                data: { flows: [] },
+                meta: { is_authenticated: false },
+            },
+        },
+    ],
+] as const) {
+    test(`a provider sign-in whose completion ${name} shows the callback error`, async ({
+        page,
+    }) => {
+        await mockApi(page, { anonymous: true });
+        await page.route(
+            "**/api/auth/browser/v1/auth/provider/complete",
+            (route) => route.fulfill(refusal),
+        );
+        await page.goto("/app/?social_callback=1");
+        await expect(page.locator(".notice.error")).toContainText(
+            "sign in with your existing method",
+        );
+        await expect(page).not.toHaveURL(/social_callback/);
+    });
+}
+
+test("a refused provider connection shows the callback error", async ({
+    page,
+}) => {
+    const accounts = await connectingAccount(page, {
+        status: 403,
+        json: { status: 403 },
+    });
+    await expect(accounts.getByRole("alert")).toContainText(
+        "could not be completed",
+    );
+    await expect(
+        accounts.getByText("Account connected.", { exact: true }),
+    ).toHaveCount(0);
+});

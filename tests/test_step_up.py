@@ -1511,6 +1511,34 @@ def test_a_provider_exchange_that_fails_after_its_session_ended_sends_no_session
     assert session_user(client) is None
 
 
+def test_an_expired_provider_state_answers_its_error_without_a_cookie_after_its_session_ended(
+    now: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    serve_provider_profile(monkeypatch)
+    with override_settings(SOCIALACCOUNT_PROVIDERS=PROVIDERS):
+        user, client, _other = arranged(WRITES["connect"])
+        state = connection_started(client, now)
+        dispatch = social_views.ProviderCallbackView.dispatch
+
+        def answered_then_ended(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+            response = dispatch(self, request, *args, **kwargs)
+            elsewhere(lambda: end_sessions(user.pk, "mfa_reset"))
+            return response
+
+        monkeypatch.setattr(social_views.ProviderCallbackView, "dispatch", answered_then_ended)
+        later = time.time() + statekit.STATE_TTL + 1
+        monkeypatch.setattr(statekit, "time", SimpleNamespace(time=lambda: later))
+
+        response = callback(client, state)
+
+    assert (response.status_code, response.get("Location"), session_cookie(response)) == (
+        302,
+        CALLBACK + "&error=unknown&error_process=login",
+        None,
+    )
+    assert session_user(client) is None
+
+
 class SignalAfterSignIn:
     # Signs a new session of the account in after the write committed, before the library sends
     # its signal from that commit.
