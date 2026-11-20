@@ -16,6 +16,7 @@ import {
 import { Calibrations } from "@/features/calibration/calibrations";
 import { OwnPendingRequests } from "@/features/inbox/operational-inbox";
 import { ViewNav } from "@/ui/action";
+import { ExportPlant } from "@/ui/export-plant";
 import { usePageTitle } from "@/ui/page-title";
 import { Notice } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
@@ -65,7 +66,9 @@ export function PlantWorkspace({
     const configuration = currentPlant.current_configuration;
     usePageTitle(`${t(tab)} · ${currentPlant.name} | Pyracast`);
     return (
-        <>
+        <ExportPlant
+            value={{ id: currentPlant.id, name: currentPlant.name, timezone }}
+        >
             <button
                 className="back-button"
                 onClick={() => router.push(portfolio)}
@@ -168,9 +171,8 @@ export function PlantWorkspace({
                 <Calibrations
                     key={`calibration-${configuration.id}`}
                     scope={scope}
-                    currentConfigurationId={configuration.id}
                 />
             )}
-        </>
+        </ExportPlant>
     );
 }

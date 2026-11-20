@@ -86,12 +86,21 @@ async function workspace(
             expect(route.request().headers()["x-csrftoken"]).toBe("token");
             const body = route.request().postDataJSON();
             if (conflict) {
+                conflict = false;
+                incident = {
+                    ...incident,
+                    title: "Changed meanwhile",
+                    revision: Number(incident?.revision) + 1,
+                };
                 await route.fulfill({
                     status: 409,
-                    json: errorBody(
-                        "incident_revision_changed",
-                        "This outage changed. Reload before editing.",
-                    ),
+                    json: {
+                        ...errorBody(
+                            "incident_revision_changed",
+                            "The outage changed. Reload the list and try again.",
+                        ),
+                        current: incident,
+                    },
                 });
                 return;
             }
@@ -187,7 +196,7 @@ async function create(page: Page, impact = "Total outage") {
         .click();
     await page.getByLabel("Incident title").fill("Inverter disconnected");
     await page
-        .getByLabel("Started at (device time)", { exact: true })
+        .getByLabel("Started at", { exact: true })
         .fill("2026-11-11T11:00");
     await page.getByLabel("Capacity impact").selectOption({ label: impact });
     await page
@@ -243,15 +252,21 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
         { header: true, skipEmptyLines: true },
     ).data;
     expect(csv).toHaveLength(3);
-    expect(csv[1]).toMatchObject({
+    expect(csv[1]).toEqual({
+        plant_id: "21",
+        plant_name: "Outage plant",
+        timezone: "Europe/Istanbul",
+        date: "2026-11-12",
+        source_kind: "forecasts",
+        starts_at: "2026-11-12T12:00:00+03:00",
+        ends_at: "2026-11-12T13:00:00+03:00",
         normal_mean_power_mw: "2",
-        affected_mean_power_mw: "0",
         normal_energy_mwh: "2",
+        normal_quality_flags: "",
+        affected_mean_power_mw: "0",
         affected_energy_mwh: "0",
+        affected_quality_flags: "",
     });
-    expect(csv[1]?.["outage_scenario.incidents"]).toContain(
-        "Inverter disconnected",
-    );
     await page.getByRole("button", { name: "Outages", exact: true }).click();
     await expect(
         page.getByRole("heading", { name: "Inverter disconnected" }),
@@ -262,7 +277,7 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
         .getByRole("button", { name: "Resolve outage", exact: true })
         .click();
     await page
-        .getByLabel("Resolved at (device time)", { exact: true })
+        .getByLabel("Resolved at", { exact: true })
         .fill("2026-11-11T14:00");
     await page.getByRole("button", { name: "Save resolution" }).click();
     await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
@@ -360,15 +375,70 @@ test("unknown impact remains missing and stale edits show a conflict", async ({
     await expect(
         page.getByRole("table").getByRole("cell", { name: /Data unavailable/ }),
     ).toHaveCount(1);
-    await page.getByRole("button", { name: "Outages", exact: true }).click();
+});
+
+test("a stale edit keeps what was typed, shows what changed and saves only when asked", async ({
+    page,
+}) => {
+    const state = await workspace(page);
+    await create(page);
+    const writes: string[] = [];
+    page.on("request", (request) => {
+        if (request.method() === "PUT") writes.push(request.url());
+    });
+    await page
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    await page.getByLabel("Capacity impact").selectOption("reduced");
+    await page.getByLabel("Available panel DC capacity (MW)").fill("2");
+    state.conflict();
+    await page.getByRole("button", { name: "Save outage changes" }).click();
+    await expect(
+        page.getByRole("alert").filter({
+            hasText: "Someone changed this outage after you opened it.",
+        }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Title: Inverter disconnected → Changed meanwhile"),
+    ).toBeVisible();
+    await expect(
+        page.getByLabel("Available panel DC capacity (MW)"),
+    ).toHaveValue("2");
+    expect(writes).toHaveLength(1);
+    expect(state.incident()).toMatchObject({
+        revision: 2,
+        title: "Changed meanwhile",
+    });
+    await page.getByRole("button", { name: "Save outage changes" }).click();
+    await expect(
+        page.getByRole("heading", { name: "Inverter disconnected" }),
+    ).toBeVisible();
+    expect(writes).toHaveLength(2);
+    expect(state.incident()).toMatchObject({
+        revision: 3,
+        title: "Inverter disconnected",
+        available_dc_mw: 2,
+    });
+});
+
+test("a stale edit can be discarded for the current version", async ({
+    page,
+}) => {
+    const state = await workspace(page);
+    await create(page);
     await page
         .getByRole("button", { name: "Edit report", exact: true })
         .click();
     state.conflict();
     await page.getByRole("button", { name: "Save outage changes" }).click();
+    await page.getByRole("button", { name: "Discard my change" }).click();
+    await expect(page.getByRole("region", { name: "Edit outage" })).toHaveCount(
+        0,
+    );
     await expect(
-        page.getByRole("alert").filter({ hasText: "This outage changed" }),
+        page.getByRole("heading", { name: "Changed meanwhile" }),
     ).toBeVisible();
+    expect(state.incident()?.revision).toBe(2);
 });
 
 test("rejects future times and requires confirmation to cancel an incorrect incident", async ({
@@ -380,7 +450,7 @@ test("rejects future times and requires confirmation to cancel an incorrect inci
         .getByRole("button", { name: "Edit report", exact: true })
         .click();
     await page
-        .getByLabel("Started at (device time)", { exact: true })
+        .getByLabel("Started at", { exact: true })
         .fill("2026-11-12T11:00");
     await page.getByRole("button", { name: "Save outage changes" }).click();
     await expect(
@@ -401,6 +471,7 @@ test("rejects future times and requires confirmation to cancel an incorrect inci
     await page
         .getByRole("button", { name: "Cancel outage", exact: true })
         .click();
+    await page.getByText("1 cancelled entry", { exact: true }).click();
     await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
     expect(state.incident()?.revision).toBe(2);
 });
@@ -434,7 +505,7 @@ test("reduced capacity needs at least one available value", async ({
         .click();
     await page.getByLabel("Incident title").fill("Inverter disconnected");
     await page
-        .getByLabel("Started at (device time)", { exact: true })
+        .getByLabel("Started at", { exact: true })
         .fill("2026-11-11T11:00");
     await page.getByLabel("Capacity impact").selectOption("reduced");
     await page
@@ -478,7 +549,7 @@ test("an emptied resolution is refused before it is sent", async ({ page }) => {
     await page
         .getByRole("button", { name: "Resolve outage", exact: true })
         .click();
-    const resolvedAt = page.getByLabel("Resolved at (device time)", {
+    const resolvedAt = page.getByLabel("Resolved at", {
         exact: true,
     });
     await resolvedAt.fill("");
@@ -504,7 +575,7 @@ test("an ongoing outage is tagged as a warning and a resolved one is labelled", 
         .getByRole("button", { name: "Resolve outage", exact: true })
         .click();
     await page
-        .getByLabel("Resolved at (device time)", { exact: true })
+        .getByLabel("Resolved at", { exact: true })
         .fill("2026-11-11T14:00");
     await page.getByRole("button", { name: "Save resolution" }).click();
     await expect(tag).toHaveText("Resolved");
@@ -514,30 +585,29 @@ test("an ongoing outage is tagged as a warning and a resolved one is labelled", 
 test.describe("in a browser zone west of the plant", () => {
     test.use({ timezoneId: "America/New_York" });
 
-    test("outage times are entered and shown in the device zone", async ({
+    test("outage times are entered and shown in plant time", async ({
         page,
     }) => {
         const state = await workspace(page);
         await page
             .getByRole("button", { name: "Outages", exact: true })
             .click();
-        await expect(
-            page.getByText(
-                "Entry and display times use your device timezone: America/New_York.",
-            ),
-        ).toBeVisible();
+        await expect(page.getByText(/device timezone/)).toHaveCount(0);
         await page
             .getByRole("button", { name: "Report outage", exact: true })
             .click();
+        await expect(
+            page.getByLabel("Started at", { exact: true }),
+        ).toHaveValue("2026-11-11T15:00");
         await page.getByLabel("Incident title").fill("Inverter disconnected");
         await page
-            .getByLabel("Started at (device time)", { exact: true })
-            .fill("2026-11-11T03:00");
+            .getByLabel("Started at", { exact: true })
+            .fill("2026-11-11T11:00");
         await page
             .getByRole("button", { name: "Save outage", exact: true })
             .click();
         await expect(
-            page.getByText(/Started Nov 11, 2026, 3:00\sAM/),
+            page.getByText(/Started Nov 11, 2026, 11:00\sAM/),
         ).toBeVisible();
         expect(state.incident()).toMatchObject({
             starts_at: "2026-11-11T08:00:00.000Z",

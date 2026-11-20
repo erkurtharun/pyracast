@@ -217,13 +217,13 @@ for (const electrical of [true, false]) {
             await readFile(await (await download).path(), "utf8"),
             { header: true, skipEmptyLines: true },
         );
-        expect(records.data[0]?.source_kinds).toContain("estimated_actuals");
-        expect(records.data[1]?.source_kinds).toContain("forecast");
+        expect(records.data[0]?.interval_source).toContain("estimated_actuals");
+        expect(records.data[1]?.interval_source).toContain("forecast");
         if (electrical) {
-            expect(records.data[2]?.source_kinds).toContain(
+            expect(records.data[2]?.interval_source).toContain(
                 "estimated_actuals",
             );
-            expect(records.data[2]?.source_kinds).toContain("forecast");
+            expect(records.data[2]?.interval_source).toContain("forecast");
         }
         await page.getByText("Source & quality", { exact: true }).click();
         await expect(
@@ -292,8 +292,8 @@ test("generation intervals show energy without redundant visible power columns",
     );
     expect(records.data).toHaveLength(4);
     expect(records.data[0]).toMatchObject({
-        start: "2026-11-14T09:00:00.000Z",
-        end: "2026-11-14T09:30:00.000Z",
+        starts_at: "2026-11-14T12:00:00+03:00",
+        ends_at: "2026-11-14T12:30:00+03:00",
         mean_power_mw: "2",
         energy_mwh: "1",
     });

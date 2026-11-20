@@ -236,7 +236,7 @@
     },
     "ProductionCsv": {
         "size": "En fazla 2 MiB boyutunda bir CSV seçin.",
-        "header": "CSV başlığı şu olmalı: starts_at,ends_at,energy,quality,source",
+        "header": "CSV sütunları starts_at, ends_at, energy_kwh veya energy_mwh, quality ve source olmalı; timezone isteğe bağlıdır.",
         "parse": "CSV okunamadı: {reason}",
         "count": "Her seferde 1 ile 2.000 arasında kayıt aktarın.",
         "interval": "Satır {row}: 30 veya 60 dakikalık aralık için saat dilimi içeren ISO tarihleri kullanın.",
@@ -423,6 +423,31 @@
             "insufficient": "Yetersiz veri",
             "provisional": "Geçici",
             "evaluated": "Değerlendirildi"
+        },
+        "IncidentStatus": {
+            "active": "Etkin",
+            "resolved": "Çözüldü",
+            "cancelled": "İptal edildi"
+        },
+        "SelectionState": {
+            "active": "Etkin",
+            "candidate": "Aday",
+            "previous_configuration": "Önceki yapılandırma",
+            "not_ready": "Hazır değil"
+        },
+        "ActivationBlocker": {
+            "configuration_changed": "yapılandırma değişti",
+            "production_source_changed": "üretim kaynağı değişti",
+            "outage_history_changed": "kesinti geçmişi değişti",
+            "incumbent_changed": "etkin kalibrasyon değişti",
+            "calibration_not_activatable": "etkinleştirilemez"
+        },
+        "AutomationCause": {
+            "toggle": "bir çalışma alanı yöneticisi kapattı",
+            "manual_activation": "elle etkinleştirme ile değişti",
+            "reset": "kalibrasyonsuz modele dönüşle kapatıldı",
+            "configuration_revised": "santral yapılandırması değiştiği için kapatıldı",
+            "workspace_disabled": "Pyracast desteği bu çalışma alanı için kapattı"
         }
     }
 }

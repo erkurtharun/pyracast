@@ -3198,6 +3198,16 @@
                         },
                         "description": ""
                     },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IncidentConflict"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
                     "400": {
                         "description": "The request input was refused.",
                         "content": {
@@ -3831,6 +3841,16 @@
                         },
                         "description": ""
                     },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IncidentConflict"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
                     "400": {
                         "description": "The request input was refused.",
                         "content": {
@@ -3958,6 +3978,16 @@
                         },
                         "description": ""
                     },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IncidentConflict"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
                     "400": {
                         "description": "The request input was refused.",
                         "content": {
@@ -4080,6 +4110,16 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/IncidentOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IncidentConflict"
                                 }
                             }
                         },
@@ -5452,6 +5492,17 @@
                 "type": "string",
                 "description": "* `activated` - activated\n* `skipped` - skipped"
             },
+            "AutomationCauseEnum": {
+                "enum": [
+                    "toggle",
+                    "manual_activation",
+                    "reset",
+                    "configuration_revised",
+                    "workspace_disabled"
+                ],
+                "type": "string",
+                "description": "* `toggle` - Toggle\n* `manual_activation` - Manual Activation\n* `reset` - Reset\n* `configuration_revised` - Configuration Revised\n* `workspace_disabled` - Workspace Disabled"
+            },
             "BaselineSourceKindEnum": {
                 "enum": [
                     "manual",
@@ -5499,7 +5550,7 @@
                         "nullable": true,
                         "oneOf": [
                             {
-                                "$ref": "#/components/schemas/DisabledCauseEnum"
+                                "$ref": "#/components/schemas/AutomationCauseEnum"
                             },
                             {
                                 "$ref": "#/components/schemas/NullEnum"
@@ -6097,11 +6148,6 @@
                     "unread"
                 ]
             },
-            "CodeEnum": {
-                "enum": ["provider_hour_incomplete", "energy_exceeds_capacity"],
-                "type": "string",
-                "description": "* `provider_hour_incomplete` - provider_hour_incomplete\n* `energy_exceeds_capacity` - energy_exceeds_capacity"
-            },
             "CollectionEndpointEnum": {
                 "enum": [
                     "forecasts",
@@ -6572,17 +6618,6 @@
                 "enum": ["suspected", "normal", "insufficient"],
                 "type": "string",
                 "description": "* `suspected` - suspected\n* `normal` - normal\n* `insufficient` - insufficient"
-            },
-            "DisabledCauseEnum": {
-                "enum": [
-                    "toggle",
-                    "manual_activation",
-                    "reset",
-                    "configuration_revised",
-                    "workspace_disabled"
-                ],
-                "type": "string",
-                "description": "* `toggle` - Toggle\n* `manual_activation` - Manual Activation\n* `reset` - Reset\n* `configuration_revised` - Configuration Revised\n* `workspace_disabled` - Workspace Disabled"
             },
             "DispatcherPhaseEnum": {
                 "enum": [
@@ -7115,6 +7150,21 @@
                     "values"
                 ]
             },
+            "IncidentConflict": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "$ref": "#/components/schemas/ErrorCode"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "current": {
+                        "$ref": "#/components/schemas/IncidentOutput"
+                    }
+                },
+                "required": ["code", "current", "message"]
+            },
             "IncidentInput": {
                 "type": "object",
                 "properties": {
@@ -7225,7 +7275,11 @@
                         "type": "integer"
                     },
                     "status": {
-                        "type": "string",
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/IncidentStatusEnum"
+                            }
+                        ],
                         "readOnly": true
                     },
                     "created_at": {
@@ -7288,6 +7342,11 @@
                     }
                 },
                 "required": ["action", "idempotency_key"]
+            },
+            "IncidentStatusEnum": {
+                "enum": ["active", "resolved", "cancelled"],
+                "type": "string",
+                "description": "* `active` - Active\n* `resolved` - Resolved\n* `cancelled` - Cancelled"
             },
             "IncidentUpdate": {
                 "type": "object",
@@ -9652,7 +9711,7 @@
                 "type": "object",
                 "properties": {
                     "code": {
-                        "$ref": "#/components/schemas/CodeEnum"
+                        "$ref": "#/components/schemas/ProductionPreviewWarningOutputCodeEnum"
                     },
                     "starts_at": {
                         "type": "string",
@@ -9664,6 +9723,11 @@
                     }
                 },
                 "required": ["code", "ends_at", "starts_at"]
+            },
+            "ProductionPreviewWarningOutputCodeEnum": {
+                "enum": ["provider_hour_incomplete", "energy_exceeds_capacity"],
+                "type": "string",
+                "description": "* `provider_hour_incomplete` - provider_hour_incomplete\n* `energy_exceeds_capacity` - energy_exceeds_capacity"
             },
             "ProductionProviderOutput": {
                 "type": "object",

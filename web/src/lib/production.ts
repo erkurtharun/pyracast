@@ -19,7 +19,30 @@ export type Observation = {
     quality: Quality;
     source: string;
 };
-export function parseProduction(text: string, language = "en"): Observation[] {
+export type Unit = "MWh" | "kWh";
+export type ProductionFile = { unit: Unit; observations: Observation[] };
+
+// The energy column names its unit; timezone is informational, as the production export writes it.
+const ENERGY_COLUMNS = { energy_mwh: "MWh", energy_kwh: "kWh" } as const;
+const REQUIRED_COLUMNS = ["starts_at", "ends_at", "quality", "source"];
+const OPTIONAL_COLUMNS = ["timezone"];
+
+function energyColumn(fields: string[] = []) {
+    const energy = Object.keys(ENERGY_COLUMNS).filter((name) =>
+        fields.includes(name),
+    );
+    const known = [...REQUIRED_COLUMNS, ...energy, ...OPTIONAL_COLUMNS];
+    const [column] = energy;
+    return energy.length === 1 &&
+        new Set(fields).size === fields.length &&
+        REQUIRED_COLUMNS.every((name) => fields.includes(name)) &&
+        fields.every((name) => known.includes(name)) &&
+        (column === "energy_mwh" || column === "energy_kwh")
+        ? column
+        : null;
+}
+
+export function parseProduction(text: string, language = "en"): ProductionFile {
     const locale = isLanguage(language) ? language : "en";
     const t = createTranslator({
         locale,
@@ -35,23 +58,15 @@ export function parseProduction(text: string, language = "en"): Observation[] {
         transformHeader: (value) => value.trim(),
         transform: (value) => value.trim(),
     });
-    if (
-        parsed.meta.fields?.join(",") !==
-        "starts_at,ends_at,energy,quality,source"
-    )
-        throw new DisplayError(t("header"));
+    const column = energyColumn(parsed.meta.fields);
+    if (!column) throw new DisplayError(t("header"));
     const [error] = parsed.errors;
     if (error) throw new DisplayError(t("parse", { reason: error.message }));
     if (parsed.data.length < 1 || parsed.data.length > 2000)
         throw new DisplayError(t("count"));
     const rows = parsed.data.map((row, index) => {
-        const {
-            starts_at = "",
-            ends_at = "",
-            energy: rawEnergy,
-            quality,
-            source,
-        } = row;
+        const { starts_at = "", ends_at = "", quality, source } = row;
+        const rawEnergy = row[column];
         const start = Date.parse(starts_at),
             end = Date.parse(ends_at),
             energy = Number(rawEnergy);
@@ -86,5 +101,5 @@ export function parseProduction(text: string, language = "en"): Observation[] {
         })
     )
         throw new DisplayError(t("overlap"));
-    return rows;
+    return { unit: ENERGY_COLUMNS[column], observations: rows };
 }

@@ -177,7 +177,7 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
         name: "production.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(
-            "starts_at,ends_at,energy,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,250,valid,meter\n",
+            "starts_at,ends_at,energy_kwh,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,250,valid,meter\n",
         ),
     });
     await expect(page.getByText(/1 valid observations ready/)).toBeVisible();
@@ -258,7 +258,7 @@ test("mock contract: imports validated production with explicit energy units", a
         name: "production.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(
-            "starts_at,ends_at,energy,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,250,valid,meter",
+            "starts_at,ends_at,energy_kwh,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,250,valid,meter",
         ),
     });
     await expect(page.getByText(/1 valid observations ready/)).toBeVisible();
@@ -287,7 +287,7 @@ test("CSV selection replaces validated rows and recovers after an invalid file",
             name,
             mimeType: "text/csv",
             buffer: Buffer.from(
-                `starts_at,ends_at,energy,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,${energy},valid,meter`,
+                `starts_at,ends_at,energy_kwh,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,${energy},valid,meter`,
             ),
         });
     await select("first.csv", "250");
@@ -364,7 +364,7 @@ for (const staleRead of ["resolve", "reject"] as const) {
             await page.getByRole("button", { name: "Import CSV" }).click();
             const csv = (energy: number, source: string) =>
                 Buffer.from(
-                    `starts_at,ends_at,energy,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,${energy},valid,${source}`,
+                    `starts_at,ends_at,energy_kwh,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,${energy},valid,${source}`,
                 );
             const input = page.getByLabel("Production CSV");
             await input.setInputFiles({
@@ -1132,14 +1132,18 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
         "5",
         "0",
     ]);
-    expect(parsed.data[0]).toMatchObject({
-        start: "2026-01-01T06:00:00+03:00",
+    expect(parsed.data[0]).toEqual({
+        plant_id: "21",
+        plant_name: "East array",
         timezone: region.timezone,
-        "result.model_version": 'Ölçüm, "north"\nroof',
-        "result.provenance.supplier": "' =SUM(A1:A2)",
-        "result.provenance.offset": "-2.5",
+        date: "2026-01-01",
+        source_kind: "forecast",
+        starts_at: "2026-01-01T06:00:00+03:00",
+        ends_at: "2026-01-01T07:00:00+03:00",
+        ghi_wm2: "0",
+        quality_flags: "",
     });
-    expect(csv).toContain(",-2.5,");
+    expect(csv).not.toContain("SUM(");
 });
 
 test("all-zero forecasts remain visible as measured zero values", async ({
@@ -1240,8 +1244,16 @@ test("mock contract: visible API error, empty state and accessible mobile layout
     expect(scan).toEqual([]);
 });
 test("CSV rejects ambiguous units, offsets, overlaps, invalid energy and oversized batches", () => {
-    const header = "starts_at,ends_at,energy,quality,source\n";
-    expect(() => parseProduction("start,end,power\n")).toThrow("header");
+    const header = "starts_at,ends_at,energy_kwh,quality,source\n";
+    for (const columns of [
+        "start,end,power",
+        "starts_at,ends_at,energy,quality,source",
+        "starts_at,ends_at,energy_kwh,energy_mwh,quality,source",
+        "starts_at,ends_at,energy_kwh,quality,source,plant",
+    ])
+        expect(() => parseProduction(`${columns}\n`)).toThrow(
+            "energy_kwh or energy_mwh",
+        );
     expect(() =>
         parseProduction(
             header + "2026-01-01T09:00:00,2026-01-01T09:30:00,-1,valid,meter",
@@ -1262,12 +1274,13 @@ test("CSV rejects ambiguous units, offsets, overlaps, invalid energy and oversiz
 });
 
 test("CSV preserves quoted commas and multiline source fields and rejects missing energy", () => {
-    const header = "starts_at,ends_at,energy,quality,source\r\n";
+    const header = "starts_at,ends_at,energy_kwh,quality,source\r\n";
     const interval = "2026-01-01T09:00:00Z,2026-01-01T09:30:00Z";
-    const rows = parseProduction(
+    const parsed = parseProduction(
         header + interval + ',0,valid,"Meter, north\nroof"\r\n',
     );
-    expect(rows).toEqual([
+    expect(parsed.unit).toBe("kWh");
+    expect(parsed.observations).toEqual([
         {
             starts_at: "2026-01-01T09:00:00Z",
             ends_at: "2026-01-01T09:30:00Z",
@@ -1443,16 +1456,14 @@ test("performance hides stale CSV while a selected range is loading", async ({
     await csv.click();
     const exported = await download;
     expect(exported.suggestedFilename()).toBe(
-        "performance-2026-11-01-2026-11-02.csv",
+        "performance-East array-2026-11-01-2026-11-02.csv",
     );
-    const records = Papa.parse<Record<string, string>>(
+    const parsed = Papa.parse<Record<string, string>>(
         await readFile(await exported.path(), "utf8"),
         { header: true, skipEmptyLines: true },
-    ).data;
-    expect(records[0]).toMatchObject({
-        start_date: "2026-11-01",
-        end_date: "2026-11-02",
-    });
+    );
+    expect(parsed.meta.fields).toContain("comparison");
+    expect(parsed.data).toEqual([]);
 });
 
 test("forecast performance shows archived metrics, missing days and selected range", async ({
@@ -1552,11 +1563,12 @@ test("forecast performance shows archived metrics, missing days and selected ran
     ).data;
     expect(exported).toHaveLength(2);
     expect(exported[0]).toMatchObject({
+        plant_name: "East array",
+        timezone: region.timezone,
         date: "2026-11-01",
         error_mwh: "-1.5",
-        "metrics.daily_bias_mwh": "-1.5",
-        timezone: region.timezone,
     });
+    expect(exported[0]).not.toHaveProperty("metrics.daily_bias_mwh");
     expect(exported[1]).toMatchObject({
         date: "2026-11-02",
         error_mwh: "",
@@ -1576,6 +1588,8 @@ test("calibration detail explains support, rejection and incumbent comparison", 
         window_start: "2026-01-01",
         window_end: "2026-01-10",
         status: "rejected",
+        selection_state: "not_ready",
+        activation_blocker: "calibration_not_activatable",
         assessment: "provisional",
         factor: 1.1,
         result: {
@@ -1635,10 +1649,15 @@ test("calibration detail explains support, rejection and incumbent comparison", 
         { header: true, skipEmptyLines: true },
     ).data;
     expect(exported[0]).toMatchObject({
+        plant_name: "East array",
         id: "40",
+        status: "rejected",
         factor: "1.1",
-        "result.training_support.informative_days": "4",
-        "result.incumbent_factor": "1.2",
+        activation_blocker: "calibration_not_activatable",
+        training_days: "8",
+        holdout_days: "2",
+        baseline_daily_mae_mwh: "3",
+        candidate_daily_mae_mwh: "2",
     });
 });
 

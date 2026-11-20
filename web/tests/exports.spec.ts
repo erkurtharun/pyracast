@@ -18,7 +18,9 @@ type Schemas = components["schemas"];
 const plant = { id: 21, name: "Doğu: array", timezone: "Europe/Istanbul" };
 
 function lines(file: CsvExport) {
-    return csvDocument(file.header, file.rows).replace(/^﻿/, "").split("\r\n");
+    return csvDocument(file.header, file.rows)
+        .replace(/^\uFEFF/, "")
+        .split("\r\n");
 }
 
 const interval = (
@@ -90,12 +92,14 @@ test("every export names the plant safely in its file name", () => {
 test("cells quote text, double quotes and never start a spreadsheet formula", () => {
     const [header, row] = csvDocument(
         ["a", "b", "c", "d", "e", "f", "g"],
-        [["=1+1", "​@x", "\t-cmd", "-2.5", "a,b", 'say "hi"', null]],
+        [["=1+1", "\u200b@x", "\t-cmd", "-2.5", "a,b", 'say "hi"', null]],
     )
-        .replace(/^﻿/, "")
+        .replace(/^\uFEFF/, "")
         .split("\r\n");
     expect(header).toBe('"a","b","c","d","e","f","g"');
-    expect(row).toBe(`"'=1+1","'​@x","'\t-cmd","-2.5","a,b","say ""hi""",`);
+    expect(row).toBe(
+        `"'=1+1","'\u200b@x","'\t-cmd","-2.5","a,b","say ""hi""",`,
+    );
 });
 
 test("the production export holds the import columns and one row per recorded interval in plant time", () => {
@@ -187,13 +191,13 @@ test("calibration exports list each run with its selection and no provider data"
     expect(list.filename).toBe("calibrations-Doğu- array.csv");
     expect(lines(list).slice(0, 2)).toEqual([
         '"plant_id","plant_name","timezone","id","window_start","window_end","status","reason","selection_state","assessment","factor","provisional_production","created_at","completed_at"',
-        '21,"Doğu: array","Europe/Istanbul",40,"2026-01-01","2026-01-30","ready",,"candidate","evaluated",1.1,false,"2026-01-31T03:00:00+03:00","2026-01-31T04:00:00+03:00"',
+        '21,"Doğu: array","Europe/Istanbul",40,"2026-01-01","2026-01-30","ready",,"candidate","evaluated",1.1,false,"2026-01-31T04:00:00+03:00","2026-01-31T05:00:00+03:00"',
     ]);
     const detail = calibrationExport(plant, run);
     expect(detail.filename).toBe("calibration-40-Doğu- array.csv");
     expect(lines(detail).slice(0, 2)).toEqual([
         '"plant_id","plant_name","timezone","id","window_start","window_end","status","reason","selection_state","assessment","factor","provisional_production","created_at","completed_at","cutoff_at","activation_blocker","training_days","holdout_days","valid_days","baseline_daily_mae_mwh","candidate_daily_mae_mwh","baseline_interval_mae_mw","candidate_interval_mae_mw"',
-        '21,"Doğu: array","Europe/Istanbul",40,"2026-01-01","2026-01-30","ready",,"candidate","evaluated",1.1,false,"2026-01-31T03:00:00+03:00","2026-01-31T04:00:00+03:00","2026-01-31T03:00:00+03:00",,20,7,27,2,1.5,0.4,0.3',
+        '21,"Doğu: array","Europe/Istanbul",40,"2026-01-01","2026-01-30","ready",,"candidate","evaluated",1.1,false,"2026-01-31T04:00:00+03:00","2026-01-31T05:00:00+03:00","2026-01-31T03:00:00+03:00",,20,7,27,2,1.5,0.4,0.3',
     ]);
     expect(csvDocument(detail.header, detail.rows)).not.toContain("secret");
 });

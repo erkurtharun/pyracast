@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
     chartIntervals,
-    forecastCsvRows,
     fullDayIntervals,
     scenarioIntervals,
 } from "../src/features/forecast/panel/model";
@@ -69,36 +68,6 @@ test("a scenario adds its values to the interval with the same start", () => {
             affected_quality_flags: ["outage_configuration_changed"],
         },
     ]);
-});
-
-test("the CSV names both scenarios only when a scenario exists", () => {
-    const rows = [
-        {
-            ...interval(6, 1),
-            quality_flags: ["a"],
-            source_snapshot_ids: [4],
-            affected_mean_power_mw: 0.5,
-            affected_energy_mwh: 0.5,
-            affected_quality_flags: ["b"],
-        },
-    ];
-    expect(forecastCsvRows(rows, false)).toBe(rows);
-    expect(forecastCsvRows(rows, true)).toEqual([
-        {
-            start: hour(6),
-            end: hour(7),
-            normal_mean_power_mw: 1,
-            normal_energy_mwh: 1,
-            affected_mean_power_mw: 0.5,
-            affected_energy_mwh: 0.5,
-            normal_quality_flags: ["a"],
-            affected_quality_flags: ["b"],
-            source_snapshot_ids: [4],
-        },
-    ]);
-    expect(
-        forecastCsvRows([{ ...rows[0]!, source_kinds: ["forecast"] }], true)[0],
-    ).toMatchObject({ source_kinds: ["forecast"] });
 });
 
 test("the chart shows the generation hours unless the full day is chosen", () => {

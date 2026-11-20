@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { ApiError } from "../src/lib/api/errors";
 import {
+    daylightRows,
     intervalKey,
     mostFrequentReason,
-    productionCsvRecords,
     reconcileEditor,
     sameInterval,
     saveFailure,
@@ -58,7 +58,9 @@ const draft = (
         quality: "valid" as const,
         expectedRevision: 1,
     };
-    return status === "failed" || status === "orphaned"
+    if (status === "orphaned")
+        return { status, ...fields, error: "gone", pendingWrite: false };
+    return status === "failed"
         ? { status, ...fields, error: "gone" }
         : { status, ...fields };
 };
@@ -149,43 +151,36 @@ test("only an implausible-value refusal offers to save anyway", () => {
     });
 });
 
-test("CSV records carry the effective value and every provider original", () => {
-    expect(
-        productionCsvRecords([
-            row(1),
-            row(2, {
-                effective: {
-                    energy_mwh: 2,
-                    quality: "valid",
-                    source: "epias",
-                    source_kind: "settlement_injection",
-                },
-                provider_originals: [
-                    provider("x", "y", 1),
-                    provider("y", "z", 1.5),
-                ],
-            } as Partial<Interval>),
-        ]),
-    ).toEqual([
-        {
-            starts_at: "2026-11-09T01:00:00Z",
-            ends_at: "2026-11-09T02:00:00Z",
-            energy: null,
-            quality: "",
-            source: "",
-            provider_energy_mwh: "",
-            provider_intervals: "",
-            provider_source: "",
-        },
-        {
-            starts_at: "2026-11-09T02:00:00Z",
-            ends_at: "2026-11-09T03:00:00Z",
-            energy: 2,
+test("the default view keeps intervals that overlap daylight and the whole producing range", () => {
+    const value = (energy_mwh: number) => ({
+        effective: {
+            energy_mwh,
             quality: "valid",
-            source: "epias",
-            provider_energy_mwh: "1; 1.5",
-            provider_intervals: "x/y; y/z",
-            provider_source: "settlement_injection; settlement_injection",
+            source: "operator",
+            source_kind: "manual",
+            provisional: false,
+            aggregated: false,
         },
-    ]);
+        provider_originals: [provider("x", "y", 1)],
+    });
+    const rows = [
+        row(1, value(0)),
+        row(2, value(0.1)),
+        row(3),
+        row(4, value(0.2)),
+        row(5),
+        row(6),
+        row(17),
+        row(18),
+    ];
+    expect(
+        daylightRows(rows, [
+            {
+                starts_at: "2026-11-09T05:30:00Z",
+                ends_at: "2026-11-09T17:30:00Z",
+            },
+        ]),
+    ).toEqual(rows.slice(1, 7));
+    expect(daylightRows(rows, [])).toEqual(rows.slice(1, 4));
+    expect(daylightRows([row(1, value(0))], [])).toEqual([]);
 });

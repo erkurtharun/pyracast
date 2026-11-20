@@ -38,6 +38,8 @@ async function setup(page: Page) {
         window_start: "2026-01-01",
         window_end: "2026-01-07",
         status: "ready",
+        selection_state: "candidate",
+        activation_blocker: null,
         assessment: "evaluated",
         factor: 1.1,
         result: { provisional_production: true },
@@ -478,7 +480,7 @@ for (const width of [320, 390, 768, 1440]) {
                         name: "production.csv",
                         mimeType: "text/csv",
                         buffer: Buffer.from(
-                            "starts_at,ends_at,energy,quality,source\n2026-01-07T10:00:00+03:00,2026-01-07T11:00:00+03:00,2400,valid,meter",
+                            "starts_at,ends_at,energy_kwh,quality,source\n2026-01-07T10:00:00+03:00,2026-01-07T11:00:00+03:00,2400,valid,meter",
                         ),
                     });
                 await page

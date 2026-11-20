@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from io import StringIO
 from typing import Any
 from uuid import uuid4
@@ -21,10 +22,10 @@ from tests.support.openapi import validate
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
-EDITS = {
+EDITS: dict[str, tuple[str, str, Callable[[], dict[str, Any]]]] = {
     "update": ("put", "", lambda: {**_wire(incident_values()), "title": "Stale title"}),
     "resolve": ("post", "resolve/", lambda: {"ends_at": NOW.isoformat()}),
-    "cancel": ("post", "cancel/", dict),
+    "cancel": ("post", "cancel/", lambda: {}),
 }
 
 

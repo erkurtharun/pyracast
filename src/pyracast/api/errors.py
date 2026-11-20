@@ -49,9 +49,14 @@ class ApiError:
     retry_after: int | None = None
     request_id: str | None = None
     authenticate: str | None = None
+    details: Mapping[str, object] | None = None
 
     def body(self) -> dict[str, object]:
-        body: dict[str, object] = {"code": self.code.value, "message": self.message}
+        body: dict[str, object] = {
+            **(self.details or {}),
+            "code": self.code.value,
+            "message": self.message,
+        }
         if self.fields:
             body["fields"] = dict(self.fields)
         if self.retry_after is not None:
@@ -147,6 +152,7 @@ def _domain(error: DomainError) -> ApiError:
         message,
         {error.field: message} if error.field else None,
         error.retry_after,
+        details=error.details,
     )
 
 

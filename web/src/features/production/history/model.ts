@@ -12,14 +12,33 @@ export type Draft = {
     quality: Quality;
     expectedRevision: number | null;
     error?: string;
-    pendingWrite?: boolean;
     implausible?: boolean;
 };
 
 export type Editor =
     | { status: "closed" }
     | ({ status: "editing" | "saving" | "reloading" } & Draft)
-    | ({ status: "failed" | "orphaned"; error: string } & Draft);
+    | ({ status: "failed"; error: string } & Draft)
+    // A write still running when its interval became unavailable keeps the controls locked until it ends.
+    | ({ status: "orphaned"; error: string; pendingWrite: boolean } & Draft);
+
+type Window = Pick<Interval, "starts_at" | "ends_at">;
+
+// The default view: intervals that overlap daylight, and every interval from the first to the last one with production.
+export function daylightRows(rows: Interval[], windows: readonly Window[]) {
+    const producing = (row: Interval) => (row.effective?.energy_mwh ?? 0) > 0;
+    const first = rows.findIndex(producing);
+    const last = rows.findLastIndex(producing);
+    return rows.filter(
+        (row, index) =>
+            (first !== -1 && index >= first && index <= last) ||
+            windows.some(
+                (window) =>
+                    Date.parse(row.starts_at) < Date.parse(window.ends_at) &&
+                    Date.parse(row.ends_at) > Date.parse(window.starts_at),
+            ),
+    );
+}
 
 export function intervalKey(row: Pick<Interval, "starts_at" | "ends_at">) {
     return `${row.starts_at}/${row.ends_at}`;
@@ -92,26 +111,4 @@ export function saveFailure(error: unknown) {
             error instanceof ApiError &&
             error.code === "production_implausible",
     };
-}
-
-export function productionCsvRecords(rows: Interval[]) {
-    return rows.map((row) => {
-        const originals = row.provider_originals;
-        return {
-            starts_at: row.starts_at,
-            ends_at: row.ends_at,
-            energy: row.effective?.energy_mwh ?? null,
-            quality: row.effective?.quality ?? "",
-            source: row.effective?.source ?? "",
-            provider_energy_mwh: originals
-                .map((original) => original.energy_mwh)
-                .join("; "),
-            provider_intervals: originals
-                .map((original) => `${original.starts_at}/${original.ends_at}`)
-                .join("; "),
-            provider_source: originals
-                .map((original) => original.source_kind)
-                .join("; "),
-        };
-    });
 }

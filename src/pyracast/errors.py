@@ -231,10 +231,12 @@ class DomainError(ValidationError):
         field: str | None = None,
         status: int | None = None,
         retry_after: int | None = None,
+        details: Mapping[str, object] | None = None,
     ) -> None:
         super().__init__(MESSAGES[code] if message is None else message, code=code)
         self.code: ErrorCode = code
         self.field = field
+        self.details = details
         if status is not None:
             self.status = status
         if retry_after is not None:

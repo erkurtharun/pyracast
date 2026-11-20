@@ -241,8 +241,11 @@ export async function mockApi(
             data = answer("CalibrationAutomationOutput", {
                 enabled: automationEnabled,
                 authorized: automationEnabled,
-                configuration_id: automationEnabled ? 31 : null,
+                configuration_id: 31,
+                configuration_current: true,
                 next_check_at: null,
+                disabled_cause: null,
+                current_calibration: null,
                 last_attempt: null,
             });
         } else if (path.endsWith("/calibrations/"))

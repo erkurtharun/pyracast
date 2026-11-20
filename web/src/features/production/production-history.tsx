@@ -6,11 +6,12 @@ import { api } from "@/lib/api/client";
 import { cadence, useApiQuery } from "@/lib/api/query";
 import { useProposalKey } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
-import { dataIntervalRange } from "@/lib/intervals";
+import { productionExport } from "@/lib/exports";
 import { plantDay } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import { qualityOf } from "@/lib/production";
 import { CsvDownload } from "@/ui/csv-download";
+import { useExportPlant } from "@/ui/export-plant";
 import { CheckboxField, ControlField, useErrorMessage } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useCodeLabel } from "@/ui/vocabulary";
@@ -18,9 +19,9 @@ import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { ProductionDayNav } from "./history/day-nav";
 import { IntervalEditor } from "./history/interval-editor";
 import {
+    daylightRows,
     intervalKey,
     mostFrequentReason,
-    productionCsvRecords,
     reconcileEditor,
     saveFailure,
     type Editor,
@@ -57,7 +58,10 @@ export function ProductionHistory({
     const canManage = useCanManageWorkspace();
     const proposals = useTranslations("ChangeRequests");
     const proposalKey = useProposalKey();
-    const yesterday = plantDay(timezone, -1);
+    const plant = useExportPlant();
+    const [reconciled, setReconciled] = useState<History>();
+    // The server builds days in the zone it answers with; the last answer bounds the day picker.
+    const yesterday = plantDay(reconciled?.timezone ?? timezone, -1);
     const shown = (day?: string) => (day && day <= yesterday ? day : yesterday);
     const date = shown(requestedDay);
     // A step taken while a day change loads continues from the day being navigated to.
@@ -76,7 +80,6 @@ export function ProductionHistory({
         },
         { poll: editor.status === "closed" ? cadence.live : false },
     );
-    const [reconciled, setReconciled] = useState<History>();
     if (reading.data && reading.data !== reconciled) {
         const fresh = reading.data;
         setReconciled(fresh);
@@ -94,13 +97,9 @@ export function ProductionHistory({
         else summaryRef.current?.focus();
     }, [editor.status, history]);
     const rows = history?.intervals ?? [];
-    const generationRows = dataIntervalRange(
-        rows,
-        (row) => row.effective != null && row.effective.energy_mwh > 0,
-    );
-    const visibleRows =
-        showFullDay || !generationRows.length ? rows : generationRows;
     const day = history?.days.find((day) => day.date === date);
+    const daylight = daylightRows(rows, day?.daylight_windows ?? []);
+    const visibleRows = showFullDay || !daylight.length ? rows : daylight;
     const hasValues = rows.some((row) => row.effective != null);
     const timeFormatter = format.intervals(
         history?.timezone ?? timezone,
@@ -155,6 +154,7 @@ export function ProductionHistory({
                     ...attempt,
                     status: "orphaned",
                     error: t("interval_changed"),
+                    pendingWrite: false,
                 });
             }
         } catch (error) {
@@ -222,14 +222,10 @@ export function ProductionHistory({
                 ends_at: row.ends_at,
                 expected_revision_id: attempt.expectedRevision,
                 action,
+                // An edit on this screen is the operator's value; a revert ignores quality and source.
                 ...(action === "set"
-                    ? {
-                          energy,
-                          quality: attempt.quality,
-                          source: row.observation?.source ?? "meter",
-                      }
-                    : // A revert ignores quality and source; these are the server defaults.
-                      { quality: "valid", source: "operator" }),
+                    ? { energy, quality: attempt.quality, source: "operator" }
+                    : { quality: "valid", source: "operator" }),
             };
             const payload = {
                 configuration_id: configuration,
@@ -461,9 +457,13 @@ export function ProductionHistory({
                     )}
                     <CsvDownload
                         label={t("download_csv")}
-                        filename={`production-${date}`}
-                        records={productionCsvRecords(rows)}
-                        metadata={{ timezone: history.timezone, unit: "MWh" }}
+                        build={() =>
+                            productionExport(
+                                { ...plant, timezone: history.timezone },
+                                date,
+                                rows,
+                            )
+                        }
                     />
                 </>
             )}

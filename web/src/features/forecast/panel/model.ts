@@ -72,22 +72,6 @@ export function scenarioIntervals(
     }));
 }
 
-export function forecastCsvRows(rows: Interval[], scenario: boolean) {
-    if (!scenario) return rows;
-    return rows.map((row) => ({
-        start: row.start,
-        end: row.end,
-        normal_mean_power_mw: row.mean_power_mw,
-        normal_energy_mwh: row.energy_mwh,
-        affected_mean_power_mw: row.affected_mean_power_mw,
-        affected_energy_mwh: row.affected_energy_mwh,
-        normal_quality_flags: row.quality_flags,
-        affected_quality_flags: row.affected_quality_flags,
-        source_snapshot_ids: row.source_snapshot_ids,
-        ...(row.source_kinds ? { source_kinds: row.source_kinds } : {}),
-    }));
-}
-
 export function chartIntervals(
     rows: Interval[],
     metric: "mean_power_mw" | "ghi_wm2",

@@ -10,6 +10,7 @@ type ErrorDetails = {
     fields: Record<string, string>;
     retryAfter: number | null;
     requestId: string | null;
+    body: unknown;
 };
 
 // The only errors whose message is shown as written; any other failure is shown as a localized generic message.
@@ -21,6 +22,8 @@ export class ApiError extends DisplayError {
     readonly fields: Record<string, string>;
     readonly retryAfter: number | null;
     readonly requestId: string | null;
+    // The whole contract body, for a refusal that carries more than its code.
+    readonly body: unknown;
 
     constructor(message: string, details: Partial<ErrorDetails> = {}) {
         super(message);
@@ -29,6 +32,7 @@ export class ApiError extends DisplayError {
         this.fields = details.fields ?? {};
         this.retryAfter = details.retryAfter ?? null;
         this.requestId = details.requestId ?? null;
+        this.body = details.body ?? null;
     }
 }
 
@@ -175,6 +179,7 @@ export function errorFromResponse(status: number, data: unknown): ApiError {
             fields: fieldMessages(data.fields),
             retryAfter: seconds(data.retry_after),
             requestId,
+            body: data,
         },
     );
 }

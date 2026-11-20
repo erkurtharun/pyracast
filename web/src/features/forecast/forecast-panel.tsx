@@ -14,7 +14,6 @@ import { ForecastSummary } from "./panel/forecast-summary";
 import { ForecastUnavailable } from "./panel/forecast-unavailable";
 import {
     chartIntervals,
-    forecastCsvRows,
     scenarioIntervals,
     type ForecastResult,
 } from "./panel/model";
@@ -67,7 +66,7 @@ export function ForecastPanel({
                 scenario={scenario}
                 diagnostic={diagnostic}
                 affectedRows={affectedRows}
-                csvRows={forecastCsvRows(allRows, Boolean(scenario))}
+                rows={allRows}
             />
             <CheckboxField
                 label={t("show_full_day")}

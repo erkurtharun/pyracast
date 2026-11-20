@@ -1,7 +1,9 @@
 "use client";
 import { useTranslations } from "next-intl";
 import type { Forecast } from "@/lib/api";
+import { forecastExport } from "@/lib/exports";
 import { CsvDownload } from "@/ui/csv-download";
+import { useExportPlant } from "@/ui/export-plant";
 import { Notice, Stat, Tag } from "@/ui/ui";
 import type { ForecastInterval as Interval } from "../forecast-intervals";
 import { WeatherReferenceCard } from "../weather-reference";
@@ -22,7 +24,7 @@ export function ForecastSummary({
     scenario,
     diagnostic,
     affectedRows,
-    csvRows,
+    rows,
 }: {
     forecast: Forecast;
     result: ForecastResult;
@@ -30,10 +32,11 @@ export function ForecastSummary({
     scenario: OutageScenario | null;
     diagnostic: ProductionDiagnostic | null | undefined;
     affectedRows: Interval[];
-    csvRows: Record<string, unknown>[];
+    rows: Interval[];
 }) {
     const t = useTranslations("Forecast");
     const { number } = useFormat();
+    const plant = useExportPlant();
     const daylight = result.daylight as DaylightSummary | undefined;
     const primary = daylight ?? result;
     const affectedDaylight = scenario?.result.daylight as
@@ -84,32 +87,17 @@ export function ForecastSummary({
                 </div>
                 <div className="button-group">
                     <CsvDownload
-                        filename={`${electrical ? "plant" : "region"}-${forecast.date}-${forecast.source_kind}`}
                         label={
                             scenario
                                 ? t("download_both_scenarios_csv")
                                 : t("download_csv")
                         }
-                        records={csvRows}
-                        metadata={{
-                            ...forecast,
-                            result: {
-                                ...result,
-                                intervals: undefined,
-                                weather_reference: undefined,
-                            },
-                            ...(scenario
-                                ? {
-                                      outage_scenario: {
-                                          ...scenario,
-                                          result: {
-                                              ...scenario.result,
-                                              intervals: undefined,
-                                          },
-                                      },
-                                  }
-                                : {}),
-                        }}
+                        build={() =>
+                            forecastExport(plant, forecast, rows, {
+                                electrical,
+                                scenario: Boolean(scenario),
+                            })
+                        }
                     />
                     <Freshness forecast={forecast} />
                     {forecast.source_kind === "mixed" && (

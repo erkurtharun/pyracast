@@ -14,6 +14,8 @@ import { Resource } from "@/ui/resource";
 import { useCodeLabel } from "@/ui/vocabulary";
 import { Notice, Stat } from "@/ui/ui";
 import { CsvDownload } from "@/ui/csv-download";
+import { useExportPlant } from "@/ui/export-plant";
+import { performanceExport } from "@/lib/exports";
 
 type PerformanceQuery = RequestOptions<
     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/performance/",
@@ -127,7 +129,6 @@ export function ForecastPerformance({
                 key={JSON.stringify(query)}
                 scope={scope}
                 query={query}
-                timezone={timezone}
             />
         </section>
     );
@@ -136,13 +137,12 @@ export function ForecastPerformance({
 function PerformanceResults({
     scope,
     query,
-    timezone,
 }: {
     scope: PlantScope;
     query: PerformanceQuery;
-    timezone: string;
 }) {
     const t = useTranslations("ForecastPerformance");
+    const plant = useExportPlant();
     const formatter = useFormat();
     const format = (value: number | null) => formatter.number(value);
     const percent = (value: number | null) =>
@@ -177,13 +177,7 @@ function PerformanceResults({
                     <>
                         <div className="toolbar">
                             <CsvDownload
-                                filename={`performance-${data.start_date}-${data.end_date}`}
-                                records={data.days}
-                                metadata={{
-                                    ...data,
-                                    days: undefined,
-                                    timezone,
-                                }}
+                                build={() => performanceExport(plant, data)}
                             />
                         </div>
                         {data.metrics && (

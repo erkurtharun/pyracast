@@ -1,17 +1,13 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { csvDocument } from "@/lib/csv";
+import { csvDocument, type CsvExport } from "@/lib/csv";
 
 export function CsvDownload({
-    filename,
-    records,
-    metadata = {},
+    build,
     label,
 }: {
-    filename: string;
-    records: Record<string, unknown>[];
-    metadata?: Record<string, unknown>;
+    build: () => CsvExport;
     label?: string;
 }) {
     const t = useTranslations("CsvDownload");
@@ -20,14 +16,15 @@ export function CsvDownload({
             type="button"
             className="button secondary"
             onClick={() => {
+                const file = build();
                 const url = URL.createObjectURL(
-                    new Blob([csvDocument(records, metadata)], {
+                    new Blob([csvDocument(file.header, file.rows)], {
                         type: "text/csv;charset=utf-8",
                     }),
                 );
                 const link = document.createElement("a");
                 link.href = url;
-                link.download = `${filename.replace(/[^a-zA-Z0-9_.-]/g, "-")}.csv`;
+                link.download = file.filename;
                 document.body.append(link);
                 link.click();
                 link.remove();

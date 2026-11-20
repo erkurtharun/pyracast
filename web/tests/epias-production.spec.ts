@@ -298,11 +298,16 @@ test("actual production defaults to generation hours and full day restores every
         await readFile(await (await download).path(), "utf8"),
         { header: true, skipEmptyLines: true },
     ).data;
-    expect(records).toHaveLength(24);
-    expect(records[8]?.energy).toBe("");
-    expect(records[0]).toMatchObject({
-        energy: "0",
-        unit: "MWh",
+    expect(records).toHaveLength(23);
+    expect(records.map((record) => record.starts_at)).not.toContain(
+        "2026-11-09T08:00:00+03:00",
+    );
+    expect(records[0]).toEqual({
+        starts_at: "2026-11-09T00:00:00+03:00",
+        ends_at: "2026-11-09T01:00:00+03:00",
+        energy_mwh: "0",
+        quality: "valid",
+        source: "epias",
         timezone: region.timezone,
     });
 });
@@ -646,7 +651,7 @@ test("importing a different native interval preserves an open draft for recovery
         name: "half-hour.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(
-            "starts_at,ends_at,energy,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,250,valid,meter",
+            "starts_at,ends_at,energy_kwh,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,250,valid,meter",
         ),
     });
     await page
@@ -728,7 +733,7 @@ test("a failed import refresh preserves the draft and releases an invalidated pe
         name: "half-hour.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(
-            "starts_at,ends_at,energy,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,250,valid,meter",
+            "starts_at,ends_at,energy_kwh,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,250,valid,meter",
         ),
     });
     await page
@@ -903,7 +908,7 @@ test("production uses the server total and exposes invalid saved quality", async
         });
 });
 
-test("CSV preview reviews effective values and unit changes require a new preview", async ({
+test("CSV preview reviews effective values in the unit its energy column names and a new file needs a new preview", async ({
     page,
 }) => {
     const state = await productionApi(page);
@@ -948,7 +953,7 @@ test("CSV preview reviews effective values and unit changes require a new previe
         name: "production.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(
-            "starts_at,ends_at,energy,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,250,valid,meter",
+            "starts_at,ends_at,energy_kwh,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,250,valid,meter",
         ),
     });
     await page
@@ -962,9 +967,13 @@ test("CSV preview reviews effective values and unit changes require a new previe
     await expect(
         page.getByText(/This import only replaces part of the provider hour/),
     ).toBeVisible();
-    await page
-        .getByRole("combobox", { name: "Energy unit", exact: true })
-        .selectOption("MWh");
+    await page.getByLabel("Production CSV").setInputFiles({
+        name: "production-mwh.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from(
+            "starts_at,ends_at,energy_mwh,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T08:30:00+03:00,250,valid,meter",
+        ),
+    });
     await expect(
         page.getByRole("button", { name: "Confirm import (1)" }),
     ).toHaveCount(0);
@@ -993,7 +1002,7 @@ test("a CSV import above plant capacity needs an acknowledgement and records its
 }) => {
     const state = await productionApi(page);
     const csv = Buffer.from(
-        "starts_at,ends_at,energy,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T09:00:00+03:00,250,valid,meter",
+        "starts_at,ends_at,energy_mwh,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T09:00:00+03:00,250,valid,meter",
     );
     await page.route("**/production/preview/", (route) => {
         const body = route.request().postDataJSON();
@@ -1032,9 +1041,6 @@ test("a CSV import above plant capacity needs an acknowledgement and records its
         mimeType: "text/csv",
         buffer: csv,
     });
-    await page
-        .getByRole("combobox", { name: "Energy unit", exact: true })
-        .selectOption("MWh");
     await page
         .getByRole("button", { name: "Preview import", exact: true })
         .click();
@@ -1432,7 +1438,7 @@ test("Turkish production at 320px keeps native corrections, decimal commas and i
         name: "production.csv",
         mimeType: "text/csv",
         buffer: Buffer.from(
-            "starts_at,ends_at,energy,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T09:00:00+03:00,250,valid,meter",
+            "starts_at,ends_at,energy_kwh,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T09:00:00+03:00,250,valid,meter",
         ),
     });
     await page.getByRole("button", { name: "Aktarımı önizle" }).click();
