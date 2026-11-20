@@ -118,6 +118,7 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     outage_history_changed: true,
     incumbent_changed: true,
     calibration_not_activatable: true,
+    review_reason_required: true,
 };
 
 export function displayMessage(error: unknown, fallback: string): string {

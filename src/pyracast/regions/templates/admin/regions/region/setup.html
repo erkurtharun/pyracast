@@ -31,6 +31,16 @@
   {% elif region.status == "rejected" %}
     <p class="callout callout--danger"><strong>{% translate "Rejected." %}</strong> {% translate "This plant is not approved. This is a review decision and says nothing about the connection, which is reported separately above." %}</p>
   {% endif %}
+  {% with decision=review_history.decision %}{% if decision.reason or review_history.resubmitted_at %}
+    <section class="panel" aria-labelledby="review-history-title">
+      <div class="panel-head"><h2 id="review-history-title">{% translate "Last review decision" %}</h2></div>
+      <dl class="facts">
+        {% if decision %}<div><dt>{{ decision.label }}</dt><dd><time datetime="{{ decision.created_at|date:'c' }}">{{ decision.created_at|date:"j M Y, H:i T" }}</time></dd></div>{% endif %}
+        {% if decision.reason %}<div class="facts-wide"><dt>{% translate "Reason shown to the customer" %}</dt><dd>{{ decision.reason }}</dd></div>{% endif %}
+        {% if review_history.resubmitted_at %}<div><dt>{% translate "Resubmitted by the customer" %}</dt><dd><time datetime="{{ review_history.resubmitted_at|date:'c' }}">{{ review_history.resubmitted_at|date:"j M Y, H:i T" }}</time></dd></div>{% endif %}
+      </dl>
+    </section>
+  {% endif %}{% endwith %}
 
   <section class="panel" aria-labelledby="progress-title">
     <div class="panel-head"><h2 id="progress-title">{% translate "Review progress" %}</h2></div>
@@ -340,24 +350,28 @@
           <details class="disclosure">
             <summary>{% translate "Reject this plant" %}</summary>
             <p>{% translate "Rejecting closes this review without approval. The saved connection is not changed." %}</p>
-            <form method="post" action="{% url 'admin:workspace_decision' region.pk %}" class="form-actions">
+            <form method="post" action="{% url 'admin:workspace_decision' region.pk %}" class="form">
               {% csrf_token %}
               <input type="hidden" name="{{ review_form.expected_revision.html_name }}" value="{{ review_form.expected_revision.value|unlocalize }}">
               <input type="hidden" name="{{ review_form.expected_status.html_name }}" value="{{ review_form.expected_status.value }}">
               <input type="hidden" name="{{ review_form.action.html_name }}" value="reject">
-              <button type="submit" class="btn btn--danger">{% translate "Reject plant" %}</button>
+              <label class="field" for="reject-reason">{% translate "Reason shown to the customer" %}</label>
+              <textarea id="reject-reason" name="{{ review_form.decision_reason.html_name }}" required rows="3" maxlength="500"></textarea>
+              <div class="form-actions"><button type="submit" class="btn btn--danger">{% translate "Reject plant" %}</button></div>
             </form>
           </details>
         {% else %}
           <details class="disclosure">
             <summary>{% translate "Suspend this plant" %}</summary>
             <p>{% translate "Suspending withdraws approval. The saved connection is not changed." %}</p>
-            <form method="post" action="{% url 'admin:workspace_decision' region.pk %}" class="form-actions">
+            <form method="post" action="{% url 'admin:workspace_decision' region.pk %}" class="form">
               {% csrf_token %}
               <input type="hidden" name="{{ review_form.expected_revision.html_name }}" value="{{ review_form.expected_revision.value|unlocalize }}">
               <input type="hidden" name="{{ review_form.expected_status.html_name }}" value="{{ review_form.expected_status.value }}">
               <input type="hidden" name="{{ review_form.action.html_name }}" value="suspend">
-              <button type="submit" class="btn btn--danger">{% translate "Suspend plant" %}</button>
+              <label class="field" for="suspend-reason">{% translate "Reason shown to the customer" %}</label>
+              <textarea id="suspend-reason" name="{{ review_form.decision_reason.html_name }}" required rows="3" maxlength="500"></textarea>
+              <div class="form-actions"><button type="submit" class="btn btn--danger">{% translate "Suspend plant" %}</button></div>
             </form>
           </details>
         {% endif %}

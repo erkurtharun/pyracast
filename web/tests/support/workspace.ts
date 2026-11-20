@@ -34,6 +34,8 @@ export const region: Schemas["RegionOutput"] = {
     timezone: "Europe/Istanbul",
     revision: 1,
     status: "approved",
+    reviewed_at: "2026-01-01T09:00:00Z",
+    review_reason: null,
 };
 export const plant = {
     id: 21,

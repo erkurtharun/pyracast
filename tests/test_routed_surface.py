@@ -50,6 +50,7 @@ API_ROUTES = sorted(
         (REGION + "plants/", ("GET", "POST")),
         (REGION + "reminders/", ("GET", "PUT")),
         (REGION + "restore/", ("POST",)),
+        (REGION + "resubmit/", ("POST",)),
         (PLANT, ("PUT",)),
         (PLANT + "calibration/automation/", ("GET", "PATCH")),
         (PLANT + "calibration/reset/", ("POST",)),

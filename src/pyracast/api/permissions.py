@@ -79,6 +79,7 @@ ROUTE_POLICIES: Mapping[str, Mapping[str, Policy]] = {
     REGION + "plants/": {"GET": MEMBER, "POST": ADMIN},
     REGION + "reminders/": {"GET": MEMBER, "PUT": ADMIN},
     REGION + "restore/": {"POST": Policy(Access.ADMIN, Throttle.SUBMISSION)},
+    REGION + "resubmit/": {"POST": Policy(Access.ADMIN, Throttle.SUBMISSION)},
     PLANT: {"PUT": ADMIN},
     PLANT + "calibration/automation/": {"GET": MEMBER, "PATCH": ADMIN},
     PLANT + "calibration/reset/": {"POST": ADMIN},

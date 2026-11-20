@@ -97,7 +97,7 @@ def test_every_reminder_mail_says_why_it_arrives_and_how_to_stop_it(
 
     assert FOOTERS[language] in " ".join(str(message.body).split())
     if kind == "forecast":
-        assert FOOTERS[language] in " ".join(message.alternatives[0][0].split())
+        assert FOOTERS[language] in " ".join(str(message.alternatives[0][0]).split())
     assert (
         message.extra_headers["List-Unsubscribe"]
         == "<mailto:noreply@localhost?subject=unsubscribe>"

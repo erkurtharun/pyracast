@@ -676,6 +676,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/resubmit/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_regions_resubmit_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/sites/": {
         parameters: {
             query?: never;
@@ -749,6 +765,7 @@ export interface components {
          *     * `region_approved` - Plant approved
          *     * `region_rejected` - Plant rejected
          *     * `region_suspended` - Plant suspended
+         *     * `region_resubmitted` - Plant resubmitted for review
          *     * `region_trashed` - Plant location moved to trash
          *     * `region_restored` - Plant location restored
          *     * `collection_schedule_updated` - Collection schedule updated
@@ -772,6 +789,7 @@ export interface components {
             | "region_approved"
             | "region_rejected"
             | "region_suspended"
+            | "region_resubmitted"
             | "region_trashed"
             | "region_restored"
             | "collection_schedule_updated"
@@ -1456,6 +1474,7 @@ export interface components {
          *     * `outage_history_changed` - Outage History Changed
          *     * `incumbent_changed` - Incumbent Changed
          *     * `calibration_not_activatable` - Calibration Not Activatable
+         *     * `review_reason_required` - Review Reason Required
          * @enum {string}
          */
         ErrorCode:
@@ -1538,7 +1557,8 @@ export interface components {
             | "production_source_changed"
             | "outage_history_changed"
             | "incumbent_changed"
-            | "calibration_not_activatable";
+            | "calibration_not_activatable"
+            | "review_reason_required";
         /**
          * @description * `current` - current
          *     * `stale` - stale
@@ -2707,6 +2727,7 @@ export interface components {
          * @enum {string}
          */
         ReferenceKindEnum: "active_calibration" | "uncalibrated_reference";
+        /** @description Reads `regions.review.with_review_outcome` annotations. */
         RegionOutput: {
             readonly id: number;
             readonly name: string;
@@ -2717,6 +2738,9 @@ export interface components {
             readonly timezone: string;
             readonly revision: number;
             readonly status: components["schemas"]["RegionStatusEnum"];
+            /** Format: date-time */
+            readonly reviewed_at: string | null;
+            readonly review_reason: string | null;
         };
         /**
          * @description * `pending` - Awaiting approval
@@ -2852,6 +2876,9 @@ export interface components {
          */
         RestoreBlockerEnum:
             "trash_retention_expired" | "location_already_exists";
+        ResubmitInput: {
+            expected_revision: number;
+        };
         RevisionInput: {
             expected_revision: number;
         };
@@ -2913,6 +2940,9 @@ export interface components {
             readonly timezone: string;
             readonly revision: number;
             readonly status: components["schemas"]["RegionStatusEnum"];
+            /** Format: date-time */
+            readonly reviewed_at: string | null;
+            readonly review_reason: string | null;
             readonly plant: components["schemas"]["PlantOutput"] | null;
             readonly reminder:
                 components["schemas"]["ReminderSummaryOutput"] | null;
@@ -6630,6 +6660,95 @@ export interface operations {
             };
             /** @description The addressed item or page does not exist. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests; Retry-After gives the seconds to wait. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    tenants_regions_resubmit_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResubmitInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegionOutput"];
+                };
+            };
+            /** @description The request input was refused. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Sign-in is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Access was refused. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The addressed item or page does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Send the request as JSON. */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -113,6 +113,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0004_region_purge_started_at",
             "0005_location_request_withdraw_and_decision_reason",
             "0006_reminder_schedule_audit",
+            "0007_audit_region_resubmitted",
         ),
     }
     expected = {app: names | set(forward.get(app, ())) for app, names in baseline.items()}

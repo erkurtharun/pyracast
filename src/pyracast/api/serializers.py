@@ -71,6 +71,11 @@ class RegionInput(InputSerializer):
 
 
 class RegionOutput(serializers.ModelSerializer[Region]):
+    """Reads `regions.review.with_review_outcome` annotations."""
+
+    reviewed_at = serializers.DateTimeField(allow_null=True, read_only=True)
+    review_reason = serializers.CharField(allow_null=True, read_only=True)
+
     class Meta:
         model = Region
         fields = (
@@ -81,8 +86,14 @@ class RegionOutput(serializers.ModelSerializer[Region]):
             "timezone",
             "revision",
             "status",
+            "reviewed_at",
+            "review_reason",
         )
         read_only_fields = fields
+
+
+class ResubmitInput(InputSerializer):
+    expected_revision = serializers.IntegerField(min_value=1)
 
 
 class LocationChangeInput(InputSerializer):

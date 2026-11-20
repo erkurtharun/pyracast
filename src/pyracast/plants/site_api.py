@@ -30,6 +30,12 @@ class SiteOutput(serializers.Serializer[Site]):
     status = serializers.ChoiceField(
         source="region.status", choices=RegionStatus.choices, read_only=True
     )
+    reviewed_at = serializers.DateTimeField(
+        source="region.reviewed_at", allow_null=True, read_only=True
+    )
+    review_reason = serializers.CharField(
+        source="region.review_reason", allow_null=True, read_only=True
+    )
     plant = PlantOutput(allow_null=True, read_only=True)
     reminder = serializers.SerializerMethodField()
 

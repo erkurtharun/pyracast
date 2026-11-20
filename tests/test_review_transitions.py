@@ -28,6 +28,7 @@ from tests.support.domain import NOW, FakeAdapter, make_system
 pytestmark = pytest.mark.django_db(transaction=True)
 
 S = RegionStatus
+REASON = "The declared capacity does not match the grid licence."
 ALLOWED = {
     (S.PENDING, S.APPROVED),
     (S.PENDING, S.REJECTED),
@@ -102,8 +103,12 @@ def test_a_decision_to_the_current_status_writes_no_second_audit_row() -> None:
     system = make_system()
     seen = review_snapshot(system.region.pk)
 
-    first = decide_review(system.admin, system.region.pk, ReviewDecision.REJECT, seen=seen)
-    second = decide_review(system.admin, system.region.pk, ReviewDecision.REJECT, seen=seen)
+    first = decide_review(
+        system.admin, system.region.pk, ReviewDecision.REJECT, reason=REASON, seen=seen
+    )
+    second = decide_review(
+        system.admin, system.region.pk, ReviewDecision.REJECT, reason=REASON, seen=seen
+    )
 
     assert (first, second) == (True, False)
     assert AuditEvent.objects.filter(action=AuditAction.REGION_REJECTED).count() == 1
@@ -124,7 +129,7 @@ def test_a_repeated_approval_reports_that_nothing_changed() -> None:
 def test_a_rejected_plant_is_not_approved_by_a_program_caller() -> None:
     system = make_system()
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), NOW)
-    decide_review(system.admin, system.region.pk, ReviewDecision.REJECT)
+    decide_review(system.admin, system.region.pk, ReviewDecision.REJECT, reason=REASON)
 
     with pytest.raises(ConflictError):
         approve_region(system.admin, system.region.pk, system.binding.pk, NOW)
@@ -137,7 +142,9 @@ def test_suspending_a_plant_that_is_not_approved_is_refused() -> None:
     seen = review_snapshot(system.region.pk)
 
     with pytest.raises(ConflictError):
-        decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND, seen=seen)
+        decide_review(
+            system.admin, system.region.pk, ReviewDecision.SUSPEND, reason=REASON, seen=seen
+        )
 
     assert Region.objects.get(pk=system.region.pk).status == S.PENDING
     assert not AuditEvent.objects.filter(action=AuditAction.REGION_SUSPENDED).exists()
@@ -209,7 +216,9 @@ def test_a_decision_from_a_page_of_an_earlier_revision_is_refused() -> None:
     Region.objects.filter(pk=system.region.pk).update(revision=seen.revision + 1)
 
     with pytest.raises(ConflictError):
-        decide_review(system.admin, system.region.pk, ReviewDecision.REJECT, seen=seen)
+        decide_review(
+            system.admin, system.region.pk, ReviewDecision.REJECT, reason=REASON, seen=seen
+        )
 
     assert Region.objects.get(pk=system.region.pk).status == S.PENDING
 
@@ -218,4 +227,4 @@ def test_an_unknown_review_decision_is_refused() -> None:
     system = make_system()
 
     with pytest.raises(ValidationError, match=r"Choose a review decision\."):
-        decide_review(system.admin, system.region.pk, "approve")
+        decide_review(system.admin, system.region.pk, "approve", reason=REASON)
