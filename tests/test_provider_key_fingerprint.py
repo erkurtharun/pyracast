@@ -151,3 +151,54 @@ def test_neither_a_key_nor_its_fingerprint_reaches_the_audit_or_the_log(
         assert value not in audit
         assert value not in pyracast_logs.text
         assert value not in str(refusal.value)
+
+
+def test_two_clients_replacing_two_keys_with_one_key_leave_one_holder() -> None:
+    system = make_system()
+    first = solcast_account(system.admin, "first-owner", provider_key("FIRST"))
+    second = solcast_account(system.admin, "second-owner", provider_key("SECOND"))
+    key = provider_key("RACE")
+
+    def replace(account: ProviderAccount) -> ValidationError | None:
+        try:
+            operations.replace_api_key(system.admin, account.pk, key, expected_revision=1)
+        except ValidationError as refusal:
+            return refusal
+        return None
+
+    held, refused = behind_open_transaction(lambda: replace(first), lambda: replace(second))
+
+    assert held is None
+    assert isinstance(refused, ValidationError)
+    assert decrypt_api_key(ProviderAccount.objects.get(pk=second.pk).encrypted_api_key) == (
+        provider_key("SECOND")
+    )
+
+
+def test_a_conflict_other_than_a_shared_key_is_not_reported_as_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = make_system()
+    account = solcast_account(system.admin, "first-owner", provider_key("FIRST"))
+
+    def conflict(*args: object, **kwargs: object) -> None:
+        raise IntegrityError("another constraint")
+
+    monkeypatch.setattr(ProviderAccount, "save", conflict)
+    with pytest.raises(IntegrityError):
+        operations.replace_api_key(
+            system.admin, account.pk, provider_key("NEW"), expected_revision=1
+        )
+    monkeypatch.setattr(ProviderAccount.objects, "create", conflict)
+    with pytest.raises(IntegrityError):
+        solcast_account(system.admin, "second-owner", provider_key("SECOND"))
+
+
+def test_reencryption_keeps_an_empty_fingerprint_empty(settings: LazySettings) -> None:
+    system = make_system()
+    account = solcast_account(system.admin, "first-owner", provider_key("FIRST"))
+    ProviderAccount.objects.filter(pk=account.pk).update(api_key_fingerprint=None)
+
+    call_command("reencrypt_secrets", stdout=StringIO())
+
+    assert ProviderAccount.objects.get(pk=account.pk).api_key_fingerprint is None

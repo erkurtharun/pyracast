@@ -10,7 +10,7 @@ from pyracast.accounts.authorization import require_platform_admin, tenant_membe
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import create_account, rotate_secret
+from pyracast.connections.operations import create_account
 from pyracast.forecasts.models import CollectionJob, RequestAttempt, RequestPurpose
 from pyracast.forecasts.quota import QuotaExceededError, reserve_request
 from pyracast.forecasts.validation import validate_binding
@@ -24,6 +24,7 @@ from pyracast.regions.operations import (
     validate_location,
 )
 from tests.support.domain import NOW, FakeAdapter, make_system, provider_key
+from tests.support.providers import replace_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -149,15 +150,15 @@ def test_canonical_accounts_share_quota_and_rotation_invalidates_validation() ->
     )
     assert duplicate.pk == system.account.pk
     assert duplicate.encrypted_api_key == ""
-    rotate_secret(system.admin, system.account.pk, "test-only-new-key")
+    replace_key(system.admin, system.account.pk, "test-only-new-key")
     system.account.refresh_from_db()
     assert system.account.credential_revision == 2
     with pytest.raises(ValidationError):
         approve_region(system.admin, system.region.pk, system.binding.pk, NOW)
     with pytest.raises(ValidationError):
-        rotate_secret(system.admin, system.account.pk, "")
+        replace_key(system.admin, system.account.pk, "")
     with pytest.raises(ValidationError):
-        rotate_secret(system.admin, system.account.pk, "bad key")
+        replace_key(system.admin, system.account.pk, "bad key")
 
 
 def test_validation_failure_consumes_quota_without_secret_in_audit() -> None:
@@ -182,7 +183,7 @@ def test_validation_rechecks_configuration_after_network(change: str) -> None:
         if change == "revision":
             Region.objects.filter(pk=system.region.pk).update(revision=2)
         else:
-            rotate_secret(system.admin, system.account.pk, "test-only-new-key")
+            replace_key(system.admin, system.account.pk, "test-only-new-key")
 
     with pytest.raises(ValidationError):
         validate_binding(system.admin, system.binding.pk, FakeAdapter(mutate), NOW)

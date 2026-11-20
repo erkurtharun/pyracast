@@ -151,24 +151,40 @@ def approve(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) -> 
     )
 
 
-def clear_cooldown(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) -> Form:
+def clear_delay(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) -> Form:
     system = admin_system()
     blocked_until = timezone.now() + timedelta(hours=2)
     ProviderAccount.objects.filter(pk=system.account.pk).update(request_blocked_until=blocked_until)
-    url = plant_url(system.region)
+    url = reverse("admin:workspace_provider_account", args=(system.account.pk,))
     return Form(
         url,
-        url,
-        binding_action(
-            system,
-            "clear_cooldown",
-            expected_cooldown_until=blocked_until.isoformat(),
-            provider_recovered="on",
-        ),
+        f"{url}delay/",
+        {
+            "expected_revision": system.account.credential_revision,
+            "expected_blocked_until": blocked_until.isoformat(),
+            "provider_recovered": "on",
+        },
         system.account,
         lambda: (
             ProviderAccount.objects.get(pk=system.account.pk).request_blocked_until == blocked_until
         ),
+    )
+
+
+def key_replacement(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) -> Form:
+    system = admin_system()
+    original = system.account.encrypted_api_key
+    url = reverse("admin:workspace_provider_account", args=(system.account.pk,))
+    return Form(
+        url,
+        f"{url}key/",
+        {
+            "expected_revision": system.account.credential_revision,
+            "api_key": "replacement-key",
+            "confirm_replacement": "on",
+        },
+        system.account,
+        lambda: ProviderAccount.objects.get(pk=system.account.pk).encrypted_api_key == original,
     )
 
 
@@ -419,7 +435,8 @@ FORMS: dict[str, Callable[[pytest.MonkeyPatch, Client, User], Form]] = {
     "configure": configure,
     "validate": validate,
     "approve": approve,
-    "clear_cooldown": clear_cooldown,
+    "clear_delay": clear_delay,
+    "key_replacement": key_replacement,
     "epias_connect": epias_connect,
     "epias_disconnect": epias_disconnect,
     "historical_save": historical_save,

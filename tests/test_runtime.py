@@ -113,6 +113,8 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "purge_finished_mail", purge_mail)
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "dispatch_collections", send)
+    revalidation_actor, send_revalidations = MagicMock(), MagicMock(return_value=0)
+    monkeypatch.setattr(command, "dispatch_revalidations", send_revalidations)
     calibration_actor, send_calibrations = MagicMock(), MagicMock()
     monkeypatch.setattr(command, "dispatch_calibrations", send_calibrations)
     notification_actor, send_notifications = MagicMock(), MagicMock()
@@ -127,12 +129,14 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
         send_forecast_reminder=lambda _: notification_actor,
         send_outbound_mail=lambda _: mail_actor,
         collect_epias=lambda _: epias_actor,
+        revalidate_provider_account=lambda _: revalidation_actor,
     )
     call_command("dispatch")
     purge.assert_called_once_with(moment)
     sweep.assert_called_once_with(moment)
     purge_mail.assert_called_once_with(moment)
     send.assert_called_once_with(actor)
+    send_revalidations.assert_called_once_with(revalidation_actor)
     send_calibrations.assert_called_once_with(calibration_actor)
     send_notifications.assert_called_once_with(notification_actor, mail_actor)
     send_epias.assert_called_once_with(epias_actor)
@@ -158,6 +162,7 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
     notification_registration = MagicMock()
     mail_registration = MagicMock()
     epias_registration = MagicMock()
+    revalidation_registration = MagicMock()
     stub_actors(
         monkeypatch,
         collect_forecast=lambda _: actor,
@@ -165,6 +170,7 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
         send_forecast_reminder=notification_registration,
         send_outbound_mail=mail_registration,
         collect_epias=epias_registration,
+        revalidate_provider_account=revalidation_registration,
     )
     create_worker = MagicMock(return_value=worker)
     monkeypatch.setattr(command, "Worker", create_worker)
@@ -177,6 +183,7 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
     notification_registration.assert_called_once_with(broker)
     mail_registration.assert_called_once_with(broker)
     epias_registration.assert_called_once_with(broker)
+    revalidation_registration.assert_called_once_with(broker)
     worker.start.assert_called_once()
     worker.stop.assert_called_once()
     broker.close.assert_called_once()

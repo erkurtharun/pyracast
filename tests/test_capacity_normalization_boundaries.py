@@ -12,7 +12,6 @@ from pyracast.accounts.models import Tenant
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.capacity_normalization import (
     _scaled_intervals,
-    _validate_bindings,
     normalize_reference_capacity,
 )
 from pyracast.forecasts.history import select_actual_snapshot
@@ -21,6 +20,7 @@ from pyracast.forecasts.models import (
     HistoricalReferenceImport,
     ReferenceCapacityNormalization,
 )
+from pyracast.forecasts.trust import normalization_problems
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
 from pyracast.plants.preparation import prepare_calibration
@@ -116,8 +116,7 @@ def test_legacy_nonfinite_binding_cannot_authorize_capacity_normalization(
 ) -> None:
     system, target = scaled_system(monkeypatch)
     system.binding.capacity_kw = float("inf")
-    with pytest.raises(ValidationError):
-        _validate_bindings(system.binding, target)
+    assert "capacity_invalid" in normalization_problems(system.binding, target)
     assert not ReferenceCapacityNormalization.objects.exists()
 
 

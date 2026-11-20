@@ -100,23 +100,23 @@ def test_approving_a_plant_records_the_approval_and_returns_to_the_plant() -> No
     assert system.region.status == RegionStatus.APPROVED
 
 
-def test_clearing_a_provider_delay_removes_it_and_returns_to_the_plant() -> None:
+def test_clearing_a_provider_delay_removes_it_and_returns_to_the_account() -> None:
     system = admin_system()
     blocked_until = timezone.now() + timedelta(hours=2)
     ProviderAccount.objects.filter(pk=system.account.pk).update(request_blocked_until=blocked_until)
     client, _ = verified_admin()
+    account_url = reverse("admin:workspace_provider_account", args=(system.account.pk,))
 
     response = client.post(
-        plant_url(system.region),
-        binding_action(
-            system,
-            "clear_cooldown",
-            expected_cooldown_until=blocked_until.isoformat(),
-            provider_recovered="on",
-        ),
+        f"{account_url}delay/",
+        {
+            "expected_revision": system.account.credential_revision,
+            "expected_blocked_until": blocked_until.isoformat(),
+            "provider_recovered": "on",
+        },
     )
 
-    assert (response.status_code, response["Location"]) == (302, plant_url(system.region))
+    assert (response.status_code, response["Location"]) == (302, account_url)
     assert ProviderAccount.objects.get(pk=system.account.pk).request_blocked_until is None
 
 

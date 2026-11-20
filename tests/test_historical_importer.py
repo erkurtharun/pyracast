@@ -10,18 +10,18 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import OperationalError, connections, transaction
+from django.db import IntegrityError, connections, transaction
 from django.test import Client
 from django.urls import reverse
-from psycopg.errors import LockNotAvailable
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.forecasts.historical_import import archive_reference
 from pyracast.forecasts.historical_upload import (
     import_historical_upload,
     parse_historical_upload,
     preview_historical_upload,
 )
-from pyracast.forecasts.models import ForecastSnapshot, HistoricalReferenceImport
+from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, HistoricalReferenceImport
 from pyracast.regions.models import Region
 from tests.support.api import verified_admin
 from tests.support.domain import System
@@ -54,10 +54,10 @@ def upload(system: System, content: bytes) -> HistoricalReferenceImport:
         system.tenant.pk,
         system.region.pk,
         system.binding.pk,
-        content,
+        parse_historical_upload(content, "historical.json"),
         "historical.json",
         settings_confirmed=True,
-    )
+    )[0]
 
 
 def import_page(system: System) -> str:
@@ -286,19 +286,17 @@ def test_a_preview_with_conflicts_offers_no_token(monkeypatch: pytest.MonkeyPatc
     assert checked["token"] == ""
 
 
-def test_a_busy_plant_answers_a_retry_with_the_page_fragment(
+def test_a_plant_changed_while_saving_answers_a_conflict_with_the_page_fragment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system = system_for_import(monkeypatch)
     client, _ = verified_admin()
     checked = preview(client, import_page(system), days(1))
-    busy = OperationalError("lock timeout")
-    busy.__cause__ = LockNotAvailable()
 
-    def locked(*args: object, **kwargs: object) -> None:
-        raise busy
+    def trashed(*args: object, **kwargs: object) -> None:
+        raise Region.DoesNotExist
 
-    monkeypatch.setattr("pyracast.platform_admin.historical.import_historical_upload", locked)
+    monkeypatch.setattr("pyracast.platform_admin.historical.import_historical_upload", trashed)
     response = client.post(
         import_page(system),
         {
@@ -310,8 +308,104 @@ def test_a_busy_plant_answers_a_retry_with_the_page_fragment(
         headers={"Accept": "application/json"},
     )
 
-    assert response.status_code == 503
-    assert response.headers["Retry-After"] == "1"
+    assert response.status_code == 409
     body = response.json()
-    assert "Try again in a moment" in body["html"]
+    assert "changed while saving" in body["html"]
     assert body["can_save"] is False
+    assert not HistoricalReferenceImport.objects.exists()
+
+
+def test_the_plant_page_lists_the_imports_of_its_plant(monkeypatch: pytest.MonkeyPatch) -> None:
+    system = system_for_import(monkeypatch)
+    record = upload(system, days(1))
+    client, _ = verified_admin()
+
+    page = client.get(reverse("admin:workspace_plant", args=(system.region.pk,)))
+
+    assert record.source_name in page.content.decode()
+
+
+def test_saving_without_a_script_reports_a_new_and_a_repeated_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = system_for_import(monkeypatch)
+    client, _ = verified_admin()
+    checked = preview(client, import_page(system), days(1))
+    notices: list[str] = []
+    for _ in range(2):
+        response = client.post(
+            import_page(system),
+            {
+                "action": "save",
+                "file": SimpleUploadedFile("export.json", days(1)),
+                "preview_token": checked["token"],
+                "settings_confirmed": "on",
+            },
+            follow=True,
+        )
+        notices.extend(str(message) for message in response.context["messages"])
+
+    assert notices == ["Historical data saved.", "This file was already imported."]
+    assert HistoricalReferenceImport.objects.count() == 1
+
+
+def test_a_conflict_other_than_a_repeated_file_is_not_hidden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = system_for_import(monkeypatch)
+
+    def conflict(*args: object, **kwargs: object) -> None:
+        raise IntegrityError("another constraint")
+
+    monkeypatch.setattr(CollectionJob.objects, "bulk_create", conflict)
+
+    with pytest.raises(IntegrityError):
+        upload(system, days(1))
+    assert not HistoricalReferenceImport.objects.exists()
+
+
+def test_a_plant_suspended_before_the_archive_commits_keeps_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = system_for_import(monkeypatch)
+    binding = SiteBinding.objects.select_related("provider_account", "region").get(
+        pk=system.binding.pk
+    )
+    Region.objects.filter(pk=system.region.pk).update(status="suspended")
+    power = parse_historical_upload(days(2), "history.json").power
+
+    with pytest.raises(ValidationError, match="not approved"):
+        archive_reference(system.admin, binding, power, "history.json", {"product": "x"})
+
+    assert not HistoricalReferenceImport.objects.exists()
+    assert not ForecastSnapshot.objects.exists()
+
+
+@pytest.mark.parametrize(
+    ("content", "name", "message"),
+    [
+        (b"{", "history.json", "not valid JSON"),
+        (b"period_end,period,pv_power_rooftop\n2026-11-07T12:30:00Z,PT30M,0\x00\n", "h.csv", "NUL"),
+    ],
+)
+def test_a_malformed_export_is_named(content: bytes, name: str, message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        parse_historical_upload(content, name)
+
+
+def test_power_tiny_on_every_day_is_reported_as_a_unit_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = system_for_import(monkeypatch)
+    rows = [
+        row(period_end=f"2026-10-{day:02d}T12:30:00+03:00", pv_power_rooftop=0.001)
+        for day in range(1, 4)
+    ]
+
+    checked = preview_historical_upload(
+        SiteBinding.objects.get(pk=system.binding.pk),
+        parse_historical_upload(document(rows), "history.json"),
+    )
+
+    assert dict(checked.checks)["power_not_implausibly_small"] is False
+    assert any("below 1%" in warning for warning in checked.warnings)

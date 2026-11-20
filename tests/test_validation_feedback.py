@@ -66,6 +66,7 @@ TURKISH_FAILURES: dict[tuple[str, int | None], str] = {
     ("provider_response_too_large", None): UNREADABLE_ANSWER_TR,
     ("unsupported_provider", None): UNSUPPORTED_ACCOUNT_TR,
     ("fixture_account_required", None): UNSUPPORTED_ACCOUNT_TR,
+    ("fixture_provider_disabled", None): UNSUPPORTED_ACCOUNT_TR,
     ("unrecognized_failure", None): (
         "Bağlant\u0131 doğrulanamad\u0131. "
         "Özel kimlik bilgilerini ve tesis ayarlar\u0131n\u0131 denetleyin."

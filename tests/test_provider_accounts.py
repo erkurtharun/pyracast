@@ -10,10 +10,10 @@ from django.utils import timezone, translation
 
 from pyracast.connections import operations
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.operations import validate_binding
 from pyracast.connections.recovery import clear_provider_cooldown
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from pyracast.forecasts.models import RequestAttempt
+from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import approve_region
 from pyracast.regions.models import AuditEvent
 from pyracast.regions.operations import configure_binding
@@ -278,3 +278,26 @@ def test_key_and_recovery_refusals_are_translated() -> None:
     assert key.value.messages != ["Enter an API key without spaces, up to 1024 characters."]
     assert recovery.value.messages != ["The account changed. Reload before confirming recovery."]
     assert replacement_refusal.value.messages != [STALE]
+
+
+def test_a_new_account_with_a_stored_key_is_refused_next_to_the_key_field() -> None:
+    system = solcast_system()
+    client, _ = verified_admin()
+
+    response = client.post(
+        setup_url(system),
+        setup_input(
+            system,
+            account_mode="new",
+            existing_account="",
+            external_account_id="another-owner",
+            api_key=provider_key("CURRENT"),
+            authorization_reference="Authorized service use",
+        ),
+    )
+
+    assert response.status_code == 400
+    assert "api_key" in response.context["setup_form"].errors
+    assert "solar-owner" in response.content.decode()
+    assert provider_key("CURRENT").encode() not in response.content
+    assert not ProviderAccount.objects.filter(external_account_id="another-owner").exists()

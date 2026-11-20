@@ -2,10 +2,11 @@ from datetime import timedelta
 
 import pytest
 
-from pyracast.connections import operations
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.operations import ForecastBudgetReservedError, validate_binding
+from pyracast.forecasts import quota
 from pyracast.forecasts.models import RequestAttempt
+from pyracast.forecasts.quota import ForecastBudgetReservedError
+from pyracast.forecasts.validation import validate_binding
 from tests.support.domain import NOW, FakeAdapter, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -13,7 +14,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 def leave_one_request_for(remaining_forecasts: int, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        operations, "remaining_forecast_requests", lambda account, now: remaining_forecasts
+        quota, "remaining_forecast_requests", lambda account, now: remaining_forecasts
     )
 
 

@@ -18,7 +18,6 @@ from django.utils import timezone
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.errors import DomainError
-from pyracast.forecasts.historical_import import import_historical_reference
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -48,7 +47,7 @@ from pyracast.trash import (
 from tests.support.concurrency import behind_open_transaction
 from tests.support.domain import NOW, System
 from tests.support.errors import raises_code
-from tests.support.historical_reference_import import power_file, source_settings, system_for_import
+from tests.support.historical_reference_import import archive, power_file, system_for_import
 from tests.support.plant_operations import make_plant, request_run, snapshot_for
 from tests.support.trash_operations import remaining_purge_work, revised_observation, sibling
 
@@ -59,15 +58,7 @@ def test_region_purge_removes_imported_reference_archive_and_preserves_other_own
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     system = system_for_import(monkeypatch)
-    record = import_historical_reference(
-        system.admin,
-        system.tenant.pk,
-        system.region.pk,
-        system.binding.pk,
-        power_file(tmp_path),
-        source_settings(),
-        trusted_root=tmp_path,
-    )
+    record = archive(system, power_file(tmp_path))
     assert ForecastSnapshot.objects.filter(job__reference_import=record).exists()
     protected_records = []
     for other_tenant in (False, True):

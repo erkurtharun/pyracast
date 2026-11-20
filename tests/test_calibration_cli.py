@@ -37,7 +37,8 @@ def dataset(days: int = 11, start: datetime = START) -> PairedDataset:
 
 
 def inputs(directory: Path) -> list[str]:
-    power, weather = [], []
+    power: list[dict[str, object]] = []
+    weather: list[dict[str, object]] = []
     for sample in dataset().samples:
         power.append(
             {
@@ -99,6 +100,7 @@ def test_existing_outputs_are_kept_unless_overwrite_is_given(
     "arguments",
     [
         ["--capacity-kw", "0"],
+        ["--capacity-kw", "many"],
         ["--capacity-kw", "nan"],
         ["--capacity-kw", "-1"],
         ["--capacity-kw", "1000", "--timezone", "Mars/Olympus"],

@@ -33,6 +33,7 @@ def test_dispatch_failure_does_not_suppress_email_and_one_shot_reports_failure(
     broker = MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     stub_actors(monkeypatch)
+    monkeypatch.setattr(command, "dispatch_revalidations", MagicMock(return_value=0))
     monkeypatch.setattr(command, "purge_finished_mail", MagicMock())
     operations = {}
     for name in (
@@ -65,6 +66,7 @@ def test_dispatch_monitoring_failure_does_not_skip_other_phases(
     broker = MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     stub_actors(monkeypatch)
+    monkeypatch.setattr(command, "dispatch_revalidations", MagicMock(return_value=0))
     notifications = MagicMock()
     monkeypatch.setattr(command, "dispatch_notifications", notifications)
     for name in (
@@ -89,6 +91,7 @@ def test_dispatch_loop_recovers_after_a_failed_cycle(
     broker = MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     stub_actors(monkeypatch)
+    monkeypatch.setattr(command, "dispatch_revalidations", MagicMock(return_value=0))
     for name in (
         "purge_expired",
         "sweep_accounts",
@@ -118,6 +121,7 @@ def test_dispatch_loop_recovers_after_a_failed_cycle(
 def mock_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "make_broker", MagicMock())
     stub_actors(monkeypatch)
+    monkeypatch.setattr(command, "dispatch_revalidations", MagicMock(return_value=0))
 
 
 def recorded_phases(record: MagicMock) -> dict[str, tuple[str, int | None, int]]:

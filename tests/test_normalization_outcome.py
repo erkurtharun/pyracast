@@ -17,7 +17,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     ReferenceCapacityNormalization,
 )
-from pyracast.regions.models import AuditEvent
+from pyracast.regions.models import AuditEvent, Region
 from tests.support.capacity_normalization import normalize, scaled_system
 from tests.support.domain import System
 from tests.support.plant_operations import publish_snapshot, snapshot_for
@@ -163,7 +163,9 @@ def test_a_source_holding_copies_names_the_binding_that_needs_its_own_run(
 
 def test_every_refusal_is_printed_on_its_own_line(monkeypatch: pytest.MonkeyPatch) -> None:
     system, _ = scaled_system(monkeypatch)
-    SiteBinding.objects.filter(pk=system.binding.pk).update(health="error", validated_at=None)
+    SiteBinding.objects.filter(pk=system.binding.pk).update(
+        health="error", validated_at=None, validated_credential_revision=None
+    )
 
     with pytest.raises(CommandError) as refusal:
         run(system)
@@ -199,3 +201,13 @@ def test_the_operation_returns_a_typed_outcome(monkeypatch: pytest.MonkeyPatch) 
     assert outcome.factor == 1000
     assert len(outcome.created) == 1
     assert outcome.reused == ()
+
+
+def test_a_plant_without_an_approved_binding_names_its_missing_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _ = scaled_system(monkeypatch)
+    Region.objects.filter(pk=system.region.pk).update(status="pending", approved_binding=None)
+
+    with pytest.raises(CommandError, match="no approved connection"):
+        run(system)

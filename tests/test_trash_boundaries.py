@@ -94,6 +94,7 @@ def test_dispatch_prioritizes_notifications_and_continues_all_queues(
     broker = Mock()
     monkeypatch.setattr(dispatcher, "make_broker", lambda: broker)
     stub_actors(monkeypatch)
+    monkeypatch.setattr(dispatcher, "dispatch_revalidations", lambda actor: 0)
     monkeypatch.setattr(dispatcher, "purge_expired", lambda now: calls.append("purge"))
     monkeypatch.setattr(dispatcher, "sweep_accounts", lambda now: calls.append("sweep"))
     monkeypatch.setattr(dispatcher, "purge_finished_mail", lambda now: None)

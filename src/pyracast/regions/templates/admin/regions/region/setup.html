@@ -17,6 +17,7 @@
     <div class="panel-head"><h2 id="historical-title">{% translate "Historical Solcast data" %}</h2></div>
     <p class="row-meta">{% translate "Check and import an authorized historical JSON or CSV export for this plant." %}</p>
     <a class="btn btn--quiet" href="{% url 'admin:workspace_historical_import' region.pk %}">{% translate "Import historical data" %}</a>
+    {% if imports %}<ul>{% for record in imports %}<li>{{ record.source_name }} · {% translate "Intervals" %}: {{ record.interval_count }} · <time datetime="{{ record.created_at|date:'c' }}">{{ record.created_at|date:"j M Y, H:i T" }}</time> · {{ record.imported_by.get_username }}</li>{% endfor %}</ul>{% endif %}
   </section>
   {% if setup_form.errors or action_form.errors or epias_form.errors %}
     <section class="notice notice--error" role="alert" tabindex="-1" data-error-summary aria-labelledby="errors-title">
@@ -125,7 +126,7 @@
     {% if binding %}
       <h3>{% translate "Saved connection" %}</h3>
       <dl class="facts facts--tinted">
-        <div><dt>{% translate "Account" %}</dt><dd>{{ binding.provider_account.provider }} · {{ binding.provider_account.external_account_id }}</dd></div>
+        <div><dt>{% translate "Account" %}</dt><dd><a href="{% url 'admin:workspace_provider_account' binding.provider_account_id %}">{{ binding.provider_account.provider }} · {{ binding.provider_account.external_account_id }}</a></dd></div>
         <div><dt>{% translate "Resource ID" %}</dt><dd>{{ binding.site_id }}</dd></div>
         <div><dt>{% translate "Connection" %}</dt><dd>{% translate plant_summary.connection %} {% translate "· key revision" %} {{ binding.provider_account.credential_revision }}</dd></div>
         <div><dt>{% translate "Last validation" %}</dt><dd>{% if binding.validated_at %}<time datetime="{{ binding.validated_at|date:'c' }}">{{ binding.validated_at|date:"j M Y, H:i T" }}</time>{% else %}{% translate "Not validated" %}{% endif %}</dd></div>
@@ -133,28 +134,19 @@
       {% if active_provider_delay %}
         <div class="callout callout--warn">
           <h3>{% translate "Provider request delay" %}</h3>
-          <p>{% translate "Requests wait until" %} <time datetime="{{ binding.provider_account.request_blocked_until|date:'c' }}">{{ binding.provider_account.request_blocked_until|date:"j M Y, H:i T" }}</time>{% translate ". Clear this delay only after confirming recovery with the provider. The daily request budget is preserved." %}</p>
-          <form method="post" class="form">
-            {% csrf_token %}
-            {% for field in action_form.hidden_fields %}{{ field }}{% endfor %}
-            <div class="field field--check{% if action_form.provider_recovered.errors %} field--error{% endif %}">
-              {{ action_form.provider_recovered.as_field_group }}
-            </div>
-            <div class="form-actions">
-              <button type="submit" name="action" value="clear_cooldown" class="btn btn--quiet">{% translate "Clear confirmed provider delay" %}</button>
-            </div>
-          </form>
+          <p>{% translate "Requests wait until" %} <time datetime="{{ binding.provider_account.request_blocked_until|date:'c' }}">{{ binding.provider_account.request_blocked_until|date:"j M Y, H:i T" }}</time>.</p>
+          <a class="btn btn--quiet" href="{% url 'admin:workspace_provider_account' binding.provider_account_id %}">{% translate "Manage the provider account" %}</a>
         </div>
       {% endif %}
     {% endif %}
 
     {% if binding %}<details class="disclosure"{% if setup_form.is_bound %} open{% endif %}><summary>{% translate "Replace connection" %}</summary>{% endif %}
-    <form method="post" class="form" data-setup-form data-account-mode-name="{{ setup_form.account_mode.html_name }}" data-api-key-name="{{ setup_form.api_key.html_name }}">
+    <form method="post" class="form" data-setup-form data-account-mode-name="{{ setup_form.account_mode.html_name }}">
       {% csrf_token %}
       <input type="hidden" name="action" value="configure">
       {% for field in setup_form.hidden_fields %}{{ field }}{{ field.errors }}{% endfor %}
       {{ setup_form.non_field_errors }}
-      <p class="callout">{% if binding %}{% translate "Saving a changed setup creates a new pending revision that must be validated and approved again. Saving the same setup changes nothing; a new API key must be validated again." %} {% translate "The selected account's key and daily quota are shared by every plant using that account." %}{% else %}{% translate "Saving creates a pending revision that must be validated and approved." %}{% endif %}</p>
+      <p class="callout">{% if binding %}{% translate "Saving a changed setup creates a new pending revision that must be validated and approved again. Saving the same setup changes nothing." %} {% translate "The selected account's key and daily quota are shared by every plant using that account." %}{% else %}{% translate "Saving creates a pending revision that must be validated and approved." %}{% endif %}</p>
 
       <fieldset class="group">
         <legend>{% translate "Solcast account" %}</legend>
@@ -179,16 +171,9 @@
             <div class="field field--wide{% if setup_form.authorization_reference.errors %} field--error{% endif %}" data-new-account-required>
               {{ setup_form.authorization_reference.as_field_group }}
             </div>
-          </div>
-        </div>
-        <div class="field{% if setup_form.api_key.errors %} field--error{% endif %}">
-          {{ setup_form.api_key.as_field_group }}
-        </div>
-        <div class="subgroup" data-account-group="existing">
-          <p class="subgroup-title">{% translate "Key replacement for an existing account" %}</p>
-          <p class="callout callout--warn">{% translate "Entering a key above replaces the selected account's key for every plant that shares it. Leave the key blank to keep the current one." %}</p>
-          <div class="field field--check{% if setup_form.confirm_key_rotation.errors %} field--error{% endif %}">
-            {{ setup_form.confirm_key_rotation.as_field_group }}
+            <div class="field field--wide{% if setup_form.api_key.errors %} field--error{% endif %}" data-new-account-required>
+              {{ setup_form.api_key.as_field_group }}
+            </div>
           </div>
         </div>
       </fieldset>

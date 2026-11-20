@@ -1,5 +1,4 @@
 import csv
-import json
 import re
 from contextlib import suppress
 from dataclasses import dataclass
@@ -13,24 +12,24 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from pyracast.accounts.authorization import require_platform_admin
-from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts.historical_import import (
-    _archive_historical_reference,
-    _day_indexes,
-    _validate_authorized_binding,
-)
+from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.historical_import import archive_reference, day_indexes, require_reference
 from pyracast.forecasts.models import HistoricalReferenceImport
-from pyracast.irradiance.pairs import PowerFile, PowerFileInterval
-from pyracast.plants.models import Plant
+from pyracast.irradiance.solcast_export import PowerFile, PowerFileInterval, parse_json
 from pyracast.regions.models import Region
 
 MAX_UPLOAD_BYTES = 7 * 1024 * 1024
 MAX_UPLOAD_ROWS = 200_000
+# Solcast's historical archive begins on 1 January 2007; earlier intervals are not its data.
+ARCHIVE_START = datetime(2007, 1, 1, tzinfo=UTC)
+# Rooftop power never exceeds the AC reference capacity; the tolerance absorbs rounding.
+CAPACITY_TOLERANCE = 1.01
+# Below this share of the capacity on every interval of several days the unit is suspect.
+IMPLAUSIBLY_SMALL_SHARE = 0.01
 _PERIODS = {"PT30M": timedelta(minutes=30), "PT60M": timedelta(hours=1)}
 _SETTINGS = (
     "latitude",
@@ -101,6 +100,8 @@ class HistoricalUploadPreview:
     warnings: tuple[str, ...]
     conflicts: tuple[str, ...]
     period: str
+    checks: tuple[tuple[str, bool], ...] = ()
+    previous_import: HistoricalReferenceImport | None = None
     unit: str = "kW"
 
 
@@ -114,17 +115,29 @@ def _canonical(row: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _translated_refusal(message: str) -> str:
+    match message:
+        case "Nonfinite JSON values are not supported.":
+            return _("Nonfinite JSON values are not supported.")
+        case "Duplicate JSON object keys are not supported.":
+            return _("Duplicate JSON object keys are not supported.")
+        case "The JSON export is nested too deeply.":
+            return _("The JSON export is nested too deeply.")
+        case "The file contains a NUL character.":
+            return _("The file contains a NUL character.")
+    return _("The file is not valid JSON.")
+
+
 def _read_rows(content: bytes, filename: str) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
     text = content.decode("utf-8-sig")
+    if "\x00" in text:
+        raise ValueError(_("The file contains a NUL character."))
     suffix = PureWindowsPath(filename).suffix.lower()
     if suffix == ".json":
-        data = json.loads(
-            text,
-            parse_constant=_invalid_constant,
-            parse_float=_json_float,
-            object_pairs_hook=_json_object,
-        )
-        _validate_json_depth(data)
+        try:
+            data = parse_json(text)
+        except ValueError as error:
+            raise ValueError(_translated_refusal(str(error))) from None
         if (
             not isinstance(data, dict)
             or "forecasts" in data
@@ -154,36 +167,6 @@ def _read_rows(content: bytes, filename: str) -> tuple[list[dict[str, Any]], dic
             raise ValueError(_("CSV rows must match the column header."))
         rows.append(dict(row))
     return rows, {}, "csv"
-
-
-def _invalid_constant(value: str) -> object:
-    raise ValueError(_("Nonfinite JSON values are not supported."))
-
-
-def _json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result = dict(pairs)
-    if len(result) != len(pairs):
-        raise ValueError(_("Duplicate JSON object keys are not supported."))
-    return result
-
-
-def _json_float(value: str) -> float:
-    number = float(value)
-    if not isfinite(number):
-        raise ValueError(_("Nonfinite JSON values are not supported."))
-    return number
-
-
-def _validate_json_depth(value: object) -> None:
-    pending = [(value, 0)]
-    while pending:
-        item, depth = pending.pop()
-        if depth > 32:
-            raise ValueError(_("The JSON export is nested too deeply."))
-        if isinstance(item, dict):
-            pending.extend((nested, depth + 1) for nested in item.values())
-        elif isinstance(item, list):
-            pending.extend((nested, depth + 1) for nested in item)
 
 
 def _instant(value: object, zone: ZoneInfo | None) -> tuple[datetime, bool]:
@@ -273,6 +256,8 @@ def parse_historical_upload(
                     )
             if intervals and start < intervals[-1].end:
                 raise ValueError(_("Historical intervals must be sorted and non-overlapping."))
+            if start < ARCHIVE_START:
+                raise ValueError(_("Intervals before the provider archive starts on 2007-01-01."))
             if end > timezone.now():
                 raise ValueError(
                     _("Historical input cannot contain future or incomplete intervals.")
@@ -386,16 +371,53 @@ def preview_historical_upload(
         warnings.append(
             "The selected reference has no declared DC capacity; settings matching is incomplete."
         )
+    days = tuple(day_indexes(upload.power, ZoneInfo(binding.timezone)))
+    highest = max(interval.power_kw for interval in upload.power.intervals)
+    within_capacity = highest <= binding.capacity_kw * CAPACITY_TOLERANCE
+    if not within_capacity:
+        conflicts.append(
+            _(
+                "Interval power reaches %(power)s kW, above the reference capacity of "
+                "%(capacity)s kW; check that the file is in kW."
+            )
+            % {"power": f"{highest:g}", "capacity": f"{binding.capacity_kw:g}"}
+        )
+    plausible_size = len(days) < 2 or highest >= binding.capacity_kw * IMPLAUSIBLY_SMALL_SHARE
+    if not plausible_size:
+        warnings.append(
+            "Every interval stays below 1% of the reference capacity; check the file's unit."
+        )
+    previous = (
+        HistoricalReferenceImport.objects.filter(
+            binding=binding, content_sha256=upload.power.sha256
+        )
+        .select_related("imported_by")
+        .first()
+    )
+    if previous is not None:
+        conflicts.append(
+            _("This file was already imported on %(date)s by %(actor)s.")
+            % {
+                "date": previous.created_at.date().isoformat(),
+                "actor": previous.imported_by.get_username(),
+            }
+        )
     return HistoricalUploadPreview(
         upload.power.intervals[0].start,
         upload.power.intervals[-1].end,
         len(upload.power.intervals),
-        tuple(_day_indexes(upload.power, ZoneInfo(binding.timezone))),
+        days,
         tuple(verified),
         tuple(missing),
         tuple(warnings),
         tuple(conflicts),
         upload.period,
+        checks=(
+            ("power_within_capacity", within_capacity),
+            ("power_not_implausibly_small", plausible_size),
+            ("not_imported_before", previous is None),
+        ),
+        previous_import=previous,
     )
 
 
@@ -404,15 +426,15 @@ def import_historical_upload(
     tenant_id: int,
     region_id: int,
     binding_id: int,
-    content: bytes,
+    upload: HistoricalUpload,
     filename: str,
     *,
-    source_timezone: str | None = None,
-    period: str | None = None,
     settings_confirmed: bool,
     source_reference: str = "Administrator-confirmed historical export for the selected binding",
     expected_configuration_ids: tuple[tuple[int, int | None], ...] | None = None,
-) -> HistoricalReferenceImport:
+) -> tuple[HistoricalReferenceImport, bool]:
+    """The one importer behind the console upload and the command; a file the binding already
+    holds returns that import unchanged."""
     require_platform_admin(actor)
     if (
         settings_confirmed is not True
@@ -422,54 +444,42 @@ def import_historical_upload(
         raise ValidationError(
             _("Confirm the historical modeled product and selected reference settings.")
         )
-    upload = parse_historical_upload(
-        content, filename, source_timezone=source_timezone, period=period
+    region = Region.objects.active().get(pk=region_id, tenant_id=tenant_id)
+    binding = SiteBinding.objects.select_related("provider_account").get(
+        pk=binding_id, region=region
     )
-    with transaction.atomic():
-        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
-        if expected_configuration_ids is not None:
-            configurations = tuple(
-                Plant.objects.select_for_update()
-                .filter(region=region)
-                .order_by("pk")
-                .values_list("pk", "current_configuration_id")
-            )
-            if configurations != expected_configuration_ids:
-                raise ValidationError(_("The plant configuration changed. Preview the file again."))
-        binding = SiteBinding.objects.get(pk=binding_id, region=region)
-        account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
-        binding = SiteBinding.objects.select_for_update().get(pk=binding.pk)
-        binding.provider_account = account
-        _validate_authorized_binding(binding)
-        preview = preview_historical_upload(binding, upload)
-        if preview.conflicts:
-            raise ValidationError(list(preview.conflicts))
-        manifest = {key: _reference_setting(binding, key) for key in _SETTINGS} | {
-            "product": "historical_rooftop_pv",
-            "settings_matched": binding.dc_capacity_kw is not None,
-            "period": upload.period,
-            "source_reference": source_reference.strip(),
-            "upload_provenance": {
-                "transport": upload.format,
-                "file_product": upload.source_product,
-                "file_metadata": upload.metadata,
-                "file_verified_fields": list(preview.verified_fields),
-                "operator_declared_fields": list(preview.missing_fields),
-                "operator_confirmed": True,
-                "binding_id": binding.pk,
-                "binding_revision": binding.region_revision,
-                "binding_dc_capacity_known": binding.dc_capacity_kw is not None,
-                "source_timezone": upload.naive_timezone,
-                "period_declared": upload.period_declared,
-                "warnings": list(preview.warnings),
-            },
-        }
-        return _archive_historical_reference(
-            actor,
-            region,
-            binding,
-            upload.power,
-            PureWindowsPath(filename).name[:255],
-            manifest,
-            timezone.now(),
-        )
+    binding.region = region
+    require_reference(binding)
+    preview = preview_historical_upload(binding, upload)
+    if preview.previous_import is not None:
+        return preview.previous_import, False
+    if preview.conflicts:
+        raise ValidationError(list(preview.conflicts))
+    manifest = {key: _reference_setting(binding, key) for key in _SETTINGS} | {
+        "product": "historical_rooftop_pv",
+        "settings_matched": binding.dc_capacity_kw is not None,
+        "period": upload.period,
+        "source_reference": source_reference.strip(),
+        "upload_provenance": {
+            "transport": upload.format,
+            "file_product": upload.source_product,
+            "file_metadata": upload.metadata,
+            "file_verified_fields": list(preview.verified_fields),
+            "operator_declared_fields": list(preview.missing_fields),
+            "operator_confirmed": True,
+            "binding_id": binding.pk,
+            "binding_revision": binding.region_revision,
+            "binding_dc_capacity_known": binding.dc_capacity_kw is not None,
+            "source_timezone": upload.naive_timezone,
+            "period_declared": upload.period_declared,
+            "warnings": list(preview.warnings),
+        },
+    }
+    return archive_reference(
+        actor,
+        binding,
+        upload.power,
+        PureWindowsPath(filename).name[:255],
+        manifest,
+        expected_configuration_ids=expected_configuration_ids,
+    )

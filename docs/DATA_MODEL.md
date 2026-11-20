@@ -400,6 +400,8 @@ erDiagram
         varchar_500 authorization_reference
         timestamp_with_time_zone authorized_at "nullable"
         integer authorized_by_id FK "nullable; references auth_user.id"
+        varchar_64 api_key_fingerprint "nullable"
+        timestamp_with_time_zone revalidation_due_at "nullable"
     }
     connections_sitebinding {
         bigint id PK
@@ -432,6 +434,7 @@ erDiagram
 
 #### `connections_provideraccount`
 
+- `provideraccount_api_key_fingerprint_uniq`: `UNIQUE ("api_key_fingerprint")`
 - `provideraccount_authentication_failed_revision_chk`: `CHECK (("authentication_failed_revision" IS NULL OR ("authentication_failed_revision" >= 1 AND "authentication_failed_revision" <= ("credential_revision"))))`
 - `provideraccount_credential_revision_chk`: `CHECK ("credential_revision" >= 1)`
 - `provideraccount_daily_quota_chk`: `CHECK (("daily_quota" >= 1 AND "daily_quota" <= 10))`

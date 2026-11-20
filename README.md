@@ -213,8 +213,8 @@ operator workflows; inspect their `--help` for required declarations and limits:
 | `import_production` | Atomically import interval energy CSV for a pinned configuration |
 | `calibrate_plant` | Queue a durable fit; `--run` executes it locally without RabbitMQ |
 | `activate_calibration` | Activate an eligible candidate or restore `--baseline` |
-| `import_historical_reference` | Archive an authorized export and verified settings manifest |
-| `normalize_reference_capacity` | Create an explicitly authorized capacity-only derived acquisition |
+| `import_historical_reference` | Archive an authorized JSON or CSV export through the console upload checks |
+| `normalize_reference_capacity` | Create an explicitly authorized capacity-only derived acquisition (`--dry-run` first) |
 
 Import paths must stay inside the repository. Use an ignored local directory.
 Production CSV values are interval energy, never instantaneous MW or cumulative

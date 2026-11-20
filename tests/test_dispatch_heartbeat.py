@@ -17,6 +17,7 @@ def test_dispatcher_touches_its_heartbeat_before_every_cycle_even_after_a_failed
     monkeypatch.setattr(command, "record_dispatch_phase", MagicMock())
     monkeypatch.setattr(command, "make_broker", MagicMock)
     stub_actors(monkeypatch)
+    monkeypatch.setattr(command, "dispatch_revalidations", MagicMock(return_value=0))
     for name in (
         "purge_expired",
         "sweep_accounts",

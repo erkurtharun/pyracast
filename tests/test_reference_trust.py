@@ -2,14 +2,15 @@ from collections.abc import Callable
 
 import pytest
 from django.core.exceptions import ValidationError
-from pyracast.forecasts.trust import (
-    PROBLEM_MESSAGES,
-    normalization_problems,
-    reference_problems,
-)
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.capacity_normalization import normalize_reference_capacity
+from pyracast.forecasts.trust import (
+    PROBLEM_MESSAGES,
+    normalization_problems,
+    problem_messages,
+    reference_problems,
+)
 from tests.support.capacity_normalization import scaled_system
 from tests.support.historical_reference_import import system_for_import
 
@@ -130,7 +131,9 @@ def test_the_operation_refuses_with_every_unmet_gate_named(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, target = scaled_system(monkeypatch)
-    SiteBinding.objects.filter(pk=system.binding.pk).update(health="error", validated_at=None)
+    SiteBinding.objects.filter(pk=system.binding.pk).update(
+        health="error", validated_at=None, validated_credential_revision=None
+    )
 
     with pytest.raises(ValidationError) as refusal:
         normalize_reference_capacity(
@@ -184,3 +187,10 @@ def test_each_import_gate_reports_its_own_problem(
 
     assert reference_problems(binding) == (code,)
     assert code in PROBLEM_MESSAGES
+
+
+def test_a_differing_field_is_named_in_its_message() -> None:
+    assert problem_messages(("field_differs:site_id", "capacity_equal")) == [
+        "The connections differ in more than their capacity: site_id.",
+        "The capacities are equal; there is nothing to rescale.",
+    ]

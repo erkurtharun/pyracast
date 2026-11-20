@@ -90,9 +90,9 @@ def test_dotted_and_dotless_turkish_identities_keep_distinct_accounts() -> None:
     admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     accounts = [
         create_account(
-            admin, provider="fixture", external_account_id=identity, api_key=provider_key()
+            admin, provider="fixture", external_account_id=identity, api_key=provider_key(name)
         )
-        for identity in ("I", "\u0130", "\u0131")
+        for identity, name in (("I", "LATIN"), ("\u0130", "DOTTED"), ("\u0131", "DOTLESS"))
     ]
     assert len({account.pk for account in accounts}) == 3
     assert [account.external_account_id for account in accounts] == ["i", "i\u0307", "\u0131"]

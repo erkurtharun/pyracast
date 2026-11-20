@@ -85,6 +85,7 @@ def reserve_account_request(
     purpose: RequestPurpose,
     binding: SiteBinding | None = None,
     job: CollectionJob | None = None,
+    keep_forecast_reserve: bool = False,
 ) -> RequestAttempt:
     started = time.monotonic()
     if now.tzinfo is None:
@@ -113,10 +114,9 @@ def reserve_account_request(
         if job is not None and binding is not None and purpose == RequestPurpose.FORECAST:
             _admit_forecast(binding, account, job, utc_day)
         if (
-            job is not None
-            and purpose == RequestPurpose.ESTIMATED_ACTUALS
-            and used + 1 + remaining_forecast_requests(account, now) > account.daily_quota
-        ):
+            keep_forecast_reserve
+            or (job is not None and purpose == RequestPurpose.ESTIMATED_ACTUALS)
+        ) and used + 1 + remaining_forecast_requests(account, now) > account.daily_quota:
             raise ForecastBudgetReservedError
         return RequestAttempt.objects.create(
             provider_account=account,
@@ -134,9 +134,15 @@ def reserve_request(
     *,
     purpose: RequestPurpose,
     job: CollectionJob | None = None,
+    keep_forecast_reserve: bool = False,
 ) -> RequestAttempt:
     return reserve_account_request(
-        binding.provider_account, now, purpose=purpose, binding=binding, job=job
+        binding.provider_account,
+        now,
+        purpose=purpose,
+        binding=binding,
+        job=job,
+        keep_forecast_reserve=keep_forecast_reserve,
     )
 
 

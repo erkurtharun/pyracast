@@ -34,4 +34,4 @@ def normalize(system: System, target: SiteBinding) -> tuple[int, ...]:
         system.binding.pk,
         target.pk,
         "User confirms the same Hobby model with only a 1 to 1000 kW reference scale change",
-    )
+    ).snapshot_ids

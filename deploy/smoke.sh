@@ -24,6 +24,7 @@ PYRACAST_RABBITMQ_URL=amqp://pyracast:smoke-broker@rabbitmq:5672/%2F
 PYRACAST_EMAIL_HOST=smtp.example.com
 PYRACAST_FROM_EMAIL=smoke@example.com
 PYRACAST_WEATHER_ENABLED=0
+PYRACAST_FIXTURE_PROVIDER=1
 ENV
 printf 'RABBITMQ_DEFAULT_USER=pyracast\nRABBITMQ_DEFAULT_PASS=smoke-broker\n' > "$BROKER_ENV_FILE"
 printf 'POSTGRES_PASSWORD=smoke-bootstrap-only\n' > "$DATABASE_ENV_FILE"

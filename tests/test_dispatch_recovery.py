@@ -18,6 +18,7 @@ def test_dispatch_reconnects_after_its_postgresql_session_is_terminated(
     broker = MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     stub_actors(monkeypatch)
+    monkeypatch.setattr(command, "dispatch_revalidations", MagicMock(return_value=0))
     for operation in (
         "dispatch_collections",
         "dispatch_epias",

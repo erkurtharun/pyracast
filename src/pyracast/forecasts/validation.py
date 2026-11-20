@@ -69,7 +69,13 @@ def validate_binding(
                     "Reload the page in a minute to see the result."
                 ),
             )
-        attempt = reserve_request(binding, now, purpose=RequestPurpose.VALIDATION)
+        # Revalidating a collecting plant never takes a request its account's forecasts need.
+        attempt = reserve_request(
+            binding,
+            now,
+            purpose=RequestPurpose.VALIDATION,
+            keep_forecast_reserve=current.status == RegionStatus.APPROVED,
+        )
     try:
         adapter.validate(binding)
     except ProviderError as exc:
