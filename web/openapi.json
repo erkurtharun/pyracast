@@ -8,7 +8,9 @@
         "/api/invitations/accept/": {
             "post": {
                 "operationId": "invitations_accept_create",
-                "tags": ["invitations"],
+                "tags": [
+                    "invitations"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -101,7 +103,9 @@
         "/api/session/": {
             "get": {
                 "operationId": "session_retrieve",
-                "tags": ["session"],
+                "tags": [
+                    "session"
+                ],
                 "responses": {
                     "200": {
                         "content": {
@@ -129,7 +133,9 @@
         "/api/session/language/": {
             "post": {
                 "operationId": "session_language_create",
-                "tags": ["session"],
+                "tags": [
+                    "session"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -208,7 +214,9 @@
                         }
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -283,7 +291,11 @@
                         "in": "query",
                         "name": "scope",
                         "schema": {
-                            "enum": ["pending", "history", "mine"],
+                            "enum": [
+                                "pending",
+                                "history",
+                                "mine"
+                            ],
                             "type": "string",
                             "default": "pending",
                             "minLength": 1
@@ -299,7 +311,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -390,7 +404,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -471,7 +487,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -582,7 +600,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -693,7 +713,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -784,7 +806,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -867,7 +891,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -928,7 +954,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1029,7 +1057,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1095,7 +1125,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1166,7 +1198,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1240,7 +1274,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1314,7 +1350,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1393,7 +1431,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1491,7 +1531,11 @@
                         "in": "query",
                         "name": "data_source",
                         "schema": {
-                            "enum": ["auto", "forecast", "estimated_actuals"],
+                            "enum": [
+                                "auto",
+                                "forecast",
+                                "estimated_actuals"
+                            ],
                             "type": "string",
                             "default": "forecast",
                             "minLength": 1
@@ -1524,7 +1568,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1634,7 +1680,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1713,7 +1761,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1842,7 +1892,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1942,7 +1994,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2021,7 +2075,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -2140,7 +2196,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -2259,7 +2317,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2346,7 +2406,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -2464,7 +2526,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2572,7 +2636,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2659,7 +2725,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -2796,7 +2864,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2893,7 +2963,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2992,7 +3064,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -3121,7 +3195,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -3278,7 +3354,10 @@
                         "in": "query",
                         "name": "resolution_minutes",
                         "schema": {
-                            "enum": [30, 60],
+                            "enum": [
+                                30,
+                                60
+                            ],
                             "type": "integer",
                             "default": 30
                         },
@@ -3293,7 +3372,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -3411,7 +3492,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -3498,7 +3581,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -3625,7 +3710,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -3752,7 +3839,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -3879,7 +3968,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -3977,7 +4068,10 @@
                         "in": "query",
                         "name": "comparison",
                         "schema": {
-                            "enum": ["archived_forecast", "historical_model"],
+                            "enum": [
+                                "archived_forecast",
+                                "historical_model"
+                            ],
                             "type": "string",
                             "default": "archived_forecast",
                             "minLength": 1
@@ -4042,7 +4136,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -4170,7 +4266,10 @@
                         "in": "query",
                         "name": "resolution_minutes",
                         "schema": {
-                            "enum": [30, 60],
+                            "enum": [
+                                30,
+                                60
+                            ],
                             "type": "integer",
                             "default": 60
                         },
@@ -4193,7 +4292,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -4292,7 +4393,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -4381,7 +4484,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -4510,7 +4615,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -4631,7 +4738,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -4710,7 +4819,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -4821,7 +4932,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -4923,7 +5036,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -4994,7 +5109,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -5106,7 +5223,9 @@
                         "required": true
                     }
                 ],
-                "tags": ["tenants"],
+                "tags": [
+                    "tenants"
+                ],
                 "security": [
                     {
                         "cookieAuth": []
@@ -5169,6 +5288,17 @@
     },
     "components": {
         "schemas": {
+            "ActivationBlockerEnum": {
+                "enum": [
+                    "configuration_changed",
+                    "production_source_changed",
+                    "outage_history_changed",
+                    "incumbent_changed",
+                    "calibration_not_activatable"
+                ],
+                "type": "string",
+                "description": "* `configuration_changed` - Configuration Changed\n* `production_source_changed` - Production Source Changed\n* `outage_history_changed` - Outage History Changed\n* `incumbent_changed` - Incumbent Changed\n* `calibration_not_activatable` - Calibration Not Activatable"
+            },
             "ActivationOutput": {
                 "type": "object",
                 "properties": {
@@ -5209,7 +5339,9 @@
                         "maxLength": 100
                     }
                 },
-                "required": ["review_fingerprint"]
+                "required": [
+                    "review_fingerprint"
+                ]
             },
             "AuditActionEnum": {
                 "enum": [
@@ -5254,10 +5386,18 @@
                         "format": "date-time"
                     }
                 },
-                "required": ["calibration_id", "created_at", "reason", "status"]
+                "required": [
+                    "calibration_id",
+                    "created_at",
+                    "reason",
+                    "status"
+                ]
             },
             "AutomaticCalibrationAttemptOutputStatusEnum": {
-                "enum": ["activated", "skipped"],
+                "enum": [
+                    "activated",
+                    "skipped"
+                ],
                 "type": "string",
                 "description": "* `activated` - activated\n* `skipped` - skipped"
             },
@@ -5271,15 +5411,25 @@
                 "description": "* `manual` - Manual\n* `realtime_generation` - Real-time generation\n* `settlement_injection` - Settlement injection"
             },
             "BindingHealthEnum": {
-                "enum": ["unknown", "healthy", "error"],
+                "enum": [
+                    "unknown",
+                    "healthy",
+                    "error"
+                ],
                 "type": "string",
                 "description": "* `unknown` - Unknown\n* `healthy` - Healthy\n* `error` - Error"
             },
             "BlankEnum": {
-                "enum": [""]
+                "enum": [
+                    ""
+                ]
             },
             "CalibrationAssessmentEnum": {
-                "enum": ["insufficient", "provisional", "evaluated"],
+                "enum": [
+                    "insufficient",
+                    "provisional",
+                    "evaluated"
+                ],
                 "type": "string",
                 "description": "* `insufficient` - Insufficient\n* `provisional` - Provisional\n* `evaluated` - Evaluated"
             },
@@ -5296,9 +5446,31 @@
                         "type": "integer",
                         "nullable": true
                     },
+                    "configuration_current": {
+                        "type": "boolean"
+                    },
                     "next_check_at": {
                         "type": "string",
                         "format": "date-time",
+                        "nullable": true
+                    },
+                    "disabled_cause": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/DisabledCauseEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "current_calibration": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/CurrentCalibrationOutput"
+                            }
+                        ],
                         "nullable": true
                     },
                     "last_attempt": {
@@ -5312,7 +5484,10 @@
                 },
                 "required": [
                     "authorized",
+                    "configuration_current",
                     "configuration_id",
+                    "current_calibration",
+                    "disabled_cause",
                     "enabled",
                     "last_attempt",
                     "next_check_at"
@@ -5343,7 +5518,11 @@
                         "format": "date"
                     }
                 },
-                "required": ["configuration_id", "end_date", "start_date"]
+                "required": [
+                    "configuration_id",
+                    "end_date",
+                    "start_date"
+                ]
             },
             "CalibrationOutput": {
                 "type": "object",
@@ -5395,6 +5574,26 @@
                         ],
                         "readOnly": true
                     },
+                    "reason": {
+                        "nullable": true,
+                        "readOnly": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/CalibrationErrorEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "selection_state": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/SelectionStateEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
                     "assessment": {
                         "readOnly": true,
                         "oneOf": [
@@ -5415,15 +5614,28 @@
                     "result": {
                         "readOnly": true
                     },
-                    "dataset_manifest": {
-                        "readOnly": true
-                    },
                     "dataset_sha256": {
                         "type": "string",
+                        "readOnly": true
+                    },
+                    "activation_blocker": {
+                        "nullable": true,
+                        "readOnly": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/ActivationBlockerEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "dataset_manifest": {
                         "readOnly": true
                     }
                 },
                 "required": [
+                    "activation_blocker",
                     "assessment",
                     "binding_id",
                     "completed_at",
@@ -5434,8 +5646,10 @@
                     "dataset_sha256",
                     "factor",
                     "id",
+                    "reason",
                     "requested_by_id",
                     "result",
+                    "selection_state",
                     "status",
                     "window_end",
                     "window_start"
@@ -5504,6 +5718,26 @@
                         ],
                         "readOnly": true
                     },
+                    "reason": {
+                        "nullable": true,
+                        "readOnly": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/CalibrationErrorEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "selection_state": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/SelectionStateEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
                     "assessment": {
                         "readOnly": true,
                         "oneOf": [
@@ -5539,15 +5773,20 @@
                     "dataset_sha256",
                     "factor",
                     "id",
+                    "reason",
                     "requested_by_id",
                     "result",
+                    "selection_state",
                     "status",
                     "window_end",
                     "window_start"
                 ]
             },
             "ChangeRequestKindEnum": {
-                "enum": ["production", "incident"],
+                "enum": [
+                    "production",
+                    "incident"
+                ],
                 "type": "string",
                 "description": "* `production` - Production\n* `incident` - Incident"
             },
@@ -5701,7 +5940,12 @@
                 ]
             },
             "ChangeRequestStatusEnum": {
-                "enum": ["pending", "approved", "rejected", "withdrawn"],
+                "enum": [
+                    "pending",
+                    "approved",
+                    "rejected",
+                    "withdrawn"
+                ],
                 "type": "string",
                 "description": "* `pending` - Pending\n* `approved` - Approved\n* `rejected` - Rejected\n* `withdrawn` - Withdrawn"
             },
@@ -5825,7 +6069,10 @@
                 ]
             },
             "CodeEnum": {
-                "enum": ["provider_hour_incomplete", "energy_exceeds_capacity"],
+                "enum": [
+                    "provider_hour_incomplete",
+                    "energy_exceeds_capacity"
+                ],
                 "type": "string",
                 "description": "* `provider_hour_incomplete` - provider_hour_incomplete\n* `energy_exceeds_capacity` - energy_exceeds_capacity"
             },
@@ -5950,7 +6197,10 @@
                         "maxItems": 10
                     }
                 },
-                "required": ["enabled", "times"]
+                "required": [
+                    "enabled",
+                    "times"
+                ]
             },
             "CollectionScheduleOutput": {
                 "type": "object",
@@ -6021,7 +6271,10 @@
                 ]
             },
             "ComparisonEnum": {
-                "enum": ["archived_forecast", "historical_model"],
+                "enum": [
+                    "archived_forecast",
+                    "historical_model"
+                ],
                 "type": "string",
                 "description": "* `archived_forecast` - archived_forecast\n* `historical_model` - historical_model"
             },
@@ -6114,10 +6367,65 @@
                         "type": "string"
                     }
                 },
-                "required": ["code", "message"]
+                "required": [
+                    "code",
+                    "message"
+                ]
+            },
+            "CurrentCalibrationOutput": {
+                "type": "object",
+                "properties": {
+                    "activation_id": {
+                        "type": "integer"
+                    },
+                    "calibration_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "factor": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "actor_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "origin": {
+                        "$ref": "#/components/schemas/CurrentCalibrationOutputOriginEnum"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "effective": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "activation_id",
+                    "actor_id",
+                    "calibration_id",
+                    "created_at",
+                    "effective",
+                    "factor",
+                    "origin"
+                ]
+            },
+            "CurrentCalibrationOutputOriginEnum": {
+                "enum": [
+                    "manual",
+                    "automatic"
+                ],
+                "type": "string",
+                "description": "* `manual` - manual\n* `automatic` - automatic"
             },
             "DaylightStatusEnum": {
-                "enum": ["normal", "polar_day", "polar_night"],
+                "enum": [
+                    "normal",
+                    "polar_day",
+                    "polar_night"
+                ],
                 "type": "string",
                 "description": "* `normal` - normal\n* `polar_day` - polar_day\n* `polar_night` - polar_night"
             },
@@ -6133,7 +6441,21 @@
                         "format": "date-time"
                     }
                 },
-                "required": ["ends_at", "starts_at"]
+                "required": [
+                    "ends_at",
+                    "starts_at"
+                ]
+            },
+            "DisabledCauseEnum": {
+                "enum": [
+                    "toggle",
+                    "manual_activation",
+                    "reset",
+                    "configuration_revised",
+                    "workspace_disabled"
+                ],
+                "type": "string",
+                "description": "* `toggle` - Toggle\n* `manual_activation` - Manual Activation\n* `reset` - Reset\n* `configuration_revised` - Configuration Revised\n* `workspace_disabled` - Workspace Disabled"
             },
             "DispatcherPhaseEnum": {
                 "enum": [
@@ -6308,7 +6630,10 @@
                 "description": "* `pending` - Pending\n* `running` - Running\n* `succeeded` - Succeeded\n* `failed` - Failed\n* `superseded` - Superseded\n* `awaiting_publication` - Awaiting publication"
             },
             "EpiasSourceKindEnum": {
-                "enum": ["realtime_generation", "settlement_injection"],
+                "enum": [
+                    "realtime_generation",
+                    "settlement_injection"
+                ],
                 "type": "string",
                 "description": "* `realtime_generation` - Real-time generation\n* `settlement_injection` - Settlement injection"
             },
@@ -6340,7 +6665,10 @@
                         "description": "Reference to the server log."
                     }
                 },
-                "required": ["code", "message"]
+                "required": [
+                    "code",
+                    "message"
+                ]
             },
             "ErrorCode": {
                 "enum": [
@@ -6416,10 +6744,15 @@
                     "duplicate_recipients",
                     "recipient_limit_exceeded",
                     "plant_not_approved",
-                    "provider_account_unavailable"
+                    "provider_account_unavailable",
+                    "configuration_changed",
+                    "production_source_changed",
+                    "outage_history_changed",
+                    "incumbent_changed",
+                    "calibration_not_activatable"
                 ],
                 "type": "string",
-                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `request_too_large` - Request Too Large\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `production_implausible` - Production Implausible\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed\n* `reminder_time_required` - Reminder Time Required\n* `duplicate_reminder_times` - Duplicate Reminder Times\n* `too_many_reminder_times` - Too Many Reminder Times\n* `recipient_required` - Recipient Required\n* `duplicate_recipients` - Duplicate Recipients\n* `recipient_limit_exceeded` - Recipient Limit Exceeded\n* `plant_not_approved` - Plant Not Approved\n* `provider_account_unavailable` - Provider Account Unavailable"
+                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `request_too_large` - Request Too Large\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `production_implausible` - Production Implausible\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed\n* `reminder_time_required` - Reminder Time Required\n* `duplicate_reminder_times` - Duplicate Reminder Times\n* `too_many_reminder_times` - Too Many Reminder Times\n* `recipient_required` - Recipient Required\n* `duplicate_recipients` - Duplicate Recipients\n* `recipient_limit_exceeded` - Recipient Limit Exceeded\n* `plant_not_approved` - Plant Not Approved\n* `provider_account_unavailable` - Provider Account Unavailable\n* `configuration_changed` - Configuration Changed\n* `production_source_changed` - Production Source Changed\n* `outage_history_changed` - Outage History Changed\n* `incumbent_changed` - Incumbent Changed\n* `calibration_not_activatable` - Calibration Not Activatable"
             },
             "ForecastOutput": {
                 "type": "object",
@@ -6479,12 +6812,20 @@
                 ]
             },
             "ForecastSourceKindEnum": {
-                "enum": ["forecast", "estimated_actuals", "mixed"],
+                "enum": [
+                    "forecast",
+                    "estimated_actuals",
+                    "mixed"
+                ],
                 "type": "string",
                 "description": "* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals\n* `mixed` - mixed"
             },
             "FreshnessEnum": {
-                "enum": ["fresh", "stale", "missing"],
+                "enum": [
+                    "fresh",
+                    "stale",
+                    "missing"
+                ],
                 "type": "string",
                 "description": "* `fresh` - fresh\n* `stale` - stale\n* `missing` - missing"
             },
@@ -6537,10 +6878,21 @@
                         "type": "integer"
                     }
                 },
-                "required": ["id", "kind", "revision", "starts_at", "title"]
+                "required": [
+                    "id",
+                    "kind",
+                    "revision",
+                    "starts_at",
+                    "title"
+                ]
             },
             "IncidentChangeActionEnum": {
-                "enum": ["create", "update", "resolve", "cancel"],
+                "enum": [
+                    "create",
+                    "update",
+                    "resolve",
+                    "cancel"
+                ],
                 "type": "string",
                 "description": "* `create` - Create\n* `update` - Update\n* `resolve` - Resolve\n* `cancel` - Cancel"
             },
@@ -6637,10 +6989,20 @@
                         "nullable": true
                     }
                 },
-                "required": ["kind", "starts_at", "title"]
+                "required": [
+                    "kind",
+                    "starts_at",
+                    "title"
+                ]
             },
             "IncidentKindEnum": {
-                "enum": ["inverter", "panels", "grid", "other", "multiple"],
+                "enum": [
+                    "inverter",
+                    "panels",
+                    "grid",
+                    "other",
+                    "multiple"
+                ],
                 "type": "string",
                 "description": "* `inverter` - Inverter\n* `panels` - Panels\n* `grid` - Grid\n* `other` - Other\n* `multiple` - Multiple"
             },
@@ -6766,7 +7128,10 @@
                         "format": "date-time"
                     }
                 },
-                "required": ["action", "idempotency_key"]
+                "required": [
+                    "action",
+                    "idempotency_key"
+                ]
             },
             "IncidentUpdate": {
                 "type": "object",
@@ -6815,7 +7180,12 @@
                         "minimum": 1
                     }
                 },
-                "required": ["expected_revision", "kind", "starts_at", "title"]
+                "required": [
+                    "expected_revision",
+                    "kind",
+                    "starts_at",
+                    "title"
+                ]
             },
             "InvitationAcceptanceInput": {
                 "type": "object",
@@ -6825,7 +7195,9 @@
                         "maxLength": 128
                     }
                 },
-                "required": ["token"]
+                "required": [
+                    "token"
+                ]
             },
             "InvitationAcceptanceOutput": {
                 "type": "object",
@@ -6837,10 +7209,18 @@
                         "$ref": "#/components/schemas/WorkspaceRoleEnum"
                     }
                 },
-                "required": ["role", "tenant_id"]
+                "required": [
+                    "role",
+                    "tenant_id"
+                ]
             },
             "InvitationDeliveryStatusEnum": {
-                "enum": ["pending", "sent", "failed", "uncertain"],
+                "enum": [
+                    "pending",
+                    "sent",
+                    "failed",
+                    "uncertain"
+                ],
                 "type": "string",
                 "description": "* `pending` - Pending\n* `sent` - Sent\n* `failed` - Failed\n* `uncertain` - Uncertain"
             },
@@ -6853,7 +7233,9 @@
                         "maxLength": 254
                     }
                 },
-                "required": ["email"]
+                "required": [
+                    "email"
+                ]
             },
             "InvitationOutput": {
                 "type": "object",
@@ -6881,10 +7263,18 @@
                         "readOnly": true
                     }
                 },
-                "required": ["delivery_status", "email", "expires_at", "id"]
+                "required": [
+                    "delivery_status",
+                    "email",
+                    "expires_at",
+                    "id"
+                ]
             },
             "LanguageEnum": {
-                "enum": ["en", "tr"],
+                "enum": [
+                    "en",
+                    "tr"
+                ],
                 "type": "string",
                 "description": "* `en` - English\n* `tr` - Türkçe"
             },
@@ -6895,7 +7285,9 @@
                         "$ref": "#/components/schemas/LanguageEnum"
                     }
                 },
-                "required": ["language"]
+                "required": [
+                    "language"
+                ]
             },
             "LocationChangeInput": {
                 "type": "object",
@@ -7000,22 +7392,37 @@
                 ]
             },
             "LocationChangeStatusEnum": {
-                "enum": ["pending", "approved", "rejected", "withdrawn"],
+                "enum": [
+                    "pending",
+                    "approved",
+                    "rejected",
+                    "withdrawn"
+                ],
                 "type": "string",
                 "description": "* `pending` - Awaiting review\n* `approved` - Approved\n* `rejected` - Rejected\n* `withdrawn` - Withdrawn"
             },
             "MeasurementBasisEnum": {
-                "enum": ["net_export", "ac_generation"],
+                "enum": [
+                    "net_export",
+                    "ac_generation"
+                ],
                 "type": "string",
                 "description": "* `net_export` - Net export\n* `ac_generation` - AC generation"
             },
             "MetricScopeEnum": {
-                "enum": ["daylight_intervals", "full_day"],
+                "enum": [
+                    "daylight_intervals",
+                    "full_day"
+                ],
                 "type": "string",
                 "description": "* `daylight_intervals` - daylight_intervals\n* `full_day` - full_day"
             },
             "MountingTypeEnum": {
-                "enum": ["unknown", "fixed", "tracking"],
+                "enum": [
+                    "unknown",
+                    "fixed",
+                    "tracking"
+                ],
                 "type": "string",
                 "description": "* `unknown` - Unknown\n* `fixed` - Fixed\n* `tracking` - Tracking"
             },
@@ -7059,7 +7466,9 @@
                 "description": "* `pending` - Pending\n* `retry` - Retry\n* `sending` - Sending\n* `sent` - Sent\n* `failed` - Failed\n* `uncertain` - Uncertain\n* `skipped` - Skipped\n* `cancelled` - Cancelled"
             },
             "NullEnum": {
-                "enum": [null]
+                "enum": [
+                    null
+                ]
             },
             "ObservationImport": {
                 "type": "object",
@@ -7078,7 +7487,11 @@
                         }
                     }
                 },
-                "required": ["configuration_id", "observations", "unit"]
+                "required": [
+                    "configuration_id",
+                    "observations",
+                    "unit"
+                ]
             },
             "ObservationImportOutput": {
                 "type": "object",
@@ -7099,7 +7512,12 @@
                         }
                     }
                 },
-                "required": ["count", "created", "existing", "ids"]
+                "required": [
+                    "count",
+                    "created",
+                    "existing",
+                    "ids"
+                ]
             },
             "ObservationOutput": {
                 "type": "object",
@@ -7170,7 +7588,12 @@
                 ]
             },
             "ObservationQualityEnum": {
-                "enum": ["valid", "outage", "curtailed", "invalid"],
+                "enum": [
+                    "valid",
+                    "outage",
+                    "curtailed",
+                    "invalid"
+                ],
                 "type": "string",
                 "description": "* `valid` - Valid\n* `outage` - Outage\n* `curtailed` - Curtailed\n* `invalid` - Invalid"
             },
@@ -7203,16 +7626,19 @@
                         "maxLength": 200
                     }
                 },
-                "required": ["ends_at", "energy", "source", "starts_at"]
-            },
-            "OriginEnum": {
-                "enum": ["editor", "csv_import"],
-                "type": "string",
-                "description": "* `editor` - editor\n* `csv_import` - csv_import"
+                "required": [
+                    "ends_at",
+                    "energy",
+                    "source",
+                    "starts_at"
+                ]
             },
             "PaginatedCalibrationSummaryOutputList": {
                 "type": "object",
-                "required": ["count", "results"],
+                "required": [
+                    "count",
+                    "results"
+                ],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7240,7 +7666,10 @@
             },
             "PaginatedChangeRequestSummaryOutputList": {
                 "type": "object",
-                "required": ["count", "results"],
+                "required": [
+                    "count",
+                    "results"
+                ],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7268,7 +7697,10 @@
             },
             "PaginatedIncidentOutputList": {
                 "type": "object",
-                "required": ["count", "results"],
+                "required": [
+                    "count",
+                    "results"
+                ],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7296,7 +7728,10 @@
             },
             "PaginatedLocationChangeOutputList": {
                 "type": "object",
-                "required": ["count", "results"],
+                "required": [
+                    "count",
+                    "results"
+                ],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7324,7 +7759,10 @@
             },
             "PaginatedPlantOutputList": {
                 "type": "object",
-                "required": ["count", "results"],
+                "required": [
+                    "count",
+                    "results"
+                ],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7352,7 +7790,10 @@
             },
             "PaginatedSiteOutputList": {
                 "type": "object",
-                "required": ["count", "results"],
+                "required": [
+                    "count",
+                    "results"
+                ],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7380,7 +7821,10 @@
             },
             "PaginatedTenantOutputList": {
                 "type": "object",
-                "required": ["count", "results"],
+                "required": [
+                    "count",
+                    "results"
+                ],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7408,7 +7852,10 @@
             },
             "PaginatedTrashedRegionOutputList": {
                 "type": "object",
-                "required": ["count", "results"],
+                "required": [
+                    "count",
+                    "results"
+                ],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7575,7 +8022,10 @@
                 ]
             },
             "PerformanceDayStatusEnum": {
-                "enum": ["matched", "missing"],
+                "enum": [
+                    "matched",
+                    "missing"
+                ],
                 "type": "string",
                 "description": "* `matched` - matched\n* `missing` - missing"
             },
@@ -7896,7 +8346,10 @@
                         "nullable": true
                     }
                 },
-                "required": ["dc_capacity_mw", "name"]
+                "required": [
+                    "dc_capacity_mw",
+                    "name"
+                ]
             },
             "PlantOutput": {
                 "type": "object",
@@ -8014,12 +8467,18 @@
                 ]
             },
             "PowerBasisEnum": {
-                "enum": ["ac", "dc"],
+                "enum": [
+                    "ac",
+                    "dc"
+                ],
                 "type": "string",
                 "description": "* `ac` - AC\n* `dc` - DC"
             },
             "PreparedMessageFormatEnum": {
-                "enum": ["xlsx", "plain"],
+                "enum": [
+                    "xlsx",
+                    "plain"
+                ],
                 "type": "string",
                 "description": "* `xlsx` - Workbook\n* `plain` - Plain text"
             },
@@ -8034,7 +8493,10 @@
                 "description": "* `current` - Current forecast\n* `saved_complete` - Saved complete forecast\n* `saved_partial` - Saved partial forecast\n* `unavailable` - Unavailable"
             },
             "ProductionChangeActionEnum": {
-                "enum": ["set", "revert"],
+                "enum": [
+                    "set",
+                    "revert"
+                ],
                 "type": "string",
                 "description": "* `set` - Set\n* `revert` - Revert"
             },
@@ -8100,7 +8562,7 @@
                         }
                     },
                     "origin": {
-                        "$ref": "#/components/schemas/OriginEnum"
+                        "$ref": "#/components/schemas/ProductionCommitInputOriginEnum"
                     },
                     "file_name": {
                         "type": "string",
@@ -8115,7 +8577,19 @@
                         "default": false
                     }
                 },
-                "required": ["changes", "configuration_id", "unit"]
+                "required": [
+                    "changes",
+                    "configuration_id",
+                    "unit"
+                ]
+            },
+            "ProductionCommitInputOriginEnum": {
+                "enum": [
+                    "editor",
+                    "csv_import"
+                ],
+                "type": "string",
+                "description": "* `editor` - editor\n* `csv_import` - csv_import"
             },
             "ProductionDayOutput": {
                 "type": "object",
@@ -8455,7 +8929,11 @@
                         }
                     }
                 },
-                "required": ["changes", "preview", "warnings"]
+                "required": [
+                    "changes",
+                    "preview",
+                    "warnings"
+                ]
             },
             "ProductionPreviewRowOutput": {
                 "type": "object",
@@ -8504,7 +8982,11 @@
                         "format": "date-time"
                     }
                 },
-                "required": ["code", "ends_at", "starts_at"]
+                "required": [
+                    "code",
+                    "ends_at",
+                    "starts_at"
+                ]
             },
             "ProductionProviderOutput": {
                 "type": "object",
@@ -8634,7 +9116,11 @@
                         "format": "date-time"
                     }
                 },
-                "required": ["code", "ends_at", "starts_at"]
+                "required": [
+                    "code",
+                    "ends_at",
+                    "starts_at"
+                ]
             },
             "ProviderIntervalOutput": {
                 "type": "object",
@@ -8715,7 +9201,12 @@
                 ]
             },
             "RegionStatusEnum": {
-                "enum": ["pending", "approved", "suspended", "rejected"],
+                "enum": [
+                    "pending",
+                    "approved",
+                    "suspended",
+                    "rejected"
+                ],
                 "type": "string",
                 "description": "* `pending` - Awaiting approval\n* `approved` - Approved\n* `suspended` - Suspended\n* `rejected` - Rejected"
             },
@@ -8727,7 +9218,9 @@
                         "maxLength": 500
                     }
                 },
-                "required": ["reason"]
+                "required": [
+                    "reason"
+                ]
             },
             "ReminderAddressesOutput": {
                 "type": "object",
@@ -8747,7 +9240,10 @@
                         }
                     }
                 },
-                "required": ["recipients", "workspace_recipients"]
+                "required": [
+                    "recipients",
+                    "workspace_recipients"
+                ]
             },
             "ReminderDeliveryOutput": {
                 "type": "object",
@@ -8957,7 +9453,11 @@
                 "description": "* `sending` - Sending\n* `paused_by_user` - Paused\n* `waiting_for_approval` - Waiting for approval\n* `provider_attention` - Provider account needs attention\n* `no_recipients` - No recipients\n* `invalid_recipient` - Invalid recipient\n* `over_recipient_limit` - Over the recipient limit"
             },
             "RequestOutcomeEnum": {
-                "enum": ["uncertain", "succeeded", "failed"],
+                "enum": [
+                    "uncertain",
+                    "succeeded",
+                    "failed"
+                ],
                 "type": "string",
                 "description": "* `uncertain` - Uncertain\n* `succeeded` - Succeeded\n* `failed` - Failed"
             },
@@ -8973,7 +9473,10 @@
                 "description": "* `forecast` - Forecast\n* `estimated_actuals` - Estimated actuals\n* `validation` - Validation\n* `inspect_settings` - Site settings check\n* `inspect_forecast` - Forecast check"
             },
             "ResolutionMinutesEnum": {
-                "enum": [30, 60],
+                "enum": [
+                    30,
+                    60
+                ],
                 "type": "integer",
                 "description": "* `30` - 30\n* `60` - 60"
             },
@@ -8989,10 +9492,16 @@
                         "format": "date-time"
                     }
                 },
-                "required": ["ends_at", "expected_revision"]
+                "required": [
+                    "ends_at",
+                    "expected_revision"
+                ]
             },
             "RestoreBlockerEnum": {
-                "enum": ["trash_retention_expired", "location_already_exists"],
+                "enum": [
+                    "trash_retention_expired",
+                    "location_already_exists"
+                ],
                 "type": "string",
                 "description": "* `trash_retention_expired` - Trash Retention Expired\n* `location_already_exists` - Location Already Exists"
             },
@@ -9004,7 +9513,19 @@
                         "minimum": 1
                     }
                 },
-                "required": ["expected_revision"]
+                "required": [
+                    "expected_revision"
+                ]
+            },
+            "SelectionStateEnum": {
+                "enum": [
+                    "active",
+                    "candidate",
+                    "previous_configuration",
+                    "not_ready"
+                ],
+                "type": "string",
+                "description": "* `active` - Active\n* `candidate` - Candidate\n* `previous_configuration` - Previous Configuration\n* `not_ready` - Not Ready"
             },
             "SessionOutput": {
                 "type": "object",
@@ -9029,7 +9550,12 @@
                         "nullable": true
                     }
                 },
-                "required": ["csrf_token", "expires_at", "language", "user"]
+                "required": [
+                    "csrf_token",
+                    "expires_at",
+                    "language",
+                    "user"
+                ]
             },
             "SessionUserOutput": {
                 "type": "object",
@@ -9217,12 +9743,18 @@
                 ]
             },
             "SlotScopeEnum": {
-                "enum": ["daylight", "full_day"],
+                "enum": [
+                    "daylight",
+                    "full_day"
+                ],
                 "type": "string",
                 "description": "* `daylight` - daylight\n* `full_day` - full_day"
             },
             "SnapshotSourceKindEnum": {
-                "enum": ["forecast", "estimated_actuals"],
+                "enum": [
+                    "forecast",
+                    "estimated_actuals"
+                ],
                 "type": "string",
                 "description": "* `forecast` - Forecast\n* `estimated_actuals` - Estimated actuals"
             },
@@ -9333,7 +9865,10 @@
                 "description": "* `configuration_unavailable` - configuration_unavailable\n* `forecast_unavailable` - forecast_unavailable\n* `estimated_actuals_unavailable` - estimated_actuals_unavailable"
             },
             "UnitEnum": {
-                "enum": ["MWh", "kWh"],
+                "enum": [
+                    "MWh",
+                    "kWh"
+                ],
                 "type": "string",
                 "description": "* `MWh` - MWh\n* `kWh` - kWh"
             },
@@ -9347,7 +9882,10 @@
                         "type": "string"
                     }
                 },
-                "required": ["id", "name"]
+                "required": [
+                    "id",
+                    "name"
+                ]
             },
             "WorkspaceInvitationsOutput": {
                 "type": "object",
@@ -9359,7 +9897,9 @@
                         }
                     }
                 },
-                "required": ["invitations"]
+                "required": [
+                    "invitations"
+                ]
             },
             "WorkspaceMemberOutput": {
                 "type": "object",
@@ -9375,7 +9915,11 @@
                         "$ref": "#/components/schemas/WorkspaceRoleEnum"
                     }
                 },
-                "required": ["email", "id", "role"]
+                "required": [
+                    "email",
+                    "id",
+                    "role"
+                ]
             },
             "WorkspaceMembersOutput": {
                 "type": "object",
@@ -9390,10 +9934,16 @@
                         "type": "integer"
                     }
                 },
-                "required": ["members", "plants_at_recipient_limit"]
+                "required": [
+                    "members",
+                    "plants_at_recipient_limit"
+                ]
             },
             "WorkspaceRoleEnum": {
-                "enum": ["admin", "viewer"],
+                "enum": [
+                    "admin",
+                    "viewer"
+                ],
                 "type": "string",
                 "description": "* `admin` - Administrator\n* `viewer` - Viewer"
             }

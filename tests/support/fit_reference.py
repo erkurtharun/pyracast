@@ -1,6 +1,5 @@
 import hashlib
 import json
-import math
 import sys
 from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
@@ -142,7 +141,7 @@ def daily_samples(days: int, per_hour: int = 2) -> tuple[CalibrationSample, ...]
     for day in range(days):
         for slot in range(24 * per_hour):
             begin = START + timedelta(days=day) + slot * step
-            shape = max(0.0, math.sin(math.pi * (slot / per_hour - 6) / 12))
+            shape = max(0.0, 1 - ((slot / per_hour - 12) / 6) ** 2)
             count += 1
             power = 130 * shape * (0.8 + 0.2 * ((count * 7919) % 101) / 101)
             energy = (
