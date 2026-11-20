@@ -88,6 +88,7 @@ export function Field({
     name: string;
     type?: string;
     defaultValue?: string | number;
+    value?: string;
     required?: boolean;
     min?: number;
     max?: number;
