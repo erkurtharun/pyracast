@@ -1552,6 +1552,11 @@ test("forecast performance shows archived metrics, missing days and selected ran
 
     await page.getByText("Additional metrics & interpretation").click();
     await expect(page.getByRole("cell", { name: "8.5" })).toBeVisible();
+    await expect(
+        page.getByRole("img", {
+            name: /^Absolute daily forecast error for 1 matched day;/,
+        }),
+    ).toBeVisible();
     const download = page.waitForEvent("download");
     await page
         .getByRole("button", { name: "Download CSV", exact: true })

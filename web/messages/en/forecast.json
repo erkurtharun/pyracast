@@ -201,7 +201,11 @@
         "relative_error": "Relative error",
         "skill_score": "Skill vs uncalibrated model",
         "skill_days": "Skill uses {count, plural, one {# day} other {# days}} outside the calibration's training period.",
-        "reason_dates": "{reason}: {dates}"
+        "reason_dates": "{reason}: {dates}",
+        "daily_error_title": "Daily forecast error",
+        "daily_error_chart": "Absolute daily forecast error for {count, plural, one {# matched day} other {# matched days}}; the table below lists each value.",
+        "daily_error_tooltip": "{date}: {error} MWh",
+        "absolute_daily_error": "Absolute error per day"
     },
     "Calibrations": {
         "calibration_history": "Calibration history",

@@ -201,7 +201,11 @@
         "relative_error": "Göreli hata",
         "skill_score": "Kalibre edilmemiş modele göre başarı",
         "skill_days": "Başarı, kalibrasyonun eğitim dönemi dışındaki {count, plural, one {# günü} other {# günü}} kullanır.",
-        "reason_dates": "{reason}: {dates}"
+        "reason_dates": "{reason}: {dates}",
+        "daily_error_title": "Günlük tahmin hatası",
+        "daily_error_chart": "{count, plural, one {# eşleşen gün} other {# eşleşen gün}} için mutlak günlük tahmin hatası; aşağıdaki tablo her değeri listeler.",
+        "daily_error_tooltip": "{date}: {error} MWh",
+        "absolute_daily_error": "Günlük mutlak hata"
     },
     "Calibrations": {
         "calibration_history": "Kalibrasyon geçmişi",

@@ -14,6 +14,7 @@ import { Resource } from "@/ui/resource";
 import { useCodeLabel } from "@/ui/vocabulary";
 import { Notice, Stat } from "@/ui/ui";
 import { CsvDownload } from "@/ui/csv-download";
+import { DailyAccuracyChart } from "./daily-accuracy-chart";
 import { useExportPlant } from "@/ui/export-plant";
 import { performanceExport } from "@/lib/exports";
 
@@ -300,6 +301,7 @@ function PerformanceResults({
                                         count: matched.length,
                                     })}
                                 </summary>
+                                <DailyAccuracyChart days={matched} />
                                 <ScrollRegion
                                     label={t("daily_forecast_comparison")}
                                 >
