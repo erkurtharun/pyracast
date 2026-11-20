@@ -18,7 +18,7 @@ from pyracast.forecasts.validation import validate_binding
 from pyracast.notifications import runtime
 from pyracast.notifications import scheduler as notification_scheduler
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
-from pyracast.notifications.operations import configure_reminders, invalid_reminder_recipient_count
+from pyracast.notifications.operations import configure_reminders, invalid_recipient_region_ids
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.plants.approval import approve_region
 from pyracast.regions.models import Region
@@ -117,7 +117,7 @@ def test_invalid_saved_recipient_records_a_skipped_slot_without_blocking_another
     assert schedule_addresses(broken) == [address]
     assert address not in caplog.text
     assert f"schedule_id={broken.pk} reason=invalid_recipient" in caplog.text
-    assert invalid_reminder_recipient_count() == 1
+    assert len(invalid_recipient_region_ids()) == 1
 
 
 def test_slot_database_failure_rolls_back_its_recipients_before_another_tenant_commits(
@@ -153,27 +153,27 @@ def test_slot_database_failure_rolls_back_its_recipients_before_another_tenant_c
 
 def test_invalid_recipient_health_count_only_includes_current_approved_schedules() -> None:
     system, schedule = configured()
-    assert invalid_reminder_recipient_count() == 0
+    assert len(invalid_recipient_region_ids()) == 0
     store(schedule, [recipient(255)])
-    assert invalid_reminder_recipient_count() == 1
+    assert len(invalid_recipient_region_ids()) == 1
     ReminderSchedule.objects.filter(pk=schedule.pk).update(enabled=False)
-    assert invalid_reminder_recipient_count() == 0
+    assert len(invalid_recipient_region_ids()) == 0
     ReminderSchedule.objects.filter(pk=schedule.pk).update(enabled=True)
     Region.objects.filter(pk=system.region.pk).update(status="suspended")
-    assert invalid_reminder_recipient_count() == 0
+    assert len(invalid_recipient_region_ids()) == 0
     Region.objects.filter(pk=system.region.pk).update(status="approved", deleted_at=NOW)
-    assert invalid_reminder_recipient_count() == 0
+    assert len(invalid_recipient_region_ids()) == 0
     Region.objects.filter(pk=system.region.pk).update(deleted_at=None)
     User.objects.filter(pk=system.member.pk).update(is_active=False)
-    assert invalid_reminder_recipient_count() == 1
+    assert len(invalid_recipient_region_ids()) == 1
     User.objects.filter(pk=system.member.pk).update(is_active=True)
     Membership.objects.filter(user=system.member, tenant=system.tenant).delete()
-    assert invalid_reminder_recipient_count() == 1
+    assert len(invalid_recipient_region_ids()) == 1
     Membership.objects.create(user=system.member, tenant=system.tenant, role=WorkspaceRole.ADMIN)
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
-    assert invalid_reminder_recipient_count() == 0
+    assert len(invalid_recipient_region_ids()) == 0
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=True)
-    assert invalid_reminder_recipient_count() == 1
+    assert len(invalid_recipient_region_ids()) == 1
 
 
 def test_a_terminated_connection_is_recovered_before_processing_another_tenant(

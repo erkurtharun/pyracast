@@ -2,7 +2,7 @@ import io
 import json
 import uuid
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -59,7 +59,7 @@ def printed(
     return report, failed
 
 
-def dispatched(at: object = NOW) -> None:
+def dispatched(at: datetime = NOW) -> None:
     for phase in DispatcherPhase.values:
         DispatcherStatus.objects.update_or_create(
             phase=phase, defaults={"attempted_at": at, "succeeded_at": at, "last_error": ""}
@@ -399,4 +399,5 @@ def test_the_whole_report_reads_a_fixed_number_of_statements_whatever_the_tenant
     assert_scale_invariant(seed, report, small=1, large=4)
     with captured_statements() as statements:
         report()
-    assert len(statements) <= 12
+    # BEGIN, SET LOCAL statement_timeout, ten reads and COMMIT.
+    assert len(statements) <= 13

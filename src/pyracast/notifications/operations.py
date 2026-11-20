@@ -29,6 +29,7 @@ from pyracast.notifications.recipients import (
     planned_recipients,
     store_recipients,
     workspace,
+    workspaces,
 )
 from pyracast.notifications.recipients import effective_recipients as effective_recipients
 from pyracast.regions.audit import record_audit
@@ -48,10 +49,20 @@ def validate_recipient(address: str) -> None:
     validate_email(address)
 
 
-def invalid_reminder_recipient_count() -> int:
-    schedules: dict[int, tuple[bool, int]] = {}
+def _all_valid(addresses: list[str]) -> bool:
+    try:
+        for address in addresses:
+            validate_recipient(address)
+    except ValidationError:
+        return False
+    return True
+
+
+def invalid_recipient_region_ids() -> set[int]:
+    """Regions whose enabled reminders would go to an invalid address, in three statements."""
+    schedules: dict[int, tuple[int, bool, int]] = {}
     rows: list[tuple[int, int, str, int | None]] = []
-    for pk, include, tenant_id, row, address, membership_id in (
+    for pk, region_id, include, tenant_id, row, address, membership_id in (
         ReminderSchedule.objects.filter(
             active_region("region__"),
             enabled=True,
@@ -61,6 +72,7 @@ def invalid_reminder_recipient_count() -> int:
         .order_by("pk", "recipient_rows__pk")
         .values_list(
             "pk",
+            "region_id",
             "include_workspace_members",
             "region__tenant_id",
             "recipient_rows__pk",
@@ -68,25 +80,24 @@ def invalid_reminder_recipient_count() -> int:
             "recipient_rows__ties__membership_id",
         )
     ):
-        schedules[pk] = (include, tenant_id)
+        schedules[pk] = (region_id, include, tenant_id)
         if row is not None:
             rows.append((pk, row, address, membership_id))
     explicit = grouped_recipients(rows)
-    tenants = {
-        tenant_id
-        for pk, (include, tenant_id) in schedules.items()
-        if needs_members(include, explicit.get(pk, []))
+    members = workspaces(
+        {
+            tenant_id
+            for pk, (_, include, tenant_id) in schedules.items()
+            if needs_members(include, explicit.get(pk, []))
+        }
+    )
+    return {
+        region_id
+        for pk, (region_id, include, tenant_id) in schedules.items()
+        if not _all_valid(
+            effective(include, explicit.get(pk, []), members.get(tenant_id, NO_MEMBERS))
+        )
     }
-    members = {tenant_id: workspace(tenant_id) for tenant_id in tenants}
-    invalid = 0
-    for pk, (include, tenant_id) in schedules.items():
-        current = members.get(tenant_id, NO_MEMBERS)
-        try:
-            for address in effective(include, explicit.get(pk, []), current):
-                validate_recipient(address)
-        except ValidationError:
-            invalid += 1
-    return invalid
 
 
 SHARED_LIMIT = (

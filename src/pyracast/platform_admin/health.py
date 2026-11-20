@@ -1,9 +1,14 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal, cast
+from datetime import datetime
+from typing import Literal
 
 from django.urls import reverse
+from django.utils.functional import Promise
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
+
+from pyracast.orchestration.delivery_health import HealthReport, check
 
 type HealthCategory = Literal["action", "delay", "review"]
 type HealthTone = Literal["attention", "delay", "review", "healthy"]
@@ -25,230 +30,217 @@ class HealthSummary:
     title: str
     tone: HealthTone
     checks: tuple[HealthCheck, ...]
+    checked_at: datetime
 
 
-def summarize_health(report: Mapping[str, object]) -> HealthSummary:
-    definitions: tuple[tuple[str, str, str, str, HealthCategory, str], ...] = (
-        (
-            "invalid_reminder_recipients",
-            _("Invalid email recipients"),
-            _("Ask the workspace administrator to correct the saved recipient addresses."),
-            _("Review affected plants"),
-            "action",
-            "plants",
+@dataclass(frozen=True)
+class Presentation:
+    label: Promise
+    help: Promise
+    action_label: Promise
+    category: HealthCategory
+
+
+PLANTS = gettext_lazy("Review affected plants")
+CONNECTIONS = gettext_lazy("Review provider connections")
+COLLECTIONS = gettext_lazy("Review collections")
+EMAILS = gettext_lazy("Review emails")
+OUTBOUND = gettext_lazy("Review outbound emails")
+METERING = gettext_lazy("Review production collection")
+CALIBRATIONS = gettext_lazy("Review calibrations")
+RECOVERS = gettext_lazy("Check the dispatcher and worker; the dispatcher recovers expired leases.")
+
+# The console order; every check that can make the report unhealthy has an entry.
+PRESENTATION: Mapping[str, Presentation] = {
+    "invalid_reminder_recipients": Presentation(
+        gettext_lazy("Invalid email recipients"),
+        gettext_lazy("Ask the workspace administrator to correct the saved recipient addresses."),
+        PLANTS,
+        "action",
+    ),
+    "unvalidated_provider_credentials": Presentation(
+        gettext_lazy("Provider keys awaiting validation"),
+        gettext_lazy("Validate the current private key before collections resume."),
+        CONNECTIONS,
+        "action",
+    ),
+    "blocked_provider_credentials": Presentation(
+        gettext_lazy("Provider keys needing attention"),
+        gettext_lazy("Review the provider key and validate the connection after correcting it."),
+        CONNECTIONS,
+        "action",
+    ),
+    "regions_without_recent_forecasts": Presentation(
+        gettext_lazy("Plants without recent forecasts"),
+        gettext_lazy("Review saved acquisition times and collection settings."),
+        PLANTS,
+        "action",
+    ),
+    "provider_cooldowns": Presentation(
+        gettext_lazy("Provider request delays"),
+        gettext_lazy(
+            "Requests resume automatically after the provider delay. Preserve the shared quota."
         ),
-        (
-            "unvalidated_provider_credentials",
-            _("Provider keys awaiting validation"),
-            _("Validate the current private key before collections resume."),
-            _("Review provider connections"),
-            "action",
-            "plants",
+        CONNECTIONS,
+        "delay",
+    ),
+    "overdue_collections": Presentation(
+        gettext_lazy("Delayed collections"),
+        gettext_lazy("Check the collection dispatcher and worker."),
+        COLLECTIONS,
+        "action",
+    ),
+    "interrupted_collections": Presentation(
+        gettext_lazy("Interrupted collections"), RECOVERS, COLLECTIONS, "action"
+    ),
+    "failed_collections": Presentation(
+        gettext_lazy("Failed collections"),
+        gettext_lazy(
+            "Review the recorded error and the plant connection before changing settings."
         ),
-        (
-            "blocked_provider_credentials",
-            _("Provider keys needing attention"),
-            _("Review the provider key and validate the connection after correcting it."),
-            _("Review provider connections"),
-            "action",
-            "plants",
+        COLLECTIONS,
+        "review",
+    ),
+    "overdue_notifications": Presentation(
+        gettext_lazy("Delayed emails"),
+        gettext_lazy("Check the dedicated notification worker."),
+        EMAILS,
+        "action",
+    ),
+    "interrupted_notifications": Presentation(
+        gettext_lazy("Interrupted emails"),
+        gettext_lazy(
+            "Review the outcome; uncertain transmission must not be resent automatically."
         ),
-        (
-            "regions_without_recent_forecasts",
-            _("Plants without recent forecasts"),
-            _("Review saved acquisition times and collection settings."),
-            _("Review affected plants"),
-            "action",
-            "plants",
+        EMAILS,
+        "action",
+    ),
+    "failed_notifications": Presentation(
+        gettext_lazy("Email outcomes needing review"),
+        gettext_lazy(
+            "Review failed, unavailable or unknown outcomes. "
+            "Reconcile unknown acceptance before resending."
         ),
-        (
-            "provider_cooldowns",
-            _("Provider request delays"),
-            _("Requests resume automatically after the provider delay. Preserve the shared quota."),
-            _("Review provider connections"),
-            "delay",
-            "plants",
+        EMAILS,
+        "review",
+    ),
+    "missed_notifications": Presentation(
+        gettext_lazy("Missed email times"),
+        gettext_lazy("Check notification worker availability and the delivery deadline."),
+        EMAILS,
+        "review",
+    ),
+    "mail_authentication_failures": Presentation(
+        gettext_lazy("Email authentication failures"),
+        gettext_lazy(
+            "Review the recorded failure and ask the deployment operator to check mail credentials."
         ),
-        (
-            "overdue_collections",
-            _("Delayed collections"),
-            _("Check the collection dispatcher and worker."),
-            _("Review collections"),
-            "action",
-            "collections",
+        EMAILS,
+        "review",
+    ),
+    "paused_notifications": Presentation(
+        gettext_lazy("Paused email times"),
+        gettext_lazy(
+            "A plant's recipient list is over the limit, empty or holds an invalid address. "
+            "Ask the workspace administrator to correct it."
         ),
-        (
-            "interrupted_collections",
-            _("Interrupted collections"),
-            _("Check the dispatcher and worker; the dispatcher recovers expired leases."),
-            _("Review collections"),
-            "action",
-            "collections",
+        EMAILS,
+        "review",
+    ),
+    "overdue_outbound_mail": Presentation(
+        gettext_lazy("Delayed account and invitation emails"),
+        gettext_lazy("Check the notification worker and the dispatcher."),
+        OUTBOUND,
+        "action",
+    ),
+    "failed_outbound_mail": Presentation(
+        gettext_lazy("Failed account and invitation emails"),
+        gettext_lazy("Review the recorded error; the person or administrator can ask again."),
+        OUTBOUND,
+        "review",
+    ),
+    "uncertain_outbound_mail": Presentation(
+        gettext_lazy("Account and invitation emails with an unknown outcome"),
+        gettext_lazy(
+            "They may have arrived and are never resent; the person or administrator can ask again."
         ),
-        (
-            "failed_collections",
-            _("Failed collections"),
-            _("Review the recorded error and the plant connection before changing settings."),
-            _("Review collections"),
-            "review",
-            "collections",
+        OUTBOUND,
+        "review",
+    ),
+    "unavailable_forecasts": Presentation(
+        gettext_lazy("Notifications prepared without saved forecasts"),
+        gettext_lazy("Review the plant collection history and approved connection."),
+        EMAILS,
+        "review",
+    ),
+    "partial_forecasts": Presentation(
+        gettext_lazy("Notifications prepared with partial forecasts"),
+        gettext_lazy("Review saved forecast coverage; missing intervals are not zero."),
+        EMAILS,
+        "review",
+    ),
+    "overdue_metering": Presentation(
+        gettext_lazy("Delayed production collection"),
+        gettext_lazy("Check the production dispatcher and worker."),
+        METERING,
+        "action",
+    ),
+    "interrupted_metering": Presentation(
+        gettext_lazy("Interrupted production collection"), RECOVERS, METERING, "action"
+    ),
+    "failed_metering": Presentation(
+        gettext_lazy("Failed production collection"),
+        gettext_lazy(
+            "Review the recorded error, target period and reported-production connection."
         ),
-        (
-            "overdue_notifications",
-            _("Delayed emails"),
-            _("Check the dedicated notification worker."),
-            _("Review emails"),
-            "action",
-            "deliveries",
-        ),
-        (
-            "interrupted_notifications",
-            _("Interrupted emails"),
-            _("Review the outcome; uncertain transmission must not be resent automatically."),
-            _("Review emails"),
-            "action",
-            "deliveries",
-        ),
-        (
-            "failed_notifications",
-            _("Email outcomes needing review"),
-            _(
-                "Review failed, unavailable or unknown outcomes. "
-                "Reconcile unknown acceptance before resending."
-            ),
-            _("Review emails"),
-            "review",
-            "deliveries",
-        ),
-        (
-            "missed_notifications",
-            _("Missed email times"),
-            _("Check notification worker availability and the delivery deadline."),
-            _("Review emails"),
-            "review",
-            "deliveries",
-        ),
-        (
-            "mail_authentication_failures",
-            _("Email authentication failures"),
-            _(
-                "Review the recorded failure and ask the deployment operator "
-                "to check mail credentials."
-            ),
-            _("Review emails"),
-            "review",
-            "deliveries",
-        ),
-        (
-            "paused_notifications",
-            _("Paused email times"),
-            _(
-                "A plant's recipient list is over the limit, empty or holds an invalid address. "
-                "Ask the workspace administrator to correct it."
-            ),
-            _("Review emails"),
-            "review",
-            "deliveries",
-        ),
-        (
-            "overdue_outbound_mail",
-            _("Delayed account and invitation emails"),
-            _("Check the notification worker and the dispatcher."),
-            _("Review outbound emails"),
-            "action",
-            "mail",
-        ),
-        (
-            "failed_outbound_mail",
-            _("Failed account and invitation emails"),
-            _("Review the recorded error; the person or administrator can ask again."),
-            _("Review outbound emails"),
-            "review",
-            "mail",
-        ),
-        (
-            "uncertain_outbound_mail",
-            _("Account and invitation emails with an unknown outcome"),
-            _(
-                "They may have arrived and are never resent; the person or administrator "
-                "can ask again."
-            ),
-            _("Review outbound emails"),
-            "review",
-            "uncertain_mail",
-        ),
-        (
-            "unavailable_forecasts",
-            _("Notifications prepared without saved forecasts"),
-            _("Review the plant collection history and approved connection."),
-            _("Review emails"),
-            "review",
-            "deliveries",
-        ),
-        (
-            "partial_forecasts",
-            _("Notifications prepared with partial forecasts"),
-            _("Review saved forecast coverage; missing intervals are not zero."),
-            _("Review emails"),
-            "review",
-            "deliveries",
-        ),
-        (
-            "overdue_metering",
-            _("Delayed production collection"),
-            _("Check the production dispatcher and worker."),
-            _("Review production collection"),
-            "action",
-            "metering",
-        ),
-        (
-            "interrupted_metering",
-            _("Interrupted production collection"),
-            _("Check the dispatcher and worker; the dispatcher recovers expired leases."),
-            _("Review production collection"),
-            "action",
-            "metering",
-        ),
-        (
-            "failed_metering",
-            _("Failed production collection"),
-            _("Review the recorded error, target period and reported-production connection."),
-            _("Review production collection"),
-            "review",
-            "metering",
-        ),
+        METERING,
+        "review",
+    ),
+    "overdue_calibrations": Presentation(
+        gettext_lazy("Delayed calibrations"),
+        gettext_lazy("Check the calibration worker and the dispatcher."),
+        CALIBRATIONS,
+        "action",
+    ),
+    "interrupted_calibrations": Presentation(
+        gettext_lazy("Interrupted calibrations"), RECOVERS, CALIBRATIONS, "action"
+    ),
+    "failed_calibrations": Presentation(
+        gettext_lazy("Failed calibrations"),
+        gettext_lazy("Review the recorded error before requesting the calibration again."),
+        CALIBRATIONS,
+        "review",
+    ),
+}
+
+
+def action_url(key: str) -> str:
+    scope = check(key).scope
+    if scope == "plants":
+        return f"{reverse('admin:workspace_plants')}?issue={key}"
+    if key == "uncertain_outbound_mail":
+        return f"{reverse('admin:notifications_outboundmail_changelist')}?status__exact=uncertain"
+    if scope == "mail":
+        return reverse("admin:notifications_outboundmail_changelist")
+    return f"{reverse('admin:workspace_operations')}?issue={key}#{scope}-title"
+
+
+def presented(key: str, count: int) -> HealthCheck:
+    presentation = PRESENTATION[key]
+    return HealthCheck(
+        key=key,
+        label=str(presentation.label),
+        count=count,
+        help=str(presentation.help),
+        action_url=action_url(key),
+        action_label=str(presentation.action_label),
+        category=presentation.category,
     )
-    checks = [
-        HealthCheck(
-            key=key,
-            label=label,
-            count=count,
-            help=help_text,
-            action_url=(
-                f"{reverse('admin:workspace_plants')}?issue={key}"
-                if target == "plants"
-                else reverse("admin:notifications_outboundmail_changelist")
-                if target == "mail"
-                else f"{reverse('admin:notifications_outboundmail_changelist')}"
-                "?status__exact=uncertain"
-                if target == "uncertain_mail"
-                else f"{reverse('admin:workspace_operations')}?issue={key}#{target}-title"
-            ),
-            action_label=action_label,
-            category=category,
-        )
-        for key, label, help_text, action_label, category, target in definitions
-        if (count := cast(int, report[key])) > 0
-    ]
-    unhealthy_phases = cast(list[str], report["unhealthy_dispatch_phases"])
-    if unhealthy_phases:
-        phase_labels = {
-            "collection": _("Collection"),
-            "notifications": _("Notifications"),
-            "calibration": _("Calibration"),
-            "retention": _("Retention"),
-            "metering": _("Production collection"),
-        }
+
+
+def summarize_health(report: HealthReport) -> HealthSummary:
+    checks = [presented(key, report.counts[key]) for key in PRESENTATION if report.counts[key] > 0]
+    if unhealthy_phases := [state for state in report.phases if not state.healthy]:
         checks.insert(
             0,
             HealthCheck(
@@ -256,21 +248,19 @@ def summarize_health(report: Mapping[str, object]) -> HealthSummary:
                 label=_("Dispatcher phases needing attention"),
                 count=len(unhealthy_phases),
                 help=_("Check the dispatcher process and its last successful run: %(phases)s.")
-                % {
-                    "phases": ", ".join(
-                        phase_labels.get(phase, phase) for phase in unhealthy_phases
-                    )
-                },
+                % {"phases": ", ".join(str(state.phase.label) for state in unhealthy_phases)},
                 action_url=f"{reverse('admin:workspace_operations')}#dispatch-title",
                 action_label=_("Review dispatcher"),
                 category="action",
             ),
         )
-    categories = {check.category for check in checks}
+    categories = {item.category for item in checks}
     if "action" in categories:
-        return HealthSummary(_("Action needed"), "attention", tuple(checks))
+        return HealthSummary(_("Action needed"), "attention", tuple(checks), report.checked_at)
     if "delay" in categories:
-        return HealthSummary(_("Provider delay"), "delay", tuple(checks))
+        return HealthSummary(_("Provider delay"), "delay", tuple(checks), report.checked_at)
     if "review" in categories:
-        return HealthSummary(_("Recent outcomes need review"), "review", tuple(checks))
-    return HealthSummary(_("Healthy"), "healthy", ())
+        return HealthSummary(
+            _("Recent outcomes need review"), "review", tuple(checks), report.checked_at
+        )
+    return HealthSummary(_("Healthy"), "healthy", (), report.checked_at)

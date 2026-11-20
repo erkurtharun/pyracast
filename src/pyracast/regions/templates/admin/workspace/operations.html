@@ -14,33 +14,70 @@
   {% if health_filter %}<div class="panel-head"><p>{{ health_filter.label }}</p><a class="text-link" href="{% url 'admin:workspace_operations' %}">{% translate "Show all operations" %}</a></div>{% endif %}
   {% if show_dispatch %}
   <section class="panel" aria-labelledby="dispatch-title">
-    <div class="panel-head"><h2 id="dispatch-title">{% translate "Dispatch" %}</h2></div>
+    <div class="panel-head"><h2 id="dispatch-title">{% translate "Workers" %}</h2><p class="row-meta">{% translate "Queue counts are a diagnostic; they never change the health result." %}</p></div>
       <div class="table-wrap" role="region" aria-labelledby="dispatch-title" tabindex="0">
         <table class="table table--stack">
           <thead>
-            <tr><th scope="col">{% translate "Phase" %}</th><th scope="col">{% translate "State" %}</th><th scope="col">{% translate "Last attempt" %}</th><th scope="col">{% translate "Last success" %}</th><th scope="col">{% translate "Last error" %}</th></tr>
+            <tr><th scope="col">{% translate "Phase" %}</th><th scope="col">{% translate "State" %}</th><th scope="col">{% translate "Last attempt" %}</th><th scope="col">{% translate "Last success" %}</th><th scope="col">{% translate "Duration" %}</th><th scope="col">{% translate "Published" %}</th><th scope="col">{% translate "Last error" %}</th></tr>
           </thead>
           <tbody>
             {% for phase in dispatch_phases %}
               <tr>
-                <th scope="row" data-label="{% translate "Phase" %}">{% translate phase.label %}</th>
+                <th scope="row" data-label="{% translate "Phase" %}">{{ phase.label }}</th>
                 <td data-label="{% translate "State" %}">
-                  <span class="badge{% if phase.unhealthy %} badge--needs-attention{% else %} badge--healthy{% endif %}">{% translate phase.state_label %}</span>
+                  <span class="badge{% if phase.unhealthy %} badge--needs-attention{% else %} badge--healthy{% endif %}">{{ phase.state_label }}</span>
                 </td>
                 <td data-label="{% translate "Last attempt" %}">{% if phase.attempted_at %}<time datetime="{{ phase.attempted_at|date:'c' }}">{{ phase.attempted_at|date:"j M Y, H:i T" }}</time>{% else %}<span class="muted">{% translate "Never" %}</span>{% endif %}</td>
                 <td data-label="{% translate "Last success" %}">{% if phase.succeeded_at %}<time datetime="{{ phase.succeeded_at|date:'c' }}">{{ phase.succeeded_at|date:"j M Y, H:i T" }}</time>{% else %}<span class="muted">{% translate "Never" %}</span>{% endif %}</td>
+                <td data-label="{% translate "Duration" %}">{% if phase.duration_ms is not None %}{{ phase.duration_ms }} ms{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td data-label="{% translate "Published" %}">{% if phase.published is not None %}{{ phase.published }}{% else %}<span class="muted">—</span>{% endif %}</td>
                 <td data-label="{% translate "Last error" %}">{% if phase.last_error %}<span class="code">{{ phase.last_error }}</span>{% else %}<span class="muted">{% translate "None" %}</span>{% endif %}</td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
+    <h3 id="queues-title">{% translate "Queues" %}</h3>
+    {% if broker.reachable %}
+      <div class="table-wrap" role="region" aria-labelledby="queues-title" tabindex="0">
+        <table class="table table--stack">
+          <thead><tr><th scope="col">{% translate "Queue" %}</th><th scope="col">{% translate "Waiting messages" %}</th><th scope="col">{% translate "Consumers" %}</th><th scope="col">{% translate "Dead letters" %}</th></tr></thead>
+          <tbody>
+            {% for queue in broker.queues %}<tr>
+              <th scope="row" data-label="{% translate "Queue" %}"><span class="code">{{ queue.queue }}</span></th>
+              <td data-label="{% translate "Waiting messages" %}">{{ queue.messages }}</td>
+              <td data-label="{% translate "Consumers" %}">{{ queue.consumers }}</td>
+              <td data-label="{% translate "Dead letters" %}">{{ queue.dead_letters }}</td>
+            </tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">{% translate "Message broker could not be read; queue counts are not shown." %}</p>
+    {% endif %}
+    <h3 id="requests-title">{% translate "Provider requests per plant" %}</h3>
+    {% if provider_requests %}
+      <div class="table-wrap" role="region" aria-labelledby="requests-title" tabindex="0">
+        <table class="table table--stack">
+          <thead><tr><th scope="col">{% translate "Plant" %}</th><th scope="col">{% translate "Today (UTC)" %}</th><th scope="col">{% translate "Busiest UTC day of the last 7" %}</th></tr></thead>
+          <tbody>
+            {% for row in provider_requests %}<tr>
+              <th scope="row" data-label="{% translate "Plant" %}">{{ row.plant_name }}</th>
+              <td data-label="{% translate "Today (UTC)" %}">{{ row.today }}</td>
+              <td data-label="{% translate "Busiest UTC day of the last 7" %}">{{ row.busiest_day }}</td>
+            </tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">{% translate "No provider requests in the last 7 days." %}</p>
+    {% endif %}
   </section>
   {% endif %}
 
   {% if show_collections %}
   <section class="panel" aria-labelledby="collections-title">
-    <div class="panel-head"><h2 id="collections-title">{% translate "Data collection" %}</h2><p class="row-meta">{% translate "Latest 20 jobs" %}</p></div>
+    <div class="panel-head"><h2 id="collections-title">{% translate "Data collection" %}</h2><p class="row-meta">{% if listed_total is not None %}{% blocktranslate with shown=collections|length total=listed_total %}Showing {{ shown }} of {{ total }}{% endblocktranslate %}{% else %}{% translate "Latest 20 jobs" %}{% endif %}</p></div>
     {% if collections %}
       <div class="table-wrap" role="region" aria-labelledby="collections-title" tabindex="0">
         <table class="table table--stack">
@@ -74,7 +111,7 @@
 
   {% if show_metering %}
   <section class="panel" aria-labelledby="metering-title">
-    <div class="panel-head"><h2 id="metering-title">{% translate "EPİAŞ production collection" %}</h2><p class="row-meta">{% translate "Latest 20 jobs" %}</p></div>
+    <div class="panel-head"><h2 id="metering-title">{% translate "EPİAŞ production collection" %}</h2><p class="row-meta">{% if listed_total is not None %}{% blocktranslate with shown=metering|length total=listed_total %}Showing {{ shown }} of {{ total }}{% endblocktranslate %}{% else %}{% translate "Latest 20 jobs" %}{% endif %}</p></div>
     {% if metering %}
       <div class="table-wrap" role="region" aria-labelledby="metering-title" tabindex="0">
         <table class="table table--stack">
@@ -95,9 +132,32 @@
   </section>
   {% endif %}
 
+  {% if show_calibrations %}
+  <section class="panel" aria-labelledby="calibrations-title">
+    <div class="panel-head"><h2 id="calibrations-title">{% translate "Calibration runs" %}</h2><p class="row-meta">{% if listed_total is not None %}{% blocktranslate with shown=calibrations|length total=listed_total %}Showing {{ shown }} of {{ total }}{% endblocktranslate %}{% else %}{% translate "Latest 20 runs" %}{% endif %}</p></div>
+    {% if calibrations %}
+      <div class="table-wrap" role="region" aria-labelledby="calibrations-title" tabindex="0">
+        <table class="table table--stack">
+          <thead><tr><th scope="col">{% translate "Plant" %}</th><th scope="col">{% translate "Period" %}</th><th scope="col">{% translate "Status" %}</th><th scope="col">{% translate "Requested" %}</th><th scope="col">{% translate "Attempts" %}</th><th scope="col">{% translate "Last error" %}</th></tr></thead>
+          <tbody>
+            {% for run in calibrations %}<tr>
+              <th scope="row" data-label="{% translate "Plant" %}"><span class="cell"><a class="row-title" href="{{ run.review_url }}">{{ run.plant_name }}</a><span class="row-meta">{{ run.company }}</span></span></th>
+              <td data-label="{% translate "Period" %}">{{ run.window_start|date:"j M Y" }} – {{ run.window_end|date:"j M Y" }}</td>
+              <td data-label="{% translate "Status" %}"><span class="badge badge--{{ run.status|slugify }}">{% translate run.status_label %}</span></td>
+              <td data-label="{% translate "Requested" %}"><time datetime="{{ run.created_at|date:'c' }}">{{ run.created_at|date:"j M Y, H:i T" }}</time></td>
+              <td data-label="{% translate "Attempts" %}">{{ run.attempts }}</td>
+              <td data-label="{% translate "Last error" %}">{% if run.error_label %}{% translate run.error_label %}{% else %}<span class="muted">{% translate "None" %}</span>{% endif %}</td>
+            </tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}<p class="empty">{% translate "No calibration runs match this view." %}</p>{% endif %}
+  </section>
+  {% endif %}
+
   {% if show_deliveries %}
   <section class="panel" aria-labelledby="deliveries-title">
-    <div class="panel-head"><h2 id="deliveries-title">{% translate "Email delivery" %}</h2><p class="row-meta">{% translate "Latest 20 deliveries" %}</p></div>
+    <div class="panel-head"><h2 id="deliveries-title">{% translate "Email delivery" %}</h2><p class="row-meta">{% if listed_total is not None %}{% blocktranslate with shown=deliveries|length total=listed_total %}Showing {{ shown }} of {{ total }}{% endblocktranslate %}{% else %}{% translate "Latest 20 deliveries" %}{% endif %}</p></div>
     {% if deliveries %}
       <div class="table-wrap" role="region" aria-labelledby="deliveries-title" tabindex="0">
         <table class="table table--stack">

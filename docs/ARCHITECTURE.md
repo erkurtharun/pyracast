@@ -323,8 +323,11 @@ operation limits; business deadlines are checked separately after database waits
 or failed phases, overdue ready jobs, expired active leases, recent
 failed/uncertain/unavailable or incomplete tomorrow deliveries, missed delivery
 deadlines, EPİAŞ failures, credential blocks, account cooldowns, mail
-authentication failures and overdue, failed or uncertain account and invitation mail. Enabled approved regions without a successful forecast
-in 26 hours are unhealthy. Complete saved-forecast fallback remains informational.
+authentication failures, overdue, failed or uncertain account and invitation mail and
+overdue, interrupted or failed calibration runs. Enabled approved regions without a successful
+forecast in 26 hours are unhealthy unless their first collection is still open. Complete
+saved-forecast fallback, queued and running calibrations, provider requests per binding and UTC
+day and the broker's queue counts are informational: a broker outage alone never fails the check.
 This check needs a working database; monitoring
 must also treat failure to execute it as unhealthy. Run the mailer with
 `worker --queues notifications --threads 2`, separately from the default collection,

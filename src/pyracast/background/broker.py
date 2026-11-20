@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -5,6 +7,7 @@ from django.conf import settings
 from django.core.checks import CheckMessage, Error
 from django.core.exceptions import ImproperlyConfigured
 from dramatiq.brokers.rabbitmq import RabbitmqBroker
+from dramatiq.common import xq_name
 
 from pyracast.background.deadlines import (
     BROKER_CALL_SECONDS,
@@ -44,3 +47,27 @@ def make_broker() -> RabbitmqBroker:
     # Semicolons separate failover nodes.
     urls = ";".join(_bounded(url) for url in configured.split(";"))
     return RabbitmqBroker(url=urls, confirm_delivery=True)
+
+
+@dataclass(frozen=True)
+class QueueState:
+    queue: str
+    messages: int
+    consumers: int
+    dead_letters: int
+
+
+def _queue_state(channel: Any, queue: str) -> QueueState:
+    # A passive declare reads the counts and fails instead of creating a missing queue.
+    main = channel.queue_declare(queue=queue, passive=True).method
+    dead = channel.queue_declare(queue=xq_name(queue), passive=True).method
+    return QueueState(queue, main.message_count, main.consumer_count, dead.message_count)
+
+
+def queue_states(queues: Sequence[str]) -> tuple[QueueState, ...]:
+    broker = make_broker()
+    try:
+        channel = broker.channel
+        return tuple(_queue_state(channel, queue) for queue in queues)
+    finally:
+        broker.close()

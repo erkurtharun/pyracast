@@ -1,5 +1,6 @@
 {% load i18n %}
 <p><span class="badge badge--{{ health_summary.tone }}">{{ health_summary.title }}</span></p>
+<p class="row-meta">{% translate "Checked at" %} <time datetime="{{ health_summary.checked_at|date:'c' }}">{{ health_summary.checked_at|date:"j M Y, H:i T" }}</time></p>
 {% if health_summary.checks %}
   <ul class="health-checks">
     {% for check in health_summary.checks %}

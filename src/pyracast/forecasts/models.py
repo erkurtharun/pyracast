@@ -3,6 +3,7 @@ import uuid
 from django.conf import settings
 from django.db import models
 from django.db.models import F
+from django.utils.translation import gettext_lazy
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.db import TIME_ITEMS, choices_check, json_shape_check, lease_check
@@ -10,11 +11,11 @@ from pyracast.regions.models import Region
 
 
 class DispatcherPhase(models.TextChoices):
-    COLLECTION = "collection", "Collection"
-    NOTIFICATIONS = "notifications", "Notifications"
-    CALIBRATION = "calibration", "Calibration"
-    RETENTION = "retention", "Retention"
-    METERING = "metering", "Metering"
+    COLLECTION = "collection", gettext_lazy("Collection")
+    NOTIFICATIONS = "notifications", gettext_lazy("Notifications")
+    CALIBRATION = "calibration", gettext_lazy("Calibration")
+    RETENTION = "retention", gettext_lazy("Retention")
+    METERING = "metering", gettext_lazy("Metering")
 
 
 class CollectionEndpoint(models.TextChoices):

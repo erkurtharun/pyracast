@@ -2871,3 +2871,120 @@ msgstr "Kayıtlar:"
 
 msgid "View all"
 msgstr "Tümünü gör"
+
+msgid "Review calibrations"
+msgstr "Kalibrasyonları incele"
+
+msgid "Delayed calibrations"
+msgstr "Geciken kalibrasyonlar"
+
+msgid "Check the calibration worker and the dispatcher."
+msgstr "Kalibrasyon işçisini ve dağıtıcıyı denetleyin."
+
+msgid "Interrupted calibrations"
+msgstr "Kesintiye uğrayan kalibrasyonlar"
+
+msgid "Failed calibrations"
+msgstr "Başarısız kalibrasyonlar"
+
+msgid "Review the recorded error before requesting the calibration again."
+msgstr "Kalibrasyonu yeniden istemeden önce kaydedilen hatayı inceleyin."
+
+msgid "A saved reminder recipient is not a valid address."
+msgstr "Kayıtlı bir hatırlatıcı alıcısı geçerli bir adres değil."
+
+msgid "The provider key changed and the connection is not validated."
+msgstr "Sağlayıcı anahtarı değişti ve bağlantı doğrulanmadı."
+
+msgid "The provider rejected the current key."
+msgstr "Sağlayıcı güncel anahtarı reddetti."
+
+msgid "Provider delay until"
+msgstr "Sağlayıcı beklemesinin sonu:"
+
+msgid "No forecast saved yet"
+msgstr "Henüz kaydedilmiş tahmin yok"
+
+msgid "Last forecast"
+msgstr "Son tahmin"
+
+msgid "Checked at"
+msgstr "Kontrol zamanı"
+
+msgid "Workers"
+msgstr "Arka plan işleri"
+
+msgid "Queue counts are a diagnostic; they never change the health result."
+msgstr "Kuyruk sayıları yalnızca tanılama içindir; sağlık sonucunu değiştirmez."
+
+msgid "Duration"
+msgstr "Süre"
+
+msgid "Published"
+msgstr "Yayımlanan"
+
+msgid "Queues"
+msgstr "Kuyruklar"
+
+msgid "Queue"
+msgstr "Kuyruk"
+
+msgid "Waiting messages"
+msgstr "Bekleyen mesajlar"
+
+msgid "Consumers"
+msgstr "Tüketiciler"
+
+msgid "Dead letters"
+msgstr "Teslim edilemeyen mesajlar"
+
+msgid "Message broker could not be read; queue counts are not shown."
+msgstr "Mesaj kuyruğu okunamadı; kuyruk sayıları gösterilmiyor."
+
+msgid "Provider requests per plant"
+msgstr "Santral başına sağlayıcı istekleri"
+
+msgid "Today (UTC)"
+msgstr "Bugün (UTC)"
+
+msgid "Busiest UTC day of the last 7"
+msgstr "Son 7 günün en yoğun UTC günü"
+
+msgid "No provider requests in the last 7 days."
+msgstr "Son 7 günde sağlayıcı isteği yok."
+
+msgid "Showing %(shown)s of %(total)s"
+msgstr "%(total)s kayıttan %(shown)s gösteriliyor"
+
+msgid "Calibration runs"
+msgstr "Kalibrasyon çalışmaları"
+
+msgid "Latest 20 runs"
+msgstr "Son 20 çalışma"
+
+msgid "Requested"
+msgstr "İstendi"
+
+msgid "No calibration runs match this view."
+msgstr "Bu görünüme uyan kalibrasyon çalışması yok."
+
+msgid "Why listed"
+msgstr "Listelenme nedeni"
+
+msgid "No plants currently match this check."
+msgstr "Bu kontrole şu anda uyan santral yok."
+
+msgid "Attempt limit reached"
+msgstr "Deneme sınırına ulaşıldı"
+
+msgid "Invalid cutoff"
+msgstr "Geçersiz kesim zamanı"
+
+msgid "Invalid calibration data"
+msgstr "Geçersiz kalibrasyon verisi"
+
+msgid "Ready"
+msgstr "Hazır"
+
+msgid "Insufficient"
+msgstr "Yetersiz"

@@ -68,8 +68,9 @@ def assert_contract(report: dict[str, object], failed: bool) -> None:
     assert set(phases) <= set(DispatcherPhase.values)
     assert all(type(phase) is str for phase in phases)
     for key in COUNTERS:
-        assert type(report[key]) is int, key
-        assert report[key] >= 0, key
+        value = report[key]
+        assert type(value) is int, key
+        assert value >= 0, key
 
 
 @pytest.mark.django_db(transaction=True)

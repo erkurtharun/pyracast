@@ -6,6 +6,8 @@ from pyracast.background.lease import claimable
 from pyracast.forecasts.models import CollectionJob, CollectionJobError, CollectionJobStatus
 from pyracast.regions.models import active_region
 
+WAITING = (CollectionJobStatus.PENDING, CollectionJobStatus.RETRY)
+
 
 def pending_job_ids(now: datetime, limit: int = 100) -> list[int]:
     return list(
@@ -18,10 +20,7 @@ def pending_job_ids(now: datetime, limit: int = 100) -> list[int]:
                 binding__provider_account__request_blocked_until__isnull=True,
             ),
         )
-        .filter(
-            Q(status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY))
-            | claimable(CollectionJobStatus.RUNNING, now)
-        )
+        .filter(Q(status__in=WAITING) | claimable(CollectionJobStatus.RUNNING, now))
         .order_by("available_at", "pk")
         .values_list("pk", flat=True)[:limit]
     )

@@ -10,7 +10,7 @@ from tests.support.domain import NOW, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 MOMENT = NOW + timedelta(hours=1)
-JOB_FIELDS = {
+JOB_FIELDS: dict[str, type | tuple[type, ...]] = {
     "id": int,
     "endpoint": str,
     "status": str,
