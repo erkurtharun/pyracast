@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { loadSession } from "@/lib/session-client";
-import { ApiError } from "@/lib/api/errors";
+import { ApiError, displayMessage } from "@/lib/api/errors";
 import { authRequest, type AuthResult } from "@/lib/auth-api";
 
 export type ReauthMode = "mfa" | "password" | "email";
@@ -132,8 +132,7 @@ export function ReauthenticationForm({
             await onVerified();
         } catch (err) {
             if (!mountedRef.current) return;
-            const message =
-                err instanceof Error ? err.message : t("reauthStillRequired");
+            const message = displayMessage(err, t("reauthStillRequired"));
             const nextFieldError =
                 err instanceof ApiError ? err.fields[fieldName] : undefined;
             setError(message);

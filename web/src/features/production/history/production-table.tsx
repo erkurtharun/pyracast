@@ -8,7 +8,6 @@ import { ProductionReading } from "./production-reading";
 export function ProductionTable({
     rows,
     visibleRows,
-    timezone,
     timeFormatter,
     intervalLabel,
     canManage,
@@ -23,7 +22,6 @@ export function ProductionTable({
 }: {
     rows: Interval[];
     visibleRows: Interval[];
-    timezone: string;
     timeFormatter: Intl.DateTimeFormat;
     intervalLabel: (row: Interval) => string;
     canManage: boolean;
@@ -42,9 +40,7 @@ export function ProductionTable({
     return (
         <ScrollRegion label={t("production_intervals")}>
             <table className="production-table">
-                <caption>
-                    {t("production_intervals")} · {timezone}
-                </caption>
+                <caption>{t("production_intervals")}</caption>
                 <thead>
                     <tr>
                         <th>{t("local_interval")}</th>

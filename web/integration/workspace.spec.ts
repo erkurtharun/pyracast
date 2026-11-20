@@ -114,7 +114,7 @@ test("a customer manages one plant site through the real API", async ({
     await page.getByText("View interval data (12 intervals)").click();
     await expect(
         page
-            .getByRole("table", { name: "Forecast intervals, Europe/Istanbul" })
+            .getByRole("table", { name: "Forecast intervals" })
             .getByRole("columnheader"),
     ).toHaveText(["Time interval", "Energy (MWh)"]);
     await page.getByText("View interval data (12 intervals)").click();
@@ -322,7 +322,7 @@ test("a customer manages one plant site through the real API", async ({
         .getByLabel("Day", { exact: true })
         .fill(process.env.BROWSER_HISTORY_DATE!);
     const productionTable = page.getByRole("table", {
-        name: "Production intervals · Europe/Istanbul",
+        name: "Production intervals",
     });
     const firstHour = productionTable.getByRole("row").filter({
         has: page.getByRole("rowheader", {
@@ -401,17 +401,17 @@ test("a customer manages one plant site through the real API", async ({
     await page
         .getByRole("button", { name: "Data collection", exact: true })
         .click();
-    await page.getByLabel("Collection time 1 (Europe/Istanbul)").fill("09:00");
+    await page.getByLabel("Collection time 1", { exact: true }).fill("09:00");
     await page.getByRole("button", { name: "+ Add time" }).click();
-    await page.getByLabel("Collection time 2 (Europe/Istanbul)").fill("16:00");
+    await page.getByLabel("Collection time 2", { exact: true }).fill("16:00");
     await page
         .getByRole("button", { name: "Save collection schedule" })
         .click();
     await expect(
-        page.getByLabel("Collection time 1 (Europe/Istanbul)"),
+        page.getByLabel("Collection time 1", { exact: true }),
     ).toHaveValue("09:00");
     await expect(
-        page.getByLabel("Collection time 2 (Europe/Istanbul)"),
+        page.getByLabel("Collection time 2", { exact: true }),
     ).toHaveValue("16:00");
     await page.getByRole("button", { name: "Email reminders" }).click();
     await page.getByLabel("Enable forecast emails for this plant").check();

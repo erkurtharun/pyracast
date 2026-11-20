@@ -639,9 +639,6 @@ msgstr "İnceleme bekleyen konum değişikliği yok."
 msgid "No plant has been submitted for this location."
 msgstr "Bu konum için santral başvurusu yapılmamış."
 
-msgid "No plants match"
-msgstr "Eşleşen santral yok"
-
 msgid "No reason given"
 msgstr "Gerekçe belirtilmedi"
 
@@ -1516,9 +1513,6 @@ msgstr ""
 "gerçek bir Solcast isteği gönderir ve seçili hesabın günlük kotasını "
 "kullanır."
 
-msgid "these filters"
-msgstr "bu filtreler"
-
 msgid "· Plant review"
 msgstr "· Santral incelemesi"
 
@@ -1554,13 +1548,6 @@ msgstr "Çalışma alanı sayfaları"
 
 msgid "Workspace administrator updated."
 msgstr "Çalışma alanı yöneticisi güncellendi."
-
-msgid ""
-"The administrator can invite members and edit this workspace. Other members "
-"have read-only access."
-msgstr ""
-"Yönetici üye davet edebilir ve bu çalışma alanını düzenleyebilir. Diğer "
-"üyeler yalnızca görüntüleyebilir."
 
 msgid ""
 "After a change, the new administrator must enable automatic calibration "
@@ -2596,6 +2583,22 @@ msgid ""
 msgstr ""
 "Ulaşmış olabilirler ve yeniden gönderilmezler; kişi veya yönetici yeniden "
 "isteyebilir."
+
+msgid "No plants match these filters."
+msgstr "Bu filtrelerle eşleşen santral yok."
+
+msgid "No plants match."
+msgstr "Eşleşen santral yok."
+
+msgid "Page %(number)s of %(total)s"
+msgstr "Sayfa %(number)s / %(total)s"
+
+msgid ""
+"The administrator can invite members and edit this workspace. Other members "
+"submit changes for the administrator's approval."
+msgstr ""
+"Yönetici üye davet edebilir ve bu çalışma alanını düzenleyebilir. Diğer "
+"üyeler değişikliklerini yöneticinin onayına gönderir."
 
 msgid "%(counter)s recipient per plant"
 msgid_plural "%(counter)s recipients per plant"

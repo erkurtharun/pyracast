@@ -1,12 +1,16 @@
 "use client";
-import { useLocale } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
+import { useCodeLabel } from "@/ui/vocabulary";
 
-export function useForecastNumber() {
+export function useFlagLabel() {
+    const t = useTranslations("Forecast.qualityFlags");
     const locale = useLocale();
-    return (value: unknown): string =>
-        typeof value === "number"
-            ? new Intl.NumberFormat(locale, {
-                  maximumFractionDigits: 3,
-              }).format(value)
-            : "—";
+    const code = useCodeLabel("Forecast.qualityFlags");
+    return (flag: string) =>
+        code(
+            flag,
+            t("unknown", {
+                value: locale === "en" ? flag.replaceAll("_", " ") : flag,
+            }),
+        );
 }

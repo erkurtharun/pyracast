@@ -3,15 +3,20 @@ import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { cadence, useApiList, useRefresh } from "@/lib/api/query";
+import { useFormat } from "@/lib/format/use-format";
 import { routes } from "@/lib/routes";
 import { PlantIcon } from "./plant-icon";
 import { PlantOnboarding } from "./plant-onboarding";
-import { Empty, Notice, RefreshFailed, Tag } from "@/ui/ui";
+import { Field, Select } from "@/ui/form";
+import { Empty, Notice, RefreshFailed } from "@/ui/ui";
+import { StatusTag, useLabel } from "@/ui/vocabulary";
 import { useWorkspace } from "@/features/workspace/workspace-shell";
 
 export function Portfolio() {
     const t = useTranslations("Dashboard");
     const locale = useLocale();
+    const format = useFormat();
+    const label = useLabel();
     const router = useRouter();
     const refresh = useRefresh();
     const { tenant } = useWorkspace();
@@ -25,6 +30,7 @@ export function Portfolio() {
         { poll: cadence.live },
     );
     const rows = sites.data?.results ?? [];
+    const offerCreate = canManage && !creating && !!sites.data;
     const open = (site: number) => router.push(routes.plant(tenant.id, site));
     const filtered = rows.filter(
         (site) =>
@@ -37,20 +43,22 @@ export function Portfolio() {
         <>
             <div className="page-heading">
                 <div>
-                    <p className="eyebrow">{tenant.name}</p>
+                    <p className="eyebrow name">{tenant.name}</p>
                     <h1>
                         {t("plants")}{" "}
-                        <span className="count" aria-hidden="true">
-                            {rows.length}
-                        </span>
+                        {sites.data && (
+                            <span className="count" aria-hidden="true">
+                                {rows.length}
+                            </span>
+                        )}
                     </h1>
                 </div>
-                {canManage && (
+                {offerCreate && rows.length > 0 && (
                     <button
                         className="button"
-                        onClick={() => setCreating(!creating)}
+                        onClick={() => setCreating(true)}
                     >
-                        {creating ? t("closeForm") : t("addPlant")}
+                        {t("addPlant")}
                     </button>
                 )}
             </div>
@@ -67,40 +75,33 @@ export function Portfolio() {
             <section className="panel" aria-label={t("plants")}>
                 {rows.length > 0 && (
                     <div className="portfolio-toolbar">
-                        <label className="field">
-                            {t("searchPlants")}
-                            <input
-                                type="search"
-                                value={search}
-                                onChange={(event) =>
-                                    setSearch(event.target.value)
-                                }
-                                placeholder={t("searchPlaceholder")}
-                            />
-                        </label>
-                        <label className="field">
-                            {t("approvalStatus")}
-                            <select
-                                value={status}
-                                onChange={(event) =>
-                                    setStatus(event.target.value)
-                                }
-                            >
-                                <option value="all">{t("allStatuses")}</option>
-                                <option value="pending">
-                                    {t("awaitingApproval")}
+                        <Field
+                            label={t("searchPlants")}
+                            name="search"
+                            type="search"
+                            value={search}
+                            onChange={(event) => setSearch(event.target.value)}
+                            placeholder={t("searchPlaceholder")}
+                        />
+                        <Select
+                            label={t("approvalStatus")}
+                            value={status}
+                            onChange={(event) => setStatus(event.target.value)}
+                        >
+                            <option value="all">{t("allStatuses")}</option>
+                            {(
+                                [
+                                    "pending",
+                                    "approved",
+                                    "rejected",
+                                    "suspended",
+                                ] as const
+                            ).map((value) => (
+                                <option key={value} value={value}>
+                                    {label("RegionStatus", value)}
                                 </option>
-                                <option value="approved">
-                                    {t("approved")}
-                                </option>
-                                <option value="rejected">
-                                    {t("rejected")}
-                                </option>
-                                <option value="suspended">
-                                    {t("suspended")}
-                                </option>
-                            </select>
-                        </label>
+                            ))}
+                        </Select>
                     </div>
                 )}
                 <RefreshFailed resource={sites} />
@@ -136,12 +137,15 @@ export function Portfolio() {
                                         >
                                             <PlantIcon />
                                         </span>
-                                        <Tag>{site.status}</Tag>
+                                        <StatusTag
+                                            group="RegionStatus"
+                                            value={site.status}
+                                        />
                                     </div>
                                     <h2>{site.plant?.name ?? site.name}</h2>
                                     <p>
                                         {metadata
-                                            ? `${metadata.dc_capacity_mw.toLocaleString(locale, { maximumSignificantDigits: 4 })} MW DC`
+                                            ? `${format.significant(metadata.dc_capacity_mw, 4)} MW DC`
                                             : t("completeSetup")}{" "}
                                         {" · "}
                                         {site.timezone}
@@ -159,11 +163,27 @@ export function Portfolio() {
                         })}
                     </div>
                 ) : (
-                    <Empty
-                        title={rows.length ? t("noMatches") : t("firstPlant")}
-                    >
-                        {rows.length ? t("differentSearch") : t("addDetails")}
-                    </Empty>
+                    <>
+                        <Empty
+                            title={
+                                rows.length ? t("noMatches") : t("firstPlant")
+                            }
+                        >
+                            {rows.length
+                                ? t("differentSearch")
+                                : t("addDetails")}
+                        </Empty>
+                        {offerCreate && !rows.length && (
+                            <div className="empty-action">
+                                <button
+                                    className="button"
+                                    onClick={() => setCreating(true)}
+                                >
+                                    {t("addPlant")}
+                                </button>
+                            </div>
+                        )}
+                    </>
                 )}
                 {canManage && (
                     <div className="portfolio-footer">

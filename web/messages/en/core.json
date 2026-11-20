@@ -44,7 +44,11 @@
         "tooManyRequests": "Too many requests. Wait a few minutes and try again.",
         "codeRequested": "A new code was requested.",
         "forgotPassword": "Forgot password?",
-        "passwordChanged": "Password saved. Sign in with your new password."
+        "passwordChanged": "Password saved. Sign in with your new password.",
+        "signInFailed": "Sign-in failed",
+        "registrationFailed": "The account was not created",
+        "verificationFailed": "The email address was not verified",
+        "resetFailed": "The password was not reset"
     },
     "Security": {
         "sessionExpired": "Your session has expired. Please sign in again.",
@@ -151,19 +155,14 @@
         "loadingWorkspaces": "Loading your workspaces…",
         "loadingScreen": "Loading…",
         "noWorkspace": "No workspace yet",
-        "contactAdmin": "Contact your administrator for access.",
+        "contactAdmin": "Ask your workspace administrator for an invitation, or write to Pyracast support at {contact}.",
         "portfolio": "Your solar portfolio",
-        "closeForm": "Close form",
         "addPlant": "+ Add a plant",
         "plants": "Plants",
-        "approved": "Approved",
-        "awaitingApproval": "Awaiting approval",
         "searchPlants": "Search plants",
         "searchPlaceholder": "Plant name or timezone",
         "approvalStatus": "Approval status",
         "allStatuses": "All statuses",
-        "rejected": "Rejected",
-        "suspended": "Suspended",
         "loadingPlants": "Loading plants...",
         "completeSetup": "Complete setup",
         "openPlant": "Open plant",
@@ -184,34 +183,10 @@
         "saving": "Saving…",
         "saved": "Saved successfully.",
         "technicalDetails": "Technical details",
-        "statuses": {
-            "approved": "approved",
-            "fresh": "fresh",
-            "ready": "ready",
-            "active": "active",
-            "succeeded": "succeeded",
-            "pending": "pending",
-            "stale": "stale",
-            "provisional": "provisional",
-            "unknown": "unknown",
-            "failed": "failed",
-            "rejected": "rejected",
-            "suspended": "suspended",
-            "missing": "missing",
-            "disabled": "disabled",
-            "queued": "queued",
-            "running": "running",
-            "complete": "complete",
-            "partial": "partial",
-            "insufficient": "insufficient",
-            "sent": "sent",
-            "cancelled": "cancelled",
-            "skipped": "skipped",
-            "uncertain": "uncertain",
-            "superseded": "superseded"
-        },
         "refreshFailed": "Could not refresh; showing data from {time}.",
-        "retry": "Try again"
+        "retry": "Try again",
+        "actionFailed": "The action could not be completed",
+        "working": "Working…"
     },
     "AppError": {
         "title": "This page could not be displayed",
@@ -230,7 +205,8 @@
         "network": "Could not reach the server. Check your connection and try again.",
         "unconfirmed": "The server did not confirm the change. Reload to check whether it was saved.",
         "stillSignedIn": "You are still signed in. Sign out again.",
-        "invalidPage": "The server returned an invalid next page."
+        "invalidPage": "The server returned an invalid next page.",
+        "unexpected": "Something went wrong. Please try again."
     },
     "ProductionCsv": {
         "size": "Choose a CSV no larger than 2 MiB.",
@@ -264,5 +240,155 @@
         "retry": "Try again",
         "loadError": "Connected accounts could not be loaded.",
         "connectAccount": "Connect an account"
+    },
+    "Enums": {
+        "RegionStatus": {
+            "pending": "In review",
+            "approved": "Approved",
+            "suspended": "Suspended",
+            "rejected": "Rejected"
+        },
+        "LocationChangeStatus": {
+            "pending": "In review",
+            "approved": "Approved",
+            "rejected": "Rejected",
+            "withdrawn": "Withdrawn"
+        },
+        "Freshness": {
+            "fresh": "Fresh",
+            "stale": "Stale",
+            "missing": "No data"
+        },
+        "CalibrationStatus": {
+            "pending": "Waiting",
+            "running": "Running",
+            "ready": "Ready",
+            "insufficient": "Insufficient",
+            "rejected": "Rejected",
+            "failed": "Failed",
+            "superseded": "Superseded"
+        },
+        "ChangeRequestKind": {
+            "production": "Production correction",
+            "incident": "Outage report"
+        },
+        "ChangeRequestStatus": {
+            "pending": "In review",
+            "approved": "Approved",
+            "rejected": "Rejected",
+            "withdrawn": "Withdrawn"
+        },
+        "IncidentKind": {
+            "inverter": "Inverter",
+            "panels": "Panels",
+            "grid": "Grid",
+            "other": "Other",
+            "multiple": "Multiple faults"
+        },
+        "ObservationQuality": {
+            "valid": "Valid",
+            "outage": "Outage",
+            "curtailed": "Curtailed",
+            "invalid": "Invalid"
+        },
+        "CollectionEndpoint": {
+            "forecasts": "Forecast",
+            "estimated_actuals": "Historical estimates",
+            "historical_import": "Historical import",
+            "scaled_forecasts": "Scaled forecast",
+            "scaled_estimated_actuals": "Scaled historical estimates"
+        },
+        "CollectionJobStatus": {
+            "pending": "Waiting",
+            "running": "In progress",
+            "retry": "Retry scheduled",
+            "succeeded": "Succeeded",
+            "failed": "Failed",
+            "stale": "Superseded or no longer eligible"
+        },
+        "CollectionJobError": {
+            "history_window_closed": "Morning retry window ended",
+            "attempts_exhausted": "Retry limit reached",
+            "forecast_superseded": "Replaced by the latest scheduled collection",
+            "binding_not_current": "The provider connection is not approved and current",
+            "schedule_disabled": "Data collection is paused",
+            "slot_not_configured": "This time is no longer in the schedule",
+            "schedule_changed": "Replaced after the schedule changed",
+            "history_incomplete": "Historical data is incomplete",
+            "history_already_archived": "History was already collected",
+            "provider_authentication_failed": "Connection credentials need administrator attention",
+            "provider_allowance_exhausted": "The provider account's daily allowance is used up; retrying after it resets",
+            "provider_access_denied": "The provider denied access to this site",
+            "provider_site_not_found": "The provider does not know this site",
+            "provider_throttled": "Waiting for the provider's request limit to reset",
+            "provider_server_error": "The provider had a server error",
+            "provider_unreachable": "The provider could not be reached",
+            "provider_invalid_response": "Unexpected provider data",
+            "provider_configuration_invalid": "The provider connection settings need administrator attention",
+            "account_unavailable": "The provider account is paused",
+            "history_budget_reserved": "Remaining budget is reserved for forecasts",
+            "quota_exhausted": "Daily account budget exhausted",
+            "provider_failure": "Provider request failed",
+            "provider_unexpected_failure": "Collection could not be completed",
+            "invalid_source_kind": "Unexpected provider data",
+            "calculation_failure": "Forecast calculation failed",
+            "lock_contention": "The system was busy; retrying",
+            "publication_failure": "Saving the collection failed; retrying"
+        },
+        "NotificationDeliveryStatus": {
+            "pending": "Preparing",
+            "retry": "Retry scheduled",
+            "sending": "Sending",
+            "sent": "Accepted by mail service",
+            "failed": "Not sent",
+            "uncertain": "Acceptance unconfirmed",
+            "skipped": "Skipped",
+            "cancelled": "Cancelled"
+        },
+        "NotificationDeliveryError": {
+            "missed_schedule": "The delivery window has ended.",
+            "delivery_deadline_exceeded": "The mail service did not accept the message within the delivery window.",
+            "cancelled_by_settings_change": "Cancelled because the reminder was turned off or this time was removed.",
+            "schedule_or_authority_changed": "Delivery settings or access changed.",
+            "no_recipients": "Not sent because no recipient is left.",
+            "invalid_recipient": "Not sent because a saved recipient address is invalid.",
+            "recipient_limit_exceeded": "Not sent because the plant has more recipients than the limit allows.",
+            "definition_trashed": "Not sent because the plant was moved to the recycle bin.",
+            "interrupted_send": "Sending was interrupted. Check mail service acceptance before resending.",
+            "interrupted_connection": "The connection was interrupted before sending. A retry is scheduled.",
+            "mail_not_sent": "The mail service was unavailable. Retry is bounded by the delivery window.",
+            "mail_configuration_invalid": "The mail settings are invalid. Delivery will retry within the sending window.",
+            "mail_credentials_rejected": "Mail service credentials need attention from Pyracast support. Delivery will retry within the sending window.",
+            "mail_authorization_revoked": "The mail sender authorization was revoked. Pyracast support must authorize the sender again.",
+            "mail_rate_limited": "The mail service rate limit was reached. Retries are bounded by the sending window.",
+            "mail_rejected": "The mail service rejected the message. Check the recipient and mail settings.",
+            "mail_sender_forbidden": "The mail service does not permit this sender. Pyracast support must check the sender settings.",
+            "mail_preparation_failed": "Transmission permission could not be confirmed. Retries are bounded by the sending window.",
+            "mail_outcome_uncertain": "Check the mail service before resending to avoid a duplicate."
+        },
+        "PreparedMessageKind": {
+            "current": "New forecast",
+            "saved_complete": "Saved forecast",
+            "saved_partial": "Partial forecast",
+            "unavailable": "No forecast available"
+        },
+        "WorkspaceRole": {
+            "admin": "Workspace administrator",
+            "viewer": "Member"
+        },
+        "ReminderState": {
+            "sending": "Enabled",
+            "paused_by_user": "Paused",
+            "waiting_for_approval": "Waiting for approval",
+            "provider_attention": "Provider account needs attention",
+            "no_recipients": "Not sent because no recipient is left.",
+            "invalid_recipient": "Not sent because a saved recipient address is invalid.",
+            "over_recipient_limit": "Not sent because the plant has more recipients than the limit allows."
+        },
+        "CalibrationAssessment": {
+            "insufficient": "Insufficient data",
+            "provisional": "Provisional",
+            "evaluated": "Evaluated"
+        }
     }
 }

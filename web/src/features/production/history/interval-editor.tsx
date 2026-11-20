@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
-import { QUALITIES, qualityOf, type Quality } from "@/lib/production";
+import { QUALITIES, qualityOf } from "@/lib/production";
 import { ControlField } from "@/ui/form";
 import { Notice } from "@/ui/ui";
+import { useLabel } from "@/ui/vocabulary";
 import type { Draft, Editor, Interval } from "./model";
 
 export type DraftChange = Partial<Pick<Draft, "energy" | "quality" | "reason">>;
@@ -31,13 +32,7 @@ export function IntervalEditor({
 }) {
     const t = useTranslations("ProductionHistory");
     const proposals = useTranslations("ChangeRequests");
-    const qualityLabel = (quality: Quality) =>
-        ({
-            valid: t("valid"),
-            invalid: t("invalid"),
-            outage: t("outage"),
-            curtailed: t("curtailed"),
-        })[quality];
+    const label = useLabel();
     const energyRef = useRef<HTMLInputElement>(null);
     useEffect(() => energyRef.current?.focus(), []);
     const blocked = saving || (canManage && editor.status === "failed");
@@ -70,7 +65,7 @@ export function IntervalEditor({
                 >
                     {QUALITIES.map((quality) => (
                         <option key={quality} value={quality}>
-                            {qualityLabel(quality)}
+                            {label("ObservationQuality", quality)}
                         </option>
                     ))}
                 </select>

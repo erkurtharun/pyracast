@@ -2,9 +2,11 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { loadSession } from "@/lib/session-client";
+import { useErrorMessage } from "./form";
 
 export function RouteError({ retry }: { retry: () => void }) {
     const t = useTranslations("AppError");
+    const errorMessage = useErrorMessage();
     const [state, setState] = useState<
         { status: "idle" | "pending" } | { status: "failed"; message: string }
     >({ status: "idle" });
@@ -26,7 +28,7 @@ export function RouteError({ retry }: { retry: () => void }) {
                     } catch (error) {
                         setState({
                             status: "failed",
-                            message: (error as Error).message,
+                            message: errorMessage(error),
                         });
                     }
                 }}

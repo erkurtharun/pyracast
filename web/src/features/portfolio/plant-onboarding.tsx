@@ -1,11 +1,15 @@
 "use client";
-import { useTranslations, useFormatter } from "next-intl";
+import { useTranslations } from "next-intl";
 
 import { useRef, useState } from "react";
 import type { Region } from "@/lib/api";
 import { api } from "@/lib/api/client";
+import { displayMessage } from "@/lib/api/errors";
+import { deviceZone } from "@/lib/format/time";
+import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
-import { Field, Notice } from "@/ui/ui";
+import { Field } from "@/ui/form";
+import { Notice } from "@/ui/ui";
 import {
     PlantConfigurationFields,
     configurationInput,
@@ -25,11 +29,9 @@ export function PlantOnboarding({
     onCancel: () => void;
 }) {
     const t = useTranslations("PlantOnboarding");
-    const format = useFormatter();
+    const format = useFormat();
     const reviewNumber = (value: unknown) =>
-        value == null || value === ""
-            ? ""
-            : format.number(Number(value), { maximumFractionDigits: 6 });
+        value == null || value === "" ? "" : format.number(Number(value), 6);
 
     const [step, setStep] = useState(existing ? 1 : 0);
     const [review, setReview] = useState<Record<string, FormDataEntryValue>>(
@@ -135,10 +137,10 @@ export function PlantOnboarding({
                     } catch (error) {
                         setStatus({
                             kind: "error",
-                            message:
-                                error instanceof Error
-                                    ? error.message
-                                    : t("unableToSaveThisPlant"),
+                            message: displayMessage(
+                                error,
+                                t("unableToSaveThisPlant"),
+                            ),
                         });
                     }
                 }}
@@ -151,17 +153,17 @@ export function PlantOnboarding({
                                     label={t("plantName")}
                                     name="name"
                                     placeholder={t("examplePlantName")}
+                                    required
                                 />
                             )}
                             <Field
                                 label={t("ianaTimezone")}
                                 name="timezone"
                                 defaultValue={
-                                    existing?.timezone ??
-                                    Intl.DateTimeFormat().resolvedOptions()
-                                        .timeZone
+                                    existing?.timezone ?? deviceZone()
                                 }
                                 placeholder="Europe/Istanbul"
+                                required
                             />
                             <Field
                                 label={t("latitude")}
@@ -171,6 +173,7 @@ export function PlantOnboarding({
                                 max={90}
                                 step="any"
                                 defaultValue={existing?.latitude}
+                                required
                             />
                             <Field
                                 label={t("longitude")}
@@ -180,6 +183,7 @@ export function PlantOnboarding({
                                 max={180}
                                 step="any"
                                 defaultValue={existing?.longitude}
+                                required
                             />
                         </div>
                         <p className="fine">{t("locationHelp")}</p>

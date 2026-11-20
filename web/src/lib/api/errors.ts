@@ -12,7 +12,10 @@ type ErrorDetails = {
     requestId: string | null;
 };
 
-export class ApiError extends Error {
+// The only errors whose message is shown as written; any other failure is shown as a localized generic message.
+export class DisplayError extends Error {}
+
+export class ApiError extends DisplayError {
     readonly status: number;
     readonly code: ErrorCode | null;
     readonly fields: Record<string, string>;
@@ -110,6 +113,12 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     incumbent_changed: true,
     calibration_not_activatable: true,
 };
+
+export function displayMessage(error: unknown, fallback: string): string {
+    return error instanceof DisplayError && error.message
+        ? error.message
+        : fallback;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return !!value && typeof value === "object" && !Array.isArray(value);

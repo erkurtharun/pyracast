@@ -1,6 +1,9 @@
 "use client";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
+import { MISSING } from "@/lib/format/number";
+import { useFormat } from "@/lib/format/use-format";
 import { ScrollRegion } from "@/ui/scroll-region";
+import { useFlagLabel } from "./panel/format";
 
 export type ForecastInterval = {
     start: string;
@@ -26,15 +29,12 @@ function IntervalValue({
     electrical: boolean;
 }) {
     const t = useTranslations("ForecastIntervals");
-    const locale = useLocale();
-    const numberFormatter = new Intl.NumberFormat(locale, {
-        maximumFractionDigits: 3,
-    });
+    const format = useFormat();
 
     return (
         <>
             <span className="interval-value">
-                {value == null ? "—" : numberFormatter.format(value)}
+                {value == null ? MISSING : format.number(value)}
             </span>
             {value == null && (
                 <span className="sr-only">{t("data_unavailable")}</span>
@@ -44,7 +44,7 @@ function IntervalValue({
                     {power == null
                         ? t("_average_power_unavailable")
                         : t("average_power", {
-                              power: numberFormatter.format(power),
+                              power: format.number(power),
                           })}
                 </span>
             )}
@@ -57,7 +57,6 @@ export function ForecastIntervals({
     electrical,
     scenarioLabel,
     label,
-    timezone,
     formatTime,
     showSources = false,
 }: {
@@ -65,19 +64,11 @@ export function ForecastIntervals({
     electrical: boolean;
     scenarioLabel?: string;
     label: string;
-    timezone: string;
     formatTime: (value: string) => string;
     showSources?: boolean;
 }) {
     const t = useTranslations("ForecastIntervals");
-    const locale = useLocale();
-    const quality = useTranslations("Forecast.qualityFlags");
-    const flagLabel = (flag: string) =>
-        quality.has(flag)
-            ? quality(flag)
-            : quality("unknown", {
-                  value: locale === "en" ? flag.replaceAll("_", " ") : flag,
-              });
+    const flagLabel = useFlagLabel();
 
     const valueField = electrical ? "energy_mwh" : "ghi_wm2";
     const notes = rows.filter(
@@ -102,9 +93,7 @@ export function ForecastIntervals({
             <summary>{t("view_intervals", { count: rows.length })}</summary>
             <ScrollRegion label={label}>
                 <table className="forecast-interval-table">
-                    <caption className="sr-only">
-                        {label}, {timezone}
-                    </caption>
+                    <caption className="sr-only">{label}</caption>
                     <thead>
                         <tr>
                             <th scope="col">{t("time_interval")}</th>
@@ -160,7 +149,7 @@ export function ForecastIntervals({
                                                     "estimated_actuals"
                                                   ? t("updated_estimate")
                                                   : t("forecast")
-                                            : "—"}
+                                            : MISSING}
                                     </td>
                                 )}
                             </tr>

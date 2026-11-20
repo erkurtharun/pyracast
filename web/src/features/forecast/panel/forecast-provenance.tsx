@@ -1,8 +1,10 @@
 "use client";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
+import { MISSING } from "@/lib/format/number";
+import { useFormat } from "@/lib/format/use-format";
 import type { Forecast } from "@/lib/api";
 import { JsonDetails, Tag } from "@/ui/ui";
-import { useForecastNumber } from "./format";
+import { useFlagLabel } from "./format";
 import {
     hasFlag,
     type DaylightSummary,
@@ -32,17 +34,10 @@ export function ForecastProvenance({
     diagnostic: ProductionDiagnostic | null | undefined;
 }) {
     const t = useTranslations("Forecast");
-    const quality = useTranslations("Forecast.qualityFlags");
-    const locale = useLocale();
-    const number = useForecastNumber();
-    const flagLabel = (flag: string) =>
-        quality.has(flag)
-            ? quality(flag)
-            : quality("unknown", {
-                  value: locale === "en" ? flag.replaceAll("_", " ") : flag,
-              });
-    const localTime = (value: string) =>
-        new Date(value).toLocaleString(locale, { timeZone: forecast.timezone });
+    const format = useFormat();
+    const number = format.number;
+    const flagLabel = useFlagLabel();
+    const localTime = (value: string) => format.time(value, forecast.timezone);
     const diagnosticDays = diagnostic?.days.map((day) => day.day).sort() ?? [];
     const [firstDay] = diagnosticDays;
     const lastDay = diagnosticDays.at(-1);
@@ -179,7 +174,7 @@ export function ForecastProvenance({
                       })
                     : ""}
                 {t("model_version", {
-                    version: String(result.model_version ?? "—"),
+                    version: String(result.model_version ?? MISSING),
                 })}{" "}
                 {forecast.configuration_id
                     ? t("configuration_id", { id: forecast.configuration_id })

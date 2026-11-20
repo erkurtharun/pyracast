@@ -1,6 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { Field } from "@/ui/ui";
+import { Field } from "@/ui/form";
 import type { Mode } from "./modes";
 
 export function AuthFields({
@@ -26,6 +26,7 @@ export function AuthFields({
                         name="company_name"
                         autoComplete="organization"
                         maxLength={200}
+                        required
                     />
                 )}
             {(mode === "verify" || mode === "reset") && (
@@ -33,6 +34,7 @@ export function AuthFields({
                     label={t("emailCode")}
                     name="key"
                     autoComplete="one-time-code"
+                    required
                 />
             )}
             {(mode === "login" ||
@@ -49,6 +51,7 @@ export function AuthFields({
                     type="email"
                     autoComplete="email"
                     maxLength={254}
+                    required
                 />
             )}
             {(mode === "login" || mode === "register" || mode === "reset") && (
@@ -64,6 +67,7 @@ export function AuthFields({
                         }
                         minLength={mode === "login" ? undefined : 15}
                         maxLength={1024}
+                        required
                     />
                     <button
                         type="button"
@@ -80,6 +84,7 @@ export function AuthFields({
                     label={t("authenticatorCode")}
                     name="code"
                     autoComplete="one-time-code"
+                    required
                 />
             )}
         </>

@@ -5,11 +5,11 @@ import { cadence } from "@/lib/api/query";
 import type { PlantAddress, PlantView } from "@/lib/routes";
 import {
     DataSourceControl,
-    localDay,
     type DataSource,
 } from "@/features/forecast/data-source";
 import { ViewNav } from "@/ui/action";
-import { ControlField } from "@/ui/form";
+import { plantDay } from "@/lib/format/time";
+import { ControlField, Select } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { PlantForecast } from "./forecast-reading";
 
@@ -40,7 +40,7 @@ export function ForecastSection({
 }) {
     const t = useTranslations("PlantWorkspace");
     const { resolution, source } = options;
-    const today = localDay(timezone);
+    const today = plantDay(timezone);
     const pastOnly =
         source === "estimated_actuals" || source === "archived_forecast";
     const leavingGeneration = leaving && view === "generation";
@@ -74,32 +74,29 @@ export function ForecastSection({
                         if (
                             (next === "estimated_actuals" ||
                                 next === "archived_forecast") &&
-                            (baseDate || localDay(timezone, 1)) > today
+                            (baseDate || plantDay(timezone, 1)) > today
                         )
                             setDate(today);
                     }}
                 />
                 {view === "generation" && (
-                    <ControlField label={t("resolution")}>
-                        <select
-                            value={resolution}
-                            disabled={leavingGeneration}
-                            onChange={(event) =>
-                                onOptions({
-                                    ...options,
-                                    resolution:
-                                        event.target.value === "30"
-                                            ? "30"
-                                            : "60",
-                                })
-                            }
-                        >
-                            <option value="30">{t("minutes30")}</option>
-                            <option value="60">{t("minutes60")}</option>
-                        </select>
-                    </ControlField>
+                    <Select
+                        label={t("resolution")}
+                        value={resolution}
+                        disabled={leavingGeneration}
+                        onChange={(event) =>
+                            onOptions({
+                                ...options,
+                                resolution:
+                                    event.target.value === "30" ? "30" : "60",
+                            })
+                        }
+                    >
+                        <option value="30">{t("minutes30")}</option>
+                        <option value="60">{t("minutes60")}</option>
+                    </Select>
                 )}
-                <span className="fine">{t("localDates", { timezone })}</span>
+                <span className="fine">{t("localDates")}</span>
             </div>
             {source === "estimated_actuals" && date > today ? (
                 <Notice>{t("selectTodayOrPastDay")}</Notice>
@@ -115,7 +112,7 @@ export function ForecastSection({
                     source={source}
                     poll={
                         source !== "archived_forecast" &&
-                        date >= localDay(timezone, -1)
+                        date >= plantDay(timezone, -1)
                             ? cadence.live
                             : false
                     }

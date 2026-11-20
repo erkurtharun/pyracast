@@ -1,4 +1,4 @@
-﻿import { test, expect, type Page } from "./support/test";
+import { test, expect, type Page } from "./support/test";
 import { mockApi, paged } from "./support/workspace";
 import { errorBody } from "./support/errors";
 
@@ -8,7 +8,7 @@ const run = (id: number) => ({
     window_start: "2026-01-01",
     window_end: "2026-01-10",
     status: "ready",
-    assessment: "accepted",
+    assessment: "evaluated",
     factor: 1.1,
     result: {},
 });
@@ -143,7 +143,7 @@ test("superseded runs are labelled in Turkish", async ({ page, baseURL }) => {
         .getByRole("button", { name: "Kalibrasyon", exact: true })
         .click();
     const row = page.getByRole("row", { name: /#40/ });
-    await expect(row).toContainText("yerini yenisi aldı");
+    await expect(row).toContainText("Yerini yenisi aldı");
     await expect(row).not.toContainText("superseded");
 });
 

@@ -1,6 +1,7 @@
 import { homeCopy, type PublicLanguage } from "./home-copy";
 import { SiteShell } from "./site-shell";
 import { routes } from "@/lib/routes";
+import { illustrationColours } from "@/styles/tokens";
 import styles from "./public-site.module.css";
 
 export function HomePage({ language }: { language: PublicLanguage }) {
@@ -69,18 +70,22 @@ export function HomePage({ language }: { language: PublicLanguage }) {
                                         >
                                             <stop
                                                 offset="0%"
-                                                stopColor="#28664e"
+                                                stopColor={
+                                                    illustrationColours.forecast
+                                                }
                                                 stopOpacity="0.17"
                                             />
                                             <stop
                                                 offset="100%"
-                                                stopColor="#28664e"
+                                                stopColor={
+                                                    illustrationColours.forecast
+                                                }
                                                 stopOpacity="0"
                                             />
                                         </linearGradient>
                                     </defs>
                                     <g
-                                        stroke="#dedfd3"
+                                        stroke={illustrationColours.grid}
                                         strokeWidth="1"
                                         strokeDasharray="3 5"
                                     >
@@ -88,7 +93,7 @@ export function HomePage({ language }: { language: PublicLanguage }) {
                                     </g>
                                     <path
                                         d="M4 210H476"
-                                        stroke="#c4ccbd"
+                                        stroke={illustrationColours.axis}
                                         strokeWidth="1"
                                     />
                                     <path
@@ -98,14 +103,14 @@ export function HomePage({ language }: { language: PublicLanguage }) {
                                     <path
                                         d="M4 210C52 210 66 201 94 173S137 99 177 66S222 35 252 57S289 105 321 127S369 171 399 192S442 210 476 210"
                                         fill="none"
-                                        stroke="#28664e"
+                                        stroke={illustrationColours.forecast}
                                         strokeWidth="3"
                                         strokeLinecap="round"
                                     />
                                     <path
                                         d="M4 210C52 210 70 201 96 180S138 111 177 81S222 56 252 75"
                                         fill="none"
-                                        stroke="#a17537"
+                                        stroke={illustrationColours.production}
                                         strokeWidth="3"
                                         strokeDasharray="5 7"
                                         strokeLinecap="round"
@@ -114,8 +119,8 @@ export function HomePage({ language }: { language: PublicLanguage }) {
                                         cx="252"
                                         cy="75"
                                         r="5"
-                                        fill="#a17537"
-                                        stroke="#fbfbf5"
+                                        fill={illustrationColours.production}
+                                        stroke={illustrationColours.halo}
                                         strokeWidth="3"
                                     />
                                 </svg>

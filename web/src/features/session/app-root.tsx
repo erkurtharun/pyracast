@@ -2,9 +2,12 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useEffect, useState, type ReactNode } from "react";
+import { displayMessage } from "@/lib/api/errors";
 import { createQueryClient, QueryOwner } from "@/lib/api/query";
+import { browserErrors } from "@/i18n/browser";
 import { loadSession, useSessionState } from "@/lib/session-client";
 import { Brand } from "@/ui/brand";
+import { LiveRegion } from "@/ui/live-region";
 import { useLanguageHandoff } from "./language-handoff";
 import { SessionLanguage } from "./session-language";
 import { Notice } from "@/ui/ui";
@@ -19,17 +22,21 @@ export function AppRoot({ children }: { children: ReactNode }) {
     return (
         <QueryClientProvider client={client}>
             <SessionLanguage language={session?.language}>
-                {session && handoff.status === "ready" ? (
-                    <QueryOwner value={user}>{children}</QueryOwner>
-                ) : (
-                    <Bootstrap
-                        languageFailed={handoff.status === "failed"}
-                        failure={failure}
-                        retry={
-                            handoff.status === "failed" ? handoff.retry : retry
-                        }
-                    />
-                )}
+                <LiveRegion>
+                    {session && handoff.status === "ready" ? (
+                        <QueryOwner value={user}>{children}</QueryOwner>
+                    ) : (
+                        <Bootstrap
+                            languageFailed={handoff.status === "failed"}
+                            failure={failure}
+                            retry={
+                                handoff.status === "failed"
+                                    ? handoff.retry
+                                    : retry
+                            }
+                        />
+                    )}
+                </LiveRegion>
             </SessionLanguage>
         </QueryClientProvider>
     );
@@ -62,7 +69,7 @@ function Bootstrap({
                     <div
                         className="loading-indicator"
                         role="progressbar"
-                        aria-label="Pyracast"
+                        aria-label={t("loadingScreen")}
                     />
                 )}
             </div>
@@ -76,8 +83,11 @@ function useSessionBootstrap() {
     const { session } = useSessionState();
     useEffect(() => {
         let active = true;
-        loadSession().catch((error: Error) => {
-            if (active) setFailure(error.message);
+        loadSession().catch((error: unknown) => {
+            if (active)
+                setFailure(
+                    displayMessage(error, browserErrors()("unexpected")),
+                );
         });
         return () => {
             active = false;

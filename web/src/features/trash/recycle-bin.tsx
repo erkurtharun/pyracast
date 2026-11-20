@@ -1,10 +1,12 @@
-"use client";
-import { useTranslations, useLocale } from "next-intl";
+﻿"use client";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import type { RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
+import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
 import { useApiList, useRefresh } from "@/lib/api/query";
+import { useErrorMessage } from "@/ui/form";
 import { Resource } from "@/ui/resource";
 import { Empty, Notice } from "@/ui/ui";
 
@@ -20,7 +22,7 @@ export function MoveToRecycleBin({
     onDeleted: () => void;
 }) {
     const t = useTranslations("RecycleBin");
-
+    const errorMessage = useErrorMessage();
     const [confirming, setConfirming] = useState(false);
     const [working, setWorking] = useState(false);
     const [error, setError] = useState("");
@@ -50,7 +52,7 @@ export function MoveToRecycleBin({
                     {t("cancel")}
                 </button>
                 <button
-                    className="button"
+                    className="button danger"
                     disabled={working}
                     onClick={async () => {
                         setWorking(true);
@@ -62,7 +64,7 @@ export function MoveToRecycleBin({
                             );
                             onDeleted();
                         } catch (failure) {
-                            setError((failure as Error).message);
+                            setError(errorMessage(failure));
                             setWorking(false);
                         }
                     }}
@@ -76,7 +78,8 @@ export function MoveToRecycleBin({
 
 export function RecycleBin({ tenant }: { tenant: number }) {
     const t = useTranslations("RecycleBin");
-    const locale = useLocale();
+    const format = useFormat();
+    const errorMessage = useErrorMessage();
 
     const refresh = useRefresh();
     const [working, setWorking] = useState<number | null>(null);
@@ -88,15 +91,6 @@ export function RecycleBin({ tenant }: { tenant: number }) {
     });
     const rows =
         regions.data?.results.filter((row) => !restored.includes(row.id)) ?? [];
-    const date = (value: string) =>
-        new Date(value).toLocaleString(locale, {
-            year: "numeric",
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-            timeZoneName: "short",
-        });
     async function restore(row: DeletedRegion) {
         setWorking(row.id);
         setError("");
@@ -112,7 +106,7 @@ export function RecycleBin({ tenant }: { tenant: number }) {
             await refresh.workspace(tenant);
             setMessage(t("restored", { name: row.name }));
         } catch (failure) {
-            setError((failure as Error).message);
+            setError(errorMessage(failure));
             void refresh.workspace(tenant);
         } finally {
             setWorking(null);
@@ -153,7 +147,7 @@ export function RecycleBin({ tenant }: { tenant: number }) {
                                                                 row.deleted_at
                                                             }
                                                         >
-                                                            {date(
+                                                            {format.deviceTime(
                                                                 row.deleted_at,
                                                             )}
                                                         </time>
@@ -169,7 +163,7 @@ export function RecycleBin({ tenant }: { tenant: number }) {
                                                                 row.purge_after
                                                             }
                                                         >
-                                                            {date(
+                                                            {format.deviceTime(
                                                                 row.purge_after,
                                                             )}
                                                         </time>

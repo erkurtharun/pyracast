@@ -286,12 +286,12 @@ for (const width of [320, 390]) {
         await page.getByText("Source & quality", { exact: true }).click();
         await expect(
             page.getByText(
-                "Forecast update 6: collected 11/11/2026, 5:00:00 AM",
+                "Forecast update 6: collected Nov 11, 2026, 5:00 AM",
             ),
         ).toBeVisible();
         await expect(
             page.getByText(
-                "Forecast update 8: collected 11/11/2026, 8:00:00 AM",
+                "Forecast update 8: collected Nov 11, 2026, 8:00 AM",
             ),
         ).toBeVisible();
         const downloadPromise = page.waitForEvent("download");

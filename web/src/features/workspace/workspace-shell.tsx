@@ -1,5 +1,5 @@
 "use client";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import {
     createContext,
@@ -10,6 +10,9 @@ import {
     type ReactNode,
 } from "react";
 import type { Tenant } from "@/lib/api";
+import { deviceZone } from "@/lib/format/time";
+import { useFormat } from "@/lib/format/use-format";
+import { contactEmail } from "@/lib/public-metadata";
 import { cadence, useApiList } from "@/lib/api/query";
 import { routes, screenOf, type Screen } from "@/lib/routes";
 import {
@@ -18,6 +21,7 @@ import {
     type SessionUser,
 } from "@/lib/session-client";
 import { Brand } from "@/ui/brand";
+import { useErrorMessage } from "@/ui/form";
 import { LanguageSelect } from "@/ui/language-select";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { WorkspaceAccess } from "@/ui/workspace-access";
@@ -74,7 +78,7 @@ export function WorkspaceShell({
     children: ReactNode;
 }) {
     const t = useTranslations("Dashboard");
-    const locale = useLocale();
+    const format = useFormat();
     const router = useRouter();
     const screen = screenOf(usePathname());
     const { session } = useSessionState();
@@ -87,6 +91,7 @@ export function WorkspaceShell({
     );
     const endingSoon = useEndingSoon(session?.expires_at ?? null);
     const [logoutError, setLogoutError] = useState("");
+    const errorMessage = useErrorMessage();
     const rows = tenants.data?.results ?? [];
     const tenant =
         tenantId === undefined
@@ -226,7 +231,7 @@ export function WorkspaceShell({
                             try {
                                 await signOut();
                             } catch (error) {
-                                setLogoutError((error as Error).message);
+                                setLogoutError(errorMessage(error));
                             }
                         }}
                     >
@@ -252,10 +257,9 @@ export function WorkspaceShell({
                     {endingSoon && (
                         <Notice>
                             {t("sessionEndingSoon", {
-                                time: new Date(endingSoon).toLocaleTimeString(
-                                    locale,
-                                    { timeStyle: "short" },
-                                ),
+                                time: format.time(endingSoon, deviceZone(), {
+                                    timeStyle: "short",
+                                }),
                             })}
                         </Notice>
                     )}
@@ -288,8 +292,10 @@ export function WorkspaceShell({
                                     {children}
                                 </Suspense>
                             ) : tenantId === undefined ? (
-                                <Empty title={t("noWorkspace")}>
-                                    {t("contactAdmin")}
+                                <Empty page title={t("noWorkspace")}>
+                                    {t("contactAdmin", {
+                                        contact: contactEmail,
+                                    })}
                                 </Empty>
                             ) : (
                                 <Notice error>

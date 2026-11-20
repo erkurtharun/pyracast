@@ -4,6 +4,9 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Plant, PlantScope, Region } from "@/lib/api";
 import { useRefresh } from "@/lib/api/query";
+import { plantDay } from "@/lib/format/time";
+import { useFormat } from "@/lib/format/use-format";
+import { contactEmail } from "@/lib/public-metadata";
 import {
     plantView,
     routes,
@@ -11,11 +14,11 @@ import {
     type PlantSection,
 } from "@/lib/routes";
 import { Calibrations } from "@/features/calibration/calibrations";
-import { localDay } from "@/features/forecast/data-source";
 import { OwnPendingRequests } from "@/features/inbox/operational-inbox";
 import { ViewNav } from "@/ui/action";
 import { usePageTitle } from "@/ui/page-title";
-import { Notice, Tag } from "@/ui/ui";
+import { Notice } from "@/ui/ui";
+import { StatusTag, useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { Outages } from "./outages";
 import {
@@ -43,6 +46,8 @@ export function PlantWorkspace({
     address: PlantAddress;
 }) {
     const t = useTranslations("PlantWorkspace");
+    const format = useFormat();
+    const label = useLabel();
     const canManage = useCanManageWorkspace();
     const router = useRouter();
     const refresh = useRefresh();
@@ -85,15 +90,19 @@ export function PlantWorkspace({
                     <h1>{currentPlant.name}</h1>
                 </div>
                 <div className="button-group">
-                    <Tag>{region.status}</Tag>
+                    <StatusTag group="RegionStatus" value={region.status} />
                 </div>
             </div>
+            <p className="fine plant-time">
+                {t("plantTime", { zone: format.zone(timezone) })}
+            </p>
             {region.status !== "approved" && (
                 <Notice>
                     {region.status === "pending"
                         ? t("awaitingApproval")
                         : t("approvalStatus", {
-                              status: t(`approval_${region.status}`),
+                              status: label("RegionStatus", region.status),
+                              contact: contactEmail,
                           })}
                 </Notice>
             )}
@@ -117,7 +126,7 @@ export function PlantWorkspace({
                     timezone={timezone}
                     configurationId={configuration?.id}
                     view={forecastView}
-                    date={address.date ?? localDay(timezone, 1)}
+                    date={address.date ?? plantDay(timezone, 1)}
                     baseDate={navigation.base.date}
                     leaving={navigation.leaving("forecast")}
                     options={forecastOptions}

@@ -13,7 +13,7 @@ import {
 } from "./security-reauthentication";
 import { LinkedAccounts } from "./linked-accounts";
 import { TwoFactorSettings } from "./two-factor-settings";
-import { ActionForm, Field } from "@/ui/ui";
+import { ActionForm, Field } from "@/ui/form";
 
 export function AccountSecurity({
     mfaRequired,
@@ -100,6 +100,7 @@ export function AccountSecurity({
                                     name="current_password"
                                     type="password"
                                     autoComplete="current-password"
+                                    required
                                 />
                             )}
                             <Field
@@ -108,6 +109,7 @@ export function AccountSecurity({
                                 type="password"
                                 autoComplete="new-password"
                                 minLength={15}
+                                required
                             />
                         </ActionForm>
                     )}

@@ -1,13 +1,16 @@
 "use client";
-import { useTranslations, useLocale } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import type { components } from "@/lib/schema";
 import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { cadence, useApiQuery, useRefresh } from "@/lib/api/query";
-import { collectionOutcomeMessages } from "@/lib/collection-outcomes";
+import { DisplayError } from "@/lib/api/errors";
+import { useFormat } from "@/lib/format/use-format";
+import { ActionForm, CheckboxField } from "@/ui/form";
 import { Resource } from "@/ui/resource";
-import { ActionForm, Notice, Stat } from "@/ui/ui";
+import { Notice, Stat } from "@/ui/ui";
+import { useLabel } from "@/ui/vocabulary";
 
 type Schedule = components["schemas"]["CollectionScheduleOutput"];
 
@@ -53,33 +56,17 @@ function ScheduleEditor({
     onSaved: () => void;
 }) {
     const t = useTranslations("CollectionSchedule");
-    const locale = useLocale();
-    const endpointLabels: Record<string, string> = {
-        forecasts: t("forecast"),
-        estimated_actuals: t("historicalEstimates"),
-    };
-    const statusLabels: Record<string, string> = {
-        pending: t("waiting"),
-        running: t("inProgress"),
-        succeeded: t("succeeded"),
-        retry: t("retryScheduled"),
-        failed: t("failed"),
-        stale: t("supersededOrNoLongerEligible"),
-    };
+    const format = useFormat();
+    const label = useLabel();
+
     const [times, setTimes] = useState(data.times);
     const moment = (value: string | null, missing: string) =>
-        value
-            ? new Date(value).toLocaleString(locale, {
-                  timeZone: data.timezone,
-                  dateStyle: "medium",
-                  timeStyle: "short",
-              })
-            : missing;
+        value ? format.time(value, data.timezone) : missing;
     return (
         <>
             <section className="panel">
                 <h2>{t("dataCollection")}</h2>
-                <p>{t("chooseTimes", { timezone: data.timezone })}</p>
+                <p>{t("chooseTimes")}</p>
                 <ActionForm
                     submit={t("saveCollectionSchedule")}
                     onSubmit={async (form) => {
@@ -90,13 +77,17 @@ function ScheduleEditor({
                                     !/^([01]\d|2[0-3]):[0-5]\d$/.test(time),
                             )
                         )
-                            throw new Error(t("enterAValidTimeInEveryRow"));
+                            throw new DisplayError(
+                                t("enterAValidTimeInEveryRow"),
+                            );
                         if (new Set(times).size !== times.length)
-                            throw new Error(
+                            throw new DisplayError(
                                 t("eachCollectionTimeMustBeUnique"),
                             );
                         if (enabled && times.length === 0)
-                            throw new Error(t("addAtLeastOneCollectionTime"));
+                            throw new DisplayError(
+                                t("addAtLeastOneCollectionTime"),
+                            );
                         const compareTimes = (a: string, b: string) =>
                             Number(a.replace(":", "")) -
                             Number(b.replace(":", ""));
@@ -119,30 +110,24 @@ function ScheduleEditor({
                         onSaved();
                     }}
                 >
-                    <label className="check-field">
-                        <input
-                            type="checkbox"
-                            name="enabled"
-                            defaultChecked={data.enabled}
-                        />{" "}
-                        {t("enableDataCollection")}
-                    </label>
+                    <CheckboxField
+                        label={t("enableDataCollection")}
+                        name="enabled"
+                        defaultChecked={data.enabled}
+                        disabled={region.status !== "approved"}
+                    />
                     {region.status !== "approved" && (
                         <Notice>{t("approvalRequired")}</Notice>
                     )}
-                    <p>{t("collectionTimes", { timezone: data.timezone })}</p>
+                    <p>{t("collectionTimes")}</p>
                     {times.map((time, index) => (
                         <div className="button-group" key={index}>
                             <label className="field">
                                 <span className="sr-only">
-                                    {t("time", { index: index + 1 })}
+                                    {t("collectionTime", { index: index + 1 })}
                                 </span>
                                 <input
                                     type="time"
-                                    aria-label={t("collectionTime", {
-                                        index: index + 1,
-                                        timezone: data.timezone,
-                                    })}
                                     value={time}
                                     onChange={(event) =>
                                         setTimes(
@@ -180,10 +165,7 @@ function ScheduleEditor({
                         {t("addTime")}
                     </button>
                     <p className="fine">
-                        {t("dailyHistory", {
-                            time: data.history_local_time,
-                            timezone: data.timezone,
-                        })}
+                        {t("dailyHistory", { time: data.history_local_time })}
                     </p>
                     <details>
                         <summary>{t("collectionDetails")}</summary>
@@ -214,24 +196,25 @@ function ScheduleEditor({
                         {data.recent_jobs.map((job) => (
                             <li key={job.id}>
                                 {t("jobSummary", {
-                                    endpoint:
-                                        endpointLabels[job.endpoint] ??
-                                        t("collection"),
+                                    endpoint: label(
+                                        "CollectionEndpoint",
+                                        job.endpoint,
+                                    ),
                                     status:
                                         job.last_error === "history_incomplete"
                                             ? t("partiallyCollected")
-                                            : (statusLabels[job.status] ??
-                                              t("statusUnavailable")),
-                                    time: new Date(
-                                        job.scheduled_for ?? job.available_at,
-                                    ).toLocaleString(locale, {
-                                        timeZone: data.timezone,
-                                    }),
-                                    timezone: data.timezone,
+                                            : label(
+                                                  "CollectionJobStatus",
+                                                  job.status,
+                                              ),
+                                    time: format.time(
+                                        job.scheduled_for,
+                                        data.timezone,
+                                    ),
                                     attempts: job.attempts,
                                 })}
                                 {job.last_error && job.status !== "succeeded"
-                                    ? ` - ${t(collectionOutcomeMessages[job.last_error])}`
+                                    ? ` - ${label("CollectionJobError", job.last_error)}`
                                     : ""}
                             </li>
                         ))}

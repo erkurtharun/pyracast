@@ -1,18 +1,20 @@
 "use client";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { cadence, useApiQuery } from "@/lib/api/query";
 import { useProposalKey } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
-import { dataIntervalRange, intervalTimeFormatter } from "@/lib/intervals";
+import { dataIntervalRange } from "@/lib/intervals";
+import { plantDay } from "@/lib/format/time";
+import { useFormat } from "@/lib/format/use-format";
 import { qualityOf } from "@/lib/production";
 import { CsvDownload } from "@/ui/csv-download";
-import { CheckboxField, ControlField } from "@/ui/form";
+import { CheckboxField, ControlField, useErrorMessage } from "@/ui/form";
 import { Notice } from "@/ui/ui";
+import { useCodeLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
-import { localDay } from "@/features/forecast/data-source";
 import { ProductionDayNav } from "./history/day-nav";
 import { IntervalEditor } from "./history/interval-editor";
 import {
@@ -49,11 +51,13 @@ export function ProductionHistory({
     onSaved: () => Promise<unknown>;
 }) {
     const t = useTranslations("ProductionHistory");
-    const locale = useLocale();
+    const format = useFormat();
+    const errorMessage = useErrorMessage();
+    const reason = useCodeLabel("ProductionHistory.reasons");
     const canManage = useCanManageWorkspace();
     const proposals = useTranslations("ChangeRequests");
     const proposalKey = useProposalKey();
-    const yesterday = localDay(timezone, -1);
+    const yesterday = plantDay(timezone, -1);
     const shown = (day?: string) => (day && day <= yesterday ? day : yesterday);
     const date = shown(requestedDay);
     // A step taken while a day change loads continues from the day being navigated to.
@@ -98,12 +102,7 @@ export function ProductionHistory({
         showFullDay || !generationRows.length ? rows : generationRows;
     const day = history?.days.find((day) => day.date === date);
     const hasValues = rows.some((row) => row.effective != null);
-    const number = (value: number) =>
-        new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(
-            value,
-        );
-    const timeFormatter = intervalTimeFormatter(
-        locale,
+    const timeFormatter = format.intervals(
         history?.timezone ?? timezone,
         rows.flatMap((row) => [
             row.starts_at,
@@ -165,7 +164,7 @@ export function ProductionHistory({
                     : {
                           ...attempt,
                           status: "failed",
-                          error: (error as Error).message,
+                          error: errorMessage(error),
                       },
             );
         }
@@ -279,7 +278,12 @@ export function ProductionHistory({
             setEditor((current) =>
                 current.status === "orphaned" && current.key === attempt.key
                     ? { ...current, pendingWrite: false }
-                    : { ...attempt, status: "failed", ...saveFailure(error) },
+                    : {
+                          ...attempt,
+                          status: "failed",
+                          ...saveFailure(error),
+                          error: errorMessage(error),
+                      },
             );
         }
     }
@@ -287,9 +291,7 @@ export function ProductionHistory({
         const code = canManage
             ? row?.edit_unavailable_reason
             : row?.proposal_unavailable_reason;
-        return code && t.has(`reasons.${code}`)
-            ? t(`reasons.${code}`)
-            : t("unavailable");
+        return code ? reason(code, t("unavailable")) : t("unavailable");
     };
     const refreshButton = (
         <button
@@ -366,7 +368,7 @@ export function ProductionHistory({
                                 : day?.total_mwh == null
                                   ? t("total_unavailable")
                                   : t("total", {
-                                        total: number(day.total_mwh),
+                                        total: format.number(day.total_mwh),
                                     })}
                         </strong>
                         {refreshButton}
@@ -397,7 +399,6 @@ export function ProductionHistory({
                         <ProductionTable
                             rows={rows}
                             visibleRows={visibleRows}
-                            timezone={history.timezone}
                             timeFormatter={timeFormatter}
                             intervalLabel={intervalLabel}
                             canManage={canManage}

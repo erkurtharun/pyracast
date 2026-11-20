@@ -61,7 +61,7 @@ test("wide content supports keyboard scrolling and adapts to viewport width", as
     await expect(scroll).not.toHaveAttribute("role");
     await expect(scroll).not.toHaveAttribute("aria-label");
     await expect(details.getByRole("table")).toHaveAccessibleName(
-        `Forecast intervals, ${region.timezone}`,
+        "Forecast intervals",
     );
 
     await page.setViewportSize({ width: 390, height: 900 });

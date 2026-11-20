@@ -4,9 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import type { components } from "@/lib/schema";
-import { intervalTimeFormatter } from "@/lib/intervals";
+import { displayMessage } from "@/lib/api/errors";
+import { useFormat } from "@/lib/format/use-format";
 import { parseProduction, type Observation } from "@/lib/production";
-import { ActionForm, Notice } from "@/ui/ui";
+import {
+    ActionForm,
+    CheckboxField,
+    ControlField,
+    Select,
+    useErrorMessage,
+} from "@/ui/form";
+import { Notice } from "@/ui/ui";
 import { ScrollRegion } from "@/ui/scroll-region";
 
 type Preview = components["schemas"]["ProductionPreviewOutput"];
@@ -51,6 +59,8 @@ export function ProductionImport({
 }) {
     const t = useTranslations("ProductionImport");
     const locale = useLocale();
+    const format = useFormat();
+    const errorMessage = useErrorMessage();
     const sequence = useRef(0);
     const [selection, setSelection] = useState<Selection>({ status: "empty" });
     const [unit, setUnit] = useState<"MWh" | "kWh">("kWh");
@@ -92,26 +102,20 @@ export function ProductionImport({
             if (current === sequence.current)
                 setSelection({
                     status: "invalid",
-                    error:
-                        error instanceof Error
-                            ? error.message
-                            : t("could_not_read_the_production_csv"),
+                    error: displayMessage(
+                        error,
+                        t("could_not_read_the_production_csv"),
+                    ),
                 });
         }
     }
-    const number = (value: number) =>
-        new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(
-            value,
-        );
     const date = (value: string) =>
-        new Intl.DateTimeFormat(locale, {
-            timeZone: timezone,
+        format.time(value, timezone, {
             year: "numeric",
             month: "short",
             day: "2-digit",
-        }).format(new Date(value));
-    const timeFormatter = intervalTimeFormatter(
-        locale,
+        });
+    const timeFormatter = format.intervals(
         timezone,
         selection.status === "preview"
             ? [
@@ -182,7 +186,7 @@ export function ProductionImport({
                         if (current === sequence.current)
                             setPreviewRequest({
                                 status: "failed",
-                                error: (error as Error).message,
+                                error: errorMessage(error),
                             });
                     }
                 }}
@@ -201,8 +205,7 @@ export function ProductionImport({
                         </div>
                     )}
                     <div className="form-grid">
-                        <label className="field">
-                            {t("production_csv")}
+                        <ControlField label={t("production_csv")}>
                             <input
                                 type="file"
                                 accept=".csv,text/csv"
@@ -212,39 +215,36 @@ export function ProductionImport({
                                     void selectFile(event.target.files?.[0])
                                 }
                             />
-                        </label>
-                        <label className="field">
-                            {t("energy_unit")}
-                            <select
-                                value={unit}
-                                disabled={confirming}
-                                onChange={(event) => {
-                                    ++sequence.current;
-                                    setUnit(
-                                        event.target.value === "MWh"
-                                            ? "MWh"
-                                            : "kWh",
-                                    );
-                                    setResult(undefined);
-                                    setPreviewRequest({ status: "idle" });
-                                    if (selection.status === "preview")
-                                        setSelection({
-                                            status: "ready",
-                                            fileName: selection.fileName,
-                                            sha256: selection.sha256,
-                                            observations:
-                                                selection.observations,
-                                        });
-                                }}
-                            >
-                                <option value="kWh">
-                                    {t("kwh_kilowatthours")}
-                                </option>
-                                <option value="MWh">
-                                    {t("mwh_megawatthours")}
-                                </option>
-                            </select>
-                        </label>
+                        </ControlField>
+                        <Select
+                            label={t("energy_unit")}
+                            value={unit}
+                            disabled={confirming}
+                            onChange={(event) => {
+                                ++sequence.current;
+                                setUnit(
+                                    event.target.value === "MWh"
+                                        ? "MWh"
+                                        : "kWh",
+                                );
+                                setResult(undefined);
+                                setPreviewRequest({ status: "idle" });
+                                if (selection.status === "preview")
+                                    setSelection({
+                                        status: "ready",
+                                        fileName: selection.fileName,
+                                        sha256: selection.sha256,
+                                        observations: selection.observations,
+                                    });
+                            }}
+                        >
+                            <option value="kWh">
+                                {t("kwh_kilowatthours")}
+                            </option>
+                            <option value="MWh">
+                                {t("mwh_megawatthours")}
+                            </option>
+                        </Select>
                     </div>
                     {selection.status === "invalid" && (
                         <Notice error>{selection.error}</Notice>
@@ -274,16 +274,11 @@ export function ProductionImport({
                                 key={`${warning.code}/${warning.starts_at}`}
                             >
                                 {t(warning.code, {
-                                    start: new Date(
+                                    start: format.time(
                                         warning.starts_at,
-                                    ).toLocaleString(locale, {
-                                        timeZone: timezone,
-                                    }),
-                                    end: new Date(
-                                        warning.ends_at,
-                                    ).toLocaleString(locale, {
-                                        timeZone: timezone,
-                                    }),
+                                        timezone,
+                                    ),
+                                    end: format.time(warning.ends_at, timezone),
                                 })}
                             </Notice>
                         ))}
@@ -320,12 +315,14 @@ export function ProductionImport({
                                             <td>
                                                 {row.current_energy_mwh === null
                                                     ? t("missing")
-                                                    : number(
+                                                    : format.number(
                                                           row.current_energy_mwh,
                                                       )}
                                             </td>
                                             <td>
-                                                {number(row.new_energy_mwh)}
+                                                {format.number(
+                                                    row.new_energy_mwh,
+                                                )}
                                             </td>
                                         </tr>
                                     ))}
@@ -379,14 +376,11 @@ export function ProductionImport({
                             }}
                         >
                             {implausible && (
-                                <label className="check-field">
-                                    <input
-                                        type="checkbox"
-                                        name="confirm_implausible"
-                                        required
-                                    />
-                                    {t("confirm_implausible")}
-                                </label>
+                                <CheckboxField
+                                    label={t("confirm_implausible")}
+                                    name="confirm_implausible"
+                                    required
+                                />
                             )}
                         </ActionForm>
                     </>
