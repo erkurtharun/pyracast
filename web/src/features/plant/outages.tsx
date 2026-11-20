@@ -8,7 +8,8 @@ import { api } from "@/lib/api/client";
 import { useApiList } from "@/lib/api/query";
 import { useProposalKey } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
-import { ActionForm, Field, Notice, RefreshFailed, Select, Tag } from "@/ui/ui";
+import { Resource } from "@/ui/resource";
+import { ActionForm, Field, Notice, Select, Tag } from "@/ui/ui";
 import { CsvDownload } from "@/ui/csv-download";
 
 type Outage = components["schemas"]["IncidentOutput"];
@@ -232,218 +233,160 @@ export function Outages({
                     </div>
                 </section>
             )}
-            {resource.data === undefined ? (
-                resource.error ? (
-                    <Notice error>{resource.error}</Notice>
-                ) : (
-                    <p role="status">{t("loadingOutages")}</p>
-                )
-            ) : (
-                <>
-                    <RefreshFailed resource={resource} />
-                    <div className="toolbar">
-                        <CsvDownload
-                            label={t("downloadOutagesCSV")}
-                            filename="plant-outages"
-                            records={resource.data?.results ?? []}
-                            metadata={{
-                                timezone: deviceTimezone,
-                                plant_timezone: timezone,
-                            }}
-                        />
-                    </div>
-                    {!resource.data?.results.length && (
-                        <p>{t("noOutagesRecorded")}</p>
-                    )}
-                    {resource.data?.results.map((outage) => (
-                        <article key={outage.id} className="provenance">
-                            <div className="section-heading">
-                                <h3>{outage.title}</h3>
-                                <Tag tone={statusTag(outage.status).tone}>
-                                    <>{statusTag(outage.status).label}</>
-                                </Tag>
-                            </div>
-                            <p>
-                                {t("started", {
-                                    kind: kinds[outage.kind] ?? t("other"),
-                                    time: format(outage.starts_at),
-                                })}
-                                {outage.status === "cancelled"
-                                    ? t("cancelledEntry")
-                                    : outage.ends_at
-                                      ? t("resolved", {
-                                            time: format(outage.ends_at),
-                                        })
-                                      : t("ongoing")}
-                            </p>
-                            <dl className="stats">
-                                <div>
-                                    <dt>{t("availablePanels")}</dt>
-                                    <dd>
-                                        {outage.available_dc_mw == null
-                                            ? t("unknown")
-                                            : t("power", {
-                                                  value: formatNumber.number(
-                                                      outage.available_dc_mw,
-                                                      {
-                                                          maximumFractionDigits: 6,
-                                                      },
-                                                  ),
-                                              })}
-                                    </dd>
+            <Resource resource={resource} loading={t("loadingOutages")}>
+                {(list) => (
+                    <>
+                        <div className="toolbar">
+                            <CsvDownload
+                                label={t("downloadOutagesCSV")}
+                                filename="plant-outages"
+                                records={list.results}
+                                metadata={{
+                                    timezone: deviceTimezone,
+                                    plant_timezone: timezone,
+                                }}
+                            />
+                        </div>
+                        {!list.results.length && (
+                            <p>{t("noOutagesRecorded")}</p>
+                        )}
+                        {list.results.map((outage) => (
+                            <article key={outage.id} className="provenance">
+                                <div className="section-heading">
+                                    <h3>{outage.title}</h3>
+                                    <Tag tone={statusTag(outage.status).tone}>
+                                        <>{statusTag(outage.status).label}</>
+                                    </Tag>
                                 </div>
-                                <div>
-                                    <dt>{t("availableInverter")}</dt>
-                                    <dd>
-                                        {outage.available_inverter_mw == null
-                                            ? t("unknown")
-                                            : t("power", {
-                                                  value: formatNumber.number(
-                                                      outage.available_inverter_mw,
-                                                      {
-                                                          maximumFractionDigits: 6,
-                                                      },
-                                                  ),
-                                              })}
-                                    </dd>
-                                </div>
-                                <div>
-                                    <dt>{t("availableExport")}</dt>
-                                    <dd>
-                                        {outage.available_export_mw == null
-                                            ? t("unknown")
-                                            : t("power", {
-                                                  value: formatNumber.number(
-                                                      outage.available_export_mw,
-                                                      {
-                                                          maximumFractionDigits: 6,
-                                                      },
-                                                  ),
-                                              })}
-                                    </dd>
-                                </div>
-                            </dl>
-                            {outage.notes && <p>{outage.notes}</p>}
-                            {outage.status === "active" &&
-                                configuration &&
-                                outage.declared_configuration_id !==
-                                    configuration.id && (
-                                    <Notice>{t("configurationChanged")}</Notice>
-                                )}
-                            {outage.status !== "cancelled" && (
-                                <div className="button-group">
-                                    <button
-                                        className="button secondary"
-                                        onClick={() => {
-                                            proposalKey.reset();
-                                            setEditor(outage);
-                                        }}
-                                    >
-                                        {canManage
-                                            ? t("editReport")
-                                            : proposals("proposeUpdate")}
-                                    </button>
-                                    {outage.status === "active" && (
+                                <p>
+                                    {t("started", {
+                                        kind: kinds[outage.kind] ?? t("other"),
+                                        time: format(outage.starts_at),
+                                    })}
+                                    {outage.status === "cancelled"
+                                        ? t("cancelledEntry")
+                                        : outage.ends_at
+                                          ? t("resolved", {
+                                                time: format(outage.ends_at),
+                                            })
+                                          : t("ongoing")}
+                                </p>
+                                <dl className="stats">
+                                    <div>
+                                        <dt>{t("availablePanels")}</dt>
+                                        <dd>
+                                            {outage.available_dc_mw == null
+                                                ? t("unknown")
+                                                : t("power", {
+                                                      value: formatNumber.number(
+                                                          outage.available_dc_mw,
+                                                          {
+                                                              maximumFractionDigits: 6,
+                                                          },
+                                                      ),
+                                                  })}
+                                        </dd>
+                                    </div>
+                                    <div>
+                                        <dt>{t("availableInverter")}</dt>
+                                        <dd>
+                                            {outage.available_inverter_mw ==
+                                            null
+                                                ? t("unknown")
+                                                : t("power", {
+                                                      value: formatNumber.number(
+                                                          outage.available_inverter_mw,
+                                                          {
+                                                              maximumFractionDigits: 6,
+                                                          },
+                                                      ),
+                                                  })}
+                                        </dd>
+                                    </div>
+                                    <div>
+                                        <dt>{t("availableExport")}</dt>
+                                        <dd>
+                                            {outage.available_export_mw == null
+                                                ? t("unknown")
+                                                : t("power", {
+                                                      value: formatNumber.number(
+                                                          outage.available_export_mw,
+                                                          {
+                                                              maximumFractionDigits: 6,
+                                                          },
+                                                      ),
+                                                  })}
+                                        </dd>
+                                    </div>
+                                </dl>
+                                {outage.notes && <p>{outage.notes}</p>}
+                                {outage.status === "active" &&
+                                    configuration &&
+                                    outage.declared_configuration_id !==
+                                        configuration.id && (
+                                        <Notice>
+                                            {t("configurationChanged")}
+                                        </Notice>
+                                    )}
+                                {outage.status !== "cancelled" && (
+                                    <div className="button-group">
                                         <button
                                             className="button secondary"
                                             onClick={() => {
                                                 proposalKey.reset();
-                                                setResolving(outage.id);
+                                                setEditor(outage);
                                             }}
                                         >
                                             {canManage
-                                                ? t("resolveOutage")
-                                                : proposals(
-                                                      "proposeResolution",
-                                                  )}
+                                                ? t("editReport")
+                                                : proposals("proposeUpdate")}
                                         </button>
-                                    )}
-                                </div>
-                            )}
-                            {resolving === outage.id && (
-                                <ActionForm
-                                    permitted
-                                    submit={
-                                        canManage
-                                            ? t("saveResolution")
-                                            : proposals("send")
-                                    }
-                                    onSubmit={async (data) => {
-                                        const ends = timestamp(
-                                            data,
-                                            "ends_at",
-                                            t,
-                                        );
-                                        if (
-                                            !ends ||
-                                            new Date(ends) <=
-                                                new Date(outage.starts_at)
-                                        )
-                                            throw new Error(
-                                                t("resolutionAfterStart"),
-                                            );
-                                        if (!canManage)
-                                            await propose({
-                                                action: "resolve",
-                                                incident_id: outage.id,
-                                                expected_revision:
-                                                    outage.revision,
-                                                ends_at: ends,
-                                                reason: String(
-                                                    data.get("reason") ?? "",
-                                                ),
-                                            });
-                                        else
-                                            await api.post(
-                                                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/resolve/",
-                                                {
-                                                    path: {
-                                                        ...scope,
-                                                        incident_id: outage.id,
-                                                    },
-                                                    body: {
-                                                        expected_revision:
-                                                            outage.revision,
-                                                        ends_at: ends,
-                                                    },
-                                                },
-                                            );
-                                        setResolving(null);
-                                        void changed();
-                                    }}
-                                >
-                                    {!canManage && <ProposalReason />}
-                                    <Field
-                                        label={t("resolvedAtDeviceTime")}
-                                        name="ends_at"
-                                        type="datetime-local"
-                                        defaultValue={localInput(
-                                            new Date().toISOString(),
+                                        {outage.status === "active" && (
+                                            <button
+                                                className="button secondary"
+                                                onClick={() => {
+                                                    proposalKey.reset();
+                                                    setResolving(outage.id);
+                                                }}
+                                            >
+                                                {canManage
+                                                    ? t("resolveOutage")
+                                                    : proposals(
+                                                          "proposeResolution",
+                                                      )}
+                                            </button>
                                         )}
-                                    />
-                                </ActionForm>
-                            )}
-                            {outage.status !== "cancelled" && (
-                                <details>
-                                    <summary>
-                                        {canManage
-                                            ? t("cancelAnIncorrectEntry")
-                                            : proposals("proposeCancellation")}
-                                    </summary>
+                                    </div>
+                                )}
+                                {resolving === outage.id && (
                                     <ActionForm
                                         permitted
                                         submit={
                                             canManage
-                                                ? t("cancelOutage")
+                                                ? t("saveResolution")
                                                 : proposals("send")
                                         }
                                         onSubmit={async (data) => {
+                                            const ends = timestamp(
+                                                data,
+                                                "ends_at",
+                                                t,
+                                            );
+                                            if (
+                                                !ends ||
+                                                new Date(ends) <=
+                                                    new Date(outage.starts_at)
+                                            )
+                                                throw new Error(
+                                                    t("resolutionAfterStart"),
+                                                );
                                             if (!canManage)
                                                 await propose({
-                                                    action: "cancel",
+                                                    action: "resolve",
                                                     incident_id: outage.id,
                                                     expected_revision:
                                                         outage.revision,
+                                                    ends_at: ends,
                                                     reason: String(
                                                         data.get("reason") ??
                                                             "",
@@ -451,7 +394,7 @@ export function Outages({
                                                 });
                                             else
                                                 await api.post(
-                                                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/cancel/",
+                                                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/resolve/",
                                                     {
                                                         path: {
                                                             ...scope,
@@ -461,29 +404,90 @@ export function Outages({
                                                         body: {
                                                             expected_revision:
                                                                 outage.revision,
+                                                            ends_at: ends,
                                                         },
                                                     },
                                                 );
+                                            setResolving(null);
                                             void changed();
                                         }}
                                     >
                                         {!canManage && <ProposalReason />}
-                                        <label className="field">
-                                            <span>
-                                                <input
-                                                    type="checkbox"
-                                                    required
-                                                />{" "}
-                                                {t("confirmationIncorrect")}
-                                            </span>
-                                        </label>
+                                        <Field
+                                            label={t("resolvedAtDeviceTime")}
+                                            name="ends_at"
+                                            type="datetime-local"
+                                            defaultValue={localInput(
+                                                new Date().toISOString(),
+                                            )}
+                                        />
                                     </ActionForm>
-                                </details>
-                            )}
-                        </article>
-                    ))}
-                </>
-            )}
+                                )}
+                                {outage.status !== "cancelled" && (
+                                    <details>
+                                        <summary>
+                                            {canManage
+                                                ? t("cancelAnIncorrectEntry")
+                                                : proposals(
+                                                      "proposeCancellation",
+                                                  )}
+                                        </summary>
+                                        <ActionForm
+                                            permitted
+                                            submit={
+                                                canManage
+                                                    ? t("cancelOutage")
+                                                    : proposals("send")
+                                            }
+                                            onSubmit={async (data) => {
+                                                if (!canManage)
+                                                    await propose({
+                                                        action: "cancel",
+                                                        incident_id: outage.id,
+                                                        expected_revision:
+                                                            outage.revision,
+                                                        reason: String(
+                                                            data.get(
+                                                                "reason",
+                                                            ) ?? "",
+                                                        ),
+                                                    });
+                                                else
+                                                    await api.post(
+                                                        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/cancel/",
+                                                        {
+                                                            path: {
+                                                                ...scope,
+                                                                incident_id:
+                                                                    outage.id,
+                                                            },
+                                                            body: {
+                                                                expected_revision:
+                                                                    outage.revision,
+                                                            },
+                                                        },
+                                                    );
+                                                void changed();
+                                            }}
+                                        >
+                                            {!canManage && <ProposalReason />}
+                                            <label className="field">
+                                                <span>
+                                                    <input
+                                                        type="checkbox"
+                                                        required
+                                                    />{" "}
+                                                    {t("confirmationIncorrect")}
+                                                </span>
+                                            </label>
+                                        </ActionForm>
+                                    </details>
+                                )}
+                            </article>
+                        ))}
+                    </>
+                )}
+            </Resource>
         </section>
     );
 }
