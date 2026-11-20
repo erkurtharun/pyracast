@@ -10,11 +10,12 @@ from typing import Any
 import pytest
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import connection, transaction
+from django.db import OperationalError, connection, transaction
 from django.db.models import Model
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
+from psycopg.errors import DeadlockDetected, LockNotAvailable, QueryCanceled
 
 from pyracast.accounts import session_lock
 from pyracast.accounts.invitations import invite_workspace_member
@@ -31,6 +32,7 @@ from pyracast.forecasts.models import CollectionJob, HistoricalReferenceImport, 
 from pyracast.metering.models import EpiasConnection
 from pyracast.notifications.models import NotificationSettings
 from pyracast.plants.models import Plant
+from pyracast.platform_admin.forms import WorkspaceSettingsForm
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import Region
 from tests.support.admin_setup import admin_system, setup_input, submitted_plant
@@ -45,13 +47,13 @@ RETRY = "Another change to this record is in progress, so nothing was saved. Try
 
 
 @contextmanager
-def row_locked_elsewhere(model: type[Model], pk: int) -> Iterator[None]:
+def row_locked_elsewhere(model: type[Model], pk: int, *, no_key: bool = False) -> Iterator[None]:
     held, release = Event(), Event()
 
     def hold() -> None:
         try:
             with transaction.atomic():
-                model._default_manager.select_for_update().get(pk=pk)
+                model._default_manager.select_for_update(no_key=no_key).get(pk=pk)
                 held.set()
                 assert release.wait(timeout=30)
         finally:
@@ -78,6 +80,7 @@ class Form:
     data: dict[str, Any]
     locked: Model
     unchanged: Callable[[], bool]
+    no_key: bool = False
 
 
 def plant_url(region: Region) -> str:
@@ -371,6 +374,9 @@ def language(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) ->
         {"language": "tr", "next": page},
         operator,
         lambda: not UserLanguagePreference.objects.filter(user=operator).exists(),
+        # The account operations hold the user row this way; a full row lock would also stop the
+        # session activity record that every request writes before any console view runs.
+        no_key=True,
     )
 
 
@@ -404,7 +410,7 @@ def test_each_console_form_posted_under_a_held_row_lock_answers_a_retry_message(
     client.raise_request_exception = False
     form = FORMS[name](monkeypatch, client, operator)
 
-    with row_locked_elsewhere(type(form.locked), form.locked.pk):
+    with row_locked_elsewhere(type(form.locked), form.locked.pk, no_key=form.no_key):
         response = client.post(form.action, form.data, HTTP_REFERER=f"http://testserver{form.page}")
 
     assert (response.status_code, response["Location"]) == (302, form.page)
@@ -506,3 +512,86 @@ def test_the_console_names_plant_and_job_states_in_turkish() -> None:
     assert "al\u0131c\u0131s" not in settings_page
     assert "Santral baş\u0131na 5 al\u0131c\u0131" in settings_page
     assert "Approved" not in review
+
+
+def database_failure(cause: Exception) -> OperationalError:
+    error = OperationalError(str(cause))
+    error.__cause__ = cause
+    return error
+
+
+SETTINGS_CHANGE = {"max_recipients": 8, "expected_max_recipients": 5}
+
+
+@pytest.mark.parametrize(
+    ("cause", "code", "message"),
+    [
+        (DeadlockDetected("deadlock detected"), "database_conflict", RETRY),
+        (
+            QueryCanceled("canceling statement due to statement timeout"),
+            "request_timeout",
+            "The change took too long, so nothing was saved. Try again in a moment.",
+        ),
+    ],
+    ids=["deadlock", "timeout"],
+)
+def test_a_console_write_that_collides_or_times_out_returns_with_a_retry_message(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    cause: Exception,
+    code: str,
+    message: str,
+) -> None:
+    NotificationSettings.objects.update_or_create(pk=1, defaults={"max_recipients": 5})
+    client, _ = verified_admin()
+    page = reverse("admin:workspace_settings")
+
+    def fail(form: WorkspaceSettingsForm, actor: User) -> None:
+        raise database_failure(cause)
+
+    monkeypatch.setattr(WorkspaceSettingsForm, "apply", fail)
+    with caplog.at_level("WARNING", logger="pyracast.platform_admin"):
+        response = client.post(page, SETTINGS_CHANGE, HTTP_REFERER=f"http://testserver{page}")
+
+    assert (response.status_code, response["Location"]) == (302, page)
+    assert message in client.get(page).content.decode()
+    assert [
+        record.getMessage() for record in caplog.records if record.name == "pyracast.platform_admin"
+    ] == [f"console_write_not_saved code={code} view=admin:workspace_settings"]
+    assert NotificationSettings.objects.get().max_recipients == 5
+
+
+def test_other_database_failures_and_failing_reads_keep_the_server_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    NotificationSettings.objects.update_or_create(pk=1, defaults={"max_recipients": 5})
+    client, _ = verified_admin()
+    client.raise_request_exception = False
+    page = reverse("admin:workspace_settings")
+
+    def fail(form: WorkspaceSettingsForm, actor: User) -> None:
+        raise database_failure(ValueError("connection lost"))
+
+    def busy_read(data: object) -> dict[str, Any]:
+        raise database_failure(LockNotAvailable("canceling statement due to lock timeout"))
+
+    monkeypatch.setattr(WorkspaceSettingsForm, "apply", fail)
+    write = client.post(page, SETTINGS_CHANGE, HTTP_REFERER=f"http://testserver{page}")
+    monkeypatch.setattr("pyracast.platform_admin.pages.settings_context", busy_read)
+    read = client.get(page)
+
+    assert (write.status_code, read.status_code) == (500, 500)
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_an_unknown_plant_action_changes_nothing(valid: bool) -> None:
+    system = admin_system()
+    client, _ = verified_admin()
+    fields = binding_action(system, "unknown") if valid else {"action": "unknown"}
+
+    response = client.post(plant_url(system.region), fields)
+
+    assert response.status_code == 400
+    refused = "The setup could not be applied." in response.content.decode()
+    assert refused is valid
+    assert not RequestAttempt.objects.exists()

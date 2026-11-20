@@ -20,6 +20,23 @@ document.addEventListener(
   true,
 );
 
+// A form is sent once. The pressed button stays enabled: disabling it would drop its
+// name and value (for example action=validate) from the submitted data.
+document.addEventListener("submit", (event) => {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || event.defaultPrevented) return;
+  if ("submitting" in form.dataset) {
+    event.preventDefault();
+    return;
+  }
+  form.dataset.submitting = "";
+});
+window.addEventListener("pageshow", () => {
+  document.querySelectorAll("form[data-submitting]").forEach((form) => {
+    delete form.dataset.submitting;
+  });
+});
+
 const setupForm = document.querySelector("[data-setup-form]");
 if (setupForm instanceof HTMLFormElement) {
   const control = setupForm.elements.namedItem(setupForm.dataset.accountModeName);

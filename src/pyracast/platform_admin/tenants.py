@@ -25,9 +25,9 @@ from pyracast.accounts.models import (
     WorkspaceRole,
 )
 from pyracast.accounts.operations import reassign_workspace_admin
-from pyracast.admin_workspace import summarize_plant, workspace_regions
 from pyracast.errors import ConflictError, ErrorCode
 from pyracast.plants.models import Plant
+from pyracast.platform_admin.read_models import summarize_plant, workspace_regions
 from pyracast.regions.models import RegionStatus, active_region
 
 if TYPE_CHECKING:

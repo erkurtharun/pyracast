@@ -5,9 +5,9 @@ import pytest
 from django.utils import translation
 
 from pyracast import providers
-from pyracast.admin_forms import validation_failure_message
 from pyracast.connections import secrets
 from pyracast.connections.contracts import ProviderError
+from pyracast.platform_admin.forms import validation_failure_message
 from tests.support.admin_setup import VALIDATION_FAILURES
 
 UNKNOWN_FAILURE = (

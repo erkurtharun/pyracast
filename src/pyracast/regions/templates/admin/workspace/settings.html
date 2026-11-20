@@ -11,7 +11,7 @@
   <section class="panel panel--narrow" aria-labelledby="reminders-title">
     <div class="panel-head"><h2 id="reminders-title">{% translate "Email reminders" %}</h2></div>
     <dl class="facts facts--compact">
-      <div><dt>{% translate "Current limit" %}</dt><dd>{{ recipient_limit }} {% translate "recipient" %}{{ recipient_limit|pluralize }} {% translate "per plant" %}</dd></div>
+      <div><dt>{% translate "Current limit" %}</dt><dd>{% blocktranslate count counter=recipient_limit %}{{ counter }} recipient per plant{% plural %}{{ counter }} recipients per plant{% endblocktranslate %}</dd></div>
     </dl>
     <form method="post" class="form">
       {% csrf_token %}

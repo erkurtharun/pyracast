@@ -22,9 +22,9 @@ from django.urls import URLPattern, URLResolver, reverse
 from pyracast.accounts import middleware as account_middleware
 from pyracast.accounts import processes
 from pyracast.accounts.models import Language, UserLanguagePreference
-from pyracast.admin import site
 from pyracast.languages import LANGUAGE_COOKIE
 from pyracast.notifications.models import NotificationSettings
+from pyracast.platform_admin.site import site
 from tests.support.account_sessions import (
     arrive,
     carrying_key,

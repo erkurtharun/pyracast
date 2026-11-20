@@ -9,10 +9,10 @@ from django.test import Client
 from django.urls import NoReverseMatch, URLPattern, URLResolver, get_resolver, reverse
 
 from pyracast.accounts.headless import ManageEmailView
-from pyracast.admin import site
-from pyracast.admin_forms import ProviderSetupForm
 from pyracast.connections.models import ProviderAccount
 from pyracast.notifications.models import NotificationSettings
+from pyracast.platform_admin.forms import ProviderSetupForm
+from pyracast.platform_admin.site import site
 from tests.support.api import verified_admin
 from tests.support.domain import make_system
 
@@ -107,10 +107,10 @@ CONSOLE_ROUTES = sorted(
         "admin/operations/",
         "admin/password_change/",
         "admin/plants/",
-        "admin/plants/<int:object_id>/",
-        "admin/plants/<int:object_id>/decision/",
-        "admin/plants/<int:object_id>/details/",
-        "admin/plants/<int:object_id>/historical-import/",
+        "admin/plants/<int:region_id>/",
+        "admin/plants/<int:region_id>/decision/",
+        "admin/plants/<int:region_id>/details/",
+        "admin/plants/<int:region_id>/historical-import/",
         "admin/r/<path:content_type_id>/<path:object_id>/",
         "admin/settings/",
         "admin/workspaces/",

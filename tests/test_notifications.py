@@ -15,7 +15,6 @@ from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.accounts.operations import reassign_workspace_admin
-from pyracast.admin_health_queries import notification_deliveries_for_issue
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -39,6 +38,7 @@ from pyracast.notifications.operations import configure_reminders, get_reminder_
 from pyracast.notifications.recipients import effective_recipients
 from pyracast.notifications.schedule import local_slot
 from pyracast.notifications.scheduler import enqueue_due
+from pyracast.platform_admin.health_queries import notification_deliveries_for_issue
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System, make_system
 from tests.support.invariants import stored_again

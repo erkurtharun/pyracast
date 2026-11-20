@@ -16,7 +16,6 @@ from django.views.decorators.http import require_http_methods
 
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.accounts.models import Tenant
-from pyracast.admin_forms import form_data, form_page, submitted
 from pyracast.errors import ConflictError, ErrorCode
 from pyracast.plants.models import (
     CONFIGURATION_PARAMETERS,
@@ -28,13 +27,14 @@ from pyracast.plants.models import (
 from pyracast.plants.operations import revise_plant
 from pyracast.plants.site_api import SiteInput
 from pyracast.plants.sites import submit_site
+from pyracast.platform_admin.forms import form_data, form_page, submitted
 from pyracast.regions.models import LocationChangeStatus, Region, RegionLocationChangeRequest
 from pyracast.regions.operations import canonical_coordinate, correct_location
 
 if TYPE_CHECKING:
     from django_stubs_ext import StrOrPromise
 
-    from pyracast.admin import PlatformAdminSite
+    from pyracast.platform_admin.site import PlatformAdminSite
 
 SITE_FIELDS = frozenset(SiteInput().fields)
 PARAMETERS = ("name", *CONFIGURATION_PARAMETERS)
@@ -223,7 +223,7 @@ def new_plant(request: HttpRequest, tenant_id: int, *, site: PlatformAdminSite) 
             )
             % {"name": region.name},
         )
-        return redirect("admin:workspace_plant", object_id=region.pk)
+        return redirect("admin:workspace_plant", region_id=region.pk)
 
     return submitted(request, form, create) or form_page(
         site,
@@ -236,9 +236,9 @@ def new_plant(request: HttpRequest, tenant_id: int, *, site: PlatformAdminSite) 
 
 @require_http_methods(["GET", "POST"])
 def plant_details_page(
-    request: HttpRequest, object_id: int, *, site: PlatformAdminSite
+    request: HttpRequest, region_id: int, *, site: PlatformAdminSite
 ) -> HttpResponse:
-    region = get_object_or_404(Region.objects.active().select_related("tenant"), pk=object_id)
+    region = get_object_or_404(Region.objects.active().select_related("tenant"), pk=region_id)
     plant = get_object_or_404(Plant.objects.select_related("current_configuration"), region=region)
     details = plant_details(region, plant)
     form = PlantDetailsForm(
@@ -265,7 +265,7 @@ def plant_details_page(
             messages.success(request, _("Plant details saved."))
         else:
             messages.info(request, _("Nothing changed."))
-        return redirect("admin:workspace_plant", object_id=region.pk)
+        return redirect("admin:workspace_plant", region_id=region.pk)
 
     return submitted(request, form, save) or form_page(
         site,

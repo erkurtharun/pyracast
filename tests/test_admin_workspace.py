@@ -11,16 +11,6 @@ from django.urls import reverse
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
-from pyracast.admin_workspace import (
-    WorkspaceSettingsForm,
-    operations_context,
-    overview_context,
-    plant_list_context,
-    recent_work_context,
-    review_context,
-    summarize_plant,
-    workspace_regions,
-)
 from pyracast.forecasts.models import DispatcherStatus, RequestAttempt
 from pyracast.notifications.models import (
     NotificationDelivery,
@@ -29,6 +19,16 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.scheduler import PREPARATION_GRACE
 from pyracast.plants.models import Plant
+from pyracast.platform_admin.forms import WorkspaceSettingsForm
+from pyracast.platform_admin.read_models import (
+    operations_context,
+    overview_context,
+    plant_list_context,
+    recent_work_context,
+    review_context,
+    summarize_plant,
+    workspace_regions,
+)
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.regions.operations import request_location_change
 from tests.support.admin_setup import admin_system, setup_input, submitted_plant
@@ -207,7 +207,7 @@ def test_workspace_gets_render_without_provider_or_mail_io(monkeypatch: pytest.M
     def unexpected(*args: object, **kwargs: object) -> None:
         pytest.fail("GET attempted provider or email I/O")
 
-    monkeypatch.setattr("pyracast.admin.adapter_for", unexpected)
+    monkeypatch.setattr("pyracast.platform_admin.plant_review.adapter_for", unexpected)
     monkeypatch.setattr("django.core.mail.send_mail", unexpected)
     for url in (
         "/admin/",

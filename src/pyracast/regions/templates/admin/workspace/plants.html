@@ -54,7 +54,7 @@
                 </th>
                 <td data-label="{% translate "Review" context "review status" %}">
                   <span class="cell">
-                    <span class="badge badge--{{ plant.status|slugify }}">{% if plant.status == "pending" %}{% translate "Awaiting approval" %}{% else %}{{ plant.status|capfirst }}{% endif %}</span>
+                    <span class="badge badge--{{ plant.status|slugify }}">{{ plant.status_label }}</span>
                     <span class="row-meta">{% translate "Revision" %} {{ plant.revision }}</span>
                   </span>
                 </td>

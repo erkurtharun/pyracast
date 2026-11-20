@@ -84,7 +84,7 @@ class SessionRequestSerialization:
             with serialize_session(session_key):
                 return self.get_response(request)
         except SessionBusyError:
-            if (
+            if request.path.startswith("/admin/") or (
                 request.method == "GET"
                 and request.headers.get("Sec-Fetch-Mode") == "navigate"
                 and not request.path.startswith("/api/")
@@ -100,8 +100,9 @@ def _busy_page(request: HttpRequest) -> HttpResponse:
             translation.get_language(),
             MESSAGES[ErrorCode.SESSION_BUSY],
         )
-    response = HttpResponse(page, status=503)
-    if "session_retry" not in request.GET:
+    response = HttpResponse(page, status=503, headers={"Retry-After": "1"})
+    # A write is never replayed: only a page read reloads by itself.
+    if request.method == "GET" and "session_retry" not in request.GET:
         path = "/" + request.get_full_path().lstrip("/")
         # One automatic reload: the marker stops a refresh loop while the session stays busy.
         response["Refresh"] = f"1; url={path}{'&' if '?' in path else '?'}session_retry=1"

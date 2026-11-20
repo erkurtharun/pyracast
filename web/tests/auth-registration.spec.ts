@@ -553,6 +553,89 @@ test("sign in only follows the permitted admin return path", async ({
     await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
 });
 
+test("a console deep link survives sign in and the second factor", async ({
+    page,
+}) => {
+    await mockApi(page, { anonymous: true, admin: true });
+    let signedIn = false;
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: {
+                user: signedIn
+                    ? { ...user, can_admin: true, mfa_required: true }
+                    : null,
+                csrf_token: signedIn ? "signed-token" : "anonymous-token",
+            },
+        }),
+    );
+    await page.route("**/api/auth/browser/v1/auth/login", (route) =>
+        route.fulfill({
+            status: 401,
+            json: {
+                status: 401,
+                data: { flows: [{ id: "mfa_authenticate", is_pending: true }] },
+                meta: { is_authenticated: false },
+            },
+        }),
+    );
+    await page.route(
+        "**/api/auth/browser/v1/auth/2fa/authenticate",
+        (route) => {
+            signedIn = true;
+            return route.fulfill({
+                json: { status: 200, meta: { is_authenticated: true } },
+            });
+        },
+    );
+    await page.route(/\/admin\/plants\/7\/\?tab=review$/, (route) =>
+        route.fulfill({
+            contentType: "text/html",
+            body: "<h1>Plant review</h1>",
+        }),
+    );
+    await page.goto("/app/?next=%2Fadmin%2Fplants%2F7%2F%3Ftab%3Dreview");
+    await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
+    await page
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await page
+        .getByRole("button", { name: "Sign in", exact: true })
+        .last()
+        .click();
+    await page.getByLabel("Authenticator or recovery code").fill("123456");
+    await page.getByRole("button", { name: "Verify code" }).click();
+    await expect(
+        page.getByRole("heading", { name: "Plant review" }),
+    ).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/admin/plants/7/");
+});
+
+for (const next of [
+    "//evil.example/admin/",
+    "/\\evil.example/admin/",
+    "/admin/../app/w/",
+    "/admin/%2e%2e/app/w/",
+    "https://evil.example/admin/",
+    "http://[::1/admin/",
+]) {
+    test(`an administrator lands on the console overview for ${next}`, async ({
+        page,
+    }) => {
+        await mockApi(page, { admin: true });
+        await page.route("**/admin/", (route) =>
+            route.fulfill({
+                contentType: "text/html",
+                body: "<h1>Administration</h1>",
+            }),
+        );
+        await page.goto(`/app/?next=${encodeURIComponent(next)}`);
+        await expect(
+            page.getByRole("heading", { name: "Administration" }),
+        ).toBeVisible();
+        expect(new URL(page.url()).pathname).toBe("/admin/");
+    });
+}
+
 test("an administrator opens administration by default", async ({ page }) => {
     await mockApi(page, { admin: true });
     await page.route("**/admin/", (route) =>

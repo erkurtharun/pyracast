@@ -19,7 +19,6 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError as APIValidationError
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
-from pyracast.admin import ReadOnlyAdmin, site
 from pyracast.api.errors import exception_handler
 from pyracast.api.serializers import RegionInput
 from pyracast.api.views import TenantsView
@@ -29,6 +28,8 @@ from pyracast.connections.models import SiteBinding
 from pyracast.connections.operations import QuotaExceededError, create_account, validate_binding
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import ForecastResult
+from pyracast.platform_admin.records import ReadOnlyAdmin
+from pyracast.platform_admin.site import site
 from pyracast.providers import FixtureProvider, adapter_for
 from pyracast.regions.models import Region
 from pyracast.regions.operations import (

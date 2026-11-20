@@ -2,7 +2,9 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from django import forms
+from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth.models import User
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, QueryDict
@@ -11,7 +13,9 @@ from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from django.views.decorators.debug import sensitive_variables
 
+from pyracast.accounts.authorization import require_platform_admin
 from pyracast.accounts.inputs import SecondFactorReauthenticateInput
+from pyracast.accounts.models import Tenant
 from pyracast.api.serializers import BindingInput
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import (
@@ -23,11 +27,22 @@ from pyracast.connections.models import (
 )
 from pyracast.connections.operations import create_account, rotate_secret
 from pyracast.errors import DomainError, ErrorCode
-from pyracast.regions.models import Region
-from pyracast.regions.operations import configure_binding
+from pyracast.notifications.models import NotificationSettings
+from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT
+from pyracast.regions.models import (
+    LocationChangeStatus,
+    Region,
+    RegionLocationChangeRequest,
+    RegionStatus,
+)
+from pyracast.regions.operations import (
+    configure_binding,
+    review_location_change,
+    transition_region,
+)
 
 if TYPE_CHECKING:
-    from pyracast.admin import PlatformAdminSite
+    from pyracast.platform_admin.site import PlatformAdminSite
 
 STALE_CODES = frozenset(
     {ErrorCode.CONFLICT, ErrorCode.WORKSPACE_ADMIN_CHANGED, ErrorCode.REGION_REVISION_CHANGED}
@@ -335,6 +350,7 @@ class BindingActionForm(forms.Form):
     binding_id = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     credential_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     expected_cooldown_until = forms.DateTimeField(required=False, widget=forms.HiddenInput)
+    expected_validated_at = forms.DateTimeField(required=False, widget=forms.HiddenInput)
     provider_recovered = forms.BooleanField(
         required=False,
         label=gettext_lazy("The provider has confirmed that this account can make requests again"),
@@ -357,3 +373,84 @@ class ConfirmationForm(SecondFactorReauthenticateInput):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.fields["code"].label = gettext_lazy("Authenticator or recovery code")
+
+
+class WorkspaceSettingsForm(forms.Form):
+    max_recipients = forms.IntegerField(
+        min_value=1, max_value=MAX_RECIPIENT_LIMIT, label=gettext_lazy("Recipients per plant")
+    )
+    expected_max_recipients = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+
+    def apply(self, actor: User) -> None:
+        require_platform_admin(actor)
+        with transaction.atomic():
+            settings, _created = NotificationSettings.objects.select_for_update().get_or_create(
+                pk=1
+            )
+            if settings.max_recipients != self.cleaned_data["expected_max_recipients"]:
+                raise ValidationError(_("Settings changed. Reload before saving."))
+            value = self.cleaned_data["max_recipients"]
+            if value == settings.max_recipients:
+                return
+            previous = settings.max_recipients
+            settings.max_recipients = value
+            settings.full_clean()
+            settings.save(update_fields=("max_recipients",))
+            LogEntry.objects.create(
+                user=actor,
+                content_type=ContentType.objects.get_for_model(NotificationSettings),
+                object_id=str(settings.pk),
+                object_repr="Email reminder settings",
+                action_flag=CHANGE,
+                change_message=f"Recipient limit changed from {previous} to {value}.",
+            )
+
+
+class ReviewDecisionForm(forms.Form):
+    expected_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+    expected_status = forms.ChoiceField(choices=RegionStatus.choices, widget=forms.HiddenInput)
+    location_change_id = forms.IntegerField(min_value=1, required=False, widget=forms.HiddenInput)
+    action = forms.ChoiceField(
+        choices=tuple(
+            (name, name) for name in ("reject", "suspend", "approve_location", "reject_location")
+        ),
+        widget=forms.HiddenInput,
+    )
+
+    def apply(self, actor: User, region_id: int) -> None:
+        require_platform_admin(actor)
+        data = self.cleaned_data
+        with transaction.atomic():
+            if data["action"] == "approve_location":
+                tenant_id = (
+                    Region.objects.active().values_list("tenant_id", flat=True).get(pk=region_id)
+                )
+                Tenant.objects.select_for_update().get(pk=tenant_id)
+            region = Region.objects.active().select_for_update().get(pk=region_id)
+            if (
+                region.revision != data["expected_revision"]
+                or region.status != data["expected_status"]
+            ):
+                raise ValidationError(_("The plant changed. Reload before reviewing it."))
+            if data["action"] in {"reject", "suspend"}:
+                required_status = (
+                    RegionStatus.PENDING if data["action"] == "reject" else RegionStatus.APPROVED
+                )
+                if region.status != required_status:
+                    raise ValidationError(
+                        _("This decision is unavailable for the current review status.")
+                    )
+                transition_region(
+                    actor,
+                    region.pk,
+                    RegionStatus.REJECTED if data["action"] == "reject" else RegionStatus.SUSPENDED,
+                )
+            else:
+                change = RegionLocationChangeRequest.objects.get(
+                    pk=data["location_change_id"],
+                    region=region,
+                    status=LocationChangeStatus.PENDING,
+                )
+                review_location_change(
+                    actor, change.pk, approve=data["action"] == "approve_location"
+                )

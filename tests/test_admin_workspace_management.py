@@ -591,7 +591,7 @@ def test_workspace_console_pages_render_in_turkish_without_mail_or_provider_call
         pytest.fail("A console page sent mail or called a provider on GET")
 
     monkeypatch.setattr("pyracast.notifications.outbox.send", unexpected)
-    monkeypatch.setattr("pyracast.admin.adapter_for", unexpected)
+    monkeypatch.setattr("pyracast.platform_admin.plant_review.adapter_for", unexpected)
     base = f"/admin/workspaces/{tenant.pk}/"
     expectations = {
         "/admin/workspaces/": "Yeni çal\u0131şma alan\u0131",

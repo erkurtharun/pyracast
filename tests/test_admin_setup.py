@@ -11,13 +11,13 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import escape
 
-from pyracast.admin_forms import BindingActionForm, ProviderSetupForm
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import rotate_secret
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.plants.models import Plant, PlantConfiguration
+from pyracast.platform_admin.forms import BindingActionForm, ProviderSetupForm
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import AuditEvent, Region
 from tests.support.admin_setup import (
@@ -98,7 +98,9 @@ def test_admin_can_review_configure_validate_and_approve_without_exposing_key(
     assert system.account.encrypted_api_key.encode() not in page.content
     assert page.context["can_approve"] is False
     assert client.post(setup_url(system), action_input(system, "approve")).status_code == 400
-    monkeypatch.setattr("pyracast.admin.adapter_for", lambda binding: FakeAdapter())
+    monkeypatch.setattr(
+        "pyracast.platform_admin.plant_review.adapter_for", lambda binding: FakeAdapter()
+    )
     assert client.post(setup_url(system), action_input(system, "validate")).status_code == 302
     assert RequestAttempt.objects.get().outcome == "succeeded"
     assert client.get(setup_url(system)).context["can_approve"] is True
@@ -346,7 +348,9 @@ def test_validation_failures_and_quota_exhaustion_are_safe(
         assert not connection.in_atomic_block
         raise ProviderError("secret-must-not-be-rendered")
 
-    monkeypatch.setattr("pyracast.admin.adapter_for", lambda binding: FakeAdapter(fail))
+    monkeypatch.setattr(
+        "pyracast.platform_admin.plant_review.adapter_for", lambda binding: FakeAdapter(fail)
+    )
     response = client.post(setup_url(system), action_input(system, "validate"))
     assert response.status_code == 400
     assert b"Connection validation failed" in response.content
@@ -374,7 +378,9 @@ def test_failed_validation_shows_its_cause_once_and_logs_one_line(
     def fail() -> None:
         raise ProviderError(code, status_code=status)
 
-    monkeypatch.setattr("pyracast.admin.adapter_for", lambda binding: FakeAdapter(fail))
+    monkeypatch.setattr(
+        "pyracast.platform_admin.plant_review.adapter_for", lambda binding: FakeAdapter(fail)
+    )
     response = client.post(setup_url(system), action_input(system, "validate"))
 
     assert response.status_code == 400
@@ -408,7 +414,8 @@ def test_a_site_the_key_cannot_see_is_reported_as_such_without_the_provider_body
         return httpx.Response(404, text=body)
 
     monkeypatch.setattr(
-        "pyracast.admin.adapter_for", lambda binding: SolcastProvider(httpx.MockTransport(handle))
+        "pyracast.platform_admin.plant_review.adapter_for",
+        lambda binding: SolcastProvider(httpx.MockTransport(handle)),
     )
     response = client.post(setup_url(system), action_input(system, "validate"))
 
@@ -466,7 +473,9 @@ def test_admin_connection_admission_explains_credential_or_rate_limit_action(
     else:
         system.account.request_blocked_until = timezone.now() + timedelta(hours=1)
     system.account.save()
-    monkeypatch.setattr("pyracast.admin.adapter_for", lambda binding: FakeAdapter())
+    monkeypatch.setattr(
+        "pyracast.platform_admin.plant_review.adapter_for", lambda binding: FakeAdapter()
+    )
     response = client.post(setup_url(system), action_input(system, "validate"))
     assert response.status_code == 400
     assert (

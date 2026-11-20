@@ -6,7 +6,6 @@ from django.core.exceptions import FieldDoesNotExist
 from django.db import models
 
 from pyracast.accounts.models import Tenant
-from pyracast.admin import site
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -28,6 +27,7 @@ from pyracast.plants.models import (
     PlantEvent,
     ProductionObservation,
 )
+from pyracast.platform_admin.site import site
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
 
 START = datetime(2026, 11, 9, 10, tzinfo=UTC)

@@ -4,29 +4,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
-from django import forms
-from django.contrib.admin.models import CHANGE, LogEntry
-from django.contrib.auth.models import User
-from django.contrib.contenttypes.models import ContentType
-from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db import transaction
 from django.db.models import Count, OuterRef, Q, QuerySet, Subquery
 from django.db.models.functions import Coalesce
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
-from django.utils.translation import gettext_lazy
 
-from pyracast.accounts.authorization import require_platform_admin
-from pyracast.accounts.models import Tenant
-from pyracast.admin_health import summarize_health
-from pyracast.admin_health_queries import (
-    collection_jobs_for_issue,
-    metering_jobs_for_issue,
-    notification_deliveries_for_issue,
-    regions_for_issue,
-)
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import (
     CollectionEndpoint,
@@ -38,9 +22,17 @@ from pyracast.forecasts.models import (
 )
 from pyracast.forecasts.monitoring import delivery_health
 from pyracast.metering.models import EpiasJobError, EpiasJobStatus
-from pyracast.notifications.models import NotificationSettings, PreparedMessageKind
-from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT, recipient_limit
+from pyracast.notifications.models import PreparedMessageKind
+from pyracast.notifications.operations import recipient_limit
 from pyracast.plants.models import Plant
+from pyracast.platform_admin.forms import ReviewDecisionForm, WorkspaceSettingsForm
+from pyracast.platform_admin.health import summarize_health
+from pyracast.platform_admin.health_queries import (
+    collection_jobs_for_issue,
+    metering_jobs_for_issue,
+    notification_deliveries_for_issue,
+    regions_for_issue,
+)
 from pyracast.regions.models import (
     AuditAction,
     AuditEvent,
@@ -50,10 +42,9 @@ from pyracast.regions.models import (
     RegionStatus,
     active_region,
 )
-from pyracast.regions.operations import review_location_change, transition_region
 
 if TYPE_CHECKING:
-    from django_stubs_ext import WithAnnotations
+    from django_stubs_ext import StrOrPromise, WithAnnotations
 
 
 @dataclass(frozen=True)
@@ -63,6 +54,7 @@ class PlantSummary:
     company: str
     plant_name: str
     status: str
+    status_label: StrOrPromise
     revision: int
     created_at: datetime
     latitude: float
@@ -154,6 +146,7 @@ def summarize_plant(region: WithAnnotations[Region, WorkspaceAnnotations]) -> Pl
         company=region.tenant.name,
         plant_name=region.workspace_plant_name or region.name,
         status=region.status,
+        status_label=RegionStatus(region.status).label,
         revision=region.revision,
         created_at=region.created_at,
         latitude=region.latitude,
@@ -401,87 +394,6 @@ def operations_context(issue: str = "") -> dict[str, Any]:
         ],
         **recent_work_context(issue=issue, now=now),
     }
-
-
-class WorkspaceSettingsForm(forms.Form):
-    max_recipients = forms.IntegerField(
-        min_value=1, max_value=MAX_RECIPIENT_LIMIT, label=gettext_lazy("Recipients per plant")
-    )
-    expected_max_recipients = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
-
-    def apply(self, actor: User) -> None:
-        require_platform_admin(actor)
-        with transaction.atomic():
-            settings, _created = NotificationSettings.objects.select_for_update().get_or_create(
-                pk=1
-            )
-            if settings.max_recipients != self.cleaned_data["expected_max_recipients"]:
-                raise ValidationError(_("Settings changed. Reload before saving."))
-            value = self.cleaned_data["max_recipients"]
-            if value == settings.max_recipients:
-                return
-            previous = settings.max_recipients
-            settings.max_recipients = value
-            settings.full_clean()
-            settings.save(update_fields=("max_recipients",))
-            LogEntry.objects.create(
-                user=actor,
-                content_type=ContentType.objects.get_for_model(NotificationSettings),
-                object_id=str(settings.pk),
-                object_repr="Email reminder settings",
-                action_flag=CHANGE,
-                change_message=f"Recipient limit changed from {previous} to {value}.",
-            )
-
-
-class ReviewDecisionForm(forms.Form):
-    expected_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
-    expected_status = forms.ChoiceField(choices=RegionStatus.choices, widget=forms.HiddenInput)
-    location_change_id = forms.IntegerField(min_value=1, required=False, widget=forms.HiddenInput)
-    action = forms.ChoiceField(
-        choices=tuple(
-            (name, name) for name in ("reject", "suspend", "approve_location", "reject_location")
-        ),
-        widget=forms.HiddenInput,
-    )
-
-    def apply(self, actor: User, region_id: int) -> None:
-        require_platform_admin(actor)
-        data = self.cleaned_data
-        with transaction.atomic():
-            if data["action"] == "approve_location":
-                tenant_id = (
-                    Region.objects.active().values_list("tenant_id", flat=True).get(pk=region_id)
-                )
-                Tenant.objects.select_for_update().get(pk=tenant_id)
-            region = Region.objects.active().select_for_update().get(pk=region_id)
-            if (
-                region.revision != data["expected_revision"]
-                or region.status != data["expected_status"]
-            ):
-                raise ValidationError(_("The plant changed. Reload before reviewing it."))
-            if data["action"] in {"reject", "suspend"}:
-                required_status = (
-                    RegionStatus.PENDING if data["action"] == "reject" else RegionStatus.APPROVED
-                )
-                if region.status != required_status:
-                    raise ValidationError(
-                        _("This decision is unavailable for the current review status.")
-                    )
-                transition_region(
-                    actor,
-                    region.pk,
-                    RegionStatus.REJECTED if data["action"] == "reject" else RegionStatus.SUSPENDED,
-                )
-            else:
-                change = RegionLocationChangeRequest.objects.get(
-                    pk=data["location_change_id"],
-                    region=region,
-                    status=LocationChangeStatus.PENDING,
-                )
-                review_location_change(
-                    actor, change.pk, approve=data["action"] == "approve_location"
-                )
 
 
 def review_context(region_id: int) -> dict[str, Any]:

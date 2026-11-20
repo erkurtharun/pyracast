@@ -19,13 +19,38 @@ function takeSocialConnect(failed: boolean) {
     }
 }
 
+const consoleRoot = "/admin/";
+
+// The server validates the return address too; this check keeps a crafted link on this
+// origin and inside the console after the browser has normalised it.
+function plain(text: string) {
+    return [...text].every(
+        (character) =>
+            character !== "\\" && character >= " " && character !== "\u007f",
+    );
+}
+
+function consoleDestination(next: string | null) {
+    if (!next || !plain(next) || !URL.canParse(next, window.location.origin))
+        return consoleRoot;
+    const target = new URL(next, window.location.origin);
+    return target.origin === window.location.origin &&
+        target.pathname.startsWith(consoleRoot)
+        ? `${target.pathname}${target.search}`
+        : consoleRoot;
+}
+
 function destination(canAdmin: boolean) {
     const { search } = window.location;
     const callback = appQuery(new URLSearchParams(search)).socialCallback;
     if (callback !== "none" && takeSocialConnect(callback === "failed"))
         return { href: `${routes.account()}${search}`, document: true };
     if (storedInvitation()) return { href: routes.invitation() };
-    if (canAdmin) return { href: "/admin/", document: true };
+    if (canAdmin)
+        return {
+            href: consoleDestination(url.searchParams.get("next")),
+            document: true,
+        };
     return { href: routes.workspaces() };
 }
 

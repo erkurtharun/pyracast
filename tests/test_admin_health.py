@@ -2,7 +2,7 @@ import pytest
 from django.urls import reverse
 from django.utils.translation import override
 
-from pyracast.admin_health import HealthCategory, summarize_health
+from pyracast.platform_admin.health import HealthCategory, summarize_health
 
 COUNTERS = [
     ("invalid_reminder_recipients", "action", "plants"),
