@@ -15,8 +15,15 @@ from django.contrib.auth.models import User
 from django.core import mail
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import DatabaseError
 from django.test import Client, override_settings
+from django.utils import timezone
 
+from pyracast.accounts import adapters
+from pyracast.accounts.models import UserLanguagePreference
+from pyracast.notifications import intents
+from pyracast.notifications.models import OutboundMail
+from pyracast.notifications.outbox import publish_due_mail, send_outbound_mail
 from tests.support.account_sessions import (
     answer,
     browser,
@@ -33,9 +40,11 @@ from tests.support.admin_mfa_bootstrap import (
     run,
 )
 from tests.support.auth_lifecycle import mailed_code, submit, totp_code
+from tests.support.outbox import deliver_mail
 from tests.support.step_up import holds_current_authority
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
+NOTICE = "account/email/second_factor_reset"
 
 
 @pytest.fixture(autouse=True)
@@ -81,6 +90,19 @@ def state(user: User) -> tuple[Any, ...]:
     )
 
 
+def notices() -> list[tuple[Any, ...]]:
+    return list(
+        OutboundMail.objects.order_by("pk").values_list(
+            "kind", "recipient", "context", "sealed_code", "status"
+        )
+    )
+
+
+def mailed() -> list[Any]:
+    deliver_mail()
+    return list(mail.outbox)
+
+
 @pytest.mark.parametrize("make", [administrator, customer], ids=["administrator", "customer"])
 def test_a_reset_removes_every_factor_ends_every_session_and_tells_the_account(
     make: Callable[[], User], events: Callable[[], list[dict[str, Any]]]
@@ -107,12 +129,55 @@ def test_a_reset_removes_every_factor_ends_every_session_and_tells_the_account(
         ("mfa_reset_by_operator", "lost_device", 2),
     ]
     assert all(line["user_id"] == user.pk for line in written)
-    [message] = mail.outbox
+    assert mail.outbox == []
+    assert notices() == [(NOTICE, user.email, {}, "", "pending")]
+    [message] = mailed()
     assert message.to == [user.email]
     assert message.extra_headers["X-Pyracast-Mail"] == "account/email/second_factor_reset"
     for secret in codes:
         assert secret not in shown
         assert secret not in str(message.body)
+
+
+def test_the_reset_notice_is_published_by_the_dispatcher_in_the_account_language() -> None:
+    user = customer()
+    with_factors(user)
+    UserLanguagePreference.objects.create(user=user, language="tr")
+    run("reset_mfa", [user.email], email=user.email, reason="lost_device")
+    published: list[int] = []
+    now = timezone.now()
+
+    assert publish_due_mail(published.append, now) == 1
+    assert [send_outbound_mail(mail_id, now) for mail_id in published] == [True]
+
+    [message] = mail.outbox
+    assert message.to == [user.email]
+    assert message.subject == "İki ad\u0131ml\u0131 doğrulaman\u0131z s\u0131f\u0131rland\u0131"
+    assert notices() == [(NOTICE, user.email, {}, "", "sent")]
+
+
+def test_a_reset_that_fails_after_storing_its_notice_keeps_everything_and_mails_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = customer()
+    with_factors(user)
+    client = session_of(user)
+    before = state(user)
+    store = intents.enqueue_mail
+
+    def stored_then_failed(*args: Any, **kwargs: Any) -> None:
+        store(*args, **kwargs)
+        raise DatabaseError("The command's transaction failed after the notice was stored.")
+
+    monkeypatch.setattr(adapters, "enqueue_mail", stored_then_failed)
+
+    with pytest.raises(DatabaseError):
+        run("reset_mfa", [user.email], email=user.email, reason="compromised")
+
+    assert state(user) == before
+    assert client.get("/api/session/").json()["user"]["id"] == user.pk
+    assert notices() == []
+    assert mailed() == []
 
 
 def test_an_administrator_without_a_factor_is_enrolled_again_after_a_reset(
@@ -146,6 +211,7 @@ def test_a_reset_ends_the_pending_steps_of_the_account(monkeypatch: pytest.Monke
     credentials = {"email": user.email, "password": TEST_PASSWORD}
     assert submit(sign_in, "auth/login", credentials).status_code == 401
     run("reset_mfa", [user.email], email=user.email, reason="compromised")
+    deliver_mail()
     mail.outbox.clear()
     new_password = {"key": code, "password": NEW_PASSWORD}
     second_factor = {"code": totp_code(secret, now)}
@@ -163,7 +229,7 @@ def test_a_reset_ends_the_pending_steps_of_the_account(monkeypatch: pytest.Monke
     user.refresh_from_db()
     assert user.check_password(TEST_PASSWORD)
     assert (session_user(reset), session_user(sign_in)) == (None, None)
-    assert mail.outbox == []
+    assert mailed() == []
 
 
 def test_after_a_reset_a_sign_in_records_the_state_the_reset_left() -> None:
@@ -201,7 +267,8 @@ def test_a_dry_run_changes_nothing_and_asks_nothing(
         "Nothing was changed."
     )
     assert events()[signed_in:] == []
-    assert mail.outbox == []
+    assert notices() == []
+    assert mailed() == []
 
 
 def refusal(email: str, answers: list[Answer], **options: object) -> tuple[str, Terminal]:
@@ -233,19 +300,22 @@ def test_a_reset_of_an_unknown_or_factorless_account_says_why(
     assert factorless == "This account has no second factor. Nothing was changed."
     assert terminal.asked == 0
     assert events() == []
-    assert mail.outbox == []
+    assert notices() == []
+    assert mailed() == []
 
 
 def test_a_second_reset_finds_nothing_to_reset() -> None:
     user = customer()
     with_factors(user)
     run("reset_mfa", [user.email], email=user.email, reason="lost_device")
+    deliver_mail()
     mail.outbox.clear()
 
     message, _terminal = refusal(user.email, [user.email])
 
     assert message == "This account has no second factor. Nothing was changed."
-    assert mail.outbox == []
+    assert [notice[0] for notice in notices()] == [NOTICE]
+    assert mailed() == []
 
 
 @pytest.mark.parametrize("answer", ["", "someone.else@example.com"])
@@ -264,7 +334,8 @@ def test_a_reset_needs_the_address_typed_again(
     assert state(user) == before
     assert client.get("/api/session/").json()["user"]["id"] == user.pk
     assert events()[signed_in:] == []
-    assert mail.outbox == []
+    assert notices() == []
+    assert mailed() == []
 
 
 def test_an_address_moved_to_another_account_during_the_confirmation_stops_the_reset(
@@ -297,7 +368,8 @@ def test_an_address_moved_to_another_account_during_the_confirmation_stops_the_r
     assert Authenticator.objects.filter(user=first).count() == 2
     assert kept.get("/api/session/").json()["user"]["id"] == second.pk
     assert events()[signed_in:] == []
-    assert mail.outbox == []
+    assert notices() == []
+    assert mailed() == []
 
 
 def test_a_reset_refuses_an_invalid_address_and_a_shared_one() -> None:

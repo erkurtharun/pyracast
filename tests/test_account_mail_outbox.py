@@ -124,6 +124,13 @@ def test_a_password_reset_request_answers_alike_and_mails_only_from_the_worker(
     ]
 
 
+def test_every_account_notice_is_a_kind_of_outbound_mail() -> None:
+    from pyracast.accounts.account_mail import NOTICES
+    from pyracast.notifications.models import OutboundMailKind
+
+    assert set(NOTICES) - set(OutboundMailKind.values) == set()
+
+
 def test_a_mailed_code_rests_only_sealed_and_is_erased_once_sent(
     transport: type[Transport],
 ) -> None:
