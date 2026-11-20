@@ -1,4 +1,5 @@
 import json
+import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -26,10 +27,16 @@ FIXTURES = Path(__file__).parent / "fixtures"
 REFERENCE_CHAIN = json.loads((FIXTURES / "tracking_gain_reference.json").read_text("utf-8"))
 REFERENCE_CHAIN_V2 = json.loads((FIXTURES / "tracking_gain_reference_v2.json").read_text("utf-8"))
 # Outputs of origin/main 14fa0004 as float.hex, written by running its tracking and transfer
-# modules (see docs/IRRADIANCE.md, "Tracking geometry transfer").
+# modules (see docs/IRRADIANCE.md, "Tracking geometry transfer"). Compared to a relative 1e-12
+# because the platform libm differs in the last bits.
 GOLDEN_V1 = json.loads((FIXTURES / "tracking_v1_golden.json").read_text("utf-8"))
+GOLDEN_REL_TOL = 1e-12
 assert REFERENCE_CHAIN, "Tracker gain reference table must contain cases."
 assert REFERENCE_CHAIN_V2, "Tracker gain v2 reference table must contain cases."
+
+
+def _matches_golden(actual: float, golden_hex: str) -> bool:
+    return math.isclose(actual, float.fromhex(golden_hex), rel_tol=GOLDEN_REL_TOL, abs_tol=1e-300)
 
 
 @pytest.mark.parametrize("case", REFERENCE_CHAIN)
@@ -71,29 +78,33 @@ def test_one_refracted_zenith_misses_the_v2_chain_where_refraction_is_largest() 
     assert max(misses) > 0.05
 
 
-def test_v1_gain_equals_main_bit_for_bit() -> None:
+def test_v1_gain_equals_main() -> None:
     rows = GOLDEN_V1["tracking_gain"]
     assert len(rows) == 400
     assert [
-        row for row in rows if tracking_gain(row[0], row[1], row[1], row[2], row[3]).hex() != row[4]
+        row
+        for row in rows
+        if not _matches_golden(tracking_gain(row[0], row[1], row[1], row[2], row[3]), row[4])
     ] == []
 
 
-def test_v1_interval_gain_equals_main_bit_for_bit() -> None:
+def test_v1_interval_gain_equals_main() -> None:
     rows = GOLDEN_V1["interval_gain"]
     assert len(rows) == 192
     assert [
         row
         for row in rows
-        if interval_gain(
-            datetime.fromisoformat(row[0]),
-            datetime.fromisoformat(row[1]),
-            row[2],
-            row[3],
-            row[4],
-            model=MODEL_V1,
-        ).hex()
-        != row[5]
+        if not _matches_golden(
+            interval_gain(
+                datetime.fromisoformat(row[0]),
+                datetime.fromisoformat(row[1]),
+                row[2],
+                row[3],
+                row[4],
+                model=MODEL_V1,
+            ),
+            row[5],
+        )
     ] == []
 
 
@@ -110,17 +121,21 @@ def _golden_configuration(name: str) -> PlantConfiguration:
     return PlantConfiguration(binding=binding, dc_capacity_mw=130.0, mounting_type=mounting)
 
 
-def _golden_power(row: list[Any], model: str) -> str:
+def _golden_power(row: list[Any], model: str) -> float:
     return reference_power_mw(
         _golden_configuration(row[0]),
         datetime.fromisoformat(row[1]),
         datetime.fromisoformat(row[2]),
         row[3],
         model_version=model,
-    ).hex()
+    )
 
 
-def test_v1_reference_power_equals_main_bit_for_bit() -> None:
+def _power_matches(row: list[Any], model: str) -> bool:
+    return _matches_golden(_golden_power(row, model), row[4])
+
+
+def test_v1_reference_power_equals_main() -> None:
     rows = GOLDEN_V1["reference_power_mw"]
     assert {row[0] for row in rows} == {
         "tracking",
@@ -129,7 +144,7 @@ def test_v1_reference_power_equals_main_bit_for_bit() -> None:
         "fixed",
         "unknown",
     }
-    assert [row for row in rows if _golden_power(row, MODEL_V1) != row[4]] == []
+    assert [row for row in rows if not _power_matches(row, MODEL_V1)] == []
 
 
 @pytest.mark.parametrize("model", [MODEL_VERSION, MODEL_V1, MODEL_V2])
@@ -142,17 +157,15 @@ def test_configurations_without_tracker_geometry_keep_main_output_under_every_mo
         if row[0] in {"tracking_without_dc", "fixed", "unknown"}
     ]
     assert len(rows) == 15
-    assert [row for row in rows if _golden_power(row, model) != row[4]] == []
+    assert [row for row in rows if not _power_matches(row, model)] == []
 
 
 def test_tracker_geometry_versions_differ_only_for_modeled_tracking() -> None:
     rows = GOLDEN_V1["reference_power_mw"]
-    changed = {row[0] for row in rows if _golden_power(row, MODEL_V2) != row[4]}
+    changed = {row[0] for row in rows if not _power_matches(row, MODEL_V2)}
     assert changed == {"tracking", "tracking_lossy"}
     assert [
-        row
-        for row in rows
-        if row[0].startswith("tracking") and _golden_power(row, MODEL_VERSION) == row[4]
+        row for row in rows if row[0].startswith("tracking") and _power_matches(row, MODEL_VERSION)
     ] == [row for row in rows if row[0] == "tracking_without_dc"]
 
 
