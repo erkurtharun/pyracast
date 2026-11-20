@@ -19,7 +19,15 @@ from psycopg import sql
 
 from pyracast.accounts.cache import AuthenticationCache
 from pyracast.mail.errors import PermanentlyNotSentError
-from tests.support.auth_lifecycle import LONGEST_ADDRESS, PASSWORD, Clock, member, submit
+from tests.support.auth_lifecycle import (
+    LONGEST_ACCOUNT_ADDRESS,
+    LONGEST_ADDRESS,
+    OVERLONG_ACCOUNT_ADDRESS,
+    PASSWORD,
+    Clock,
+    member,
+    submit,
+)
 from tests.support.company_registration import signup
 from tests.support.outbox import after_the_lease, deliver_mail
 
@@ -217,7 +225,7 @@ def pending_signup(index: int, address: str) -> Client:
     return client
 
 
-def pending_address_change(index: int, address: str) -> Client:
+def reauthenticated_changer(index: int) -> Client:
     user = User.objects.create_user(
         username=f"changer-{index}", email=f"changer-{index}@example.com", password=PASSWORD
     )
@@ -226,6 +234,11 @@ def pending_address_change(index: int, address: str) -> Client:
     credentials = {"email": user.email, "password": PASSWORD}
     assert submit(client, "auth/login", credentials).status_code == 200
     assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+    return client
+
+
+def pending_address_change(index: int, address: str) -> Client:
+    client = reauthenticated_changer(index)
     assert submit(client, "account/email", {"email": address}).status_code == 200
     return client
 
@@ -392,14 +405,33 @@ def test_a_reset_for_the_longest_accepted_address_answers_alike_and_is_mailed(
     assert transport.sent[0].to == [LONGEST_ADDRESS]
 
 
-def test_an_address_change_to_the_longest_accepted_address_mails_its_code(
+def test_an_address_change_to_the_longest_account_address_is_mailed_and_verified(
     transport: type[Transport],
 ) -> None:
-    pending_address_change(0, LONGEST_ADDRESS)
+    client = pending_address_change(0, LONGEST_ACCOUNT_ADDRESS)
 
-    assert intents() == [("account/email/email_confirmation", LONGEST_ADDRESS)]
+    assert intents() == [("account/email/email_confirmation", LONGEST_ACCOUNT_ADDRESS)]
     assert deliver_mail() == 1
-    assert transport.sent[0].to == [LONGEST_ADDRESS]
+    assert transport.sent[0].to == [LONGEST_ACCOUNT_ADDRESS]
+    code = mailed_code(transport.sent[0])
+    assert submit(client, "auth/email/verify", {"key": code}).status_code == 200
+    assert EmailAddress.objects.filter(email=LONGEST_ACCOUNT_ADDRESS, verified=True).exists()
+
+
+@pytest.mark.parametrize("address", [OVERLONG_ACCOUNT_ADDRESS, LONGEST_ADDRESS], ids=["255", "320"])
+def test_an_address_change_longer_than_an_account_address_is_refused_before_any_mail(
+    address: str,
+) -> None:
+    client = reauthenticated_changer(0)
+
+    response = submit(client, "account/email", {"email": address})
+
+    assert response.status_code == 400
+    assert [(error["code"], error["param"]) for error in response.json()["errors"]] == [
+        ("max_length", "email")
+    ]
+    assert intents() == []
+    assert not EmailAddress.objects.filter(email=address).exists()
 
 
 def test_a_late_refusal_never_reopens_an_intent_recovered_as_uncertain(

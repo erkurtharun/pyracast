@@ -22,6 +22,7 @@ from pyracast.mail.errors import PermanentlyNotSentError
 from pyracast.plants.sites import submit_site
 from pyracast.regions.models import Region
 from tests.support.api import verified_admin
+from tests.support.auth_lifecycle import LONGEST_ADDRESS, OVERLONG_ACCOUNT_ADDRESS
 from tests.support.concurrency import behind_open_transaction
 from tests.support.outbox import deliver_mail
 
@@ -365,6 +366,29 @@ def test_invitation_refusals_are_form_errors_that_keep_the_values() -> None:
     assert limited.status_code == 400
     assert "Too many invitations were sent. Try again later." in (limited.content.decode())
     assert WorkspaceInvitation.objects.count() == 1
+
+
+@pytest.mark.parametrize("address", [OVERLONG_ACCOUNT_ADDRESS, LONGEST_ADDRESS], ids=["255", "320"])
+def test_an_invitation_address_longer_than_an_account_address_is_a_form_error(
+    address: str,
+) -> None:
+    tenant, _, _ = workspace()
+    client, _ = verified_admin()
+
+    invitation = client.post(
+        f"/admin/workspaces/{tenant.pk}/invitations/new/", {"email": address, "language": "en"}
+    )
+    creation = client.post(
+        "/admin/workspaces/new/",
+        {"name": "Long address", "administrator_email": address, "language": "en"},
+    )
+
+    for response in (invitation, creation):
+        assert response.status_code == 400
+        assert "Ensure this value has at most 254 characters" in response.content.decode()
+    assert not WorkspaceInvitation.objects.exists()
+    assert not Tenant.objects.filter(name="Long address").exists()
+    assert not LogEntry.objects.exists()
 
 
 @pytest.mark.parametrize(

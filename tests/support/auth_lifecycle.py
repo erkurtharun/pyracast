@@ -17,9 +17,11 @@ AUTH = "/api/auth/browser/v1/"
 
 
 PASSWORD = "test-only-" + "falcon-cloud-79!"
-# The longest address the account inputs accept (Django's `EmailValidator` allows 320 characters);
-# no account holds one, because the account address columns keep 254.
+# The longest address the sign-in and reset inputs accept (Django's `EmailValidator` allows 320
+# characters); no account holds one, because the account address columns keep 254.
 LONGEST_ADDRESS = "a" * 64 + "@" + ".".join(["b" * 63] * 3 + ["c" * 59, "com"])
+LONGEST_ACCOUNT_ADDRESS = "a" * 63 + "@" + ".".join(["b" * 63] * 2 + ["c" * 58, "com"])
+OVERLONG_ACCOUNT_ADDRESS = "a" + LONGEST_ACCOUNT_ADDRESS
 
 
 @dataclass
