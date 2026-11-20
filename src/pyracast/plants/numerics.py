@@ -509,7 +509,7 @@ def _screen(
     losses: list[float] = []
     left = 0.0
     for position, factor in enumerate(boundaries):
-        while pending[0][0] <= factor:
+        while pending and pending[0][0] <= factor:
             _, row_index, version = heappop(pending)
             if version != versions[row_index]:
                 continue

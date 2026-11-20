@@ -185,6 +185,7 @@ def request_preparation(plant_ids: Iterable[int], now: datetime | None = None) -
 
 
 def incidents_changed(plant_id: int) -> None:
+    """Supersede open runs whose outage inputs changed; the caller holds the plant lock."""
     moment = timezone.now()
     for run in CalibrationRun.objects.filter(
         plant_id=plant_id, status__in=OPEN_STATUSES

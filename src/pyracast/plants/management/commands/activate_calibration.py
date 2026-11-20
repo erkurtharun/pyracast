@@ -27,10 +27,7 @@ class Command(BaseCommand):
                     else activate_calibration(*scope, options["calibration_id"])
                 )
             except CalibrationRun.DoesNotExist as error:
-                raise CommandError(
-                    f"Calibration {options['calibration_id']} not found for the current "
-                    "configuration."
-                ) from error
+                raise CommandError(f"Calibration {options['calibration_id']} not found.") from error
         self.stdout.write(
             f"Activation {activation.pk}; calibration {activation.calibration_id or 'baseline'}."
         )

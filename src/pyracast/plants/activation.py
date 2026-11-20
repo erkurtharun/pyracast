@@ -142,9 +142,7 @@ def activate_calibration(
         region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         configuration = current_configuration(plant)
-        run = CalibrationRun.objects.get(
-            pk=calibration_id, plant=plant, configuration=configuration
-        )
+        run = CalibrationRun.objects.get(pk=calibration_id, plant=plant)
         now = timezone.now()
         blocker = activation_blocker(plant, configuration, run, now)
         if blocker is not None:

@@ -100,6 +100,32 @@ def test_runs_of_a_revised_configuration_read_as_previous_and_open_runs_as_not_r
     assert automation_status(plant)["current_calibration"] is None
 
 
+def test_activating_a_previous_configuration_run_refuses_with_the_blocker_the_detail_shows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, active, _ = two_candidates(monkeypatch)
+    revise_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        name="Changed",
+        dc_capacity_mw=140,
+    )
+    client = Client()
+    client.force_login(system.member)
+    runs = f"{plant_path(system, plant)}calibrations/"
+
+    refused = client.post(f"{runs}{active.pk}/activate/", {}, content_type="application/json")
+
+    assert (refused.status_code, refused.json()["code"]) == (400, "configuration_changed")
+    assert client.get(f"{runs}{active.pk}/").json()["activation_blocker"] == "configuration_changed"
+    with pytest.raises(CommandError, match=r"^Activation refused: configuration_changed\.$"):
+        call_command(
+            "activate_calibration", username="member", plant_id=plant.pk, calibration_id=active.pk
+        )
+
+
 def test_a_baseline_reset_reads_as_the_effective_current_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -141,7 +167,7 @@ def test_the_operator_command_names_the_blocker(monkeypatch: pytest.MonkeyPatch)
         ({"username": "nobody"}, "User nobody not found."),
         ({"plant_id": 0}, "Plant 0 not found."),
         ({"username": "outsider"}, "User outsider may not change plant"),
-        ({"calibration_id": 0}, "Calibration 0 not found for the current configuration."),
+        ({"calibration_id": 0}, r"^Calibration 0 not found\.$"),
     ],
 )
 def test_the_operator_command_names_each_refusal(

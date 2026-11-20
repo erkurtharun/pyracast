@@ -43,6 +43,12 @@ def test_breakpoints_one_ulp_apart_and_pieces_capped_throughout_are_searched_exa
     assert numerics._fit(rows, normalization, cap) == exhaustive_fit(rows, normalization, cap)
 
 
+def test_a_fit_without_rows_equals_the_exhaustive_search() -> None:
+    _, normalization, cap = random_rows(5, 1)
+
+    assert numerics._fit([], normalization, cap) == exhaustive_fit([], normalization, cap)
+
+
 def test_a_fit_beyond_floating_range_is_refused_as_before() -> None:
     rows, _, cap = random_rows(3, 30)
 
