@@ -8,9 +8,7 @@
         "/api/invitations/accept/": {
             "post": {
                 "operationId": "invitations_accept_create",
-                "tags": [
-                    "invitations"
-                ],
+                "tags": ["invitations"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -103,9 +101,7 @@
         "/api/session/": {
             "get": {
                 "operationId": "session_retrieve",
-                "tags": [
-                    "session"
-                ],
+                "tags": ["session"],
                 "responses": {
                     "200": {
                         "content": {
@@ -133,9 +129,7 @@
         "/api/session/language/": {
             "post": {
                 "operationId": "session_language_create",
-                "tags": [
-                    "session"
-                ],
+                "tags": ["session"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -214,9 +208,7 @@
                         }
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -291,11 +283,7 @@
                         "in": "query",
                         "name": "scope",
                         "schema": {
-                            "enum": [
-                                "pending",
-                                "history",
-                                "mine"
-                            ],
+                            "enum": ["pending", "history", "mine"],
                             "type": "string",
                             "default": "pending",
                             "minLength": 1
@@ -311,9 +299,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -404,9 +390,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -487,9 +471,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -600,9 +582,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -713,9 +693,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -806,9 +784,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -891,9 +867,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -954,9 +928,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1057,9 +1029,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1125,9 +1095,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1198,9 +1166,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1274,9 +1240,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1350,9 +1314,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1431,9 +1393,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1531,11 +1491,7 @@
                         "in": "query",
                         "name": "data_source",
                         "schema": {
-                            "enum": [
-                                "auto",
-                                "forecast",
-                                "estimated_actuals"
-                            ],
+                            "enum": ["auto", "forecast", "estimated_actuals"],
                             "type": "string",
                             "default": "forecast",
                             "minLength": 1
@@ -1568,9 +1524,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1680,9 +1634,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1761,9 +1713,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1892,9 +1842,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1994,9 +1942,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2075,9 +2021,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -2196,9 +2140,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -2317,9 +2259,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2406,9 +2346,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -2526,9 +2464,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2636,9 +2572,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2725,9 +2659,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -2864,9 +2796,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2963,9 +2893,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -3064,9 +2992,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -3195,9 +3121,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -3354,10 +3278,7 @@
                         "in": "query",
                         "name": "resolution_minutes",
                         "schema": {
-                            "enum": [
-                                30,
-                                60
-                            ],
+                            "enum": [30, 60],
                             "type": "integer",
                             "default": 30
                         },
@@ -3372,9 +3293,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -3492,9 +3411,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -3581,9 +3498,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -3710,9 +3625,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -3839,9 +3752,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -3968,9 +3879,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -4068,10 +3977,7 @@
                         "in": "query",
                         "name": "comparison",
                         "schema": {
-                            "enum": [
-                                "archived_forecast",
-                                "historical_model"
-                            ],
+                            "enum": ["archived_forecast", "historical_model"],
                             "type": "string",
                             "default": "archived_forecast",
                             "minLength": 1
@@ -4136,9 +4042,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -4266,10 +4170,7 @@
                         "in": "query",
                         "name": "resolution_minutes",
                         "schema": {
-                            "enum": [
-                                30,
-                                60
-                            ],
+                            "enum": [30, 60],
                             "type": "integer",
                             "default": 60
                         },
@@ -4292,9 +4193,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -4393,9 +4292,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -4484,9 +4381,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -4615,9 +4510,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -4738,9 +4631,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -4819,9 +4710,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -4932,9 +4821,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -5036,9 +4923,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -5109,9 +4994,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -5223,9 +5106,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -5339,9 +5220,7 @@
                         "maxLength": 100
                     }
                 },
-                "required": [
-                    "review_fingerprint"
-                ]
+                "required": ["review_fingerprint"]
             },
             "AuditActionEnum": {
                 "enum": [
@@ -5386,18 +5265,10 @@
                         "format": "date-time"
                     }
                 },
-                "required": [
-                    "calibration_id",
-                    "created_at",
-                    "reason",
-                    "status"
-                ]
+                "required": ["calibration_id", "created_at", "reason", "status"]
             },
             "AutomaticCalibrationAttemptOutputStatusEnum": {
-                "enum": [
-                    "activated",
-                    "skipped"
-                ],
+                "enum": ["activated", "skipped"],
                 "type": "string",
                 "description": "* `activated` - activated\n* `skipped` - skipped"
             },
@@ -5411,25 +5282,15 @@
                 "description": "* `manual` - Manual\n* `realtime_generation` - Real-time generation\n* `settlement_injection` - Settlement injection"
             },
             "BindingHealthEnum": {
-                "enum": [
-                    "unknown",
-                    "healthy",
-                    "error"
-                ],
+                "enum": ["unknown", "healthy", "error"],
                 "type": "string",
                 "description": "* `unknown` - Unknown\n* `healthy` - Healthy\n* `error` - Error"
             },
             "BlankEnum": {
-                "enum": [
-                    ""
-                ]
+                "enum": [""]
             },
             "CalibrationAssessmentEnum": {
-                "enum": [
-                    "insufficient",
-                    "provisional",
-                    "evaluated"
-                ],
+                "enum": ["insufficient", "provisional", "evaluated"],
                 "type": "string",
                 "description": "* `insufficient` - Insufficient\n* `provisional` - Provisional\n* `evaluated` - Evaluated"
             },
@@ -5518,11 +5379,7 @@
                         "format": "date"
                     }
                 },
-                "required": [
-                    "configuration_id",
-                    "end_date",
-                    "start_date"
-                ]
+                "required": ["configuration_id", "end_date", "start_date"]
             },
             "CalibrationOutput": {
                 "type": "object",
@@ -5783,10 +5640,7 @@
                 ]
             },
             "ChangeRequestKindEnum": {
-                "enum": [
-                    "production",
-                    "incident"
-                ],
+                "enum": ["production", "incident"],
                 "type": "string",
                 "description": "* `production` - Production\n* `incident` - Incident"
             },
@@ -5940,12 +5794,7 @@
                 ]
             },
             "ChangeRequestStatusEnum": {
-                "enum": [
-                    "pending",
-                    "approved",
-                    "rejected",
-                    "withdrawn"
-                ],
+                "enum": ["pending", "approved", "rejected", "withdrawn"],
                 "type": "string",
                 "description": "* `pending` - Pending\n* `approved` - Approved\n* `rejected` - Rejected\n* `withdrawn` - Withdrawn"
             },
@@ -6069,10 +5918,7 @@
                 ]
             },
             "CodeEnum": {
-                "enum": [
-                    "provider_hour_incomplete",
-                    "energy_exceeds_capacity"
-                ],
+                "enum": ["provider_hour_incomplete", "energy_exceeds_capacity"],
                 "type": "string",
                 "description": "* `provider_hour_incomplete` - provider_hour_incomplete\n* `energy_exceeds_capacity` - energy_exceeds_capacity"
             },
@@ -6197,10 +6043,7 @@
                         "maxItems": 10
                     }
                 },
-                "required": [
-                    "enabled",
-                    "times"
-                ]
+                "required": ["enabled", "times"]
             },
             "CollectionScheduleOutput": {
                 "type": "object",
@@ -6271,10 +6114,7 @@
                 ]
             },
             "ComparisonEnum": {
-                "enum": [
-                    "archived_forecast",
-                    "historical_model"
-                ],
+                "enum": ["archived_forecast", "historical_model"],
                 "type": "string",
                 "description": "* `archived_forecast` - archived_forecast\n* `historical_model` - historical_model"
             },
@@ -6367,10 +6207,7 @@
                         "type": "string"
                     }
                 },
-                "required": [
-                    "code",
-                    "message"
-                ]
+                "required": ["code", "message"]
             },
             "CurrentCalibrationOutput": {
                 "type": "object",
@@ -6413,19 +6250,12 @@
                 ]
             },
             "CurrentCalibrationOutputOriginEnum": {
-                "enum": [
-                    "manual",
-                    "automatic"
-                ],
+                "enum": ["manual", "automatic"],
                 "type": "string",
                 "description": "* `manual` - manual\n* `automatic` - automatic"
             },
             "DaylightStatusEnum": {
-                "enum": [
-                    "normal",
-                    "polar_day",
-                    "polar_night"
-                ],
+                "enum": ["normal", "polar_day", "polar_night"],
                 "type": "string",
                 "description": "* `normal` - normal\n* `polar_day` - polar_day\n* `polar_night` - polar_night"
             },
@@ -6441,10 +6271,7 @@
                         "format": "date-time"
                     }
                 },
-                "required": [
-                    "ends_at",
-                    "starts_at"
-                ]
+                "required": ["ends_at", "starts_at"]
             },
             "DisabledCauseEnum": {
                 "enum": [
@@ -6630,10 +6457,7 @@
                 "description": "* `pending` - Pending\n* `running` - Running\n* `succeeded` - Succeeded\n* `failed` - Failed\n* `superseded` - Superseded\n* `awaiting_publication` - Awaiting publication"
             },
             "EpiasSourceKindEnum": {
-                "enum": [
-                    "realtime_generation",
-                    "settlement_injection"
-                ],
+                "enum": ["realtime_generation", "settlement_injection"],
                 "type": "string",
                 "description": "* `realtime_generation` - Real-time generation\n* `settlement_injection` - Settlement injection"
             },
@@ -6665,10 +6489,7 @@
                         "description": "Reference to the server log."
                     }
                 },
-                "required": [
-                    "code",
-                    "message"
-                ]
+                "required": ["code", "message"]
             },
             "ErrorCode": {
                 "enum": [
@@ -6812,20 +6633,12 @@
                 ]
             },
             "ForecastSourceKindEnum": {
-                "enum": [
-                    "forecast",
-                    "estimated_actuals",
-                    "mixed"
-                ],
+                "enum": ["forecast", "estimated_actuals", "mixed"],
                 "type": "string",
                 "description": "* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals\n* `mixed` - mixed"
             },
             "FreshnessEnum": {
-                "enum": [
-                    "fresh",
-                    "stale",
-                    "missing"
-                ],
+                "enum": ["fresh", "stale", "missing"],
                 "type": "string",
                 "description": "* `fresh` - fresh\n* `stale` - stale\n* `missing` - missing"
             },
@@ -6878,21 +6691,10 @@
                         "type": "integer"
                     }
                 },
-                "required": [
-                    "id",
-                    "kind",
-                    "revision",
-                    "starts_at",
-                    "title"
-                ]
+                "required": ["id", "kind", "revision", "starts_at", "title"]
             },
             "IncidentChangeActionEnum": {
-                "enum": [
-                    "create",
-                    "update",
-                    "resolve",
-                    "cancel"
-                ],
+                "enum": ["create", "update", "resolve", "cancel"],
                 "type": "string",
                 "description": "* `create` - Create\n* `update` - Update\n* `resolve` - Resolve\n* `cancel` - Cancel"
             },
@@ -6989,20 +6791,10 @@
                         "nullable": true
                     }
                 },
-                "required": [
-                    "kind",
-                    "starts_at",
-                    "title"
-                ]
+                "required": ["kind", "starts_at", "title"]
             },
             "IncidentKindEnum": {
-                "enum": [
-                    "inverter",
-                    "panels",
-                    "grid",
-                    "other",
-                    "multiple"
-                ],
+                "enum": ["inverter", "panels", "grid", "other", "multiple"],
                 "type": "string",
                 "description": "* `inverter` - Inverter\n* `panels` - Panels\n* `grid` - Grid\n* `other` - Other\n* `multiple` - Multiple"
             },
@@ -7128,10 +6920,7 @@
                         "format": "date-time"
                     }
                 },
-                "required": [
-                    "action",
-                    "idempotency_key"
-                ]
+                "required": ["action", "idempotency_key"]
             },
             "IncidentUpdate": {
                 "type": "object",
@@ -7180,12 +6969,7 @@
                         "minimum": 1
                     }
                 },
-                "required": [
-                    "expected_revision",
-                    "kind",
-                    "starts_at",
-                    "title"
-                ]
+                "required": ["expected_revision", "kind", "starts_at", "title"]
             },
             "InvitationAcceptanceInput": {
                 "type": "object",
@@ -7195,9 +6979,7 @@
                         "maxLength": 128
                     }
                 },
-                "required": [
-                    "token"
-                ]
+                "required": ["token"]
             },
             "InvitationAcceptanceOutput": {
                 "type": "object",
@@ -7209,18 +6991,10 @@
                         "$ref": "#/components/schemas/WorkspaceRoleEnum"
                     }
                 },
-                "required": [
-                    "role",
-                    "tenant_id"
-                ]
+                "required": ["role", "tenant_id"]
             },
             "InvitationDeliveryStatusEnum": {
-                "enum": [
-                    "pending",
-                    "sent",
-                    "failed",
-                    "uncertain"
-                ],
+                "enum": ["pending", "sent", "failed", "uncertain"],
                 "type": "string",
                 "description": "* `pending` - Pending\n* `sent` - Sent\n* `failed` - Failed\n* `uncertain` - Uncertain"
             },
@@ -7233,9 +7007,7 @@
                         "maxLength": 254
                     }
                 },
-                "required": [
-                    "email"
-                ]
+                "required": ["email"]
             },
             "InvitationOutput": {
                 "type": "object",
@@ -7263,18 +7035,10 @@
                         "readOnly": true
                     }
                 },
-                "required": [
-                    "delivery_status",
-                    "email",
-                    "expires_at",
-                    "id"
-                ]
+                "required": ["delivery_status", "email", "expires_at", "id"]
             },
             "LanguageEnum": {
-                "enum": [
-                    "en",
-                    "tr"
-                ],
+                "enum": ["en", "tr"],
                 "type": "string",
                 "description": "* `en` - English\n* `tr` - Türkçe"
             },
@@ -7285,9 +7049,7 @@
                         "$ref": "#/components/schemas/LanguageEnum"
                     }
                 },
-                "required": [
-                    "language"
-                ]
+                "required": ["language"]
             },
             "LocationChangeInput": {
                 "type": "object",
@@ -7392,37 +7154,22 @@
                 ]
             },
             "LocationChangeStatusEnum": {
-                "enum": [
-                    "pending",
-                    "approved",
-                    "rejected",
-                    "withdrawn"
-                ],
+                "enum": ["pending", "approved", "rejected", "withdrawn"],
                 "type": "string",
                 "description": "* `pending` - Awaiting review\n* `approved` - Approved\n* `rejected` - Rejected\n* `withdrawn` - Withdrawn"
             },
             "MeasurementBasisEnum": {
-                "enum": [
-                    "net_export",
-                    "ac_generation"
-                ],
+                "enum": ["net_export", "ac_generation"],
                 "type": "string",
                 "description": "* `net_export` - Net export\n* `ac_generation` - AC generation"
             },
             "MetricScopeEnum": {
-                "enum": [
-                    "daylight_intervals",
-                    "full_day"
-                ],
+                "enum": ["daylight_intervals", "full_day"],
                 "type": "string",
                 "description": "* `daylight_intervals` - daylight_intervals\n* `full_day` - full_day"
             },
             "MountingTypeEnum": {
-                "enum": [
-                    "unknown",
-                    "fixed",
-                    "tracking"
-                ],
+                "enum": ["unknown", "fixed", "tracking"],
                 "type": "string",
                 "description": "* `unknown` - Unknown\n* `fixed` - Fixed\n* `tracking` - Tracking"
             },
@@ -7466,9 +7213,7 @@
                 "description": "* `pending` - Pending\n* `retry` - Retry\n* `sending` - Sending\n* `sent` - Sent\n* `failed` - Failed\n* `uncertain` - Uncertain\n* `skipped` - Skipped\n* `cancelled` - Cancelled"
             },
             "NullEnum": {
-                "enum": [
-                    null
-                ]
+                "enum": [null]
             },
             "ObservationImport": {
                 "type": "object",
@@ -7487,11 +7232,7 @@
                         }
                     }
                 },
-                "required": [
-                    "configuration_id",
-                    "observations",
-                    "unit"
-                ]
+                "required": ["configuration_id", "observations", "unit"]
             },
             "ObservationImportOutput": {
                 "type": "object",
@@ -7512,12 +7253,7 @@
                         }
                     }
                 },
-                "required": [
-                    "count",
-                    "created",
-                    "existing",
-                    "ids"
-                ]
+                "required": ["count", "created", "existing", "ids"]
             },
             "ObservationOutput": {
                 "type": "object",
@@ -7588,12 +7324,7 @@
                 ]
             },
             "ObservationQualityEnum": {
-                "enum": [
-                    "valid",
-                    "outage",
-                    "curtailed",
-                    "invalid"
-                ],
+                "enum": ["valid", "outage", "curtailed", "invalid"],
                 "type": "string",
                 "description": "* `valid` - Valid\n* `outage` - Outage\n* `curtailed` - Curtailed\n* `invalid` - Invalid"
             },
@@ -7626,19 +7357,11 @@
                         "maxLength": 200
                     }
                 },
-                "required": [
-                    "ends_at",
-                    "energy",
-                    "source",
-                    "starts_at"
-                ]
+                "required": ["ends_at", "energy", "source", "starts_at"]
             },
             "PaginatedCalibrationSummaryOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7666,10 +7389,7 @@
             },
             "PaginatedChangeRequestSummaryOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7697,10 +7417,7 @@
             },
             "PaginatedIncidentOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7728,10 +7445,7 @@
             },
             "PaginatedLocationChangeOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7759,10 +7473,7 @@
             },
             "PaginatedPlantOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7790,10 +7501,7 @@
             },
             "PaginatedSiteOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7821,10 +7529,7 @@
             },
             "PaginatedTenantOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -7852,10 +7557,7 @@
             },
             "PaginatedTrashedRegionOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -8022,10 +7724,7 @@
                 ]
             },
             "PerformanceDayStatusEnum": {
-                "enum": [
-                    "matched",
-                    "missing"
-                ],
+                "enum": ["matched", "missing"],
                 "type": "string",
                 "description": "* `matched` - matched\n* `missing` - missing"
             },
@@ -8346,10 +8045,7 @@
                         "nullable": true
                     }
                 },
-                "required": [
-                    "dc_capacity_mw",
-                    "name"
-                ]
+                "required": ["dc_capacity_mw", "name"]
             },
             "PlantOutput": {
                 "type": "object",
@@ -8467,18 +8163,12 @@
                 ]
             },
             "PowerBasisEnum": {
-                "enum": [
-                    "ac",
-                    "dc"
-                ],
+                "enum": ["ac", "dc"],
                 "type": "string",
                 "description": "* `ac` - AC\n* `dc` - DC"
             },
             "PreparedMessageFormatEnum": {
-                "enum": [
-                    "xlsx",
-                    "plain"
-                ],
+                "enum": ["xlsx", "plain"],
                 "type": "string",
                 "description": "* `xlsx` - Workbook\n* `plain` - Plain text"
             },
@@ -8493,10 +8183,7 @@
                 "description": "* `current` - Current forecast\n* `saved_complete` - Saved complete forecast\n* `saved_partial` - Saved partial forecast\n* `unavailable` - Unavailable"
             },
             "ProductionChangeActionEnum": {
-                "enum": [
-                    "set",
-                    "revert"
-                ],
+                "enum": ["set", "revert"],
                 "type": "string",
                 "description": "* `set` - Set\n* `revert` - Revert"
             },
@@ -8577,17 +8264,10 @@
                         "default": false
                     }
                 },
-                "required": [
-                    "changes",
-                    "configuration_id",
-                    "unit"
-                ]
+                "required": ["changes", "configuration_id", "unit"]
             },
             "ProductionCommitInputOriginEnum": {
-                "enum": [
-                    "editor",
-                    "csv_import"
-                ],
+                "enum": ["editor", "csv_import"],
                 "type": "string",
                 "description": "* `editor` - editor\n* `csv_import` - csv_import"
             },
@@ -8929,11 +8609,7 @@
                         }
                     }
                 },
-                "required": [
-                    "changes",
-                    "preview",
-                    "warnings"
-                ]
+                "required": ["changes", "preview", "warnings"]
             },
             "ProductionPreviewRowOutput": {
                 "type": "object",
@@ -8982,11 +8658,7 @@
                         "format": "date-time"
                     }
                 },
-                "required": [
-                    "code",
-                    "ends_at",
-                    "starts_at"
-                ]
+                "required": ["code", "ends_at", "starts_at"]
             },
             "ProductionProviderOutput": {
                 "type": "object",
@@ -9116,11 +8788,7 @@
                         "format": "date-time"
                     }
                 },
-                "required": [
-                    "code",
-                    "ends_at",
-                    "starts_at"
-                ]
+                "required": ["code", "ends_at", "starts_at"]
             },
             "ProviderIntervalOutput": {
                 "type": "object",
@@ -9201,12 +8869,7 @@
                 ]
             },
             "RegionStatusEnum": {
-                "enum": [
-                    "pending",
-                    "approved",
-                    "suspended",
-                    "rejected"
-                ],
+                "enum": ["pending", "approved", "suspended", "rejected"],
                 "type": "string",
                 "description": "* `pending` - Awaiting approval\n* `approved` - Approved\n* `suspended` - Suspended\n* `rejected` - Rejected"
             },
@@ -9218,9 +8881,7 @@
                         "maxLength": 500
                     }
                 },
-                "required": [
-                    "reason"
-                ]
+                "required": ["reason"]
             },
             "ReminderAddressesOutput": {
                 "type": "object",
@@ -9240,10 +8901,7 @@
                         }
                     }
                 },
-                "required": [
-                    "recipients",
-                    "workspace_recipients"
-                ]
+                "required": ["recipients", "workspace_recipients"]
             },
             "ReminderDeliveryOutput": {
                 "type": "object",
@@ -9453,11 +9111,7 @@
                 "description": "* `sending` - Sending\n* `paused_by_user` - Paused\n* `waiting_for_approval` - Waiting for approval\n* `provider_attention` - Provider account needs attention\n* `no_recipients` - No recipients\n* `invalid_recipient` - Invalid recipient\n* `over_recipient_limit` - Over the recipient limit"
             },
             "RequestOutcomeEnum": {
-                "enum": [
-                    "uncertain",
-                    "succeeded",
-                    "failed"
-                ],
+                "enum": ["uncertain", "succeeded", "failed"],
                 "type": "string",
                 "description": "* `uncertain` - Uncertain\n* `succeeded` - Succeeded\n* `failed` - Failed"
             },
@@ -9473,10 +9127,7 @@
                 "description": "* `forecast` - Forecast\n* `estimated_actuals` - Estimated actuals\n* `validation` - Validation\n* `inspect_settings` - Site settings check\n* `inspect_forecast` - Forecast check"
             },
             "ResolutionMinutesEnum": {
-                "enum": [
-                    30,
-                    60
-                ],
+                "enum": [30, 60],
                 "type": "integer",
                 "description": "* `30` - 30\n* `60` - 60"
             },
@@ -9492,16 +9143,10 @@
                         "format": "date-time"
                     }
                 },
-                "required": [
-                    "ends_at",
-                    "expected_revision"
-                ]
+                "required": ["ends_at", "expected_revision"]
             },
             "RestoreBlockerEnum": {
-                "enum": [
-                    "trash_retention_expired",
-                    "location_already_exists"
-                ],
+                "enum": ["trash_retention_expired", "location_already_exists"],
                 "type": "string",
                 "description": "* `trash_retention_expired` - Trash Retention Expired\n* `location_already_exists` - Location Already Exists"
             },
@@ -9513,9 +9158,7 @@
                         "minimum": 1
                     }
                 },
-                "required": [
-                    "expected_revision"
-                ]
+                "required": ["expected_revision"]
             },
             "SelectionStateEnum": {
                 "enum": [
@@ -9550,12 +9193,7 @@
                         "nullable": true
                     }
                 },
-                "required": [
-                    "csrf_token",
-                    "expires_at",
-                    "language",
-                    "user"
-                ]
+                "required": ["csrf_token", "expires_at", "language", "user"]
             },
             "SessionUserOutput": {
                 "type": "object",
@@ -9743,18 +9381,12 @@
                 ]
             },
             "SlotScopeEnum": {
-                "enum": [
-                    "daylight",
-                    "full_day"
-                ],
+                "enum": ["daylight", "full_day"],
                 "type": "string",
                 "description": "* `daylight` - daylight\n* `full_day` - full_day"
             },
             "SnapshotSourceKindEnum": {
-                "enum": [
-                    "forecast",
-                    "estimated_actuals"
-                ],
+                "enum": ["forecast", "estimated_actuals"],
                 "type": "string",
                 "description": "* `forecast` - Forecast\n* `estimated_actuals` - Estimated actuals"
             },
@@ -9865,10 +9497,7 @@
                 "description": "* `configuration_unavailable` - configuration_unavailable\n* `forecast_unavailable` - forecast_unavailable\n* `estimated_actuals_unavailable` - estimated_actuals_unavailable"
             },
             "UnitEnum": {
-                "enum": [
-                    "MWh",
-                    "kWh"
-                ],
+                "enum": ["MWh", "kWh"],
                 "type": "string",
                 "description": "* `MWh` - MWh\n* `kWh` - kWh"
             },
@@ -9882,10 +9511,7 @@
                         "type": "string"
                     }
                 },
-                "required": [
-                    "id",
-                    "name"
-                ]
+                "required": ["id", "name"]
             },
             "WorkspaceInvitationsOutput": {
                 "type": "object",
@@ -9897,9 +9523,7 @@
                         }
                     }
                 },
-                "required": [
-                    "invitations"
-                ]
+                "required": ["invitations"]
             },
             "WorkspaceMemberOutput": {
                 "type": "object",
@@ -9915,11 +9539,7 @@
                         "$ref": "#/components/schemas/WorkspaceRoleEnum"
                     }
                 },
-                "required": [
-                    "email",
-                    "id",
-                    "role"
-                ]
+                "required": ["email", "id", "role"]
             },
             "WorkspaceMembersOutput": {
                 "type": "object",
@@ -9934,16 +9554,10 @@
                         "type": "integer"
                     }
                 },
-                "required": [
-                    "members",
-                    "plants_at_recipient_limit"
-                ]
+                "required": ["members", "plants_at_recipient_limit"]
             },
             "WorkspaceRoleEnum": {
-                "enum": [
-                    "admin",
-                    "viewer"
-                ],
+                "enum": ["admin", "viewer"],
                 "type": "string",
                 "description": "* `admin` - Administrator\n* `viewer` - Viewer"
             }
