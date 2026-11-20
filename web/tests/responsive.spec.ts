@@ -38,7 +38,7 @@ async function setup(page: Page) {
         window_start: "2026-01-01",
         window_end: "2026-01-07",
         status: "ready",
-        assessment: "validated",
+        assessment: "evaluated",
         factor: 1.1,
         result: { provisional_production: true },
     };
@@ -393,7 +393,7 @@ for (const width of [320, 390, 768, 1440]) {
                     page.getByText("Provisional production", { exact: true }),
                 ).toHaveCount(2);
                 await expect(
-                    page.getByText("Assessment: validated. Factor: 1.1."),
+                    page.getByText("Assessment: Evaluated. Factor: 1.1."),
                 ).toBeVisible();
             }
             if (tab === "Production") {

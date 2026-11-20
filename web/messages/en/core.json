@@ -383,6 +383,11 @@
             "no_recipients": "Not sent because no recipient is left.",
             "invalid_recipient": "Not sent because a saved recipient address is invalid.",
             "over_recipient_limit": "Not sent because the plant has more recipients than the limit allows."
+        },
+        "CalibrationAssessment": {
+            "insufficient": "Insufficient data",
+            "provisional": "Provisional",
+            "evaluated": "Evaluated"
         }
     }
 }

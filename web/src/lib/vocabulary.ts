@@ -8,6 +8,7 @@ export const vocabulary = {
     LocationChangeStatus: "LocationChangeStatusEnum",
     Freshness: "FreshnessEnum",
     CalibrationStatus: "CalibrationStatusEnum",
+    CalibrationAssessment: "CalibrationAssessmentEnum",
     ChangeRequestKind: "ChangeRequestKindEnum",
     ChangeRequestStatus: "ChangeRequestStatusEnum",
     IncidentKind: "IncidentKindEnum",

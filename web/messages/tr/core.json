@@ -383,6 +383,11 @@
             "no_recipients": "Gönderilecek alıcı kalmadığı için gönderilmedi.",
             "invalid_recipient": "Kayıtlı bir alıcı adresi geçersiz olduğu için gönderilmedi.",
             "over_recipient_limit": "Santralin alıcı sayısı sınırı aştığı için gönderilmedi."
+        },
+        "CalibrationAssessment": {
+            "insufficient": "Yetersiz veri",
+            "provisional": "Geçici",
+            "evaluated": "Değerlendirildi"
         }
     }
 }

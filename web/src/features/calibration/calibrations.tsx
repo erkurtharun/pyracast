@@ -5,11 +5,30 @@ import { useEffect, useRef, useState } from "react";
 import type { Calibration, PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { cadence, useApiList, useRefresh } from "@/lib/api/query";
+import { useFormat } from "@/lib/format/use-format";
 import { CalibrationAutomationPanel } from "./calibration-automation";
 import { CsvDownload } from "@/ui/csv-download";
 import { ScrollRegion } from "@/ui/scroll-region";
+import { useErrorMessage } from "@/ui/form";
 import { Resource } from "@/ui/resource";
 import { Empty, JsonDetails, Notice, Stat, Tag } from "@/ui/ui";
+import { StatusTag, useCodeLabel, useLabel } from "@/ui/vocabulary";
+
+function useValueLabel() {
+    const t = useTranslations("Calibrations");
+    const locale = useLocale();
+    const code = useCodeLabel("Calibrations.values");
+    return (value: string) =>
+        value === ""
+            ? ""
+            : code(
+                  value,
+                  t("unknown_value", {
+                      value:
+                          locale === "en" ? value.replaceAll("_", " ") : value,
+                  }),
+              );
+}
 
 type DetailState =
     | { status: "idle" | "loading" }
@@ -28,15 +47,11 @@ export function Calibrations({
 }) {
     const t = useTranslations("Calibrations");
     const canManage = useCanManageWorkspace();
-    const locale = useLocale();
-    const enumLabel = (value: string) =>
-        value === ""
-            ? ""
-            : t.has(`values.${value}`)
-              ? t(`values.${value}`)
-              : t("unknown_value", {
-                    value: locale === "en" ? value.replaceAll("_", " ") : value,
-                });
+    const format = useFormat();
+    const label = useLabel();
+    const errorMessage = useErrorMessage();
+    const assessment = (value: Calibration["assessment"]) =>
+        value === "" ? "" : label("CalibrationAssessment", value);
 
     const refresh = useRefresh();
     const changed = () => refresh.workspace(scope.tenant_id);
@@ -68,7 +83,7 @@ export function Calibrations({
         } catch (error) {
             setActionState({
                 status: "error",
-                error: (error as Error).message,
+                error: errorMessage(error),
             });
         }
     }
@@ -84,7 +99,7 @@ export function Calibrations({
                 setDetail({ status: "loaded", data });
         } catch (error) {
             if (sequence === detailSequence.current)
-                setDetail({ status: "error", error: (error as Error).message });
+                setDetail({ status: "error", error: errorMessage(error) });
         }
     }
     return (
@@ -183,7 +198,10 @@ export function Calibrations({
                                                     {run.window_end}
                                                 </td>
                                                 <td>
-                                                    <Tag>{run.status}</Tag>
+                                                    <StatusTag
+                                                        group="CalibrationStatus"
+                                                        value={run.status}
+                                                    />
                                                     {run.configuration_id !==
                                                         currentConfigurationId && (
                                                         <Tag>
@@ -194,7 +212,7 @@ export function Calibrations({
                                                     )}
                                                 </td>
                                                 <td>
-                                                    {enumLabel(run.assessment)}{" "}
+                                                    {assessment(run.assessment)}{" "}
                                                     {(
                                                         run.result as Record<
                                                             string,
@@ -211,14 +229,10 @@ export function Calibrations({
                                                     )}
                                                 </td>
                                                 <td>
-                                                    {run.factor === null
-                                                        ? "—"
-                                                        : new Intl.NumberFormat(
-                                                              locale,
-                                                              {
-                                                                  maximumFractionDigits: 4,
-                                                              },
-                                                          ).format(run.factor)}
+                                                    {format.number(
+                                                        run.factor,
+                                                        4,
+                                                    )}
                                                 </td>
                                                 <td>
                                                     <button
@@ -294,7 +308,10 @@ export function Calibrations({
                         <div className="section-heading">
                             <h3>{t("calibration_id", { id: selected.id })}</h3>
                             <div className="tags">
-                                <Tag>{selected.status}</Tag>
+                                <StatusTag
+                                    group="CalibrationStatus"
+                                    value={selected.status}
+                                />
                                 {(
                                     selected.result as Record<
                                         string,
@@ -309,13 +326,11 @@ export function Calibrations({
                         </div>
                         <p>
                             {t("assessment_factor", {
-                                assessment: enumLabel(selected.assessment),
+                                assessment: assessment(selected.assessment),
                                 factor:
                                     selected.factor === null
                                         ? t("unavailable")
-                                        : new Intl.NumberFormat(locale, {
-                                              maximumFractionDigits: 4,
-                                          }).format(selected.factor),
+                                        : format.number(selected.factor, 4),
                             })}
                         </p>
                         <CalibrationAssessment run={selected} />
@@ -341,15 +356,11 @@ export function Calibrations({
 
 function CalibrationAssessment({ run }: { run: Calibration }) {
     const t = useTranslations("Calibrations");
-    const locale = useLocale();
-    const enumLabel = (value: string) =>
-        value === ""
-            ? ""
-            : t.has(`values.${value}`)
-              ? t(`values.${value}`)
-              : t("unknown_value", {
-                    value: locale === "en" ? value.replaceAll("_", " ") : value,
-                });
+    const formatter = useFormat();
+    const label = useLabel();
+    const valueLabel = useValueLabel();
+    const statusMessage = useCodeLabel("Calibrations.status_messages");
+    const reasonMessage = useCodeLabel("Calibrations.reasons");
 
     const asRecord = (value: unknown): Record<string, unknown> =>
         value && typeof value === "object" && !Array.isArray(value)
@@ -362,43 +373,7 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
         support = asRecord(result.training_support),
         exclusions = asRecord(result.exclusions),
         daylightMetrics = result.metric_scope === "daylight_intervals";
-    const format = (value: unknown) =>
-        typeof value === "number"
-            ? new Intl.NumberFormat(locale, {
-                  maximumFractionDigits: 4,
-              }).format(value)
-            : "—";
-    const messages: Record<string, string> = {
-        pending: t("waiting_for_the_calibration_worker"),
-        running: t("the_worker_is_fitting_and_evaluating_this"),
-        ready: t("this_fit_passed_the_heldout_comparison_and"),
-        rejected: t("this_fit_did_not_pass_the_improvement"),
-        insufficient: t("there_are_not_enough_eligible_complete_days"),
-    };
-    const reasonMessages: Record<string, string> = {
-        insufficient_complete_days: t(
-            "not_enough_complete_paired_days_are_available",
-        ),
-        insufficient_training_support: t(
-            "the_training_days_do_not_contain_enough",
-        ),
-        zero_production_holdout: t(
-            "zero_production_in_the_comparison_period_prevents",
-        ),
-        baseline_improvement_below_margin: t(
-            "the_candidate_did_not_improve_enough_over",
-        ),
-        factor_at_bound: t("the_fitted_factor_reached_its_allowed_boundary"),
-        incumbent_mae_regression: t(
-            "the_candidate_increased_error_compared_with_the",
-        ),
-        baseline_bias_regression: t(
-            "the_candidate_increased_bias_compared_with_the",
-        ),
-        incumbent_bias_regression: t(
-            "the_candidate_increased_bias_compared_with_the_2",
-        ),
-    };
+    const format = (value: unknown) => formatter.number(value, 4);
     const reasons = Array.isArray(result.reasons)
         ? result.reasons.filter(
               (reason): reason is string => typeof reason === "string",
@@ -407,8 +382,12 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
     return (
         <>
             <Notice>
-                {messages[run.status] ??
-                    t("calibration_status", { status: enumLabel(run.status) })}
+                {statusMessage(
+                    run.status,
+                    t("calibration_status", {
+                        status: label("CalibrationStatus", run.status),
+                    }),
+                )}
                 {run.assessment === "provisional"
                     ? t("_this_is_a_provisional_assessment_based")
                     : ""}
@@ -417,7 +396,7 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                 <ul>
                     {reasons.map((reason) => (
                         <li key={reason}>
-                            {reasonMessages[reason] ?? enumLabel(reason)}
+                            {reasonMessage(reason, valueLabel(reason))}
                         </li>
                     ))}
                 </ul>
@@ -517,12 +496,7 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                             )
                             .map(([key, value]) => (
                                 <li key={key}>
-                                    {enumLabel(key)}:{" "}
-                                    {typeof value === "number"
-                                        ? new Intl.NumberFormat(locale).format(
-                                              value,
-                                          )
-                                        : String(value)}
+                                    {valueLabel(key)}: {formatter.number(value)}
                                 </li>
                             ))}
                     </ul>
