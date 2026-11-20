@@ -1,10 +1,11 @@
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, transaction
+from django.db.models import Q
 from django.db.models.functions import Greatest
 
 from pyracast.background.failures import log_failure
@@ -13,13 +14,14 @@ from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import (
     CollectionEndpoint,
+    CollectionInactiveReason,
     CollectionJob,
     CollectionJobError,
     CollectionJobStatus,
     CollectionSchedule,
 )
-from pyracast.forecasts.timing import forecast_timing, latest_forecast_slot
-from pyracast.regions.models import Region
+from pyracast.forecasts.timing import ForecastTiming, forecast_timing, latest_forecast_slot
+from pyracast.regions.models import Region, RegionStatus
 
 logger = logging.getLogger(__name__)
 # A stale forecast job at the latest slot is opened again unless it was refused for a reason that
@@ -44,22 +46,75 @@ class _RegionContext:
         return ZoneInfo(self.timezone)
 
 
-def _schedule_night_history(context: _RegionContext) -> int | None:
-    binding, now = context.binding, context.now
-    today = now.astimezone(context.zone).date()
-    window = nightly_window(today, context.timezone)
-    if window is None or not window[0] <= now < window[1]:
-        return None
-    history = (
-        CollectionJob.objects.filter(
-            binding=binding,
+@dataclass(frozen=True)
+class NightWindow:
+    """The open nightly history window of a local day, collecting the day before."""
+
+    start: datetime
+    end: datetime
+    target: date
+
+    def history(self) -> Q:
+        return Q(
             endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
             reference_import__isnull=True,
-            target_date=today - timedelta(days=1),
-            scheduled_for__gte=window[0],
-            scheduled_for__lt=window[1],
-            retry_until=window[1],
+            target_date=self.target,
+            scheduled_for__gte=self.start,
+            scheduled_for__lt=self.end,
+            retry_until=self.end,
         )
+
+    def revivable(self) -> Q:
+        """A stale history job of the window that saved nothing; the scheduler revives it."""
+        return Q(
+            endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
+            target_date=self.target,
+            scheduled_for__gte=self.start,
+            retry_until=self.end,
+            status=CollectionJobStatus.STALE,
+            forecastsnapshot__isnull=True,
+        )
+
+
+def open_night_window(now: datetime, timezone_name: str) -> NightWindow | None:
+    today = now.astimezone(ZoneInfo(timezone_name)).date()
+    window = nightly_window(today, timezone_name)
+    if window is None or not window[0] <= now < window[1]:
+        return None
+    return NightWindow(window[0], window[1], today - timedelta(days=1))
+
+
+@dataclass(frozen=True)
+class Collecting:
+    binding: SiteBinding
+    timing: ForecastTiming
+
+
+def collection_gate(
+    region: Region, schedule: CollectionSchedule | None
+) -> Collecting | CollectionInactiveReason:
+    """The scheduler's gate, in its order, for a loaded region and its saved schedule."""
+    binding = region.approved_binding
+    if region.status != RegionStatus.APPROVED:
+        return CollectionInactiveReason.NOT_APPROVED
+    if binding is None or binding.validated_at is None:
+        return CollectionInactiveReason.NOT_VALIDATED
+    if not binding_is_current(binding, region):
+        return CollectionInactiveReason.BINDING_NOT_CURRENT
+    if schedule is not None and not schedule.enabled:
+        return CollectionInactiveReason.SCHEDULE_DISABLED
+    timing = forecast_timing(binding, schedule)
+    # Approval creates the first forecast job; a binding without one was never approved.
+    return CollectionInactiveReason.NOT_APPROVED if timing is None else Collecting(binding, timing)
+
+
+def _schedule_night_history(context: _RegionContext) -> int | None:
+    binding, now = context.binding, context.now
+    window = open_night_window(now, context.timezone)
+    if window is None:
+        return None
+    history = (
+        CollectionJob.objects.filter(window.history(), binding=binding)
         .order_by("scheduled_for", "pk")
         .first()
     )
@@ -67,22 +122,14 @@ def _schedule_night_history(context: _RegionContext) -> int | None:
         history, _ = CollectionJob.objects.get_or_create(
             binding=binding,
             endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
-            scheduled_for=window[0],
+            scheduled_for=window.start,
             defaults={
-                "target_date": today - timedelta(days=1),
+                "target_date": window.target,
                 "available_at": now,
-                "retry_until": window[1],
+                "retry_until": window.end,
             },
         )
-    CollectionJob.objects.filter(
-        binding=binding,
-        endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
-        target_date=today - timedelta(days=1),
-        scheduled_for__gte=window[0],
-        retry_until=window[1],
-        status=CollectionJobStatus.STALE,
-        forecastsnapshot__isnull=True,
-    ).update(
+    CollectionJob.objects.filter(window.revivable(), binding=binding).update(
         status=CollectionJobStatus.PENDING,
         available_at=Greatest("available_at", now),
         last_error="",
@@ -152,14 +199,12 @@ def _enqueue_region(region_id: int, now: datetime) -> list[int]:
         )
         if region is None:
             return []
-        binding = region.approved_binding
-        if binding is None or binding.validated_at is None or not binding_is_current(binding):
+        gate = collection_gate(region, CollectionSchedule.objects.filter(region=region).first())
+        if isinstance(gate, CollectionInactiveReason):
             return []
-        timing = forecast_timing(binding, CollectionSchedule.objects.filter(region=region).first())
-        if timing is None:
-            return []
-        context = _RegionContext(binding, region.timezone, now)
+        context = _RegionContext(gate.binding, region.timezone, now)
         jobs = [pk for pk in (_schedule_night_history(context),) if pk is not None]
+        timing = gate.timing
         slot = latest_forecast_slot(now, region.timezone, timing.times, timing.effective_from)
         if slot is None:
             return jobs

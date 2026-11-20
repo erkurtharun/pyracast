@@ -54,6 +54,22 @@ class SnapshotSourceKind(models.TextChoices):
     ESTIMATED_ACTUALS = "estimated_actuals", "Estimated actuals"
 
 
+class CollectionState(models.TextChoices):
+    COLLECTING = "collecting", "Collecting"
+    WAITING_FOR_APPROVAL = "waiting_for_approval", "Waiting for approval"
+    PAUSED = "paused", "Paused"
+    PROVIDER_ATTENTION = "provider_attention", "Waiting for the provider"
+
+
+class CollectionInactiveReason(models.TextChoices):
+    NOT_APPROVED = "not_approved", "Not approved"
+    NOT_VALIDATED = "not_validated", "Not validated"
+    BINDING_NOT_CURRENT = "binding_not_current", "Binding not current"
+    SCHEDULE_DISABLED = "schedule_disabled", "Schedule disabled"
+    QUOTA_TOO_LOW = "quota_too_low", "Quota too low for forecasts"
+    PROVIDER_UNAVAILABLE = "provider_unavailable", "Provider unavailable"
+
+
 class CollectionJobError(models.TextChoices):
     HISTORY_WINDOW_CLOSED = "history_window_closed", "History window closed"
     ATTEMPTS_EXHAUSTED = "attempts_exhausted", "Attempts exhausted"

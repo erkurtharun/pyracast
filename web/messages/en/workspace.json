@@ -259,7 +259,8 @@
         "dailyHistory": "Daily history: {time}. Pausing also stops history collection.",
         "jobSummary": "{endpoint} - {status} - {time} - {attempts, plural, one {# attempt} other {# attempts}}",
         "approvalRequired": "Data collection can be enabled once this plant is approved and connected.",
-        "historyHelp": "Historical estimate retries preserve requests for scheduled forecasts. Validation and retries can use additional requests. Email reminders do not request provider data. Historical estimates are modeled; EPİAŞ reported production and settlement injection are separate records."
+        "historyHelp": "Historical estimate retries preserve requests for scheduled forecasts. Validation and retries can use additional requests. Email reminders do not request provider data. Historical estimates are modeled; EPİAŞ reported production and settlement injection are separate records.",
+        "requestsToday": "Provider requests today (UTC)"
     },
     "RecycleBin": {
         "deletePlant": "Delete plant",

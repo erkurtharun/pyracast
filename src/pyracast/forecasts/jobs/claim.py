@@ -5,6 +5,8 @@ from enum import StrEnum
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
+from django.db.models import DateTimeField, Q, Value
+from django.db.models.functions import Greatest
 
 from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS
@@ -117,6 +119,17 @@ def _stale_reason(
     return None
 
 
+def window_closed(job: CollectionJob, now: datetime) -> bool:
+    return job.retry_until is not None and now >= job.retry_until
+
+
+def open_at_claim(now: datetime) -> Q:
+    """Waiting jobs whose window is still open when they can first be claimed (window_closed)."""
+    return Q(retry_until__isnull=True) | Q(
+        retry_until__gt=Greatest("available_at", Value(now, output_field=DateTimeField()))
+    )
+
+
 def claim(job_id: int, now: datetime) -> Lease | None:
     clock = Clock(now)
     with transaction.atomic():
@@ -144,7 +157,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             CollectionJobStatus.FAILED,
         } or (job.available_at > now and not cleared_cooldown):
             return None
-        if job.retry_until is not None and now >= job.retry_until:
+        if window_closed(job, now):
             _end_unclaimed(
                 job, CollectionJobStatus.FAILED, CollectionJobError.HISTORY_WINDOW_CLOSED
             )

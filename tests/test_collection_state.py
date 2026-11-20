@@ -11,7 +11,7 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts.jobs.claim import claim
-from pyracast.forecasts.models import CollectionJob, RequestPurpose
+from pyracast.forecasts.models import CollectionJob, RequestAttempt, RequestPurpose
 from pyracast.forecasts.quota import RequestDeferredError, reserve_request
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
@@ -207,6 +207,8 @@ def test_usage_counts_only_the_plants_own_requests_of_the_utc_day() -> None:
         capacity_kw=1,
         capacity_semantics_verified=True,
     )
+    validation = RequestAttempt.objects.get(binding=system.binding)
+    assert (validation.purpose, validation.utc_day) == ("validation", EVENING.date())
     for binding, moment, count in (
         (system.binding, EVENING, 2),
         (other, EVENING, 3),
@@ -215,7 +217,7 @@ def test_usage_counts_only_the_plants_own_requests_of_the_utc_day() -> None:
         for _ in range(count):
             reserve_request(binding, moment, purpose=RequestPurpose.FORECAST)
 
-    assert read(system, EVENING)["requests_today"] == 2
+    assert read(system, EVENING)["requests_today"] == 3
 
 
 def test_members_read_the_state_and_other_workspaces_learn_nothing() -> None:

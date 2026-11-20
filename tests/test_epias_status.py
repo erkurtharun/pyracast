@@ -40,13 +40,14 @@ class Source:
     def job(
         self, day: date, status: str, batch: datetime, *, complete: bool | None = None
     ) -> EpiasCollectionJob:
-        connection = self.connection
+        connection, configuration = self.connection, self.plant.current_configuration
         assert connection is not None
+        assert configuration is not None
         provider = {"id": connection.provider_plant_id, "eic": connection.eic}
         job = EpiasCollectionJob.objects.create(
             plant=self.plant,
             connection=connection,
-            configuration=self.plant.current_configuration,
+            configuration=configuration,
             connection_revision=connection.revision,
             provider_plant=provider,
             target_date=day,

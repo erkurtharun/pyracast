@@ -259,7 +259,8 @@
         "dailyHistory": "Günlük geçmiş: {time}. Duraklatma, geçmiş verilerinin toplanmasını da durdurur.",
         "jobSummary": "{endpoint} - {status} - {time} - {attempts, number} deneme",
         "approvalRequired": "Veri toplama, santral onaylanıp bağlandıktan sonra etkinleştirilebilir.",
-        "historyHelp": "Geçmiş tahminlerinin yeniden denemeleri, planlı tahminlerin istek kotasını korur. Doğrulama ve yeniden denemeler ek istek tüketebilir. E-posta hatırlatıcıları sağlayıcıdan veri istemez. Geçmiş tahminleri modelle hesaplanır; EPİAŞ bildirilen üretim ve uzlaştırmaya esas veriş kayıtları ayrıdır."
+        "historyHelp": "Geçmiş tahminlerinin yeniden denemeleri, planlı tahminlerin istek kotasını korur. Doğrulama ve yeniden denemeler ek istek tüketebilir. E-posta hatırlatıcıları sağlayıcıdan veri istemez. Geçmiş tahminleri modelle hesaplanır; EPİAŞ bildirilen üretim ve uzlaştırmaya esas veriş kayıtları ayrıdır.",
+        "requestsToday": "Bugünkü sağlayıcı istekleri (UTC)"
     },
     "RecycleBin": {
         "deletePlant": "Santrali sil",

@@ -1091,6 +1091,22 @@ export interface components {
             | "scaled_forecasts"
             | "scaled_estimated_actuals";
         /**
+         * @description * `not_approved` - Not approved
+         *     * `not_validated` - Not validated
+         *     * `binding_not_current` - Binding not current
+         *     * `schedule_disabled` - Schedule disabled
+         *     * `quota_too_low` - Quota too low for forecasts
+         *     * `provider_unavailable` - Provider unavailable
+         * @enum {string}
+         */
+        CollectionInactiveReasonEnum:
+            | "not_approved"
+            | "not_validated"
+            | "binding_not_current"
+            | "schedule_disabled"
+            | "quota_too_low"
+            | "provider_unavailable";
+        /**
          * @description * `history_window_closed` - History window closed
          *     * `attempts_exhausted` - Attempts exhausted
          *     * `forecast_superseded` - Forecast superseded
@@ -1184,6 +1200,14 @@ export interface components {
             timezone: string;
             /** Format: date-time */
             effective_from: string;
+            state: components["schemas"]["CollectionStateEnum"];
+            inactive_reason:
+                | (
+                      | components["schemas"]["CollectionInactiveReasonEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            requests_today: number;
             /** Format: date-time */
             last_success_at: string | null;
             /** Format: date-time */
@@ -1195,6 +1219,18 @@ export interface components {
             history_retry_minutes: number;
             max_forecast_times: number;
         };
+        /**
+         * @description * `collecting` - Collecting
+         *     * `waiting_for_approval` - Waiting for approval
+         *     * `paused` - Paused
+         *     * `provider_attention` - Waiting for the provider
+         * @enum {string}
+         */
+        CollectionStateEnum:
+            | "collecting"
+            | "waiting_for_approval"
+            | "paused"
+            | "provider_attention";
         /**
          * @description * `archived_forecast` - archived_forecast
          *     * `historical_model` - historical_model
@@ -1340,7 +1376,19 @@ export interface components {
             configuration_revision: number;
         };
         EpiasConnectionOutput: {
+            state: components["schemas"]["EpiasStateEnum"];
             connected: boolean;
+            /** Format: date-time */
+            disconnected_at: string | null;
+            health:
+                | (
+                      | components["schemas"]["EpiasHealthEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            /** Format: date */
+            complete_through: string | null;
+            failed_days: number;
             provider_plant_id: number | null;
             settlement_plant_id: number | null;
             /** Format: date */
@@ -1357,6 +1405,18 @@ export interface components {
             pending_jobs: number;
             archived_days: number;
         };
+        /**
+         * @description * `up_to_date` - Up to date
+         *     * `collecting` - Collecting
+         *     * `waiting_for_publication` - Waiting for publication
+         *     * `needs_attention` - Needs attention
+         * @enum {string}
+         */
+        EpiasHealthEnum:
+            | "up_to_date"
+            | "collecting"
+            | "waiting_for_publication"
+            | "needs_attention";
         /**
          * @description * `retry_window_expired` - Retry window expired
          *     * `attempts_exhausted` - Attempts exhausted
@@ -1397,6 +1457,13 @@ export interface components {
          * @enum {string}
          */
         EpiasSourceKindEnum: "realtime_generation" | "settlement_injection";
+        /**
+         * @description * `never_connected` - Never connected
+         *     * `connected` - Connected
+         *     * `disconnected` - Disconnected
+         * @enum {string}
+         */
+        EpiasStateEnum: "never_connected" | "connected" | "disconnected";
         /** @description Body of every failed /api/ response. */
         Error: {
             code: components["schemas"]["ErrorCode"];

@@ -19,6 +19,19 @@ class EpiasJobStatus(models.TextChoices):
     AWAITING_PUBLICATION = "awaiting_publication", "Awaiting publication"
 
 
+class EpiasState(models.TextChoices):
+    NEVER_CONNECTED = "never_connected", "Never connected"
+    CONNECTED = "connected", "Connected"
+    DISCONNECTED = "disconnected", "Disconnected"
+
+
+class EpiasHealth(models.TextChoices):
+    UP_TO_DATE = "up_to_date", "Up to date"
+    COLLECTING = "collecting", "Collecting"
+    WAITING_FOR_PUBLICATION = "waiting_for_publication", "Waiting for publication"
+    NEEDS_ATTENTION = "needs_attention", "Needs attention"
+
+
 class EpiasConnection(models.Model):
     plant = models.OneToOneField("plants.Plant", on_delete=models.PROTECT)
     provider_plant_id = models.PositiveBigIntegerField()
