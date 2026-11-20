@@ -59,7 +59,7 @@ def production_changes(request: ChangeRequest) -> list[ProductionChange]:
             row.starts_at,
             row.ends_at,
             row.expected_head_id,
-            row.action,
+            "revert" if row.action == ProductionChangeAction.REVERT else "set",
             row.energy_mwh,
             row.quality,
             row.source,

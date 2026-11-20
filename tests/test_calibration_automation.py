@@ -26,13 +26,8 @@ from pyracast.plants.models import (
     PlantEvent,
     ProductionObservation,
 )
-from pyracast.plants.operations import (
-    ObservationInput,
-    activate_calibration,
-    import_observations,
-    reset_calibration,
-    revise_plant,
-)
+from pyracast.plants.operations import activate_calibration, reset_calibration, revise_plant
+from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region
 from pyracast.trash import purge_expired, trash_region

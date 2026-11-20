@@ -166,22 +166,25 @@ def test_stale_production_correction_is_a_coded_conflict(monkeypatch: pytest.Mon
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/"
         "production/changes/"
     )
-    payload = {
-        "configuration_id": plant.current_configuration_id,
-        "unit": "MWh",
-        "changes": [
-            {
-                "starts_at": start.isoformat(),
-                "ends_at": (start + timedelta(hours=1)).isoformat(),
-                "expected_revision_id": None,
-                "action": "set",
-                "energy": 2,
-            }
-        ],
-    }
+
+    def payload(energy: float) -> dict[str, object]:
+        return {
+            "configuration_id": plant.current_configuration_id,
+            "unit": "MWh",
+            "changes": [
+                {
+                    "starts_at": start.isoformat(),
+                    "ends_at": (start + timedelta(hours=1)).isoformat(),
+                    "expected_revision_id": None,
+                    "action": "set",
+                    "energy": energy,
+                }
+            ],
+        }
+
     client = signed_in(system.member)
-    assert post(client, path, payload).status_code == 200
-    stale = post(client, path, payload)
+    assert post(client, path, payload(2)).status_code == 200
+    stale = post(client, path, payload(3))
     assert stale.status_code == 409
     assert stale.json() == {
         "code": "production_revision_changed",

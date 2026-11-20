@@ -14,7 +14,7 @@ from pyracast.plants.models import (
     PlantConfiguration,
     PlantEvent,
 )
-from pyracast.plants.operations import ObservationInput, import_observations
+from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.training import run_calibration
 from tests.support.domain import NOW
 from tests.support.historical_reference_import import source_settings

@@ -19,14 +19,9 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.numerics import POLICY_VERSION, FitResult
-from pyracast.plants.operations import (
-    ObservationInput,
-    activate_calibration,
-    import_observations,
-    request_calibration,
-    reset_calibration,
-)
+from pyracast.plants.operations import activate_calibration, request_calibration, reset_calibration
 from pyracast.plants.preparation import prepare_calibration
+from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.regions.models import Region
 from tests.support.calibration_preparation import add_days
 from tests.support.domain import NOW

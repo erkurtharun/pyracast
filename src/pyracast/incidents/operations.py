@@ -1,11 +1,10 @@
-from dataclasses import dataclass
 from datetime import datetime
 from math import isfinite
 from typing import Any
 
 from django.contrib.auth.models import User
 from django.db import transaction
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -13,28 +12,11 @@ from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.incidents.models import IncidentKind, IncidentRevision, PlantIncident
+from pyracast.plants.incident_policy import incidents_changed
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.regions.models import Region
 
 UNZONED = _("Outage times must include a time zone.")
-
-
-@dataclass(frozen=True)
-class IncidentEvidence:
-    incident_id: int
-    revision_id: int
-    revision: int
-    recorded_at: datetime
-    kind: str
-    title: str
-    notes: str
-    starts_at: datetime
-    ends_at: datetime | None
-    available_dc_mw: float | None
-    available_inverter_mw: float | None
-    available_export_mw: float | None
-    declared_configuration_id: int
-    cancelled_at: datetime | None
 
 
 def _snapshot(row: PlantIncident) -> dict[str, object]:
@@ -50,65 +32,6 @@ def _snapshot(row: PlantIncident) -> dict[str, object]:
         "declared_configuration_id": row.declared_configuration_id,
         "cancelled_at": row.cancelled_at.isoformat() if row.cancelled_at else None,
     }
-
-
-def _evidence(revision: IncidentRevision) -> IncidentEvidence:
-    data = revision.snapshot
-    return IncidentEvidence(
-        incident_id=revision.incident_id,
-        revision_id=revision.pk,
-        revision=revision.revision,
-        recorded_at=revision.created_at,
-        kind=data["kind"],
-        title=data["title"],
-        notes=data["notes"],
-        starts_at=datetime.fromisoformat(data["starts_at"]),
-        ends_at=datetime.fromisoformat(data["ends_at"]) if data["ends_at"] else None,
-        available_dc_mw=data["available_dc_mw"],
-        available_inverter_mw=data["available_inverter_mw"],
-        available_export_mw=data["available_export_mw"],
-        declared_configuration_id=data["declared_configuration_id"],
-        cancelled_at=datetime.fromisoformat(data["cancelled_at"]) if data["cancelled_at"] else None,
-    )
-
-
-def pinned_incidents(plant_id: int, revision_ids: list[int]) -> tuple[IncidentEvidence, ...]:
-    revisions = list(
-        IncidentRevision.objects.filter(incident__plant_id=plant_id, pk__in=revision_ids).order_by(
-            "incident_id"
-        )
-    )
-    if len(revisions) != len(revision_ids):
-        raise ValueError("Incident revision evidence is missing or belongs to another plant.")
-    return tuple(_evidence(revision) for revision in revisions)
-
-
-def select_incidents(
-    plant_id: int, start: datetime, end: datetime, known_at: datetime
-) -> tuple[IncidentEvidence, ...]:
-    if any(x.utcoffset() is None for x in (start, end, known_at)) or end <= start:
-        raise ValueError("An aware, nonempty interval and aware knowledge time are required.")
-    latest = (
-        IncidentRevision.objects.filter(
-            incident_id=OuterRef("incident_id"), created_at__lte=known_at
-        )
-        .order_by("-revision")
-        .values("pk")[:1]
-    )
-    revisions = IncidentRevision.objects.filter(
-        incident__plant_id=plant_id, created_at__lte=known_at, pk=Subquery(latest)
-    ).order_by("incident_id")
-    result = []
-    for revision in revisions:
-        evidence = _evidence(revision)
-        if (
-            evidence.cancelled_at
-            or evidence.starts_at >= end
-            or (evidence.ends_at is not None and evidence.ends_at <= start)
-        ):
-            continue
-        result.append(evidence)
-    return tuple(result)
 
 
 def lock_incident_plant(
@@ -193,8 +116,6 @@ def _record(row: PlantIncident, actor: User) -> None:
     IncidentRevision.objects.create(
         incident=row, revision=row.revision, snapshot=_snapshot(row), actor=actor
     )
-    from pyracast.plants.incident_policy import incidents_changed
-
     incidents_changed(row.plant_id)
 
 
@@ -227,7 +148,9 @@ def prepare_incident(
         if row.cancelled_at is not None:
             raise DomainError(ErrorCode.INCIDENT_CLOSED)
         configuration = (
-            plant.current_configuration if row.ends_at is None else row.declared_configuration
+            plant.current_configuration
+            if values.get("ends_at") is None
+            else row.declared_configuration
         )
         if configuration is None:
             raise DomainError(ErrorCode.CONFIGURATION_UNAVAILABLE)

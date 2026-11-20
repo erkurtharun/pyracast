@@ -2,7 +2,7 @@ from datetime import datetime
 
 from django.utils import timezone
 
-from pyracast.incidents.operations import select_incidents
+from pyracast.incidents.evidence import select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import CalibrationRun, CalibrationStatus, PlantConfiguration
 

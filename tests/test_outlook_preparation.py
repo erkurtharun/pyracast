@@ -243,6 +243,6 @@ def test_ended_incident_still_produces_completed_day_scenario(
         "plant_id": plant.pk,
         "calibration_id": None,
     }
-    scenario = incident_forecasts.incident_scenario(outlook, day, 60, timezone.now())
+    scenario = incident_forecasts.incident_scenario(outlook, day, 60, timezone.now()).scenario
     assert scenario is not None
     assert cast(dict[str, Any], scenario["result"])["energy_mwh"] == pytest.approx(611)

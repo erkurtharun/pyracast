@@ -15,9 +15,10 @@ from pyracast.errors import ConflictError
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.measurements import latest_measurement_day, select_measurements
 from pyracast.plants.models import ProductionObservation
-from pyracast.plants.operations import ObservationInput, revise_plant
+from pyracast.plants.operations import revise_plant
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
+    ObservationInput,
     ProductionChange,
     change_production,
     preview_production,
@@ -47,12 +48,11 @@ def test_correction_survives_imports_and_revert_uses_latest_provider(
     row = result["intervals"][10]
     assert row["effective"]["energy_mwh"] == 3.5
     assert row["effective"]["source_kind"] == "manual"
-    assert row["provider_original"]["energy_mwh"] == 30
-    assert row["provider_original"]["snapshot_id"] == newer.pk
+    assert row["provider_originals"][0]["energy_mwh"] == 30
+    assert row["provider_originals"][0]["snapshot_id"] == newer.pk
     assert row["observation"]["recorded_by_id"] == system.member.pk
     assert row["can_edit"]
     assert row["can_revert"]
-    assert not row["reference_available"]
     assert result["days"][0]["total_mwh"] == 23 * 30 + 3.5
     assert original.readings[10]["total_mwh"] == "26"
     second = write(system, plant, [edit(slot, 4, revision_id=first)])["ids"][0]
@@ -73,7 +73,7 @@ def test_correction_survives_imports_and_revert_uses_latest_provider(
     assert result["intervals"][10]["revision_id"] == reverted
     assert result["intervals"][10]["observation"] is None
     assert not result["intervals"][10]["can_revert"]
-    assert len(result["revisions"]) == 3
+    assert ProductionObservation.objects.filter(plant=plant).count() == 3
     # Older fits retain the exact revision even when every write shares a timestamp.
     pinned, _ = select_measurements(config, start, end, NOW, observation_id_cutoff=first)
     assert pinned[10].energy_mwh == 3.5
@@ -140,7 +140,7 @@ def test_half_hour_manual_quality_suppresses_whole_provider_hour(
     half = production_history(plant, start_date=DAY, end_date=DAY, resolution_minutes=30)
     assert half["intervals"][20]["effective"]["energy_mwh"] == 0
     assert half["intervals"][21]["effective"] is None
-    assert half["intervals"][20]["provider_original"]["ends_at"] == slot + timedelta(hours=1)
+    assert half["intervals"][20]["provider_originals"][0]["ends_at"] == slot + timedelta(hours=1)
 
 
 def test_preview_units_stale_token_and_missing_are_explicit(
@@ -169,7 +169,7 @@ def test_preview_units_stale_token_and_missing_are_explicit(
         write(system, plant, [ProductionChange(**result["changes"][0])], unit="kWh")
     history = production_history(plant, start_date=DAY, end_date=DAY)
     assert history["intervals"][1]["effective"] is None
-    assert history["intervals"][1]["provider_original"] is None
+    assert history["intervals"][1]["provider_originals"] == []
 
 
 def test_current_configuration_and_meter_basis_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -193,9 +193,9 @@ def test_current_configuration_and_meter_basis_boundaries(monkeypatch: pytest.Mo
     assert config is not None
     assert select_measurements(config, start, end, NOW)[0] == []
     history = production_history(plant, start_date=DAY, end_date=DAY)
-    assert history["observations"][0]["id"] == first
+    assert history["intervals"][0]["previous_configuration_observation"]["id"] == first
     assert history["intervals"][0]["edit_unavailable_reason"] == "configuration_mismatch"
-    assert history["intervals"][0]["provider_original"] is None
+    assert history["intervals"][0]["provider_originals"] == []
     with pytest.raises(ValidationError, match="previous configuration"):
         write(system, plant, [edit(start, 3, revision_id=first)])
     with pytest.raises(ValidationError, match="current approved configuration"):
@@ -233,9 +233,8 @@ def test_api_permissions_and_validation(monkeypatch: pytest.MonkeyPatch) -> None
     }
     response = client.post(base + "changes/", payload, content_type="application/json")
     assert response.status_code == 200
-    assert (
-        client.post(base + "changes/", payload, content_type="application/json").status_code == 409
-    )
+    replay = client.post(base + "changes/", payload, content_type="application/json")
+    assert (replay.status_code, replay.json()) == (200, response.json())
     payload["changes"][0]["energy"] = True
     assert (
         client.post(base + "changes/", payload, content_type="application/json").status_code == 400

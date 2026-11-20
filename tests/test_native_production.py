@@ -8,9 +8,11 @@ from django.test import Client
 
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import ProductionObservation
-from pyracast.plants.operations import ObservationInput, import_observations, revise_plant
+from pyracast.plants.operations import revise_plant
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
+    ObservationInput,
+    import_observations,
     preview_production,
 )
 from tests.support.plant_operations import make_plant
@@ -142,7 +144,7 @@ def test_csv_warns_only_when_proposed_native_rows_leave_provider_gaps(
     assert correction["preview"][0]["corrected"]
 
 
-def test_native_previous_configuration_is_display_only_and_reentry_after_revert(
+def test_native_earlier_configuration_correction_is_shown_apart_and_reentry_after_revert(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -159,7 +161,7 @@ def test_native_previous_configuration_is_display_only_and_reentry_after_revert(
     assert result["intervals"][0]["observation"] is None
     assert result["intervals"][0]["effective"] is None
     assert result["intervals"][0]["edit_unavailable_reason"] == "configuration_mismatch"
-    assert result["observations"][0]["id"] == restored
+    assert result["intervals"][0]["previous_configuration_observation"]["id"] == restored
 
 
 @pytest.mark.parametrize(
@@ -167,7 +169,6 @@ def test_native_previous_configuration_is_display_only_and_reentry_after_revert(
     [
         ("W", "valid", "Use MWh"),
         ("MWh", "empty", "batch"),
-        ("MWh", "action", "Unknown production action"),
         ("MWh", "revert", "no manual production"),
         ("MWh", "range", "within 31 local days"),
     ],
@@ -183,8 +184,6 @@ def test_invalid_batches_fail_at_application_boundary(
     rows = [edit(start)]
     if changes == "empty":
         rows = []
-    elif changes == "action":
-        rows = [edit(start, action="delete")]
     elif changes == "revert":
         rows = [edit(start, action="revert")]
     elif changes == "range":
@@ -267,7 +266,7 @@ def test_huge_finite_energy_does_not_publish_infinite_totals(
     start, _ = local_day_bounds(DAY, system.binding.timezone)
     rows = [edit(start, 1e308, minutes=30), edit(start + timedelta(minutes=30), 1e308, minutes=30)]
     rows.extend(edit(start + timedelta(hours=hour), 1e308) for hour in range(1, 24))
-    write(system, plant, rows)
+    write(system, plant, rows, confirm_implausible=True)
     result = production_history(plant, start_date=DAY, end_date=DAY)
     assert result["days"][0]["complete"]
     assert result["days"][0]["total_mwh"] is None

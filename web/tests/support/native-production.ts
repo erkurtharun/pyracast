@@ -8,13 +8,10 @@ export function nativeProductionHistory(
     rows: (Pick<Interval, "starts_at" | "ends_at"> & Partial<Interval>)[],
 ): components["schemas"]["ProductionHistoryOutput"] {
     const intervals: Interval[] = rows.map((row) => ({
-        reference_available: true,
         observation: null,
-        can_enter: true,
-        unavailable_reason: null,
+        previous_configuration_observation: null,
         revision_id: null,
         effective: null,
-        provider_original: null,
         provider_originals: [],
         can_edit: true,
         can_propose: false,
@@ -24,9 +21,7 @@ export function nativeProductionHistory(
         edit_unavailable_reason: null,
         ...row,
     }));
-    const observations = intervals.flatMap((row) =>
-        row.observation ? [row.observation] : [],
-    );
+    const recorded = intervals.filter((row) => row.observation).length;
     return {
         plant_id: 21,
         configuration_id: 31,
@@ -43,7 +38,7 @@ export function nativeProductionHistory(
             {
                 date,
                 available_count: intervals.length,
-                recorded_count: observations.length,
+                recorded_count: recorded,
                 missing_count: intervals.filter((row) => row.effective === null)
                     .length,
                 sunrise: `${date}T06:00:00Z`,
@@ -65,7 +60,5 @@ export function nativeProductionHistory(
             },
         ],
         intervals,
-        observations,
-        revisions: observations,
     };
 }

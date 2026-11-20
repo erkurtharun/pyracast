@@ -27,7 +27,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
-from pyracast.plants.operations import ObservationInput, import_observations
+from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.regions.models import Region
 from tests.support.capacity_normalization import normalize, scaled_system
 from tests.support.domain import NOW, FakeAdapter, System, make_system

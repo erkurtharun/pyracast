@@ -248,7 +248,7 @@ def test_saved_outage_keeps_timestamp_precision_and_archive_provenance(
         assert scenario["result"]["provenance"] == (
             issuance.payloads[resolution]["provenance"]
             | {
-                "scenario_policy": "reported-operating-limits-v1",
+                "scenario_policy": "reported-operating-limits-v2",
                 "evaluated_at": source.collected_at.isoformat(),
                 "incident_revision_ids": scenario["incident_revision_ids"],
             }

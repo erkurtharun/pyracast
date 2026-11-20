@@ -21,13 +21,8 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.numerics import FitResult, fit_calibration
-from pyracast.plants.operations import (
-    ObservationInput,
-    activate_calibration,
-    import_observations,
-    reset_calibration,
-    revise_plant,
-)
+from pyracast.plants.operations import activate_calibration, reset_calibration, revise_plant
+from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.training import LEASE_DURATION, pending_calibration_ids, run_calibration
 from pyracast.regions.models import Region
 from pyracast.solar import DAYLIGHT_POLICY

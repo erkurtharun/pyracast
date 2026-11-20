@@ -196,17 +196,14 @@ async function setup(page: Page) {
                     return {
                         starts_at,
                         ends_at,
-                        can_enter: true,
                         can_edit: true,
                         can_propose: false,
                         can_propose_revert: false,
                         proposal_unavailable_reason: null,
                         can_revert: observation !== null,
-                        reference_available: true,
-                        unavailable_reason: null,
                         observation,
+                        previous_configuration_observation: null,
                         revision_id: observation?.id ?? null,
-                        provider_original: provider,
                         provider_originals: provider ? [provider] : [],
                         effective:
                             observation || provider
@@ -228,8 +225,6 @@ async function setup(page: Page) {
                         edit_unavailable_reason: null,
                     };
                 }),
-                observations: [],
-                revisions: [],
             } satisfies components["schemas"]["ProductionHistoryOutput"],
         });
     });

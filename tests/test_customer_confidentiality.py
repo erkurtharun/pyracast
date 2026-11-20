@@ -55,7 +55,6 @@ CUSTOMER_FIELDS = {
     "calibration_id",
     "can_admin",
     "can_edit",
-    "can_enter",
     "can_propose",
     "can_propose_revert",
     "can_restore",
@@ -71,6 +70,8 @@ CUSTOMER_FIELDS = {
     "completed_at",
     "configuration_created_at",
     "configuration_id",
+    "configuration_revision",
+    "confirm_implausible",
     "conflict",
     "connected",
     "content_sha256",
@@ -123,6 +124,8 @@ CUSTOMER_FIELDS = {
     "export_limit_mw",
     "factor",
     "fields",
+    "file_name",
+    "file_sha256",
     "first_settlement_date",
     "forecast_complete",
     "forecast_status",
@@ -186,6 +189,7 @@ CUSTOMER_FIELDS = {
     "notes",
     "observation",
     "observations",
+    "origin",
     "outage_scenario",
     "page",
     "pending_jobs",
@@ -199,13 +203,13 @@ CUSTOMER_FIELDS = {
     "predicted_energy_mwh",
     "preview",
     "previous",
+    "previous_configuration_observation",
     "production_diagnostic",
     "production_items",
     "proposal_unavailable_reason",
     "proposed",
     "proposed_by",
     "provider_intervals",
-    "provider_original",
     "provider_originals",
     "provider_plant_id",
     "provisional",
@@ -221,7 +225,6 @@ CUSTOMER_FIELDS = {
     "recipients",
     "recorded_by_id",
     "recorded_count",
-    "reference_available",
     "reference_provenance",
     "region_id",
     "regional_irradiance",
@@ -238,7 +241,6 @@ CUSTOMER_FIELDS = {
     "reviewed_by",
     "revision",
     "revision_id",
-    "revisions",
     "role",
     "scheduled_for",
     "scope",
@@ -551,7 +553,6 @@ def test_production_history_returns_customer_source_text_unchanged(
     [interval] = [row for row in response.json()["intervals"] if row["effective"]]
     assert interval["effective"]["source"] == "Solcast sheet"
     assert interval["observation"]["source"] == "Solcast sheet"
-    assert response.json()["observations"][0]["source"] == "Solcast sheet"
 
 
 @pytest.mark.django_db(transaction=True)

@@ -5,7 +5,7 @@ from threading import Barrier
 from typing import Any
 
 import pytest
-from django.db import close_old_connections, connection
+from django.db import close_old_connections, connection, transaction
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
 
@@ -171,7 +171,7 @@ def test_month_of_half_hours_commits_with_a_bounded_statement_count(
         rows.append(edit(cursor, 0.5, minutes=30))
         cursor += timedelta(minutes=30)
     assert len(rows) == 1488
-    with CaptureQueriesContext(connection) as queries:
+    with transaction.atomic(), CaptureQueriesContext(connection) as queries:
         result = write(system, plant, rows)
     assert result["created"] == 1488
     assert len(queries) <= 30

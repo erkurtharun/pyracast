@@ -42,6 +42,7 @@ from pyracast.incidents.operations import (
 )
 from pyracast.plants.models import Plant, active_plant
 from pyracast.plants.production_changes import (
+    AuditContext,
     ProductionChange,
     change_production,
     lock_production_configuration,
@@ -289,6 +290,8 @@ def approve_request(
             configuration_id=request.configuration_id,
             unit="MWh",
             changes=production_changes(request),
+            audit=AuditContext("change_request"),
+            confirm_implausible=True,
         )
         for item, observation_id in zip(
             request.production_items.order_by("starts_at", "pk"), result["ids"], strict=True

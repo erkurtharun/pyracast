@@ -122,6 +122,41 @@ def _slots(
     return result
 
 
+def _role(actor: User | None, plant: Plant) -> str | None:
+    if actor is None:
+        return None
+    return (
+        Membership.objects.filter(
+            user=actor, user__is_active=True, tenant_id=plant.region.tenant_id
+        )
+        .values_list("role", flat=True)
+        .first()
+    )
+
+
+def _earlier_configuration_heads(
+    heads: list[ProductionObservation], configuration: PlantConfiguration | None
+) -> dict[tuple[datetime, datetime], dict[str, Any]]:
+    """Live corrections recorded under an earlier configuration, keyed by their interval; they are
+    shown beside the interval but never enter its effective value or the day total."""
+    earlier = [
+        row
+        for row in heads
+        if not row.is_reverted
+        and (configuration is None or row.configuration_id != configuration.pk)
+    ]
+    revisions = dict(
+        PlantConfiguration.objects.filter(
+            pk__in={row.configuration_id for row in earlier}
+        ).values_list("pk", "revision")
+    )
+    return {
+        (row.starts_at, row.ends_at): ObservationOutput(row).data
+        | {"configuration_revision": revisions[row.configuration_id]}
+        for row in earlier
+    }
+
+
 def production_history(
     plant: Plant,
     *,
@@ -161,32 +196,12 @@ def production_history(
     heads = selected.heads
     observations = [row for row in heads if not row.is_reverted]
     encoded = {row["id"]: row for row in ObservationOutput(observations, many=True).data}
-    revisions = ProductionObservation.objects.filter(
-        plant=plant,
-        starts_at__lt=range_end,
-        ends_at__gt=range_start,
-        created_at__lte=now,
-    ).order_by("starts_at", "id")
+    earlier = _earlier_configuration_heads(heads, configuration)
     providers, effective = selected.selection.providers, selected.selection.effective
     current = configuration is not None and configuration_is_current(configuration)
-    may_edit = (
-        actor is None
-        or Membership.objects.filter(
-            user=actor,
-            user__is_active=True,
-            tenant_id=plant.region.tenant_id,
-            role=WorkspaceRole.ADMIN,
-        ).exists()
-    )
-    may_propose = (
-        actor is not None
-        and Membership.objects.filter(
-            user=actor,
-            user__is_active=True,
-            tenant_id=plant.region.tenant_id,
-            role=WorkspaceRole.VIEWER,
-        ).exists()
-    )
+    role = _role(actor, plant)
+    may_edit = actor is None or role == WorkspaceRole.ADMIN
+    may_propose = role == WorkspaceRole.VIEWER
     days, intervals = [], []
     day = start_date
     while day <= end_date:
@@ -249,30 +264,14 @@ def production_history(
             )
             edit_reason = "workspace_readonly" if not may_edit else technical_reason
             available = interval_is_covered(native, cursor, end) and end <= now
-            reason = (
-                "already_recorded"
-                if exact
-                else "observation_overlap"
-                if overlaps
-                else "configuration_unavailable"
-                if configuration is None
-                else "configuration_not_current"
-                if not current
-                else "estimated_actuals_unavailable"
-                if not available
-                else None
-            )
             intervals.append(
                 {
                     "starts_at": cursor,
                     "ends_at": end,
-                    "reference_available": available,
                     "observation": encoded[exact.pk] if exact else None,
-                    "can_enter": reason is None,
-                    "unavailable_reason": reason,
+                    "previous_configuration_observation": earlier.get((cursor, end)),
                     "revision_id": head.pk if head else None,
                     "effective": _slot_value(effective, cursor, end),
-                    "provider_original": _provider(originals[0]) if originals else None,
                     "provider_originals": [_provider(row) for row in originals],
                     "can_edit": edit_reason is None,
                     "can_propose": may_propose and technical_reason is None,
@@ -318,6 +317,4 @@ def production_history(
         "daylight_policy": DAYLIGHT_POLICY,
         "days": days,
         "intervals": intervals,
-        "observations": list(encoded.values()),
-        "revisions": ObservationOutput(revisions, many=True).data,
     }

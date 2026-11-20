@@ -68,9 +68,11 @@ def plant_outlook(
         )
         frozen = "outage_scenario" in result
         if not frozen:
-            result["outage_scenario"] = incident_scenario(
-                result, target_date, resolution_minutes, scenario_at
-            )
+            evaluated = incident_scenario(result, target_date, resolution_minutes, scenario_at)
+            if evaluated.replacement_result is not None:
+                result["result"] = evaluated.replacement_result
+                result["calibration_id"] = None
+            result["outage_scenario"] = evaluated.scenario
         result["production_diagnostic"] = (
             production_diagnostic(result, target_date, scenario_at)
             if as_of is None and not frozen

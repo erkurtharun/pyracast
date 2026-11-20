@@ -196,7 +196,6 @@ export async function mockApi(
                 end_date: "2026-01-07",
                 days: [],
                 intervals: [],
-                observations: [],
             };
         else if (path.endsWith("/calibration/automation/")) {
             if (method === "PATCH")

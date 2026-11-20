@@ -4,10 +4,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import (
     Plant,
 )
-from pyracast.plants.operations import (
-    ObservationInput,
-    import_observations,
-)
+from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.solar import daylight_window
 from tests.support.domain import System
 from tests.support.plant_training import actual_snapshot_for

@@ -19,12 +19,9 @@ from pyracast.plants.availability import (
 )
 from pyracast.plants.models import Plant, ProductionObservation
 from pyracast.plants.numerics import PowerInterval
-from pyracast.plants.operations import (
-    ObservationInput,
-    import_observations,
-    revise_plant,
-)
+from pyracast.plants.operations import revise_plant
 from pyracast.plants.production import production_history
+from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
 from tests.support.errors import raises_code
@@ -46,10 +43,10 @@ def test_seven_saved_days_do_not_enable_ten_and_batch_rolls_back(
     assert result["start_date"] == date(2026, 11, 2)
     assert result["end_date"] == DAY
     assert len(result["intervals"]) == 168
-    assert all(row["can_enter"] for row in result["intervals"])
+    assert sum(day["available_count"] for day in result["days"]) == 168
     older = DAY - timedelta(days=9)
-    rows = production_history(plant, start_date=older, end_date=DAY)["intervals"]
-    assert sum(row["can_enter"] for row in rows) == 168
+    days = production_history(plant, start_date=older, end_date=DAY)["days"]
+    assert sum(day["available_count"] for day in days) == 168
     valid, _ = local_day_bounds(DAY, system.binding.timezone)
     invalid, _ = local_day_bounds(older, system.binding.timezone)
     with raises_code("estimated_actuals_unavailable"):
@@ -84,7 +81,7 @@ def test_history_reads_where_astral_misses_an_event(monkeypatch: pytest.MonkeyPa
     _, plant = pacific_plant(monkeypatch)
     result = production_history(plant, start_date=date(2026, 11, 2), end_date=DAY)
     assert len(result["intervals"]) == 7 * 24
-    assert sum(row["can_enter"] for row in result["intervals"]) == 24
+    assert sum(day["available_count"] for day in result["days"]) == 24
 
 
 def test_history_saves_where_astral_misses_an_event(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,11 +105,9 @@ def test_reference_holes_disable_only_affected_slots(
     source.normalized_intervals[1]["power_kw"] = power
     stored_again(source)
     result = production_history(plant, start_date=DAY, end_date=DAY)
-    assert not result["intervals"][0]["can_enter"]
-    assert result["intervals"][1]["can_enter"]
+    assert result["days"][0]["available_count"] == 23
     half = production_history(plant, start_date=DAY, end_date=DAY, resolution_minutes=30)
-    assert half["intervals"][0]["can_enter"]
-    assert not half["intervals"][1]["can_enter"]
+    assert half["days"][0]["available_count"] == 47
     start, _ = local_day_bounds(DAY, system.binding.timezone)
     with raises_code("estimated_actuals_unavailable"):
         upload(system, plant, [ObservationInput(start, start + timedelta(hours=1), 0)])
@@ -125,9 +120,8 @@ def test_partial_oldest_day_and_missing_interval_are_unavailable(
     source = saved_actuals(system, DAY)
     source.normalized_intervals = source.normalized_intervals[1:]
     stored_again(source)
-    rows = production_history(plant, start_date=DAY, end_date=DAY)["intervals"]
-    assert not rows[0]["can_enter"]
-    assert rows[1]["can_enter"]
+    days = production_history(plant, start_date=DAY, end_date=DAY)["days"]
+    assert days[0]["available_count"] == 23
 
 
 def test_mixed_resolution_preserves_observations_after_revision_and_reference_loss(
@@ -147,11 +141,12 @@ def test_mixed_resolution_preserves_observations_after_revision_and_reference_lo
     )
     plant.refresh_from_db()
     result = production_history(plant, start_date=DAY, end_date=DAY)
-    assert result["intervals"][0]["unavailable_reason"] == "observation_overlap"
-    assert result["observations"][0]["configuration_id"] == original_id
+    assert result["intervals"][0]["edit_unavailable_reason"] == "observation_overlap"
     half = production_history(plant, start_date=DAY, end_date=DAY, resolution_minutes=30)
     assert half["intervals"][0]["observation"]["energy_mwh"] == 0
-    assert half["intervals"][0]["unavailable_reason"] == "already_recorded"
+    earlier = half["intervals"][0]["previous_configuration_observation"]
+    assert earlier["configuration_id"] == original_id
+    assert half["intervals"][0]["edit_unavailable_reason"] == "configuration_mismatch"
     assert original_id is not None
     with pytest.raises(ValidationError, match="current approved configuration"):
         import_observations(
@@ -174,18 +169,18 @@ def test_forecasts_future_publication_and_wrong_binding_never_enable_entry(
     snapshot_for(system, DAY)
     result = production_history(plant)
     assert result["available_start_date"] is None
-    assert not any(row["can_enter"] for row in result["intervals"])
+    assert not any(day["available_count"] for day in result["days"])
     source = saved_actuals(system, DAY)
     source.available_at = NOW + timedelta(seconds=1)
     stored_again(source)
     result = production_history(plant, start_date=DAY, end_date=DAY)
-    assert not any(row["can_enter"] for row in result["intervals"])
+    assert result["days"][0]["available_count"] == 0
     source.available_at = NOW
     stored_again(source)
     Region.objects.filter(pk=system.region.pk).update(status="suspended")
     result = production_history(plant, start_date=DAY, end_date=DAY)
     assert all(
-        row["unavailable_reason"] == "configuration_not_current" for row in result["intervals"]
+        row["edit_unavailable_reason"] == "configuration_not_current" for row in result["intervals"]
     )
 
 
@@ -199,9 +194,7 @@ def test_history_preserves_dst_interval_bounds(
     saved_actuals(system, day)
     result = production_history(plant, start_date=day, end_date=day, resolution_minutes=30)
     assert len(result["intervals"]) == count
-    assert all(row["can_enter"] for row in result["intervals"]), {
-        (row["reference_available"], row["unavailable_reason"]) for row in result["intervals"]
-    }
+    assert result["days"][0]["available_count"] == count
     assert len({row["starts_at"] for row in result["intervals"]}) == count
 
 
@@ -243,7 +236,7 @@ def test_configless_history_and_source_interval_validation(monkeypatch: pytest.M
     result = production_history(plant)
     assert result["configuration_id"] is None
     assert all(
-        row["unavailable_reason"] == "configuration_unavailable" for row in result["intervals"]
+        row["edit_unavailable_reason"] == "configuration_unavailable" for row in result["intervals"]
     )
     start = datetime(2026, 11, 8, tzinfo=UTC)
     assert not interval_is_covered(

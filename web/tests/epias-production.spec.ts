@@ -81,21 +81,20 @@ async function productionApi(page: Page, viewer = false) {
                             source_kind: "settlement_injection",
                             provisional: false,
                         },
-                provider_original:
+                provider_originals:
                     energy === null
-                        ? null
-                        : {
-                              starts_at,
-                              ends_at,
-                              energy_mwh: energy,
-                              source_kind: "settlement_injection",
-                              snapshot_id: 1,
-                              collected_at: "2026-11-10T00:00:00Z",
-                              provisional: false,
-                          },
-                reference_available: true,
-                can_enter: !observation,
-                unavailable_reason: null,
+                        ? []
+                        : [
+                              {
+                                  starts_at,
+                                  ends_at,
+                                  energy_mwh: energy,
+                                  source_kind: "settlement_injection",
+                                  snapshot_id: 1,
+                                  collected_at: "2026-11-10T00:00:00Z",
+                                  provisional: false,
+                              },
+                          ],
                 can_edit: true,
                 can_revert: Boolean(observation),
                 edit_unavailable_reason: null,
@@ -133,7 +132,6 @@ async function productionApi(page: Page, viewer = false) {
                     },
                 ],
                 intervals,
-                observations: [],
             },
         });
     });
@@ -208,7 +206,6 @@ function oneInterval(energy: number) {
         end_date: "2026-11-09",
         native_intervals: true,
         days: [{ date: "2026-11-09", total_mwh: null }],
-        observations: [],
         intervals: [
             {
                 starts_at: "2026-11-09T08:00:00+03:00",
@@ -492,7 +489,6 @@ test("reloading a conflict preserves the draft when the native interval disappea
                 end_date: "2026-11-09",
                 native_intervals: true,
                 days: [{ date: "2026-11-09", total_mwh: null }],
-                observations: [],
                 intervals: [
                     {
                         starts_at: "2026-11-09T09:00:00+03:00",
@@ -1006,7 +1002,6 @@ test("native timeline preserves half-hour and offset-hour corrections with their
                         provider("10:00", "11:00", 4, 4),
                     ]),
                 ],
-                observations: [],
             },
         });
     });
@@ -1185,7 +1180,6 @@ test("Turkish production at 320px keeps native corrections, decimal commas and i
                 end_date: "2026-11-09",
                 native_intervals: true,
                 days: [{ date: "2026-11-09", total_mwh: null }],
-                observations: [],
                 intervals: [
                     {
                         starts_at: "2026-11-09T13:30:00+03:00",

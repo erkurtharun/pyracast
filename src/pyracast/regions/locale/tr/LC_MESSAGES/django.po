@@ -826,6 +826,9 @@ msgid "Pyracast is being updated. Try again in a minute; your data is safe."
 msgstr ""
 "Pyracast güncelleniyor. Bir dakika sonra yeniden deneyin; verileriniz güvende."
 
+msgid "Some values exceed what the plant can produce. Check the unit, then confirm to save."
+msgstr "Bazı değerler santralin üretebileceğini aşıyor. Birimi kontrol edin, ardından kaydetmek için onaylayın."
+
 msgid "The request is too large to be accepted."
 msgstr "İstek kabul edilemeyecek kadar büyük."
 

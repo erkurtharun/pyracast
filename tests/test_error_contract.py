@@ -603,6 +603,14 @@ CASES: dict[str, Case] = {
         "Yeni talep göndermeden önce bekleyen talepleri sonuçland\u0131r\u0131n veya geri çekin.",
         domain("ConflictError", "pending_request_limit"),
     ),
+    "production_implausible": Case(
+        400,
+        "Some values exceed what the plant can produce. Check the unit, then confirm to save.",
+        "Baz\u0131 değerler santralin üretebileceğini aş\u0131yor. "
+        "Birimi kontrol edin, ard\u0131ndan kaydetmek için onaylay\u0131n.",
+        domain("DomainError", "production_implausible", field="changes"),
+        fields=("changes",),
+    ),
     "production_revision_changed": Case(
         409,
         "Production changed. Reload the latest values before saving.",

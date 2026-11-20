@@ -122,12 +122,19 @@ def test_a_plant_event_with_identifiers_that_are_not_integers_is_refused(
     system, plant = make_plant(monkeypatch)
     stored = PlantEvent.objects.count()
 
-    with pytest.raises(ValueError, match="production_changed"):
+    with pytest.raises(ValueError, match="'production_changed' takes 'created_ids'"):
         record_plant_event(
             PlantEventAction.PRODUCTION_CHANGED,
             plant_id=plant.pk,
             actor=system.member,
-            details={"configuration_id": 1, "ids": ids},
+            details={
+                "origin": "editor",
+                "configuration_id": 1,
+                "created_ids": ids,
+                "unchanged": 0,
+                "file_name": None,
+                "file_sha256": None,
+            },
         )
     assert PlantEvent.objects.count() == stored
 

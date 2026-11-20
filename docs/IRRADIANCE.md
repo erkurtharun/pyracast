@@ -395,7 +395,11 @@ Current/future forecast outlooks expose this evidence as `production_diagnostic`
 when its configuration, source identity, incidents and reference factor remain
 applicable. Evidence older than two completed local days is labeled `stale`.
 The diagnostic changes neither forecast power nor DC/inverter/export capacity.
-Only reported operating limits drive the separate outage scenario. A `suspected`
+Only reported operating limits drive the separate outage scenario
+(`reported-operating-limits-v2`). Reported capacities apply while the outlook's
+configuration keeps the DC, inverter and export capacities and the meter basis
+under which the outage was declared; any other configuration makes the impact
+unknown and flags `outage_configuration_changed`. A `suspected`
 aggregate assessment pauses automatic promotion of fitted Huber candidates over an
 active calibration. Explicit `identity_recovery` may pass that diagnostic veto only
 after all source, freshness, thirty matched-day, seven new holdout-day, paired MAE,

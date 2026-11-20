@@ -30,7 +30,11 @@ from pyracast.plants.measurements import select_measurements, selection_fingerpr
 from pyracast.plants.models import ProductionObservation
 from pyracast.plants.operations import revise_plant
 from pyracast.plants.production import production_history
-from pyracast.plants.production_changes import ProductionChange, change_production
+from pyracast.plants.production_changes import (
+    ProductionAction,
+    ProductionChange,
+    change_production,
+)
 from pyracast.trash import RETENTION, purge_expired, restore_region, trash_region
 from tests.support.change_request_boundaries import (
     RequestCase,
@@ -55,7 +59,7 @@ def approve(case: RequestCase, request: ChangeRequest) -> ChangeRequest:
 
 
 def provider_request(
-    case: RequestCase, *, action: str = "set", expected: int | None = None
+    case: RequestCase, *, action: ProductionAction = "set", expected: int | None = None
 ) -> ChangeRequest:
     start, _ = local_day_bounds(DAY, case.system.binding.timezone)
     assert case.plant.current_configuration_id is not None
