@@ -434,6 +434,22 @@ def test_an_address_change_longer_than_an_account_address_is_refused_before_any_
     assert not EmailAddress.objects.filter(email=address).exists()
 
 
+@pytest.mark.parametrize("address", [OVERLONG_ACCOUNT_ADDRESS, "added@example.com"])
+def test_an_address_change_is_checked_against_the_sessions_authority_before_its_input(
+    address: str,
+) -> None:
+    client = reauthenticated_changer(0)
+    user = User.objects.get(username="changer-0")
+    EmailAddress.objects.create(user=user, email="spare@example.com", verified=True)
+
+    response = submit(client, "account/email", {"email": address})
+
+    assert response.status_code == 401
+    assert [error["code"] for error in response.json()["errors"]] == ["reauthentication_required"]
+    assert intents() == []
+    assert deliver_mail() == 0
+
+
 def test_a_late_refusal_never_reopens_an_intent_recovered_as_uncertain(
     transport: type[Transport], monkeypatch: pytest.MonkeyPatch
 ) -> None:

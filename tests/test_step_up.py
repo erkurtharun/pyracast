@@ -32,6 +32,7 @@ from pyracast.accounts import middleware as account_middleware
 from pyracast.accounts import processes, security, step_up
 from pyracast.accounts.audit import refusal_throttle
 from pyracast.accounts.sessions import end_sessions
+from pyracast.notifications.models import OutboundMail
 from tests.support import account_sessions
 from tests.support.account_sessions import (
     alongside,
@@ -47,6 +48,7 @@ from tests.support.account_sessions import (
 )
 from tests.support.admin_mfa_bootstrap import run
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, submit, totp_code
+from tests.support.outbox import deliver_mail
 from tests.support.social_accounts import (
     CALLBACK,
     PROVIDERS,
@@ -73,6 +75,11 @@ def now(monkeypatch: pytest.MonkeyPatch) -> float:
     moment = time.time()
     monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: moment))
     return moment
+
+
+def mailed_to() -> list[list[str]]:
+    deliver_mail()
+    return [message.to for message in mail.outbox]
 
 
 def reauthenticate(client: Client, user: User, factor: str, code: str) -> int:
@@ -104,7 +111,7 @@ def test_reauthentication_accepts_only_the_strongest_factor_the_account_holds(
     else:
         assert status == 403
         assert proofs(client) == []
-        assert mail.outbox == []
+        assert mailed_to() == []
 
 
 CHANGED_PASSWORD = PASSWORD + "-changed"
@@ -164,7 +171,7 @@ def test_a_step_up_asks_for_the_strongest_factor_the_account_holds_and_nothing_e
     assert body["code"] == "not_authenticated"
     assert body["message"] == body["errors"][0]["message"]
     assert stored(user) == before
-    assert mail.outbox == []
+    assert mailed_to() == []
 
 
 @pytest.mark.parametrize(("action", "kind", "factor"), RETAINED)
@@ -182,7 +189,7 @@ def test_a_retained_proof_by_a_weaker_factor_ends_and_the_step_up_asks_for_the_s
     assert [flow["id"] for flow in response.json()["data"]["flows"]] == [FLOWS[STRONGEST[kind]]]
     assert stored(user) == before
     assert proofs(client) == []
-    assert mail.outbox == []
+    assert mailed_to() == []
 
 
 def test_a_password_proof_ends_when_the_account_gains_an_authenticator(now: float) -> None:
@@ -192,6 +199,7 @@ def test_a_password_proof_ends_when_the_account_gains_an_authenticator(now: floa
     secret = client.get(AUTH + "account/authenticators/totp").json()["meta"]["secret"]
     activation = {"code": totp_code(secret, now)}
     assert call(client, "post", "account/authenticators/totp", activation).status_code == 200
+    deliver_mail()
     mail.outbox.clear()
 
     response = call(client, *ACTIONS["add-address"])
@@ -200,7 +208,7 @@ def test_a_password_proof_ends_when_the_account_gains_an_authenticator(now: floa
     assert [flow["id"] for flow in response.json()["data"]["flows"]] == [FLOWS["mfa"]]
     assert proofs(client) == []
     assert list(EmailAddress.objects.values_list("email", flat=True)) == [user.email]
-    assert mail.outbox == []
+    assert mailed_to() == []
 
 
 def test_a_connection_needs_a_proof_by_the_strongest_factor() -> None:
@@ -284,6 +292,7 @@ def proven(kind: str, now: float) -> tuple[User, Client]:
     code = totp_code(secret, now) if secret else ""
     assert reauthenticate(client, user, STRONGEST[kind], code) == 200
     assert len(proofs(client)) == 1
+    deliver_mail()
     mail.outbox.clear()
     return user, client
 
@@ -309,12 +318,12 @@ def test_a_step_up_proof_holds_only_while_the_credential_state_it_was_given_unde
     if change == "unchanged":
         if action == "add-address":
             assert response.status_code == 200
-            assert [message.to for message in mail.outbox] == [["added@example.com"]]
+            assert mailed_to() == [["added@example.com"]]
         else:
             assert User.objects.get(pk=user.pk).check_password(CHANGED_PASSWORD)
         return
     assert stored(user) == before
-    assert mail.outbox == []
+    assert mailed_to() == []
     if change in SESSION_ENDING:
         signed_out = call(Client(enforce_csrf_checks=True), *ACTIONS[action])
         assert (response.status_code, response.json()) == (
@@ -349,7 +358,7 @@ def test_a_reauthentication_code_completes_only_under_the_state_it_was_sent_unde
     response = call(client, "post", "auth/reauthenticate/code/confirm", data)
 
     assert proofs(client) == []
-    assert mail.outbox == []
+    assert mailed_to() == []
     if change in SESSION_ENDING:
         assert response.status_code == 401
         assert session_user(client) is None
@@ -402,7 +411,7 @@ def test_a_proof_by_the_strongest_factor_lets_the_step_up_through(action: str, n
 
     if action == "add-address":
         assert response.status_code == 200
-        assert [message.to for message in mail.outbox] == [["added@example.com"]]
+        assert mailed_to() == [["added@example.com"]]
     else:
         assert response.json()["meta"]["password_changed"] is True
         assert User.objects.get(pk=user.pk).check_password(CHANGED_PASSWORD)
@@ -538,8 +547,7 @@ WRITES = {
         "post",
         AUTH + "account/email",
         lambda _user, _before, response: (
-            response.status_code == 200
-            and ["added@example.com"] in [message.to for message in mail.outbox]
+            response.status_code == 200 and ["added@example.com"] in mailed_to()
         ),
         {"email": "added@example.com"},
         changes_state=False,
@@ -763,6 +771,7 @@ def changed_at(
     def commit_the_change() -> None:
         started.set()
         elsewhere(change)
+        elsewhere(deliver_mail)
         after.append(credentials(user))
         mail.outbox.clear()
 
@@ -861,7 +870,7 @@ def test_a_credential_write_is_refused_after_another_sessions_credential_change_
     # Ending the proofs changes the session's data under its key; no answer sends the cookie.
     assert session_cookie(response) is None
     assert credentials(user) == after[0]
-    assert mail.outbox == []
+    assert mailed_to() == []
     signed_out = competitor.revokes_sessions or not competitor.routed
     assert session_user(client) == (None if signed_out else user.pk)
     assert proofs(client) == []
@@ -1037,7 +1046,7 @@ def test_a_proof_recorded_with_the_key_rotation_serves_the_next_request_of_that_
     assert session_key(jar) == rotated != old
     assert write.status_code == 200
     assert session_cookie(write) is None
-    assert ["added@example.com"] in [message.to for message in mail.outbox]
+    assert ["added@example.com"] in mailed_to()
 
 
 def test_a_proof_ended_as_a_request_starts_changes_the_session_data_and_sends_no_cookie() -> None:
@@ -1349,7 +1358,7 @@ FAILING_AFTER = {
 
 
 @pytest.mark.parametrize("write", FAILING_AFTER)
-def test_a_factor_write_that_rolls_back_leaves_no_security_line(
+def test_a_factor_write_that_rolls_back_leaves_no_security_line_and_no_mail(
     write: str, now: float, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     case = WRITES[write]
@@ -1373,6 +1382,8 @@ def test_a_factor_write_that_rolls_back_leaves_no_security_line(
     assert response.status_code >= 500
     assert credentials(user) == before
     assert {event, "sessions_revoked"} & {line["event"] for line in events()} == set()
+    assert list(OutboundMail.objects.values_list("kind", flat=True)) == []
+    assert mailed_to() == []
     assert session_user(other) == user.pk
 
 
@@ -1389,7 +1400,8 @@ def test_an_address_change_whose_session_cannot_be_saved_sends_no_code(
     with session_row_held(session_key(client)):
         response = case.send(client, token, None)
 
-    assert mail.outbox == []
+    assert list(OutboundMail.objects.values_list("kind", flat=True)) == []
+    assert mailed_to() == []
     assert "email_change_requested" not in {line["event"] for line in events()}
     assert (response.status_code, response.json()["code"]) == (503, "busy")
     assert session_user(client) == user.pk
