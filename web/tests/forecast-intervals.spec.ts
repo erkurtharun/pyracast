@@ -390,10 +390,10 @@ for (const scenario of ["outage"] as const) {
             normal_energy_mwh: "2",
             affected_mean_power_mw: "1",
             affected_energy_mwh: "1",
-            normal_quality_flags: '["normal_test_flag"]',
+            normal_quality_flags: "normal_test_flag",
         });
         expect(records.data[1]?.affected_quality_flags).toBe(
-            '["affected_test_flag"]',
+            "affected_test_flag",
         );
     });
 }

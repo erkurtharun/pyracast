@@ -1476,6 +1476,7 @@ test("forecast performance shows archived metrics, missing days and selected ran
         lastQuery = new URL(route.request().url()).search;
         await route.fulfill({
             json: {
+                comparison: "archived_forecast",
                 start_date: "2026-11-01",
                 end_date: "2026-11-02",
                 matched_days: 1,
@@ -1494,6 +1495,9 @@ test("forecast performance shows archived metrics, missing days and selected ran
                         measured_energy_mwh: 10,
                         predicted_energy_mwh: 8.5,
                         error_mwh: -1.5,
+                        source_kind: "estimated_actuals",
+                        provisional_production: false,
+                        calibration_in_sample: false,
                     },
                     {
                         date: "2026-11-02",
@@ -1502,6 +1506,9 @@ test("forecast performance shows archived metrics, missing days and selected ran
                         measured_energy_mwh: null,
                         predicted_energy_mwh: null,
                         error_mwh: null,
+                        source_kind: null,
+                        provisional_production: false,
+                        calibration_in_sample: null,
                     },
                 ],
             },
@@ -1594,6 +1601,7 @@ test("calibration detail explains support, rejection and incumbent comparison", 
         window_end: "2026-01-10",
         status: "rejected",
         selection_state: "not_ready",
+        reason: null,
         activation_blocker: "calibration_not_activatable",
         assessment: "provisional",
         factor: 1.1,
