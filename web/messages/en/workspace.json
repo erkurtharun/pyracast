@@ -351,6 +351,7 @@
         "mine": "My submissions",
         "empty": "No submissions here.",
         "loading": "Loading submissions…",
+        "markAllRead": "Mark all as read",
         "refreshList": "Refresh list",
         "refreshDetails": "Refresh details",
         "approved": "Approved",

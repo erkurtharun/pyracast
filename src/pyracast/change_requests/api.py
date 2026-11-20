@@ -24,6 +24,7 @@ from pyracast.change_requests.serializers import (
     IncidentRequestInput,
     ProductionRequestInput,
     RejectionInput,
+    SeenAllOutput,
 )
 from pyracast.incidents.api import IncidentConflict, current_on_conflict
 from pyracast.plants.production_changes import ProductionChange
@@ -95,6 +96,19 @@ class InboxView(RequestView):
         return self.get_paginated_response(
             ChangeRequestSummaryOutput(cast(Any, rows), many=True).data
         )
+
+
+class SeenAllView(RequestView):
+    @extend_schema(
+        request=EmptyInput,
+        responses=SeenAllOutput,
+        operation_id="tenants_change_requests_seen_all_create",
+    )
+    def post(self, request: Request, tenant_id: int) -> Response:
+        data = EmptyInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        marked = operations.mark_all_seen(cast(User, request.user), tenant_id)
+        return Response(SeenAllOutput({"marked": marked}).data)
 
 
 class DetailView(RequestView):
