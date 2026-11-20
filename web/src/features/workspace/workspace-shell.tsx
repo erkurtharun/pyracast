@@ -21,6 +21,7 @@ import {
     type SessionUser,
 } from "@/lib/session-client";
 import { Brand } from "@/ui/brand";
+import { useErrorMessage } from "@/ui/form";
 import { LanguageSelect } from "@/ui/language-select";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { WorkspaceAccess } from "@/ui/workspace-access";
@@ -90,6 +91,7 @@ export function WorkspaceShell({
     );
     const endingSoon = useEndingSoon(session?.expires_at ?? null);
     const [logoutError, setLogoutError] = useState("");
+    const errorMessage = useErrorMessage();
     const rows = tenants.data?.results ?? [];
     const tenant =
         tenantId === undefined
@@ -229,7 +231,7 @@ export function WorkspaceShell({
                             try {
                                 await signOut();
                             } catch (error) {
-                                setLogoutError((error as Error).message);
+                                setLogoutError(errorMessage(error));
                             }
                         }}
                     >
