@@ -310,7 +310,7 @@ def test_worker_checks_resource_policy_independently_of_configurer(change: str) 
 @pytest.mark.parametrize("mode", ["safe", "uncertain", "permanent"])
 def test_delivery_failure_and_retry_policy(mode: str, monkeypatch: pytest.MonkeyPatch) -> None:
     delivery = ready()
-    monkeypatch.setattr("pyracast.notifications.jobs.secrets.randbelow", lambda bound: 0)
+    monkeypatch.setattr("pyracast.background.retry_policy.secrets.randbelow", lambda bound: 0)
 
     def fail(message: EmailMessage) -> None:
         if mode == "safe":

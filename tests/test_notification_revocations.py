@@ -9,7 +9,6 @@ from django.test import override_settings
 from pyracast.accounts.models import Membership
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.mail.errors import NotSentError
-from pyracast.notifications import jobs
 from pyracast.notifications.jobs import LEASE_DURATION, process_notification
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.scheduler import enqueue_due
@@ -146,7 +145,9 @@ def test_revocation_after_permission_preserves_the_attempt_but_excludes_safe_ret
     group(system, ["EXTERNAL@example.com"])
     (delivery_id,) = enqueue_due(SLOT)
     clock = [0.0]
-    monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(
+        "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: clock[0])
+    )
     attempted: list[EmailMessage] = []
     original_recipients = ["EXTERNAL@example.com", retained.email]
 

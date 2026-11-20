@@ -41,7 +41,7 @@ def test_reclaimed_connection_cannot_transmit_after_a_new_lease(
     delivery = ready()
     clock = [0.0]
     monkeypatch.setattr(
-        "pyracast.notifications.jobs.time", SimpleNamespace(monotonic=lambda: clock[0])
+        "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: clock[0])
     )
 
     def reclaim() -> None:
@@ -72,7 +72,7 @@ def test_late_smtp_response_resolves_the_original_uncertain_lease(
     delivery = ready()
     clock = [0.0]
     monkeypatch.setattr(
-        "pyracast.notifications.jobs.time", SimpleNamespace(monotonic=lambda: clock[0])
+        "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: clock[0])
     )
 
     def late_response(message: EmailMessage) -> None:
@@ -114,7 +114,7 @@ def test_open_connection_does_not_authorize_a_changed_delivery(
     delivery = ready()
     clock = [0.0]
     monkeypatch.setattr(
-        "pyracast.notifications.jobs.time", SimpleNamespace(monotonic=lambda: clock[0])
+        "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: clock[0])
     )
     start = SLOT + MAX_LATENESS - timedelta(seconds=1) if change == "deadline" else SLOT
 
@@ -152,7 +152,7 @@ def test_expired_connection_is_retried_only_within_its_delivery_budget(
         NotificationDelivery.objects.filter(pk=delivery.pk).update(attempts=7)
     clock = [0.0]
     monkeypatch.setattr(
-        "pyracast.notifications.jobs.time", SimpleNamespace(monotonic=lambda: clock[0])
+        "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: clock[0])
     )
 
     def expire() -> None:
@@ -172,7 +172,7 @@ def test_a_lease_that_expires_during_preparation_cannot_transmit(
     delivery = ready()
     clock = [0.0]
     monkeypatch.setattr(
-        "pyracast.notifications.jobs.time", SimpleNamespace(monotonic=lambda: clock[0])
+        "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: clock[0])
     )
 
     def slow_preparation(record: NotificationDelivery) -> EmailMultiAlternatives:
@@ -203,7 +203,7 @@ def test_authority_lock_wait_cannot_move_transmission_past_its_deadline(
     delivery = ready()
     clock = [0.0]
     monkeypatch.setattr(
-        "pyracast.notifications.jobs.time", SimpleNamespace(monotonic=lambda: clock[0])
+        "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: clock[0])
     )
     original = recipient_limit
     calls = 0

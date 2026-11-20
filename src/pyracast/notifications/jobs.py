@@ -1,20 +1,20 @@
 import logging
-import secrets
-import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import cast
 from zoneinfo import ZoneInfo
 
-from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.db import DatabaseError, transaction
 from django.db.models import Case, F, Q, Value, When
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
+from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS
 from pyracast.background.failures import log_failure
+from pyracast.background.lease import RELEASED, carries, claimable, expired, release, take
+from pyracast.background.retry_policy import MAIL
 from pyracast.mail.errors import (
     DeliveryUncertainError,
     MailFailure,
@@ -70,13 +70,12 @@ def _recover_interrupted(delivery: NotificationDelivery, now: datetime) -> None:
     else:
         delivery.status = (
             NotificationDeliveryStatus.RETRY
-            if delivery.attempts < 8 and now < delivery.scheduled_for + MAX_LATENESS
+            if not MAIL.exhausted(delivery.attempts) and now < delivery.scheduled_for + MAX_LATENESS
             else NotificationDeliveryStatus.FAILED
         )
         delivery.last_error = NotificationDeliveryError.INTERRUPTED_CONNECTION
         delivery.available_at = now
-        delivery.lease_token = None
-        delivery.lease_expires_at = None
+        release(delivery)
     delivery.save()
 
 
@@ -106,27 +105,22 @@ def _lock_workspace(delivery_id: int) -> None:
 def _mark_transmit(
     delivery_id: int, token: uuid.UUID, now: datetime, message: EmailMultiAlternatives
 ) -> bool:
-    started = time.monotonic()
+    clock = Clock(now)
     with transaction.atomic():
         _lock_workspace(delivery_id)
         limit = recipient_limit(lock=True)
         delivery = _locked_delivery(delivery_id)
-        if (
-            delivery is None
-            or delivery.status != NotificationDeliveryStatus.SENDING
-            or delivery.lease_token != token
-        ):
+        if delivery is None or not carries(delivery, token, NotificationDeliveryStatus.SENDING):
             return False
         addresses, reason = _authorize(delivery, limit)
-        now += timedelta(seconds=time.monotonic() - started)
-        if delivery.lease_expires_at is None or delivery.lease_expires_at <= now:
+        now = clock.now()
+        if expired(delivery, now):
             _recover_interrupted(delivery, now)
             return False
         if reason or now - delivery.scheduled_for > MAX_LATENESS:
             delivery.status = NotificationDeliveryStatus.SKIPPED
             delivery.last_error = reason or NotificationDeliveryError.DELIVERY_DEADLINE_EXCEEDED
-            delivery.lease_token = None
-            delivery.lease_expires_at = None
+            release(delivery)
             delivery.save()
             return False
         delivery.transmit_started_at = now
@@ -136,19 +130,16 @@ def _mark_transmit(
 
 
 def process_notification(delivery_id: int, now: datetime) -> bool:
-    started = time.monotonic()
-    entered_at = now
-    if now.tzinfo is None:
-        raise ValidationError("An aware timestamp is required.")
+    clock = Clock(now)
     with transaction.atomic():
         _lock_workspace(delivery_id)
         limit = recipient_limit(lock=True)
         delivery = _locked_delivery(delivery_id)
         if delivery is None:
             return False
-        now = entered_at + timedelta(seconds=time.monotonic() - started)
+        now = clock.now()
         if delivery.status == NotificationDeliveryStatus.SENDING:
-            if delivery.lease_expires_at is None or delivery.lease_expires_at <= now:
+            if expired(delivery, now):
                 _recover_interrupted(delivery, now)
             return False
         if (
@@ -188,11 +179,8 @@ def process_notification(delivery_id: int, now: datetime) -> bool:
                 )
             message, delivery.prepared_message = build_unavailable_message(delivery, prepared_at)
         message.bcc = addresses
-        token = uuid.uuid4()
-        delivery.status, delivery.lease_token = NotificationDeliveryStatus.SENDING, token
-        delivery.lease_expires_at = now + LEASE_DURATION
+        token = take(delivery, NotificationDeliveryStatus.SENDING, now, LEASE_DURATION)
         delivery.transmit_started_at = None
-        delivery.attempts += 1
         delivery.save()
     available_at = now
     error_code: str
@@ -200,20 +188,15 @@ def process_notification(delivery_id: int, now: datetime) -> bool:
 
     def before_send() -> bool:
         nonlocal transmitting
-        transmitting = _mark_transmit(
-            delivery_id,
-            token,
-            entered_at + timedelta(seconds=time.monotonic() - started),
-            message,
-        )
+        transmitting = _mark_transmit(delivery_id, token, clock.now(), message)
         return transmitting
 
     def retry_or_fail() -> tuple[NotificationDeliveryStatus, datetime]:
-        completed_at = entered_at + timedelta(seconds=time.monotonic() - started)
-        retry_at = completed_at + timedelta(
-            seconds=min(60 * 2 ** (delivery.attempts - 1), 1800) + secrets.randbelow(31)
-        )
-        if delivery.attempts < 8 and retry_at < delivery.scheduled_for + MAX_LATENESS:
+        retry_at = clock.now() + MAIL.delay(delivery.attempts)
+        if (
+            not MAIL.exhausted(delivery.attempts)
+            and retry_at < delivery.scheduled_for + MAX_LATENESS
+        ):
             return NotificationDeliveryStatus.RETRY, retry_at
         return NotificationDeliveryStatus.FAILED, now
 
@@ -260,8 +243,7 @@ def process_notification(delivery_id: int, now: datetime) -> bool:
         last_error=stored_error,
         sent_at=timezone.now() if status == NotificationDeliveryStatus.SENT else None,
         available_at=available_at,
-        lease_token=None,
-        lease_expires_at=None,
+        **RELEASED,
     )
     return status == NotificationDeliveryStatus.SENT and bool(updated)
 
@@ -273,7 +255,7 @@ def pending_notification_ids(now: datetime, limit: int = 100) -> list[int]:
         )
         .filter(
             Q(status__in=(NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY))
-            | Q(status=NotificationDeliveryStatus.SENDING, lease_expires_at__lte=now)
+            | claimable(NotificationDeliveryStatus.SENDING, now)
         )
         .order_by("available_at", "pk")
         .values_list("pk", flat=True)[:limit]
