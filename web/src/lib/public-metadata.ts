@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { languages, type Language } from "@/i18n/language";
 
 export const siteOrigin = "https://pyracast.app";
+export const contactEmail = "info@pyracast.app";
 export const publicPages = ["home", "privacy", "terms"] as const;
 export type PublicPage = (typeof publicPages)[number];
 
