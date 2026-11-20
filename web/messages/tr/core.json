@@ -149,6 +149,7 @@
         "verifyEmail": "Yeni e-postayı doğrula",
         "emailCode": "E-posta doğrulama kodu",
         "loadingWorkspaces": "Çalışma alanlarınız yükleniyor…",
+        "loadingScreen": "Yükleniyor…",
         "noWorkspace": "Henüz çalışma alanı yok",
         "contactAdmin": "Erişim için yöneticinizle iletişime geçin.",
         "portfolio": "Güneş enerjisi portföyünüz",

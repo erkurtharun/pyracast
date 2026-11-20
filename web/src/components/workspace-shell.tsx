@@ -3,6 +3,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import {
     createContext,
+    Suspense,
     useContext,
     useEffect,
     useState,
@@ -277,7 +278,15 @@ export function WorkspaceShell({
                                     </button>
                                 </>
                             ) : tenant ? (
-                                children
+                                <Suspense
+                                    fallback={
+                                        <p role="status">
+                                            {t("loadingScreen")}
+                                        </p>
+                                    }
+                                >
+                                    {children}
+                                </Suspense>
                             ) : tenantId === undefined ? (
                                 <Empty title={t("noWorkspace")}>
                                     {t("contactAdmin")}

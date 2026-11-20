@@ -29,6 +29,7 @@ import {
     configurationInput,
 } from "./plant-configuration-fields";
 import { DataSourceControl, localDay, type DataSource } from "./data-source";
+import { usePageTitle } from "./page-title";
 export function PlantWorkspace({
     plant,
     scope,
@@ -102,6 +103,7 @@ export function PlantWorkspace({
     const today = localDay(timezone);
     const configuration = currentPlant.current_configuration;
     const metadata = configuration ?? currentPlant.submission;
+    usePageTitle(`${t(tab)} · ${currentPlant.name} | Pyracast`);
     return (
         <>
             <button

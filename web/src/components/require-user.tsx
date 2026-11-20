@@ -2,6 +2,7 @@
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import { Fragment, type ReactNode } from "react";
+import { appQuery } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
 import { Auth } from "./auth";
 import { WorkspaceAccess } from "./workspace-access";
@@ -15,7 +16,7 @@ export function RequireUser({
     invitationToken?: string | null;
 }) {
     const t = useTranslations("Dashboard");
-    const signup = useSearchParams().get("signup") === "1";
+    const { signup } = appQuery(useSearchParams());
     const { session } = useSessionState();
     const stored = useStoredInvitation();
     if (session?.user)

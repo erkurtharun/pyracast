@@ -7,7 +7,7 @@ import { authRequest, type AuthResult } from "@/lib/auth-api";
 import { loadSession, useSessionState } from "@/lib/session-client";
 import { isLanguage } from "@/i18n/language";
 import { publicPath } from "@/lib/public-metadata";
-import { routes } from "@/lib/routes";
+import { addressWithout, appQuery, callbackParams, routes } from "@/lib/routes";
 import { ActionForm, Field, Notice } from "./ui";
 import { SocialProviderButtons } from "./social-provider-buttons";
 import { LanguageSelect } from "./language-select";
@@ -79,19 +79,15 @@ export function Auth({
     useEffect(() => {
         let active = true;
         const callback = new URL(window.location.href);
+        const outcome = appQuery(callback.searchParams).socialCallback;
         const callbackError = (callbackErrorRef.current ??=
-            callback.searchParams.has("social_callback") &&
-            callback.searchParams.has("error"));
-        if (callback.searchParams.has("social_callback")) {
-            callback.searchParams.delete("social_callback");
-            callback.searchParams.delete("error");
-            callback.searchParams.delete("error_process");
+            outcome === "failed");
+        if (outcome !== "none")
             window.history.replaceState(
                 window.history.state,
                 "",
-                `${callback.pathname}${callback.search}${callback.hash}`,
+                addressWithout(callback, callbackParams),
             );
-        }
         authRequest("auth/session", "GET")
             .then((result) => {
                 if (!active) return;

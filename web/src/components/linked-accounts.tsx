@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { authRequest, type AuthenticatorRecord } from "@/lib/auth-api";
+import { addressWithout, appQuery, callbackParams } from "@/lib/routes";
 import {
     SocialProviderButtons,
     useSocialProviders,
@@ -44,21 +45,16 @@ export function LinkedAccounts({
     const [callbackError] = useState(
         () =>
             typeof window !== "undefined" &&
-            new URLSearchParams(window.location.search).has(
-                "social_callback",
-            ) &&
-            new URLSearchParams(window.location.search).has("error"),
+            appQuery(new URLSearchParams(window.location.search))
+                .socialCallback === "failed",
     );
     useEffect(() => {
         const url = new URL(window.location.href);
-        if (!url.searchParams.has("social_callback")) return;
-        url.searchParams.delete("social_callback");
-        url.searchParams.delete("error");
-        url.searchParams.delete("error_process");
+        if (appQuery(url.searchParams).socialCallback === "none") return;
         window.history.replaceState(
             window.history.state,
             "",
-            `${url.pathname}${url.search}${url.hash}`,
+            addressWithout(url, callbackParams),
         );
     }, []);
     useEffect(() => {

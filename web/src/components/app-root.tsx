@@ -13,17 +13,12 @@ export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
     const { session, failure, retry } = useSessionBootstrap();
     const handoff = useLanguageHandoff(session);
+    useFocusSessionRead(session !== undefined && handoff.status === "ready");
     const user = session?.user?.id;
     useForeignCacheRemoval(client, user);
     return (
         <QueryClientProvider client={client}>
-            <SessionLanguage
-                language={
-                    handoff.status === "failed"
-                        ? handoff.language
-                        : session?.language
-                }
-            >
+            <SessionLanguage language={session?.language}>
                 {session && handoff.status === "ready" ? (
                     <QueryOwner value={user}>{children}</QueryOwner>
                 ) : (
@@ -88,8 +83,20 @@ function useSessionBootstrap() {
             active = false;
         };
     }, [attempt]);
+    return {
+        session,
+        failure,
+        retry: () => {
+            setFailure(undefined);
+            setAttempt((value) => value + 1);
+        },
+    };
+}
+
+// A read during a pending or failed language hand-off would adopt a session behind its retry screen.
+function useFocusSessionRead(enabled: boolean) {
     useEffect(() => {
-        if (!session) return;
+        if (!enabled) return;
         const refresh = () => {
             if (document.visibilityState === "visible")
                 loadSession().catch(() => {});
@@ -100,15 +107,7 @@ function useSessionBootstrap() {
             window.removeEventListener("focus", refresh);
             document.removeEventListener("visibilitychange", refresh);
         };
-    }, [session]);
-    return {
-        session,
-        failure,
-        retry: () => {
-            setFailure(undefined);
-            setAttempt((value) => value + 1);
-        },
-    };
+    }, [enabled]);
 }
 
 function useForeignCacheRemoval(client: QueryClient, user: number | undefined) {

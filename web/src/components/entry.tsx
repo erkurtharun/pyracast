@@ -2,27 +2,28 @@
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { routes } from "@/lib/routes";
+import { appQuery, routes } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
 import { RequireUser } from "./require-user";
 import { storedInvitation } from "./workspace-invitation";
 
 const socialConnectKey = "pyracast.socialConnect";
 
-function takeSocialConnect(url: URL) {
+function takeSocialConnect(failed: boolean) {
     try {
         const connecting = window.sessionStorage.getItem(socialConnectKey);
         window.sessionStorage.removeItem(socialConnectKey);
-        return Boolean(connecting) || url.searchParams.has("error");
+        return Boolean(connecting) || failed;
     } catch {
-        return url.searchParams.has("error");
+        return failed;
     }
 }
 
 function destination(canAdmin: boolean) {
-    const url = new URL(window.location.href);
-    if (url.searchParams.has("social_callback") && takeSocialConnect(url))
-        return { href: `${routes.account()}${url.search}`, document: true };
+    const { search } = window.location;
+    const callback = appQuery(new URLSearchParams(search)).socialCallback;
+    if (callback !== "none" && takeSocialConnect(callback === "failed"))
+        return { href: `${routes.account()}${search}`, document: true };
     if (storedInvitation()) return { href: routes.invitation() };
     if (canAdmin) return { href: "/admin/", document: true };
     return { href: routes.workspaces() };

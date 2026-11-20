@@ -149,6 +149,7 @@
         "verifyEmail": "Verify new email",
         "emailCode": "Email verification code",
         "loadingWorkspaces": "Loading your workspaces…",
+        "loadingScreen": "Loading…",
         "noWorkspace": "No workspace yet",
         "contactAdmin": "Contact your administrator for access.",
         "portfolio": "Your solar portfolio",

@@ -1,17 +1,15 @@
 "use client";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { isLanguage, type Language } from "@/i18n/language";
 import { api } from "@/lib/api/client";
+import { addressWithout, appQuery } from "@/lib/routes";
 import { adoptSession, type Session } from "@/lib/session-client";
 
 export type Handoff =
-    | { status: "ready" }
-    | { status: "pending" | "failed"; language: Language; retry: () => void };
+    { status: "ready" } | { status: "pending" | "failed"; retry: () => void };
 
 export function useLanguageHandoff(current: Session | undefined): Handoff {
-    const requested = useSearchParams().get("language");
-    const language = isLanguage(requested) ? requested : undefined;
+    const { language } = appQuery(useSearchParams());
     const [status, setStatus] = useState<"pending" | "failed" | "ready">(
         language ? "pending" : "ready",
     );
@@ -20,12 +18,10 @@ export function useLanguageHandoff(current: Session | undefined): Handoff {
         let active = true;
         const finish = (updated: Session) => {
             if (!active) return;
-            const url = new URL(window.location.href);
-            url.searchParams.delete("language");
             window.history.replaceState(
                 window.history.state,
                 "",
-                `${url.pathname}${url.search}${url.hash}`,
+                addressWithout(new URL(window.location.href), ["language"]),
             );
             adoptSession(updated);
             setStatus("ready");
@@ -42,5 +38,5 @@ export function useLanguageHandoff(current: Session | undefined): Handoff {
         };
     }, [current, language, status]);
     if (status === "ready" || !language) return { status: "ready" };
-    return { status, language, retry: () => setStatus("pending") };
+    return { status, retry: () => setStatus("pending") };
 }
