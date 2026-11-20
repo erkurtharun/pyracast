@@ -1,13 +1,16 @@
 import json
+import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from threading import Event
 from typing import Any
 
 import pytest
+from allauth.mfa.models import Authenticator
+from allauth.usersessions.models import UserSession
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import OperationalError, connection, transaction
@@ -35,25 +38,28 @@ from pyracast.plants.models import Plant
 from pyracast.platform_admin.forms import WorkspaceSettingsForm
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import Region
+from tests.support.account_sessions import totp_clock, with_totp
 from tests.support.admin_setup import admin_system, setup_input, submitted_plant
 from tests.support.api import verified_admin
+from tests.support.auth_lifecycle import totp_code
 from tests.support.domain import FakeAdapter, System, make_system
 from tests.support.historical_reference_import import system_for_import
 from tests.support.metering import PROVIDER_PLANT, FixtureClient
 from tests.support.plant_operations import make_plant
+from tests.support.step_up import proofs, with_proof
 
 pytestmark = pytest.mark.django_db(transaction=True)
 RETRY = "Another change to this record is in progress, so nothing was saved. Try again in a moment."
 
 
 @contextmanager
-def row_locked_elsewhere(model: type[Model], pk: int, *, no_key: bool = False) -> Iterator[None]:
+def held_elsewhere(lock: Callable[[], object]) -> Iterator[None]:
     held, release = Event(), Event()
 
     def hold() -> None:
         try:
             with transaction.atomic():
-                model._default_manager.select_for_update(no_key=no_key).get(pk=pk)
+                lock()
                 held.set()
                 assert release.wait(timeout=30)
         finally:
@@ -71,6 +77,14 @@ def row_locked_elsewhere(model: type[Model], pk: int, *, no_key: bool = False) -
             holder.result(timeout=10)
             with connection.cursor() as cursor:
                 cursor.execute("RESET lock_timeout")
+
+
+def row_locked_elsewhere(
+    model: type[Model], pk: int, *, no_key: bool = False
+) -> AbstractContextManager[None]:
+    return held_elsewhere(
+        lambda: model._default_manager.select_for_update(no_key=no_key).get(pk=pk)
+    )
 
 
 @dataclass(frozen=True)
@@ -374,8 +388,29 @@ def language(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) ->
         {"language": "tr", "next": page},
         operator,
         lambda: not UserLanguagePreference.objects.filter(user=operator).exists(),
-        # The account operations hold the user row this way; a full row lock would also stop the
-        # session activity record that every request writes before any console view runs.
+        # Account operations hold the user row without its key; a full row lock would also stop
+        # the session record a request inserts before any console view runs.
+        no_key=True,
+    )
+
+
+def confirm(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) -> Form:
+    now = time.time()
+    totp_clock(monkeypatch, now)
+    Authenticator.objects.filter(user=operator).delete()
+    secret = with_totp(operator)
+    factor = Authenticator.objects.get(user=operator)
+    with_proof(
+        client, operator, "mfa", age=60, reauthenticated=False, type=factor.type, id=factor.pk
+    )
+    url = reverse("admin:workspace_confirm")
+    settings_page = reverse("admin:workspace_settings")
+    return Form(
+        f"{url}?next={settings_page}",
+        url,
+        {"code": totp_code(secret, now), "next": settings_page},
+        operator,
+        lambda: factor.pk not in {proof.get("id") for proof in proofs(client)},
         no_key=True,
     )
 
@@ -399,6 +434,7 @@ FORMS: dict[str, Callable[[pytest.MonkeyPatch, Client, User], Form]] = {
     "removal": removal,
     "new_plant": new_plant,
     "language": language,
+    "confirm": confirm,
 }
 
 
@@ -432,6 +468,42 @@ def test_a_retry_returns_to_the_console_overview_when_the_form_page_is_unknown()
 
     assert (response.status_code, response["Location"]) == (302, reverse("admin:index"))
     assert RETRY in client.get(reverse("admin:index")).content.decode()
+
+
+def test_a_script_sent_console_form_receives_its_retry_message_as_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, operator = verified_admin()
+    client.raise_request_exception = False
+    form = historical_save(monkeypatch, client, operator)
+
+    with row_locked_elsewhere(type(form.locked), form.locked.pk):
+        response = client.post(form.action, form.data, HTTP_ACCEPT="application/json")
+
+    assert (response.status_code, response["Retry-After"]) == (503, "1")
+    assert response.json() == {"message": RETRY}
+    assert RETRY not in client.get(form.page).content.decode()
+    assert form.unchanged()
+
+
+def test_a_language_change_never_waits_for_a_record_that_references_the_account() -> None:
+    client, operator = verified_admin()
+    page = reverse("admin:workspace_plants")
+
+    def record_session() -> None:
+        with connection.cursor() as cursor:
+            cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        UserSession.objects.create(
+            user=operator, session_key="b" * 32, ip="127.0.0.1", user_agent="Browser"
+        )
+
+    with held_elsewhere(record_session):
+        response = client.post(
+            reverse("admin:workspace_language"), {"language": "tr", "next": page}
+        )
+
+    assert (response.status_code, response["Location"]) == (302, page)
+    assert UserLanguagePreference.objects.get(user=operator).language == "tr"
 
 
 def busy(session_key: str) -> Any:

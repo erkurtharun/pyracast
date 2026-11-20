@@ -30,7 +30,12 @@ HOSTILE = [
     "/admin/\r\nSet-Cookie: x=1",
     "/admin/%0d%0aLocation:%20https://elsewhere.example/",
     "/admin/\x00",
-    " /admin/",
+    " /admin/plants/7/",
+    "/admin/plants/7/ ",
+    "/admin/plants/7/\x85Set-Cookie: x=1",
+    "/admin/plants/7/%C2%85",
+    "/admin/plants/7/\u2028",
+    "/admin/plants/7/\u202e",
     "/app/w/",
     "",
 ]

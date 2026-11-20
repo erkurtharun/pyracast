@@ -617,8 +617,10 @@ for (const next of [
     "/admin/%2e%2e/app/w/",
     "https://evil.example/admin/",
     "http://[::1/admin/",
+    " /admin/plants/7/",
+    "/admin/plants/7/\u2028",
 ]) {
-    test(`an administrator lands on the console overview for ${next}`, async ({
+    test(`an administrator lands on the console overview for ${JSON.stringify(next)}`, async ({
         page,
     }) => {
         await mockApi(page, { admin: true });
