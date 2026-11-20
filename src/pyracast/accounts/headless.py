@@ -17,6 +17,7 @@ from allauth.account.internal.stagekit import LOGIN_SESSION_KEY
 from allauth.account.models import EmailAddress
 from allauth.core import ratelimit
 from allauth.headless.account import views
+from allauth.headless.account.inputs import AddEmailInput as AllauthAddEmailInput
 from allauth.headless.base.response import AuthenticationResponse, ConflictResponse
 from allauth.headless.internal.restkit.inputs import Input
 from allauth.headless.internal.restkit.response import ErrorResponse
@@ -247,9 +248,10 @@ class ManageEmailView(StepUpAnswers, StartingView, views.ManageEmailView):
             return super().handle(request, *args, **kwargs)
 
     def get_input_class(self) -> type[Input] | None:
-        if self.request.method == "POST":
+        input_class = super().get_input_class()
+        if input_class is AllauthAddEmailInput:
             return inputs.AddEmailInput
-        return super().get_input_class()
+        return input_class
 
     def handle_input(self, data: Any) -> ErrorResponse | None:
         if self.request.method == "POST":
