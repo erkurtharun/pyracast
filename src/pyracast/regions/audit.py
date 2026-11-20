@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 
 from django.contrib.auth.models import User
 
-from pyracast.event_details import INTEGER, TEXT, DetailShape, shaped
+from pyracast.event_details import INTEGER, OPTIONAL_INTEGER, TEXT, DetailShape, shaped
 from pyracast.regions.models import AuditAction, AuditEvent, Region
 
 if TYPE_CHECKING:
@@ -22,6 +22,11 @@ AUDIT_DETAILS: Mapping[str, DetailShape] = {
     AuditAction.LOCATION_CHANGE_REBASED: {},
     AuditAction.BINDING_CONFIGURED: BINDING,
     AuditAction.CONNECTION_VALIDATED: BINDING,
+    AuditAction.CONNECTION_VALIDATION_FAILED: {
+        **BINDING,
+        "error_code": TEXT,
+        "status_code": OPTIONAL_INTEGER,
+    },
     AuditAction.REGION_APPROVED: BINDING,
     AuditAction.REGION_REJECTED: REVIEW_REASON,
     AuditAction.REGION_SUSPENDED: REVIEW_REASON,

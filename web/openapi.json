@@ -5572,6 +5572,7 @@
                     "location_change_rebased",
                     "binding_configured",
                     "connection_validated",
+                    "connection_validation_failed",
                     "region_approved",
                     "region_rejected",
                     "region_suspended",
@@ -5587,7 +5588,7 @@
                     "provider_cooldown_cleared"
                 ],
                 "type": "string",
-                "description": "* `region_renamed` - Plant location renamed\n* `location_change_requested` - Location change requested\n* `location_change_approved` - Location change approved\n* `location_change_rejected` - Location change rejected\n* `location_change_withdrawn` - Location change withdrawn\n* `location_change_rebased` - Location change request moved to the new revision\n* `binding_configured` - Provider connection configured\n* `connection_validated` - Provider connection validated\n* `region_approved` - Plant approved\n* `region_rejected` - Plant rejected\n* `region_suspended` - Plant suspended\n* `region_resubmitted` - Plant resubmitted for review\n* `region_trashed` - Plant location moved to trash\n* `region_restored` - Plant location restored\n* `collection_schedule_updated` - Collection schedule updated\n* `reminder_schedule_updated` - Email reminders updated\n* `historical_reference_imported` - Historical reference imported\n* `reference_capacity_normalized` - Reference capacity normalized\n* `provider_account_created` - Provider account created\n* `provider_secret_rotated` - Provider key rotated\n* `provider_cooldown_cleared` - Provider request pause cleared"
+                "description": "* `region_renamed` - Plant location renamed\n* `location_change_requested` - Location change requested\n* `location_change_approved` - Location change approved\n* `location_change_rejected` - Location change rejected\n* `location_change_withdrawn` - Location change withdrawn\n* `location_change_rebased` - Location change request moved to the new revision\n* `binding_configured` - Provider connection configured\n* `connection_validated` - Provider connection validated\n* `connection_validation_failed` - Provider connection validation failed\n* `region_approved` - Plant approved\n* `region_rejected` - Plant rejected\n* `region_suspended` - Plant suspended\n* `region_resubmitted` - Plant resubmitted for review\n* `region_trashed` - Plant location moved to trash\n* `region_restored` - Plant location restored\n* `collection_schedule_updated` - Collection schedule updated\n* `reminder_schedule_updated` - Email reminders updated\n* `historical_reference_imported` - Historical reference imported\n* `reference_capacity_normalized` - Reference capacity normalized\n* `provider_account_created` - Provider account created\n* `provider_secret_rotated` - Provider key rotated\n* `provider_cooldown_cleared` - Provider request pause cleared"
             },
             "AutomaticCalibrationAttemptOutput": {
                 "type": "object",
