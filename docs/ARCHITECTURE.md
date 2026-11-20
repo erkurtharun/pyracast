@@ -170,9 +170,10 @@ A write of the account's own credentials (recovery codes, authenticator, passwor
 addresses, provider identities) runs in one transaction that first
 locks the account, answers `session_ended` when the session is gone and asks for a
 confirmation by the factor the account needs now when the record differs, also before a
-password change that gives the current password. Other requests, such as console writes of
-business data, compare the record when they start, so one already past that check finishes,
-as a request of a session revoked a moment later does. Linking is
+password change that gives the current password. The session that made such a write keeps
+its record for the state it left, within its confirmation's window. Other requests, such as
+console writes of business data, compare the record when they start, so one already past that
+check finishes, as a request of a session revoked a moment later does. Linking is
 bound to the initiating user, and disconnects lock the user record to preserve a
 working login method. Provider sign-in retains Pyracast's local MFA requirements.
 
@@ -528,12 +529,14 @@ the stored session the cookie named other than by expiry (a sign-out, a password
 change); an expired session leaves its key, which names no session. So an answer
 arriving after a newer one never restores an older key, and an expiry never deletes the
 key of a later sign-in; a request whose session no longer exists answers as signed out.
-The web client treats that answer as the end of the session only after a session read
-sent after it agrees, and otherwise repeats the refused request once when that read shows
-the account the request was prepared under; a repeat refused
-again goes through the same read and is not sent a third time. A sign-out whose session
-read still shows the same account signed in is sent once more with the current key, and
-reported if the session is still signed in after it or the read shows another account.
+Each web-client request names the tag of the session it was prepared for (a random value
+issued at sign-in, kept when a confirmation renews the key, returned by `/api/session/`,
+never logged); a middleware before any other refuses one for another session with 409
+`session_changed`, so it changes nothing. The client then reads the session and repeats the
+request once only when that read shows the same tag, and drops an answer that arrives after
+it adopted another session. Tabs share the last tag a session read observed in
+`localStorage`; a tab whose adopted tag differs hides its screens until it reads again. A
+read that would end a signed-in session is confirmed by a second read.
 Revoke sessions after 12 hours or 30 minutes without requests; polling of a visible
 tab counts as activity, and hidden tabs do not poll. Sessions predating the lifetime markers fail closed. A request
 whose session another session of the account ended while it ran answers 400
@@ -579,10 +582,13 @@ verification codes, go to private local process logs. Console mail in production
 an unknown backend stops startup. Email replacements require reauthentication
 and verification; a password change also needs a recent MFA reauthentication when the
 account has an authenticator, and invalidates other sessions. Customers can optionally
-enable TOTP from account settings. Enrollment renders the server-issued setup URI as a
-local QR code with a manual-key fallback. The browser keeps secrets only in component memory.
+enable TOTP from account settings: the setup secret is issued only after a confirmation, the
+first code activates the authenticator and its answer carries the recovery codes, shown once.
+Enrollment renders the server-issued setup URI as a local QR code with a manual-key fallback.
+The browser keeps secrets only in component memory.
 Removing TOTP or accessing and regenerating recovery codes requires explicit MFA
-reauthentication within five minutes, bound to a still-enrolled factor; password
+reauthentication within five minutes, bound to a still-enrolled factor (the activation code
+counts as one within the window of the confirmation that allowed it); password
 reauthentication is insufficient. Platform administrators cannot remove TOTP.
 
 Requests sharing a valid session cookie serialize through a PostgreSQL advisory

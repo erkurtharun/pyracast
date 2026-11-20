@@ -1,27 +1,40 @@
 "use client";
 import { useTranslations } from "next-intl";
-import type { RecoveryCounts } from "./model";
+import { deviceZone } from "@/lib/format/time";
+import { useFormat } from "@/lib/format/use-format";
+import type { Facts } from "./model";
 
 export function EnabledPanel({
-    recovery,
+    facts,
     mfaRequired,
     busy,
-    loadingRecovery,
-    onShowRecovery,
     onReplace,
     onRemove,
 }: {
-    recovery?: RecoveryCounts;
+    facts: Facts;
     mfaRequired: boolean;
     busy: boolean;
-    loadingRecovery: boolean;
-    onShowRecovery: () => void;
     onReplace: () => void;
     onRemove: () => void;
 }) {
     const t = useTranslations("Security");
+    const format = useFormat();
+    // The server sends seconds since the epoch.
+    const date = (seconds: number) =>
+        format.time(seconds * 1000, deviceZone(), { dateStyle: "medium" });
+    const { recovery } = facts;
     return (
         <div className="mfa-subpanel">
+            {facts.addedAt !== undefined && (
+                <p>
+                    {t("authenticatorAdded", { date: date(facts.addedAt) })}{" "}
+                    {facts.lastUsedAt
+                        ? t("authenticatorLastUsed", {
+                              date: date(facts.lastUsedAt),
+                          })
+                        : t("authenticatorNotUsed")}
+                </p>
+            )}
             {recovery && (
                 <p>
                     {t("recoveryCount", {
@@ -41,17 +54,9 @@ export function EnabledPanel({
                     className="button secondary"
                     type="button"
                     disabled={busy}
-                    onClick={onShowRecovery}
-                >
-                    {loadingRecovery ? t("working") : t("showRecovery")}
-                </button>
-                <button
-                    className="button secondary"
-                    type="button"
-                    disabled={busy}
                     onClick={onReplace}
                 >
-                    {t("replaceRecovery")}
+                    {recovery ? t("replaceRecovery") : t("generateRecovery")}
                 </button>
                 {!mfaRequired && (
                     <button

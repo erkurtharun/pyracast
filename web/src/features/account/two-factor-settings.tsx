@@ -2,17 +2,14 @@
 
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadSession } from "@/lib/session-client";
 import { ApiError, displayMessage } from "@/lib/api/errors";
 import {
     authRequest,
     type AuthenticatorRecord,
     type AuthResult,
 } from "@/lib/auth-api";
-import {
-    getReauthMode,
-    refreshExpiredSession,
-} from "./security-reauthentication";
+import { refreshExpiredSession } from "./security-reauthentication";
+import { StepUpPrompt, stepUpMode, useStepUp } from "./step-up";
 import { AuthenticatorSetup } from "./authenticator-setup";
 import { RecoveryCodes } from "./recovery-codes";
 import { ConfirmStep } from "./two-factor/confirm-step";
@@ -20,467 +17,233 @@ import { EnabledPanel } from "./two-factor/enabled-panel";
 import { LoadError } from "./two-factor/load-error";
 import {
     parseAuthenticators,
-    type LocalFeedback,
-    type PendingOperation,
-    type RecoveryCounts,
+    type Facts,
     type StatusNotice,
     type TwoFactorView,
 } from "./two-factor/model";
-import { ReauthStep } from "./two-factor/reauth-step";
-import { RecoveryViewed } from "./two-factor/recovery-viewed";
 import { TwoFactorStatusTag } from "./two-factor/status-tag";
+
+type Feedback = { text: string; locale: string };
+type Action = "setup" | "activate" | "replace" | "remove";
+
+// The server answered and changed nothing.
+function refused(failure: unknown) {
+    return (
+        failure instanceof ApiError &&
+        failure.status >= 400 &&
+        failure.status < 500
+    );
+}
 
 export function TwoFactorSettings({
     mfaRequired,
-    hasPassword,
     email,
 }: {
     mfaRequired: boolean;
-    hasPassword: boolean;
     email: string;
 }) {
     const t = useTranslations("Security");
     const locale = useLocale();
-
+    const stepUp = useStepUp();
     const [view, setView] = useState<TwoFactorView>({ kind: "loading" });
     const [loadCount, setLoadCount] = useState(0);
-    const [pendingAction, setPendingAction] = useState<string | null>(null);
+    const [running, setRunning] = useState<Action>();
     const [setupCode, setSetupCode] = useState("");
-    const [statusNotice, setStatusNotice] = useState<StatusNotice>();
-    const [errorFeedback, setErrorFeedback] = useState<LocalFeedback>();
-    const [codeFieldError, setCodeFieldError] = useState<LocalFeedback>();
-
-    const mountedRef = useRef(true);
-    const pendingRef = useRef(false);
-    const hasInteractedRef = useRef(false);
+    const [notice, setNotice] = useState<StatusNotice>();
+    const [error, setError] = useState<Feedback>();
+    const [codeError, setCodeError] = useState<Feedback>();
     const stepHeadingRef = useRef<HTMLHeadingElement>(null);
-    const panelHeadingRef = useRef<HTMLHeadingElement>(null);
     const errorRef = useRef<HTMLDivElement>(null);
-    const activeBlobUrlsRef = useRef<Set<{ url: string; timer: number }>>(
-        new Set(),
+    const blobUrls = useRef<Set<{ url: string; timer: number }>>(new Set());
+
+    const show = useCallback((next: TwoFactorView) => {
+        setView(next);
+        requestAnimationFrame(() => stepHeadingRef.current?.focus());
+    }, []);
+
+    const fail = useCallback(
+        (message: string) => {
+            setError({ text: message, locale });
+            requestAnimationFrame(() => errorRef.current?.focus());
+        },
+        [locale],
     );
 
-    const clearTransientFeedback = useCallback(() => {
-        setStatusNotice(undefined);
-        setErrorFeedback(undefined);
-        setCodeFieldError(undefined);
-    }, []);
-
-    const focusStepHeading = useCallback(() => {
-        if (!hasInteractedRef.current) return;
-        requestAnimationFrame(() => {
-            (stepHeadingRef.current ?? panelHeadingRef.current)?.focus();
-        });
-    }, []);
-
-    const focusError = useCallback(() => {
-        requestAnimationFrame(() => {
-            errorRef.current?.focus();
-        });
-    }, []);
-
-    const fetchAuthenticators = useCallback(async (): Promise<{
-        totpEnabled: boolean;
-        recovery?: RecoveryCounts;
-    }> => {
+    const readFacts = useCallback(async () => {
         const result = await authRequest<AuthenticatorRecord[]>(
             "account/authenticators",
             "GET",
         );
-        if (result.status === 401) {
-            if (!result.meta?.is_authenticated) {
-                await refreshExpiredSession(t("sessionExpired"));
-            }
-            throw new ApiError(t("confirmIdentityFirst"));
-        }
+        if (result.status === 401)
+            await refreshExpiredSession(t("sessionExpired"));
         return parseAuthenticators(result.data);
     }, [t]);
 
     useEffect(() => {
-        mountedRef.current = true;
-        pendingRef.current = false;
-        const blobEntries = activeBlobUrlsRef.current;
         let active = true;
-
-        authRequest<AuthenticatorRecord[]>("account/authenticators", "GET")
-            .then(async (result) => {
-                if (!active || !mountedRef.current) return;
-                if (result.status === 401) {
-                    if (!result.meta?.is_authenticated) {
-                        await loadSession();
-                        if (!active || !mountedRef.current) return;
-                        setView({
-                            kind: "loadError",
-                            reason: "sessionExpired",
-                        });
-                        return;
-                    }
+        const urls = blobUrls.current;
+        readFacts()
+            .then(({ totpEnabled, facts }) => {
+                if (active)
+                    setView(
+                        totpEnabled
+                            ? { kind: "enabled", facts }
+                            : { kind: "disabled" },
+                    );
+            })
+            .catch((failure: unknown) => {
+                if (active)
                     setView({
                         kind: "loadError",
-                        reason: "identityRequired",
+                        message: displayMessage(failure, ""),
                     });
-                    return;
-                }
-                const { totpEnabled, recovery } = parseAuthenticators(
-                    result.data,
-                );
-                setView(
-                    totpEnabled
-                        ? { kind: "enabled", recovery }
-                        : { kind: "disabled" },
-                );
-                focusStepHeading();
-            })
-            .catch((err: unknown) => {
-                if (!active || !mountedRef.current) return;
-                setView({
-                    kind: "loadError",
-                    message: displayMessage(err, ""),
-                });
             });
-
         return () => {
             active = false;
-            mountedRef.current = false;
-            pendingRef.current = false;
-            for (const entry of blobEntries) {
+            for (const entry of urls) {
                 window.clearTimeout(entry.timer);
                 URL.revokeObjectURL(entry.url);
             }
-            blobEntries.clear();
+            urls.clear();
         };
-    }, [loadCount, focusStepHeading]);
+    }, [loadCount, readFacts]);
 
-    async function handleAuthenticated401(
+    // Codes shown once must reach the screen even when the list cannot be read after them.
+    const currentFacts = () =>
+        readFacts().then(
+            ({ facts }) => facts,
+            (): Facts => ({}),
+        );
+
+    async function confirmedFirst(
         result: AuthResult<unknown>,
-        operation: PendingOperation,
-        returnView: TwoFactorView,
-        afterActivation: boolean,
-        isReplay: boolean,
-    ): Promise<boolean> {
-        if (!mountedRef.current) return true;
+        resume: () => Promise<void>,
+    ) {
         if (result.status !== 401) return false;
-        if (!result.meta?.is_authenticated) {
-            await refreshExpiredSession(t("sessionExpired"));
-        }
-        if (isReplay) {
-            throw new ApiError(t("reauthStillRequired"), { status: 401 });
-        }
-        if (afterActivation) {
-            setStatusNotice(undefined);
-        }
-        setView({
-            kind: "reauth",
-            mode: getReauthMode(result, hasPassword),
-            operation,
-            returnView,
-            afterActivation,
-        });
-        focusStepHeading();
+        const mode = stepUpMode(result);
+        if (!mode) await refreshExpiredSession(t("sessionExpired"));
+        else stepUp.ask(mode, resume);
         return true;
     }
 
-    async function runRecoveryFetch(
-        fallbackRecovery: RecoveryCounts | undefined,
-        afterActivation: boolean,
-        isReplay: boolean,
-    ) {
-        const result = await authRequest(
-            "account/authenticators/recovery-codes",
-            "GET",
-        );
-        const returnView: TwoFactorView = {
-            kind: "enabled",
-            recovery: fallbackRecovery,
-        };
-        if (
-            await handleAuthenticated401(
-                result,
-                { type: "getRecovery", afterActivation },
-                returnView,
-                afterActivation,
-                isReplay,
-            )
-        ) {
-            return;
-        }
-        if (!mountedRef.current) return;
-        if (afterActivation) setStatusNotice(undefined);
-        const unusedCodes = result.data?.unused_codes;
-        const recovery =
-            result.data?.unused_code_count !== undefined &&
-            result.data.total_code_count !== undefined
-                ? {
-                      unused: result.data.unused_code_count,
-                      total: result.data.total_code_count,
-                  }
-                : fallbackRecovery;
-        if (Array.isArray(unusedCodes) && unusedCodes.length > 0) {
-            setView({
-                kind: "recoverySaving",
-                recovery,
-                codes: unusedCodes,
-            });
-        } else {
-            setView({
-                kind: "recoveryViewed",
-                recovery,
-            });
-        }
-        focusStepHeading();
-    }
-
-    async function executeOperation(
-        operation: PendingOperation,
-        options: { isReplay: boolean; fallbackView: TwoFactorView },
-    ) {
-        if (!mountedRef.current || pendingRef.current) return;
-        hasInteractedRef.current = true;
-        pendingRef.current = true;
-        setPendingAction(operation.type);
-        clearTransientFeedback();
-
+    // A change whose answer was lost may have committed: the list says what the account holds.
+    async function reconcile(action: Action) {
         try {
-            switch (operation.type) {
-                case "startSetup": {
-                    if (mfaRequired) return;
-                    const result = await authRequest(
-                        "account/authenticators/totp",
-                        "GET",
-                    );
-                    if (
-                        await handleAuthenticated401(
-                            result,
-                            operation,
-                            options.fallbackView,
-                            false,
-                            options.isReplay,
-                        )
-                    ) {
-                        return;
-                    }
-                    if (result.status === 200) {
-                        const { totpEnabled, recovery } =
-                            await fetchAuthenticators();
-                        if (!mountedRef.current) return;
-                        setView(
-                            totpEnabled
-                                ? { kind: "enabled", recovery }
-                                : { kind: "disabled" },
-                        );
-                        focusStepHeading();
-                        return;
-                    }
-                    const secret = result.meta?.secret;
-                    const totpUrl = result.meta?.totp_url;
-                    if (!secret || !totpUrl) {
-                        throw new ApiError(t("setupUnavailable"));
-                    }
-                    if (!mountedRef.current) return;
-                    setSetupCode("");
-                    setView({ kind: "enrolling", secret, totpUrl });
-                    focusStepHeading();
-                    return;
-                }
-
-                case "activateTotp": {
-                    if (mfaRequired) return;
-                    const result = await authRequest(
-                        "account/authenticators/totp",
-                        "POST",
-                        { code: operation.code },
-                    );
-                    if (
-                        await handleAuthenticated401(
-                            result,
-                            operation,
-                            options.fallbackView,
-                            false,
-                            options.isReplay,
-                        )
-                    ) {
-                        return;
-                    }
-                    if (!mountedRef.current) return;
-                    setSetupCode("");
-
-                    let recovery: RecoveryCounts | undefined;
-                    try {
-                        const refreshed = await fetchAuthenticators();
-                        recovery = refreshed.recovery;
-                    } catch {
-                        recovery = undefined;
-                    }
-                    if (!mountedRef.current) return;
-                    setStatusNotice("authenticatorActivated");
-
-                    try {
-                        await runRecoveryFetch(recovery, true, false);
-                    } catch (recoveryErr) {
-                        if (!mountedRef.current) return;
-                        setView({ kind: "enabled", recovery });
-                        setErrorFeedback({
-                            text: displayMessage(recoveryErr, t("loadFailed")),
-                            locale,
-                        });
-                        focusError();
-                    }
-                    return;
-                }
-
-                case "getRecovery": {
-                    const recovery =
-                        "recovery" in options.fallbackView
-                            ? options.fallbackView.recovery
-                            : undefined;
-                    await runRecoveryFetch(
-                        recovery,
-                        operation.afterActivation,
-                        options.isReplay,
-                    );
-                    return;
-                }
-
-                case "replaceRecovery": {
-                    const result = await authRequest(
-                        "account/authenticators/recovery-codes",
-                        "POST",
-                        {},
-                    );
-                    if (
-                        await handleAuthenticated401(
-                            result,
-                            operation,
-                            options.fallbackView,
-                            false,
-                            options.isReplay,
-                        )
-                    ) {
-                        return;
-                    }
-                    if (!mountedRef.current) return;
-                    const unusedCodes = result.data?.unused_codes ?? [];
-                    let recovery: RecoveryCounts | undefined =
-                        "recovery" in options.fallbackView
-                            ? options.fallbackView.recovery
-                            : undefined;
-                    try {
-                        const refreshed = await fetchAuthenticators();
-                        recovery = refreshed.recovery ?? recovery;
-                    } catch {
-                        if (unusedCodes.length > 0) {
-                            recovery = {
-                                unused: unusedCodes.length,
-                                total: unusedCodes.length,
-                            };
-                        }
-                    }
-                    if (!mountedRef.current) return;
-                    setStatusNotice("codesReplaced");
-                    if (unusedCodes.length > 0) {
-                        setView({
-                            kind: "recoverySaving",
-                            recovery,
-                            codes: unusedCodes,
-                        });
-                    } else {
-                        setView({
-                            kind: "recoveryViewed",
-                            recovery,
-                        });
-                    }
-                    focusStepHeading();
-                    return;
-                }
-
-                case "removeTotp": {
-                    if (mfaRequired) return;
-                    const result = await authRequest(
-                        "account/authenticators/totp",
-                        "DELETE",
-                    );
-                    if (
-                        await handleAuthenticated401(
-                            result,
-                            operation,
-                            options.fallbackView,
-                            false,
-                            options.isReplay,
-                        )
-                    ) {
-                        return;
-                    }
-                    if (!mountedRef.current) return;
-                    setSetupCode("");
-                    setStatusNotice("authenticatorRemoved");
-                    setView({ kind: "disabled" });
-                    focusStepHeading();
-                    return;
-                }
-            }
-        } catch (err) {
-            if (!mountedRef.current) return;
-            if (options.isReplay) {
-                setView(options.fallbackView);
-            }
-            if (
-                (!(err instanceof ApiError) ||
-                    err.status >= 500 ||
-                    err.status < 400) &&
-                (operation.type === "activateTotp" ||
-                    operation.type === "removeTotp" ||
-                    operation.type === "replaceRecovery")
-            ) {
-                try {
-                    const current = await fetchAuthenticators();
-                    if (!mountedRef.current) return;
-                    if (current.totpEnabled) {
-                        setSetupCode("");
-                        setView({
-                            kind: "enabled",
-                            recovery: current.recovery,
-                        });
-                    } else if (operation.type !== "activateTotp") {
-                        setView({ kind: "disabled" });
-                    }
-                } catch {
-                    if (!mountedRef.current) return;
-                    setView({ kind: "loadError" });
-                    return;
-                }
-            }
-            const message = displayMessage(err, t("loadFailed"));
-            setErrorFeedback({ text: message, locale });
-            if (err instanceof ApiError && err.fields.code) {
-                setCodeFieldError({ text: err.fields.code, locale });
-            }
-            focusError();
-        } finally {
-            if (mountedRef.current) {
-                pendingRef.current = false;
-                setPendingAction(null);
-            }
-        }
-    }
-
-    async function copyToClipboard(text: string, notice: StatusNotice) {
-        setErrorFeedback(undefined);
-        try {
-            if (!navigator.clipboard?.writeText) {
-                throw new Error(t("copyFailed"));
-            }
-            await navigator.clipboard.writeText(text);
-            if (!mountedRef.current) return;
-            setStatusNotice(notice);
+            const { totpEnabled, facts } = await readFacts();
+            if (totpEnabled) {
+                setSetupCode("");
+                setView({ kind: "enabled", facts });
+            } else if (action !== "activate") setView({ kind: "disabled" });
         } catch {
-            if (!mountedRef.current) return;
-            setErrorFeedback({ text: t("copyFailed"), locale });
-            focusError();
+            setView({ kind: "loadError" });
         }
     }
 
-    function downloadCodes(codes: string[]) {
-        setErrorFeedback(undefined);
+    async function run(action: Action, work: () => Promise<void>) {
+        setRunning(action);
+        setNotice(undefined);
+        setError(undefined);
+        setCodeError(undefined);
+        try {
+            await work();
+        } catch (failure) {
+            if (failure instanceof ApiError && failure.fields.code)
+                setCodeError({ text: failure.fields.code, locale });
+            fail(displayMessage(failure, t("loadFailed")));
+            if (action !== "setup" && !refused(failure))
+                await reconcile(action);
+        } finally {
+            setRunning(undefined);
+        }
+    }
+
+    const startSetup = (): Promise<void> =>
+        run("setup", async () => {
+            const result = await authRequest(
+                "account/authenticators/totp",
+                "GET",
+            );
+            if (await confirmedFirst(result, startSetup)) return;
+            const { secret, totp_url: totpUrl } = result.meta ?? {};
+            if (result.status === 200 || !secret || !totpUrl) {
+                setLoadCount((count) => count + 1);
+                return;
+            }
+            setSetupCode("");
+            show({ kind: "enrolling", secret, totpUrl });
+        });
+
+    const activate = (
+        enrolling: Extract<TwoFactorView, { kind: "enrolling" }>,
+        code: string,
+    ): Promise<void> =>
+        run("activate", async () => {
+            const result = await authRequest(
+                "account/authenticators/totp",
+                "POST",
+                { code },
+            );
+            // A confirmation that lapsed while the code was typed asks for it again; the code
+            // has expired by then, so the setup asks for a fresh one.
+            const fresh = async () => {
+                setSetupCode("");
+                setNotice("enterFreshCode");
+                show(enrolling);
+            };
+            if (await confirmedFirst(result, fresh)) return;
+            setSetupCode("");
+            const facts = await currentFacts();
+            setNotice("authenticatorActivated");
+            const codes = result.meta?.recovery_codes;
+            show(
+                codes?.length
+                    ? { kind: "codes", facts, codes }
+                    : { kind: "enabled", facts },
+            );
+        });
+
+    const replaceCodes = (): Promise<void> =>
+        run("replace", async () => {
+            const result = await authRequest(
+                "account/authenticators/recovery-codes",
+                "POST",
+                {},
+            );
+            if (await confirmedFirst(result, replaceCodes)) return;
+            const facts = await currentFacts();
+            setNotice("codesReplaced");
+            show({
+                kind: "codes",
+                facts,
+                codes: result.data?.unused_codes ?? [],
+            });
+        });
+
+    const remove = (): Promise<void> =>
+        run("remove", async () => {
+            const result = await authRequest(
+                "account/authenticators/totp",
+                "DELETE",
+            );
+            if (await confirmedFirst(result, remove)) return;
+            setSetupCode("");
+            setNotice("authenticatorRemoved");
+            show({ kind: "disabled" });
+        });
+
+    async function copy(text: string, copied: StatusNotice) {
+        setError(undefined);
+        try {
+            if (!navigator.clipboard?.writeText) throw new Error();
+            await navigator.clipboard.writeText(text);
+            setNotice(copied);
+        } catch {
+            fail(t("copyFailed"));
+        }
+    }
+
+    function download(codes: string[]) {
+        setError(undefined);
         const blob = new Blob([`${codes.join("\n")}\n`], {
             type: "text/plain;charset=utf-8",
         });
@@ -495,42 +258,31 @@ export function TwoFactorSettings({
             url,
             timer: window.setTimeout(() => {
                 URL.revokeObjectURL(url);
-                activeBlobUrlsRef.current.delete(entry);
+                blobUrls.current.delete(entry);
             }, 1000),
         };
-        activeBlobUrlsRef.current.add(entry);
-        setStatusNotice("codesDownloaded");
+        blobUrls.current.add(entry);
+        setNotice("codesDownloaded");
     }
 
-    function showStep(next: TwoFactorView) {
-        hasInteractedRef.current = true;
-        clearTransientFeedback();
-        setView(next);
-        focusStepHeading();
-    }
-
-    const activeError =
-        errorFeedback?.locale === locale ? errorFeedback.text : undefined;
+    const facts: Facts = "facts" in view ? view.facts : {};
+    const busy = running !== undefined || view.kind === "loading";
+    const activeError = error?.locale === locale ? error.text : undefined;
     const activeCodeError =
-        codeFieldError?.locale === locale ? codeFieldError.text : undefined;
-    const isBusy = pendingAction !== null || view.kind === "loading";
+        codeError?.locale === locale ? codeError.text : undefined;
 
     return (
-        <section className="panel narrow" aria-busy={isBusy || undefined}>
+        <section className="panel narrow" aria-busy={busy || undefined}>
             <div className="mfa-header">
-                <h2 ref={panelHeadingRef} tabIndex={-1}>
-                    {t("twoFactor")}
-                </h2>
+                <h2>{t("twoFactor")}</h2>
                 <TwoFactorStatusTag view={view} mfaRequired={mfaRequired} />
             </div>
             {view.kind === "disabled" && <p>{t("authenticatorHelp")}</p>}
-
-            {statusNotice && (
+            {notice && (
                 <div className="notice" role="status">
-                    {t(statusNotice)}
+                    {t(notice)}
                 </div>
             )}
-
             {activeError && (
                 <div
                     ref={errorRef}
@@ -541,28 +293,29 @@ export function TwoFactorSettings({
                     {activeError}
                 </div>
             )}
-
+            <StepUpPrompt
+                stepUp={stepUp}
+                email={email}
+                onError={(message) => fail(message)}
+            />
             {view.kind === "loading" && (
                 <div role="status">
                     <p>{t("loading")}</p>
                     <div className="loading-indicator" aria-hidden="true" />
                 </div>
             )}
-
             {view.kind === "loadError" && (
                 <LoadError
-                    view={view}
-                    busy={isBusy}
+                    message={view.message}
+                    busy={busy}
                     onRetry={() => {
-                        hasInteractedRef.current = true;
-                        clearTransientFeedback();
+                        setError(undefined);
                         setView({ kind: "loading" });
                         setLoadCount((count) => count + 1);
                     }}
                 />
             )}
-
-            {view.kind === "disabled" && (
+            {!stepUp.pending && view.kind === "disabled" && (
                 <div className="mfa-actions">
                     {mfaRequired ? (
                         <div className="notice" role="status">
@@ -572,23 +325,17 @@ export function TwoFactorSettings({
                         <button
                             className="button"
                             type="button"
-                            disabled={isBusy}
-                            onClick={() =>
-                                void executeOperation(
-                                    { type: "startSetup" },
-                                    { isReplay: false, fallbackView: view },
-                                )
-                            }
+                            disabled={busy}
+                            onClick={() => void startSetup()}
                         >
-                            {pendingAction === "startSetup"
+                            {running === "setup"
                                 ? t("working")
                                 : t("setupAuthenticator")}
                         </button>
                     )}
                 </div>
             )}
-
-            {view.kind === "enrolling" && (
+            {!stepUp.pending && view.kind === "enrolling" && (
                 <AuthenticatorSetup
                     headingRef={stepHeadingRef}
                     secret={view.secret}
@@ -596,155 +343,72 @@ export function TwoFactorSettings({
                     code={setupCode}
                     onCodeChange={setSetupCode}
                     error={activeCodeError}
-                    busy={isBusy}
-                    verifying={pendingAction === "activateTotp"}
-                    onCopyKey={() =>
-                        void copyToClipboard(view.secret, "setupKeyCopied")
-                    }
+                    busy={busy}
+                    verifying={running === "activate"}
+                    onCopyKey={() => void copy(view.secret, "setupKeyCopied")}
                     onActivate={() => {
-                        const trimmed = setupCode.trim();
-                        if (!trimmed) {
-                            setCodeFieldError({ text: t("enterCode"), locale });
+                        const code = setupCode.trim();
+                        if (!code) {
+                            setCodeError({ text: t("enterCode"), locale });
                             return;
                         }
-                        void executeOperation(
-                            { type: "activateTotp", code: trimmed },
-                            { isReplay: false, fallbackView: view },
-                        );
+                        void activate(view, code);
                     }}
                     onCancel={() => {
-                        hasInteractedRef.current = true;
                         setSetupCode("");
-                        clearTransientFeedback();
-                        setView({ kind: "disabled" });
-                        focusStepHeading();
+                        setError(undefined);
+                        setCodeError(undefined);
+                        show({ kind: "disabled" });
                     }}
                 />
             )}
-
-            {view.kind === "enabled" && (
+            {!stepUp.pending && view.kind === "enabled" && (
                 <EnabledPanel
-                    recovery={view.recovery}
+                    facts={view.facts}
                     mfaRequired={mfaRequired}
-                    busy={isBusy}
-                    loadingRecovery={pendingAction === "getRecovery"}
-                    onShowRecovery={() =>
-                        void executeOperation(
-                            { type: "getRecovery", afterActivation: false },
-                            { isReplay: false, fallbackView: view },
-                        )
-                    }
-                    onReplace={() =>
-                        showStep({
-                            kind: "confirmReplace",
-                            recovery: view.recovery,
-                        })
-                    }
-                    onRemove={() =>
-                        showStep({
-                            kind: "confirmRemove",
-                            recovery: view.recovery,
-                        })
-                    }
+                    busy={busy}
+                    onReplace={() => show({ kind: "confirmReplace", facts })}
+                    onRemove={() => show({ kind: "confirmRemove", facts })}
                 />
             )}
-
-            {view.kind === "recoveryViewed" && (
-                <RecoveryViewed
-                    headingRef={stepHeadingRef}
-                    recovery={view.recovery}
-                    busy={isBusy}
-                    onReplace={() =>
-                        showStep({
-                            kind: "confirmReplace",
-                            recovery: view.recovery,
-                        })
-                    }
-                    onBack={() =>
-                        showStep({ kind: "enabled", recovery: view.recovery })
-                    }
-                />
-            )}
-
-            {view.kind === "recoverySaving" && (
+            {view.kind === "codes" && (
                 <RecoveryCodes
                     headingRef={stepHeadingRef}
                     codes={view.codes}
-                    busy={isBusy}
+                    busy={busy}
                     onCopy={() =>
-                        void copyToClipboard(
-                            view.codes.join("\n"),
-                            "codesCopied",
-                        )
+                        void copy(view.codes.join("\n"), "codesCopied")
                     }
-                    onDownload={() => downloadCodes(view.codes)}
+                    onDownload={() => download(view.codes)}
                     onAcknowledge={() => {
-                        hasInteractedRef.current = true;
-                        setErrorFeedback(undefined);
-                        setStatusNotice("recoverySavedAck");
-                        setView({ kind: "enabled", recovery: view.recovery });
-                        focusStepHeading();
+                        setError(undefined);
+                        setNotice("recoverySavedAck");
+                        show({ kind: "enabled", facts });
                     }}
                 />
             )}
-
-            {view.kind === "confirmReplace" && (
+            {!stepUp.pending && view.kind === "confirmReplace" && (
                 <ConfirmStep
                     headingRef={stepHeadingRef}
                     action="replace"
-                    busy={isBusy}
-                    working={pendingAction === "replaceRecovery"}
-                    onConfirm={() =>
-                        void executeOperation(
-                            { type: "replaceRecovery" },
-                            { isReplay: false, fallbackView: view },
-                        )
-                    }
-                    onCancel={() =>
-                        showStep({ kind: "enabled", recovery: view.recovery })
-                    }
+                    busy={busy}
+                    working={running === "replace"}
+                    onConfirm={() => void replaceCodes()}
+                    onCancel={() => show({ kind: "enabled", facts })}
                 />
             )}
-
-            {view.kind === "confirmRemove" && !mfaRequired && (
-                <ConfirmStep
-                    headingRef={stepHeadingRef}
-                    action="remove"
-                    busy={isBusy}
-                    working={pendingAction === "removeTotp"}
-                    onConfirm={() =>
-                        void executeOperation(
-                            { type: "removeTotp" },
-                            { isReplay: false, fallbackView: view },
-                        )
-                    }
-                    onCancel={() =>
-                        showStep({ kind: "enabled", recovery: view.recovery })
-                    }
-                />
-            )}
-
-            {view.kind === "reauth" && (
-                <ReauthStep
-                    headingRef={stepHeadingRef}
-                    view={view}
-                    email={email}
-                    busy={isBusy}
-                    onCancel={() => showStep(view.returnView)}
-                    onVerified={async () => {
-                        if (view.operation.type === "activateTotp") {
-                            setSetupCode("");
-                            setView(view.returnView);
-                            focusStepHeading();
-                            return;
-                        }
-                        await executeOperation(view.operation, {
-                            isReplay: true,
-                            fallbackView: view.returnView,
-                        });
-                    }}
-                />
-            )}
+            {!stepUp.pending &&
+                view.kind === "confirmRemove" &&
+                !mfaRequired && (
+                    <ConfirmStep
+                        headingRef={stepHeadingRef}
+                        action="remove"
+                        busy={busy}
+                        working={running === "remove"}
+                        onConfirm={() => void remove()}
+                        onCancel={() => show({ kind: "enabled", facts })}
+                    />
+                )}
         </section>
     );
 }

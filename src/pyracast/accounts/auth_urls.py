@@ -6,6 +6,7 @@ from django.urls import path
 from django.views.decorators.http import require_http_methods, require_POST
 
 from pyracast.accounts import headless
+from pyracast.accounts.devices import SessionsView
 from pyracast.accounts.mfa_views import (
     AuthenticateView,
     ManageRecoveryCodesView,
@@ -24,6 +25,10 @@ from pyracast.accounts.social_views import (
 urlpatterns = [
     path("config", ConfigView.as_api_view(client=Client.BROWSER)),
     path("auth/session", account_views.SessionView.as_api_view(client=Client.BROWSER)),
+    path(
+        "auth/sessions",
+        require_http_methods(["GET", "DELETE"])(SessionsView.as_api_view(client=Client.BROWSER)),
+    ),
     path("auth/login", headless.LoginView.as_api_view(client=Client.BROWSER)),
     path(
         "auth/signup", CompanySignupView.as_api_view(client=Client.BROWSER), name="password_signup"

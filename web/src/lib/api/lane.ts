@@ -9,18 +9,19 @@ export type Exchange = { status: number; ok: boolean; data: unknown };
 const TIMEOUT_MS = 95_000;
 // session_busy is refused before any view runs, so one retry is safe for every method.
 const MAX_RETRY_SECONDS = 2;
+const SESSION_READ = "/api/session/";
 
 let csrfToken: string | undefined;
 let epoch = 0;
 let serial: Promise<unknown> = Promise.resolve();
-// The account of the session the tab has adopted; undefined while signed out or not yet read.
-export type Owner = number | undefined;
+// The tag of the session this tab adopted: "" while signed out, undefined before its first read.
+export type Tag = string | undefined;
 type SessionCheck = {
-    owner: () => Owner;
-    confirm: () => Promise<Owner>;
+    tag: () => Tag;
+    confirm: () => Promise<Tag>;
 };
 let session: SessionCheck = {
-    owner: () => undefined,
+    tag: () => undefined,
     confirm: () => Promise.resolve(undefined),
 };
 const unreadable = Symbol("unreadable");
@@ -37,14 +38,8 @@ export function confirmSessionWith(check: SessionCheck) {
     session = check;
 }
 
-export function sessionOwner() {
-    return session.owner();
-}
-
-// A refused request is repeated only for the account it was prepared under.
-export async function sessionHeldBy(owner: Owner) {
-    if (owner === undefined) return false;
-    return (await session.confirm().catch(() => undefined)) === owner;
+export function sessionTag() {
+    return session.tag();
 }
 
 function unsafe(method: Method) {
@@ -55,58 +50,73 @@ function changesSession(url: string) {
     return url.startsWith("/api/session/") || url.startsWith("/api/auth/");
 }
 
-export function exchange(request: LaneRequest): Promise<Exchange> {
+export function changedSession() {
+    return new ApiError(browserErrors()("sessionChanged"), {
+        status: 409,
+        code: "session_changed",
+    });
+}
+
+function refusedAsChanged({ status, data }: Exchange) {
+    return (
+        status === 409 &&
+        (data as { code?: unknown } | null)?.code === "session_changed"
+    );
+}
+
+export function exchange(request: LaneRequest, tag: Tag): Promise<Exchange> {
     if (unsafe(request.method)) epoch++;
-    if (!changesSession(request.url)) return attempt(request);
-    const result = serial.then(() => attempt(request));
+    if (!changesSession(request.url)) return attempt(request, tag);
+    const result = serial.then(() => attempt(request, tag));
     serial = result.catch(() => {});
     return result;
 }
 
+// Sends a request for the session this tab adopted. A refusal for a changed session is repeated
+// once when a session read sent after it shows the same session under a renewed key, and never
+// for another session. An answer that arrives after the tab adopted another session is not
+// delivered.
+export async function prepared(request: LaneRequest): Promise<Exchange> {
+    if (request.url === SESSION_READ) return exchange(request, undefined);
+    const tag = sessionTag();
+    let answer = await exchange(request, tag);
+    if (refusedAsChanged(answer) && (await confirmed()) === tag)
+        answer = await exchange(request, tag);
+    if (tag !== undefined && sessionTag() !== tag) throw changedSession();
+    return answer;
+}
+
+async function confirmed(): Promise<Tag> {
+    return session.confirm().catch(() => undefined);
+}
+
 export async function send<T>(request: LaneRequest): Promise<T> {
-    const owner = sessionOwner();
-    const first = await exchange(request);
-    if (first.ok) return first.data as T;
-    const error = errorFromResponse(first.status, first.data);
-    // session_ended answers after the request's own work committed, so only a refusal is repeated.
+    const answer = await prepared(request);
+    if (answer.ok) return answer.data as T;
+    const error = errorFromResponse(answer.status, answer.data);
+    // A session that expired or ended is learnt by a session read; the request is not repeated.
     if (
-        !(await stillSignedIn(request, error, owner)) ||
-        error.code !== "not_authenticated"
+        !changesSession(request.url) &&
+        (error.code === "not_authenticated" || error.code === "session_ended")
     )
-        throw error;
-    const retry = await exchange(request);
-    if (retry.ok) return retry.data as T;
-    const refused = errorFromResponse(retry.status, retry.data);
-    await stillSignedIn(request, refused, owner);
-    throw refused;
+        await confirmed();
+    throw error;
 }
 
-// A request sent with a session key that a reauthentication or sign-in replaced meanwhile is
-// answered as signed out; only a session read sent after that answer decides.
-async function stillSignedIn(
-    request: LaneRequest,
-    error: ApiError,
-    owner: Owner,
-) {
-    if (
-        changesSession(request.url) ||
-        (error.code !== "not_authenticated" && error.code !== "session_ended")
-    )
-        return false;
-    return sessionHeldBy(owner);
-}
-
-async function attempt(request: LaneRequest, retried = false) {
-    const result = await deliver(request);
+async function attempt(request: LaneRequest, tag: Tag, retried = false) {
+    const result = await deliver(request, tag);
     if (retried || result.ok) return result;
     const error = errorFromResponse(result.status, result.data);
     if (error.code !== "session_busy") return result;
     const seconds = Math.min(error.retryAfter ?? 1, MAX_RETRY_SECONDS);
     await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
-    return attempt(request, true);
+    return attempt(request, tag, true);
 }
 
-async function deliver({ method, url, body }: LaneRequest): Promise<Exchange> {
+async function deliver(
+    { method, url, body }: LaneRequest,
+    tag: Tag,
+): Promise<Exchange> {
     const t = browserErrors();
     let response: Response;
     try {
@@ -123,6 +133,7 @@ async function deliver({ method, url, body }: LaneRequest): Promise<Exchange> {
                 (unsafe(method) || url.startsWith("/api/auth/"))
                     ? { "X-CSRFToken": csrfToken }
                     : {}),
+                ...(tag === undefined ? {} : { "X-Session-Tag": tag }),
             },
             ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         });

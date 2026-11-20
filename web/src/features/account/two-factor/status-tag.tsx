@@ -12,8 +12,7 @@ export function TwoFactorStatusTag({
 }) {
     const t = useTranslations("Security");
     if (view.kind === "loading" || view.kind === "loadError") return null;
-    const current = view.kind === "reauth" ? view.returnView : view;
-    if (current.kind === "disabled" || current.kind === "enrolling") {
+    if (view.kind === "disabled" || view.kind === "enrolling") {
         return (
             <Tag tone={mfaRequired ? "warning" : "neutral"}>
                 {mfaRequired ? t("statusRequired") : t("statusDisabled")}

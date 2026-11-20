@@ -1,11 +1,23 @@
 "use client";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useEffect, useState, type ReactNode } from "react";
+import {
+    useEffect,
+    useState,
+    useSyncExternalStore,
+    type ReactNode,
+} from "react";
 import { displayMessage } from "@/lib/api/errors";
 import { createQueryClient, QueryOwner } from "@/lib/api/query";
 import { browserErrors } from "@/i18n/browser";
-import { loadSession, useSessionState } from "@/lib/session-client";
+import {
+    isCurrent,
+    loadSession,
+    observedTagKey,
+    sessionOwner,
+    useSessionState,
+    type Session,
+} from "@/lib/session-client";
 import { Brand } from "@/ui/brand";
 import { LiveRegion } from "@/ui/live-region";
 import { useLanguageHandoff } from "./language-handoff";
@@ -16,15 +28,17 @@ export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
     const { session, failure, retry } = useSessionBootstrap();
     const handoff = useLanguageHandoff(session);
-    useFocusSessionRead(session !== undefined && handoff.status === "ready");
-    const user = session?.user?.id;
-    useForeignCacheRemoval(client, user);
+    const ready = session !== undefined && handoff.status === "ready";
+    useFocusSessionRead(ready);
+    const current = useCurrentSession(session, ready);
+    const owner = sessionOwner(session);
+    useForeignCacheRemoval(client, owner);
     return (
         <QueryClientProvider client={client}>
             <SessionLanguage language={session?.language}>
                 <LiveRegion>
-                    {session && handoff.status === "ready" ? (
-                        <QueryOwner value={user}>{children}</QueryOwner>
+                    {ready && current ? (
+                        <QueryOwner value={owner}>{children}</QueryOwner>
                     ) : (
                         <Bootstrap
                             languageFailed={handoff.status === "failed"}
@@ -120,10 +134,35 @@ function useFocusSessionRead(enabled: boolean) {
     }, [enabled]);
 }
 
-function useForeignCacheRemoval(client: QueryClient, user: number | undefined) {
+function subscribeObservedTag(listener: () => void) {
+    const changed = (event: StorageEvent) => {
+        if (event.key === observedTagKey) listener();
+    };
+    window.addEventListener("storage", changed);
+    return () => window.removeEventListener("storage", changed);
+}
+
+// Another tab observed a session other than this tab's: its screens stay hidden until a read
+// adopts the session the browser holds.
+function useCurrentSession(session: Session | undefined, enabled: boolean) {
+    const current = useSyncExternalStore(
+        subscribeObservedTag,
+        () => isCurrent(session),
+        () => true,
+    );
+    useEffect(() => {
+        if (enabled && !current) loadSession().catch(() => {});
+    }, [enabled, current]);
+    return current;
+}
+
+function useForeignCacheRemoval(
+    client: QueryClient,
+    owner: string | undefined,
+) {
     useEffect(() => {
         client.removeQueries({
-            predicate: (query) => query.queryKey[1] !== user,
+            predicate: (query) => query.queryKey[1] !== owner,
         });
-    }, [client, user]);
+    }, [client, owner]);
 }

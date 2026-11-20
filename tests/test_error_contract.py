@@ -265,7 +265,7 @@ CASES: dict[str, Case] = {
     "session_changed": Case(
         409,
         "The session changed in another tab. The page now shows the current session.",
-        "Oturum başka bir sekmede değişti. Sayfa artık geçerli oturumu gösteriyor.",
+        "Oturum başka bir sekmede değişti. Sayfa art\u0131k geçerli oturumu gösteriyor.",
         another_session,
     ),
     "not_authenticated": Case(

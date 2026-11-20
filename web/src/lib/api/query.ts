@@ -38,7 +38,7 @@ export function createQueryClient() {
     });
 }
 
-export const QueryOwner = createContext<number | undefined>(undefined);
+export const QueryOwner = createContext<string | undefined>(undefined);
 
 type Page<T> = { results: T[]; next: string | null };
 type Fetched<T> = { value: T; requests: number };

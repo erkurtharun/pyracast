@@ -34,10 +34,10 @@ def lapse(request: HttpRequest) -> None:
 
 
 def persist(request: HttpRequest) -> None:
-    # Saves a changed stored session in the open transaction, so its data commits with the
-    # account's. A session ended meanwhile is answered as ended, any other failure of the save as
-    # itself.
-    if request.session.session_key is None or not request.session.modified:
+    # Saves a changed session in the open transaction, a new one included, so its data commits
+    # with the account's. A session ended meanwhile is answered as ended, any other failure of
+    # the save as itself.
+    if not request.session.modified:
         return
     try:
         request.session.save()

@@ -303,6 +303,7 @@ CUSTOMER_FIELDS = {
     "selection_policy",
     "selection_state",
     "sent_at",
+    "session_tag",
     "settlement_plant_id",
     "settlement_snapshot_ids",
     "skill_days",

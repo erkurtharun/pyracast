@@ -72,6 +72,7 @@ MIDDLEWARE = [
     "pyracast.accounts.signup.SignupMinimumAnswerTime",
     "pyracast.accounts.session_lock.SessionRequestSerialization",
     "pyracast.accounts.session_cookie.SessionCookie",
+    "pyracast.accounts.session_tag.SessionTagCheck",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "pyracast.accounts.middleware.SessionLifetime",
     "pyracast.accounts.processes.PendingProcessAuthority",
@@ -214,6 +215,7 @@ ACCOUNT_RATE_LIMITS = {
     "confirm_email": "1/1m/key,6/h/key",
     "change_password": f"{PASSWORD_CHANGE_MAX_ATTEMPTS}/{PASSWORD_CHANGE_WINDOW_MINUTES}m/user",
     "request_email_change": "3/10m/user,10/d/user,20/h/ip",
+    "manage_sessions": "30/m/user",
 }
 CACHES = {
     "default": {

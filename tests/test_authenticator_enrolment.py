@@ -126,8 +126,10 @@ def test_the_codes_of_an_activation_are_shown_once(now: float) -> None:
 
 def test_an_activation_shows_no_recovery_codes_it_did_not_create(now: float) -> None:
     user = account("owner")
-    RecoveryCodes.activate(user)
-    client = confirmed(user)
+    existing = RecoveryCodes.activate(user).get_unused_codes()
+    client = signed_in(user)
+    # Recovery codes are the account's strongest factor, so one of them confirms the session.
+    assert submit(client, "auth/2fa/reauthenticate", {"code": existing[0]}).status_code == 200
 
     activation = activate(client, setup_secret(client), now)
 

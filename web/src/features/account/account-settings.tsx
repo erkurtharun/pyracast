@@ -18,10 +18,7 @@ export function AccountSettings() {
             <section className="panel narrow">
                 <h2>{t("emailAddress")}</h2>
                 <p className="account-email">{user.email}</p>
-                <EmailChange
-                    email={user.email}
-                    hasPassword={user.has_usable_password}
-                />
+                <EmailChange email={user.email} />
             </section>
             <AccountSecurity
                 key={`${user.id}:${user.mfa_required}`}

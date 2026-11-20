@@ -1,11 +1,5 @@
 import { ApiError, errorFromResponse } from "./api/errors";
-import {
-    exchange,
-    sessionHeldBy,
-    sessionOwner,
-    type Exchange,
-    type Method,
-} from "./api/lane";
+import { prepared, type Method } from "./api/lane";
 import { browserErrors } from "@/i18n/browser";
 
 export type AuthData = {
@@ -32,15 +26,10 @@ export type AuthResult<TData = AuthData> = {
         secret?: string;
         totp_url?: string;
         password_changed?: boolean;
+        recovery_codes?: string[];
     };
     errors?: { message: string; param?: string; code?: string }[];
 };
-
-function signedOut({ status, data }: Exchange) {
-    return (
-        status === 401 && !(data as AuthResult | null)?.meta?.is_authenticated
-    );
-}
 
 export async function authRequest<TData = AuthData>(
     path: string,
@@ -48,14 +37,11 @@ export async function authRequest<TData = AuthData>(
     body?: unknown,
 ): Promise<AuthResult<TData>> {
     const t = browserErrors();
-    const request = { method, url: `/api/auth/browser/v1/${path}`, body };
-    const owner = sessionOwner();
-    let answer = await exchange(request);
-    // A read carrying a key that a reauthentication replaced meanwhile is answered as signed out;
-    // it is repeated once when a session read sent after that answer still shows the same account.
-    if (method === "GET" && signedOut(answer) && (await sessionHeldBy(owner)))
-        answer = await exchange(request);
-    const { status, ok, data } = answer;
+    const { status, ok, data } = await prepared({
+        method,
+        url: `/api/auth/browser/v1/${path}`,
+        body,
+    });
     if (!data || typeof data !== "object" || Array.isArray(data))
         throw new ApiError(
             ok ? t("invalidResponse") : t("request", { status }),

@@ -324,3 +324,6 @@ msgstr "Hatırlatmalar santral onaylandıktan sonra açılabilir."
 
 msgid "Reminders can be turned on once the plant's forecast provider account is enabled."
 msgstr "Hatırlatmalar santralin tahmin sağlayıcı hesabı etkinleştirildikten sonra açılabilir."
+
+msgid "Choose sessions of this account."
+msgstr "Bu hesabın oturumlarını seçin."

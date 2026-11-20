@@ -6,6 +6,9 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 CONSOLE = "/admin/"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+# The console path a provider sign-in started from, kept in the session that completed it until
+# the console's first page follows it.
+CONSOLE_RETURN = "pyracast_console_return"
 
 
 def _plain(text: str) -> bool:
