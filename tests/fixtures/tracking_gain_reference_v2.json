@@ -1,0 +1,10 @@
+[
+  {"reference_fraction": 0.05, "true_zenith": 86.5856, "apparent_zenith": 86.3749, "azimuth": 62.7403, "day_of_year": 172, "gain": 2.1101},
+  {"reference_fraction": 0.12, "true_zenith": 81.2204, "apparent_zenith": 81.1210, "azimuth": 67.0723, "day_of_year": 172, "gain": 2.0705},
+  {"reference_fraction": 0.06, "true_zenith": 83.9368, "apparent_zenith": 83.7993, "azimuth": 233.9394, "day_of_year": 355, "gain": 1.3431},
+  {"reference_fraction": 0.75, "true_zenith": 14.6728, "apparent_zenith": 14.6686, "azimuth": 167.2636, "day_of_year": 172, "gain": 1.0013},
+  {"reference_fraction": 0.42, "true_zenith": 54.4086, "apparent_zenith": 54.3861, "azimuth": 123.9620, "day_of_year": 79, "gain": 1.2768},
+  {"reference_fraction": 0.08, "true_zenith": 83.0342, "apparent_zenith": 82.9119, "azimuth": 264.7513, "day_of_year": 265, "gain": 1.6573},
+  {"reference_fraction": 0.03, "true_zenith": 86.5673, "apparent_zenith": 86.3573, "azimuth": 58.6321, "day_of_year": 172, "gain": 1.2096},
+  {"reference_fraction": 0.35, "true_zenith": 74.3320, "apparent_zenith": 74.2753, "azimuth": 251.9889, "day_of_year": 355, "gain": 2.3085}
+]
