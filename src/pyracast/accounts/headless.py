@@ -28,7 +28,6 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from psycopg.errors import DeadlockDetected
 
 from pyracast.accounts import inputs
-from pyracast.accounts.audit import lines_after_commit
 from pyracast.accounts.login_limits import spent, throttled
 from pyracast.accounts.processes import (
     AuthorityChangedError,
@@ -190,7 +189,7 @@ class ConfirmReauthenticationCodeView(StrongestFactor, views.ConfirmReauthentica
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         try:
-            with lines_after_commit(), transaction.atomic():
+            with transaction.atomic():
                 require_authority(request, REAUTHENTICATION_CODE_SESSION_KEY)
                 return super().post(request, *args, **kwargs)
         except AuthorityChangedError:
@@ -239,12 +238,9 @@ class ManageEmailView(StepUpAnswers, StartingView, views.ManageEmailView):
     persists_session = True
 
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        if not request.user.is_authenticated or request.method not in {"POST", "DELETE"}:
+        # A POST runs in `starting`'s transaction, and handle_input checks first in it.
+        if not request.user.is_authenticated or request.method != "DELETE":
             return super().handle(request, *args, **kwargs)
-        if request.method == "POST":
-            # `starting` opens the transaction and handle_input checks first in it.
-            with lines_after_commit():
-                return super().handle(request, *args, **kwargs)
         with credential_write(request):
             return super().handle(request, *args, **kwargs)
 

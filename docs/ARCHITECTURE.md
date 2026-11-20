@@ -43,6 +43,13 @@ Caught exceptions in calibration, metering and collection scheduling use `pyraca
 error type and the innermost `pyracast` code location, never the exception message. Local launcher
 logs and process identities are development tooling.
 
+A `pyracast.security` line that reports a change (`audit.CHANGE_EVENTS`) and is written inside a
+transaction leaves with its commit, so a transaction or savepoint that rolls back writes none and a
+process that stops between the commit and its hooks loses it; a refusal, a failed attempt or a
+throttle is written at once, also when its transaction rolls back. The one exception is the daily
+sign-in lock: its notice is stored through the autocommitted authentication-cache connection, so it
+and its `login_locked` line stay when the sign-in rolls back.
+
 Worker and dispatcher entry points handle `SIGINT` and `SIGTERM` without raising
 asynchronous exceptions into database operations. The dispatcher finishes its current cycle; the worker stops
 taking new work, lets active tasks finish and returns buffered work through Dramatiq.

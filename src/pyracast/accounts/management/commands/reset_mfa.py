@@ -8,7 +8,7 @@ from django.core.management.base import CommandError, CommandParser
 from django.db import transaction
 
 from pyracast.accounts.adapters import AccountAdapter
-from pyracast.accounts.audit import SecurityEvent, lines_after_commit, record_security_event
+from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.management.operator import OperatorCommand, operator_address
 from pyracast.accounts.sessions import end_sessions
@@ -48,8 +48,7 @@ class Command(OperatorCommand):
             return
         if self.ask("Type the address again to confirm: ").strip().lower() != address:
             raise CommandError(MISMATCH)
-        # The sessions line leaves with the commit, which the notice written last can still fail.
-        with lines_after_commit(), transaction.atomic():
+        with transaction.atomic():
             current = self.with_factors(address, lock=True)
             if current.pk != account.pk:
                 raise CommandError(CHANGED)

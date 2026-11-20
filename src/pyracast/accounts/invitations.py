@@ -17,12 +17,7 @@ from django.utils import timezone, translation
 from django.utils.translation import gettext as _
 from django.views.decorators.debug import sensitive_variables
 
-from pyracast.accounts.audit import (
-    SecurityEvent,
-    record_on_commit,
-    record_security_event,
-    refusal_throttle,
-)
+from pyracast.accounts.audit import SecurityEvent, record_security_event, refusal_throttle
 from pyracast.accounts.authorization import authorize_workspace_admin
 from pyracast.accounts.language import user_language
 from pyracast.accounts.models import (
@@ -168,7 +163,7 @@ def invite_workspace_member(
         expires_at=now + INVITATION_LIFETIME,
         role=role,
     )
-    record_on_commit(
+    record_security_event(
         SecurityEvent.INVITATION_SENT,
         user_id=actor.pk,
         tenant_id=tenant_id,
@@ -268,7 +263,7 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
             actor_id=invitation.created_by_id,
             administrator=actor,
         )
-        record_on_commit(
+        record_security_event(
             SecurityEvent.WORKSPACE_ADMIN_REASSIGNED,
             user_id=invitation.created_by_id,
             tenant_id=invitation.tenant_id,
@@ -276,7 +271,7 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
         )
     invitation.accepted_at = timezone.now()
     invitation.save(update_fields=["accepted_at"])
-    record_on_commit(
+    record_security_event(
         SecurityEvent.INVITATION_ACCEPTED,
         user_id=actor.pk,
         tenant_id=invitation.tenant_id,
@@ -302,7 +297,7 @@ def revoke_workspace_invitation(
     if invitation.accepted_at is None and invitation.revoked_at is None:
         invitation.revoked_at = now
     invitation.save(update_fields=["expires_at", "revoked_at"])
-    record_on_commit(
+    record_security_event(
         SecurityEvent.INVITATION_REVOKED,
         user_id=actor.pk,
         tenant_id=tenant_id,

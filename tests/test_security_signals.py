@@ -30,7 +30,6 @@ from pyracast.accounts.audit import (
     connect_security_events,
     failure_logger,
     logger,
-    record_on_commit,
     record_security_event,
 )
 
@@ -53,7 +52,7 @@ PINNED_LINE_KEYS = frozenset(
         "count",
     }
 )
-WRITERS = frozenset({"record_security_event", "record_on_commit", "record_refusal"})
+WRITERS = frozenset({"record_security_event", "record_refusal"})
 LINE_ARGUMENTS = frozenset({"request", "user_id", "client_ip"})
 DETAIL_OF_ARGUMENT = {"address": "subject"}
 SIGNALLED = frozenset(
@@ -501,13 +500,13 @@ def test_a_line_bound_to_a_commit_is_written_only_when_the_transaction_commits(
 ) -> None:
     def rolled_back() -> None:
         with transaction.atomic():
-            record_on_commit(SecurityEvent.INVITATION_SENT, user_id=USER_ID, target_id=1)
+            record_security_event(SecurityEvent.INVITATION_SENT, user_id=USER_ID, target_id=1)
             raise RuntimeError
 
     with pytest.raises(RuntimeError):
         rolled_back()
     with transaction.atomic():
-        record_on_commit(SecurityEvent.INVITATION_SENT, user_id=USER_ID, target_id=2)
+        record_security_event(SecurityEvent.INVITATION_SENT, user_id=USER_ID, target_id=2)
 
     assert lines(caplog) == [
         {"event": "invitation_sent", "user_id": USER_ID, "client_ip": None, "target_id": 2}

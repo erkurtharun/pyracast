@@ -50,7 +50,6 @@ from django.template.loader import render_to_string
 from django.views.decorators.http import require_GET
 from requests import RequestException
 
-from pyracast.accounts.audit import lines_after_commit
 from pyracast.accounts.processes import (
     PROVIDER_SIGNUP_SESSION_KEY,
     credential_write,
@@ -272,8 +271,7 @@ class ProviderCallbackView(OAuth2CallbackView):
             login = adapter.complete_login(request, app, token, response=access_token)
             login.token = token
             login.state = state
-            with lines_after_commit():
-                return starting(request, lambda: complete(request, login))
+            return starting(request, lambda: complete(request, login))
         except (PermissionDenied, OAuth2Error, RequestException, ProviderException) as error:
             return cast(
                 HttpResponseBase,
