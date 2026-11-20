@@ -1,9 +1,11 @@
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from threading import Event
 
 from django.db import connection, connections, transaction
+from django.db.models import Model
 
 
 def _waits_for(holder_pid: int, waiter_pid: int) -> bool:
@@ -57,3 +59,37 @@ def behind_open_transaction[T, U](holder: Callable[[], T], waiter: Callable[[], 
         finally:
             release.set()
         return holding.result(timeout=20), waiting.result(timeout=20)
+
+
+@contextmanager
+def short_lock_timeout() -> Iterator[None]:
+    with connection.cursor() as cursor:
+        cursor.execute("SET lock_timeout = '300ms'")
+    try:
+        yield
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("RESET lock_timeout")
+
+
+@contextmanager
+def row_locked_elsewhere(model: type[Model], pk: int) -> Iterator[None]:
+    held, release = Event(), Event()
+
+    def hold() -> None:
+        try:
+            with transaction.atomic():
+                model._default_manager.select_for_update().get(pk=pk)
+                held.set()
+                assert release.wait(timeout=30)
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        holder = pool.submit(hold)
+        try:
+            assert held.wait(timeout=10)
+            yield
+        finally:
+            release.set()
+            holder.result(timeout=10)

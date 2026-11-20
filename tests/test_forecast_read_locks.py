@@ -1,13 +1,12 @@
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import contextmanager
 from datetime import date, timedelta
 from threading import Event
 from typing import Any, cast
 
 import pytest
 from django.core.exceptions import PermissionDenied
-from django.db import connection, transaction
+from django.db import connection
 from django.db.models import Model
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
@@ -21,6 +20,7 @@ from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import activate_calibration, revise_plant
 from pyracast.regions.models import Region
+from tests.support.concurrency import row_locked_elsewhere, short_lock_timeout
 from tests.support.domain import NOW, System
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
@@ -35,40 +35,6 @@ def plant_path(system: System, plant: Plant) -> str:
 
 def region_path(system: System) -> str:
     return f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
-
-
-@contextmanager
-def short_lock_timeout() -> Iterator[None]:
-    with connection.cursor() as cursor:
-        cursor.execute("SET lock_timeout = '300ms'")
-    try:
-        yield
-    finally:
-        with connection.cursor() as cursor:
-            cursor.execute("RESET lock_timeout")
-
-
-@contextmanager
-def row_locked_elsewhere(model: type[Model], pk: int) -> Iterator[None]:
-    held, release = Event(), Event()
-
-    def hold() -> None:
-        try:
-            with transaction.atomic():
-                model._default_manager.select_for_update().get(pk=pk)
-                held.set()
-                assert release.wait(timeout=30)
-        finally:
-            connection.close()
-
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        holder = pool.submit(hold)
-        try:
-            assert held.wait(timeout=10)
-            yield
-        finally:
-            release.set()
-            holder.result(timeout=10)
 
 
 @pytest.mark.parametrize("model", [Region, Plant, ProviderAccount])
