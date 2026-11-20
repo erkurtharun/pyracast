@@ -30,8 +30,8 @@ from pyracast.accounts.models import (
     WorkspaceRole,
 )
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.models import CollectionJob, HistoricalReferenceImport, RequestAttempt
+from pyracast.forecasts.validation import validate_binding
 from pyracast.metering.models import EpiasConnection
 from pyracast.notifications.models import NotificationSettings
 from pyracast.plants.models import Plant

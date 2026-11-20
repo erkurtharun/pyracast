@@ -190,7 +190,7 @@ def _layer(module: str) -> str:
     parts = module.split(".")
     if module in PROJECT_MODULES:
         return "project"
-    if parts[0].startswith("admin"):
+    if parts[0] == "platform_admin":
         return "platform_admin"
     if module in ORCHESTRATION_MODULES or ".management.commands." in module:
         return "orchestration"
