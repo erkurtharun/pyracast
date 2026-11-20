@@ -59,7 +59,8 @@ def _all_valid(addresses: list[str]) -> bool:
 
 
 def invalid_recipient_region_ids() -> set[int]:
-    """Regions whose enabled reminders would go to an invalid address, in three statements."""
+    """Regions whose enabled reminders would go to an invalid address, in at most three
+    statements."""
     schedules: dict[int, tuple[int, bool, int]] = {}
     rows: list[tuple[int, int, str, int | None]] = []
     for pk, region_id, include, tenant_id, row, address, membership_id in (
