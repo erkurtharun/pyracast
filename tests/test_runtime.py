@@ -15,15 +15,15 @@ from pyracast.background import broker as broker_module
 from pyracast.background.failures import PhaseOutcome
 from pyracast.forecasts import runtime
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
+from pyracast.orchestration.kinds import COLLECTION
 from pyracast.shutdown import ShutdownRequest
 from tests.support.domain import make_system
+from tests.support.kinds import stub_actors
 
 
 @pytest.fixture(autouse=True)
 def isolated_dispatch_monitoring(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "pyracast.forecasts.management.commands.dispatch.record_dispatch_phase", MagicMock()
-    )
+    monkeypatch.setattr("pyracast.orchestration.dispatcher.record_dispatch_phase", MagicMock())
 
 
 @pytest.mark.django_db(transaction=True)
@@ -34,7 +34,7 @@ def test_stub_queue_duplicate_delivery_is_idempotent(monkeypatch: pytest.MonkeyP
         runtime, "datetime", MagicMock(now=MagicMock(return_value=job.scheduled_for))
     )
     broker = StubBroker()
-    actor = runtime.make_actor(broker)
+    actor = COLLECTION.make_actor(broker)
     worker = Worker(broker, worker_threads=1, worker_timeout=100)
     worker.start()
     try:
@@ -59,7 +59,7 @@ def test_dispatch_schedules_before_sending_and_repeats_pending(
     monkeypatch.setattr(runtime, "enqueue_due", scheduled)
     monkeypatch.setattr(runtime, "pending_job_ids", pending)
     broker = StubBroker()
-    actor = runtime.make_actor(broker)
+    actor = COLLECTION.make_actor(broker)
     assert runtime.dispatch_collections(actor) == PhaseOutcome(published=2)
     assert runtime.dispatch_collections(actor) == PhaseOutcome(published=2)
     assert broker.queues[actor.queue_name].qsize() == 4
@@ -101,7 +101,7 @@ def test_rabbitmq_failover_urls_preserve_explicit_parameters(settings: LazySetti
 
 
 def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
-    from pyracast.forecasts.management.commands import dispatch as command
+    from pyracast.orchestration import dispatcher as command
 
     broker, actor, purge, sweep = MagicMock(), MagicMock(), MagicMock(), MagicMock()
     send = MagicMock(return_value=PhaseOutcome())
@@ -112,19 +112,22 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     purge_mail = MagicMock()
     monkeypatch.setattr(command, "purge_finished_mail", purge_mail)
     monkeypatch.setattr(command, "make_broker", lambda: broker)
-    monkeypatch.setattr(command, "make_actor", lambda _: actor)
     monkeypatch.setattr(command, "dispatch_collections", send)
     calibration_actor, send_calibrations = MagicMock(), MagicMock()
-    monkeypatch.setattr(command, "make_calibration_actor", lambda _: calibration_actor)
     monkeypatch.setattr(command, "dispatch_calibrations", send_calibrations)
     notification_actor, send_notifications = MagicMock(), MagicMock()
-    monkeypatch.setattr(command, "make_notification_actor", lambda _: notification_actor)
     mail_actor = MagicMock()
-    monkeypatch.setattr(command, "make_outbound_mail_actor", lambda _: mail_actor)
     monkeypatch.setattr(command, "dispatch_notifications", send_notifications)
     epias_actor, send_epias = MagicMock(), MagicMock()
-    monkeypatch.setattr(command, "make_epias_actor", lambda _: epias_actor)
     monkeypatch.setattr(command, "dispatch_epias", send_epias)
+    stub_actors(
+        monkeypatch,
+        collect_forecast=lambda _: actor,
+        calibrate_plant=lambda _: calibration_actor,
+        send_forecast_reminder=lambda _: notification_actor,
+        send_outbound_mail=lambda _: mail_actor,
+        collect_epias=lambda _: epias_actor,
+    )
     call_command("dispatch")
     purge.assert_called_once_with(moment)
     sweep.assert_called_once_with(moment)
@@ -147,19 +150,22 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> None:
-    from pyracast.forecasts.management.commands import worker as command
+    from pyracast.orchestration.management.commands import worker as command
 
     broker, actor, worker = MagicMock(), MagicMock(), MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
-    monkeypatch.setattr(command, "make_actor", lambda _: actor)
     calibration_registration = MagicMock()
-    monkeypatch.setattr(command, "make_calibration_actor", calibration_registration)
     notification_registration = MagicMock()
-    monkeypatch.setattr(command, "make_notification_actor", notification_registration)
     mail_registration = MagicMock()
-    monkeypatch.setattr(command, "make_outbound_mail_actor", mail_registration)
     epias_registration = MagicMock()
-    monkeypatch.setattr(command, "make_epias_actor", epias_registration)
+    stub_actors(
+        monkeypatch,
+        collect_forecast=lambda _: actor,
+        calibrate_plant=calibration_registration,
+        send_forecast_reminder=notification_registration,
+        send_outbound_mail=mail_registration,
+        collect_epias=epias_registration,
+    )
     create_worker = MagicMock(return_value=worker)
     monkeypatch.setattr(command, "Worker", create_worker)
     monkeypatch.setattr(ShutdownRequest, "wait", MagicMock(side_effect=KeyboardInterrupt))
@@ -179,18 +185,11 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_notification_worker_consumes_only_its_queue(monkeypatch: pytest.MonkeyPatch) -> None:
-    from pyracast.forecasts.management.commands import worker as command
+    from pyracast.orchestration.management.commands import worker as command
 
     broker, worker = MagicMock(), MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
-    for factory in (
-        "make_actor",
-        "make_calibration_actor",
-        "make_notification_actor",
-        "make_outbound_mail_actor",
-        "make_epias_actor",
-    ):
-        monkeypatch.setattr(command, factory, MagicMock())
+    stub_actors(monkeypatch)
     constructor = MagicMock(return_value=worker)
     monkeypatch.setattr(command, "Worker", constructor)
     monkeypatch.setattr(ShutdownRequest, "wait", MagicMock(side_effect=KeyboardInterrupt))
@@ -203,20 +202,14 @@ def test_notification_worker_consumes_only_its_queue(monkeypatch: pytest.MonkeyP
 def test_commands_handle_termination_and_restore_previous_handlers(
     command_name: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from pyracast.forecasts.management.commands import dispatch, worker
+    from pyracast.orchestration import dispatcher as dispatch
+    from pyracast.orchestration.management.commands import worker
 
     command = worker if command_name == "worker" else dispatch
     broker = MagicMock()
     previous = signal.getsignal(signal.SIGTERM)
     monkeypatch.setattr(command, "make_broker", lambda: broker)
-    for factory in (
-        "make_actor",
-        "make_calibration_actor",
-        "make_notification_actor",
-        "make_outbound_mail_actor",
-        "make_epias_actor",
-    ):
-        monkeypatch.setattr(command, factory, MagicMock())
+    stub_actors(monkeypatch)
 
     def terminate(*_: object, **__: object) -> None:
         handler = signal.getsignal(signal.SIGTERM)
@@ -248,21 +241,14 @@ def test_commands_handle_termination_and_restore_previous_handlers(
 
 
 def test_worker_command_closes_broker_when_stopping_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    from pyracast.forecasts.management.commands import worker as command
+    from pyracast.orchestration.management.commands import worker as command
 
     broker, worker = MagicMock(), MagicMock()
     worker.start.side_effect = KeyboardInterrupt
     worker.stop.side_effect = RuntimeError("shutdown failed")
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "Worker", lambda *args, **kwargs: worker)
-    for factory in (
-        "make_actor",
-        "make_calibration_actor",
-        "make_notification_actor",
-        "make_outbound_mail_actor",
-        "make_epias_actor",
-    ):
-        monkeypatch.setattr(command, factory, MagicMock())
+    stub_actors(monkeypatch)
 
     with pytest.raises(RuntimeError, match="shutdown failed"):
         call_command("worker")
@@ -279,25 +265,18 @@ def test_dispatch_rejects_nonfinite_poll_interval(interval: float) -> None:
 def test_dispatch_does_not_start_cycle_after_shutdown_requested(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from pyracast.forecasts.management.commands import dispatch as command
+    from pyracast.orchestration import dispatcher as command
 
     broker, purge = MagicMock(), MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "purge_expired", purge)
-    for factory in (
-        "make_actor",
-        "make_calibration_actor",
-        "make_notification_actor",
-        "make_outbound_mail_actor",
-    ):
-        monkeypatch.setattr(command, factory, MagicMock())
 
     def finish_registration(_: object) -> None:
         handler = signal.getsignal(signal.SIGTERM)
         assert callable(handler)
         handler(signal.SIGTERM, None)
 
-    monkeypatch.setattr(command, "make_epias_actor", finish_registration)
+    stub_actors(monkeypatch, collect_epias=finish_registration)
 
     call_command("dispatch", loop=True)
 
@@ -309,7 +288,8 @@ def test_dispatch_does_not_start_cycle_after_shutdown_requested(
 def test_existing_stop_file_prevents_command_startup(
     command_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from pyracast.forecasts.management.commands import dispatch, worker
+    from pyracast.orchestration import dispatcher as dispatch
+    from pyracast.orchestration.management.commands import worker
 
     command = worker if command_name == "worker" else dispatch
     stop_file = tmp_path / "stop"
@@ -325,18 +305,11 @@ def test_existing_stop_file_prevents_command_startup(
 def test_dispatch_repeats_after_poll_timeout_until_stop_requested(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from pyracast.forecasts.management.commands import dispatch as command
+    from pyracast.orchestration import dispatcher as command
 
     broker = MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
-    for factory in (
-        "make_actor",
-        "make_calibration_actor",
-        "make_notification_actor",
-        "make_outbound_mail_actor",
-        "make_epias_actor",
-    ):
-        monkeypatch.setattr(command, factory, MagicMock())
+    stub_actors(monkeypatch)
     for operation in (
         "purge_expired",
         "sweep_accounts",

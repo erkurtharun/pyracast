@@ -10,9 +10,10 @@ from dramatiq.brokers.stub import StubBroker
 
 from pyracast.background.broker import make_broker
 from pyracast.forecasts.models import RequestAttempt
+from pyracast.orchestration.kinds import CALIBRATION
 from pyracast.plants.models import CalibrationRun
 from pyracast.plants.operations import create_plant, request_calibration
-from pyracast.plants.runtime import dispatch_calibrations, make_calibration_actor
+from pyracast.plants.runtime import dispatch_calibrations
 from tests.support.domain import NOW, make_system
 
 
@@ -43,7 +44,7 @@ def test_calibration_queue_redelivery_completes_once_without_provider_requests()
     run = calibration_request()
     requests = RequestAttempt.objects.count()
     broker = StubBroker()
-    actor = make_calibration_actor(broker)
+    actor = CALIBRATION.make_actor(broker)
     assert dispatch_calibrations(actor) == 1
     assert dispatch_calibrations(actor) == 1
     worker = Worker(broker, worker_threads=1, worker_timeout=100)
@@ -69,7 +70,7 @@ def test_calibration_queue_redelivery_completes_once_without_provider_requests()
 def test_rabbitmq_delivers_calibration_job() -> None:
     run = calibration_request()
     broker = make_broker()
-    original = make_calibration_actor(broker)
+    original = CALIBRATION.make_actor(broker)
     queue = f"test_calibration_{uuid.uuid4().hex}"
     actor = dramatiq.actor(broker=broker, actor_name=queue, queue_name=queue, max_retries=0)(
         original.fn

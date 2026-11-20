@@ -6,7 +6,8 @@ from django.core.management import call_command
 from dramatiq.brokers.rabbitmq import RabbitmqBroker
 
 from pyracast.background.failures import PhaseOutcome
-from pyracast.forecasts.management.commands import dispatch as command
+from pyracast.orchestration import dispatcher as command
+from tests.support.kinds import stub_actors
 from tests.support.rabbitmq import install_fake_rabbitmq
 
 
@@ -15,12 +16,8 @@ def test_dispatcher_touches_its_heartbeat_before_every_cycle_even_after_a_failed
 ) -> None:
     monkeypatch.setattr(command, "record_dispatch_phase", MagicMock())
     monkeypatch.setattr(command, "make_broker", MagicMock)
+    stub_actors(monkeypatch)
     for name in (
-        "make_actor",
-        "make_calibration_actor",
-        "make_notification_actor",
-        "make_outbound_mail_actor",
-        "make_epias_actor",
         "purge_expired",
         "sweep_accounts",
         "purge_finished_mail",

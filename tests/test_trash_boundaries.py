@@ -15,11 +15,12 @@ from pyracast.forecasts.jobs import (
     persist_snapshot,
     publish,
 )
-from pyracast.forecasts.management.commands import dispatch as dispatch_command
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
 from pyracast.forecasts.scheduler import enqueue_due as enqueue_collections
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.scheduler import enqueue_due as enqueue_reminders
+from pyracast.orchestration import dispatcher
+from pyracast.orchestration.management.commands import dispatch as dispatch_command
 from pyracast.plants.activation import reset_calibration
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import CalibrationRun, Plant
@@ -30,6 +31,7 @@ from pyracast.regions.models import Region
 from pyracast.trash import purge_expired, restore_region, trash_region
 from tests.support.domain import NOW, FakeAdapter
 from tests.support.jobs import calculate
+from tests.support.kinds import stub_actors
 from tests.support.notifications import SLOT, configured, saved
 from tests.support.plant_operations import make_plant, request_run
 from tests.support.trash_boundaries import _race_before_region_lock
@@ -94,26 +96,19 @@ def test_dispatch_prioritizes_notifications_and_continues_all_queues(
 ) -> None:
     calls: list[str] = []
     broker = Mock()
-    monkeypatch.setattr(dispatch_command, "make_broker", lambda: broker)
-    for name in (
-        "make_actor",
-        "make_calibration_actor",
-        "make_notification_actor",
-        "make_outbound_mail_actor",
-        "make_epias_actor",
-    ):
-        monkeypatch.setattr(dispatch_command, name, lambda broker: object())
-    monkeypatch.setattr(dispatch_command, "purge_expired", lambda now: calls.append("purge"))
-    monkeypatch.setattr(dispatch_command, "sweep_accounts", lambda now: calls.append("sweep"))
-    monkeypatch.setattr(dispatch_command, "purge_finished_mail", lambda now: None)
+    monkeypatch.setattr(dispatcher, "make_broker", lambda: broker)
+    stub_actors(monkeypatch)
+    monkeypatch.setattr(dispatcher, "purge_expired", lambda now: calls.append("purge"))
+    monkeypatch.setattr(dispatcher, "sweep_accounts", lambda now: calls.append("sweep"))
+    monkeypatch.setattr(dispatcher, "purge_finished_mail", lambda now: None)
     for name in ("dispatch_calibrations", "dispatch_notifications", "dispatch_epias"):
-        monkeypatch.setattr(dispatch_command, name, lambda *actors, name=name: calls.append(name))
+        monkeypatch.setattr(dispatcher, name, lambda *actors, name=name: calls.append(name))
 
     def collection(actor: object) -> PhaseOutcome:
         calls.append("dispatch")
         return PhaseOutcome()
 
-    monkeypatch.setattr(dispatch_command, "dispatch_collections", collection)
+    monkeypatch.setattr(dispatcher, "dispatch_collections", collection)
     dispatch_command.Command().handle(loop=False, poll_seconds=60.0)
     assert calls == [
         "dispatch_notifications",

@@ -239,7 +239,7 @@ def test_health_command_emits_json_and_nonzero_for_degraded_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "pyracast.forecasts.management.commands.check_delivery_health.timezone.now", lambda: NOW
+        "pyracast.orchestration.management.commands.check_delivery_health.timezone.now", lambda: NOW
     )
     output = io.StringIO()
     with pytest.raises(CommandError, match="needs attention"):
@@ -266,7 +266,7 @@ def test_health_command_bounds_every_statement_to_ten_seconds(
         return {"healthy": True, "statement_timeout": row[0]}
 
     monkeypatch.setattr(
-        "pyracast.forecasts.management.commands.check_delivery_health.delivery_health", report
+        "pyracast.orchestration.management.commands.check_delivery_health.delivery_health", report
     )
     output = io.StringIO()
     call_command("check_delivery_health", stdout=output)

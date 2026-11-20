@@ -36,15 +36,12 @@ from pyracast import maintenance
 from pyracast.accounts.authentication import login_identity
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.forecasts.historical_upload import MAX_UPLOAD_BYTES
-from pyracast.forecasts.management.commands.check_delivery_health import (
+from pyracast.mail import gmail
+from pyracast.orchestration.kinds import register_actors
+from pyracast.orchestration.management.commands.check_delivery_health import (
     Command as DeliveryHealthCommand,
 )
-from pyracast.forecasts.management.commands.worker import Command as WorkerCommand
-from pyracast.forecasts.runtime import make_actor
-from pyracast.mail import gmail
-from pyracast.metering.runtime import make_epias_actor
-from pyracast.notifications.runtime import make_notification_actor, make_outbound_mail_actor
-from pyracast.plants.runtime import make_calibration_actor
+from pyracast.orchestration.management.commands.worker import Command as WorkerCommand
 from pyracast.urls import urlpatterns
 from tests.support.gateway_routes import (
     backend_route,
@@ -170,14 +167,7 @@ def yaml_scalar(document: str, *keys: str) -> str:
 
 
 def test_every_actor_queue_is_consumed_by_exactly_one_compose_worker() -> None:
-    broker = StubBroker()
-    actors = (
-        make_actor(broker),
-        make_calibration_actor(broker),
-        make_notification_actor(broker),
-        make_outbound_mail_actor(broker),
-        make_epias_actor(broker),
-    )
+    actors = register_actors(StubBroker()).values()
     queues = {actor.queue_name for actor in actors}
     consumed: Counter[str] = Counter()
     for service in compose_services().values():

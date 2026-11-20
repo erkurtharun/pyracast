@@ -17,7 +17,8 @@ from pyracast.background.broker import make_broker
 from pyracast.epias import EpiasClient, EpiasError
 from pyracast.metering import client
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
-from pyracast.metering.runtime import dispatch_epias, make_epias_actor
+from pyracast.metering.runtime import dispatch_epias
+from pyracast.orchestration.kinds import METERING
 from tests.support.domain import NOW
 from tests.support.metering import FixtureClient, connected
 
@@ -65,7 +66,7 @@ def test_epias_queue_redelivery_archives_once_per_job(monkeypatch: pytest.Monkey
     monkeypatch.setattr("pyracast.metering.runtime.datetime", SimpleNamespace(now=lambda _: NOW))
     monkeypatch.setattr("pyracast.metering.jobs.get_epias_client", lambda: FixtureClient())
     broker = StubBroker()
-    actor = make_epias_actor(broker)
+    actor = METERING.make_actor(broker)
     assert dispatch_epias(actor) == 2
     assert dispatch_epias(actor) == 2
     worker = Worker(broker, worker_threads=2, worker_timeout=100)
@@ -98,7 +99,7 @@ def test_rabbitmq_delivers_epias_job_without_live_provider_calls(
     job = EpiasCollectionJob.objects.order_by("pk").first()
     assert job is not None
     broker = make_broker()
-    original = make_epias_actor(broker)
+    original = METERING.make_actor(broker)
     queue = f"test_epias_{uuid.uuid4().hex}"
     actor = dramatiq.actor(broker=broker, actor_name=queue, queue_name=queue, max_retries=0)(
         original.fn

@@ -47,12 +47,7 @@ HTTP_MODULES = (
     "proxy",
 )
 PROJECT_MODULES = {"settings", "urls", "wsgi", "cli", "production"}
-ORCHESTRATION_MODULES = {
-    "forecasts.monitoring",
-    "forecasts.management.commands.check_delivery_health",
-    "forecasts.management.commands.dispatch",
-    "forecasts.management.commands.worker",
-}
+ORCHESTRATION_MODULES = {"forecasts.monitoring"}
 
 # Each entry is an import against the layer order that is not resolved yet, with its reason.
 BACK_EDGES: dict[tuple[str, str], str] = {

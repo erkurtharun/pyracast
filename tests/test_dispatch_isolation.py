@@ -11,11 +11,11 @@ from dramatiq.brokers.stub import StubBroker
 
 from pyracast import trash
 from pyracast.epias import AUTH_URL, BASE_URL, EpiasClient
-from pyracast.forecasts.management.commands import dispatch as command
 from pyracast.forecasts.models import DispatcherStatus, ForecastSnapshot
 from pyracast.metering import scheduler as metering_scheduler
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection
 from pyracast.metering.scheduler import enqueue_due_epias_jobs
+from pyracast.orchestration import dispatcher as command
 from pyracast.plants import automation
 from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
 from pyracast.plants.operations import request_calibration

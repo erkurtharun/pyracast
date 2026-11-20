@@ -5,8 +5,9 @@ import pytest
 from django.core.management import CommandError, call_command
 from django.db import connection
 
-from pyracast.forecasts.management.commands import dispatch as command
 from pyracast.forecasts.models import CollectionJob, DispatcherStatus
+from pyracast.orchestration import dispatcher as command
+from tests.support.kinds import stub_actors
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -16,14 +17,7 @@ def test_dispatch_reconnects_after_its_postgresql_session_is_terminated(
 ) -> None:
     broker = MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
-    for factory in (
-        "make_actor",
-        "make_calibration_actor",
-        "make_notification_actor",
-        "make_outbound_mail_actor",
-        "make_epias_actor",
-    ):
-        monkeypatch.setattr(command, factory, MagicMock())
+    stub_actors(monkeypatch)
     for operation in (
         "dispatch_collections",
         "dispatch_epias",

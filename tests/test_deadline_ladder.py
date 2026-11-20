@@ -19,10 +19,11 @@ from pyracast import outbound
 from pyracast.background import broker as broker_module
 from pyracast.background import deadlines
 from pyracast.forecasts import jobs as collection_jobs
-from pyracast.forecasts.management.commands import dispatch, worker
 from pyracast.metering import jobs as metering_jobs
 from pyracast.notifications import jobs as notification_jobs
 from pyracast.notifications import outbox
+from pyracast.orchestration.kinds import register_actors
+from pyracast.orchestration.management.commands import dispatch, worker
 from pyracast.plants import training
 from pyracast.plants.training import pending_calibration_ids
 from scripts import dev as launcher
@@ -46,7 +47,7 @@ def duration(value: str) -> timedelta:
 
 def registered_actors() -> dict[str, Any]:
     broker = StubBroker()
-    worker.register_actors(broker)
+    register_actors(broker)
     return dict(broker.actors)
 
 

@@ -43,10 +43,10 @@ import sys
 import django
 django.setup()
 from pyracast.background.broker import make_broker
-from pyracast.forecasts.runtime import make_actor
+from pyracast.orchestration.kinds import COLLECTION
 broker = make_broker()
 try:
-    make_actor(broker).send(0)
+    COLLECTION.make_actor(broker).send(0)
     ready, _, _ = broker.get_queue_message_counts('default')
 finally:
     broker.close()

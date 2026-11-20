@@ -368,7 +368,7 @@ from pyracast.providers import FixtureProvider
 from pyracast.plants.approval import approve_region
 from pyracast.regions.operations import configure_binding, submit_region
 from pyracast.background.broker import make_broker
-from pyracast.forecasts.runtime import make_actor
+from pyracast.orchestration.kinds import COLLECTION
 assert os.getuid() != 0
 with connection.cursor() as cursor:
     cursor.execute("SELECT has_database_privilege('pyracast_owner', current_database(), 'CREATE')")
@@ -409,7 +409,7 @@ validate_binding(actor, binding.pk, FixtureProvider(), timezone.now())
 job = approve_region(actor, region.pk, binding.pk, timezone.now()).job
 broker = make_broker()
 try:
-    make_actor(broker).send(job.pk)
+    COLLECTION.make_actor(broker).send(job.pk)
 finally:
     broker.close()
 deadline = time.monotonic() + 90

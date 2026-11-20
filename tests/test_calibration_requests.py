@@ -16,6 +16,7 @@ from pyracast.forecasts.models import CollectionJob, HistoricalReferenceImport
 from pyracast.incidents.models import PlantIncident
 from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
+from pyracast.orchestration.kinds import CALIBRATION
 from pyracast.plants import automation, preparation, training
 from pyracast.plants.automation import set_calibration_automation
 from pyracast.plants.models import (
@@ -26,7 +27,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.production_changes import ObservationInput, import_observations
-from pyracast.plants.runtime import dispatch_calibrations, make_calibration_actor
+from pyracast.plants.runtime import dispatch_calibrations
 from tests.support.calibration_preparation import add_days
 from tests.support.concurrency import behind_open_transaction
 from tests.support.domain import NOW, System
@@ -217,7 +218,7 @@ def test_a_crash_between_the_write_and_its_preparation_loses_nothing(
     assert not CalibrationRun.objects.exists()
 
     broker = StubBroker()
-    assert dispatch_calibrations(make_calibration_actor(broker)) == 1
+    assert dispatch_calibrations(CALIBRATION.make_actor(broker)) == 1
     run = CalibrationRun.objects.get()
     assert run.status == "pending"
     assert committed_request(plant.pk) is None
@@ -228,7 +229,7 @@ def test_concurrent_dispatchers_prepare_one_request_once(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     crash_after_write(monkeypatch, system, plant)
-    actor = make_calibration_actor(StubBroker())
+    actor = CALIBRATION.make_actor(StubBroker())
     original = preparation.prepare_calibration
     attempts: list[int] = []
 

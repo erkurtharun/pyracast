@@ -22,25 +22,14 @@ from dramatiq.middleware.time_limit import TimeLimitExceeded
 from pyracast.background import broker as broker_module
 from pyracast.background.failures import PhaseOutcome, queue_depth, queue_full
 from pyracast.forecasts import runtime
-from pyracast.forecasts.management.commands import worker as command
-from pyracast.metering.runtime import dispatch_epias, make_epias_actor
-from pyracast.notifications.runtime import (
-    dispatch_notifications,
-    make_notification_actor,
-    make_outbound_mail_actor,
-    publish_outbound_mail,
-)
-from pyracast.plants.runtime import dispatch_calibrations, make_calibration_actor
+from pyracast.metering.runtime import dispatch_epias
+from pyracast.notifications.runtime import dispatch_notifications, publish_outbound_mail
+from pyracast.orchestration.kinds import CALIBRATION, COLLECTION, METERING, OUTBOUND_MAIL, REMINDER
+from pyracast.orchestration.management.commands import worker as command
+from pyracast.plants.runtime import dispatch_calibrations
 from pyracast.shutdown import ShutdownRequest
+from tests.support.kinds import stub_actors
 from tests.support.rabbitmq import FakeRabbitmq, install_fake_rabbitmq
-
-FACTORIES = (
-    "make_actor",
-    "make_calibration_actor",
-    "make_notification_actor",
-    "make_outbound_mail_actor",
-    "make_epias_actor",
-)
 
 
 def test_the_worker_arms_each_actor_time_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -62,9 +51,7 @@ def test_the_worker_arms_each_actor_time_limit(monkeypatch: pytest.MonkeyPatch) 
         ).send()
 
     monkeypatch.setattr(command, "make_broker", lambda: broker)
-    for factory in FACTORIES[1:]:
-        monkeypatch.setattr(command, factory, MagicMock())
-    monkeypatch.setattr(command, "make_actor", register)
+    stub_actors(monkeypatch, collect_forecast=register)
     monkeypatch.setattr(ShutdownRequest, "wait", lambda _self, _timeout=None: interrupted.wait(3))
 
     call_command("worker", threads=1)
@@ -75,8 +62,7 @@ def test_the_worker_arms_each_actor_time_limit(monkeypatch: pytest.MonkeyPatch) 
 def test_the_worker_drains_for_ten_minutes(monkeypatch: pytest.MonkeyPatch) -> None:
     broker, worker = MagicMock(), MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
-    for factory in FACTORIES:
-        monkeypatch.setattr(command, factory, MagicMock())
+    stub_actors(monkeypatch)
     monkeypatch.setattr(command, "Worker", MagicMock(return_value=worker))
     monkeypatch.setattr(ShutdownRequest, "wait", MagicMock(return_value=True))
 
@@ -131,7 +117,7 @@ def test_a_queue_ten_batches_deep_receives_no_more_collections(
     monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
 ) -> None:
     broker = StubBroker()
-    actor = runtime.make_actor(broker)
+    actor = COLLECTION.make_actor(broker)
     for identifier in range(1000):
         actor.send(identifier)
     monkeypatch.setattr(runtime, "enqueue_due", MagicMock())
@@ -146,7 +132,7 @@ def test_a_queue_ten_batches_deep_receives_no_more_collections(
 
 def test_a_queue_below_ten_batches_still_receives_its_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
     broker = StubBroker()
-    actor = make_epias_actor(broker)
+    actor = METERING.make_actor(broker)
     for identifier in range(999):
         actor.send(identifier)
     monkeypatch.setattr("pyracast.metering.runtime.enqueue_due_epias_jobs", MagicMock())
@@ -162,7 +148,7 @@ def test_a_queue_ten_batches_deep_receives_no_more_metering_jobs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     broker = StubBroker()
-    actor = make_epias_actor(broker)
+    actor = METERING.make_actor(broker)
     for identifier in range(1000):
         actor.send(identifier)
     pending = MagicMock(return_value=[3, 5])
@@ -175,7 +161,7 @@ def test_a_queue_ten_batches_deep_receives_no_more_metering_jobs(
 
 def test_a_queue_ten_batches_deep_receives_no_more_mail(monkeypatch: pytest.MonkeyPatch) -> None:
     broker = StubBroker()
-    actor = make_outbound_mail_actor(broker)
+    actor = OUTBOUND_MAIL.make_actor(broker)
     for identifier in range(1000):
         actor.send(identifier)
     expired, publish = MagicMock(return_value=0), MagicMock(return_value=2)
@@ -198,14 +184,14 @@ def rabbitmq(monkeypatch: pytest.MonkeyPatch) -> FakeRabbitmq:
 def collection_round(
     broker: RabbitmqBroker, monkeypatch: pytest.MonkeyPatch
 ) -> Callable[[], object]:
-    actor = runtime.make_actor(broker)
+    actor = COLLECTION.make_actor(broker)
     monkeypatch.setattr(runtime, "enqueue_due", MagicMock())
     monkeypatch.setattr(runtime, "pending_job_ids", MagicMock(return_value=[3, 5]))
     return partial(runtime.dispatch_collections, actor)
 
 
 def metering_round(broker: RabbitmqBroker, monkeypatch: pytest.MonkeyPatch) -> Callable[[], object]:
-    actor = make_epias_actor(broker)
+    actor = METERING.make_actor(broker)
     monkeypatch.setattr("pyracast.metering.runtime.enqueue_due_epias_jobs", MagicMock())
     monkeypatch.setattr(
         "pyracast.metering.runtime.pending_epias_ids", MagicMock(return_value=[3, 5])
@@ -216,7 +202,7 @@ def metering_round(broker: RabbitmqBroker, monkeypatch: pytest.MonkeyPatch) -> C
 def calibration_round(
     broker: RabbitmqBroker, monkeypatch: pytest.MonkeyPatch
 ) -> Callable[[], object]:
-    actor = make_calibration_actor(broker)
+    actor = CALIBRATION.make_actor(broker)
     monkeypatch.setattr("pyracast.plants.runtime._schedule", MagicMock())
     monkeypatch.setattr(
         "pyracast.plants.runtime.pending_calibration_ids", MagicMock(return_value=[3, 5])
@@ -225,7 +211,7 @@ def calibration_round(
 
 
 def reminder_round(broker: RabbitmqBroker, monkeypatch: pytest.MonkeyPatch) -> Callable[[], object]:
-    actor = make_notification_actor(broker)
+    actor = REMINDER.make_actor(broker)
     monkeypatch.setattr("pyracast.notifications.runtime.enqueue_due", MagicMock())
     monkeypatch.setattr(
         "pyracast.notifications.runtime.pending_notification_ids", MagicMock(return_value=[3, 5])
@@ -237,7 +223,7 @@ def reminder_round(broker: RabbitmqBroker, monkeypatch: pytest.MonkeyPatch) -> C
 
 
 def mail_tick(broker: RabbitmqBroker, monkeypatch: pytest.MonkeyPatch) -> Callable[[], object]:
-    actor = make_outbound_mail_actor(broker)
+    actor = OUTBOUND_MAIL.make_actor(broker)
     monkeypatch.setattr("pyracast.notifications.runtime.end_expired_mail", MagicMock())
 
     def publish_due_mail(send: Callable[[int], object], _now: object) -> int:
