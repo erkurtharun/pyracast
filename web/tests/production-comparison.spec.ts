@@ -73,12 +73,12 @@ test("available historical model days appear without empty grid rows", async ({
     await expect(comparison.getByRole("row")).toHaveCount(9);
     await expect(
         comparison.locator(".stat").filter({ hasText: "Relative error" }),
-    ).toContainText("20%");
+    ).toContainText("20 %");
     await expect(
         comparison
             .locator(".stat")
             .filter({ hasText: "Skill vs uncalibrated model" }),
-    ).toContainText("12.5%");
+    ).toContainText("12.5 %");
     await expect(
         comparison.getByText(
             "Skill uses 3 days outside the calibration's training period.",

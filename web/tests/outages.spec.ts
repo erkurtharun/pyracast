@@ -121,7 +121,7 @@ async function workspace(
             data = incident;
         } else if (path.endsWith("/forecast/")) {
             const intervals = [0, 2, 0].map((power, index) => ({
-                start: `2026-11-12T0${index + 8}:00:00Z`,
+                start: `2026-11-12T${String(index + 8).padStart(2, "0")}:00:00Z`,
                 end: `2026-11-12T${String(index + 9).padStart(2, "0")}:00:00Z`,
                 mean_power_mw: power,
                 energy_mwh: power,

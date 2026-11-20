@@ -1509,7 +1509,7 @@ test("forecast performance shows archived metrics, missing days and selected ran
     await page.getByText("Additional metrics & interpretation").click();
     await page.getByText("Unavailable dates (1)", { exact: true }).click();
     await expect(
-        page.getByText("No forecast was archived for this day: 1 day"),
+        page.getByText("No forecast was archived for this day: 2026-11-02"),
     ).toBeVisible();
     await page.getByText("How comparison is measured", { exact: true }).click();
     await expect(
