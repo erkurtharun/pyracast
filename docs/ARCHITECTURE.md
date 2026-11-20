@@ -150,8 +150,18 @@ invitation signup as password users. Provider identities never grant workspace
 access by email or domain, and matching email addresses never merge accounts.
 Only Google-authoritative Gmail or verified Workspace addresses satisfy mailbox
 verification; other addresses use Pyracast's email verification.
-Connections require an authenticated session and recent reauthentication; users
-without a password can confirm a code sent to their verified email. Linking is
+Connections require an authenticated session and recent reauthentication. A
+reauthentication uses the strongest factor the account holds: its authenticator, else its
+password, else a code sent to its verified email; it ends when the account's credential
+state changes. Each session keeps one record of that state, written under the account's
+locks when it signs in or confirms; a confirmation checks its factor under those locks.
+A write of the account's own credentials (recovery codes, authenticator, password,
+addresses, provider identities) runs in one transaction that first
+locks the account, answers `session_ended` when the session is gone and asks for a
+confirmation by the factor the account needs now when the record differs, also before a
+password change that gives the current password. Other requests, such as console writes of
+business data, compare the record when they start, so one already past that check finishes,
+as a request of a session revoked a moment later does. Linking is
 bound to the initiating user, and disconnects lock the user record to preserve a
 working login method. Provider sign-in retains Pyracast's local MFA requirements.
 
@@ -245,7 +255,7 @@ Workspace administrators can rename a plant and its region without changing a re
 
 ## Reliability and security
 
-- Keep one authentication authority: django-allauth browser sessions, with no app-token endpoints or separate password login. A platform administrator is an active staff superuser; console actions also require MFA evidence bound to the current user and a live authenticator. Administrators require a TOTP factor provisioned through the trusted operator command before login; password possession cannot bootstrap an administrative factor. Reauthentication protects security changes, and recovery codes are one-use and shown once. MFA secrets use authenticated encryption with an HKDF context distinct from provider credentials.
+- Keep one authentication authority: django-allauth browser sessions, with no app-token endpoints or separate password login. A platform administrator is an active staff superuser; the console also requires MFA evidence bound to the current user and a live authenticator, and every console write a reauthentication by that authenticator within the reauthentication window, which the API's MFA management uses too. Administrators require a TOTP factor provisioned through `bootstrap_admin` before login; password possession cannot bootstrap an administrative factor. Reauthentication protects security changes, and recovery codes are one-use and shown once. MFA secrets use authenticated encryption with an HKDF context distinct from provider credentials.
 - Derive tenant access from authenticated membership. Only console views pass platform authority (`platform=True`) to a shared operation, which checks the platform administrator before it takes the tenant lock; `/api/tenants/` routes never do. Scope list/detail/create/update operations, worker jobs and cache keys. Tenant ownership is not a trusted request field. Django admin does not provide tenant isolation automatically.
 - Store provider keys in a secret manager or authenticated encryption with keys outside the database. Accept credential changes through write-only admin inputs; redact secrets from responses, logs and audit payloads.
   The MFA-protected administration setup page supports existing authorized accounts
@@ -509,19 +519,25 @@ reported if the session is still signed in after it or the read shows another ac
 Revoke sessions after 12 hours or 30 minutes without requests; polling of a visible
 tab counts as activity, and hidden tabs do not poll. Sessions predating the lifetime markers fail closed. A request
 whose session another session of the account ended while it ran answers 400
-`session_ended`, also when its own work committed; the client signs in again. API
+`session_ended`, also when its own work committed; the client signs in again. A
+provider callback whose session ended before it took its provider state or during the
+provider exchange answers like one that finds nothing pending: it stores nothing and sends
+no session cookie. API
 responses are private and non-cacheable. The frontend reads stored results and
 never handles provider credentials. A fixed public HTTPS origin determines
 security-email navigation. Verification and recovery codes expire after ten minutes,
 allow at most three attempts and are bound to the initiating browser session. A
-pending code or sign-in step rests on the credential state of its account (password,
+pending code or sign-in step, and a reauthentication kept in the session (a console
+confirmation included), rests on the credential state of its account (password,
 active flag, addresses, provider identities, authenticators) as read under lock where
-the request identified the account; any change of that state ends every pending step
-of the account, a state equal again counts as the same, ending sessions by hand ends
+the request identified the account or recorded the reauthentication; any change of that
+state ends every pending step and reauthentication of the account, the operator commands'
+changes included, a state equal again counts as the same, ending sessions by hand ends
 none, and a step without an account (a provider sign-up, the new address of a change)
-is guarded by the unique constraints when it completes. Starting or completing a step
-and reclaiming an abandoned sign-up lock the account's addresses, provider identities
-and account row, in that order, before its authenticators or workspaces. Real
+is guarded by the unique constraints when it completes. Starting or completing a step,
+recording a reauthentication, an operator command on an account and reclaiming an
+abandoned sign-up lock the account's addresses, provider identities and account row, in
+that order, before its authenticators or workspaces. Real
 mail delivery through the Gmail API or SMTP is a production requirement, separate
 from mocked mail validation. Gmail uses only `gmail.send` with OAuth credentials
 for the configured sender; credentials remain deployment secrets.
@@ -529,7 +545,8 @@ Local development may explicitly select Django's console backend with
 `PYRACAST_EMAIL_BACKEND=console` and `PYRACAST_DEBUG=1`; messages, including usable
 verification codes, go to private local process logs. Console mail in production or
 an unknown backend stops startup. Email replacements require reauthentication
-and verification; password changes invalidate other sessions. Customers can optionally
+and verification; a password change also needs a recent MFA reauthentication when the
+account has an authenticator, and invalidates other sessions. Customers can optionally
 enable TOTP from account settings. Enrollment renders the server-issued setup URI as a
 local QR code with a manual-key fallback. The browser keeps secrets only in component memory.
 Removing TOTP or accessing and regenerating recovery codes requires explicit MFA

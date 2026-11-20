@@ -124,6 +124,10 @@ test("verified email and a recovery code protect a real browser session", async 
         .locator("main li code")
         .nth(2)
         .innerText();
+    const fourthRecoveryCode = await page
+        .locator("main li code")
+        .nth(3)
+        .innerText();
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.getByLabel("Email", { exact: true }).fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
@@ -152,6 +156,12 @@ test("verified email and a recovery code protect a real browser session", async 
         .fill(password);
     await page.getByLabel("New password", { exact: true }).fill(newPassword);
     await page.getByRole("button", { name: "Change password" }).click();
+    await passwordSettings
+        .getByLabel("Authenticator or recovery code")
+        .fill(fourthRecoveryCode);
+    await passwordSettings
+        .getByRole("button", { name: "Confirm authenticator" })
+        .click();
     await expect(
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();

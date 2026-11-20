@@ -15,10 +15,11 @@ from django.db import connections
 from django.http import HttpRequest
 from django.test import Client, RequestFactory, override_settings
 
-from pyracast.accounts import mfa_views
-from pyracast.accounts.mfa_views import recently_reauthenticated_with_mfa
+from pyracast.accounts import step_up
+from pyracast.accounts.security import has_mfa_evidence
 from tests.support.admin_mfa_bootstrap import TEST_PASSWORD
 from tests.support.admin_recovery_security import AUTH, RECOVERY, authenticated_account, submit
+from tests.support.step_up import stamped
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
 
@@ -33,7 +34,7 @@ def test_session_and_password_cannot_read_or_replace_recovery_codes(
     recovery = RecoveryCodes.activate(user).instance
     original = recovery.data.copy()
     assert (
-        submit(client, AUTH + "auth/reauthenticate", {"password": TEST_PASSWORD}).status_code == 200
+        submit(client, AUTH + "auth/reauthenticate", {"password": TEST_PASSWORD}).status_code == 403
     )
     response = client.get(RECOVERY) if method == "get" else submit(client, RECOVERY, {})
     assert response.status_code == 401
@@ -73,7 +74,7 @@ def test_fresh_mfa_reauthentication_allows_recovery_code_rotation(
 
     monkeypatch.setattr(time, "time", lambda: now + 301)
     assert (
-        submit(client, AUTH + "auth/reauthenticate", {"password": TEST_PASSWORD}).status_code == 200
+        submit(client, AUTH + "auth/reauthenticate", {"password": TEST_PASSWORD}).status_code == 403
     )
     assert submit(client, RECOVERY, {}).status_code == 401
 
@@ -89,7 +90,7 @@ def test_invalid_mfa_reauthentication_timestamp_cannot_authorize_recovery_codes(
     record = get_authentication_records(request, user)[0]
     record["reauthenticated"] = True
     record["at"] = invalid_at
-    assert not recently_reauthenticated_with_mfa(request)
+    assert not has_mfa_evidence(request, recent=True)
 
 
 def test_deleted_mfa_factor_cannot_authorize_recovery_codes() -> None:
@@ -99,7 +100,7 @@ def test_deleted_mfa_factor_cannot_authorize_recovery_codes() -> None:
     request.session = client.session
     get_authentication_records(request, user)[0]["reauthenticated"] = True
     Authenticator.objects.filter(user=user).delete()
-    assert not recently_reauthenticated_with_mfa(request)
+    assert not has_mfa_evidence(request, recent=True)
 
 
 def test_mfa_reauthentication_is_bound_to_current_account() -> None:
@@ -108,22 +109,22 @@ def test_mfa_reauthentication_is_bound_to_current_account() -> None:
     request.user = user
     request.session = client.session
     get_authentication_records(request, user)[0]["reauthenticated"] = True
-    assert recently_reauthenticated_with_mfa(request)
+    assert has_mfa_evidence(request, recent=True)
     request.user = User.objects.create_user(username="other")
     Authenticator.objects.create(user=request.user, type="totp", data={})
-    assert not recently_reauthenticated_with_mfa(request)
+    assert not has_mfa_evidence(request, recent=True)
 
 
 def test_anonymous_request_has_no_mfa_reauthentication() -> None:
     request = RequestFactory().get("/")
     request.user = AnonymousUser()
-    assert not recently_reauthenticated_with_mfa(request)
+    assert not has_mfa_evidence(request, recent=True)
 
 
 def test_password_reauthentication_cannot_remove_customer_totp() -> None:
     client, user, _ = authenticated_account(privileged=False)
     assert (
-        submit(client, AUTH + "auth/reauthenticate", {"password": TEST_PASSWORD}).status_code == 200
+        submit(client, AUTH + "auth/reauthenticate", {"password": TEST_PASSWORD}).status_code == 403
     )
     token = client.get("/api/session/").json()["csrf_token"]
     response = client.delete(AUTH + "account/authenticators/totp", HTTP_X_CSRFTOKEN=token)
@@ -222,15 +223,16 @@ def test_recovery_access_and_factor_removal_serialize_across_sessions(
         request.session = client.session
         record_authentication(request, user, method="mfa", type="totp", id=factor.pk)
         get_authentication_records(request, user)[-1]["reauthenticated"] = True
+        stamped(request, user)
         request.session.save()
     token = removal_client.get("/api/session/").json()["csrf_token"]
     verified, release, removal_finished = Event(), Event(), Event()
     recovery_pid: Queue[int] = Queue()
     removal_pid: Queue[int] = Queue()
-    original = mfa_views.recently_reauthenticated_with_mfa
+    original = has_mfa_evidence
 
-    def pause_after_verification(request: HttpRequest) -> bool:
-        authenticated = original(request)
+    def pause_after_verification(request: HttpRequest, *, recent: bool = False) -> bool:
+        authenticated = original(request, recent=recent)
         if request.path == RECOVERY:
             with connections["default"].cursor() as cursor:
                 cursor.execute("SELECT pg_backend_pid()")
@@ -239,7 +241,7 @@ def test_recovery_access_and_factor_removal_serialize_across_sessions(
             assert release.wait(timeout=10)
         return authenticated
 
-    monkeypatch.setattr(mfa_views, "recently_reauthenticated_with_mfa", pause_after_verification)
+    monkeypatch.setattr(step_up, "has_mfa_evidence", pause_after_verification)
 
     def access_recovery() -> tuple[int, list[str]]:
         try:

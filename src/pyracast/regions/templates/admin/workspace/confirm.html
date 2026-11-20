@@ -1,0 +1,22 @@
+{% extends "admin/workspace/base.html" %}
+{% load i18n %}
+{% block title %}{% translate "Confirm with your authenticator" %}{% endblock %}
+{% block heading %}{% translate "Confirm with your authenticator" %}{% endblock %}
+{% block lead %}<p class="lead">{% if refused %}{% translate "Nothing was saved. Confirm with your authenticator, then submit the change again." %}{% else %}{% translate "Changes in the console need a recent confirmation with your authenticator." %}{% endif %}</p>{% endblock %}
+{% block content %}
+  <section class="panel panel--narrow" aria-labelledby="confirm-title">
+    <div class="panel-head"><h2 id="confirm-title">{% translate "Authenticator code" %}</h2></div>
+    <form method="post" action="{% url 'admin:workspace_confirm' %}" class="form">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next }}">
+      {{ form.non_field_errors }}
+      <div class="field{% if form.code.errors %} field--error{% endif %}">
+        {{ form.code.as_field_group }}
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn--primary">{% translate "Confirm" %}</button>
+        <a class="text-link" href="{{ next }}">{% translate "Cancel" context "console" %}</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}

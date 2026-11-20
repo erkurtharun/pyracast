@@ -414,12 +414,18 @@ On the VM through IAP:
 ```bash
 sudo -i
 cd /opt/pyracast/current
-docker compose --env-file deploy/release.env -f deploy/compose.yaml exec api pyracast createsuperuser
 docker compose --env-file deploy/release.env -f deploy/compose.yaml exec api \
-  pyracast provision_admin_mfa --username YOUR_ADMIN --email admin@example.com
+  pyracast bootstrap_admin --email admin@example.com
 ```
 
-Enroll the private authenticator URI immediately; do not put it in logs or tickets.
+Verify mail first (below): the first sign-in mails a code to this address. The command asks
+for a new password and shows the authenticator setup once, in this terminal only; do not
+put it in logs or tickets. For an existing administrator the address must be verified on
+that account or be its only, primary address, so that it can sign in with it; otherwise the
+command stores nothing. A lost or compromised authenticator is removed with
+`pyracast reset_mfa --email ADDRESS --reason lost_device|compromised`, which ends the
+account's sessions, mails the account and writes an audit line; an administrator then
+runs `bootstrap_admin` again. Both commands take `--dry-run`.
 Run `pyracast check_mail --send-to YOUR_ADDRESS` in the `api` container to send one
 reminder-shaped test mail; without `--send-to` it only opens the transport, as the
 release does after each install (a failure is a warning in the release log). Exit

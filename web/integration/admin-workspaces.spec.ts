@@ -8,7 +8,7 @@ import {
 test("a platform administrator creates a workspace, adds a plant and manages members", async ({
     page,
 }, testInfo) => {
-    test.setTimeout(90_000);
+    test.setTimeout(130_000);
     const violations = await recordCspViolations(page);
     await page.setViewportSize({ width: 1440, height: 1000 });
     await signInToConsole(

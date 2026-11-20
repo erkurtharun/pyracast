@@ -1,3 +1,4 @@
+import threading
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future
@@ -20,6 +21,7 @@ from pyracast.accounts import middleware as account_middleware
 from pyracast.accounts.inputs import ReauthenticateInput
 from pyracast.accounts.language import save_user_language
 from pyracast.accounts.models import UserLanguagePreference
+from pyracast.accounts.session_cookie import SessionCookie
 from pyracast.languages import Language
 from tests.support.account_sessions import (
     account,
@@ -226,29 +228,76 @@ def test_reauthentication_rotates_the_session_key() -> None:
     assert list(devices) == [after]
 
 
-def confirm_change(client: Client) -> None:
+def confirm_change(client: Client, code_after: threading.Event | None = None) -> None:
     assert submit(client, "account/email", {"email": "changed@example.com"}).status_code == 200
+    if code_after is not None:
+        assert code_after.wait(timeout=10)
     assert submit(client, "auth/email/verify", {"key": mailed_code()}).status_code == 200
 
 
-def test_a_reauthentication_whose_session_was_ended_meanwhile_answers_session_ended(
+def changed_during_the_password_check(
+    monkeypatch: pytest.MonkeyPatch, change: Callable[[], object]
+) -> list[tuple[bool, Future[None]]]:
+    clean: Callable[..., Any] = ReauthenticateInput.clean
+    changes: list[tuple[bool, Future[None]]] = []
+
+    def changed_meanwhile(self: ReauthenticateInput) -> Any:
+        cleaned = clean(self)
+        future = alongside(change)
+        changes.append((future.done(), future))
+        return cleaned
+
+    monkeypatch.setattr(ReauthenticateInput, "clean", changed_meanwhile)
+    return changes
+
+
+def test_a_change_that_ends_a_session_waits_for_the_reauthentication_it_meets_and_ends_it_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user = account("owner")
     rotating = signed_in(user)
     other = signed_in(user, reauthenticated=True)
-    clean: Callable[..., Any] = ReauthenticateInput.clean
-
-    def ended_meanwhile(self: ReauthenticateInput) -> Any:
-        cleaned = clean(self)
-        elsewhere(lambda: confirm_change(other))
-        return cleaned
-
-    monkeypatch.setattr(ReauthenticateInput, "clean", ended_meanwhile)
+    answered = threading.Event()
+    changes = changed_during_the_password_check(
+        monkeypatch, lambda: confirm_change(other, code_after=answered)
+    )
 
     response = submit(rotating, "auth/reauthenticate", {"password": PASSWORD})
+    answered.set()
+    [(finished, change)] = changes
+    change.result(timeout=10)
 
-    assert (response.status_code, response.json().get("code")) == (400, "session_ended")
+    assert not finished
+    assert response.status_code == 200
+    assert session_user(rotating) is None
+    assert session_user(other) == user.pk
+    devices = UserSession.objects.filter(user=user).values_list("session_key", flat=True)
+    assert list(devices) == [session_key(other)]
+
+
+def test_a_change_that_ends_a_reauthenticated_session_before_its_answer_is_saved_ends_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = account("owner")
+    rotating = signed_in(user)
+    other = signed_in(user, reauthenticated=True)
+    changes = changed_during_the_password_check(monkeypatch, lambda: confirm_change(other))
+    process_response = SessionCookie.process_response
+    answering = threading.get_ident()
+
+    def saved_after_the_change(self: SessionCookie, request: Any, response: Any) -> Any:
+        if threading.get_ident() == answering and changes:
+            changes[0][1].result(timeout=10)
+        return process_response(self, request, response)
+
+    monkeypatch.setattr(SessionCookie, "process_response", saved_after_the_change)
+
+    response = submit(rotating, "auth/reauthenticate", {"password": PASSWORD})
+    [(finished, change)] = changes
+    change.result(timeout=10)
+
+    assert not finished
+    assert (response.status_code, response.json()["code"]) == (400, "session_ended")
     assert session_user(rotating) is None
     assert session_user(other) == user.pk
     devices = UserSession.objects.filter(user=user).values_list("session_key", flat=True)

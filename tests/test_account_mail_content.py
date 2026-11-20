@@ -62,8 +62,10 @@ PRECEDENCE_EXCEPTIONS: dict[tuple[str, int, int], str] = {
     ("remove-address", 44, 47): "the primary address is refused before reauthentication",
     ("remove-address", 45, 47): "an address outside the account is refused before reauthentication",
     ("remove-address", 47, 48): "removing a secondary requires reauthentication before sending",
-    ("totp-on", 56, 58): "an unverified address prevents activation before reauthentication",
-    ("disconnect", 67, 68): "the last way to sign in is refused before reauthentication",
+    ("reauthentication-code", 54, 55): "an account with a password is refused before the address",
+    ("reauthentication-code", 54, 56): "an account with a password is refused before the address",
+    ("totp-on", 57, 59): "an unverified address prevents activation before reauthentication",
+    ("disconnect", 68, 69): "the last way to sign in is refused before reauthentication",
 }
 
 
@@ -172,13 +174,18 @@ def test_reset_request_for_duplicate_unverified_identities_mails_the_shared_addr
 
 
 def signed_in_actor(state: str, language: str) -> Client:
-    account(PRIMARY, "member", language)
+    user = account(PRIMARY, "member", language)
     client = commit_browser()
+    if state == "reauthentication-pending":
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
+        client.force_login(user)
+        request_reauthentication_code(client)
+        mail.outbox.clear()
+        return client
     credentials = {"email": PRIMARY, "password": PASSWORD}
     assert submit(client, "auth/login", credentials).status_code == 200
-    if state == "reauthentication-pending":
-        request_reauthentication_code(client)
-    elif state != "signed-in":
+    if state != "signed-in":
         assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     if state == "pending-change":
         assert submit(client, "account/email", {"email": CHANGE}).status_code == 200
@@ -224,9 +231,11 @@ def test_verification_resend_after_signup_with_a_taken_address_mails_nothing(
 
 
 def test_unrouted_reauthentication_code_resend_answers_404_and_mails_nothing() -> None:
-    account(PRIMARY, "member", "en")
+    user = account(PRIMARY, "member", "en")
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
     client = commit_browser()
-    assert submit(client, "auth/login", {"email": PRIMARY, "password": PASSWORD}).status_code == 200
+    client.force_login(user)
     request_reauthentication_code(client)
 
     response = submit(client, "auth/reauthenticate/code/resend", {})

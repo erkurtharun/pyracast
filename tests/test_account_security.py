@@ -26,7 +26,7 @@ from django.test import Client, RequestFactory, override_settings
 from pyracast import settings as project_settings
 from pyracast.accounts.cache import AuthenticationCache
 from pyracast.accounts.checks import check_authentication_mail_delivery
-from pyracast.accounts.security import has_verified_mfa, normalize_client_ip
+from pyracast.accounts.security import has_mfa_evidence, normalize_client_ip
 from pyracast.api.middleware import PrivateAPIResponses
 from pyracast.mail.smtp import EmailBackend as SMTPEmailBackend
 
@@ -311,18 +311,18 @@ def test_mfa_evidence_is_bound_to_current_user_and_live_authenticator() -> None:
     request = RequestFactory().get("/admin/")
     request.user = verified_member()
     request.session = SessionStore()
-    assert not has_verified_mfa(request)
+    assert not has_mfa_evidence(request)
     authenticator = Authenticator.objects.create(user=request.user, type="totp", data={})
     record_authentication(request, request.user, method="mfa", type="totp", id=authenticator.pk)
-    assert has_verified_mfa(request)
+    assert has_mfa_evidence(request)
     other = User.objects.create_user(username="other")
     request.user = other
-    assert not has_verified_mfa(request)
+    assert not has_mfa_evidence(request)
     request.user = authenticator.user
     authenticator.delete()
-    assert not has_verified_mfa(request)
+    assert not has_mfa_evidence(request)
     request.user.is_active = False
-    assert not has_verified_mfa(request)
+    assert not has_mfa_evidence(request)
 
 
 @pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)

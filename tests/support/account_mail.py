@@ -460,9 +460,17 @@ NOT_APPLICABLE: tuple[tuple[str, Callable[[Combination], bool]], ...] = (
         lambda c: c.state in SIGNED and c.shape not in SESSION_SHAPES,
     ),
     (
-        "only password change and provider disconnect decide on mail by whether the account has "
-        "a password; sign-in and password reauthentication read it but never send mail",
-        lambda c: c.shape in PASSWORDLESS and c.endpoint not in {"password", "disconnect"},
+        "only password change, provider disconnect and a reauthentication code decide on mail by "
+        "whether the account has a password; sign-in and password reauthentication read it but "
+        "never send mail",
+        lambda c: (
+            c.shape in PASSWORDLESS
+            and c.endpoint not in {"password", "disconnect", "reauthentication-code"}
+        ),
+    ),
+    (
+        "a reauthentication code is pending only for an account without a password",
+        lambda c: c.state == "reauthentication-pending" and c.shape not in PASSWORDLESS,
     ),
     (
         "signed out, the account's shape matters only when the request touches the account",
@@ -682,6 +690,11 @@ EXPECTED: tuple[Expect, ...] = (
     expect("password", Mail(SET_NOTICE, "primary", "member", 401), shapes=PASSWORDLESS),
     expect("password", Mail(CHANGED_NOTICE, "primary", "member", 401)),
     expect("reauthentication-code", NoMail(401, "no session"), states=ANONYMOUS),
+    expect(
+        "reauthentication-code",
+        NoMail(403, "an account with a password confirms with it"),
+        shapes=SESSION_SHAPES - PASSWORDLESS,
+    ),
     expect(
         "reauthentication-code",
         Mail(LOGIN_CODE, "target", "member", 200),

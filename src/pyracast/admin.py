@@ -1,5 +1,7 @@
-from functools import partial
+from collections.abc import Callable
+from functools import partial, update_wrapper
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlsplit
 
 from django.contrib import admin, messages
 from django.contrib.auth import logout
@@ -24,8 +26,11 @@ from pyracast import admin_tenant_views as workspace_views
 from pyracast.accounts.authorization import has_platform_admin_session
 from pyracast.accounts.language import save_user_language, set_language_cookie
 from pyracast.accounts.models import Tenant
+from pyracast.accounts.processes import confirmation
+from pyracast.accounts.security import has_mfa_evidence
 from pyracast.admin_forms import (
     BindingActionForm,
+    ConfirmationForm,
     EpiasConnectionForm,
     ProviderSetupForm,
     validation_failure_message,
@@ -75,6 +80,17 @@ from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequ
 from pyracast.regions.operations import approve_region
 
 _REPLACED_SITE_ROUTES = {"autocomplete", "logout", "password_change", "password_change_done"}
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def console_destination(request: HttpRequest, target: str | None) -> str:
+    if target and url_has_allowed_host_and_scheme(
+        target, {request.get_host()}, require_https=request.is_secure()
+    ):
+        parts = urlsplit(target)
+        if parts.path.startswith("/admin/"):
+            return parts.path + (f"?{parts.query}" if parts.query else "")
+    return reverse("admin:index")
 
 
 class PlatformAdminSite(admin.AdminSite):
@@ -88,11 +104,48 @@ class PlatformAdminSite(admin.AdminSite):
             return redirect("admin:index")
         return redirect("/app/?next=/admin/")
 
+    def admin_view[V: Callable[..., Any]](
+        self, view: V, cacheable: bool = False, *, needs_confirmation: bool = True
+    ) -> V:
+        # Django and every ModelAdmin build their console routes through here too, so an unsafe
+        # request reaches a view only with a recent confirmation by the authenticator.
+        if needs_confirmation:
+            view = self._confirmed(view)
+        return super().admin_view(view, cacheable)
+
+    def _confirmed[V: Callable[..., Any]](self, view: V) -> V:
+        def confirmed(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
+            if request.method in SAFE_METHODS or has_mfa_evidence(request, recent=True):
+                return view(request, *args, **kwargs)
+            return self.confirmation(
+                request,
+                ConfirmationForm(user=request.user),
+                console_destination(request, request.META.get("HTTP_REFERER")),
+                status=403,
+            )
+
+        return cast(V, update_wrapper(confirmed, view))
+
+    def each_context(self, request: HttpRequest) -> dict[str, Any]:
+        return {
+            **super().each_context(request),
+            "confirmation_needed": not has_mfa_evidence(request, recent=True),
+        }
+
     def get_urls(self) -> list[URLPattern | URLResolver]:
         return [
             path("plants/", self.admin_view(self.plants), name="workspace_plants"),
-            path("logout/", self.admin_view(self.workspace_logout), name="logout"),
+            path(
+                "logout/",
+                self.admin_view(self.workspace_logout, needs_confirmation=False),
+                name="logout",
+            ),
             path("language/", self.admin_view(self.language), name="workspace_language"),
+            path(
+                "confirm/",
+                self.admin_view(self.confirm, needs_confirmation=False),
+                name="workspace_confirm",
+            ),
             path("plants/<int:object_id>/", self.admin_view(self.plant), name="workspace_plant"),
             path(
                 "plants/<int:object_id>/historical-import/",
@@ -264,6 +317,37 @@ class PlatformAdminSite(admin.AdminSite):
                 request, _("Choose a review action and reload the current plant before continuing.")
             )
         return redirect("admin:workspace_plant", object_id=object_id)
+
+    def confirm(self, request: HttpRequest) -> HttpResponse:
+        if request.method not in {"GET", "POST"}:
+            return HttpResponseNotAllowed(("GET", "POST"))
+        data = request.POST if request.method == "POST" else request.GET
+        destination = console_destination(request, data.get("next"))
+        form = ConfirmationForm(
+            request.POST if request.method == "POST" else None, user=request.user
+        )
+        if request.method == "POST":
+            with confirmation(request):
+                confirmed = form.is_valid()
+                if confirmed:
+                    form.save()
+            if confirmed:
+                messages.success(request, _("Confirmed with your authenticator."))
+                return redirect(destination)
+        return self.confirmation(
+            request, form, destination, status=400 if request.method == "POST" else 200
+        )
+
+    def confirmation(
+        self, request: HttpRequest, form: ConfirmationForm, destination: str, *, status: int
+    ) -> TemplateResponse:
+        return self.workspace_response(
+            request,
+            "confirm",
+            _("Confirm with your authenticator"),
+            {"form": form, "next": destination, "refused": status == 403},
+            status=status,
+        )
 
     def workspace_logout(self, request: HttpRequest) -> HttpResponse:
         if request.method != "POST":

@@ -11,6 +11,7 @@ from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from django.views.decorators.debug import sensitive_variables
 
+from pyracast.accounts.inputs import SecondFactorReauthenticateInput
 from pyracast.api.serializers import BindingInput
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import (
@@ -350,3 +351,9 @@ class BindingActionForm(forms.Form):
         ):
             raise ValidationError(_("The setup changed. Reload this page before continuing."))
         return binding
+
+
+class ConfirmationForm(SecondFactorReauthenticateInput):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.fields["code"].label = gettext_lazy("Authenticator or recovery code")

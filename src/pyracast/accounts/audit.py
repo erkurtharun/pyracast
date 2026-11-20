@@ -5,6 +5,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from enum import StrEnum
 from functools import partial
 from ipaddress import ip_address
@@ -26,6 +27,7 @@ from pyracast.event_details import INTEGER, OPTIONAL_INTEGER, OPTIONAL_TEXT, TEX
 
 logger = logging.getLogger("pyracast.security")
 failure_logger = logging.getLogger(__name__)
+_after_commit: ContextVar[bool] = ContextVar("pyracast_lines_after_commit", default=False)
 
 
 class SecurityEvent(StrEnum):
@@ -63,6 +65,7 @@ class SecurityEvent(StrEnum):
     SOCIAL_ACCOUNT_CONNECTED = "social_account_connected"
     SOCIAL_ACCOUNT_DISCONNECTED = "social_account_disconnected"
     ADMIN_MFA_PROVISIONED = "admin_mfa_provisioned"
+    MFA_RESET_BY_OPERATOR = "mfa_reset_by_operator"
     INVALID_PROXY_HEADERS = "invalid_proxy_headers"
     AUTHENTICATION_REQUEST_THROTTLED = "authentication_request_throttled"
     API_REQUEST_THROTTLED = "api_throttled"
@@ -76,6 +79,32 @@ class SecurityEvent(StrEnum):
     WORKSPACE_MEMBER_REMOVED = "workspace_member_removed"
     WORKSPACE_ADMIN_REASSIGNED = "workspace_admin_reassigned"
 
+
+# Lines that report a change or a success rather than a refusal or failure; inside
+# lines_after_commit they leave only with the commit of what they report.
+CHANGE_EVENTS = frozenset(
+    {
+        SecurityEvent.LOGIN_SUCCEEDED,
+        SecurityEvent.LOGOUT,
+        SecurityEvent.SESSIONS_REVOKED,
+        SecurityEvent.REAUTHENTICATED,
+        SecurityEvent.MFA_SUCCEEDED,
+        SecurityEvent.SIGNUP,
+        SecurityEvent.EMAIL_VERIFIED,
+        SecurityEvent.EMAIL_ADDED,
+        SecurityEvent.EMAIL_CHANGE_REQUESTED,
+        SecurityEvent.EMAIL_CHANGED,
+        SecurityEvent.EMAIL_REMOVED,
+        SecurityEvent.CREDENTIAL_CHANGED,
+        SecurityEvent.CREDENTIAL_SET,
+        SecurityEvent.CREDENTIAL_RESET,
+        SecurityEvent.MFA_ADDED,
+        SecurityEvent.MFA_REMOVED,
+        SecurityEvent.MFA_RESET,
+        SecurityEvent.SOCIAL_ACCOUNT_CONNECTED,
+        SecurityEvent.SOCIAL_ACCOUNT_DISCONNECTED,
+    }
+)
 
 SIGNAL_EVENTS: Mapping[Signal, SecurityEvent] = {
     auth_signals.user_logged_in: SecurityEvent.LOGIN_SUCCEEDED,
@@ -139,7 +168,8 @@ SECURITY_EVENT_DETAILS: Mapping[SecurityEvent, frozenset[str]] = {
     SecurityEvent.AUTHENTICATOR_UNREADABLE: frozenset(),
     SecurityEvent.SECOND_FACTOR_LOCKED: frozenset(),
     SecurityEvent.SOCIAL_LOGIN_REFUSED: frozenset({"provider", "reason"}),
-    SecurityEvent.ADMIN_MFA_PROVISIONED: frozenset(),
+    SecurityEvent.ADMIN_MFA_PROVISIONED: frozenset({"reason"}),
+    SecurityEvent.MFA_RESET_BY_OPERATOR: frozenset({"reason", "count"}),
     SecurityEvent.INVALID_PROXY_HEADERS: frozenset(),
     SecurityEvent.AUTHENTICATION_REQUEST_THROTTLED: frozenset(),
     SecurityEvent.API_REQUEST_THROTTLED: frozenset({"scope"}),
@@ -166,6 +196,15 @@ def _client_ip(request: HttpRequest | None, client_ip: str | None) -> str | None
         with suppress(ValueError, PermissionDenied):
             return str(ip_address(get_adapter().get_client_ip(request)))
     return client_ip
+
+
+@contextmanager
+def lines_after_commit() -> Iterator[None]:
+    token = _after_commit.set(True)
+    try:
+        yield
+    finally:
+        _after_commit.reset(token)
 
 
 @contextmanager
@@ -222,7 +261,15 @@ def record_security_event(
             key for key, kind in LINE_KINDS.items() if key in line and not kind.accepts(line[key])
         ]:
             raise ValueError(f"{event} takes {', '.join(mistyped)} of another type.")
-        logger.info("%s", json.dumps(line, sort_keys=True))
+        write = partial(logger.info, "%s", json.dumps(line, sort_keys=True))
+        if (
+            event in CHANGE_EVENTS
+            and _after_commit.get()
+            and transaction.get_connection().in_atomic_block
+        ):
+            transaction.on_commit(write, robust=True)
+        else:
+            write()
 
 
 def record_on_commit(event: SecurityEvent, **fields: Any) -> None:

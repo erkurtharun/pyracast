@@ -2,7 +2,6 @@ import runpy
 import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from pathlib import Path
 from threading import Barrier, Event
 from typing import Any
@@ -26,7 +25,7 @@ from django.db import IntegrityError, close_old_connections, connections, transa
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import Client, override_settings
 
-from pyracast.accounts import social, social_views
+from pyracast.accounts import processes, social
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
 from pyracast.accounts.social import SocialAccountAdapter
@@ -247,11 +246,23 @@ def test_social_link_and_unlink_require_reauthentication_and_emit_audit(
     listed = client.get(AUTH + "account/providers").json()["data"]
     assert listed[0]["uid"] == account.uid
     assert listed[0]["provider"]["id"] == "google"
+    removal = {"provider": "google", "account": account.uid}
+    token = client.get("/api/session/").json()["csrf_token"]
+    # The connection changed the account's credential state, which ends the reauthentication.
+    stale = client.delete(
+        AUTH + "account/providers",
+        removal,
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=token,
+    )
+    assert stale.status_code == 401
+    assert SocialAccount.objects.filter(pk=account.pk).exists()
+    assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     token = client.get("/api/session/").json()["csrf_token"]
     with caplog.at_level("INFO", logger="pyracast.security"):
         removed = client.delete(
             AUTH + "account/providers",
-            {"provider": "google", "account": account.uid},
+            removal,
             content_type="application/json",
             HTTP_X_CSRFTOKEN=token,
         )
@@ -421,7 +432,12 @@ def test_connect_callback_remains_bound_to_original_recently_reauthenticated_use
 ) -> None:
     user = member()
     other = User.objects.create_user(username="other", email="other@example.com", password=PASSWORD)
-    existing = SocialAccount.objects.create(user=other, provider="google", uid="google-identity")
+    existing = SocialAccount.objects.create(
+        user=other,
+        provider="google",
+        uid="google-identity",
+        extra_data={"email": "old@gmail.com"},
+    )
     client = Client()
     assert (
         submit(client, "auth/login", {"email": user.email, "password": PASSWORD}).status_code == 200
@@ -458,20 +474,24 @@ def test_connect_callback_remains_bound_to_original_recently_reauthenticated_use
     assert SocialAccount.objects.count() == 1
     existing.refresh_from_db()
     assert existing.user_id == other.pk
-    assert existing.extra_data == {"email": oauth_profile["email"]}
+    # A refused connection stores nothing, not even the provider's newer profile.
+    assert existing.extra_data == {"email": "old@gmail.com"}
     assert "account_reauthentication_state" not in client.session
 
 
 def test_connect_rejects_identity_owned_by_other_user(oauth_profile: dict[str, Any]) -> None:
     user = member()
     other = User.objects.create_user(username="other")
-    SocialAccount.objects.create(user=other, provider="google", uid="google-identity")
+    SocialAccount.objects.create(
+        user=other, provider="google", uid="google-identity", extra_data={"email": "old@gmail.com"}
+    )
     client = Client()
     submit(client, "auth/login", {"email": user.email, "password": PASSWORD})
     submit(client, "auth/reauthenticate", {"password": PASSWORD})
     response = complete(client, begin(client, process="connect"))
     assert "error=connected_other" in response["Location"]
-    assert SocialAccount.objects.get().user_id == other.pk
+    identity = SocialAccount.objects.get()
+    assert (identity.user_id, identity.extra_data) == (other.pk, {"email": "old@gmail.com"})
 
 
 def test_disabling_provider_expires_pending_signup_and_callback(
@@ -630,17 +650,18 @@ def test_concurrent_sessions_cannot_disconnect_both_passwordless_login_methods()
         SocialAccount.objects.create(user=user, provider=provider, uid=f"{provider}-identity")
         for provider in PROVIDERS
     ]
+    # The account has no password; its sessions reauthenticate with a mailed code.
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
     clients = [Client(enforce_csrf_checks=True), Client(enforce_csrf_checks=True)]
     tokens = []
     for client in clients:
-        assert (
-            submit(client, "auth/login", {"email": user.email, "password": PASSWORD}).status_code
-            == 200
-        )
-        assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+        client.force_login(user)
+        request = {"email": user.email}
+        assert submit(client, "auth/reauthenticate/code/request", request).status_code == 200
+        confirmation = {"code": mailed_code()}
+        assert submit(client, "auth/reauthenticate/code/confirm", confirmation).status_code == 200
         tokens.append(client.get("/api/session/").json()["csrf_token"])
-    user.set_unusable_password()
-    user.save(update_fields=["password"])
     barrier = Barrier(2)
 
     def disconnect(index: int) -> int:
@@ -661,12 +682,6 @@ def test_concurrent_sessions_cannot_disconnect_both_passwordless_login_methods()
         finally:
             connections.close_all()
 
-    # Password changes expire sessions; retain their recorded authenticated identity
-    # while testing only simultaneous removal of independent provider credentials.
-    for client in clients:
-        session = client.session
-        session["_auth_user_hash"] = user.get_session_auth_hash()
-        session.save()
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(disconnect, index) for index in range(2)]
         statuses = sorted(future.result(timeout=20) for future in futures)
@@ -693,7 +708,7 @@ def test_microsoft_without_mail_uses_principal_or_requests_email(
     }
 
 
-@pytest.mark.parametrize("change", ["password", "deactivated", "deleted", "staff"])
+@pytest.mark.parametrize("change", ["password", "deactivated", "deleted", "staff", "renamed"])
 def test_connect_rechecks_current_user_after_provider_exchange(
     oauth_profile: dict[str, Any], change: str
 ) -> None:
@@ -729,19 +744,20 @@ def test_connect_rechecks_current_user_after_provider_exchange(
                 User.objects.filter(pk=user.pk).update(is_active=False)
             elif change == "deleted":
                 user.delete()
-            else:
+            elif change == "staff":
                 User.objects.filter(pk=user.pk).update(is_staff=True, is_superuser=True)
+            else:
+                User.objects.filter(pk=user.pk).update(first_name="Renamed")
         finally:
             continue_profile.set()
         response = future.result(timeout=20)
-    if change == "staff":
+    if change == "renamed":
+        # A change outside the credential state keeps the reauthentication.
         assert response["Location"] == CALLBACK
-        user.refresh_from_db()
-        assert user.is_staff
-        assert user.is_superuser
-        assert user.check_password(PASSWORD)
         assert SocialAccount.objects.get().user_id == user.pk
     else:
+        # The staff flags are part of the credential state, so changing them ends the
+        # reauthentication the connection rests on.
         assert "error=permission_denied" in response["Location"]
         assert not SocialAccount.objects.exists()
         if change == "password":
@@ -750,6 +766,11 @@ def test_connect_rechecks_current_user_after_provider_exchange(
         elif change == "deactivated":
             user.refresh_from_db()
             assert not user.is_active
+        elif change == "staff":
+            user.refresh_from_db()
+            assert user.is_staff
+            assert user.is_superuser
+            assert user.check_password(PASSWORD)
 
 
 def test_concurrent_provider_claim_rejects_second_user_without_losing_identity(
@@ -823,15 +844,14 @@ def test_disconnect_rechecks_authentication_after_waiting_for_user_lock(
     submit(client, "auth/reauthenticate", {"password": PASSWORD})
     token = client.get("/api/session/").json()["csrf_token"]
     lock_requested = Event()
-    original = social.locked_social_user
+    original = processes.account_state
 
-    @contextmanager
-    def observed_lock(request: HttpRequest, user_id: int) -> Iterator[User | None]:
-        lock_requested.set()
-        with original(request, user_id) as locked:
-            yield locked
+    def observed_lock(user_id: Any, *, lock: bool = False) -> str | None:
+        if lock:
+            lock_requested.set()
+        return original(user_id, lock=lock)
 
-    monkeypatch.setattr(social_views, "locked_social_user", observed_lock)
+    monkeypatch.setattr(processes, "account_state", observed_lock)
 
     def disconnect() -> int:
         close_old_connections()

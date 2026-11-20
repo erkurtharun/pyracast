@@ -128,17 +128,17 @@ copy `web/.env.example` to ignored `web/.env.local` and set `DJANGO_API_ORIGIN`.
 
 ```text
 uv run --locked pyracast migrate --noinput
-uv run --locked pyracast createsuperuser
-uv run --locked pyracast provision_admin_mfa --username YOUR_ADMIN --email admin@example.com
-uv run --locked pyracast fixture_demo --username YOUR_ADMIN
+uv run --locked pyracast bootstrap_admin --email admin@example.com
+uv run --locked pyracast fixture_demo --username USERNAME_SHOWN_BY_BOOTSTRAP
 ```
 
-Scan the private terminal QR code with the administrator's authenticator; use a
-Unicode terminal wide enough to show the complete code without wrapping. The
-enrollment URI remains available for manual setup if the console cannot display
-the code. Keep both out of logs and tickets. Provisioning refuses to replace an
-existing factor. Administrators verify email, sign in with password/TOTP, then
-confirm MFA and save recovery codes in **Account settings**.
+`bootstrap_admin` asks for a new password and shows a private QR code, setup key and
+link; scan it in a Unicode terminal wide enough for the complete code, keep all three
+out of logs and tickets, and type the current code. It also enrolls an administrator
+whose second factor was removed with `reset_mfa --email ADDRESS --reason lost_device`.
+`--dry-run` shows what either command would do. Administrators verify email, sign in
+with password/TOTP and save recovery codes in **Account settings**; console changes
+then need a confirmation with the authenticator from the last five minutes.
 
 Sign in at `http://127.0.0.1:3000/`. Administrators open `/admin/`; customers open
 their plant portfolio. The synthetic demo processes its durable job directly,

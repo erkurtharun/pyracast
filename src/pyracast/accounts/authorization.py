@@ -2,7 +2,7 @@ from django.contrib.auth.models import AnonymousUser, User
 from django.http import HttpRequest
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
-from pyracast.accounts.security import has_verified_mfa
+from pyracast.accounts.security import has_mfa_evidence
 from pyracast.errors import ErrorCode, ForbiddenError
 
 
@@ -39,7 +39,7 @@ def requires_admin_mfa(user: User | AnonymousUser) -> bool:
 
 
 def has_platform_admin_session(request: HttpRequest) -> bool:
-    return is_platform_admin(request.user) and has_verified_mfa(request)
+    return is_platform_admin(request.user) and has_mfa_evidence(request)
 
 
 def require_platform_admin(actor: User) -> None:

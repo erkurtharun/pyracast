@@ -40,7 +40,7 @@ from django.http import HttpRequest
 from django.test import Client, RequestFactory, override_settings
 from django.utils import timezone
 
-from pyracast.accounts import authentication, headless, processes, social
+from pyracast.accounts import authentication, headless, processes, security, social
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.inputs import (
     LoginInput,
@@ -55,6 +55,7 @@ from tests.support.account_sessions import (
     browser,
     elsewhere,
     moment,
+    passwordless,
     session_user,
     signed_in,
     totp_clock,
@@ -121,7 +122,7 @@ def signup_resend(monkeypatch: pytest.MonkeyPatch) -> Pending:
 
 
 def reauthentication_code(monkeypatch: pytest.MonkeyPatch) -> Pending:
-    user = account("owner")
+    user = passwordless("owner")
     EmailAddress.objects.create(user=user, email=SECOND, verified=True)
     client = signed_in(user)
     request = {"email": SECOND}
@@ -531,10 +532,23 @@ def test_a_reset_code_dies_when_its_authority_changes_after_the_code_is_sent(
     assert list(EmailAddress.objects.values_list("email", flat=True)) == addresses
 
 
+def test_a_reauthentication_code_dies_when_the_account_gains_an_authenticator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pending = reauthentication_code(monkeypatch)
+    mail.outbox.clear()
+    with_totp(pending.user)
+
+    pending.client.get("/api/session/")
+
+    assert REAUTHENTICATION_CODE_SESSION_KEY not in pending.client.session
+    assert mail.outbox == []
+
+
 def test_a_reauthentication_code_dies_when_its_address_is_replaced_after_the_code_is_sent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = account("owner")
+    user = passwordless("owner")
     EmailAddress.objects.create(user=user, email=SECOND, verified=True)
     client = signed_in(user)
     changes = changing(
@@ -906,7 +920,7 @@ def test_a_password_change_started_while_a_reset_code_is_requested_waits_and_end
 def test_an_address_replacement_started_while_a_reauthentication_code_is_requested_ends_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = account("owner")
+    user = passwordless("owner")
     EmailAddress.objects.create(user=user, email=SECOND, verified=True)
     client = signed_in(user)
     changes = changing(
@@ -1024,6 +1038,8 @@ def spent_reset(user: User) -> Client:
 
 
 def spent_reauthentication_code(user: User) -> Client:
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
     client = signed_in(user)
     for _ in range(3):
         response = submit(client, "auth/reauthenticate/code/request", {"email": OWNER})
@@ -1072,7 +1088,7 @@ def test_a_start_refused_by_its_budget_waits_for_no_lock(start: str) -> None:
 def test_a_reauthentication_code_admitted_after_its_budget_looked_spent_sends_no_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = account("owner")
+    user = passwordless("owner")
     client = signed_in(user)
     monkeypatch.setattr(headless, "spent", lambda *args, **kwargs: True)
 
@@ -1170,12 +1186,33 @@ def test_a_change_committed_after_the_request_checked_its_steps_ends_the_second_
     assert session_user(pending.client) is None
 
 
-def test_a_second_factor_reauthentication_without_an_authenticator_refuses_the_code() -> None:
-    client = signed_in(account("owner"))
+def test_an_authenticator_removal_started_after_the_factor_check_waits_for_the_code_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The view checks the account's factor and then the code under the account's locks, so a
+    # removal started between the two commits only after the code was checked.
+    user = account("owner")
+    with_totp(user)
+    client = browser()
+    client.force_login(user)
+    checked = security.strongest_factor
+    removals: list[tuple[bool, Future[None]]] = []
+
+    def removed_after_the_check(checked_user: Any) -> Any:
+        factor = checked(checked_user)
+        future = alongside(lambda: Authenticator.objects.filter(user_id=checked_user.pk).delete())
+        removals.append((future.done(), future))
+        return factor
+
+    monkeypatch.setattr("pyracast.accounts.step_up.strongest_factor", removed_after_the_check)
 
     response = submit(client, "auth/2fa/reauthenticate", {"code": "123456"})
+    [(finished, removal)] = removals
+    removal.result(timeout=10)
 
+    assert not finished
     assert (response.status_code, error_codes(response)) == (400, ["incorrect_code"])
+    assert not Authenticator.objects.filter(user=user).exists()
 
 
 @override_settings(ACCOUNT_EMAIL_VERIFICATION_SUPPORTS_CHANGE=True)

@@ -26,14 +26,20 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from psycopg.errors import DeadlockDetected
 
 from pyracast.accounts import inputs
+from pyracast.accounts.audit import lines_after_commit
 from pyracast.accounts.login_limits import spent, throttled
 from pyracast.accounts.processes import (
     AuthorityChangedError,
     StartingView,
+    authorize_credential_write,
+    confirmation,
     continuing,
+    credential_write,
     lock_account,
     require_authority,
 )
+from pyracast.accounts.security import Factor, strongest_factor
+from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor, require_recent_mfa
 from pyracast.db import violated_constraint
 
 COMPLETION_FAILURES = (
@@ -94,7 +100,11 @@ class RequestPasswordResetView(StartingView, views.RequestPasswordResetView):
     input_class = inputs.RequestPasswordResetInput
 
 
-class RequestReauthenticationCodeView(StartingView, views.RequestReauthenticationCodeView):
+class RequestReauthenticationCodeView(
+    StrongestFactor, StartingView, views.RequestReauthenticationCodeView
+):
+    factor = Factor.CODE
+
     def handle_input(self, data: Any) -> ErrorResponse | None:
         # With the code budget of the typed address spent, the input reads the account unlocked
         # and allauth refuses it there; one it admits after all (a use expired meanwhile) read
@@ -128,7 +138,7 @@ class ResetPasswordView(views.ResetPasswordView):
             return ConflictResponse(request)
 
 
-class VerifyEmailView(views.VerifyEmailView):
+class VerifyEmailView(StepUpAnswers, views.VerifyEmailView):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         process = cast(EmailVerificationProcess, self.process)
         try:
@@ -138,6 +148,11 @@ class VerifyEmailView(views.VerifyEmailView):
                 require_authority(request, EMAIL_VERIFICATION_CODE_SESSION_KEY)
                 if self.stage:
                     require_authority(request, LOGIN_SESSION_KEY)
+                else:
+                    # A signed-in session completing a change of its own address also needs its
+                    # authority record; a change that ended the code answers above as nothing
+                    # pending.
+                    authorize_credential_write(request)
                 email_address = process.finish()
                 response = None
                 if self.stage:
@@ -167,10 +182,12 @@ class ResendEmailVerificationCodeView(views.ResendEmailVerificationCodeView):
         return response
 
 
-class ConfirmReauthenticationCodeView(views.ConfirmReauthenticationCodeView):
+class ConfirmReauthenticationCodeView(StrongestFactor, views.ConfirmReauthenticationCodeView):
+    factor = Factor.CODE
+
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         try:
-            with transaction.atomic():
+            with lines_after_commit(), transaction.atomic():
                 require_authority(request, REAUTHENTICATION_CODE_SESSION_KEY)
                 return super().post(request, *args, **kwargs)
         except AuthorityChangedError:
@@ -178,8 +195,23 @@ class ConfirmReauthenticationCodeView(views.ConfirmReauthenticationCodeView):
             return ConflictResponse(request)
 
 
-class ChangePasswordView(views.ChangePasswordView):
+class ChangePasswordView(StepUpAnswers, views.ChangePasswordView):
     input_class = inputs.ChangePasswordInput
+
+    def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        user = request.user
+        if request.method != "POST" or not user.is_authenticated:
+            return super().handle(request, *args, **kwargs)
+        with credential_write(request):
+            # The current password is checked against the password as locked here.
+            request.user = User.objects.get(pk=user.pk)
+            # The current password proves only the password; an account with an authenticator
+            # also proves the authenticator.
+            if strongest_factor(request.user) is Factor.MFA:
+                refused = require_recent_mfa(request)
+                if refused is not None:
+                    return refused
+            return super().handle(request, *args, **kwargs)
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         response: HttpResponse = super().post(request, *args, **kwargs)
@@ -189,16 +221,38 @@ class ChangePasswordView(views.ChangePasswordView):
         return response
 
 
-class ReauthenticateView(views.ReauthenticateView):
+class ReauthenticateView(StrongestFactor, views.ReauthenticateView):
+    factor = Factor.PASSWORD
     input_class = inputs.ReauthenticateInput
 
+    def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        if request.method != "POST" or not request.user.is_authenticated:
+            return super().handle(request, *args, **kwargs)
+        with confirmation(request):
+            return super().handle(request, *args, **kwargs)
 
-class ManageEmailView(StartingView, views.ManageEmailView):
+
+class ManageEmailView(StepUpAnswers, StartingView, views.ManageEmailView):
+    persists_session = True
+
+    def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        if not request.user.is_authenticated or request.method not in {"POST", "DELETE"}:
+            return super().handle(request, *args, **kwargs)
+        if request.method == "POST":
+            # `starting` opens the transaction and handle_input checks first in it.
+            with lines_after_commit():
+                return super().handle(request, *args, **kwargs)
+        with credential_write(request):
+            return super().handle(request, *args, **kwargs)
+
     def handle_input(self, data: Any) -> ErrorResponse | None:
         if self.request.method == "POST":
             if spent(self.request, "request_email_change", user=self.user):
                 raise throttled(self.request)
-            lock_account(self.user.pk)
+            if self.request.user.is_authenticated:
+                authorize_credential_write(self.request)
+            else:
+                lock_account(self.user.pk)
         return super().handle_input(data)
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:

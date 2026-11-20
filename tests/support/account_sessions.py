@@ -36,10 +36,20 @@ def account(name: str, *, verified: bool = True) -> User:
     return user
 
 
+def passwordless(name: str) -> User:
+    user = account(name)
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
+    return user
+
+
 def signed_in(user: User, *, reauthenticated: bool = False) -> Client:
     client = browser()
-    credentials = {"email": user.email, "password": PASSWORD}
-    assert submit(client, "auth/login", credentials).status_code == 200
+    if user.has_usable_password():
+        credentials = {"email": user.email, "password": PASSWORD}
+        assert submit(client, "auth/login", credentials).status_code == 200
+    else:
+        client.force_login(user)
     if reauthenticated:
         assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     return client
@@ -52,6 +62,29 @@ def session_user(client: Client) -> int | None:
 
 def session_key(client: Client) -> str:
     return client.cookies[settings.SESSION_COOKIE_NAME].value
+
+
+def session_cookie(response: Any) -> tuple[str, Any, str] | None:
+    cookie = response.cookies.get(settings.SESSION_COOKIE_NAME)
+    return None if cookie is None else (cookie.value, cookie["max-age"], cookie["expires"])
+
+
+def carrying_key(key: str, *, enforce_csrf_checks: bool = True) -> Client:
+    client = Client(enforce_csrf_checks=enforce_csrf_checks)
+    client.cookies[settings.SESSION_COOKIE_NAME] = key
+    return client
+
+
+def arrive(jar: Client, *answers: Any) -> None:
+    # A browser applies the session cookie of each answer in the order the answers arrive.
+    for answer in answers:
+        cookie = answer.cookies.get(settings.SESSION_COOKIE_NAME)
+        if cookie is None:
+            continue
+        if cookie["max-age"] == 0:
+            jar.cookies.pop(settings.SESSION_COOKIE_NAME, None)
+        else:
+            jar.cookies[settings.SESSION_COOKIE_NAME] = cookie.value
 
 
 def totp_clock(monkeypatch: pytest.MonkeyPatch, now: float) -> None:

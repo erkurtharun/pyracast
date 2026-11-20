@@ -49,6 +49,14 @@ NOTICES = {
         _("Two-factor authentication was turned off"),
         _("Two-factor authentication with an authenticator app was turned off for your account."),
     ),
+    "account/email/second_factor_reset": Notice(
+        _("Your second factor was reset"),
+        _(
+            "An operator removed the second factors of your Pyracast account and "
+            "ended its sessions."
+        ),
+        security=False,
+    ),
     "mfa/email/recovery_codes_generated": Notice(
         _("New recovery codes were generated"),
         _("New recovery codes were generated for your account. The previous codes no longer work."),

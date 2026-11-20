@@ -3,8 +3,11 @@ from typing import Any, cast
 
 from django.conf import settings
 from django.contrib.sessions.backends import db
+from django.contrib.sessions.backends.base import UpdateError
+from django.contrib.sessions.exceptions import SessionInterrupted
 from django.contrib.sessions.middleware import SessionMiddleware
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ObjectNotUpdated
+from django.db import DatabaseError
 from django.http import HttpRequest, HttpResponse
 
 
@@ -22,6 +25,20 @@ class SessionStore(db.SessionStore):
 
 def lapse(request: HttpRequest) -> None:
     cast(SessionStore, request.session).lapsed = True
+
+
+def persist(request: HttpRequest) -> None:
+    # Saves a stored session in the open transaction, so its data commits with the account's. A
+    # session ended meanwhile is answered as ended, any other failure of the save as itself.
+    if request.session.session_key is None:
+        return
+    try:
+        request.session.save()
+    except UpdateError as error:
+        failure = error.__context__
+        if isinstance(failure, DatabaseError) and not isinstance(failure, ObjectNotUpdated):
+            raise failure from failure.__cause__
+        raise SessionInterrupted("Another session of the account ended this one.") from None
 
 
 class SessionCookie(SessionMiddleware):
