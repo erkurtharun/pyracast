@@ -84,6 +84,11 @@ class ErrorCode(models.TextChoices):
     RECIPIENT_LIMIT_EXCEEDED = "recipient_limit_exceeded"
     PLANT_NOT_APPROVED = "plant_not_approved"
     PROVIDER_ACCOUNT_UNAVAILABLE = "provider_account_unavailable"
+    CONFIGURATION_CHANGED = "configuration_changed"
+    PRODUCTION_SOURCE_CHANGED = "production_source_changed"
+    OUTAGE_HISTORY_CHANGED = "outage_history_changed"
+    INCUMBENT_CHANGED = "incumbent_changed"
+    CALIBRATION_NOT_ACTIVATABLE = "calibration_not_activatable"
 
 
 MESSAGES: Mapping[ErrorCode, StrPromise] = {
@@ -199,6 +204,15 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.PLANT_NOT_APPROVED: _("Reminders can be turned on once the plant is approved."),
     ErrorCode.PROVIDER_ACCOUNT_UNAVAILABLE: _(
         "Reminders can be turned on once the plant's forecast provider account is enabled."
+    ),
+    ErrorCode.CONFIGURATION_CHANGED: _("The plant configuration is no longer current."),
+    ErrorCode.PRODUCTION_SOURCE_CHANGED: _(
+        "The production source changed; request a new calibration."
+    ),
+    ErrorCode.OUTAGE_HISTORY_CHANGED: _("The outage history changed; request a new calibration."),
+    ErrorCode.INCUMBENT_CHANGED: _("The active calibration changed; request a new comparison."),
+    ErrorCode.CALIBRATION_NOT_ACTIVATABLE: _(
+        "Only a completed, held-out evaluated calibration can be activated."
     ),
 }
 

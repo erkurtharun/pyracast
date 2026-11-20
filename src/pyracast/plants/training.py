@@ -16,8 +16,15 @@ from django.utils import timezone
 from pyracast.accounts.models import Tenant
 from pyracast.background.failures import log_failure
 from pyracast.connections.models import ProviderAccount
+from pyracast.plants.automation import attempt_promotion
 from pyracast.plants.calibration_data import build_calibration_dataset, current_source_validation
-from pyracast.plants.events import record_plant_event
+from pyracast.plants.calibration_runs import (
+    OPEN_STATUSES,
+    SupersedeReason,
+    finish_run,
+    requeue_run,
+    start_run,
+)
 from pyracast.plants.forecasting import power_limit
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import production_identity_current
@@ -27,7 +34,6 @@ from pyracast.plants.models import (
     CalibrationStatus,
     Plant,
     PlantConfiguration,
-    PlantEventAction,
     active_plant,
 )
 from pyracast.plants.numerics import (
@@ -50,18 +56,26 @@ class _Lease:
     run: CalibrationRun
     configuration: PlantConfiguration
     token: uuid.UUID
+    tenant_id: int
 
 
 def _follow_up(plant: Plant, run: CalibrationRun, now: datetime) -> None:
-    from pyracast.plants.automation import promote_automatic_calibration, record_automatic_skip
-
-    try:
-        with transaction.atomic():
-            promote_automatic_calibration(plant, run, now)
-    except Exception as error:
-        log_failure(logger, "calibration_promotion_failed", error, run=run.pk)
-        record_automatic_skip(plant, run.pk, "promotion_failed")
+    attempt_promotion(plant, run, now)
     request_preparation([run.plant_id], now)
+
+
+def _supersede_reason(
+    run: CalibrationRun, configuration: PlantConfiguration, now: datetime
+) -> SupersedeReason | None:
+    if not configuration_is_current(configuration):
+        return SupersedeReason.CONFIGURATION_CHANGED
+    if run.binding_id != configuration.binding_id:
+        return SupersedeReason.BINDING_CHANGED
+    if not production_identity_current(run):
+        return SupersedeReason.PRODUCTION_SOURCE_CHANGED
+    if not incidents_unchanged(run, now):
+        return SupersedeReason.OUTAGE_HISTORY_CHANGED
+    return None
 
 
 def _claim(run_id: int, now: datetime) -> _Lease | None:
@@ -69,16 +83,15 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
     identity = CalibrationRun.objects.select_related("plant__region").filter(pk=run_id).first()
     if identity is None:
         return None
+    tenant_id = identity.plant.region.tenant_id
     with transaction.atomic():
-        Tenant.objects.select_for_update().get(pk=identity.plant.region.tenant_id)
+        Tenant.objects.select_for_update().get(pk=tenant_id)
         if not Region.objects.select_for_update().filter(pk=identity.plant.region_id).exists():
             return None
         plant = Plant.objects.select_for_update().get(pk=identity.plant_id)
         run = CalibrationRun.objects.select_for_update().get(pk=run_id)
         now += timedelta(seconds=time.monotonic() - started)
-        if run.status not in {CalibrationStatus.PENDING, CalibrationStatus.RUNNING}:
-            return None
-        if (
+        if run.status not in OPEN_STATUSES or (
             run.status == CalibrationStatus.RUNNING
             and run.lease_expires_at is not None
             and run.lease_expires_at > now
@@ -87,51 +100,43 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
         configuration = PlantConfiguration.objects.select_related("binding__provider_account").get(
             pk=run.configuration_id
         )
-        if (
-            not configuration_is_current(configuration)
-            or run.binding_id != configuration.binding_id
-            or not production_identity_current(run)
-            or not incidents_unchanged(run, now)
-        ):
-            run.status = CalibrationStatus.SUPERSEDED
-        elif run.attempts >= MAX_ATTEMPTS or run.cutoff_at > now:
-            run.status = CalibrationStatus.FAILED
-            run.last_error = (
+        reason = _supersede_reason(run, configuration, now)
+        if reason is not None:
+            finish_run(run, CalibrationStatus.SUPERSEDED, now, reason)
+        elif run.attempts >= MAX_ATTEMPTS or run.cutoff_at > now + LEASE_DURATION:
+            error = (
                 CalibrationError.ATTEMPT_LIMIT
                 if run.attempts >= MAX_ATTEMPTS
                 else CalibrationError.INVALID_CUTOFF
             )
-            logger.warning("calibration_run_failed run=%s reason=%s", run.pk, run.last_error)
+            logger.warning("calibration_run_failed run=%s reason=%s", run.pk, error)
+            finish_run(run, CalibrationStatus.FAILED, now, error)
+        elif run.cutoff_at > now:
+            return None
         else:
-            token = uuid.uuid4()
-            run.status = CalibrationStatus.RUNNING
-            run.attempts += 1
-            run.lease_token = token
-            run.lease_expires_at = now + LEASE_DURATION
-            run.save(update_fields=("status", "attempts", "lease_token", "lease_expires_at"))
-            return _Lease(run, configuration, token)
-        run.completed_at = now
-        run.lease_token = None
-        run.lease_expires_at = None
-        run.save(
-            update_fields=(
-                "status",
-                "last_error",
-                "completed_at",
-                "lease_token",
-                "lease_expires_at",
-            )
-        )
+            return _Lease(run, configuration, start_run(run, now, LEASE_DURATION), tenant_id)
         _follow_up(plant, run, now)
         return None
 
 
 def _lock_calibration_records(lease: _Lease) -> tuple[Plant, CalibrationRun]:
-    Tenant.objects.select_for_update().get(pk=lease.configuration.plant.region.tenant_id)
+    Tenant.objects.select_for_update().get(pk=lease.tenant_id)
     Region.objects.select_for_update().get(pk=lease.configuration.binding.region_id)
     plant = Plant.objects.select_for_update().get(pk=lease.run.plant_id)
     run = CalibrationRun.objects.select_for_update().get(pk=lease.run.pk)
     return plant, run
+
+
+def _holds_lease(run: CalibrationRun, lease: _Lease, now: datetime) -> bool:
+    if (
+        run.status == CalibrationStatus.RUNNING
+        and run.lease_token == lease.token
+        and run.lease_expires_at is not None
+        and run.lease_expires_at > now
+    ):
+        return True
+    logger.warning("calibration_lease_lost run=%s", run.pk)
+    return False
 
 
 def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now: datetime) -> bool:
@@ -142,26 +147,14 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
             pk=lease.configuration.binding.provider_account_id
         )
         now += timedelta(seconds=time.monotonic() - started)
-        if (
-            run.status != CalibrationStatus.RUNNING
-            or run.lease_token != lease.token
-            or run.lease_expires_at is None
-            or run.lease_expires_at <= now
-        ):
-            logger.warning("calibration_lease_lost run=%s", run.pk)
+        if not _holds_lease(run, lease, now):
             return False
         configuration = PlantConfiguration.objects.select_related("binding__provider_account").get(
             pk=run.configuration_id
         )
-        if (
-            not configuration_is_current(configuration)
-            or run.binding_id != configuration.binding_id
-            or not production_identity_current(run)
-            or not incidents_unchanged(run, now)
-        ):
-            run.status = CalibrationStatus.SUPERSEDED
-        else:
-            run.status, run.factor, run.assessment = result.status, result.factor, result.assessment
+        reason = _supersede_reason(run, configuration, now)
+        if reason is None:
+            run.factor, run.assessment = result.factor, result.assessment
             run.result = result.report
             run.dataset_manifest = manifest
             run.dataset_sha256 = hashlib.sha256(
@@ -169,23 +162,11 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
                     manifest, sort_keys=True, separators=(",", ":"), allow_nan=False
                 ).encode()
             ).hexdigest()
-        run.completed_at = now
-        run.lease_token = None
-        run.lease_expires_at = None
-        run.last_error = ""
-        run.save()
-        record_plant_event(
-            plant_id=run.plant_id,
-            actor=None,
-            action=PlantEventAction.CALIBRATION_COMPLETED,
-            details={
-                "calibration_id": run.pk,
-                "status": run.status,
-                "dataset_sha256": run.dataset_sha256,
-            },
+        finish_run(
+            run, CalibrationStatus.SUPERSEDED if reason else result.status, now, reason or ""
         )
         _follow_up(plant, run, now)
-        return run.status != CalibrationStatus.SUPERSEDED
+        return reason is None
 
 
 def _fail(lease: _Lease, now: datetime) -> None:
@@ -193,32 +174,13 @@ def _fail(lease: _Lease, now: datetime) -> None:
     with transaction.atomic():
         plant, run = _lock_calibration_records(lease)
         now += timedelta(seconds=time.monotonic() - started)
-        if (
-            run.status != CalibrationStatus.RUNNING
-            or run.lease_token != lease.token
-            or run.lease_expires_at is None
-            or run.lease_expires_at <= now
-        ):
-            logger.warning("calibration_lease_lost run=%s", run.pk)
+        if not _holds_lease(run, lease, now):
             return
-        run.status = (
-            CalibrationStatus.FAILED if run.attempts >= MAX_ATTEMPTS else CalibrationStatus.PENDING
-        )
-        run.completed_at = now if run.status == CalibrationStatus.FAILED else None
-        run.last_error = CalibrationError.INVALID_CALIBRATION_DATA
-        run.lease_token = None
-        run.lease_expires_at = None
-        run.save(
-            update_fields=(
-                "status",
-                "completed_at",
-                "last_error",
-                "lease_token",
-                "lease_expires_at",
-            )
-        )
-        if run.status == CalibrationStatus.FAILED:
-            _follow_up(plant, run, now)
+        if run.attempts < MAX_ATTEMPTS:
+            requeue_run(run, CalibrationError.INVALID_CALIBRATION_DATA)
+            return
+        finish_run(run, CalibrationStatus.FAILED, now, CalibrationError.INVALID_CALIBRATION_DATA)
+        _follow_up(plant, run, now)
 
 
 def run_calibration(run_id: int, now: datetime | None = None) -> bool:

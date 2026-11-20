@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
 from pyracast.plants import training
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.measurements import (
     latest_measurement_day,
     production_identity_current,
@@ -15,7 +16,6 @@ from pyracast.plants.measurements import (
 )
 from pyracast.plants.models import CalibrationRun, ProductionObservation
 from pyracast.plants.numerics import FitResult, fit_calibration
-from pyracast.plants.operations import activate_calibration
 from pyracast.plants.preparation import prepare_calibration
 from tests.support.domain import NOW
 from tests.support.invariants import stored_again

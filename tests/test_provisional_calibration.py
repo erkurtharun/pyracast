@@ -16,11 +16,11 @@ from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.forecasting import plant_forecast
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 from pyracast.plants.models import CalibrationActivation, CalibrationRun, Plant, PlantConfiguration
-from pyracast.plants.operations import activate_calibration
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
 from tests.support.domain import NOW, System

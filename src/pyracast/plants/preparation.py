@@ -17,21 +17,26 @@ from pyracast.connections.currency import binding_is_current
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
 from pyracast.plants.availability import reference_intervals
-from pyracast.plants.events import record_plant_event
-from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
+from pyracast.plants.calibration_runs import (
+    OPEN_STATUSES,
+    SupersedeReason,
+    create_run,
+    current_activation,
+    finish_run,
+    pin_inputs,
+)
+from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import (
     Measurement,
     latest_measurement_day,
     select_measurements,
-    selection_fingerprint,
 )
 from pyracast.plants.models import (
-    CalibrationActivation,
+    CalibrationError,
     CalibrationRun,
     CalibrationStatus,
     Plant,
     PlantConfiguration,
-    PlantEventAction,
     ProductionObservation,
     active_plant,
 )
@@ -46,7 +51,8 @@ from pyracast.solar import daylight_window
 
 AUTOMATIC_POOL_DAYS = 60
 PREPARATION_RETRY_DELAY = timedelta(hours=1)
-OPEN_RUN = (CalibrationStatus.PENDING, CalibrationStatus.RUNNING)
+# A run that failed without a data error is retried by the next preparation after this delay.
+FAILED_RUN_RETRY_DELAY = timedelta(days=1)
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +109,7 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
         configuration = plant.current_configuration
         if configuration is None or not binding_is_current(configuration.binding):
             return None
-        if CalibrationRun.objects.filter(plant=plant, status__in=OPEN_RUN).exists():
+        if CalibrationRun.objects.filter(plant=plant, status__in=OPEN_STATUSES).exists():
             return None
         moment = timezone.now() if now is None else max(now, timezone.now())
         today = moment.astimezone(ZoneInfo(configuration.binding.timezone)).date()
@@ -126,69 +132,39 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             end_day - timedelta(days=AUTOMATIC_POOL_DAYS - 1), configuration.binding.timezone
         )
         _, end = local_day_bounds(end_day, configuration.binding.timezone)
-        rows, snapshot_ids = select_measurements(
+        rows, _ = select_measurements(
             configuration, start, end, moment, observation_id_cutoff=watermark
         )
         days = _matched_days(configuration, rows, moment)
         if not days:
             return None
-        window_start, _ = local_day_bounds(days[0], configuration.binding.timezone)
-        _, window_end = local_day_bounds(days[-1], configuration.binding.timezone)
-        rows, snapshot_ids = select_measurements(
-            configuration, window_start, window_end, moment, observation_id_cutoff=watermark
-        )
-        from pyracast.plants.incident_policy import incident_ids
-
-        incidents = incident_ids(configuration, window_start, window_end, moment)
-        fingerprint, reference_ids = selection_fingerprint(configuration, rows, moment, incidents)
-        comparison = (
-            CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
-            .order_by("-created_at", "-pk")
-            .first()
-        )
+        inputs = pin_inputs(configuration, days[0], days[-1], moment, watermark)
+        comparison = current_activation(plant, configuration)
         compared = Q(comparison_activation=comparison)
         if comparison is not None and comparison.calibration_id is not None:
             compared |= Q(pk=comparison.calibration_id)
         previous = CalibrationRun.objects.filter(
             compared,
-            Q(status=CalibrationStatus.FAILED) | Q(result__policy_version=POLICY_VERSION),
+            Q(status=CalibrationStatus.FAILED, last_error=CalibrationError.INVALID_CALIBRATION_DATA)
+            | Q(status=CalibrationStatus.FAILED, completed_at__gt=moment - FAILED_RUN_RETRY_DELAY)
+            | Q(result__policy_version=POLICY_VERSION),
             configuration=configuration,
             window_start__lte=days[0],
             window_end__gte=days[-1],
+            incident_revision_ids=inputs.incident_revision_ids,
         )
-        previous = previous.filter(incident_revision_ids=incidents)
-        if previous.filter(input_sha256=fingerprint).exists() or (
+        if previous.filter(input_sha256=inputs.input_sha256).exists() or (
             latest is not None
-            and not snapshot_ids
+            and not inputs.production_snapshot_ids
             and previous.filter(input_sha256="", observation_id_cutoff__gte=watermark).exists()
         ):
             return None
         actor = (
             latest.recorded_by if latest else EpiasConnection.objects.get(plant=plant).connected_by
         )
-        run = CalibrationRun.objects.create(
-            plant=plant,
-            configuration=configuration,
-            binding=configuration.binding,
-            comparison_activation=comparison,
-            requested_by=actor,
-            window_start=days[0],
-            window_end=days[-1],
-            cutoff_at=moment,
-            observation_id_cutoff=watermark,
-            production_snapshot_ids=snapshot_ids,
-            measurement_selection_policy=MEASUREMENT_POLICY,
-            reference_snapshot_ids=reference_ids,
-            incident_revision_ids=incidents,
-            input_sha256=fingerprint,
+        return create_run(
+            plant, configuration, inputs, comparison=comparison, requested_by=actor, manual=False
         )
-        record_plant_event(
-            plant_id=plant.pk,
-            actor=actor,
-            action=PlantEventAction.CALIBRATION_SCHEDULED,
-            details={"calibration_id": run.pk, "observation_id_cutoff": watermark},
-        )
-        return run
 
 
 def request_preparation(plant_ids: Iterable[int], now: datetime | None = None) -> None:
@@ -208,6 +184,18 @@ def request_preparation(plant_ids: Iterable[int], now: datetime | None = None) -
     transaction.on_commit(partial(_prepare_after_commit, identifiers, now))
 
 
+def incidents_changed(plant_id: int) -> None:
+    moment = timezone.now()
+    for run in CalibrationRun.objects.filter(
+        plant_id=plant_id, status__in=OPEN_STATUSES
+    ).select_related("configuration", "binding"):
+        if not incidents_unchanged(run, moment):
+            finish_run(
+                run, CalibrationStatus.SUPERSEDED, moment, SupersedeReason.OUTAGE_HISTORY_CHANGED
+            )
+    request_preparation([plant_id], moment)
+
+
 def request_region_preparation(region_id: int) -> None:
     request_preparation(
         Plant.objects.filter(region_id=region_id, current_configuration__isnull=False).values_list(
@@ -224,7 +212,9 @@ def _prepare_after_commit(plant_ids: list[int], now: datetime | None) -> None:
 def prepare_requested_calibrations(now: datetime, limit: int = 100) -> list[int]:
     due = (
         Plant.objects.filter(active_plant(), calibration_preparation_due_at__lte=now)
-        .exclude(Exists(CalibrationRun.objects.filter(plant=OuterRef("pk"), status__in=OPEN_RUN)))
+        .exclude(
+            Exists(CalibrationRun.objects.filter(plant=OuterRef("pk"), status__in=OPEN_STATUSES))
+        )
         .order_by("calibration_preparation_due_at", "pk")
         .values_list("pk", flat=True)[:limit]
     )
@@ -263,13 +253,14 @@ def _prepare_requested(plant_id: int, now: datetime | None) -> CalibrationRun | 
         if (
             due_at is None
             or due_at > moment
-            or CalibrationRun.objects.filter(plant_id=plant_id, status__in=OPEN_RUN).exists()
+            or CalibrationRun.objects.filter(plant_id=plant_id, status__in=OPEN_STATUSES).exists()
         ):
             return None
         run = prepare_calibration(plant_id, now)
-        if run is None:
-            promote_undecided_candidate(plant_id, moment)
-        Plant.objects.filter(pk=plant_id).update(calibration_preparation_due_at=None)
+        settled = run is not None or promote_undecided_candidate(plant_id, moment)
+        Plant.objects.filter(pk=plant_id).update(
+            calibration_preparation_due_at=None if settled else moment + PREPARATION_RETRY_DELAY
+        )
         return run
 
 

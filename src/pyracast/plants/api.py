@@ -3,12 +3,19 @@ from typing import Any, cast
 from django.contrib.auth.models import User
 from django.db.models import Model, QuerySet
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework.generics import GenericAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from pyracast.plants import operations
+from pyracast.plants.activation import (
+    activate_calibration,
+    activation_blocker,
+    reset_calibration,
+    selection,
+)
 from pyracast.plants.automation import automation_status, set_calibration_automation
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import (
@@ -174,13 +181,17 @@ class CalibrationsView(ScopedView[CalibrationRun]):
 
     @extend_schema(responses=CalibrationSummaryOutput(many=True))
     def get(self, _request: Request, **_kwargs: Any) -> Response:
+        plant = self.plant()
         rows = (
-            CalibrationRun.objects.filter(plant=self.plant())
+            CalibrationRun.objects.filter(plant=plant)
             .defer("dataset_manifest")
             .order_by("-created_at", "-id")
         )
         page = self.paginate_queryset(rows)
-        return self.get_paginated_response(CalibrationSummaryOutput(page, many=True).data)
+        context = {"selection": selection(plant)}
+        return self.get_paginated_response(
+            CalibrationSummaryOutput(page, many=True, context=context).data
+        )
 
     @extend_schema(request=CalibrationInput, responses={202: CalibrationOutput})
     def post(self, request: Request, **_kwargs: Any) -> Response:
@@ -188,7 +199,13 @@ class CalibrationsView(ScopedView[CalibrationRun]):
         data = CalibrationInput(data=request.data)
         data.is_valid(raise_exception=True)
         run = operations.request_calibration(*scope, **data.validated_data)
-        return Response(CalibrationOutput(run).data, status=202)
+        return Response(_detail(self.plant(), run), status=202)
+
+
+def _detail(plant: Plant, run: CalibrationRun) -> Any:
+    blocker = activation_blocker(plant, plant.current_configuration, run, timezone.now())
+    context = {"selection": selection(plant), "blocker": blocker}
+    return CalibrationOutput(run, context=context).data
 
 
 class CalibrationView(ScopedView[CalibrationRun]):
@@ -196,8 +213,9 @@ class CalibrationView(ScopedView[CalibrationRun]):
 
     @extend_schema(responses=CalibrationOutput)
     def get(self, _request: Request, **kwargs: Any) -> Response:
-        run = get_object_or_404(CalibrationRun, plant=self.plant(), pk=kwargs["calibration_id"])
-        return Response(CalibrationOutput(run).data)
+        plant = self.plant()
+        run = get_object_or_404(CalibrationRun, plant=plant, pk=kwargs["calibration_id"])
+        return Response(_detail(plant, run))
 
 
 class ActivateView(ScopedView[CalibrationActivation]):
@@ -208,7 +226,7 @@ class ActivateView(ScopedView[CalibrationActivation]):
         scope = self.scope()
         data = EmptyInput(data=request.data)
         data.is_valid(raise_exception=True)
-        activation = operations.activate_calibration(*scope, kwargs["calibration_id"])
+        activation = activate_calibration(*scope, kwargs["calibration_id"])
         return Response(ActivationOutput(activation).data)
 
 
@@ -220,7 +238,7 @@ class ResetView(ScopedView[CalibrationActivation]):
         scope = self.scope()
         data = EmptyInput(data=request.data)
         data.is_valid(raise_exception=True)
-        return Response(ActivationOutput(operations.reset_calibration(*scope)).data)
+        return Response(ActivationOutput(reset_calibration(*scope)).data)
 
 
 class CalibrationAutomationView(ScopedView[Plant]):

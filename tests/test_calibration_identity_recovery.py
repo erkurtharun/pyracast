@@ -5,6 +5,7 @@ import pytest
 from django.db import transaction
 
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.automation import promote_automatic_calibration, set_calibration_automation
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -12,7 +13,6 @@ from pyracast.plants.models import (
     PlantEvent,
     ProductionObservation,
 )
-from pyracast.plants.operations import activate_calibration
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region

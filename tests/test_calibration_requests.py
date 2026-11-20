@@ -187,8 +187,10 @@ def test_a_finished_calibration_persists_while_its_follow_up_raises(
     assert run.status == "ready"
     assert run.last_error == ""
     if step == "promotion":
-        skipped = PlantEvent.objects.get(plant=plant, action="calibration_automatic_skipped")
-        assert skipped.details["reason"] == "promotion_failed"
+        assert (
+            automatic_decisions(plant)
+            == [("calibration_automatic_skipped", "promotion_failed")] * 2
+        )
     else:
         assert committed_request(plant.pk) is not None
     assert "private preparation detail" not in pyracast_logs.text
@@ -340,6 +342,7 @@ def test_a_failed_promotion_is_retried_after_an_unrelated_daily_check_failure(
     assert CalibrationActivation.objects.get().calibration_id == run.pk
     assert CalibrationRun.objects.count() == 1
     assert automatic_decisions(plant) == [
+        ("calibration_automatic_skipped", "promotion_failed"),
         ("calibration_automatic_skipped", "promotion_failed"),
         ("calibration_automatic_skipped", "preparation_failed"),
         ("calibration_automatically_activated", None),

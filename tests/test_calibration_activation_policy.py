@@ -9,7 +9,7 @@ from django.test import Client
 from psycopg.errors import LockNotAvailable
 
 from pyracast.accounts.models import Membership
-from pyracast.plants.activation import activate_calibration
+from pyracast.plants.activation import activate_calibration, reset_calibration
 from pyracast.plants.automation import (
     automation_status,
     prepare_due_calibrations,
@@ -17,9 +17,10 @@ from pyracast.plants.automation import (
 )
 from pyracast.plants.management.commands import activate_calibration as command
 from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
+from pyracast.plants.operations import revise_plant
 from tests.support.calibration_automation import evaluated_run, promote
 from tests.support.domain import NOW, System
-from tests.support.plant_operations import make_plant, ready_run
+from tests.support.plant_operations import make_plant, ready_run, request_run
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -69,6 +70,52 @@ def test_the_run_detail_shows_the_blocker_the_activation_refuses_with(
     assert listed[stale.pk]["selection_state"] == "candidate"
     assert listed[active.pk]["selection_state"] == "active"
     assert "activation_blocker" not in listed[stale.pk]
+
+
+def test_runs_of_a_revised_configuration_read_as_previous_and_open_runs_as_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, active, _ = two_candidates(monkeypatch)
+    scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
+    revise_plant(*scope, name="Changed", dc_capacity_mw=140)
+    plant.refresh_from_db()
+    open_run = request_run(system, plant)
+    client = Client()
+    client.force_login(system.member)
+    runs = f"{plant_path(system, plant)}calibrations/"
+
+    previous = client.get(f"{runs}{active.pk}/").json()
+    pending = client.get(f"{runs}{open_run.pk}/").json()
+    listed = {row["id"]: row for row in client.get(runs).json()["results"]}
+
+    assert (previous["selection_state"], previous["activation_blocker"]) == (
+        "previous_configuration",
+        "configuration_changed",
+    )
+    assert (pending["selection_state"], pending["activation_blocker"]) == (
+        "not_ready",
+        "calibration_not_activatable",
+    )
+    assert listed[open_run.pk]["selection_state"] == "not_ready"
+    assert automation_status(plant)["current_calibration"] is None
+
+
+def test_a_baseline_reset_reads_as_the_effective_current_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, _, _ = two_candidates(monkeypatch)
+
+    reset_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk)
+    plant.refresh_from_db()
+
+    current = automation_status(plant)["current_calibration"]
+    assert {key: current[key] for key in ("calibration_id", "factor", "origin", "effective")} == {
+        "calibration_id": None,
+        "factor": None,
+        "origin": "manual",
+        "effective": True,
+    }
+    assert automation_status(plant)["disabled_cause"] == "reset"
 
 
 def test_an_automatic_promotion_records_the_blocker_code(monkeypatch: pytest.MonkeyPatch) -> None:

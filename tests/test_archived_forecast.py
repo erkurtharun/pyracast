@@ -8,6 +8,7 @@ from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastResult
 from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.activation import activate_calibration, reset_calibration
 from pyracast.plants.forecast_archive import forecast_cutoff
 from pyracast.plants.forecasting import archived_forecast, plant_forecast
 from pyracast.plants.history import plant_outlook
@@ -17,7 +18,6 @@ from pyracast.plants.models import (
     ForecastIssuance,
     PlantConfiguration,
 )
-from pyracast.plants.operations import activate_calibration, reset_calibration
 from tests.support.domain import NOW
 from tests.support.errors import raises_code
 from tests.support.invariants import stored_again

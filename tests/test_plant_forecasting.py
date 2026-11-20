@@ -7,6 +7,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import Client
 
 from pyracast.plants import forecasting
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.forecasting import plant_forecast, power_intervals, power_limit
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -14,7 +15,7 @@ from pyracast.plants.models import (
     ForecastIssuance,
     PlantConfiguration,
 )
-from pyracast.plants.operations import activate_calibration, revise_plant
+from pyracast.plants.operations import revise_plant
 from tests.support.domain import NOW
 from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for

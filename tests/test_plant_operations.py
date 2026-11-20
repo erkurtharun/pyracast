@@ -15,6 +15,7 @@ from django.utils import timezone
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
+from pyracast.plants.activation import activate_calibration, reset_calibration
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -25,10 +26,8 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.operations import (
-    activate_calibration,
     create_plant,
     request_calibration,
-    reset_calibration,
     revise_plant,
 )
 from pyracast.plants.production_changes import (

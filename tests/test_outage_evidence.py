@@ -11,11 +11,12 @@ from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.notifications.report_data import saved_report_context
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.forecast_archive import prepare_forecast_issuances
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.incident_forecasts import incident_scenario
 from pyracast.plants.models import CalibrationActivation, Plant
-from pyracast.plants.operations import activate_calibration, revise_plant
+from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import Region
 from tests.support.concurrency import row_locked_elsewhere, short_lock_timeout
 from tests.support.domain import NOW, System

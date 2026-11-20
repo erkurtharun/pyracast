@@ -8,9 +8,9 @@ from django.utils import timezone
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import PlantConfiguration
-from pyracast.plants.operations import activate_calibration
 from tests.support.domain import NOW
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 

@@ -7,12 +7,12 @@ import pytest
 from pyracast.forecasts.actuals import ACTUAL_COMPOSITION_POLICY, ACTUAL_PIN_FORMAT
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.availability import reference_intervals
 from pyracast.plants.calibration_data import build_calibration_dataset, current_source_validation
 from pyracast.plants.measurements import select_measurements, selection_fingerprint
 from pyracast.plants.models import CalibrationRun, Plant
 from pyracast.plants.numerics import POLICY_VERSION
-from pyracast.plants.operations import activate_calibration
 from pyracast.plants.performance import forecast_performance
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.production_changes import ObservationInput, import_observations

@@ -12,8 +12,8 @@ from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.incidents.models import IncidentKind, IncidentRevision, PlantIncident
-from pyracast.plants.incident_policy import incidents_changed
 from pyracast.plants.models import Plant, PlantConfiguration
+from pyracast.plants.preparation import incidents_changed
 from pyracast.regions.models import Region
 
 UNZONED = _("Outage times must include a time zone.")

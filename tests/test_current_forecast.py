@@ -11,9 +11,9 @@ from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import ForecastResult, RequestAttempt
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
-from pyracast.plants.operations import activate_calibration
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
 from tests.support.invariants import stored_again

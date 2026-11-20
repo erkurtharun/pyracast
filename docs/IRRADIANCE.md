@@ -357,7 +357,8 @@ be promoted simply because a recent historical import triggered another fit.
 After a promotion, require seven entirely new holdout dates
 before another promotion. Rejection, insufficient evidence, revoked authority or a
 changed source/configuration/incident/incumbent preserves the last good selection.
-Disabling automation keeps that selection; resetting to baseline also disables it.
+A promotion that raises is retried hourly and abandoned after three recorded
+`promotion_failed` skips. Disabling automation keeps that selection; resetting to baseline also disables it.
 Configuration changes disable the old authorization. Compare later unseen days and
 revisit performance across seasons before making accuracy or degradation claims.
 With at least 30 matched days, report up to three expanding-training, three-day

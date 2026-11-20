@@ -5,8 +5,9 @@ from django.utils import timezone
 
 from pyracast.connections.models import SiteBinding
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.models import Plant
-from pyracast.plants.operations import activate_calibration, revise_plant
+from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import Region
 from tests.support.domain import System
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for

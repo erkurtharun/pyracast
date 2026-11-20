@@ -104,6 +104,11 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     recipient_limit_exceeded: true,
     plant_not_approved: true,
     provider_account_unavailable: true,
+    configuration_changed: true,
+    production_source_changed: true,
+    outage_history_changed: true,
+    incumbent_changed: true,
+    calibration_not_activatable: true,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

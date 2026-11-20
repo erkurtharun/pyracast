@@ -2,13 +2,17 @@ from typing import Any
 
 from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from pyracast.api.serializers import FiniteFloat, ForecastEnvelope, InputSerializer
 from pyracast.change_requests.models import ProductionChangeAction
+from pyracast.plants.activation import ActivationBlocker, SelectionState, selection_state
+from pyracast.plants.automation_state import AutomationCause
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationAssessment,
+    CalibrationError,
     CalibrationRun,
     MeasurementBasis,
     MountingType,
@@ -388,13 +392,23 @@ class ProductionHistoryOutput(serializers.Serializer[dict[str, Any]]):
     intervals = ProductionIntervalOutput(many=True)
 
 
-class CalibrationOutput(serializers.ModelSerializer[CalibrationRun]):
+class CalibrationSummaryOutput(serializers.ModelSerializer[CalibrationRun]):
     configuration_id = serializers.IntegerField()
     binding_id = serializers.IntegerField()
     requested_by_id = serializers.IntegerField()
     assessment = serializers.ChoiceField(
         choices=CalibrationAssessment.choices, allow_blank=True, read_only=True
     )
+    reason = serializers.SerializerMethodField()
+    selection_state = serializers.SerializerMethodField()
+
+    @extend_schema_field(serializers.ChoiceField(choices=CalibrationError.choices, allow_null=True))
+    def get_reason(self, run: CalibrationRun) -> str | None:
+        return run.last_error or None
+
+    @extend_schema_field(serializers.ChoiceField(choices=SelectionState.choices))
+    def get_selection_state(self, run: CalibrationRun) -> str:
+        return selection_state(run, self.context["selection"])
 
     class Meta:
         model = CalibrationRun
@@ -409,21 +423,29 @@ class CalibrationOutput(serializers.ModelSerializer[CalibrationRun]):
             "created_at",
             "completed_at",
             "status",
+            "reason",
+            "selection_state",
             "assessment",
             "factor",
             "result",
-            "dataset_manifest",
             "dataset_sha256",
         )
         read_only_fields = fields
 
 
-class CalibrationSummaryOutput(CalibrationOutput):
+class CalibrationOutput(CalibrationSummaryOutput):
+    activation_blocker = serializers.SerializerMethodField()
+
+    @extend_schema_field(
+        serializers.ChoiceField(choices=ActivationBlocker.choices, allow_null=True)
+    )
+    def get_activation_blocker(self, run: CalibrationRun) -> str | None:
+        blocker: str | None = self.context["blocker"]
+        return blocker
+
     class Meta:
         model = CalibrationRun
-        fields = tuple(
-            field for field in CalibrationOutput.Meta.fields if field != "dataset_manifest"
-        )
+        fields = (*CalibrationSummaryOutput.Meta.fields, "activation_blocker", "dataset_manifest")
         read_only_fields = fields
 
 
@@ -453,11 +475,24 @@ class AutomaticCalibrationAttemptOutput(serializers.Serializer[dict[str, Any]]):
     created_at = serializers.DateTimeField()
 
 
+class CurrentCalibrationOutput(serializers.Serializer[dict[str, Any]]):
+    activation_id = serializers.IntegerField()
+    calibration_id = serializers.IntegerField(allow_null=True)
+    factor = serializers.FloatField(allow_null=True)
+    actor_id = serializers.IntegerField(allow_null=True)
+    origin = serializers.ChoiceField(choices=("manual", "automatic"))
+    created_at = serializers.DateTimeField()
+    effective = serializers.BooleanField()
+
+
 class CalibrationAutomationOutput(serializers.Serializer[dict[str, Any]]):
     enabled = serializers.BooleanField()
     authorized = serializers.BooleanField()
     configuration_id = serializers.IntegerField(allow_null=True)
+    configuration_current = serializers.BooleanField()
     next_check_at = serializers.DateTimeField(allow_null=True)
+    disabled_cause = serializers.ChoiceField(choices=AutomationCause.choices, allow_null=True)
+    current_calibration = CurrentCalibrationOutput(allow_null=True)
     last_attempt = AutomaticCalibrationAttemptOutput(allow_null=True)
 
 

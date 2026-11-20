@@ -7,9 +7,9 @@ from django.utils import timezone
 from pyracast.accounts.models import Tenant
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.measurements import production_identity_at, production_identity_current
 from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
-from pyracast.plants.operations import activate_calibration
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
 from tests.support.historical_production_identity import record_identity

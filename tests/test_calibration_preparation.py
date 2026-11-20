@@ -11,6 +11,7 @@ from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastSnapshot, HistoricalReferenceImport
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants import measurements, training
+from pyracast.plants.activation import activate_calibration, reset_calibration
 from pyracast.plants.calibration_data import build_calibration_dataset
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -19,7 +20,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.numerics import POLICY_VERSION, FitResult
-from pyracast.plants.operations import activate_calibration, request_calibration, reset_calibration
+from pyracast.plants.operations import request_calibration
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.regions.models import Region
