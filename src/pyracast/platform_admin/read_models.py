@@ -35,6 +35,7 @@ from pyracast.platform_admin.health_queries import (
     notification_deliveries_for_issue,
     regions_for_issue,
 )
+from pyracast.platform_admin.records import region_records
 from pyracast.regions.models import (
     AuditAction,
     AuditEvent,
@@ -428,6 +429,7 @@ def review_context(region_id: int) -> dict[str, Any]:
         "recent_collections": work["collections"],
         "recent_deliveries": work["deliveries"],
         "recent_activity": recent_activity_context(region.pk),
+        "region_records": region_records(region.pk),
         "review_history": review_history(region.pk),
         "review_form": ReviewDecisionForm(
             initial={"expected_revision": region.revision, "expected_status": region.status}

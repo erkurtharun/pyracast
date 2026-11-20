@@ -189,6 +189,9 @@ class WorkspaceAdminChange(models.Model):
             ),
         )
 
+    def __str__(self) -> str:
+        return f"Administrator of workspace {self.tenant_id} set to {self.administrator_id}"
+
 
 class WorkspaceMemberRemoval(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
@@ -199,6 +202,9 @@ class WorkspaceMemberRemoval(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="workspace_removals"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"Member {self.user_id} removed from workspace {self.tenant_id}"
 
 
 class AuthenticationCacheEntry(models.Model):
