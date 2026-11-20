@@ -2804,3 +2804,12 @@ msgstr "Hizmet yetkilendirme referansı gereklidir."
 
 msgid "An API key is required for a Solcast account."
 msgstr "Solcast hesabı için bir API anahtarı gereklidir."
+
+msgid "Workspace name or member email"
+msgstr "Çalışma alanı adı veya üye e-postası"
+
+msgid "Needs an administrator"
+msgstr "Yönetici gerekiyor"
+
+msgid "Inactive account"
+msgstr "Devre dışı hesap"
