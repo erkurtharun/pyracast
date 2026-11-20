@@ -46,7 +46,7 @@ def test_plant_list_states_an_empty_filter_and_the_page_in_one_sentence() -> Non
     html = client.get(
         "/admin/plants/?q=no-match&status=approved", HTTP_ACCEPT_LANGUAGE="tr"
     ).content.decode()
-    assert "Bu filtrelerle eşleşen santral yok." in html
+    assert "Bu filtrelerle e\u015fle\u015fen santral yok." in html
 
 
 def test_recipient_limit_is_a_translated_plural() -> None:
