@@ -555,12 +555,12 @@ msgstr "Kayıplar (%)"
 
 msgid ""
 "Lowering the limit pauses reminders for plants whose saved recipient list is"
-" over it. Their lists are kept, not deleted, and reminders resume once the "
-"list is shortened or the limit is raised."
+" over it. Their lists are kept, and future reminders resume once the list is "
+"shortened or the limit is raised."
 msgstr ""
 "Sınırın düşürülmesi, kayıtlı alıcı listesi sınırı aşan santrallerin "
 "hatırlatmalarını duraklatır. Listeleri korunur; liste kısaltıldığında veya "
-"sınır artırıldığında hatırlatmalar devam eder."
+"sınır artırıldığında sonraki hatırlatmalar devam eder."
 
 msgid "Mail authentication failed"
 msgstr "E-posta kimlik doğrulaması başarısız"
@@ -2821,3 +2821,26 @@ msgstr "Şu açık davetler iptal edilir:"
 
 msgid "No invitation is open."
 msgstr "Açık davet yok."
+
+msgid "Pause reminders for the plants listed above"
+msgstr "Yukarıdaki santrallerin hatırlatmalarını duraklat"
+
+msgid "This limit pauses reminders for the plants listed above. Confirm to save it."
+msgstr ""
+"Bu sınır yukarıdaki santrallerin hatırlatmalarını duraklatır. Kaydetmek için "
+"onaylayın."
+
+msgid "This limit pauses reminders for these plants:"
+msgstr "Bu sınır şu santrallerin hatırlatmalarını duraklatır:"
+
+#, python-format
+msgid "%(counter)s recipient"
+msgid_plural "%(counter)s recipients"
+msgstr[0] "%(counter)s alıcı"
+msgstr[1] "%(counter)s alıcı"
+
+msgid "Plants over the limit"
+msgstr "Sınırı aşan santraller"
+
+msgid "No plant is over the limit."
+msgstr "Sınırı aşan santral yok."

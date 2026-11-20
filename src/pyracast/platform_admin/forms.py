@@ -340,6 +340,9 @@ class WorkspaceSettingsForm(forms.Form):
         min_value=1, max_value=MAX_RECIPIENT_LIMIT, label=gettext_lazy("Recipients per plant")
     )
     expected_max_recipients = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+    confirm_pause = forms.BooleanField(
+        required=False, label=gettext_lazy("Pause reminders for the plants listed above")
+    )
 
 
 class ReviewDecisionForm(forms.Form):
