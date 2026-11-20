@@ -46,7 +46,9 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
     loader = MigrationLoader(None)
     disk = loader.disk_migrations
     project = {
-        config.label for config in apps.get_app_configs() if config.name.startswith("pyracast.")
+        config.label
+        for config in apps.get_app_configs()
+        if config.name.startswith("pyracast.") and any(config.get_models())
     }
     baseline = {app: {"0001_initial"} for app in project}
     # Regions and connections reference each other; Django breaks that cycle in a second file.
