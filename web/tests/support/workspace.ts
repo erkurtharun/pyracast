@@ -83,7 +83,7 @@ export async function mockApi(
             method === "DELETE"
         ) {
             expect(route.request().headers()["x-csrftoken"]).toBe(
-                "signed-token",
+                signedIn ? "signed-token" : "anonymous-token",
             );
             signedIn = false;
             data = { status: 401, meta: { is_authenticated: false } };

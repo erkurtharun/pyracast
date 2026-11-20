@@ -546,7 +546,12 @@ test("a rejected social signup email keeps an explicit sign-in and link path", a
     await expect(
         page.getByText(/sign in first and connect this provider/),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page
+        .getByRole("button", {
+            name: "Use another sign-in method",
+            exact: true,
+        })
+        .click();
     await expect(
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
