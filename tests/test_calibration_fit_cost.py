@@ -1,3 +1,6 @@
+import math
+from dataclasses import replace
+
 import pytest
 
 from pyracast.plants import numerics
@@ -27,6 +30,26 @@ def test_the_fit_equals_the_exhaustive_search_exactly(seed: int) -> None:
     rows, normalization, cap = random_rows(seed, 60)
 
     assert numerics._fit(rows, normalization, cap) == exhaustive_fit(rows, normalization, cap)
+
+
+def test_breakpoints_one_ulp_apart_and_pieces_capped_throughout_are_searched_exactly() -> None:
+    rows, normalization, cap = random_rows(7, 30)
+    power = cap / 1.1
+    neighbour = math.nextafter(power, math.inf)
+    rows[0] = replace(rows[0], pieces=((power, 0.25), (neighbour, 0.25)))
+    rows[1] = replace(rows[1], pieces=((5 * cap, 0.5),))
+    assert cap / power != cap / neighbour
+
+    assert numerics._fit(rows, normalization, cap) == exhaustive_fit(rows, normalization, cap)
+
+
+def test_a_fit_beyond_floating_range_is_refused_as_before() -> None:
+    rows, _, cap = random_rows(3, 30)
+
+    with pytest.raises(ValueError, match="must be finite"):
+        numerics._fit(rows, 1e-308, cap)
+    with pytest.raises(ValueError, match="must be finite"):
+        exhaustive_fit(rows, 1e-308, cap)
 
 
 @pytest.mark.parametrize("days", [10, 40])
