@@ -1,4 +1,5 @@
 import { homeCopy, type PublicLanguage } from "./home-copy";
+import { formatTime } from "@/lib/format/time";
 import { publicPath } from "@/lib/public-metadata";
 import { SiteShell } from "./site-shell";
 import styles from "./public-site.module.css";
@@ -30,10 +31,12 @@ export function LegalPage({
                     <p className={styles.updated}>
                         {copy.updated}:{" "}
                         <time dateTime={updated}>
-                            {new Intl.DateTimeFormat(language, {
-                                dateStyle: "long",
-                                timeZone: "UTC",
-                            }).format(new Date(`${updated}T00:00:00Z`))}
+                            {formatTime(
+                                language,
+                                `${updated}T00:00:00Z`,
+                                "UTC",
+                                { dateStyle: "long" },
+                            )}
                         </time>
                     </p>
                 </header>
