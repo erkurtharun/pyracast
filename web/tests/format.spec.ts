@@ -7,8 +7,11 @@ import {
 } from "../src/lib/format/number";
 import {
     formatTime,
+    fromPlantInput,
     intervalTimeFormatter,
     plantDay,
+    plantTimestamp,
+    toPlantInput,
     zoneLabel,
 } from "../src/lib/format/time";
 
@@ -90,4 +93,38 @@ test("interval times name the offset only when it changes inside the range", () 
         "2026-03-29T01:30:00Z",
     ]);
     expect(shift.format(new Date("2026-03-29T00:00:00Z"))).toBe("01:00 GMT+1");
+});
+
+test("a plant timestamp is the ISO wall time in the plant zone with its offset", () => {
+    expect(plantTimestamp("2026-11-11T08:00:00Z", "Europe/Istanbul")).toBe(
+        "2026-11-11T11:00:00+03:00",
+    );
+    expect(plantTimestamp("2026-03-29T01:30:00Z", "Europe/Berlin")).toBe(
+        "2026-03-29T03:30:00+02:00",
+    );
+    expect(plantTimestamp("2026-01-07T09:00:00Z", "UTC")).toBe(
+        "2026-01-07T09:00:00+00:00",
+    );
+    expect(plantTimestamp(null, "UTC")).toBeNull();
+});
+
+test("a plant time input shows the wall clock of the plant zone", () => {
+    expect(toPlantInput("2026-11-11T08:00:00Z", "Europe/Istanbul")).toBe(
+        "2026-11-11T11:00",
+    );
+    expect(toPlantInput("2026-11-11T08:00:00Z", "America/New_York")).toBe(
+        "2026-11-11T03:00",
+    );
+});
+
+test("an entered plant time is read in the plant zone and a missing hour is refused", () => {
+    expect(fromPlantInput("2026-11-11T11:00", "Europe/Istanbul")).toBe(
+        "2026-11-11T08:00:00.000Z",
+    );
+    expect(fromPlantInput("2026-03-29T02:30", "Europe/Berlin")).toBeNull();
+    expect(fromPlantInput("2026-10-25T02:30", "Europe/Berlin")).toBe(
+        "2026-10-25T00:30:00.000Z",
+    );
+    expect(fromPlantInput("", "Europe/Berlin")).toBeNull();
+    expect(fromPlantInput("2026-02-30T10:00", "Europe/Berlin")).toBeNull();
 });

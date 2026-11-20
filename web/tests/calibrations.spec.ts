@@ -428,3 +428,22 @@ test("ready calibrations from previous configurations remain visible but cannot 
             .getByRole("button", { name: "Activate", exact: true }),
     ).toBeEnabled();
 });
+
+test("a ready run of the current configuration offers activation and reports only that the selection changed", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/plants/21/calibrations/", (route) =>
+        route.fulfill({ json: paged([run(40)]) }),
+    );
+    await page.route("**/plants/21/calibrations/40/activate/", (route) =>
+        route.fulfill({ json: {} }),
+    );
+    await openCalibration(page);
+    await page.getByRole("button", { name: "Activate", exact: true }).click();
+    await expect(
+        page.getByText(
+            "Calibration selection updated. Refresh the forecast to see the current result.",
+        ),
+    ).toBeVisible();
+});

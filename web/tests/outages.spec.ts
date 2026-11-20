@@ -510,3 +510,37 @@ test("an ongoing outage is tagged as a warning and a resolved one is labelled", 
     await expect(tag).toHaveText("Resolved");
     await expect(tag).toHaveClass(/tag-neutral/);
 });
+
+test.describe("in a browser zone west of the plant", () => {
+    test.use({ timezoneId: "America/New_York" });
+
+    test("outage times are entered and shown in the device zone", async ({
+        page,
+    }) => {
+        const state = await workspace(page);
+        await page
+            .getByRole("button", { name: "Outages", exact: true })
+            .click();
+        await expect(
+            page.getByText(
+                "Entry and display times use your device timezone: America/New_York.",
+            ),
+        ).toBeVisible();
+        await page
+            .getByRole("button", { name: "Report outage", exact: true })
+            .click();
+        await page.getByLabel("Incident title").fill("Inverter disconnected");
+        await page
+            .getByLabel("Started at (device time)", { exact: true })
+            .fill("2026-11-11T03:00");
+        await page
+            .getByRole("button", { name: "Save outage", exact: true })
+            .click();
+        await expect(
+            page.getByText(/Started Nov 11, 2026, 3:00\sAM/),
+        ).toBeVisible();
+        expect(state.incident()).toMatchObject({
+            starts_at: "2026-11-11T08:00:00.000Z",
+        });
+    });
+});
