@@ -7,14 +7,16 @@ from typing import Any
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
-from django.db import close_old_connections, connections
+from django.db import close_old_connections, connection, connections
 from django.db.models import F
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.connections.models import ProviderAccount
 from pyracast.notifications.models import NotificationSettings, ReminderSchedule
 from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT, configure_reminders
+from pyracast.notifications.overview import plants_at_recipient_limit
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
@@ -312,6 +314,17 @@ def test_the_members_warning_counts_only_plants_a_new_member_would_pause() -> No
         already_over["plants_at_recipient_limit"],
         held_otherwise["plants_at_recipient_limit"],
     ) == (0, 0)
+
+
+def test_the_members_warning_reads_one_statement_when_no_plant_includes_the_members() -> None:
+    system = approved()
+    viewer_of(system)
+    save(system, recipients=["ops@example.com"])
+
+    with CaptureQueriesContext(connection) as captured:
+        assert plants_at_recipient_limit(system.tenant.pk) == 0
+
+    assert len(captured) == 1
 
 
 def test_concurrent_first_saves_of_one_plant_keep_one_schedule() -> None:

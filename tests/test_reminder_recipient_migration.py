@@ -112,6 +112,27 @@ def test_every_schedule_address_and_pin_is_copied_as_stored(
     assert "1 membership pin(s) beyond the id range" in capsys.readouterr().out
 
 
+def test_a_pin_ties_the_address_whose_stored_key_it_shares(
+    previous: tuple[System, Apps], capsys: pytest.CaptureFixture[str]
+) -> None:
+    system, apps = previous
+    schedule_id = old_schedule(
+        system,
+        apps,
+        recipients=[" ops@example.com", "dev@example.com"],
+        recipient_memberships={
+            "ops@example.com": [7],
+            "DEV@Example.com": [8],
+            "nobody@example.com": [9],
+        },
+    )
+
+    forward()
+
+    assert stored(schedule_id) == [(" ops@example.com", [7]), ("dev@example.com", [8])]
+    assert "1 membership pin(s) named no address of their list" in capsys.readouterr().out
+
+
 def test_a_delivery_marked_for_transmission_keeps_its_whole_list_as_its_envelope(
     previous: tuple[System, Apps],
 ) -> None:

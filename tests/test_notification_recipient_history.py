@@ -15,7 +15,7 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.overview import plants_at_recipient_limit
-from pyracast.notifications.recipients import effective_recipients
+from pyracast.notifications.recipients import effective_recipients, recipient_key
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.operations import submit_region
 from tests.support.domain import NOW, System
@@ -35,12 +35,7 @@ from tests.support.notifications import (
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def test_another_schedule_tied_to_the_member_prunes_the_same_address_kept_as_external() -> None:
-    system, _ = configured()
-    first = group(system, ["OLD@example.com", "retained@example.com"])
-    assert ties(first) == {}
-    user = member(system, "old@example.com")
-    membership = Membership.objects.get(tenant=system.tenant, user=user)
+def tied_elsewhere(system: System, address: str, membership_id: int) -> ReminderSchedule:
     region = submit_region(
         system.member,
         system.tenant.pk,
@@ -50,7 +45,17 @@ def test_another_schedule_tied_to_the_member_prunes_the_same_address_kept_as_ext
         timezone="Europe/Istanbul",
     )
     evidence = ReminderSchedule.objects.create(region=region, effective_from=NOW)
-    store(evidence, [user.email], {user.email: [membership.pk]})
+    store(evidence, [address], {recipient_key(address): [membership_id]})
+    return evidence
+
+
+def test_another_schedule_tied_to_the_member_prunes_the_same_address_kept_as_external() -> None:
+    system, _ = configured()
+    first = group(system, ["OLD@example.com", "retained@example.com"])
+    assert ties(first) == {}
+    user = member(system, "old@example.com")
+    membership = Membership.objects.get(tenant=system.tenant, user=user)
+    evidence = tied_elsewhere(system, user.email, membership.pk)
     user.email = "new@example.com"
     user.save(update_fields=["email"])
     EmailAddress.objects.filter(user=user).delete()
@@ -62,12 +67,27 @@ def test_another_schedule_tied_to_the_member_prunes_the_same_address_kept_as_ext
     assert ties(evidence) == {}
 
 
-def test_removing_a_member_keeps_an_address_tied_to_another_member() -> None:
+@pytest.mark.parametrize("include_workspace_members", [False, True])
+def test_an_address_tied_elsewhere_to_a_removed_member_still_reaches_the_member_holding_it(
+    include_workspace_members: bool,
+) -> None:
     system, _ = configured()
     former = member(system, "former@example.com")
+    former_membership = Membership.objects.get(tenant=system.tenant, user=former)
     current = member(system, "shared@example.com")
     current_membership = Membership.objects.get(tenant=system.tenant, user=current)
-    schedule = group(system, [current.email])
+    schedule = configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        recipients=[] if include_workspace_members else [current.email],
+        include_workspace_members=include_workspace_members,
+        times=["10:00"],
+        language="en",
+        now=NOW,
+    )
+    evidence = tied_elsewhere(system, current.email, former_membership.pk)
     pending = NotificationDelivery.objects.get(pk=enqueue_due(SLOT)[0])
     historical = NotificationDelivery.objects.create(
         schedule=schedule,
@@ -78,13 +98,30 @@ def test_removing_a_member_keeps_an_address_tied_to_another_member() -> None:
         status="sent",
     )
     freeze(historical, [current.email, former.email])
+
     remove_workspace_member(system.member, system.tenant.pk, former.pk)
-    assert schedule_addresses(schedule) == [current.email]
-    assert ties(schedule) == {current.email: [current_membership.pk]}
-    assert revoked(pending) == [former.email]
+
+    assert schedule_addresses(evidence) == []
+    assert ties(schedule) == (
+        {} if include_workspace_members else {current.email: [current_membership.pk]}
+    )
+    assert revoked(pending) == ([former.email] if include_workspace_members else [])
     assert (candidates(historical), revoked(historical)) == ([current.email, former.email], [])
     assert process_notification(pending.pk, SLOT)
     assert mail.outbox[0].bcc == [current.email]
+
+
+def test_a_member_without_an_address_removes_no_blank_recipient() -> None:
+    system, schedule = configured()
+    store(schedule, ["", "default@example.com"])
+    blank = User.objects.create(username="blank", email="")
+    Membership.objects.create(tenant=system.tenant, user=blank)
+    revision = ReminderSchedule.objects.get(pk=schedule.pk).revision
+
+    remove_workspace_member(system.member, system.tenant.pk, blank.pk)
+
+    assert schedule_addresses(schedule) == ["", "default@example.com"]
+    assert ReminderSchedule.objects.get(pk=schedule.pk).revision == revision
 
 
 def two_members_with_one_address(system: System) -> tuple[User, User]:

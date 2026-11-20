@@ -859,6 +859,84 @@ test("a save from a form read before another change is refused with a reload", a
     ).toHaveValue("current@example.test");
 });
 
+test("a reload that fails after a refused save reports the failure and keeps the reload offered", async ({
+    page,
+}) => {
+    const errors: Error[] = [];
+    page.on("pageerror", (error) => errors.push(error));
+    await reminderApi(page);
+    await openReminders(page);
+    let refused = false;
+    await page.route("**/reminders/", (route) => {
+        if (route.request().method() === "PUT") {
+            refused = true;
+            return route.fulfill({
+                status: 409,
+                json: errorBody(
+                    "reminder_schedule_changed",
+                    "The email reminders changed. Reload before saving.",
+                ),
+            });
+        }
+        return refused
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", "Reminder service is busy."),
+              })
+            : route.fallback();
+    });
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    const reload = page.getByRole("button", {
+        name: "Reload reminders",
+        exact: true,
+    });
+    const failed = page.waitForResponse(
+        (response) =>
+            response.request().method() === "GET" &&
+            response.url().endsWith("/reminders/") &&
+            response.status() === 503,
+    );
+    await reload.click();
+    await failed;
+    await expect(
+        page.getByRole("alert").filter({ hasText: "Could not refresh" }),
+    ).toBeVisible();
+    await expect(reload).toBeVisible();
+    expect(errors).toEqual([]);
+});
+
+test("a save accepted after a refused one withdraws the reload offer", async ({
+    page,
+}) => {
+    await reminderApi(page);
+    await openReminders(page);
+    let refuse = true;
+    await page.route("**/reminders/", (route) => {
+        if (route.request().method() !== "PUT" || !refuse)
+            return route.fallback();
+        refuse = false;
+        return route.fulfill({
+            status: 409,
+            json: errorBody(
+                "reminder_schedule_changed",
+                "The email reminders changed. Reload before saving.",
+            ),
+        });
+    });
+    const save = page.getByRole("button", { name: "Save reminders" });
+    const reload = page.getByRole("button", {
+        name: "Reload reminders",
+        exact: true,
+    });
+    await save.click();
+    await expect(reload).toBeVisible();
+    await save.click();
+    await expect(
+        page.getByText("Saved successfully.", { exact: true }),
+    ).toBeVisible();
+    await expect(reload).toHaveCount(0);
+});
+
 test("saved reminder fields stay unavailable until the refreshed settings arrive", async ({
     page,
 }) => {
