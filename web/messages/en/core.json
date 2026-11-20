@@ -403,6 +403,13 @@
             "admin": "Workspace administrator",
             "viewer": "Member"
         },
+        "InvitationState": {
+            "pending": "Pending",
+            "accepted": "Accepted",
+            "revoked": "Cancelled",
+            "expired": "Expired",
+            "superseded": "Replaced"
+        },
         "ReminderState": {
             "sending": "Sending",
             "paused_by_user": "Paused",

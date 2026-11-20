@@ -142,8 +142,8 @@ reauthentication, MFA and session management. Email ownership is mandatory befor
 login. Django validates passwords with a 15-character minimum and common-password
 screening, hashes new passwords with Argon2 and rotates session identifiers on login.
 Mutations enforce CSRF before authentication. Allauth's account and IP rate limits
-share an atomic PostgreSQL JSON/TTL cache; ingress limits and per-user API throttles on
-expensive endpoints additionally protect capacity.
+share an atomic PostgreSQL JSON/TTL cache; ingress limits and API throttles per user (per
+client address when signed out) on expensive endpoints additionally protect capacity.
 Failed sign-ins are limited per address (also per day) and, under a project action
 that no sign-in success or password reset clears, per client IP; a refused account
 answers and counts exactly like a wrong password. Only finished failures make the daily
@@ -194,13 +194,17 @@ remain available to the new administrator without depending on the former accoun
 Workspace administrators can remove another member from that workspace;
 they cannot remove themselves or its administrator. Removal preserves the user's
 account, other memberships and workspace resources. Under the tenant lock, it records
-an audit entry and expires pending invitations for all known addresses of that user.
+an audit entry and closes pending invitations for all known addresses of that user.
 
 Invitations grant member access after explicit acceptance by the authenticated
 owner of the verified invited email. New invited accounts do not create another
 workspace. Invitations expire after seven days and can be cancelled. The notification
-worker mints each invitation's token when it sends the mail and stores only its hash. A replacement invitation or administrator transfer invalidates
-the previous pending grant. Issuance is rate-limited per workspace and recipient.
+worker mints each invitation's token when it sends the mail and stores only its hash.
+A replacement invitation or administrator transfer invalidates the previous pending
+grant; closing an invitation records why and keeps its deadline. A usable link shows
+the workspace, role and inviter before sign-in, every unusable link gets one identical
+refusal, and a repeated acceptance by the accepting account answers like the first.
+Issuance is rate-limited per workspace and recipient.
 
 Member proposals are immutable and separate from production and incident records.
 They do not affect totals, forecasts or calibration before approval. The current

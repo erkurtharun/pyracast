@@ -52,9 +52,7 @@ def member_label(user: User) -> str:
 
 
 def pending_invitations(tenant_id: int | OuterRef) -> QuerySet[WorkspaceInvitation]:
-    return WorkspaceInvitation.objects.filter(
-        tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=timezone.now()
-    )
+    return WorkspaceInvitation.objects.filter(tenant_id=tenant_id).pending(timezone.now())
 
 
 class WorkspaceMemberChoice(MemberChoice):

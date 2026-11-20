@@ -403,6 +403,13 @@
             "admin": "Çalışma alanı yöneticisi",
             "viewer": "Üye"
         },
+        "InvitationState": {
+            "pending": "Bekliyor",
+            "accepted": "Kabul edildi",
+            "revoked": "İptal edildi",
+            "expired": "Süresi doldu",
+            "superseded": "Yenilendi"
+        },
         "ReminderState": {
             "sending": "Gönderiliyor",
             "paused_by_user": "Duraklatıldı",

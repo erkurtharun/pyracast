@@ -2186,6 +2186,21 @@ pre,
 .workspace-member .field-hint {
     display: block;
 }
+.workspace-member .button-group {
+    flex-shrink: 0;
+}
+.invitation-banner {
+    padding: var(--space-4) var(--space-5);
+    border-bottom: 1px solid var(--line);
+    background: var(--teal-soft);
+    color: var(--ink);
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+.invitation-banner p,
+.invitation-details p {
+    margin: var(--space-1) 0;
+}
 @media (max-width: 480px) {
     .member-list .workspace-member {
         flex-direction: column;

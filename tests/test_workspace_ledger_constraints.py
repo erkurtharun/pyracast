@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -54,7 +55,7 @@ def refusal(write: Any) -> str | None:
     return violated_constraint(raised.value)
 
 
-def test_revoking_an_invitation_records_the_revocation_and_ends_it(
+def test_revoking_an_invitation_records_the_revocation_and_keeps_the_deadline(
     workspace: tuple[Tenant, User],
 ) -> None:
     tenant, administrator = workspace
@@ -62,9 +63,10 @@ def test_revoking_an_invitation_records_the_revocation_and_ends_it(
 
     revoke_workspace_invitation(administrator, tenant.pk, invitation.pk)
 
+    deadline = invitation.expires_at
     invitation.refresh_from_db()
     assert invitation.revoked_at is not None
-    assert invitation.expires_at <= invitation.revoked_at
+    assert (invitation.expires_at, invitation.revoked_reason) == (deadline, "cancelled")
     assert invitation.accepted_at is None
 
 
@@ -111,7 +113,8 @@ def test_an_accepted_invitation_is_never_marked_revoked(
     accept_workspace_invitation(guest, invitation_token())
     invitation = WorkspaceInvitation.objects.get()
 
-    revoke_workspace_invitation(administrator, tenant.pk, invitation.pk)
+    with pytest.raises(ValidationError, match="invalid or expired"):
+        revoke_workspace_invitation(administrator, tenant.pk, invitation.pk)
 
     invitation.refresh_from_db()
     assert invitation.accepted_at is not None
@@ -132,7 +135,8 @@ def test_removing_a_member_revokes_the_open_invitations_of_the_member_addresses(
     invitation.refresh_from_db()
     other.refresh_from_db()
     assert invitation.revoked_at is not None
-    assert invitation.expires_at <= invitation.revoked_at
+    assert invitation.revoked_reason == "member_removed"
+    assert invitation.expires_at > invitation.revoked_at
     assert other.revoked_at is None
 
 
@@ -184,11 +188,15 @@ def test_the_database_refuses_an_administrator_change_that_names_one_account_twi
             "workspaceinvitation_revoked_at_chk",
         ),
         (
-            lambda now: {"revoked_at": now - timedelta(minutes=1)},
+            lambda now: {"revoked_reason": "cancelled"},
             "workspaceinvitation_revoked_at_chk",
         ),
+        (
+            lambda now: {"accepted_by": User.objects.get(username="ledger-admin")},
+            "workspaceinvitation_accepted_by_chk",
+        ),
     ],
-    ids=["accepted_and_revoked", "open_after_revocation"],
+    ids=["accepted_and_revoked", "reason_without_revocation", "acceptor_without_acceptance"],
 )
 def test_the_database_refuses_an_invitation_state_no_writer_stores(
     change: Any, constraint: str, workspace: tuple[Tenant, User]

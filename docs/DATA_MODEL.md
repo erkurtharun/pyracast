@@ -20,7 +20,7 @@ no model and is not shown.
 
 ## Overview
 
-60 tables and 116 single-column foreign keys.
+60 tables and 117 single-column foreign keys.
 
 ```mermaid
 erDiagram
@@ -93,6 +93,7 @@ erDiagram
     accounts_tenant ||--o{ accounts_workspaceadminchange : "tenant_id"
     auth_user ||--o{ accounts_workspaceinvitation : "created_by_id"
     accounts_tenant ||--o{ accounts_workspaceinvitation : "tenant_id"
+    auth_user |o--o{ accounts_workspaceinvitation : "accepted_by_id"
     auth_user ||--o{ accounts_workspacememberremoval : "actor_id"
     accounts_tenant ||--o{ accounts_workspacememberremoval : "tenant_id"
     auth_user ||--o{ accounts_workspacememberremoval : "user_id"
@@ -241,6 +242,8 @@ erDiagram
         bigint tenant_id FK "references accounts_tenant.id"
         varchar_6 role
         timestamp_with_time_zone revoked_at "nullable"
+        varchar_21 revoked_reason
+        integer accepted_by_id FK "nullable; references auth_user.id"
     }
     accounts_workspacememberremoval {
         bigint id PK
@@ -263,6 +266,7 @@ erDiagram
     accounts_tenant ||--o{ accounts_workspaceadminchange : "tenant_id"
     auth_user ||--o{ accounts_workspaceinvitation : "created_by_id"
     accounts_tenant ||--o{ accounts_workspaceinvitation : "tenant_id"
+    auth_user |o--o{ accounts_workspaceinvitation : "accepted_by_id"
     auth_user ||--o{ accounts_workspacememberremoval : "actor_id"
     accounts_tenant ||--o{ accounts_workspacememberremoval : "tenant_id"
     auth_user ||--o{ accounts_workspacememberremoval : "user_id"
@@ -290,8 +294,10 @@ erDiagram
 
 #### `accounts_workspaceinvitation`
 
+- `workspaceinvitation_accepted_by_chk`: `CHECK (("accepted_by_id" IS NULL OR "accepted_at" IS NOT NULL))`
 - `workspaceinvitation_delivery_status_chk`: `CHECK ("delivery_status" IN ('pending', 'sent', 'failed', 'uncertain'))`
-- `workspaceinvitation_revoked_at_chk`: `CHECK (("revoked_at" IS NULL OR ("accepted_at" IS NULL AND "expires_at" <= ("revoked_at"))))`
+- `workspaceinvitation_revoked_at_chk`: `CHECK ((("revoked_at" IS NULL AND "revoked_reason" = '') OR ("accepted_at" IS NULL AND "revoked_at" IS NOT NULL)))`
+- `workspaceinvitation_revoked_reason_chk`: `CHECK ("revoked_reason" IN ('', 'cancelled', 'superseded', 'member_removed', 'administrator_changed'))`
 - `workspaceinvitation_role_chk`: `CHECK ("role" IN ('admin', 'viewer'))`
 - `workspaceinvitation_tenant_administrator_uniq`: `UNIQUE INDEX ("tenant_id") WHERE ("accepted_at" IS NULL AND "revoked_at" IS NULL AND "role" = 'admin')`
 - `workspaceinvitation_tenant_email_uniq`: `UNIQUE INDEX ("tenant_id", "email") WHERE ("accepted_at" IS NULL AND "revoked_at" IS NULL)`

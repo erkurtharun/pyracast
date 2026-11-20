@@ -53,7 +53,7 @@ def test_platform_authority_runs_workspace_operations_without_membership() -> No
     assert mail.outbox[-1].to == ["guest@example.com"]
     revoke_workspace_invitation(platform, tenant_id, invitation.pk, platform=True)
     invitation.refresh_from_db()
-    assert invitation.expires_at <= timezone.now()
+    assert invitation.state_at(timezone.now()) == "revoked"
 
     remove_workspace_member(platform, tenant_id, viewer.pk, platform=True)
     assert not Membership.objects.filter(user=viewer).exists()
@@ -136,7 +136,7 @@ def test_platform_authority_refuses_everyone_who_is_not_a_platform_administrator
     operations: list[Callable[[], Any]] = [
         lambda: invite_workspace_member(actor, tenant_id, "other@example.com", platform=True),
         lambda: revoke_workspace_invitation(actor, tenant_id, invitation.pk, platform=True),
-        lambda: reissue_workspace_invitation(actor, tenant_id, invitation.pk),
+        lambda: reissue_workspace_invitation(actor, tenant_id, invitation.pk, platform=True),
         lambda: remove_workspace_member(actor, tenant_id, viewer.pk, platform=True),
         lambda: submit_site(
             actor,
@@ -175,7 +175,7 @@ def test_platform_authority_refuses_everyone_who_is_not_a_platform_administrator
         with pytest.raises(PermissionDenied):
             operation()
     invitation.refresh_from_db()
-    assert invitation.expires_at > timezone.now()
+    assert invitation.state_at(timezone.now()) == "pending"
     assert WorkspaceInvitation.objects.count() == 1
     assert Membership.objects.filter(user=viewer).exists()
     assert Region.objects.filter(tenant_id=tenant_id).count() == 1

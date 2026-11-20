@@ -168,7 +168,11 @@ def invitation_reissue(request: HttpRequest, tenant_id: int, invitation_id: int)
     get_object_or_404(WorkspaceInvitation, pk=invitation_id, tenant_id=tenant_id)
     try:
         replacement = reissue_workspace_invitation(
-            _actor(request), tenant_id, invitation_id, language=request.LANGUAGE_CODE
+            _actor(request),
+            tenant_id,
+            invitation_id,
+            platform=True,
+            language=request.LANGUAGE_CODE,
         )
     except ValidationError as refusal:
         messages.error(request, " ".join(refusal.messages))
@@ -180,8 +184,14 @@ def invitation_reissue(request: HttpRequest, tenant_id: int, invitation_id: int)
 @require_POST
 def invitation_revocation(request: HttpRequest, tenant_id: int, invitation_id: int) -> HttpResponse:
     invitation = get_object_or_404(WorkspaceInvitation, pk=invitation_id, tenant_id=tenant_id)
-    revoke_workspace_invitation(_actor(request), tenant_id, invitation.pk, platform=True)
-    messages.success(request, _("Invitation to %(email)s revoked.") % {"email": invitation.email})
+    try:
+        revoke_workspace_invitation(_actor(request), tenant_id, invitation.pk, platform=True)
+    except ValidationError as refusal:
+        messages.error(request, " ".join(refusal.messages))
+    else:
+        messages.success(
+            request, _("Invitation to %(email)s revoked.") % {"email": invitation.email}
+        )
     return _workspace_section(tenant_id, "invitations-title")
 
 

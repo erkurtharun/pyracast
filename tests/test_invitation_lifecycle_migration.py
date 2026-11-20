@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import timedelta
 from typing import Any
 
@@ -83,7 +83,8 @@ def test_the_lifecycle_migration_keeps_every_invitation_and_records_no_reason_it
 
     after = WorkspaceInvitation.objects.order_by("pk")
     assert {pk: values for pk, *values in after.values_list("pk", *STORED)} == before
-    assert set(after.values_list("revoked_reason", "accepted_by_id")) == {("", None)}
+    assert list(after.values_list("revoked_reason", flat=True).distinct()) == [""]
+    assert not after.filter(accepted_by__isnull=False).exists()
     assert {
         name: WorkspaceInvitation.objects.get(pk=pk).state_at(timezone.now())
         for name, pk in rows.items()
@@ -104,12 +105,13 @@ def test_the_lifecycle_migration_keeps_every_invitation_and_records_no_reason_it
 
     pending = WorkspaceInvitation.objects.filter(pk=rows["pending"])
     accepted = WorkspaceInvitation.objects.filter(pk=rows["accepted"])
-    for refused in (
+    refusals: tuple[Callable[[], int], ...] = (
         lambda: pending.update(revoked_reason="cancelled"),
         lambda: pending.update(revoked_reason="unknown", revoked_at=now),
         lambda: pending.update(accepted_by_id=invitee.pk),
         lambda: accepted.update(revoked_at=now, revoked_reason="cancelled"),
-    ):
+    )
+    for refused in refusals:
         with pytest.raises(IntegrityError), transaction.atomic():
             refused()
     pending.update(revoked_at=now, revoked_reason="cancelled")

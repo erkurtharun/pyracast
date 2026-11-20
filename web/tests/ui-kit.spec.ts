@@ -323,6 +323,9 @@ test("the shell announces action outcomes through one live region that exists be
             id: 7,
             email: "new@example.test",
             role: "viewer",
+            state: "pending",
+            created_at: "2026-11-20T09:00:00Z",
+            expires_at: "2026-11-27T09:00:00Z",
             delivery_status: "sent",
         },
     ];
@@ -348,7 +351,7 @@ test("the shell announces action outcomes through one live region that exists be
     await expect(region).toHaveText("");
     await page.getByRole("button", { name: "Members", exact: true }).click();
     const cancel = page.getByRole("button", {
-        name: "Cancel invitation",
+        name: "Cancel the invitation for new@example.test",
         exact: true,
     });
     await expect(cancel).toHaveClass(/secondary/);
@@ -365,6 +368,9 @@ test("the shell speaks a repeated outcome again", async ({ page }) => {
         id,
         email: `invitee${id}@example.test`,
         role: "viewer",
+        state: "pending",
+        created_at: "2026-11-20T09:00:00Z",
+        expires_at: "2026-11-27T09:00:00Z",
         delivery_status: "sent",
     }));
     await mockApi(page);
@@ -389,8 +395,7 @@ test("the shell speaks a repeated outcome again", async ({ page }) => {
     await page.getByRole("button", { name: "Members", exact: true }).click();
     const region = page.locator("[data-live-region]");
     const cancel = page.getByRole("button", {
-        name: "Cancel invitation",
-        exact: true,
+        name: /^Cancel the invitation for invitee\d+@example\.test$/,
     });
     await cancel.first().click();
     await expect(region).toHaveText("Invitation cancelled.");

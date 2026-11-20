@@ -1,3 +1,6 @@
+from datetime import datetime
+from typing import Self
+
 from django.conf import settings
 from django.db import models
 
@@ -19,6 +22,21 @@ class InvitationDeliveryStatus(models.TextChoices):
     SENT = "sent", "Sent"
     FAILED = "failed", "Failed"
     UNCERTAIN = "uncertain", "Uncertain"
+
+
+class InvitationState(models.TextChoices):
+    PENDING = "pending", "Pending"
+    ACCEPTED = "accepted", "Accepted"
+    REVOKED = "revoked", "Revoked"
+    EXPIRED = "expired", "Expired"
+    SUPERSEDED = "superseded", "Superseded"
+
+
+class InvitationRevocation(models.TextChoices):
+    CANCELLED = "cancelled", "Cancelled"
+    SUPERSEDED = "superseded", "Superseded"
+    MEMBER_REMOVED = "member_removed", "Member removed"
+    ADMINISTRATOR_CHANGED = "administrator_changed", "Administrator changed"
 
 
 class Tenant(models.Model):
@@ -52,6 +70,19 @@ class Membership(models.Model):
         )
 
 
+class WorkspaceInvitationQuerySet[M: WorkspaceInvitation = WorkspaceInvitation, Row = M](
+    models.QuerySet[M, Row]
+):
+    def open(self) -> Self:
+        return self.filter(accepted_at__isnull=True, revoked_at__isnull=True)
+
+    def pending(self, now: datetime) -> Self:
+        return self.open().filter(expires_at__gt=now)
+
+    def revoke(self, now: datetime, reason: InvitationRevocation) -> int:
+        return self.open().update(revoked_at=now, revoked_reason=reason)
+
+
 class WorkspaceInvitation(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
     email = models.EmailField()
@@ -59,24 +90,37 @@ class WorkspaceInvitation(models.Model):
     token_hash = models.CharField(max_length=64, unique=True, null=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
+    # The natural deadline; closing an invitation never moves it.
     expires_at = models.DateTimeField()
     accepted_at = models.DateTimeField(null=True)
+    accepted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, related_name="+"
+    )
     revoked_at = models.DateTimeField(null=True)
+    # Empty on rows revoked before reasons were stored.
+    revoked_reason = models.CharField(
+        max_length=21, choices=InvitationRevocation, blank=True, default=""
+    )
     delivery_status = models.CharField(
         max_length=9, choices=InvitationDeliveryStatus, default=InvitationDeliveryStatus.PENDING
     )
     role = models.CharField(max_length=6, choices=WorkspaceRole, default=WorkspaceRole.VIEWER)
 
+    objects = WorkspaceInvitationQuerySet.as_manager()
+
     class Meta:
         constraints = (
             choices_check("delivery_status", InvitationDeliveryStatus),
             choices_check("role", WorkspaceRole),
-            # Readers treat an invitation as open while `expires_at` lies ahead, so a revocation
-            # ends the deadline too.
+            choices_check("revoked_reason", InvitationRevocation, blank=True),
             models.CheckConstraint(
-                condition=models.Q(revoked_at__isnull=True)
-                | models.Q(accepted_at__isnull=True, expires_at__lte=models.F("revoked_at")),
+                condition=models.Q(revoked_at__isnull=True, revoked_reason="")
+                | models.Q(revoked_at__isnull=False, accepted_at__isnull=True),
                 name="%(class)s_revoked_at_chk",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(accepted_by__isnull=True) | models.Q(accepted_at__isnull=False),
+                name="%(class)s_accepted_by_chk",
             ),
             models.UniqueConstraint(
                 fields=("tenant", "email"),
@@ -91,6 +135,15 @@ class WorkspaceInvitation(models.Model):
                 name="%(class)s_tenant_administrator_uniq",
             ),
         )
+
+    def state_at(self, now: datetime) -> InvitationState:
+        if self.accepted_at is not None:
+            return InvitationState.ACCEPTED
+        if self.revoked_reason == InvitationRevocation.SUPERSEDED:
+            return InvitationState.SUPERSEDED
+        if self.revoked_at is not None:
+            return InvitationState.REVOKED
+        return InvitationState.PENDING if self.expires_at > now else InvitationState.EXPIRED
 
 
 class WorkspaceAdminChange(models.Model):

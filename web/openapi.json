@@ -13,7 +13,7 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "$ref": "#/components/schemas/InvitationAcceptanceInput"
+                                "$ref": "#/components/schemas/InvitationTokenInput"
                             }
                         }
                     },
@@ -47,6 +47,89 @@
                     },
                     "401": {
                         "description": "Sign-in is required.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Access was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Send the request as JSON.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests; Retry-After gives the seconds to wait.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API failure.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/invitations/preview/": {
+            "post": {
+                "operationId": "invitations_preview_create",
+                "tags": ["invitations"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/InvitationTokenInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InvitationPreviewOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "description": "The request input was refused.",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -1038,6 +1121,97 @@
                 "responses": {
                     "204": {
                         "description": "No response body"
+                    },
+                    "401": {
+                        "description": "Sign-in is required.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Access was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "The addressed item or page does not exist.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API failure.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/invitations/{invitation_id}/resend/": {
+            "post": {
+                "operationId": "tenants_invitations_resend_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "invitation_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InvitationOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "description": "The request input was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
                     },
                     "401": {
                         "description": "Sign-in is required.",
@@ -7164,16 +7338,6 @@
                 },
                 "required": ["expected_revision", "kind", "starts_at", "title"]
             },
-            "InvitationAcceptanceInput": {
-                "type": "object",
-                "properties": {
-                    "token": {
-                        "type": "string",
-                        "maxLength": 128
-                    }
-                },
-                "required": ["token"]
-            },
             "InvitationAcceptanceOutput": {
                 "type": "object",
                 "properties": {
@@ -7214,6 +7378,27 @@
                         "format": "email",
                         "readOnly": true
                     },
+                    "role": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/WorkspaceRoleEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "state": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/InvitationStateEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
                     "expires_at": {
                         "type": "string",
                         "format": "date-time",
@@ -7228,7 +7413,67 @@
                         "readOnly": true
                     }
                 },
-                "required": ["delivery_status", "email", "expires_at", "id"]
+                "required": [
+                    "created_at",
+                    "delivery_status",
+                    "email",
+                    "expires_at",
+                    "id",
+                    "role",
+                    "state"
+                ]
+            },
+            "InvitationPreviewOutput": {
+                "type": "object",
+                "properties": {
+                    "workspace": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "$ref": "#/components/schemas/WorkspaceRoleEnum"
+                    },
+                    "inviter": {
+                        "type": "string",
+                        "format": "email",
+                        "nullable": true
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email"
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": [
+                    "email",
+                    "expires_at",
+                    "inviter",
+                    "role",
+                    "workspace"
+                ]
+            },
+            "InvitationStateEnum": {
+                "enum": [
+                    "pending",
+                    "accepted",
+                    "revoked",
+                    "expired",
+                    "superseded"
+                ],
+                "type": "string",
+                "description": "* `pending` - Pending\n* `accepted` - Accepted\n* `revoked` - Revoked\n* `expired` - Expired\n* `superseded` - Superseded"
+            },
+            "InvitationTokenInput": {
+                "type": "object",
+                "properties": {
+                    "token": {
+                        "type": "string",
+                        "maxLength": 128
+                    }
+                },
+                "required": ["token"]
             },
             "IrradianceConfigurationOutput": {
                 "type": "object",

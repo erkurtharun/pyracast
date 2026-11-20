@@ -281,7 +281,7 @@ def refusal(response: Any) -> tuple[int, str]:
 
 @pytest.mark.parametrize("first", ["transfer", "removal"])
 def test_the_outgoing_and_the_incoming_administrator_removing_each_other_leave_one_administrator(
-    workspace: tuple[Tenant, User], first: str
+    workspace: tuple[Tenant, User, User], first: str
 ) -> None:
     tenant, administrator, viewer = workspace
     platform = User.objects.create_superuser(username="platform")

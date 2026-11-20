@@ -362,6 +362,7 @@ STORED_VOCABULARIES = (
     StoredVocabulary(Membership, "role", _membership),
     StoredVocabulary(WorkspaceInvitation, "role", _invitation),
     StoredVocabulary(WorkspaceInvitation, "delivery_status", _invitation, retired=("accepted",)),
+    StoredVocabulary(WorkspaceInvitation, "revoked_reason", _invitation, published=False),
     StoredVocabulary(UserLanguagePreference, "language", _language),
     StoredVocabulary(Region, "status", _region),
     StoredVocabulary(RegionLocationChangeRequest, "status", _location_change),
