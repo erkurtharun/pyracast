@@ -1,12 +1,16 @@
-from collections.abc import Callable
 from typing import Any, cast
 from urllib.parse import urlsplit
 
 from allauth.account.internal.flows import reauthentication
 from allauth.core import ratelimit
 from allauth.core.exceptions import ImmediateHttpResponse, ReauthenticationRequired
-from allauth.core.internal.httpkit import add_query_params
-from allauth.headless.base.response import ConflictResponse
+from allauth.headless.base.response import (
+    AuthenticationResponse,
+    ConflictResponse,
+    ForbiddenResponse,
+)
+from allauth.headless.base.views import APIView
+from allauth.headless.internal.restkit.response import ErrorResponse
 from allauth.headless.socialaccount.forms import RedirectToProviderForm
 from allauth.headless.socialaccount.inputs import SignupInput
 from allauth.headless.socialaccount.response import SocialAccountsResponse
@@ -20,7 +24,8 @@ from allauth.headless.socialaccount.views import (
     RedirectToProviderView as AllauthRedirectToProviderView,
 )
 from allauth.socialaccount.adapter import get_adapter as get_social_adapter
-from allauth.socialaccount.helpers import complete_social_login, render_authentication_error
+from allauth.socialaccount.helpers import render_authentication_error
+from allauth.socialaccount.internal.flows import login as login_flows
 from allauth.socialaccount.internal.flows.signup import get_pending_signup
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialLogin
 from allauth.socialaccount.providers import registry
@@ -37,7 +42,6 @@ from allauth.socialaccount.providers.oauth2.views import OAuth2Adapter, OAuth2Ca
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.sessions.backends.base import UpdateError
-from django.contrib.sessions.exceptions import SessionInterrupted
 from django.core.exceptions import ObjectNotUpdated, PermissionDenied
 from django.db import DatabaseError, IntegrityError, transaction
 from django.http import (
@@ -56,21 +60,22 @@ from pyracast.accounts.processes import (
     lock_account,
     starting,
 )
+from pyracast.accounts.session_lock import release_session
 from pyracast.accounts.social import (
-    authorize_connection,
+    IDENTITY_CONSTRAINT,
+    connect_identity,
     lock_identity,
     record_social_refusal,
     social_callback_url,
+    store_verified_login,
+    take_verified_login,
 )
 from pyracast.accounts.step_up import StepUpAnswers
 from pyracast.db import violated_constraint
 
-# A provider sign-up whose identity (Django's generated name for allauth's unique provider and
-# uid) or vouched address another account claimed meanwhile answers like nothing pending.
-CLAIMED_CONSTRAINTS = {
-    "socialaccount_socialaccount_provider_uid_fc810c6e_uniq",
-    "unique_verified_email",
-}
+# A provider sign-up whose identity or vouched address another account claimed meanwhile answers
+# like nothing pending.
+CLAIMED_CONSTRAINTS = {IDENTITY_CONSTRAINT, "unique_verified_email"}
 
 
 class RetiredProvider(Provider):
@@ -151,6 +156,7 @@ class RedirectToProviderView(AllauthRedirectToProviderView):
         if not form.is_valid():
             return HttpResponseRedirect(f"{callback}&error=invalid_request")
         process = form.cleaned_data["process"]
+        session = request.session
         response = cast(
             HttpResponse,
             form.cleaned_data["provider"].redirect(
@@ -161,6 +167,12 @@ class RedirectToProviderView(AllauthRedirectToProviderView):
                 headless=True,
             ),
         )
+        # allauth saved the session with the state and swapped in a store marked modified; a
+        # browser that holds its key is sent nothing after the commit.
+        if request.session is not session and request.session.session_key == request.COOKIES.get(
+            settings.SESSION_COOKIE_NAME
+        ):
+            request.session.modified = False
         if not isinstance(response, HttpResponseRedirect) or urlsplit(response.url).netloc in {
             "",
             request.get_host(),
@@ -217,39 +229,21 @@ class ManageProvidersView(StepUpAnswers, AllauthManageProvidersView):
             return super().handle(request, *args, **kwargs)
 
 
-def complete(request: HttpRequest, login: SocialLogin) -> HttpResponseBase:
-    # Runs in `starting`, after the provider exchange: the accounts it writes are locked before
-    # allauth's lookup reads or refreshes the identity, and before any session row is touched.
-    if login.state.get("process") != AuthProcess.CONNECT:
-        lock_identity(login.account.provider, login.account.uid)
-        return cast(HttpResponseBase, complete_social_login(request, login))
-    try:
-        authorize_connection(request, login)
-    except PermissionDenied:
-        error = {"error": "permission_denied", "error_process": AuthProcess.CONNECT}
-        return HttpResponseRedirect(add_query_params(login.state["next"], error))
-    # allauth's lookup refreshes an existing identity before the connection is decided; a
-    # connection refused after it rolls that back too. Only a connection ends the flow by raising.
-    with transaction.atomic():
-        try:
-            refused = cast(HttpResponseBase, complete_social_login(request, login))
-        except ImmediateHttpResponse as connected:
-            return cast(HttpResponseBase, connected.response)
-        transaction.set_rollback(True)
-    return refused
-
-
 class ProviderCallbackView(OAuth2CallbackView):
-    # allauth contract: this is allauth 65.22.1's OAuth2CallbackView.dispatch step by step
-    # (tests/test_provider_callback_contract.py pins that source). Only the transactions differ:
-    # the state is taken and saved on its own, no transaction is open during the provider
-    # exchange, and the completion runs in `starting`.
+    # allauth contract: allauth 65.22.1's OAuth2CallbackView.dispatch up to the adapter's
+    # complete_login (tests/test_provider_callback_contract.py pins those sources). The callback
+    # only verifies: it takes its state while the session's requests are serialized, exchanges
+    # with no lock and no transaction, and stores the verified login for the browser session that
+    # started the round trip. POST auth/provider/complete signs in or connects.
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         adapter: Any = self.adapter
         provider = adapter.get_provider()
         state, response = self._get_state(request, provider)
         if response:
             return cast(HttpResponseBase, response)
+        # allauth saved the session with its state taken; nothing is saved or sent after that.
+        request.session.modified = False
+        release_session()
         if "error" in request.GET or "code" not in request.GET:
             cancelled = request.GET.get("error", None) == adapter.login_cancelled_error
             return cast(
@@ -269,9 +263,6 @@ class ProviderCallbackView(OAuth2CallbackView):
             )
             token = adapter.parse_token(access_token)
             login = adapter.complete_login(request, app, token, response=access_token)
-            login.token = token
-            login.state = state
-            return starting(request, lambda: complete(request, login))
         except (PermissionDenied, OAuth2Error, RequestException, ProviderException) as error:
             return cast(
                 HttpResponseBase,
@@ -279,14 +270,14 @@ class ProviderCallbackView(OAuth2CallbackView):
                     request, provider, exception=error, extra_context={"state": state}
                 ),
             )
+        login.state = state
+        store_verified_login(cast(str, request.session.session_key), login)
+        return HttpResponseRedirect(state["next"])
 
 
-callback_view: Callable[[type[OAuth2Adapter]], Callable[[HttpRequest], HttpResponseBase]] = (
-    ProviderCallbackView.adapter_view
-)
-CALLBACKS = {
-    "google": callback_view(GoogleOAuth2Adapter),
-    "microsoft": callback_view(MicrosoftGraphOAuth2Adapter),
+ADAPTERS: dict[str, type[OAuth2Adapter]] = {
+    "google": GoogleOAuth2Adapter,
+    "microsoft": MicrosoftGraphOAuth2Adapter,
 }
 
 
@@ -297,8 +288,11 @@ def provider_callback(request: HttpRequest, provider: str) -> HttpResponseBase:
         record_social_refusal(request, provider, "provider_disabled", user)
         callback = social_callback_url()
         return HttpResponseRedirect(f"{callback}&error=provider_unavailable")
+    view = ProviderCallbackView()
+    view.request = request
+    view.adapter = ADAPTERS[provider](request)
     try:
-        return CALLBACKS[provider](request)
+        return view.dispatch(request)
     except UpdateError as error:
         # allauth saves the session as it takes the provider state, and a session that ended
         # before fails that save. Django raises the same error for any failed save, such as a
@@ -308,9 +302,6 @@ def provider_callback(request: HttpRequest, provider: str) -> HttpResponseBase:
         if isinstance(failure, DatabaseError) and not isinstance(failure, ObjectNotUpdated):
             raise failure from failure.__cause__
         return nothing_pending(request, provider)
-    except SessionInterrupted:
-        # The session ended during the provider exchange; its completion found it gone.
-        return nothing_pending(request, provider)
 
 
 def nothing_pending(request: HttpRequest, provider: str) -> HttpResponseBase:
@@ -319,3 +310,51 @@ def nothing_pending(request: HttpRequest, provider: str) -> HttpResponseBase:
     request.session = type(request.session)()
     social_provider = get_social_adapter(request).get_provider(request, provider)
     return cast(HttpResponseBase, render_authentication_error(request, social_provider))
+
+
+class CompleteProviderLoginView(StepUpAnswers, APIView):
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        login = take_verified_login(request)
+        if login is None:
+            return ConflictResponse(request)
+        if login.state.get("process") == AuthProcess.CONNECT:
+            return connect(request, login)
+        return starting(request, lambda: sign_in(request, login))
+
+
+def sign_in(request: HttpRequest, login: SocialLogin) -> HttpResponseBase:
+    # The account the identity names is locked before allauth looks the identity up; a refused
+    # sign-in still commits the profile that lookup refreshed.
+    lock_identity(login.account.provider, login.account.uid)
+    try:
+        response = login_flows.complete_login(request, login, raises=True)
+    except PermissionDenied:
+        return ForbiddenResponse(request)
+    return AuthenticationResponse.from_response(request, response)
+
+
+def connect(request: HttpRequest, login: SocialLogin) -> HttpResponseBase:
+    # Only the account that started the round trip connects, inside its credential write and
+    # without allauth's lookup; a refusal asks it to confirm with the factor it needs.
+    provider = login.account.provider
+    initiator = (login.state.get("data") or {}).get("user_id")
+    reason = (
+        "reauthentication_required" if isinstance(initiator, int) else "initiating_user_missing"
+    )
+    if not request.user.is_authenticated:
+        record_social_refusal(request, provider, reason)
+        return AuthenticationResponse(request)
+    user = request.user
+    try:
+        if user.pk != initiator:
+            raise ReauthenticationRequired
+        with credential_write(request):
+            if reauthentication.is_reauthentication_required(request, app="allauth.socialaccount"):
+                raise ReauthenticationRequired
+            if not connect_identity(request, login, user):
+                connected_other = get_social_adapter().validation_error("connected_other")
+                return ErrorResponse(request, exception=connected_other)
+            return ManageProvidersView.respond_provider_accounts(request)
+    except ReauthenticationRequired:
+        record_social_refusal(request, provider, reason, user)
+        raise

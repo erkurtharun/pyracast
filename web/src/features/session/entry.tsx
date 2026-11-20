@@ -7,18 +7,6 @@ import { useSessionState } from "@/lib/session-client";
 import { RequireUser } from "./require-user";
 import { storedInvitation } from "@/features/workspace/workspace-invitation";
 
-const socialConnectKey = "pyracast.socialConnect";
-
-function takeSocialConnect(failed: boolean) {
-    try {
-        const connecting = window.sessionStorage.getItem(socialConnectKey);
-        window.sessionStorage.removeItem(socialConnectKey);
-        return Boolean(connecting) || failed;
-    } catch {
-        return failed;
-    }
-}
-
 const consoleRoot = "/admin/";
 const unprintable = /\\|(?! )[\p{C}\p{Z}]/u;
 
@@ -42,8 +30,8 @@ function consoleDestination(next: string | null) {
 function destination(canAdmin: boolean) {
     const { search } = window.location;
     const params = new URLSearchParams(search);
-    const callback = appQuery(params).socialCallback;
-    if (callback !== "none" && takeSocialConnect(callback === "failed"))
+    // A signed-in browser returns from a provider only to connect it.
+    if (appQuery(params).socialCallback !== "none")
         return { href: `${routes.account()}${search}`, document: true };
     if (storedInvitation()) return { href: routes.invitation() };
     if (canAdmin)

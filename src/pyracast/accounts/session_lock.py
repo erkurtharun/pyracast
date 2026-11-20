@@ -2,6 +2,7 @@ import hashlib
 import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from django.conf import settings
@@ -18,10 +19,19 @@ from pyracast.api.errors import coded, error_json
 from pyracast.errors import MESSAGES, ErrorCode
 
 _LOCK_TIMEOUT = "5s"
+_release: ContextVar[Callable[[], None]] = ContextVar(
+    "pyracast_session_release", default=lambda: None
+)
 
 
 class SessionBusyError(Exception):
     pass
+
+
+def release_session() -> None:
+    # Ends the serialization of the current request early: the request must not save its session
+    # after this call.
+    _release.get()()
 
 
 @contextmanager
@@ -46,17 +56,20 @@ def serialize_session(session_key: str) -> Iterator[None]:
         connection.close()
         raise
 
+    held = True
+
     def require_locked_connection(
         execute: Callable[..., Any], sql: str, params: Any, many: bool, context: Any
     ) -> Any:
-        if connection.connection is not locked_connection:
+        if held and connection.connection is not locked_connection:
             raise SessionInterrupted("The session serialization connection changed.")
         return execute(sql, params, many, context)
 
-    try:
-        with connection.execute_wrapper(require_locked_connection):
-            yield
-    finally:
+    def release() -> None:
+        nonlocal held
+        if not held:
+            return
+        held = False
         if connection.connection is not locked_connection or not connection.is_usable():
             connection.close()
             raise SessionInterrupted("The session serialization connection was lost.")
@@ -70,6 +83,14 @@ def serialize_session(session_key: str) -> Iterator[None]:
         except BaseException:
             connection.close()
             raise
+
+    token = _release.set(release)
+    try:
+        with connection.execute_wrapper(require_locked_connection):
+            yield
+    finally:
+        _release.reset(token)
+        release()
 
 
 class SessionRequestSerialization:

@@ -73,6 +73,14 @@ def error_codes(response: Any) -> list[str]:
     return [error["code"] for error in response.json()["errors"]]
 
 
+def stored_logins() -> list[str]:
+    with connections["auth_cache"].cursor() as cursor:
+        cursor.execute(
+            "SELECT value::text FROM pyracast_authentication_cache WHERE value ? 'account'"
+        )
+        return [value for (value,) in cursor.fetchall()]
+
+
 @pytest.mark.usefixtures("profile")
 def test_the_callback_verifies_the_login_and_signs_nobody_in() -> None:
     user = account("owner")
@@ -84,10 +92,13 @@ def test_the_callback_verifies_the_login_and_signs_nobody_in() -> None:
     assert (verified.status_code, verified["Location"]) == (302, CALLBACK)
     assert session_cookie(verified) is None
     assert session_user(client) is None
+    [stored] = stored_logins()
+    assert "test-access-token" not in stored
     completed = finish(client)
     assert completed.status_code == 200
     assert completed.json()["data"]["user"]["id"] == user.pk
     assert session_user(client) == user.pk
+    assert stored_logins() == []
 
 
 @pytest.mark.usefixtures("profile")
@@ -164,6 +175,20 @@ def test_a_completion_without_its_stored_login_is_refused_and_changes_nothing(
     assert response.status_code == 409
     assert list(SocialAccount.objects.values_list("user_id", "uid")) == identities
     assert mail.outbox == []
+
+
+@pytest.mark.usefixtures("profile")
+def test_a_completion_after_its_provider_was_disabled_is_refused() -> None:
+    user = account("owner")
+    SocialAccount.objects.create(user=user, provider="google", uid="google-identity")
+    client = browser()
+    assert callback(client, begin(client))["Location"] == CALLBACK
+
+    with override_settings(SOCIALACCOUNT_PROVIDERS={"microsoft": PROVIDERS["microsoft"]}):
+        response = finish(client)
+
+    assert response.status_code == 409
+    assert session_user(client) is None
 
 
 @pytest.mark.usefixtures("profile")

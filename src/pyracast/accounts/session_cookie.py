@@ -22,15 +22,22 @@ class SessionStore(db.SessionStore):
         self.found = self.session_key is not None
         return data
 
+    def stored_key(self) -> str | None:
+        # The key of the stored session the request carried, read now if it was not yet; None
+        # when it named none.
+        self.keys()
+        return self.session_key if self.found else None
+
 
 def lapse(request: HttpRequest) -> None:
     cast(SessionStore, request.session).lapsed = True
 
 
 def persist(request: HttpRequest) -> None:
-    # Saves a stored session in the open transaction, so its data commits with the account's. A
-    # session ended meanwhile is answered as ended, any other failure of the save as itself.
-    if request.session.session_key is None:
+    # Saves a changed stored session in the open transaction, so its data commits with the
+    # account's. A session ended meanwhile is answered as ended, any other failure of the save as
+    # itself.
+    if request.session.session_key is None or not request.session.modified:
         return
     try:
         request.session.save()

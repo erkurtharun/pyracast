@@ -149,10 +149,10 @@ def _rotate_after_reauthentication(
         record_activity(request, time.time())
 
 
+# allauth signals an authenticator activation and a recovery-code replacement only after their
+# commit; those writes end the other sessions in their own transaction (mfa_views).
 REVOKING_SIGNALS: dict[Signal, str] = {
-    mfa_signals.authenticator_added: "mfa_added",
     mfa_signals.authenticator_removed: "mfa_removed",
-    mfa_signals.authenticator_reset: "mfa_reset",
     account_signals.email_changed: "email_changed",
     account_signals.password_changed: "password_changed",
     account_signals.password_set: "password_set",

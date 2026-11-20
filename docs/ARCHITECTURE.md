@@ -531,9 +531,10 @@ Revoke sessions after 12 hours or 30 minutes without requests; polling of a visi
 tab counts as activity, and hidden tabs do not poll. Sessions predating the lifetime markers fail closed. A request
 whose session another session of the account ended while it ran answers 400
 `session_ended`, also when its own work committed; the client signs in again. A
-provider callback whose session ended before it took its provider state or during the
-provider exchange answers like one that finds nothing pending: it stores nothing and sends
-no session cookie. API
+provider callback only verifies: it stores the verified login for its stored session while
+the provider state lives and sends no session cookie (a session that ended before it took
+its state finds nothing pending). `POST auth/provider/complete` signs in or connects from
+that login once, a connection inside the account's credential write. API
 responses are private and non-cacheable. The frontend reads stored results and
 never handles provider credentials. A fixed public HTTPS origin determines
 security-email navigation. Account and invitation mail is stored as an outbound mail
@@ -580,8 +581,9 @@ reauthentication is insufficient. Platform administrators cannot remove TOTP.
 Requests sharing a valid session cookie serialize through a PostgreSQL advisory
 lock around session loading and response saving. This prevents concurrent code
 attempts or ordinary polling from overwriting security state. Acquisition waits
-at most five seconds before returning HTTP 429 with `Retry-After`; provider calls
-do not hold a database transaction. The default database connection must remain
+at most five seconds before returning HTTP 429 with `Retry-After`. The provider
+callback ends its serialization once it has taken its state, so provider calls hold no
+lock and no transaction. The default database connection must remain
 on one PostgreSQL session throughout the request: use a direct connection or an
 external session pool, never transaction-pooled PgBouncer. Django's built-in
 connection pool is rejected. Connection loss fails closed and releases the lock.

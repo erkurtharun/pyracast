@@ -260,6 +260,7 @@
         "linkedAccounts": "Connected accounts",
         "disconnect": "Disconnect",
         "removed": "Account disconnected.",
+        "connected": "Account connected.",
         "retry": "Try again",
         "loadError": "Connected accounts could not be loaded.",
         "connectAccount": "Connect an account"

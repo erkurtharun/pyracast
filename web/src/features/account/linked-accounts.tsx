@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { ApiError } from "@/lib/api/errors";
 import { authRequest, type AuthenticatorRecord } from "@/lib/auth-api";
 import { addressWithout, appQuery, callbackParams } from "@/lib/routes";
 import {
@@ -35,14 +36,14 @@ export function LinkedAccounts({
     const [accounts, setAccounts] = useState<ProviderAccount[]>();
     const [version, setVersion] = useState(0);
     const [error, setError] = useState<string>();
-    const [notice, setNotice] = useState(false);
+    const [notice, setNotice] = useState<"removed" | "connected">();
     const [busy, setBusy] = useState(false);
     const [reauth, setReauth] = useState<{
         mode: ReauthMode;
         pending: Pending;
     }>();
     const [canConnect, setCanConnect] = useState(false);
-    const [callbackError] = useState(
+    const [callbackError, setCallbackError] = useState(
         () =>
             typeof window !== "undefined" &&
             appQuery(new URLSearchParams(window.location.search))
@@ -50,13 +51,35 @@ export function LinkedAccounts({
     );
     useEffect(() => {
         const url = new URL(window.location.href);
-        if (appQuery(url.searchParams).socialCallback === "none") return;
+        const outcome = appQuery(url.searchParams).socialCallback;
+        if (outcome === "none") return;
         window.history.replaceState(
             window.history.state,
             "",
             addressWithout(url, callbackParams),
         );
-    }, []);
+        if (outcome !== "succeeded") return;
+        // The provider's redirect back only verified the identity; this request connects it.
+        authRequest<ProviderAccount[]>("auth/provider/complete", "POST")
+            .then(async (result) => {
+                if (result.status === 401) {
+                    if (!result.meta?.is_authenticated)
+                        await refreshExpiredSession(security("sessionExpired"));
+                    setReauth({
+                        mode: getReauthMode(result, hasPassword),
+                        pending: { kind: "connect" },
+                    });
+                    return;
+                }
+                setVersion((v) => v + 1);
+                setNotice("connected");
+            })
+            .catch((err) => {
+                if (err instanceof ApiError && err.status === 400)
+                    setError(err.message);
+                else setCallbackError(true);
+            });
+    }, [hasPassword, security]);
     useEffect(() => {
         let active = true;
         authRequest<ProviderAccount[]>("account/providers", "GET")
@@ -84,7 +107,7 @@ export function LinkedAccounts({
     async function confirmConnection() {
         setBusy(true);
         setError(undefined);
-        setNotice(false);
+        setNotice(undefined);
         try {
             const result = await authRequest<AuthenticatorRecord[]>(
                 "account/authenticators",
@@ -109,7 +132,7 @@ export function LinkedAccounts({
     async function disconnect(account: ProviderAccount, replay = false) {
         setBusy(true);
         setError(undefined);
-        setNotice(false);
+        setNotice(undefined);
         try {
             const result = await authRequest("account/providers", "DELETE", {
                 provider: account.provider.id,
@@ -126,7 +149,7 @@ export function LinkedAccounts({
                 return;
             }
             setReauth(undefined);
-            setNotice(true);
+            setNotice("removed");
             setVersion((v) => v + 1);
         } catch (err) {
             setError(err instanceof Error ? err.message : t("loadError"));
@@ -140,7 +163,8 @@ export function LinkedAccounts({
         !providers.length &&
         !notice &&
         !error &&
-        !callbackError
+        !callbackError &&
+        !reauth
     )
         return null;
     return (
@@ -168,7 +192,7 @@ export function LinkedAccounts({
                     </button>
                 </div>
             )}
-            {notice && <p role="status">{t("removed")}</p>}
+            {notice && <p role="status">{t(notice)}</p>}
             {accounts?.map((account) => (
                 <div
                     className="linked-provider"

@@ -14,6 +14,7 @@ from pyracast.accounts.mfa_views import (
 )
 from pyracast.accounts.signup import CompanySignupView
 from pyracast.accounts.social_views import (
+    CompleteProviderLoginView,
     ManageProvidersView,
     ProviderSignupView,
     RedirectToProviderView,
@@ -60,6 +61,10 @@ urlpatterns = [
         name="provider_redirect",
     ),
     path("auth/provider/signup", ProviderSignupView.as_api_view(client=Client.BROWSER)),
+    path(
+        "auth/provider/complete",
+        require_POST(CompleteProviderLoginView.as_api_view(client=Client.BROWSER)),
+    ),
     path(
         "account/email",
         require_http_methods(["GET", "POST", "DELETE"])(

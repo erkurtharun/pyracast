@@ -54,18 +54,6 @@ export function SocialProviderButtons({
                     key={provider}
                     action="/api/auth/browser/v1/auth/provider/redirect"
                     method="post"
-                    onSubmit={() => {
-                        if (process === "connect") {
-                            try {
-                                window.sessionStorage.setItem(
-                                    "pyracast.socialConnect",
-                                    "1",
-                                );
-                            } catch {
-                                // Browser privacy settings can disable session storage.
-                            }
-                        }
-                    }}
                 >
                     <input
                         type="hidden"

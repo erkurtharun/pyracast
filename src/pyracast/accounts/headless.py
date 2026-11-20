@@ -33,6 +33,7 @@ from pyracast.accounts.processes import (
     AuthorityChangedError,
     StartingView,
     authorize_credential_write,
+    code_account,
     confirmation,
     continuing,
     credential_write,
@@ -151,10 +152,10 @@ class VerifyEmailView(StepUpAnswers, views.VerifyEmailView):
                 require_authority(request, EMAIL_VERIFICATION_CODE_SESSION_KEY)
                 if self.stage:
                     require_authority(request, LOGIN_SESSION_KEY)
-                else:
+                elif code_account(process.state) == request.user.pk:
                     # A signed-in session completing a change of its own address also needs its
                     # authority record; a change that ended the code answers above as nothing
-                    # pending.
+                    # pending. A code of another account rests on that code's stamp alone.
                     authorize_credential_write(request)
                 email_address = process.finish()
                 response = None

@@ -93,6 +93,16 @@ test("social signup restores invitation and does not request a password", async 
             },
         }),
     );
+    await page.route("**/api/auth/browser/v1/auth/provider/complete", (route) =>
+        route.fulfill({
+            status: 401,
+            json: {
+                status: 401,
+                data: { flows: [{ id: "provider_signup", is_pending: true }] },
+                meta: { is_authenticated: false },
+            },
+        }),
+    );
     await page.route(
         "**/api/auth/browser/v1/auth/provider/signup",
         async (route) => {
@@ -496,6 +506,16 @@ test("a rejected social signup email keeps an explicit sign-in and link path", a
             },
         }),
     );
+    await page.route("**/api/auth/browser/v1/auth/provider/complete", (route) =>
+        route.fulfill({
+            status: 401,
+            json: {
+                status: 401,
+                data: { flows: [{ id: "provider_signup", is_pending: true }] },
+                meta: { is_authenticated: false },
+            },
+        }),
+    );
     await page.route("**/api/auth/browser/v1/auth/provider/signup", (route) =>
         route.request().method() === "GET"
             ? route.fulfill({
@@ -536,13 +556,6 @@ test("connecting returns to account settings and consumes an expired-confirmatio
     page,
 }) => {
     await mockApi(page);
-    await page.addInitScript(() => {
-        if (
-            location.pathname === "/app/" &&
-            location.search.includes("social_callback")
-        )
-            sessionStorage.setItem("pyracast.socialConnect", "1");
-    });
     await page.goto(
         "/app/?social_callback=1&error=reauthentication_required&error_process=connect",
     );
@@ -562,4 +575,150 @@ test("connecting returns to account settings and consumes an expired-confirmatio
     await expect(
         page.getByRole("region", { name: "Connected accounts" }),
     ).toHaveCount(0);
+});
+
+test("a provider sign-in completes on return and opens the workspace", async ({
+    page,
+}) => {
+    await mockApi(page, { anonymous: true });
+    let completed = false;
+    await page.route(
+        "**/api/auth/browser/v1/auth/provider/complete",
+        (route) => {
+            expect(route.request().method()).toBe("POST");
+            completed = true;
+            return route.fulfill({
+                json: { status: 200, meta: { is_authenticated: true } },
+            });
+        },
+    );
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: {
+                user: completed ? user : null,
+                csrf_token: completed ? "signed-token" : "anonymous-token",
+            },
+        }),
+    );
+    await page.goto("/app/?social_callback=1");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    await expect(page).not.toHaveURL(/social_callback/);
+});
+
+test("a provider sign-in that needs the second factor asks for it", async ({
+    page,
+}) => {
+    await mockApi(page, { anonymous: true });
+    const pending = {
+        status: 401,
+        json: {
+            status: 401,
+            data: { flows: [{ id: "mfa_authenticate", is_pending: true }] },
+            meta: { is_authenticated: false },
+        },
+    };
+    await page.route("**/api/auth/browser/v1/auth/provider/complete", (route) =>
+        route.fulfill(pending),
+    );
+    await page.route("**/api/auth/browser/v1/auth/session", (route) =>
+        route.fulfill(pending),
+    );
+    await page.goto("/app/?social_callback=1");
+    await expect(
+        page.getByRole("heading", { name: "Two-factor authentication" }),
+    ).toBeVisible();
+    await expect(page.locator(".notice.error")).toHaveCount(0);
+});
+
+const connectedAccount = {
+    provider: { id: "google", name: "Google" },
+    uid: "account-42",
+    display: "solar@example.test",
+};
+
+async function connectingAccount(
+    page: Parameters<typeof mockApi>[0],
+    completion: { status: number; json: unknown },
+) {
+    await mockApi(page);
+    await page.route("**/api/auth/browser/v1/config", (route) =>
+        route.fulfill({
+            json: {
+                status: 200,
+                data: { socialaccount: { providers: [{ id: "google" }] } },
+            },
+        }),
+    );
+    let connected = false;
+    await page.route("**/api/auth/browser/v1/account/providers", (route) =>
+        route.fulfill({
+            json: { status: 200, data: connected ? [connectedAccount] : [] },
+        }),
+    );
+    await page.route(
+        "**/api/auth/browser/v1/auth/provider/complete",
+        (route) => {
+            connected = completion.status === 200;
+            return route.fulfill(completion);
+        },
+    );
+    await page.goto("/app/?social_callback=1");
+    return page.getByRole("region", { name: "Connected accounts" });
+}
+
+test("a provider connection completes on return to account settings", async ({
+    page,
+}) => {
+    const accounts = await connectingAccount(page, {
+        status: 200,
+        json: { status: 200, data: [connectedAccount] },
+    });
+    await expect(
+        accounts.getByText("Account connected.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        accounts.getByRole("button", { name: "Disconnect solar@example.test" }),
+    ).toBeVisible();
+    await expect(page).not.toHaveURL(/social_callback/);
+});
+
+test("a provider connection that needs a confirmation asks for the factor it names", async ({
+    page,
+}) => {
+    const accounts = await connectingAccount(page, {
+        status: 401,
+        json: {
+            status: 401,
+            data: { flows: [{ id: "mfa_reauthenticate" }] },
+            meta: { is_authenticated: true },
+            errors: [
+                {
+                    code: "mfa_reauthentication_required",
+                    message: "Confirm with your authenticator to continue.",
+                },
+            ],
+        },
+    });
+    await expect(
+        accounts.getByLabel("Authenticator or recovery code", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        accounts.getByLabel("Current password", { exact: true }),
+    ).toHaveCount(0);
+});
+
+test("a provider connection to another account's identity says so", async ({
+    page,
+}) => {
+    const message =
+        "The social account is already connected to a different account.";
+    const accounts = await connectingAccount(page, {
+        status: 400,
+        json: allauthErrorBody(400, "invalid_request", [
+            { code: "connected_other", message },
+        ]),
+    });
+    await expect(accounts.getByRole("alert")).toContainText(message);
 });
