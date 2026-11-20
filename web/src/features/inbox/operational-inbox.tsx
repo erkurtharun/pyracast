@@ -7,6 +7,7 @@ import { DisplayError } from "@/lib/api/errors";
 import { cadence, useApiQuery, useRefresh } from "@/lib/api/query";
 import { MISSING } from "@/lib/format/number";
 import { useFormat } from "@/lib/format/use-format";
+import { qualityOf } from "@/lib/production";
 import type { components } from "@/lib/schema";
 import { ActionForm, TextAreaField, useErrorMessage } from "@/ui/form";
 import { Notice, RefreshFailed } from "@/ui/ui";
@@ -29,8 +30,6 @@ const ZONED_TIME: Intl.DateTimeFormatOptions = {
 
 type ChangeRequest = components["schemas"]["ChangeRequestOutput"];
 type IncidentKind = components["schemas"]["IncidentKindEnum"];
-// The serializer types the stored choice as a string; the column holds only these values.
-type ObservationQuality = components["schemas"]["ObservationQualityEnum"];
 type Summary = components["schemas"]["ChangeRequestSummaryOutput"];
 type Scope = "pending" | "history" | "mine";
 type Reading = components["schemas"]["ProductionValueOutput"];
@@ -609,11 +608,8 @@ function ReadingValue({ value }: { value: Reading | null }) {
                 {format.quantity(value.energy_mwh, "MWh", 6)}
             </p>
             <p>
-                {label(
-                    "ObservationQuality",
-                    value.quality as ObservationQuality,
-                )}{" "}
-                · {value.source_kind === "manual" ? t("manual") : t("provider")}
+                {label("ObservationQuality", qualityOf(value.quality))} ·{" "}
+                {value.source_kind === "manual" ? t("manual") : t("provider")}
             </p>
         </>
     ) : (
