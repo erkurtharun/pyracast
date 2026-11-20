@@ -122,7 +122,7 @@ def test_connection_errors_are_safe_and_preserve_input(
         def removed_plant(*args: object, **kwargs: object) -> None:
             raise Plant.DoesNotExist(provider_detail)
 
-        monkeypatch.setattr("pyracast.admin.connect_epias", removed_plant)
+        monkeypatch.setattr("pyracast.platform_admin.plant_review.connect_epias", removed_plant)
     if error == "configuration":
         system.region.status = "suspended"
         system.region.save(update_fields=("status",))

@@ -14,8 +14,8 @@ from django.utils import translation
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.language import RequestLanguage, save_user_language
 from pyracast.accounts.models import UserLanguagePreference
-from pyracast.admin_workspace import recent_activity_context
 from pyracast.languages import LANGUAGE_COOKIE, Language, browser_language
+from pyracast.platform_admin.read_models import recent_activity_context
 from pyracast.regions.models import AuditEvent
 from tests.support.admin_setup import admin_system
 from tests.support.api import verified_admin

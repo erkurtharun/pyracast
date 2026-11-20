@@ -1,7 +1,7 @@
 {% extends "admin/change_form.html" %}
 {% load i18n %}
 {% block object-tools-items %}
-  {% if original and not original.deleted_at %}
+  {% if original %}
     <li><a href="{% url 'admin:workspace_plant' original.pk %}">{% translate "Review and set up provider" %}</a></li>
   {% endif %}
   {{ block.super }}

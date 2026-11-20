@@ -58,6 +58,8 @@ if (uploadForm instanceof HTMLFormElement) {
         status.textContent = `${uploadForm.dataset.saved} ${uploadForm.dataset.intervals}: ${payload.interval_count}.`;
         status.tabIndex = -1;
         status.focus();
+      } else if (typeof payload.message === "string") {
+        status.textContent = payload.message;
       } else {
         result.innerHTML = payload.html;
         token.value = payload.token;

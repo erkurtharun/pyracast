@@ -2,7 +2,6 @@ from django.urls import include, path
 
 from pyracast import health
 from pyracast.accounts.social_views import provider_callback
-from pyracast.admin import site
 from pyracast.api import error_pages
 from pyracast.api.csp_reports import CSPReportView
 from pyracast.api.session import SessionLanguageView, SessionView
@@ -17,6 +16,7 @@ from pyracast.api.workspaces import (
 )
 from pyracast.forecasts.views import CollectionScheduleView
 from pyracast.plants.site_api import SitesView
+from pyracast.platform_admin.site import site
 
 handler400 = error_pages.bad_request
 handler403 = error_pages.permission_denied

@@ -202,9 +202,6 @@ msgstr ""
 "Devam etmeden önce bir inceleme işlemi seçin ve güncel santrali yeniden "
 "yükleyin."
 
-msgid "Choose a setup action."
-msgstr "Bir kurulum işlemi seçin."
-
 msgid "Clear"
 msgstr "Temizle"
 
@@ -1492,9 +1489,6 @@ msgstr "konum değişikliği"
 msgid "of"
 msgstr "/"
 
-msgid "per plant"
-msgstr "santral başına"
-
 msgid "plant"
 msgstr "santral"
 
@@ -1503,9 +1497,6 @@ msgid ""
 msgstr ""
 "ilk tahmini sıraya alır. Müşteriler verileri ancak kaydedildikten sonra "
 "görür."
-
-msgid "recipient"
-msgstr "alıcı"
 
 msgid ""
 "sends a real Solcast request and uses the selected account's daily quota."
@@ -2593,3 +2584,33 @@ msgid ""
 msgstr ""
 "Ulaşmış olabilirler ve yeniden gönderilmezler; kişi veya yönetici yeniden "
 "isteyebilir."
+
+msgid "%(counter)s recipient per plant"
+msgid_plural "%(counter)s recipients per plant"
+msgstr[0] "Santral başına %(counter)s alıcı"
+msgstr[1] "Santral başına %(counter)s alıcı"
+
+msgid "Stale"
+msgstr "Güncel değil"
+
+msgid "Superseded"
+msgstr "Yerini yenisi aldı"
+
+msgid ""
+"Another change to this record is in progress, so nothing was saved. Try "
+"again in a moment."
+msgstr ""
+"Bu kayıtta başka bir değişiklik sürüyor; hiçbir şey kaydedilmedi. Biraz "
+"sonra yeniden deneyin."
+
+msgid "The change took too long, so nothing was saved. Try again in a moment."
+msgstr ""
+"Değişiklik çok uzun sürdü; hiçbir şey kaydedilmedi. Biraz sonra yeniden "
+"deneyin."
+
+msgid ""
+"This connection was validated after this page opened. Reload the page "
+"before validating again."
+msgstr ""
+"Bu bağlantı, sayfa açıldıktan sonra doğrulandı. Yeniden doğrulamadan önce "
+"sayfayı yenileyin."

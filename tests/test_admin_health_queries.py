@@ -4,12 +4,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from django.db import connection
 
-from pyracast.admin_health_queries import (
-    collection_jobs_for_issue,
-    metering_jobs_for_issue,
-    notification_deliveries_for_issue,
-    regions_for_issue,
-)
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -21,6 +15,12 @@ from pyracast.forecasts.monitoring import delivery_health
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.scheduler import PREPARATION_GRACE
+from pyracast.platform_admin.health_queries import (
+    collection_jobs_for_issue,
+    metering_jobs_for_issue,
+    notification_deliveries_for_issue,
+    regions_for_issue,
+)
 from pyracast.regions.models import Region
 from tests.support.domain import System, make_system
 from tests.support.metering import connected

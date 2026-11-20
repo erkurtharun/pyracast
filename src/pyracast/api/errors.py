@@ -20,7 +20,6 @@ from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone, translation
 from django.utils.cache import patch_cache_control
 from django.utils.translation import gettext
-from psycopg.errors import DeadlockDetected, LockNotAvailable, QueryCanceled
 from rest_framework import exceptions
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
@@ -30,7 +29,13 @@ from pyracast.accounts.audit import SecurityEvent, record_refusal
 from pyracast.accounts.language import request_language
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.operations import QuotaExceededError, RequestDeferredError
-from pyracast.errors import MESSAGES, DomainError, ErrorCode, ForbiddenError
+from pyracast.errors import (
+    MESSAGES,
+    DomainError,
+    ErrorCode,
+    ForbiddenError,
+    retryable_database_code,
+)
 
 logger = logging.getLogger("pyracast.api")
 
@@ -163,14 +168,11 @@ def _provider(error: QuotaExceededError | ProviderError) -> ApiError:
 
 
 def _database(error: DatabaseError, request: HttpRequest | None, view: str) -> ApiError | None:
-    if isinstance(error.__cause__, LockNotAvailable):
-        return coded(ErrorCode.BUSY, 503, retry_after=1)
-    if isinstance(error.__cause__, DeadlockDetected):
-        return coded(ErrorCode.DATABASE_CONFLICT, 503, retry_after=1)
-    if isinstance(error.__cause__, QueryCanceled):
+    code = retryable_database_code(error)
+    if code == ErrorCode.REQUEST_TIMEOUT:
         request_id = log_server_error(request, view, error, code="request_timeout")
-        return coded(ErrorCode.REQUEST_TIMEOUT, 503, request_id=request_id)
-    return None
+        return coded(code, 503, request_id=request_id)
+    return None if code is None else coded(code, 503, retry_after=1)
 
 
 _STATUS_CODES: Mapping[int, ErrorCode] = {

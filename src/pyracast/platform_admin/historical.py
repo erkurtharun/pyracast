@@ -7,12 +7,13 @@ from django.contrib.auth.models import User
 from django.core import signing
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
-from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
+from django.views.decorators.http import require_http_methods
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.historical_upload import (
@@ -22,10 +23,11 @@ from pyracast.forecasts.historical_upload import (
     preview_historical_upload,
 )
 from pyracast.plants.models import Plant
+from pyracast.platform_admin.failures import wants_json
 from pyracast.regions.models import Region
 
 if TYPE_CHECKING:
-    from pyracast.admin import PlatformAdminSite
+    from pyracast.platform_admin.site import PlatformAdminSite
 
 PREVIEW_SALT = "historical-upload-preview-v1"
 SOURCE_LABELS = {
@@ -112,12 +114,11 @@ def _configuration_identity(region: Region, binding: SiteBinding) -> dict[str, A
     }
 
 
+@require_http_methods(["GET", "POST"])
 def historical_import(
-    site: PlatformAdminSite, request: HttpRequest, object_id: int
+    request: HttpRequest, region_id: int, *, site: PlatformAdminSite
 ) -> HttpResponse:
-    if request.method not in {"GET", "POST"}:
-        return HttpResponseNotAllowed(("GET", "POST"))
-    region = get_object_or_404(Region.objects.active().select_related("tenant"), pk=object_id)
+    region = get_object_or_404(Region.objects.active().select_related("tenant"), pk=region_id)
     binding = (
         SiteBinding.objects.select_related("provider_account", "region")
         .filter(region=region, region_revision=region.revision, pk=region.approved_binding_id or 0)
@@ -188,7 +189,7 @@ def historical_import(
                         request,
                         _("Historical data saved. Repeated uploads reuse the existing import."),
                     )
-                    if request.headers.get("Accept") == "application/json":
+                    if wants_json(request):
                         return JsonResponse(
                             {
                                 "saved": True,
@@ -196,7 +197,7 @@ def historical_import(
                                 "interval_count": preview.interval_count,
                             }
                         )
-                    return redirect("admin:workspace_historical_import", object_id=region.pk)
+                    return redirect("admin:workspace_historical_import", region_id=region.pk)
                 if action != "preview":
                     raise ValidationError(_("Choose an upload action."))
                 token = signing.dumps(identity, salt=PREVIEW_SALT, compress=True)
@@ -221,7 +222,7 @@ def historical_import(
         "title": _("Import historical Solcast data"),
     }
     status = 400 if form.errors else 200
-    if request.method == "POST" and request.headers.get("Accept") == "application/json":
+    if request.method == "POST" and wants_json(request):
         return JsonResponse(
             {
                 "html": render_to_string(

@@ -3,12 +3,16 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
-from pyracast.admin_workspace import operations_context, plant_list_context, recent_work_context
 from pyracast.forecasts.models import DispatcherPhase
 from pyracast.forecasts.monitoring import record_dispatch_phase
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.scheduler import PREPARATION_GRACE
+from pyracast.platform_admin.read_models import (
+    operations_context,
+    plant_list_context,
+    recent_work_context,
+)
 from tests.support.api import verified_admin
 from tests.support.delivery_health import NOW, recent_forecast
 from tests.support.metering import connected

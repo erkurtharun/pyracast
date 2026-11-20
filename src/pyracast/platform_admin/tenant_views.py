@@ -16,8 +16,9 @@ from pyracast.accounts.invitations import (
 )
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
 from pyracast.accounts.operations import remove_workspace_member
-from pyracast.admin_forms import form_data, form_page, submitted
-from pyracast.admin_tenants import (
+from pyracast.plants.models import Plant
+from pyracast.platform_admin.forms import form_data, form_page, submitted
+from pyracast.platform_admin.tenants import (
     InvitationForm,
     WorkspaceAdministratorForm,
     WorkspaceForm,
@@ -28,10 +29,9 @@ from pyracast.admin_tenants import (
     tenant_list_context,
     workspace_context,
 )
-from pyracast.plants.models import Plant
 
 if TYPE_CHECKING:
-    from pyracast.admin import PlatformAdminSite
+    from pyracast.platform_admin.site import PlatformAdminSite
 
 
 def _actor(request: HttpRequest) -> User:

@@ -893,7 +893,7 @@ def test_csrf_refusal_on_every_other_api_route_is_the_coded_body(mode: str) -> N
     assert {path: refusal for path, refusal in refusals.items() if refusal != expected} == {}
 
 
-def test_busy_session_navigation_reloads_once_then_explains() -> None:
+def test_busy_console_reads_reload_once_then_explain_and_writes_never_reload() -> None:
     client = Client()
     client.cookies["sessionid"] = "a" * 32
     with pytest.MonkeyPatch.context() as patch:
@@ -910,8 +910,9 @@ def test_busy_session_navigation_reloads_once_then_explains() -> None:
     assert "Refresh" not in second
     assert second["Content-Type"].startswith("text/html")
     assert filtered["Refresh"] == "1; url=/admin/?q=solar&session_retry=1"
-    assert reload.status_code == 429
-    assert reload.json()["code"] == "session_busy"
+    assert reload.status_code == 503
+    assert reload["Content-Type"].startswith("text/html")
+    assert "Refresh" not in reload
 
 
 def test_busy_session_api_navigation_keeps_the_json_body() -> None:

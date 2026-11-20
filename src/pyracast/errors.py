@@ -2,8 +2,9 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import models
+from django.db import DatabaseError, models
 from django.utils.translation import gettext_lazy as _
+from psycopg.errors import DeadlockDetected, LockNotAvailable, QueryCanceled
 
 if TYPE_CHECKING:
     from django_stubs_ext import StrOrPromise, StrPromise
@@ -235,3 +236,17 @@ class ForbiddenError(PermissionDenied):
     def __init__(self, code: ErrorCode) -> None:
         super().__init__(MESSAGES[code])
         self.code = code
+
+
+_RETRYABLE_DATABASE_FAILURES: tuple[tuple[type[Exception], ErrorCode], ...] = (
+    (LockNotAvailable, ErrorCode.BUSY),
+    (DeadlockDetected, ErrorCode.DATABASE_CONFLICT),
+    (QueryCanceled, ErrorCode.REQUEST_TIMEOUT),
+)
+
+
+def retryable_database_code(error: DatabaseError) -> ErrorCode | None:
+    return next(
+        (code for kind, code in _RETRYABLE_DATABASE_FAILURES if isinstance(error.__cause__, kind)),
+        None,
+    )

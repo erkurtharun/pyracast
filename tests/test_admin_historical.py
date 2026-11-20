@@ -9,9 +9,9 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
 from django.urls import reverse
 
-from pyracast.admin_historical import PREVIEW_SALT
 from pyracast.forecasts.models import HistoricalReferenceImport
 from pyracast.plants.models import Plant
+from pyracast.platform_admin.historical import PREVIEW_SALT
 from pyracast.regions.models import RegionStatus
 from tests.support.api import verified_admin
 from tests.support.historical_reference_import import system_for_import

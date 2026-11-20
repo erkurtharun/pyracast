@@ -311,6 +311,6 @@ def test_provider_credentials_are_removed_from_nested_public_data(technical: boo
 
 
 def test_provider_accounts_are_not_registered_in_admin() -> None:
-    from pyracast.admin import site
+    from pyracast.platform_admin.site import site
 
     assert not site.is_registered(ProviderAccount)

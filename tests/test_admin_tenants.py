@@ -7,7 +7,7 @@ from django.http import QueryDict
 from django.test import Client
 
 from pyracast.accounts.models import Membership, Tenant
-from pyracast.admin_tenants import WorkspaceAdministratorForm, tenant_list_context
+from pyracast.platform_admin.tenants import WorkspaceAdministratorForm, tenant_list_context
 from tests.support.api import verified_admin
 
 pytestmark = pytest.mark.django_db
@@ -132,7 +132,7 @@ def test_workspace_admin_form_handles_concurrent_membership_change(monkeypatch: 
     def removed(*_args: Any, **_kwargs: Any) -> None:
         raise ValidationError("The selected member is no longer active.")
 
-    monkeypatch.setattr("pyracast.admin_tenants.reassign_workspace_admin", removed)
+    monkeypatch.setattr("pyracast.platform_admin.tenants.reassign_workspace_admin", removed)
     response = client.post(
         f"/admin/workspaces/{tenant.pk}/administrator/",
         {"administrator": viewer.pk, "expected_admin_id": owner.pk},

@@ -7,7 +7,7 @@
 {% block lead %}
   <p class="lead"><a href="{% url 'admin:workspace_tenant' region.tenant_id %}">{{ region.tenant.name }}</a>{% if plant_summary.plant_name and plant_summary.plant_name != region.name %} · {{ region.name }}{% endif %}</p>
   <dl class="state-strip">
-    <div><dt>{% translate "Review" context "review status" %}</dt><dd><span class="badge badge--{{ region.status|slugify }}">{% if region.status == "pending" %}{% translate "Awaiting approval" %}{% else %}{% translate region.status|capfirst %}{% endif %}</span></dd></div>
+    <div><dt>{% translate "Review" context "review status" %}</dt><dd><span class="badge badge--{{ region.status|slugify }}">{{ region.get_status_display }}</span></dd></div>
     <div><dt>{% translate "Connection" %}</dt><dd>{% if plant_summary %}<span class="badge badge--{{ plant_summary.connection|slugify }}">{% translate plant_summary.connection %}</span>{% elif binding %}<span class="badge">{% translate binding.health|capfirst %}</span>{% else %}<span class="badge badge--not-configured">{% translate "Not configured" %}</span>{% endif %}</dd></div>
     <div><dt>{% translate "Last saved forecast" %}</dt><dd>{% if last_collected_at %}<time datetime="{{ last_collected_at|date:'c' }}">{{ last_collected_at|date:"j M Y, H:i T" }}</time>{% else %}<span class="muted">{% translate "None saved yet" %}</span>{% endif %}</dd></div>
   </dl>
@@ -38,7 +38,7 @@
       <li class="step{% if plants %} step--done{% endif %}"><span class="step-state">{% if plants %}{% translate "Done" %}{% else %}{% translate "To do" %}{% endif %}</span><span class="step-name">{% translate "Plant submitted" %}</span></li>
       <li class="step{% if binding %} step--done{% endif %}"><span class="step-state">{% if binding %}{% translate "Done" %}{% else %}{% translate "To do" %}{% endif %}</span><span class="step-name">{% translate "Private connection saved" %}</span></li>
       <li class="step{% if can_approve or plant_summary.connection == "Healthy" %} step--done{% endif %}"><span class="step-state">{% if can_approve or plant_summary.connection == "Healthy" %}{% translate "Done" %}{% else %}{% translate "To do" %}{% endif %}</span><span class="step-name">{% translate "Connection validated" %}</span></li>
-      <li class="step{% if region.status == "approved" %} step--done{% endif %}"><span class="step-state">{% if region.status == "approved" %}{% translate "Done" %}{% elif region.status == "pending" %}{% translate "To do" %}{% else %}{% translate region.status|capfirst %}{% endif %}</span><span class="step-name">{% translate "Plant approved" %}</span></li>
+      <li class="step{% if region.status == "approved" %} step--done{% endif %}"><span class="step-state">{% if region.status == "approved" %}{% translate "Done" %}{% elif region.status == "pending" %}{% translate "To do" %}{% else %}{{ region.get_status_display }}{% endif %}</span><span class="step-name">{% translate "Plant approved" %}</span></li>
     </ol>
   </section>
 
