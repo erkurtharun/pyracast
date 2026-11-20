@@ -251,7 +251,8 @@
         "LocationChangeStatus": {
             "pending": "In review",
             "approved": "Approved",
-            "rejected": "Rejected"
+            "rejected": "Rejected",
+            "withdrawn": "Withdrawn"
         },
         "Freshness": {
             "fresh": "Fresh",

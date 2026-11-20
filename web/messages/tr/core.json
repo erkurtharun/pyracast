@@ -251,7 +251,8 @@
         "LocationChangeStatus": {
             "pending": "İncelemede",
             "approved": "Onaylandı",
-            "rejected": "Reddedildi"
+            "rejected": "Reddedildi",
+            "withdrawn": "Geri çekildi"
         },
         "Freshness": {
             "fresh": "Güncel",
