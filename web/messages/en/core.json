@@ -309,16 +309,30 @@
             "history_window_closed": "Morning retry window ended",
             "attempts_exhausted": "Retry limit reached",
             "forecast_superseded": "Replaced by the latest scheduled collection",
+            "binding_not_current": "The provider connection is not approved and current",
+            "schedule_disabled": "Data collection is paused",
+            "slot_not_configured": "This time is no longer in the schedule",
+            "schedule_changed": "Replaced after the schedule changed",
             "history_incomplete": "Historical data is incomplete",
-            "history_already_archived": "Historical data was already saved",
-            "provider_authentication_failed": "Connection credentials need attention from Pyracast support",
+            "history_already_archived": "History was already collected",
+            "provider_authentication_failed": "Connection credentials need administrator attention",
+            "provider_allowance_exhausted": "The provider account's daily allowance is used up; retrying after it resets",
+            "provider_access_denied": "The provider denied access to this site",
+            "provider_site_not_found": "The provider does not know this site",
             "provider_throttled": "Waiting for the provider's request limit to reset",
+            "provider_server_error": "The provider had a server error",
+            "provider_unreachable": "The provider could not be reached",
+            "provider_invalid_response": "Unexpected provider data",
+            "provider_configuration_invalid": "The provider connection settings need administrator attention",
+            "account_unavailable": "The provider account is paused",
             "history_budget_reserved": "Remaining budget is reserved for forecasts",
             "quota_exhausted": "Daily account budget exhausted",
             "provider_failure": "Provider request failed",
-            "provider_unexpected_failure": "The provider answered with an unexpected failure",
+            "provider_unexpected_failure": "Collection could not be completed",
             "invalid_source_kind": "Unexpected provider data",
-            "calculation_failure": "Forecast calculation failed"
+            "calculation_failure": "Forecast calculation failed",
+            "lock_contention": "The system was busy; retrying",
+            "publication_failure": "Saving the collection failed; retrying"
         },
         "NotificationDeliveryStatus": {
             "pending": "Preparing",
@@ -360,6 +374,15 @@
         "WorkspaceRole": {
             "admin": "Workspace administrator",
             "viewer": "Member"
+        },
+        "ReminderState": {
+            "sending": "Enabled",
+            "paused_by_user": "Paused",
+            "waiting_for_approval": "Waiting for approval",
+            "provider_attention": "Provider account needs attention",
+            "no_recipients": "Not sent because no recipient is left.",
+            "invalid_recipient": "Not sent because a saved recipient address is invalid.",
+            "over_recipient_limit": "Not sent because the plant has more recipients than the limit allows."
         }
     }
 }

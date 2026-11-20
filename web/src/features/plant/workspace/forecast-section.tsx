@@ -5,10 +5,10 @@ import { cadence } from "@/lib/api/query";
 import type { PlantAddress, PlantView } from "@/lib/routes";
 import {
     DataSourceControl,
-    localDay,
     type DataSource,
 } from "@/features/forecast/data-source";
 import { ViewNav } from "@/ui/action";
+import { plantDay } from "@/lib/format/time";
 import { ControlField } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { PlantForecast } from "./forecast-reading";
@@ -40,7 +40,7 @@ export function ForecastSection({
 }) {
     const t = useTranslations("PlantWorkspace");
     const { resolution, source } = options;
-    const today = localDay(timezone);
+    const today = plantDay(timezone);
     const pastOnly =
         source === "estimated_actuals" || source === "archived_forecast";
     const leavingGeneration = leaving && view === "generation";
@@ -74,7 +74,7 @@ export function ForecastSection({
                         if (
                             (next === "estimated_actuals" ||
                                 next === "archived_forecast") &&
-                            (baseDate || localDay(timezone, 1)) > today
+                            (baseDate || plantDay(timezone, 1)) > today
                         )
                             setDate(today);
                     }}
@@ -99,7 +99,7 @@ export function ForecastSection({
                         </select>
                     </ControlField>
                 )}
-                <span className="fine">{t("localDates", { timezone })}</span>
+                <span className="fine">{t("localDates")}</span>
             </div>
             {source === "estimated_actuals" && date > today ? (
                 <Notice>{t("selectTodayOrPastDay")}</Notice>
@@ -115,7 +115,7 @@ export function ForecastSection({
                     source={source}
                     poll={
                         source !== "archived_forecast" &&
-                        date >= localDay(timezone, -1)
+                        date >= plantDay(timezone, -1)
                             ? cadence.live
                             : false
                     }

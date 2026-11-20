@@ -309,16 +309,30 @@
             "history_window_closed": "Sabah yeniden deneme süresi doldu",
             "attempts_exhausted": "Yeniden deneme sınırına ulaşıldı",
             "forecast_superseded": "Yerine en son planlanan veri toplama geçti",
+            "binding_not_current": "Sağlayıcı bağlantısı onaylı ve güncel değil",
+            "schedule_disabled": "Veri toplama duraklatıldı",
+            "slot_not_configured": "Bu saat artık planda yok",
+            "schedule_changed": "Plan değiştiği için yerine yenisi geldi",
             "history_incomplete": "Geçmiş verileri eksik",
-            "history_already_archived": "Geçmiş verileri zaten kaydedilmişti",
-            "provider_authentication_failed": "Bağlantı kimlik bilgileri için Pyracast desteğinin müdahalesi gerekiyor",
+            "history_already_archived": "Geçmiş zaten toplandı",
+            "provider_authentication_failed": "Bağlantı kimlik bilgileri için yönetici müdahalesi gerekiyor",
+            "provider_allowance_exhausted": "Sağlayıcı hesabının günlük hakkı doldu; sıfırlandıktan sonra yeniden denenecek",
+            "provider_access_denied": "Sağlayıcı bu konuma erişimi reddetti",
+            "provider_site_not_found": "Sağlayıcı bu konumu tanımıyor",
             "provider_throttled": "Sağlayıcının istek sınırının sıfırlanması bekleniyor",
+            "provider_server_error": "Sağlayıcıda sunucu hatası oluştu",
+            "provider_unreachable": "Sağlayıcıya ulaşılamadı",
+            "provider_invalid_response": "Beklenmeyen sağlayıcı verisi",
+            "provider_configuration_invalid": "Sağlayıcı bağlantı ayarları için yönetici müdahalesi gerekiyor",
+            "account_unavailable": "Sağlayıcı hesabı duraklatıldı",
             "history_budget_reserved": "Kalan kota tahminler için ayrıldı",
             "quota_exhausted": "Günlük hesap kotası tükendi",
             "provider_failure": "Sağlayıcı isteği başarısız",
-            "provider_unexpected_failure": "Sağlayıcı beklenmeyen bir hatayla yanıt verdi",
+            "provider_unexpected_failure": "Veri toplama tamamlanamadı",
             "invalid_source_kind": "Beklenmeyen sağlayıcı verisi",
-            "calculation_failure": "Tahmin hesabı başarısız"
+            "calculation_failure": "Tahmin hesabı başarısız",
+            "lock_contention": "Sistem meşguldü; yeniden denenecek",
+            "publication_failure": "Veri toplama kaydedilemedi; yeniden denenecek"
         },
         "NotificationDeliveryStatus": {
             "pending": "Hazırlanıyor",
@@ -360,6 +374,15 @@
         "WorkspaceRole": {
             "admin": "Çalışma alanı yöneticisi",
             "viewer": "Üye"
+        },
+        "ReminderState": {
+            "sending": "Etkin",
+            "paused_by_user": "Duraklatıldı",
+            "waiting_for_approval": "Onay bekleniyor",
+            "provider_attention": "Sağlayıcı hesabı ilgi bekliyor",
+            "no_recipients": "Gönderilecek alıcı kalmadığı için gönderilmedi.",
+            "invalid_recipient": "Kayıtlı bir alıcı adresi geçersiz olduğu için gönderilmedi.",
+            "over_recipient_limit": "Santralin alıcı sayısı sınırı aştığı için gönderilmedi."
         }
     }
 }

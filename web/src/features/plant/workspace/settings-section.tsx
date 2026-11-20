@@ -1,5 +1,5 @@
 "use client";
-import { useFormatter, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import type { Plant, PlantScope, Region } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import type { PlantAddress, PlantView } from "@/lib/routes";
@@ -10,7 +10,8 @@ import {
 import { MoveToRecycleBin } from "@/features/trash/recycle-bin";
 import { ViewNav } from "@/ui/action";
 import { CsvDownload } from "@/ui/csv-download";
-import { ActionForm, Notice } from "@/ui/ui";
+import { ActionForm } from "@/ui/form";
+import { Notice } from "@/ui/ui";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { CollectionSchedule } from "../collection-schedule";
 import { RegionSettings } from "../region-settings";
@@ -40,28 +41,9 @@ export function SettingsSection({
     onDeleted: () => Promise<void>;
 }) {
     const t = useTranslations("PlantWorkspace");
-    const format = useFormatter();
     const canManage = useCanManageWorkspace();
-    const coordinate = (value: number) =>
-        format.number(value, { maximumFractionDigits: 6 });
     return (
         <>
-            <details>
-                <summary>{t("location")}</summary>
-                <p>
-                    {t("locationSummary", {
-                        latitude: coordinate(region.latitude),
-                        longitude: coordinate(region.longitude),
-                        timezone,
-                    })}
-                </p>
-                <CsvDownload
-                    label={t("downloadPlantCSV")}
-                    filename={`plant-${plant.id}`}
-                    records={[plant]}
-                    metadata={{ timezone }}
-                />
-            </details>
             <ViewNav
                 label={t("plantSettings")}
                 views={[
@@ -86,14 +68,22 @@ export function SettingsSection({
                         onChanged={onChanged}
                     />
                 ) : view === "location" ? (
-                    <RegionSettings region={region} scope={scope} />
+                    <>
+                        <RegionSettings region={region} scope={scope} />
+                        <CsvDownload
+                            label={t("downloadPlantCSV")}
+                            filename={`plant-${plant.id}`}
+                            records={[plant]}
+                            metadata={{ timezone }}
+                        />
+                    </>
                 ) : view === "collection" ? (
                     <CollectionSchedule scope={scope} region={region} />
                 ) : (
                     <Reminders scope={scope} region={region} />
                 )}
             </fieldset>
-            {canManage && (
+            {canManage && view === "configuration" && (
                 <section className="panel">
                     <h2>{t("deletePlant")}</h2>
                     <p>{t("deletionHelp")}</p>

@@ -18,6 +18,7 @@ export const vocabulary = {
     NotificationDeliveryStatus: "NotificationDeliveryStatusEnum",
     NotificationDeliveryError: "NotificationDeliveryErrorEnum",
     PreparedMessageKind: "PreparedMessageKindEnum",
+    ReminderState: "ReminderStateEnum",
     WorkspaceRole: "WorkspaceRoleEnum",
 } as const satisfies Record<string, keyof Schemas>;
 

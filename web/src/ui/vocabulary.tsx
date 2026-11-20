@@ -36,6 +36,7 @@ const tones: { [G in Group]?: Partial<Record<Vocabulary[G], Tone>> } = {
         uncertain: "warning",
         failed: "danger",
     },
+    ReminderState: { sending: "success" },
 };
 
 export function useLabel() {

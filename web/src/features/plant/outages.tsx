@@ -1,18 +1,36 @@
 "use client";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
-import { useTranslations, useLocale, useFormatter } from "next-intl";
+import { useTranslations } from "next-intl";
 
 import { useState } from "react";
 import type { Plant, PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { useApiList } from "@/lib/api/query";
+import { DisplayError } from "@/lib/api/errors";
+import { deviceZone } from "@/lib/format/time";
+import { useFormat } from "@/lib/format/use-format";
 import { useProposalKey } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
 import { Resource } from "@/ui/resource";
-import { ActionForm, Field, Notice, Select, Tag } from "@/ui/ui";
+import {
+    ActionForm,
+    CheckboxField,
+    Field,
+    Select,
+    TextAreaField,
+} from "@/ui/form";
+import { Notice, Tag } from "@/ui/ui";
+import { useLabel } from "@/ui/vocabulary";
 import { CsvDownload } from "@/ui/csv-download";
 
 type Outage = components["schemas"]["IncidentOutput"];
+const INCIDENT_KINDS = [
+    "inverter",
+    "panels",
+    "grid",
+    "other",
+    "multiple",
+] as const satisfies readonly components["schemas"]["IncidentKindEnum"][];
 type OutageInput = components["schemas"]["IncidentInput"];
 type Configuration = NonNullable<Plant["current_configuration"]>;
 type IncidentRequest = Omit<
@@ -40,9 +58,9 @@ function timestamp(
     if (!value) return null;
     const date = new Date(value);
     if (!Number.isFinite(date.getTime()) || date.getTime() > Date.now())
-        throw new Error(t("invalidTime"));
+        throw new DisplayError(t("invalidTime"));
     if (localInput(date.toISOString()) !== value)
-        throw new Error(t("nonexistentTime"));
+        throw new DisplayError(t("nonexistentTime"));
     return date.toISOString();
 }
 
@@ -77,15 +95,8 @@ export function Outages({
         setSubmitted(true);
         await onChanged();
     }
-    const locale = useLocale();
-    const formatNumber = useFormatter();
-    const kinds: Record<string, string> = {
-        inverter: t("inverter"),
-        panels: t("panels"),
-        grid: t("grid"),
-        other: t("other"),
-        multiple: t("multipleFaults"),
-    };
+    const format = useFormat();
+    const label = useLabel();
 
     const [editor, setEditor] = useState<Outage | "new" | null>(null);
     const [resolving, setResolving] = useState<number | null>(null);
@@ -103,7 +114,7 @@ export function Outages({
                           ? proposals("resolved")
                           : status === "cancelled"
                             ? proposals("cancelled")
-                            : status,
+                            : t("unknown"),
               };
     const ceilings = (outage?: Outage): Ceilings | undefined =>
         configuration &&
@@ -112,9 +123,8 @@ export function Outages({
             outage.declared_configuration_id === configuration.id)
             ? configuration
             : undefined;
-    const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const format = (value: string) =>
-        new Date(value).toLocaleString(locale, { timeZone: deviceTimezone });
+    const deviceTimezone = deviceZone();
+    const time = (value: string) => format.time(value, deviceTimezone);
     const changed = onChanged;
     return (
         <section className="panel">
@@ -141,9 +151,6 @@ export function Outages({
             {!canManage && <p className="fine">{proposals("approvalHelp")}</p>}
             <p className="fine">
                 {t("deviceTimezone", { timezone: deviceTimezone })}
-                {deviceTimezone !== timezone
-                    ? t("plantTimezone", { timezone })
-                    : ""}
             </p>
             <details>
                 <summary>{t("howToReportAnOutage")}</summary>
@@ -260,14 +267,17 @@ export function Outages({
                                 </div>
                                 <p>
                                     {t("started", {
-                                        kind: kinds[outage.kind] ?? t("other"),
-                                        time: format(outage.starts_at),
+                                        kind: label(
+                                            "IncidentKind",
+                                            outage.kind,
+                                        ),
+                                        time: time(outage.starts_at),
                                     })}
                                     {outage.status === "cancelled"
                                         ? t("cancelledEntry")
                                         : outage.ends_at
                                           ? t("resolved", {
-                                                time: format(outage.ends_at),
+                                                time: time(outage.ends_at),
                                             })
                                           : t("ongoing")}
                                 </p>
@@ -278,11 +288,9 @@ export function Outages({
                                             {outage.available_dc_mw == null
                                                 ? t("unknown")
                                                 : t("power", {
-                                                      value: formatNumber.number(
+                                                      value: format.number(
                                                           outage.available_dc_mw,
-                                                          {
-                                                              maximumFractionDigits: 6,
-                                                          },
+                                                          6,
                                                       ),
                                                   })}
                                         </dd>
@@ -294,11 +302,9 @@ export function Outages({
                                             null
                                                 ? t("unknown")
                                                 : t("power", {
-                                                      value: formatNumber.number(
+                                                      value: format.number(
                                                           outage.available_inverter_mw,
-                                                          {
-                                                              maximumFractionDigits: 6,
-                                                          },
+                                                          6,
                                                       ),
                                                   })}
                                         </dd>
@@ -309,11 +315,9 @@ export function Outages({
                                             {outage.available_export_mw == null
                                                 ? t("unknown")
                                                 : t("power", {
-                                                      value: formatNumber.number(
+                                                      value: format.number(
                                                           outage.available_export_mw,
-                                                          {
-                                                              maximumFractionDigits: 6,
-                                                          },
+                                                          6,
                                                       ),
                                                   })}
                                         </dd>
@@ -377,7 +381,7 @@ export function Outages({
                                                 new Date(ends) <=
                                                     new Date(outage.starts_at)
                                             )
-                                                throw new Error(
+                                                throw new DisplayError(
                                                     t("resolutionAfterStart"),
                                                 );
                                             if (!canManage)
@@ -420,6 +424,7 @@ export function Outages({
                                             defaultValue={localInput(
                                                 new Date().toISOString(),
                                             )}
+                                            required
                                         />
                                     </ActionForm>
                                 )}
@@ -471,15 +476,12 @@ export function Outages({
                                             }}
                                         >
                                             {!canManage && <ProposalReason />}
-                                            <label className="field">
-                                                <span>
-                                                    <input
-                                                        type="checkbox"
-                                                        required
-                                                    />{" "}
-                                                    {t("confirmationIncorrect")}
-                                                </span>
-                                            </label>
+                                            <CheckboxField
+                                                label={t(
+                                                    "confirmationIncorrect",
+                                                )}
+                                                required
+                                            />
                                         </ActionForm>
                                     </details>
                                 )}
@@ -505,13 +507,12 @@ function OutageForm({
 }) {
     const t = useTranslations("Outages");
     const proposals = useTranslations("ChangeRequests");
-    const format = useFormatter();
+    const format = useFormat();
+    const label = useLabel();
     const ceiling = (value?: number | null) =>
         value == null
             ? undefined
-            : t("capacityCeiling", {
-                  value: format.number(value, { maximumFractionDigits: 6 }),
-              });
+            : t("capacityCeiling", { value: format.number(value, 6) });
 
     const capacities = [
         outage?.available_dc_mw,
@@ -540,9 +541,9 @@ function OutageForm({
             onSubmit={async (data) => {
                 const starts = timestamp(data, "starts_at", t);
                 const ends = timestamp(data, "ends_at", t);
-                if (!starts) throw new Error(t("enterTheOutageStart"));
+                if (!starts) throw new DisplayError(t("enterTheOutageStart"));
                 if (ends && new Date(ends) <= new Date(starts))
-                    throw new Error(t("resolutionAfterStart"));
+                    throw new DisplayError(t("resolutionAfterStart"));
                 const capacity = (key: string) =>
                     impact === "total"
                         ? 0
@@ -550,10 +551,10 @@ function OutageForm({
                             String(data.get(key) ?? "").trim() === ""
                           ? null
                           : Number(data.get(key));
-                const kind = (
-                    ["inverter", "panels", "grid", "other", "multiple"] as const
-                ).find((value) => value === data.get("kind"));
-                if (!kind) throw new Error(t("chooseAValidOutageType"));
+                const kind = INCIDENT_KINDS.find(
+                    (value) => value === data.get("kind"),
+                );
+                if (!kind) throw new DisplayError(t("chooseAValidOutageType"));
                 const capacities = {
                     available_dc_mw: capacity("available_dc_mw"),
                     available_inverter_mw: capacity("available_inverter_mw"),
@@ -563,7 +564,7 @@ function OutageForm({
                     impact === "reduced" &&
                     Object.values(capacities).every((value) => value === null)
                 )
-                    throw new Error(t("capacityRequired"));
+                    throw new DisplayError(t("capacityRequired"));
                 await onSave(
                     {
                         kind,
@@ -583,17 +584,19 @@ function OutageForm({
                     label={t("outageType")}
                     name="kind"
                     defaultValue={outage?.kind ?? "inverter"}
+                    required
                 >
-                    <option value="inverter">{t("inverter")}</option>
-                    <option value="panels">{t("panels")}</option>
-                    <option value="grid">{t("grid")}</option>
-                    <option value="other">{t("other")}</option>
-                    <option value="multiple">{t("multipleFaults")}</option>
+                    {INCIDENT_KINDS.map((kind) => (
+                        <option key={kind} value={kind}>
+                            {label("IncidentKind", kind)}
+                        </option>
+                    ))}
                 </Select>
                 <Field
                     label={t("incidentTitle")}
                     name="title"
                     defaultValue={outage?.title}
+                    required
                 />
                 <Field
                     label={t("startedAtDeviceTime")}
@@ -602,28 +605,26 @@ function OutageForm({
                     defaultValue={localInput(
                         outage?.starts_at ?? new Date().toISOString(),
                     )}
+                    required
                 />
                 <Field
                     label={t("resolvedAtDeviceTimeOptional")}
                     name="ends_at"
                     type="datetime-local"
-                    required={false}
                     defaultValue={
                         outage?.ends_at ? localInput(outage.ends_at) : ""
                     }
                 />
             </div>
-            <label className="field">
-                {t("capacityImpact")}
-                <select
-                    value={impact}
-                    onChange={(event) => setImpact(event.target.value)}
-                >
-                    <option value="total">{t("totalOutage")}</option>
-                    <option value="reduced">{t("reducedCapacity")}</option>
-                    <option value="unknown">{t("unknownImpact")}</option>
-                </select>
-            </label>
+            <Select
+                label={t("capacityImpact")}
+                value={impact}
+                onChange={(event) => setImpact(event.target.value)}
+            >
+                <option value="total">{t("totalOutage")}</option>
+                <option value="reduced">{t("reducedCapacity")}</option>
+                <option value="unknown">{t("unknownImpact")}</option>
+            </Select>
             {impact === "reduced" && (
                 <>
                     <p className="fine">{t("remainingCapacityHelp")}</p>
@@ -636,7 +637,6 @@ function OutageForm({
                             max={ceilings?.dc_capacity_mw}
                             hint={ceiling(ceilings?.dc_capacity_mw)}
                             step="any"
-                            required={false}
                             defaultValue={outage?.available_dc_mw ?? ""}
                         />
                         <Field
@@ -647,7 +647,6 @@ function OutageForm({
                             max={ceilings?.inverter_capacity_mw ?? undefined}
                             hint={ceiling(ceilings?.inverter_capacity_mw)}
                             step="any"
-                            required={false}
                             defaultValue={outage?.available_inverter_mw ?? ""}
                         />
                         <Field
@@ -658,7 +657,6 @@ function OutageForm({
                             max={ceilings?.export_limit_mw ?? undefined}
                             hint={ceiling(ceilings?.export_limit_mw)}
                             step="any"
-                            required={false}
                             defaultValue={outage?.available_export_mw ?? ""}
                         />
                     </div>
@@ -668,10 +666,11 @@ function OutageForm({
                     </details>
                 </>
             )}
-            <label className="field">
-                {t("notesOptional")}
-                <textarea name="notes" defaultValue={outage?.notes} />
-            </label>
+            <TextAreaField
+                label={t("notesOptional")}
+                name="notes"
+                defaultValue={outage?.notes}
+            />
         </ActionForm>
     );
 }
@@ -679,9 +678,10 @@ function OutageForm({
 function ProposalReason() {
     const t = useTranslations("ChangeRequests");
     return (
-        <label className="field">
-            {t("optionalReason")}
-            <textarea name="reason" maxLength={500} />
-        </label>
+        <TextAreaField
+            label={t("optionalReason")}
+            name="reason"
+            maxLength={500}
+        />
     );
 }
