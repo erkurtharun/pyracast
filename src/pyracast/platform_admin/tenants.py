@@ -28,7 +28,7 @@ from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.errors import ConflictError, ErrorCode
 from pyracast.plants.models import Plant
 from pyracast.platform_admin.read_models import summarize_plant, workspace_regions
-from pyracast.regions.models import RegionStatus, active_region
+from pyracast.regions.models import active_region
 
 if TYPE_CHECKING:
     from django_stubs_ext import StrPromise
@@ -267,7 +267,6 @@ def workspace_context(tenant: Tenant) -> dict[str, Any]:
         "plants": [
             {
                 "summary": summarize_plant(region),
-                "status": RegionStatus(region.status).label,
                 "capacity_mw": capacities.get(region.pk),
             }
             for region in workspace_regions().filter(tenant=tenant).order_by("name", "pk")

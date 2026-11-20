@@ -28,7 +28,7 @@
 
   <section class="panel" aria-labelledby="plants-title">
     <div class="panel-head">
-      <h2 id="plants-title">{{ page_obj.paginator.count }} {% translate "plant" %}{{ page_obj.paginator.count|pluralize }}</h2>
+      <h2 id="plants-title">{% blocktranslate count counter=page_obj.paginator.count %}{{ counter }} plant{% plural %}{{ counter }} plants{% endblocktranslate %}</h2>
     </div>
     {% if plants %}
       <div class="table-wrap" role="region" aria-labelledby="plants-title" tabindex="0">
@@ -79,7 +79,7 @@
         </table>
       </div>
     {% else %}
-      <p class="empty">{% translate "No plants match" %}{% if q or status %} {% translate "these filters" %}{% endif %}.</p>
+      <p class="empty">{% if q or status %}{% translate "No plants match these filters." %}{% else %}{% translate "No plants match." %}{% endif %}</p>
     {% endif %}
 
     {% if page_obj.has_other_pages %}
@@ -87,7 +87,7 @@
         {% if page_obj.has_previous %}
           <a class="btn btn--quiet" rel="prev" href="?{{ pagination_query }}&amp;page={{ page_obj.previous_page_number }}">{% translate "Previous" %}</a>
         {% endif %}
-        <span class="pagination-status">{% translate "Page" %} {{ page_obj.number }} {% translate "of" %} {{ page_obj.paginator.num_pages }}</span>
+        <span class="pagination-status">{% blocktranslate with number=page_obj.number total=page_obj.paginator.num_pages %}Page {{ number }} of {{ total }}{% endblocktranslate %}</span>
         {% if page_obj.has_next %}
           <a class="btn btn--quiet" rel="next" href="?{{ pagination_query }}&amp;page={{ page_obj.next_page_number }}">{% translate "Next" %}</a>
         {% endif %}
