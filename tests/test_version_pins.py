@@ -1,5 +1,6 @@
 import os
 import re
+import shlex
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -225,6 +226,26 @@ def test_development_postgresql_runs_the_major_version_production_runs() -> None
 
     assert single("PostgreSQL in development and CI").split(".")[0] == major
     assert f'"/var/lib/postgresql/{major}/docker"' in start_postgres
+
+
+def apk_commands(path: str) -> list[list[str]]:
+    instructions = (ROOT / path).read_text(encoding="utf-8").replace("\\\n", " ").splitlines()
+    return [
+        list(shlex.shlex(instruction.removeprefix("RUN "), posix=True, punctuation_chars=True))
+        for instruction in instructions
+        if instruction.startswith("RUN ") and "apk" in instruction
+    ]
+
+
+def test_the_postgresql_image_adds_packages_uncached_at_a_quoted_minimum_version() -> None:
+    for command in apk_commands("deploy/postgres/Dockerfile"):
+        packages = [token for token in command[2:] if not token.startswith("-")]
+        assert command[:2] == ["apk", "add"], command
+        assert "--no-cache" in command, command
+        assert packages, command
+        assert all(
+            re.fullmatch(r"[a-z0-9][\w.+-]*>=\d[\w.]*-r\d+", package) for package in packages
+        ), command
 
 
 def test_the_build_backend_range_admits_the_pinned_uv() -> None:
