@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "./support/test";
 import AxeBuilder from "@axe-core/playwright";
 import type { components } from "../src/lib/schema";
+import { errorBody } from "./support/errors";
 import { mockApi, paged, region, user, tenantRow } from "./support/workspace";
 
 async function setup(page: Page) {
@@ -630,7 +631,14 @@ for (const width of [320, 390, 1440]) {
                 }),
             );
             await page.route("**/invitations/", (route) =>
-                route.fulfill({ json: { invitations: [] } }),
+                route.request().method() === "POST"
+                    ? route.fulfill({
+                          status: 400,
+                          json: errorBody("invalid_request", "Check it.", {
+                              fields: { email: "Use a company address." },
+                          }),
+                      })
+                    : route.fulfill({ json: { invitations: [] } }),
             );
             await page.route("**/api/**/trash/**", (route) =>
                 route.fulfill({ json: paged([]) }),
@@ -646,6 +654,8 @@ for (const width of [320, 390, 1440]) {
                           account: "Hesap",
                           accountHeading: "Hesap ayarları",
                           trash: "Geri dönüşüm kutusu",
+                          email: "E-posta adresi",
+                          invite: "Davet gönder",
                       }
                     : {
                           navigation: "Main navigation",
@@ -655,6 +665,8 @@ for (const width of [320, 390, 1440]) {
                           account: "Account",
                           accountHeading: "Account settings",
                           trash: "Recycle bin",
+                          email: "Email address",
+                          invite: "Send invitation",
                       };
             const navigation = page.getByRole("navigation", {
                 name: labels.navigation,
@@ -723,6 +735,20 @@ for (const width of [320, 390, 1440]) {
             await fits(page, "Members", width === 390);
             await page.screenshot({
                 path: testInfo.outputPath("members.png"),
+                fullPage: true,
+            });
+            await page
+                .getByLabel(labels.email, { exact: true })
+                .fill("a.member.with.a.long.address@example.test");
+            await page
+                .getByRole("button", { name: labels.invite, exact: true })
+                .click();
+            await expect(page.locator(".form-errors li")).toHaveText(
+                `${labels.email}: Use a company address.`,
+            );
+            await fits(page, "Members with a field error", width === 390);
+            await page.screenshot({
+                path: testInfo.outputPath("members-field-error.png"),
                 fullPage: true,
             });
             await navigation
