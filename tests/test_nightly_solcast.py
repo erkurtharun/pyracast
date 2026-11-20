@@ -7,10 +7,9 @@ from types import SimpleNamespace
 import pytest
 from django.db import close_old_connections, connection
 
-from pyracast.connections import operations
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts import jobs
+from pyracast.forecasts import jobs, quota
 from pyracast.forecasts.history import select_actual_snapshot
 from pyracast.forecasts.jobs import claim, collect, pending_job_ids
 from pyracast.forecasts.models import (
@@ -310,8 +309,9 @@ def test_history_retries_after_utc_budget_reset_inside_local_night_window() -> N
     job = CollectionJob.objects.get(endpoint="estimated_actuals")
     assert not collect(job.pk, HistoricalFixture(before_reset), no_calculation, before_reset)
     job.refresh_from_db()
-    assert (job.status, job.available_at) == ("retry", NIGHT)
-    assert collect(job.pk, HistoricalFixture(NIGHT), no_calculation, NIGHT)
+    provider_day = NIGHT + timedelta(minutes=2)
+    assert (job.status, job.available_at) == ("retry", provider_day)
+    assert collect(job.pk, HistoricalFixture(provider_day), no_calculation, provider_day)
 
 
 def test_shared_account_protects_slots_on_both_local_dates_within_utc_day() -> None:
@@ -373,10 +373,10 @@ def test_history_rechecks_morning_deadline_before_request(
     late = NIGHT + timedelta(hours=6) - timedelta(seconds=1)
     if boundary == "account_lock":
         ticks = iter([0.0, 2.0])
-        monkeypatch.setattr(operations, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+        monkeypatch.setattr(quota, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
     else:
         elapsed = [0.0]
-        original_reserve = operations.reserve_request
+        original_reserve = quota.reserve_request
 
         def reserve(
             binding: SiteBinding,

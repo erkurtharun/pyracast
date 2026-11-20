@@ -4,7 +4,7 @@ from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parents[1] / "src" / "pyracast"
 
-# Lower layers never import higher ones (docs/ARCHITECTURE.md, "Import direction").
+# Lower layers never import higher ones; the allowlists below only shrink.
 LAYERS: tuple[tuple[str, ...], ...] = (
     (
         "collection_window",
@@ -17,9 +17,10 @@ LAYERS: tuple[tuple[str, ...], ...] = (
         "provider_retry",
         "shutdown",
         "solar",
+        "weather_data",
     ),
     ("background", "db", "encryption", "environment", "errors", "health", "schema_objects"),
-    ("epias", "mail", "maintenance", "providers", "weather"),
+    ("epias", "mail", "maintenance", "outbound", "providers", "weather"),
     ("accounts",),
     ("regions",),
     ("connections",),
@@ -47,7 +48,6 @@ HTTP_MODULES = (
 )
 PROJECT_MODULES = {"settings", "urls", "wsgi", "cli", "production"}
 ORCHESTRATION_MODULES = {
-    "runtime",
     "forecasts.monitoring",
     "forecasts.management.commands.check_delivery_health",
     "forecasts.management.commands.dispatch",
@@ -77,23 +77,17 @@ BACK_EDGES: dict[tuple[str, str], str] = {
         "accounts.stored_secrets",
         "connections.secrets",
     ): "secret re-encryption walks provider credentials",
-    ("collection_window", "notifications.schedule"): "helper not moved to its neutral home yet",
     (
         "connections.contracts",
         "forecasts.models",
     ): "provider data carries the snapshot weather vocabulary",
-    ("connections.operations", "forecasts.budget"): "helper not moved to its neutral home yet",
-    ("connections.operations", "forecasts.models"): "helper not moved to its neutral home yet",
     ("forecasts.acquisition", "plants.forecast_sources"): "snapshot replay lives in plants",
-    ("forecasts.actuals", "plants.forecast_composition"): "snapshot composition lives in plants",
-    ("forecasts.budget", "notifications.schedule"): "helper not moved to its neutral home yet",
     (
         "forecasts.historical_import",
         "plants.preparation",
     ): "an import prepares calibrations of its plants",
     ("forecasts.historical_upload", "plants.models"): "an upload previews the plants it feeds",
     ("forecasts.history", "plants.forecast_sources"): "snapshot replay lives in plants",
-    ("forecasts.intraday", "plants.forecast_composition"): "snapshot replay lives in plants",
     ("forecasts.intraday", "plants.forecast_sources"): "snapshot replay lives in plants",
     (
         "forecasts.jobs",
@@ -111,8 +105,6 @@ BACK_EDGES: dict[tuple[str, str], str] = {
         "forecasts.snapshot_restore",
         "plants.preparation",
     ): "a restore prepares calibrations of its plants",
-    ("forecasts.timing", "notifications.schedule"): "helper not moved to its neutral home yet",
-    ("irradiance.weather_reference", "weather"): "helper not moved to its neutral home yet",
     ("plants.incident_forecasts", "incidents.operations"): "plant analytics read incidents",
     ("plants.incident_policy", "incidents.operations"): "plant analytics read incidents",
     ("plants.measurements", "incidents.operations"): "plant analytics read metering and incidents",

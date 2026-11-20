@@ -7,8 +7,8 @@ from typing import cast
 import httpx
 import pytest
 
-from pyracast.weather import (
-    OpenMeteoProvider,
+from pyracast.weather import OpenMeteoProvider
+from pyracast.weather_data import (
     WeatherData,
     WeatherError,
     normalize_weather,

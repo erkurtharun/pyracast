@@ -9,11 +9,13 @@ from django.core.exceptions import ValidationError
 from django.db import OperationalError, close_old_connections, connection, transaction
 
 from pyracast.connections.contracts import ProviderData, ProviderError
+from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import QuotaExceededError, reserve_request, rotate_secret
+from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts import jobs
 from pyracast.forecasts.jobs import (
     LEASE_DURATION,
+    Failure,
     Lease,
     claim,
     collect,
@@ -30,6 +32,7 @@ from pyracast.forecasts.models import (
     RequestAttempt,
     RequestPurpose,
 )
+from pyracast.forecasts.quota import QuotaExceededError, reserve_request
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.regions.operations import approve_region, transition_region
@@ -71,7 +74,7 @@ def test_interrupted_lease_can_be_reclaimed_and_old_owner_cannot_publish() -> No
     )
     assert snapshot is not None
     assert not publish(first, snapshot, {}, NOW + LEASE_DURATION + timedelta(seconds=1))
-    retry(first, NOW, CollectionJobError.PROVIDER_FAILURE)
+    retry(first, NOW, Failure(CollectionJobError.PROVIDER_FAILURE))
     assert publish(second, snapshot, {"valid": True}, NOW + LEASE_DURATION + timedelta(seconds=1))
     assert ForecastSnapshot.objects.get().raw_payload == {"vintage": 2}
 
@@ -117,7 +120,7 @@ def test_estimated_actuals_snapshot_cannot_be_published_after_restart() -> None:
     assert snapshot.source_kind == "estimated_actuals"
     with pytest.raises(ValidationError):
         publish(lease, snapshot, {}, NOW)
-    retry(lease, NOW, CollectionJobError.PROVIDER_UNEXPECTED_FAILURE)
+    retry(lease, NOW, Failure(CollectionJobError.PROVIDER_UNEXPECTED_FAILURE))
     job.refresh_from_db()
     assert not collect(job.pk, FakeAdapter(), calculate, job.available_at)
     job.refresh_from_db()
@@ -293,8 +296,8 @@ def test_an_expired_running_lease_is_reclaimed_and_naive_now_rejected() -> None:
     assert lease is not None
     with pytest.raises(ValidationError):
         claim(job.pk, NOW.replace(tzinfo=None))
-    retry(lease, NOW, CollectionJobError.PROVIDER_FAILURE)
-    retry(lease, NOW, CollectionJobError.CALCULATION_FAILURE)
+    retry(lease, NOW, Failure(CollectionJobError.PROVIDER_FAILURE))
+    retry(lease, NOW, Failure(CollectionJobError.CALCULATION_FAILURE))
     job.refresh_from_db()
     assert job.last_error == "provider_failure"
     assert isinstance(lease, Lease)
@@ -436,7 +439,7 @@ def test_publication_holds_account_lock_against_credential_rotation(
     assert snapshot is not None
     account_checked = Event()
     rotation_blocked = Event()
-    original = jobs.binding_is_current
+    original = binding_is_current
 
     def checked(binding: SiteBinding) -> bool:
         current = original(binding)

@@ -9,7 +9,7 @@ from pyracast.irradiance.weather_reference import (
     summarize_weather,
     unavailable_weather,
 )
-from pyracast.weather import WeatherData, WeatherInterval
+from pyracast.weather_data import WeatherData, WeatherInterval
 
 
 def interval(start: datetime, ghi: float | None = 100.0) -> WeatherInterval:

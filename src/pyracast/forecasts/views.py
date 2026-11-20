@@ -9,9 +9,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from pyracast.api.serializers import InputSerializer
+from pyracast.connections.models import MAX_DAILY_QUOTA
 from pyracast.forecasts.models import CollectionEndpoint, CollectionJobError, CollectionJobStatus
 from pyracast.forecasts.schedule import (
-    MAX_COLLECTION_TIMES,
     configure_schedule,
     get_schedule,
     schedule_payload,
@@ -21,7 +21,7 @@ from pyracast.forecasts.schedule import (
 class CollectionScheduleInput(InputSerializer):
     enabled = serializers.BooleanField()
     times = serializers.ListField(
-        child=serializers.CharField(max_length=5), max_length=MAX_COLLECTION_TIMES
+        child=serializers.CharField(max_length=5), max_length=MAX_DAILY_QUOTA
     )
 
 

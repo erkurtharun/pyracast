@@ -7,6 +7,11 @@ from typing import Any, Literal, cast
 from django.db.models import Q
 
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.composition import (
+    ForecastComposition,
+    ForecastVintage,
+    compose_forecasts,
+)
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJobStatus,
@@ -16,11 +21,6 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.sources import covering_snapshots, snapshot_data
 from pyracast.irradiance import local_day_bounds
 from pyracast.irradiance.weather_reference import summarize_weather, unavailable_weather
-from pyracast.plants.forecast_composition import (
-    ForecastComposition,
-    ForecastVintage,
-    compose_forecasts,
-)
 from pyracast.plants.forecast_sources import apply_composition, compose_snapshots
 from pyracast.solar import Daylight, daylight_energy_windows, daylight_window
 

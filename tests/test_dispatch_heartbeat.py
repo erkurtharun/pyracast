@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 import pytest
 from django.core.management import call_command
 
+from pyracast.background.failures import PhaseOutcome
 from pyracast.forecasts.management.commands import dispatch as command
-from pyracast.forecasts.monitoring import PhaseOutcome
 
 
 def test_dispatcher_touches_its_heartbeat_before_every_cycle_even_after_a_failed_phase(
@@ -28,7 +28,7 @@ def test_dispatcher_touches_its_heartbeat_before_every_cycle_even_after_a_failed
     ):
         monkeypatch.setattr(command, name, MagicMock())
     monkeypatch.setattr(
-        command, "dispatch", MagicMock(side_effect=[ConnectionError, PhaseOutcome()])
+        command, "dispatch_collections", MagicMock(side_effect=[ConnectionError, PhaseOutcome()])
     )
     heartbeat = tmp_path / "dispatcher-heartbeat"
     stop_file = tmp_path / "stop"

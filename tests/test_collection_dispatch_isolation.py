@@ -8,14 +8,14 @@ import pytest
 from django.contrib.auth.models import User
 from django.db import close_old_connections, connection, connections, transaction
 
-from pyracast import runtime
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.background.failures import PhaseOutcome
 from pyracast.connections.contracts import ProviderError
-from pyracast.connections.operations import validate_binding
+from pyracast.forecasts import runtime
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
-from pyracast.forecasts.monitoring import PhaseOutcome
 from pyracast.forecasts.scheduler import CollectionSchedulingError, enqueue_due
+from pyracast.forecasts.validation import validate_binding
 from pyracast.providers import normalize_payload
 from pyracast.regions.models import Region
 from pyracast.regions.operations import approve_region, configure_binding, submit_region
@@ -34,7 +34,7 @@ def test_existing_pending_collections_are_dispatched_after_scheduler_failure(
     reconnect = MagicMock()
     monkeypatch.setattr(runtime, "close_old_connections", reconnect)
     actor = MagicMock()
-    assert runtime.dispatch(actor) == PhaseOutcome(published=2, error="RuntimeError")
+    assert runtime.dispatch_collections(actor) == PhaseOutcome(published=2, error="RuntimeError")
     assert actor.send.call_args_list == [call(11), call(19)]
     reconnect.assert_called_once()
     assert "private response" not in caplog.text

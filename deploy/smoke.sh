@@ -358,7 +358,8 @@ from pyracast.connections.operations import create_account, validate_binding
 from pyracast.forecasts.models import ForecastResult
 from pyracast.providers import FixtureProvider
 from pyracast.regions.operations import approve_region, configure_binding, submit_region
-from pyracast.runtime import make_actor, make_broker
+from pyracast.background.broker import make_broker
+from pyracast.forecasts.runtime import make_actor
 assert os.getuid() != 0
 with connection.cursor() as cursor:
     cursor.execute("SELECT has_database_privilege('pyracast_owner', current_database(), 'CREATE')")

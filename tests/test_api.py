@@ -25,9 +25,11 @@ from pyracast.api.views import TenantsView
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
-from pyracast.connections.operations import QuotaExceededError, create_account, validate_binding
+from pyracast.connections.operations import create_account
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import ForecastResult
+from pyracast.forecasts.quota import QuotaExceededError
+from pyracast.forecasts.validation import validate_binding
 from pyracast.platform_admin.records import ReadOnlyAdmin
 from pyracast.platform_admin.site import site
 from pyracast.providers import FixtureProvider, adapter_for

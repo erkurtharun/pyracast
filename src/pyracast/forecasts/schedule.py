@@ -1,4 +1,3 @@
-import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -17,11 +16,12 @@ from pyracast.collection_window import (
     NIGHT_RETRY_DELAY,
     next_nightly_start,
 )
+from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import MAX_DAILY_QUOTA
-from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
+    CollectionJobError,
     CollectionJobStatus,
     CollectionSchedule,
     ForecastSnapshot,
@@ -31,14 +31,13 @@ from pyracast.forecasts.timing import (
     effective_forecast_schedule,
     next_forecast_slot,
 )
+from pyracast.local_time import CLOCK_PATTERN
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region
 
-MAX_COLLECTION_TIMES = 1440
-
 
 def forecast_time_limit(daily_quota: int) -> int:
-    return min(MAX_COLLECTION_TIMES, max(daily_quota - 1, 0))
+    return max(daily_quota - 1, 0)
 
 
 def get_schedule(tenant_id: int, region_id: int, now: datetime) -> CollectionSchedule:
@@ -72,7 +71,7 @@ def configure_schedule(
         limit = forecast_time_limit(
             binding.provider_account.daily_quota if binding else MAX_DAILY_QUOTA
         )
-        if len(times) != len(set(times)) or len(times) > limit:
+        if len(times) != len(set(times)) or (enabled and len(times) > limit):
             raise ValidationError(
                 gettext(
                     "Provide at most %(limit)s distinct local times; "
@@ -80,12 +79,11 @@ def configure_schedule(
                 ),
                 params={"limit": limit},
             )
-        if any(re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", clock) is None for clock in times):
+        if any(CLOCK_PATTERN.fullmatch(clock) is None for clock in times):
             raise ValidationError(gettext("Collection times must use HH:MM."))
-        if enabled and (not times or binding is None or not binding_is_current(binding)):
-            raise ValidationError(
-                gettext("An approved current region and at least one time are required.")
-            )
+        # The intent is kept in every approval state; readers gate collection on the binding.
+        if enabled and not times:
+            raise ValidationError(gettext("At least one time is required."))
         times = sorted(times)
         existing = CollectionSchedule.objects.filter(region=region).first()
         if existing is not None and existing.enabled == enabled and existing.times == times:
@@ -112,7 +110,12 @@ def configure_schedule(
                 or slot.astimezone(zone).strftime("%H:%M") in times
             ]
             unclaimed = unclaimed.exclude(pk__in=retained)
-        unclaimed.update(status=CollectionJobStatus.STALE, lease_token=None, lease_expires_at=None)
+        unclaimed.update(
+            status=CollectionJobStatus.STALE,
+            last_error=CollectionJobError.SCHEDULE_CHANGED,
+            lease_token=None,
+            lease_expires_at=None,
+        )
         record_audit(
             actor=actor,
             region=region,

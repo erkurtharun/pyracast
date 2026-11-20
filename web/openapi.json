@@ -5745,19 +5745,33 @@
                     "history_window_closed",
                     "attempts_exhausted",
                     "forecast_superseded",
+                    "binding_not_current",
+                    "schedule_disabled",
+                    "slot_not_configured",
+                    "schedule_changed",
                     "history_incomplete",
                     "history_already_archived",
                     "provider_authentication_failed",
+                    "provider_allowance_exhausted",
+                    "provider_access_denied",
+                    "provider_site_not_found",
                     "provider_throttled",
+                    "provider_server_error",
+                    "provider_unreachable",
+                    "provider_invalid_response",
+                    "provider_configuration_invalid",
+                    "account_unavailable",
                     "history_budget_reserved",
                     "quota_exhausted",
                     "provider_failure",
                     "provider_unexpected_failure",
                     "invalid_source_kind",
-                    "calculation_failure"
+                    "calculation_failure",
+                    "lock_contention",
+                    "publication_failure"
                 ],
                 "type": "string",
-                "description": "* `history_window_closed` - History window closed\n* `attempts_exhausted` - Attempts exhausted\n* `forecast_superseded` - Forecast superseded\n* `history_incomplete` - History incomplete\n* `history_already_archived` - History already archived\n* `provider_authentication_failed` - Provider authentication failed\n* `provider_throttled` - Provider throttled\n* `history_budget_reserved` - History budget reserved\n* `quota_exhausted` - Quota exhausted\n* `provider_failure` - Provider failure\n* `provider_unexpected_failure` - Provider unexpected failure\n* `invalid_source_kind` - Invalid source kind\n* `calculation_failure` - Calculation failure"
+                "description": "* `history_window_closed` - History window closed\n* `attempts_exhausted` - Attempts exhausted\n* `forecast_superseded` - Forecast superseded\n* `binding_not_current` - Binding not current\n* `schedule_disabled` - Schedule disabled\n* `slot_not_configured` - Slot not configured\n* `schedule_changed` - Schedule changed\n* `history_incomplete` - History incomplete\n* `history_already_archived` - History already archived\n* `provider_authentication_failed` - Provider authentication failed\n* `provider_allowance_exhausted` - Provider allowance exhausted\n* `provider_access_denied` - Provider access denied\n* `provider_site_not_found` - Provider site not found\n* `provider_throttled` - Provider throttled\n* `provider_server_error` - Provider server error\n* `provider_unreachable` - Provider unreachable\n* `provider_invalid_response` - Provider invalid response\n* `provider_configuration_invalid` - Provider configuration invalid\n* `account_unavailable` - Account unavailable\n* `history_budget_reserved` - History budget reserved\n* `quota_exhausted` - Quota exhausted\n* `provider_failure` - Provider failure\n* `provider_unexpected_failure` - Provider unexpected failure\n* `invalid_source_kind` - Invalid source kind\n* `calculation_failure` - Calculation failure\n* `lock_contention` - Lock contention\n* `publication_failure` - Publication failure"
             },
             "CollectionJobOutput": {
                 "type": "object",
@@ -5833,7 +5847,7 @@
                             "type": "string",
                             "maxLength": 5
                         },
-                        "maxItems": 1440
+                        "maxItems": 10
                     }
                 },
                 "required": ["enabled", "times"]
@@ -5850,7 +5864,7 @@
                             "type": "string",
                             "maxLength": 5
                         },
-                        "maxItems": 1440
+                        "maxItems": 10
                     },
                     "timezone": {
                         "type": "string"

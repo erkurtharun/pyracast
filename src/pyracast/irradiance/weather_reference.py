@@ -4,7 +4,7 @@ import math
 from datetime import UTC, date, datetime, timedelta
 
 from pyracast.irradiance import local_day_bounds
-from pyracast.weather import WeatherData
+from pyracast.weather_data import WeatherData
 
 ATTRIBUTION = {
     "text": "Weather data by Open-Meteo.com",

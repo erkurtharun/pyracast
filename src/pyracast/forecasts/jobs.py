@@ -2,15 +2,17 @@ import logging
 import math
 import time
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
+from enum import StrEnum
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.db.models import Q
 
+from pyracast.background.failures import log_failure
 from pyracast.collection_window import INTRADAY_HISTORY_WINDOW, NIGHT_RETRY_DELAY
 from pyracast.connections.contracts import (
     Calculator,
@@ -20,15 +22,8 @@ from pyracast.connections.contracts import (
     ProviderError,
     WindowHistoryAdapter,
 )
+from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import (
-    ForecastBudgetReservedError,
-    HistoryWindowClosedError,
-    QuotaExceededError,
-    RequestDeferredError,
-    record_provider_failure,
-    reserve_request,
-)
 from pyracast.forecasts.acquisition import missing_actuals_window
 from pyracast.forecasts.models import (
     CollectionEndpoint,
@@ -45,6 +40,15 @@ from pyracast.forecasts.models import (
     SnapshotWeatherError,
 )
 from pyracast.forecasts.projections import prepare_daily_payloads
+from pyracast.forecasts.quota import (
+    AccountUnavailableError,
+    ForecastBudgetReservedError,
+    HistoryWindowClosedError,
+    QuotaExceededError,
+    RequestDeferredError,
+    record_provider_failure,
+    reserve_request,
+)
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.forecasts.timing import (
     approval_job,
@@ -53,9 +57,10 @@ from pyracast.forecasts.timing import (
 )
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import Plant
-from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
+from pyracast.provider_retry import next_provider_day, next_retry_at, rate_limit_retry_after
 from pyracast.regions.models import Region, active_region
-from pyracast.weather import OpenMeteoProvider, WeatherError, serialize_weather
+from pyracast.weather import OpenMeteoProvider
+from pyracast.weather_data import WeatherError, serialize_weather
 
 if TYPE_CHECKING:
     from pyracast.plants.forecast_archive import PreparedForecastIssuance
@@ -63,6 +68,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 LEASE_DURATION = timedelta(minutes=5)
+MAX_ATTEMPTS = 3
+LOCK_SQLSTATES = frozenset({"55P03", "40P01"})
+INVALID_ANSWER_CODES = frozenset(
+    {
+        "invalid_provider_endpoint",
+        "invalid_provider_interval",
+        "invalid_provider_schema",
+        "provider_response_too_large",
+        "unsafe_provider_response",
+    }
+)
+PROVIDER_STATUS_OUTCOMES = {
+    401: CollectionJobError.PROVIDER_AUTHENTICATION_FAILED,
+    402: CollectionJobError.PROVIDER_ALLOWANCE_EXHAUSTED,
+    403: CollectionJobError.PROVIDER_ACCESS_DENIED,
+    404: CollectionJobError.PROVIDER_SITE_NOT_FOUND,
+    429: CollectionJobError.PROVIDER_THROTTLED,
+}
 
 
 @dataclass(frozen=True)
@@ -74,25 +97,139 @@ class Lease:
     endpoint: str = "forecasts"
 
 
-def binding_is_current(binding: SiteBinding, loaded_region: Region | None = None) -> bool:
-    current = {
-        "pk": binding.region_id,
-        "deleted_at": None,
-        "status": "approved",
-        "revision": binding.region_revision,
-        "approved_binding_id": binding.pk,
-    }
-    region_is_current = (
-        Region.objects.filter(**current).exists()
-        if loaded_region is None
-        else all(getattr(loaded_region, field) == value for field, value in current.items())
+class RetryKind(StrEnum):
+    # Counts the attempt and backs off; the job fails after MAX_ATTEMPTS or its window.
+    TRANSIENT = "transient"
+    # Transient provider failure: as TRANSIENT with the forecast minimum backoff.
+    PROVIDER = "provider"
+    # Returns the attempt and backs off: nothing was asked of the provider.
+    WAITING = "waiting"
+    # Returns the attempt and waits for the provider day; past its window the job is skipped.
+    PROVIDER_DAY = "provider_day"
+    # Returns the attempt and fails: an operator must act first or the job's window has closed.
+    BLOCKED = "blocked"
+    PERMANENT = "permanent"
+
+
+@dataclass(frozen=True)
+class Failure:
+    code: CollectionJobError
+    kind: RetryKind = RetryKind.TRANSIENT
+    retry_after_seconds: int | None = None
+
+
+class CollectionFailureError(Exception):
+    def __init__(self, failure: Failure) -> None:
+        super().__init__(failure.code)
+        self.failure = failure
+
+
+@dataclass
+class _Progress:
+    started: float = field(default_factory=lambda: time.monotonic())
+    reserved: bool = False
+
+
+def provider_failure(error: ProviderError) -> Failure:
+    status = error.status_code
+    kind = RetryKind.PROVIDER if error.retryable else RetryKind.PERMANENT
+    if status == 402:
+        return Failure(CollectionJobError.PROVIDER_ALLOWANCE_EXHAUSTED, RetryKind.PROVIDER_DAY)
+    if status == 429:
+        return Failure(
+            CollectionJobError.PROVIDER_THROTTLED,
+            retry_after_seconds=rate_limit_retry_after(error.retry_after_seconds),
+        )
+    if status in PROVIDER_STATUS_OUTCOMES:
+        return Failure(PROVIDER_STATUS_OUTCOMES[status], kind, error.retry_after_seconds)
+    if status is not None and 500 <= status < 600:
+        return Failure(CollectionJobError.PROVIDER_SERVER_ERROR, kind, error.retry_after_seconds)
+    if status is None and error.code == "provider_request_failed":
+        return Failure(CollectionJobError.PROVIDER_UNREACHABLE, kind)
+    if status is None and error.code in INVALID_ANSWER_CODES:
+        return Failure(CollectionJobError.PROVIDER_INVALID_RESPONSE, kind)
+    return Failure(CollectionJobError.PROVIDER_FAILURE, kind, error.retry_after_seconds)
+
+
+def _refusal(error: QuotaExceededError, now: datetime) -> Failure:
+    if isinstance(error, RequestDeferredError):
+        if error.available_at is None:
+            return Failure(CollectionJobError.PROVIDER_AUTHENTICATION_FAILED, RetryKind.BLOCKED)
+        return Failure(
+            CollectionJobError.PROVIDER_THROTTLED,
+            RetryKind.WAITING,
+            math.ceil((error.available_at - now).total_seconds()),
+        )
+    if isinstance(error, HistoryWindowClosedError):
+        return Failure(CollectionJobError.HISTORY_WINDOW_CLOSED, RetryKind.BLOCKED)
+    if isinstance(error, ForecastBudgetReservedError):
+        return Failure(CollectionJobError.HISTORY_BUDGET_RESERVED, RetryKind.PROVIDER_DAY)
+    if isinstance(error, AccountUnavailableError):
+        return Failure(CollectionJobError.ACCOUNT_UNAVAILABLE, RetryKind.PROVIDER_DAY)
+    return Failure(CollectionJobError.QUOTA_EXHAUSTED, RetryKind.PROVIDER_DAY)
+
+
+def _is_intraday(job: CollectionJob) -> bool:
+    return job.retry_until is not None and (
+        job.retry_until <= job.scheduled_for + INTRADAY_HISTORY_WINDOW
     )
-    return (
-        region_is_current
-        and binding.provider_account.enabled
-        and binding.provider_account.authorized_at is not None
-        and binding.validated_credential_revision == binding.provider_account.credential_revision
+
+
+def _end_unclaimed(
+    job: CollectionJob, status: CollectionJobStatus, code: CollectionJobError
+) -> None:
+    job.status = status
+    job.last_error = code
+    job.lease_token = None
+    job.lease_expires_at = None
+    job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
+
+
+def _stale_reason(
+    job: CollectionJob, binding: SiteBinding, now: datetime
+) -> CollectionJobError | None:
+    schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
+    approval_id, first_slot = approval_job(binding.pk) or (None, None)
+    timing = effective_forecast_schedule(
+        first_slot=first_slot,
+        schedule=schedule,
+        daily_quota=binding.provider_account.daily_quota,
     )
+    latest_slot = (
+        latest_forecast_slot(now, binding.timezone, timing.times, timing.effective_from)
+        if timing is not None
+        else None
+    )
+    if (
+        job.endpoint == CollectionEndpoint.FORECASTS
+        and latest_slot is not None
+        and latest_slot > job.scheduled_for
+    ):
+        return CollectionJobError.FORECAST_SUPERSEDED
+    if not binding_is_current(binding):
+        return CollectionJobError.BINDING_NOT_CURRENT
+    if schedule is None:
+        return None
+    if not schedule.enabled:
+        return CollectionJobError.SCHEDULE_DISABLED
+    slot_bound = job.endpoint == CollectionEndpoint.FORECASTS or (
+        job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
+        and job.target_date == job.scheduled_for.astimezone(ZoneInfo(binding.timezone)).date()
+    )
+    clock = job.scheduled_for.astimezone(ZoneInfo(binding.region.timezone)).strftime("%H:%M")
+    # Approval creates one immediate acquisition outside existing clocks.
+    approval_acquisition = (
+        job.endpoint == CollectionEndpoint.FORECASTS
+        and job.scheduled_for >= schedule.effective_from
+        and job.pk == approval_id
+    )
+    if (
+        slot_bound
+        and clock not in (timing.times if timing is not None else ())
+        and not approval_acquisition
+    ):
+        return CollectionJobError.SLOT_NOT_CONFIGURED
+    return None
 
 
 def claim(job_id: int, now: datetime) -> Lease | None:
@@ -125,11 +262,9 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         } or (job.available_at > now and not cleared_cooldown):
             return None
         if job.retry_until is not None and now >= job.retry_until:
-            job.status = CollectionJobStatus.FAILED
-            job.last_error = CollectionJobError.HISTORY_WINDOW_CLOSED
-            job.lease_token = None
-            job.lease_expires_at = None
-            job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
+            _end_unclaimed(
+                job, CollectionJobStatus.FAILED, CollectionJobError.HISTORY_WINDOW_CLOSED
+            )
             return None
         if (
             job.status == CollectionJobStatus.RUNNING
@@ -149,69 +284,18 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             .exists()
         ):
             return None
-        if job.retry_until is None and job.attempts >= 3:
-            job.status = CollectionJobStatus.FAILED
-            job.last_error = CollectionJobError.ATTEMPTS_EXHAUSTED
-            job.lease_token = None
-            job.lease_expires_at = None
-            job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
-            return None
         binding = SiteBinding.objects.select_related("provider_account", "region").get(
             pk=job.binding_id
         )
-        schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
-        approval_id, first_slot = approval_job(binding.pk) or (None, None)
-        timing = effective_forecast_schedule(
-            first_slot=first_slot,
-            schedule=schedule,
-            daily_quota=binding.provider_account.daily_quota,
-        )
-        latest_slot = (
-            latest_forecast_slot(now, binding.timezone, timing.times, timing.effective_from)
-            if timing is not None
-            else None
-        )
-        if (
-            job.endpoint == CollectionEndpoint.FORECASTS
-            and latest_slot is not None
-            and latest_slot > job.scheduled_for
-        ):
-            job.status = CollectionJobStatus.STALE
-            job.last_error = CollectionJobError.FORECAST_SUPERSEDED
-            job.lease_token = None
-            job.lease_expires_at = None
-            job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
+        reason = _stale_reason(job, binding, now)
+        if reason == CollectionJobError.FORECAST_SUPERSEDED:
+            _end_unclaimed(job, CollectionJobStatus.STALE, reason)
             return None
-        if not binding_is_current(binding) or (
-            schedule is not None
-            and (
-                not schedule.enabled
-                or (
-                    (
-                        job.endpoint == CollectionEndpoint.FORECASTS
-                        or (
-                            job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
-                            and job.target_date
-                            == job.scheduled_for.astimezone(ZoneInfo(binding.timezone)).date()
-                        )
-                    )
-                    and job.scheduled_for.astimezone(ZoneInfo(binding.region.timezone)).strftime(
-                        "%H:%M"
-                    )
-                    not in (timing.times if timing is not None else ())
-                    # Approval creates one immediate acquisition outside existing clocks.
-                    and (
-                        job.endpoint != CollectionEndpoint.FORECASTS
-                        or job.scheduled_for < schedule.effective_from
-                        or job.pk != approval_id
-                    )
-                )
-            )
-        ):
-            job.status = CollectionJobStatus.STALE
-            job.lease_token = None
-            job.lease_expires_at = None
-            job.save(update_fields=("status", "lease_token", "lease_expires_at"))
+        if job.retry_until is None and job.attempts >= MAX_ATTEMPTS:
+            _end_unclaimed(job, CollectionJobStatus.FAILED, CollectionJobError.ATTEMPTS_EXHAUSTED)
+            return None
+        if reason is not None:
+            _end_unclaimed(job, CollectionJobStatus.STALE, reason)
             return None
         token = uuid.uuid4()
         job.status = CollectionJobStatus.RUNNING
@@ -221,67 +305,59 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         if cleared_cooldown:
             job.available_at = now
         if job.retry_until is not None:
-            job.available_at = now + (
-                LEASE_DURATION
-                if job.retry_until <= job.scheduled_for + INTRADAY_HISTORY_WINDOW
-                else NIGHT_RETRY_DELAY
-            )
+            job.available_at = now + (LEASE_DURATION if _is_intraday(job) else NIGHT_RETRY_DELAY)
         job.save(
             update_fields=("status", "lease_token", "lease_expires_at", "attempts", "available_at")
         )
         return Lease(job.pk, binding, job.target_date, token, job.endpoint)
 
 
-def retry(
-    lease: Lease,
-    now: datetime,
-    code: CollectionJobError,
-    *,
-    quota: bool = False,
-    retryable: bool = True,
-    retry_after_seconds: int | None = None,
-    waiting: bool = False,
-    provider_transient: bool = False,
-) -> None:
+def _retry_at(job: CollectionJob, now: datetime, failure: Failure) -> datetime | None:
+    """The next attempt, or None when the job ends."""
+    waits_for_provider_day = failure.kind == RetryKind.PROVIDER_DAY
+    if job.retry_until is not None:
+        available = next_retry_at(
+            now,
+            job.attempts,
+            failure.retry_after_seconds,
+            minimum_seconds=120 * 2 ** min(job.attempts, 6)
+            if _is_intraday(job) and not waits_for_provider_day
+            else int(NIGHT_RETRY_DELAY.total_seconds()),
+        )
+        if waits_for_provider_day and failure.code != CollectionJobError.HISTORY_BUDGET_RESERVED:
+            available = max(available, next_provider_day(now))
+        return available if available < job.retry_until else None
+    if waits_for_provider_day:
+        return next_provider_day(now)
+    if job.attempts >= MAX_ATTEMPTS:
+        return None
+    retry_after = failure.retry_after_seconds
+    if failure.kind == RetryKind.PROVIDER and job.endpoint == CollectionEndpoint.FORECASTS:
+        retry_after = max(retry_after or 0, 120 * 2 ** min(job.attempts, 6))
+    return next_retry_at(now, job.attempts, retry_after)
+
+
+def retry(lease: Lease, now: datetime, failure: Failure) -> None:
     with transaction.atomic():
         job = CollectionJob.objects.select_for_update().get(pk=lease.job_id)
         if job.lease_token != lease.token or job.status != CollectionJobStatus.RUNNING:
             return
-        job.last_error = code
-        if quota or waiting:
+        job.last_error = failure.code
+        if failure.kind in {RetryKind.WAITING, RetryKind.PROVIDER_DAY, RetryKind.BLOCKED}:
             job.attempts -= 1
-        if not retryable:
-            job.status = CollectionJobStatus.FAILED
-        elif job.retry_until is not None:
-            intraday = job.retry_until <= job.scheduled_for + INTRADAY_HISTORY_WINDOW
-            job.available_at = next_retry_at(
-                now,
-                job.attempts,
-                retry_after_seconds,
-                minimum_seconds=120 * 2 ** min(job.attempts, 6)
-                if intraday and not quota
-                else int(NIGHT_RETRY_DELAY.total_seconds()),
-            )
-            if quota and code != CollectionJobError.HISTORY_BUDGET_RESERVED:
-                tomorrow = now.astimezone(UTC).date() + timedelta(days=1)
-                reset = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
-                job.available_at = max(job.available_at, reset)
-            job.status = (
-                CollectionJobStatus.RETRY
-                if job.available_at < job.retry_until
-                else CollectionJobStatus.FAILED
-            )
-        elif quota:
+        available = (
+            None
+            if failure.kind in {RetryKind.BLOCKED, RetryKind.PERMANENT}
+            else _retry_at(job, now, failure)
+        )
+        if available is not None:
             job.status = CollectionJobStatus.RETRY
-            tomorrow = now.astimezone(UTC).date() + timedelta(days=1)
-            job.available_at = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
+            job.available_at = available
+        elif failure.kind == RetryKind.PROVIDER_DAY:
+            # A refusal that outlives the job's window is a planned skip, not a failure.
+            job.status = CollectionJobStatus.STALE
         else:
-            job.status = (
-                CollectionJobStatus.RETRY if job.attempts < 3 else CollectionJobStatus.FAILED
-            )
-            if provider_transient and job.endpoint == CollectionEndpoint.FORECASTS:
-                retry_after_seconds = max(retry_after_seconds or 0, 120 * 2 ** min(job.attempts, 6))
-            job.available_at = next_retry_at(now, job.attempts, retry_after_seconds)
+            job.status = CollectionJobStatus.FAILED
         job.lease_token = None
         job.lease_expires_at = None
         job.save()
@@ -360,6 +436,7 @@ def publish(
         binding = SiteBinding.objects.select_related("provider_account").get(pk=job.binding_id)
         if not binding_is_current(binding):
             job.status = CollectionJobStatus.STALE
+            job.last_error = CollectionJobError.BINDING_NOT_CURRENT
         else:
             if job.endpoint == CollectionEndpoint.FORECASTS:
                 ForecastResult.objects.get_or_create(
@@ -396,6 +473,9 @@ def publish(
                             "status": CollectionJobStatus.PENDING
                             if schedule is None or schedule.enabled
                             else CollectionJobStatus.STALE,
+                            "last_error": ""
+                            if schedule is None or schedule.enabled
+                            else CollectionJobError.SCHEDULE_DISABLED,
                         },
                     )
         job.lease_token = None
@@ -481,31 +561,106 @@ def _persist_weather(lease: Lease, data: ProviderData, now: datetime) -> bool:
         )
 
 
-def collect(
-    job_id: int,
+def _acquire(
+    lease: Lease,
+    adapter: ProviderAdapter,
+    now: datetime,
+    progress: _Progress,
+    history_window: tuple[datetime, datetime] | None,
+    weather_provider: OpenMeteoProvider | None,
+) -> ForecastSnapshot | None:
+    def clock() -> datetime:
+        return now + timedelta(seconds=time.monotonic() - progress.started)
+
+    try:
+        adapter.prepare(lease.binding)
+    except ProviderError as exc:
+        logger.warning("Provider configuration invalid job_id=%s code=%s", lease.job_id, exc.code)
+        raise CollectionFailureError(
+            Failure(CollectionJobError.PROVIDER_CONFIGURATION_INVALID, RetryKind.PERMANENT)
+        ) from None
+    job = CollectionJob.objects.get(pk=lease.job_id)
+    try:
+        attempt = reserve_request(
+            lease.binding,
+            clock(),
+            purpose=RequestPurpose.ESTIMATED_ACTUALS
+            if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
+            else RequestPurpose.FORECAST,
+            job=job,
+        )
+    except QuotaExceededError as exc:
+        raise CollectionFailureError(_refusal(exc, clock())) from None
+    progress.reserved = True
+    request_at = clock()
+    if job.retry_until is not None and request_at >= job.retry_until:
+        RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.FAILED)
+        raise CollectionFailureError(
+            Failure(CollectionJobError.HISTORY_WINDOW_CLOSED, RetryKind.BLOCKED)
+        )
+    try:
+        data = (
+            fetch_history(lease, adapter, window=history_window, now=request_at)
+            if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
+            else adapter.fetch(lease.binding, lease.target_date)
+        )
+    except ProviderError as exc:
+        RequestAttempt.objects.filter(pk=attempt.pk).update(
+            outcome=RequestOutcome.FAILED, http_status=exc.status_code
+        )
+        record_provider_failure(lease.binding.provider_account, exc, clock())
+        logger.warning(
+            "Provider request failed correlation_id=%s status_code=%s",
+            attempt.correlation_id,
+            exc.status_code,
+        )
+        raise CollectionFailureError(provider_failure(exc)) from None
+    except Exception as exc:
+        logger.warning(
+            "Provider acquisition interrupted correlation_id=%s error_type=%s",
+            attempt.correlation_id,
+            type(exc).__name__,
+        )
+        raise CollectionFailureError(
+            Failure(CollectionJobError.PROVIDER_UNEXPECTED_FAILURE)
+        ) from None
+    RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.SUCCEEDED)
+    logger.info("Provider request succeeded correlation_id=%s", attempt.correlation_id)
+    if weather_provider is not None:
+        data = replace(
+            data, weather=None, weather_error=SnapshotWeatherError.ACQUISITION_INTERRUPTED
+        )
+    snapshot = persist_snapshot(lease, data, clock())
+    if snapshot is None:
+        return None
+    if weather_provider is not None:
+        data = _attach_weather(lease, data, weather_provider)
+        if not _persist_weather(lease, data, clock()):
+            return None
+        snapshot.refresh_from_db(fields=("weather_payload", "weather_error"))
+    return snapshot
+
+
+def _collect_leased(
+    lease: Lease,
     adapter: ProviderAdapter,
     calculator: Calculator,
     now: datetime,
-    *,
-    weather_provider: OpenMeteoProvider | None = None,
+    progress: _Progress,
+    weather_provider: OpenMeteoProvider | None,
 ) -> bool:
     from pyracast.plants.forecast_archive import prepare_forecast_issuances
 
-    started = time.monotonic()
-    lease = claim(job_id, now)
-    if lease is None:
-        return False
-    weather_provider = weather_provider if lease.endpoint == CollectionEndpoint.FORECASTS else None
-    snapshot = ForecastSnapshot.objects.filter(job_id=job_id).first()
+    def clock() -> datetime:
+        return now + timedelta(seconds=time.monotonic() - progress.started)
+
+    actuals = lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
+    snapshot = ForecastSnapshot.objects.filter(job_id=lease.job_id).first()
     if snapshot is None:
-        history_window = (
-            missing_actuals_window(lease.binding, now)
-            if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
-            else None
-        )
-        if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS and history_window is None:
+        history_window = missing_actuals_window(lease.binding, now) if actuals else None
+        if actuals and history_window is None:
             CollectionJob.objects.filter(
-                pk=job_id, lease_token=lease.token, status=CollectionJobStatus.RUNNING
+                pk=lease.job_id, lease_token=lease.token, status=CollectionJobStatus.RUNNING
             ).update(
                 status=CollectionJobStatus.SUCCEEDED,
                 last_error=CollectionJobError.HISTORY_ALREADY_ARCHIVED,
@@ -513,121 +668,21 @@ def collect(
                 lease_expires_at=None,
             )
             return True
-        try:
-            job = CollectionJob.objects.get(pk=job_id)
-            attempt = reserve_request(
-                lease.binding,
-                now + timedelta(seconds=time.monotonic() - started),
-                purpose=RequestPurpose.ESTIMATED_ACTUALS
-                if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
-                else RequestPurpose.FORECAST,
-                job=job,
-            )
-        except RequestDeferredError as exc:
-            finished_at = now + timedelta(seconds=time.monotonic() - started)
-            retry(
-                lease,
-                finished_at,
-                CollectionJobError.PROVIDER_AUTHENTICATION_FAILED
-                if exc.available_at is None
-                else CollectionJobError.PROVIDER_THROTTLED,
-                retryable=exc.available_at is not None,
-                retry_after_seconds=math.ceil((exc.available_at - finished_at).total_seconds())
-                if exc.available_at is not None
-                else None,
-                waiting=True,
-            )
-            return False
-        except QuotaExceededError as exc:
-            retry(
-                lease,
-                now + timedelta(seconds=time.monotonic() - started),
-                CollectionJobError.HISTORY_WINDOW_CLOSED
-                if isinstance(exc, HistoryWindowClosedError)
-                else CollectionJobError.HISTORY_BUDGET_RESERVED
-                if isinstance(exc, ForecastBudgetReservedError)
-                else CollectionJobError.QUOTA_EXHAUSTED,
-                quota=True,
-            )
-            return False
-        request_at = now + timedelta(seconds=time.monotonic() - started)
-        if job.retry_until is not None and request_at >= job.retry_until:
-            RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.FAILED)
-            retry(lease, request_at, CollectionJobError.HISTORY_WINDOW_CLOSED, quota=True)
-            return False
-        try:
-            data = (
-                fetch_history(lease, adapter, window=history_window, now=request_at)
-                if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
-                else adapter.fetch(lease.binding, lease.target_date)
-            )
-        except ProviderError as exc:
-            RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.FAILED)
-            record_provider_failure(
-                lease.binding.provider_account,
-                exc,
-                now + timedelta(seconds=time.monotonic() - started),
-            )
-            logger.warning("Provider request failed correlation_id=%s", attempt.correlation_id)
-            retry(
-                lease,
-                now + timedelta(seconds=time.monotonic() - started),
-                CollectionJobError.PROVIDER_AUTHENTICATION_FAILED
-                if exc.status_code == 401
-                else CollectionJobError.PROVIDER_THROTTLED
-                if exc.status_code == 429
-                else CollectionJobError.PROVIDER_FAILURE,
-                retryable=exc.retryable,
-                retry_after_seconds=rate_limit_retry_after(exc.retry_after_seconds)
-                if exc.status_code == 429
-                else exc.retry_after_seconds,
-                provider_transient=exc.retryable and exc.status_code != 429,
-            )
-            return False
-        except Exception as exc:
-            logger.warning(
-                "Provider acquisition interrupted correlation_id=%s error_type=%s",
-                attempt.correlation_id,
-                type(exc).__name__,
-            )
-            retry(
-                lease,
-                now + timedelta(seconds=time.monotonic() - started),
-                CollectionJobError.PROVIDER_UNEXPECTED_FAILURE,
-            )
-            return False
-        RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.SUCCEEDED)
-        logger.info("Provider request succeeded correlation_id=%s", attempt.correlation_id)
-        if weather_provider is not None:
-            data = replace(
-                data, weather=None, weather_error=SnapshotWeatherError.ACQUISITION_INTERRUPTED
-            )
-        snapshot = persist_snapshot(
-            lease, data, now + timedelta(seconds=time.monotonic() - started)
+        snapshot = _acquire(
+            lease,
+            adapter,
+            now,
+            progress,
+            history_window,
+            None if actuals else weather_provider,
         )
         if snapshot is None:
             return False
-        if weather_provider is not None:
-            data = _attach_weather(lease, data, weather_provider)
-            if not _persist_weather(
-                lease, data, now + timedelta(seconds=time.monotonic() - started)
-            ):
-                return False
-            snapshot.refresh_from_db(fields=("weather_payload", "weather_error"))
-    expected_kind = (
-        SnapshotSourceKind.ESTIMATED_ACTUALS
-        if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
-        else SnapshotSourceKind.FORECAST
-    )
+    expected_kind = SnapshotSourceKind.ESTIMATED_ACTUALS if actuals else SnapshotSourceKind.FORECAST
     if snapshot.source_kind != expected_kind:
-        retry(
-            lease,
-            now + timedelta(seconds=time.monotonic() - started),
-            CollectionJobError.INVALID_SOURCE_KIND,
-        )
-        return False
-    if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS:
-        return publish(lease, snapshot, {}, now + timedelta(seconds=time.monotonic() - started))
+        raise CollectionFailureError(Failure(CollectionJobError.INVALID_SOURCE_KIND))
+    if actuals:
+        return publish(lease, snapshot, {}, clock())
     try:
         data = snapshot_data(snapshot)
         payload = calculator(lease.binding, lease.target_date, data)
@@ -636,12 +691,7 @@ def collect(
         logger.warning(
             "Forecast calculation failed job_id=%s error_type=%s", lease.job_id, type(exc).__name__
         )
-        retry(
-            lease,
-            now + timedelta(seconds=time.monotonic() - started),
-            CollectionJobError.CALCULATION_FAILURE,
-        )
-        return False
+        raise CollectionFailureError(Failure(CollectionJobError.CALCULATION_FAILURE)) from None
     daily_payloads = prepare_daily_payloads(
         lease.binding, lease.target_date, data, calculator, payload
     )
@@ -649,10 +699,44 @@ def collect(
         lease,
         snapshot,
         payload,
-        now + timedelta(seconds=time.monotonic() - started),
+        clock(),
         daily_payloads=daily_payloads,
         prepared_issuances=prepared_issuances,
     )
+
+
+def collect(
+    job_id: int,
+    adapter: ProviderAdapter,
+    calculator: Calculator,
+    now: datetime,
+    *,
+    weather_provider: OpenMeteoProvider | None = None,
+) -> bool:
+    progress = _Progress()
+    lease = claim(job_id, now)
+    if lease is None:
+        return False
+    try:
+        return _collect_leased(lease, adapter, calculator, now, progress, weather_provider)
+    except CollectionFailureError as exc:
+        failure = exc.failure
+    except DatabaseError as exc:
+        log_failure(logger, "collection_database_failure", exc, job_id=job_id)
+        lock = getattr(exc.__cause__, "sqlstate", None) in LOCK_SQLSTATES
+        failure = (
+            Failure(
+                CollectionJobError.LOCK_CONTENTION,
+                RetryKind.TRANSIENT if progress.reserved else RetryKind.WAITING,
+            )
+            if lock
+            else Failure(CollectionJobError.PUBLICATION_FAILURE)
+        )
+    except Exception as exc:
+        log_failure(logger, "collection_failure", exc, job_id=job_id)
+        failure = Failure(CollectionJobError.PUBLICATION_FAILURE)
+    retry(lease, now + timedelta(seconds=time.monotonic() - progress.started), failure)
+    return False
 
 
 def pending_job_ids(now: datetime, limit: int = 100) -> list[int]:

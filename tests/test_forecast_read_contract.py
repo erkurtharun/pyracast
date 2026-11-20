@@ -14,7 +14,7 @@ from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant
 from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
-from pyracast.weather import serialize_weather
+from pyracast.weather_data import serialize_weather
 from tests.support.domain import NOW, System
 from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for

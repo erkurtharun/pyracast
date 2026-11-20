@@ -7,13 +7,10 @@ from django.db.models import F
 
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import (
-    create_account,
-    record_provider_failure,
-    rotate_secret,
-    validate_binding,
-)
+from pyracast.connections.operations import create_account, rotate_secret
 from pyracast.connections.recovery import clear_provider_cooldown
+from pyracast.forecasts.quota import record_provider_failure
+from pyracast.forecasts.validation import validate_binding
 from pyracast.regions.operations import configure_binding
 from tests.support.domain import NOW, FakeAdapter, make_system, provider_key
 from tests.support.invariants import PROVIDER_ACCOUNT_RULE, SITE_BINDING_RULE, violations

@@ -7,7 +7,7 @@ from django.conf import settings
 
 from pyracast.collection_window import SLOT_SEARCH_DAYS
 from pyracast.forecasts.models import CollectionEndpoint, CollectionJob, CollectionSchedule
-from pyracast.notifications.schedule import local_slot
+from pyracast.local_time import local_slot
 
 
 @dataclass(frozen=True)

@@ -6,12 +6,10 @@ import psycopg.errors
 import pytest
 from django.db import DatabaseError, OperationalError
 
-from pyracast import runtime
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import RequestDeferredError, reserve_request
 from pyracast.connections.secrets import encrypt_secret
-from pyracast.forecasts import jobs
+from pyracast.forecasts import jobs, runtime
 from pyracast.forecasts.jobs import claim, collect, pending_job_ids
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -19,8 +17,10 @@ from pyracast.forecasts.models import (
     RequestAttempt,
     RequestPurpose,
 )
+from pyracast.forecasts.quota import RequestDeferredError, reserve_request
 from pyracast.providers import SolcastProvider
-from pyracast.weather import OpenMeteoProvider, WeatherError
+from pyracast.weather import OpenMeteoProvider
+from pyracast.weather_data import WeatherError
 from tests.support.domain import NOW, FakeAdapter, System, make_system
 from tests.support.jobs import calculate
 from tests.support.providers import TARGET, binding_for

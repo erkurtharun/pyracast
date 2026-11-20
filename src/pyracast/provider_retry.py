@@ -25,6 +25,13 @@ def retryable_status(status: int) -> bool:
     return status in {408, 425, 429} or (500 <= status < 600 and status not in {501, 505})
 
 
+def next_provider_day(now: datetime) -> datetime:
+    # Provider allowances reset at UTC midnight; the margin keeps a request ahead of the
+    # provider's own reset from being refused and blocking the account for another day.
+    tomorrow = now.astimezone(UTC).date() + timedelta(days=1)
+    return datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC) + timedelta(minutes=2)
+
+
 def rate_limit_retry_after(retry_after: int | None) -> int:
     return 900 if retry_after is None else retry_after
 

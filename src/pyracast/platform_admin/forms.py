@@ -91,6 +91,7 @@ _FAILURES_WITHOUT_STATUS = {
     "invalid_provider_schema": _UNREADABLE_ANSWER,
     "invalid_provider_interval": _UNREADABLE_ANSWER,
     "unsafe_provider_response": _UNREADABLE_ANSWER,
+    "provider_response_too_large": _UNREADABLE_ANSWER,
     "fixture_account_required": _UNSUPPORTED_ACCOUNT,
     "unsupported_provider": _UNSUPPORTED_ACCOUNT,
 }

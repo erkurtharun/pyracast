@@ -11,11 +11,11 @@ from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import authorize_workspace_admin, tenant_membership
 from pyracast.accounts.models import WorkspaceRole
+from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import SiteBinding
 from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.actuals import ACTUAL_COMPOSITION_POLICY
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
-from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import SnapshotSourceKind
 from pyracast.plants.events import record_plant_event
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY

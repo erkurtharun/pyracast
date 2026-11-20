@@ -5,6 +5,7 @@ import type { components } from "@/lib/schema";
 import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { cadence, useApiQuery, useRefresh } from "@/lib/api/query";
+import { collectionOutcomeMessages } from "@/lib/collection-outcomes";
 import { Resource } from "@/ui/resource";
 import { ActionForm, Notice, Stat } from "@/ui/ui";
 
@@ -65,23 +66,6 @@ function ScheduleEditor({
         failed: t("failed"),
         stale: t("supersededOrNoLongerEligible"),
     };
-    const errorLabels: Record<string, string> = {
-        provider_failure: t("providerRequestFailed"),
-        quota_exhausted: t("dailyAccountBudgetExhausted"),
-        invalid_source_kind: t("unexpectedProviderData"),
-        calculation_failure: t("forecastCalculationFailed"),
-        history_not_supported: t("historicalEstimatesUnavailable"),
-        history_incomplete: t("historicalDataIsIncomplete"),
-        history_budget_reserved: t("remainingBudgetIsReservedForForecasts"),
-        retry_window_expired: t("morningRetryWindowEnded"),
-        history_window_closed: t("morningRetryWindowEnded"),
-        provider_authentication_failed: t("credentialAttention"),
-        provider_throttled: t("providerThrottle"),
-        provider_rejected: t("providerRejected"),
-        attempts_exhausted: t("retryLimitReached"),
-        superseded_forecast_slot: t("superseded"),
-    };
-
     const [times, setTimes] = useState(data.times);
     const moment = (value: string | null, missing: string) =>
         value
@@ -140,7 +124,6 @@ function ScheduleEditor({
                             type="checkbox"
                             name="enabled"
                             defaultChecked={data.enabled}
-                            disabled={region.status !== "approved"}
                         />{" "}
                         {t("enableDataCollection")}
                     </label>
@@ -248,7 +231,7 @@ function ScheduleEditor({
                                     attempts: job.attempts,
                                 })}
                                 {job.last_error && job.status !== "succeeded"
-                                    ? ` - ${errorLabels[job.last_error] ?? t("collectionNotCompleted")}`
+                                    ? ` - ${t(collectionOutcomeMessages[job.last_error])}`
                                     : ""}
                             </li>
                         ))}

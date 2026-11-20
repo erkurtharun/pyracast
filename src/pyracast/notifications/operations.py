@@ -1,4 +1,3 @@
-import re
 from dataclasses import dataclass, replace
 from datetime import datetime
 
@@ -13,6 +12,7 @@ from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Language, WorkspaceRole
 from pyracast.connections.models import MAX_DAILY_QUOTA
 from pyracast.errors import DomainError, ErrorCode
+from pyracast.local_time import CLOCK_PATTERN
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationSettings,
@@ -25,7 +25,6 @@ from pyracast.regions.models import Region, RegionStatus, active_region
 RECIPIENT_MAX_LENGTH = 254
 # The largest per-plant recipient limit the console accepts (a smallint column).
 MAX_RECIPIENT_LIMIT = 32767
-CLOCK = re.compile(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]")
 
 
 def validate_recipient(address: str) -> None:
@@ -101,7 +100,7 @@ def _check_recipients(submitted: ReminderSettings) -> None:
 
 
 def _check_times(submitted: ReminderSettings, stored: ReminderSettings, region: Region) -> None:
-    if any(CLOCK.fullmatch(clock) is None for clock in submitted.times):
+    if any(CLOCK_PATTERN.fullmatch(clock) is None for clock in submitted.times):
         raise ValidationError(gettext("Reminder times must use HH:MM."))
     if len(set(submitted.times)) != len(submitted.times):
         raise DomainError(ErrorCode.DUPLICATE_REMINDER_TIMES, field="times")

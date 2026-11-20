@@ -24,7 +24,7 @@ from pyracast.accounts import session_lock
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.api.session import SessionView
 from pyracast.connections.contracts import ProviderError
-from pyracast.connections.operations import QuotaExceededError, RequestDeferredError
+from pyracast.forecasts.quota import QuotaExceededError, RequestDeferredError
 from tests.support.auth_lifecycle import PASSWORD
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"])

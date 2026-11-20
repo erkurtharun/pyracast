@@ -6,13 +6,10 @@ from django.contrib.auth.models import User
 from django.db import IntegrityError, connection, connections, transaction
 
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.operations import (
-    QuotaExceededError,
-    create_account,
-    reserve_account_request,
-)
+from pyracast.connections.operations import create_account
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from pyracast.forecasts.models import RequestPurpose
+from pyracast.forecasts.quota import QuotaExceededError, reserve_account_request
 from pyracast.regions.models import AuditEvent
 from tests.support.domain import NOW, provider_key
 

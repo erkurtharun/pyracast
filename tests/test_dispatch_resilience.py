@@ -7,11 +7,9 @@ import pytest
 from django.core.management import CommandError, call_command
 from django.db import OperationalError
 
-from pyracast import runtime
-from pyracast.background.failures import ItemsFailedError
-from pyracast.forecasts import scheduler
+from pyracast.background.failures import ItemsFailedError, PhaseOutcome
+from pyracast.forecasts import runtime, scheduler
 from pyracast.forecasts.management.commands import dispatch as command
-from pyracast.forecasts.monitoring import PhaseOutcome
 from pyracast.forecasts.scheduler import CollectionSchedulingError
 from pyracast.shutdown import ShutdownRequest
 from tests.support.domain import make_system
@@ -25,7 +23,8 @@ def isolated_monitoring(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 
 @pytest.mark.parametrize(
-    "failed_phase", ["purge_expired", "dispatch", "dispatch_calibrations", "dispatch_epias"]
+    "failed_phase",
+    ["purge_expired", "dispatch_collections", "dispatch_calibrations", "dispatch_epias"],
 )
 def test_dispatch_failure_does_not_suppress_email_and_one_shot_reports_failure(
     failed_phase: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -44,14 +43,14 @@ def test_dispatch_failure_does_not_suppress_email_and_one_shot_reports_failure(
     operations = {}
     for name in (
         "purge_expired",
-        "dispatch",
+        "dispatch_collections",
         "dispatch_calibrations",
         "dispatch_notifications",
         "dispatch_epias",
     ):
         operations[name] = MagicMock()
         monkeypatch.setattr(command, name, operations[name])
-    operations["dispatch"].return_value = PhaseOutcome()
+    operations["dispatch_collections"].return_value = PhaseOutcome()
     monkeypatch.setattr(command, "sweep_accounts", MagicMock())
     operations[failed_phase].side_effect = RuntimeError("private-provider-response")
     monkeypatch.setattr(command, "logger", logging.getLogger("test.dispatch"), raising=False)
@@ -90,7 +89,7 @@ def test_dispatch_monitoring_failure_does_not_skip_other_phases(
         "dispatch_epias",
     ):
         monkeypatch.setattr(command, name, MagicMock())
-    monkeypatch.setattr(command, "dispatch", MagicMock(return_value=PhaseOutcome()))
+    monkeypatch.setattr(command, "dispatch_collections", MagicMock(return_value=PhaseOutcome()))
     monkeypatch.setattr(command, "record_dispatch_phase", MagicMock(side_effect=ConnectionError))
     with pytest.raises(CommandError, match="monitoring"):
         call_command("dispatch")
@@ -120,7 +119,7 @@ def test_dispatch_loop_recovers_after_a_failed_cycle(
     ):
         monkeypatch.setattr(command, name, MagicMock())
     collection = MagicMock(side_effect=[ConnectionError("private-broker-url"), PhaseOutcome()])
-    monkeypatch.setattr(command, "dispatch", collection)
+    monkeypatch.setattr(command, "dispatch_collections", collection)
     stop_file = tmp_path / "stop"
     cycles = []
 
@@ -162,7 +161,9 @@ def test_phase_records_duration_and_published_count(
 ) -> None:
     mock_runtime(monkeypatch)
     monkeypatch.setattr(command, "dispatch_notifications", MagicMock(return_value=3))
-    monkeypatch.setattr(command, "dispatch", MagicMock(return_value=PhaseOutcome(published=2)))
+    monkeypatch.setattr(
+        command, "dispatch_collections", MagicMock(return_value=PhaseOutcome(published=2))
+    )
     monkeypatch.setattr(command, "dispatch_calibrations", MagicMock(return_value=1))
     monkeypatch.setattr(command, "purge_expired", MagicMock(return_value={"plants": 4}))
     monkeypatch.setattr(command, "sweep_accounts", MagicMock())
@@ -253,7 +254,7 @@ def test_collection_keeps_its_first_cause_when_publishing_fails(
     monkeypatch.setattr(runtime, "close_old_connections", MagicMock())
     actor = MagicMock()
     actor.send.side_effect = [None, ConnectionError("private-broker-url")]
-    assert runtime.dispatch(actor) == PhaseOutcome(published=1, error=error)
+    assert runtime.dispatch_collections(actor) == PhaseOutcome(published=1, error=error)
     assert "collection_publish_failed published=1 error_type=ConnectionError" in pyracast_logs.text
     assert "private-broker-url" not in pyracast_logs.text
 

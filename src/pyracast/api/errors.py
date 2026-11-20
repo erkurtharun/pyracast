@@ -28,7 +28,6 @@ from rest_framework.views import set_rollback
 from pyracast.accounts.audit import SecurityEvent, record_refusal
 from pyracast.accounts.language import request_language
 from pyracast.connections.contracts import ProviderError
-from pyracast.connections.operations import QuotaExceededError, RequestDeferredError
 from pyracast.errors import (
     MESSAGES,
     DomainError,
@@ -36,6 +35,7 @@ from pyracast.errors import (
     ForbiddenError,
     retryable_database_code,
 )
+from pyracast.forecasts.quota import QuotaExceededError, RequestDeferredError
 
 logger = logging.getLogger("pyracast.api")
 

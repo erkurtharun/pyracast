@@ -42,7 +42,8 @@ queue_and_count() {
 import sys
 import django
 django.setup()
-from pyracast.runtime import make_actor, make_broker
+from pyracast.background.broker import make_broker
+from pyracast.forecasts.runtime import make_actor
 broker = make_broker()
 try:
     make_actor(broker).send(0)

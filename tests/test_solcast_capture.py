@@ -15,9 +15,9 @@ from django.utils import timezone
 from pyracast.accounts.models import Tenant
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import QuotaExceededError, reserve_account_request
 from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.models import RequestAttempt, RequestPurpose
+from pyracast.forecasts.quota import QuotaExceededError, reserve_account_request
 from pyracast.providers import normalize_payload
 from pyracast.regions.models import Region
 from scripts import check_solcast

@@ -11,7 +11,7 @@ from pyracast.forecasts.models import (
     CollectionSchedule,
     RequestAttempt,
 )
-from pyracast.notifications.schedule import local_slot
+from pyracast.local_time import local_slot
 from pyracast.regions.models import active_region
 
 

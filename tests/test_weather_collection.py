@@ -6,12 +6,11 @@ import httpx
 import pytest
 from django.conf import LazySettings
 
-from pyracast import runtime
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.secrets import encrypt_secret
-from pyracast.forecasts import jobs
+from pyracast.forecasts import jobs, runtime
 from pyracast.forecasts.jobs import LEASE_DURATION, collect
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -22,7 +21,8 @@ from pyracast.forecasts.models import (
 )
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.providers import FixtureProvider
-from pyracast.weather import OpenMeteoProvider, WeatherData
+from pyracast.weather import OpenMeteoProvider
+from pyracast.weather_data import WeatherData
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.weather_collection import WeatherFixture
 
@@ -197,7 +197,7 @@ def test_runtime_only_enriches_enabled_hobby_forecasts(
     job.endpoint = endpoint
     job.save(update_fields=("endpoint",))
     settings.PYRACAST_WEATHER_ENABLED = enabled
-    monkeypatch.setenv("PYRACAST_OPEN_METEO_API_KEY", "artificial-weather-key")
+    settings.PYRACAST_OPEN_METEO_API_KEY = "artificial-weather-key"
     monkeypatch.setattr(runtime, "datetime", SimpleNamespace(now=lambda _: NOW))
     monkeypatch.setattr(runtime, "adapter_for", lambda binding: HistoricalFixture())
     weather = WeatherFixture()

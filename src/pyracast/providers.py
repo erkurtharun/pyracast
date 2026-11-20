@@ -1,13 +1,15 @@
 import json
 import math
 import re
+import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal, cast
 from zoneinfo import ZoneInfo
 
 import httpx
+from django.views.decorators.debug import sensitive_variables
 
 from pyracast.connections.contracts import (
     HistoryAdapter,
@@ -19,6 +21,7 @@ from pyracast.connections.models import SiteBinding
 from pyracast.connections.secrets import decrypt_api_key
 from pyracast.intervals import NormalizedInterval, Sunlight
 from pyracast.irradiance import local_day_bounds
+from pyracast.outbound import UnboundedResponseError, read_bounded
 from pyracast.provider_retry import retry_after_seconds, retryable_status
 
 
@@ -70,9 +73,12 @@ def normalize_payload(
             raise ProviderError("invalid_provider_interval", retryable=False) from None
         intervals.append(NormalizedInterval(start, end, power))
     try:
-        json.dumps(payload, allow_nan=False)
+        # PostgreSQL jsonb stores neither NUL nor unpaired surrogates.
+        json.dumps(payload, allow_nan=False, ensure_ascii=False).encode("utf-8")
     except TypeError, ValueError:
         raise ProviderError("invalid_provider_schema", retryable=False) from None
+    if contains_text(payload, "\u0000"):
+        raise ProviderError("invalid_provider_schema", retryable=False)
     # The Hobby response does not promise an issue timestamp or P50 semantics.
     return ProviderData(
         raw_payload=payload.copy(),
@@ -82,20 +88,22 @@ def normalize_payload(
     )
 
 
-def contains_secret(value: object, secret: str) -> bool:
+def contains_text(value: object, text: str) -> bool:
     if isinstance(value, str):
-        return secret in value
+        return text in value
     if isinstance(value, list):
-        return any(contains_secret(item, secret) for item in value)
+        return any(contains_text(item, text) for item in value)
     if isinstance(value, dict):
         return any(
-            contains_secret(key, secret) or contains_secret(item, secret)
-            for key, item in value.items()
+            contains_text(key, text) or contains_text(item, text) for key, item in value.items()
         )
     return False
 
 
 class FixtureProvider(ProviderAdapter, HistoryAdapter):
+    def prepare(self, binding: SiteBinding) -> None:
+        pass
+
     def validate(self, binding: SiteBinding) -> None:
         if binding.provider_account.provider != "fixture":
             raise ProviderError("fixture_account_required")
@@ -153,6 +161,14 @@ class SolcastProvider(ProviderAdapter, HistoryAdapter):
         self.transport = transport
         self.clock = clock
 
+    def prepare(self, binding: SiteBinding) -> None:
+        try:
+            decrypt_api_key(binding.provider_account.encrypted_api_key)
+        except ProviderError:
+            raise ProviderError("invalid_provider_secret", retryable=False) from None
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", binding.site_id):
+            raise ProviderError("invalid_site_id", retryable=False)
+
     def validate(self, binding: SiteBinding) -> None:
         # Saved Toolkit settings require operator attestation; the response only validates access.
         self.fetch(binding, datetime.now(UTC).date())
@@ -180,39 +196,72 @@ class SolcastProvider(ProviderAdapter, HistoryAdapter):
     def _request(
         self, binding: SiteBinding, endpoint: Literal["forecasts", "estimated_actuals"], hours: int
     ) -> ProviderData:
-        secret = decrypt_api_key(binding.provider_account.encrypted_api_key)
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", binding.site_id):
-            raise ProviderError("invalid_site_id")
-        try:
-            with httpx.Client(
-                timeout=httpx.Timeout(20, connect=5),
-                transport=self.transport,
-                follow_redirects=False,
-            ) as client:
-                response = client.get(
-                    f"https://api.solcast.com.au/rooftop_sites/{binding.site_id}/{endpoint}",
-                    headers={"Authorization": f"Bearer {secret}"},
-                    params={"format": "json", "hours": hours},
+        self.prepare(binding)
+        answer = solcast_get(
+            decrypt_api_key(binding.provider_account.encrypted_api_key),
+            f"/rooftop_sites/{binding.site_id}/{endpoint}",
+            {"hours": hours},
+            transport=self.transport,
+        )
+        return normalize_payload(answer.payload, endpoint, collected_at=self.clock())
+
+
+@dataclass(frozen=True)
+class SolcastAnswer:
+    payload: object
+    headers: httpx.Headers
+
+
+@sensitive_variables()
+def solcast_get(
+    secret: str,
+    path: str,
+    params: dict[str, str | int],
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> SolcastAnswer:
+    started = time.monotonic()
+    try:
+        with (
+            httpx.Client(
+                timeout=httpx.Timeout(20, connect=5), transport=transport, follow_redirects=False
+            ) as client,
+            client.stream(
+                "GET",
+                f"https://api.solcast.com.au{path}",
+                headers={"Authorization": f"Bearer {secret}"},
+                params={"format": "json", **params},
+            ) as response,
+        ):
+            if not response.is_success:
+                raise ProviderError(
+                    "provider_request_failed",
+                    retryable=retryable_status(response.status_code),
+                    retry_after_seconds=retry_after_seconds(response.headers.get("Retry-After"))
+                    if response.status_code in {429, 503}
+                    else None,
+                    status_code=response.status_code,
                 )
-                if not response.is_success:
-                    raise ProviderError(
-                        "provider_request_failed",
-                        retryable=retryable_status(response.status_code),
-                        retry_after_seconds=retry_after_seconds(response.headers.get("Retry-After"))
-                        if response.status_code in {429, 503}
-                        else None,
-                        status_code=response.status_code,
-                    ) from None
-                if secret in response.text:
-                    raise ProviderError("unsafe_provider_response")
-                payload = response.json()
-        except httpx.DecodingError, json.JSONDecodeError, UnicodeDecodeError:
-            raise ProviderError("invalid_provider_schema") from None
-        except httpx.HTTPError:
-            raise ProviderError("provider_request_failed") from None
-        if contains_secret(payload, secret):
-            raise ProviderError("unsafe_provider_response")
-        return normalize_payload(payload, endpoint, collected_at=self.clock())
+            body = read_bounded(response, started).decode("utf-8")
+            headers = response.headers
+    except UnboundedResponseError as exc:
+        raise ProviderError(
+            "provider_response_too_large" if exc.too_large else "provider_request_failed",
+            retryable=not exc.too_large,
+        ) from None
+    except UnicodeDecodeError:
+        raise ProviderError("invalid_provider_schema") from None
+    except httpx.HTTPError:
+        raise ProviderError("provider_request_failed") from None
+    if secret in body:
+        raise ProviderError("unsafe_provider_response")
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        raise ProviderError("invalid_provider_schema") from None
+    if contains_text(payload, secret) or contains_text(dict(headers), secret):
+        raise ProviderError("unsafe_provider_response")
+    return SolcastAnswer(payload, headers)
 
 
 def adapter_for(binding: SiteBinding) -> ProviderAdapter:

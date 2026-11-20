@@ -14,8 +14,7 @@ from rest_framework.test import APIClient
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import MAX_DAILY_QUOTA, ProviderAccount, SiteBinding
-from pyracast.connections.operations import validate_binding
-from pyracast.forecasts.jobs import claim, collect, persist_snapshot, retry
+from pyracast.forecasts.jobs import Failure, claim, collect, persist_snapshot, retry
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionJobError,
@@ -26,6 +25,7 @@ from pyracast.forecasts.models import (
 )
 from pyracast.forecasts.schedule import configure_schedule, get_schedule, schedule_payload
 from pyracast.forecasts.scheduler import enqueue_due
+from pyracast.forecasts.validation import validate_binding
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.regions.operations import approve_region
@@ -134,7 +134,7 @@ def test_history_restart_reuses_saved_snapshot_without_request() -> None:
     data = HistoricalFixture().fetch_history(lease.binding, lease.target_date, 7)
     snapshot = persist_snapshot(lease, data, NIGHT)
     assert snapshot is not None
-    retry(lease, NIGHT, CollectionJobError.PROVIDER_UNEXPECTED_FAILURE)
+    retry(lease, NIGHT, Failure(CollectionJobError.PROVIDER_UNEXPECTED_FAILURE))
     history.refresh_from_db()
     assert collect(history.pk, FakeAdapter(), no_calculation, history.available_at)
     assert not RequestAttempt.objects.filter(job=history).exists()
@@ -317,7 +317,7 @@ def test_schedule_edit_keeps_authorized_retry_and_only_creates_future_slots(
     job = CollectionJob.objects.get(endpoint="forecasts", scheduled_for=due)
     lease = claim(job.pk, due)
     assert lease is not None
-    retry(lease, due, CollectionJobError.PROVIDER_FAILURE)
+    retry(lease, due, Failure(CollectionJobError.PROVIDER_FAILURE))
     changed = due + timedelta(minutes=1)
     times = ["08:00", "09:00", "11:00"] + (["10:00"] if keep_due_time else [])
     configure_schedule(
@@ -331,7 +331,7 @@ def test_schedule_edit_keeps_authorized_retry_and_only_creates_future_slots(
     job.refresh_from_db()
     assert job.status == ("retry" if keep_due_time else "stale")
     assert job.attempts == 1
-    assert job.last_error == "provider_failure"
+    assert job.last_error == ("provider_failure" if keep_due_time else "schedule_changed")
     assert (claim(job.pk, due + timedelta(minutes=2)) is not None) is keep_due_time
     assert enqueue_due(changed) == []
     enqueue_due(due + timedelta(hours=1))
@@ -501,7 +501,7 @@ def test_forecast_and_history_share_atomic_account_quota() -> None:
     assert RequestAttempt.objects.count() == 2
     assert (
         CollectionJob.objects.filter(
-            status__in=("failed", "retry"),
+            status__in=("stale", "retry"),
             last_error__in=("quota_exhausted", "history_budget_reserved"),
         ).count()
         == 1
@@ -572,7 +572,8 @@ def test_schedule_disable_during_request_preserves_authorized_acquisition() -> N
 
 
 def test_history_revalidation_rearms_stale_job_without_resetting_attempts() -> None:
-    from pyracast.connections.operations import rotate_secret, validate_binding
+    from pyracast.connections.operations import rotate_secret
+    from pyracast.forecasts.validation import validate_binding
 
     system = make_system(approved=True)
     enqueue_due(NIGHT)

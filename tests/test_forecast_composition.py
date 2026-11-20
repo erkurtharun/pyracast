@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from pyracast.plants.forecast_composition import ForecastVintage, compose_forecasts
+from pyracast.forecasts.composition import ForecastVintage, compose_forecasts
 
 START = datetime(2026, 11, 11, tzinfo=UTC)
 

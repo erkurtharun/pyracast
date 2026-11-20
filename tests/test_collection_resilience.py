@@ -6,13 +6,7 @@ import pytest
 from pyracast.api.errors import exception_handler
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.operations import (
-    RequestDeferredError,
-    record_provider_failure,
-    reserve_account_request,
-    rotate_secret,
-    validate_binding,
-)
+from pyracast.connections.operations import rotate_secret
 from pyracast.epias import AUTH_URL, EpiasClient, EpiasDay, EpiasError, EpiasPlant
 from pyracast.forecasts.jobs import LEASE_DURATION, claim, collect, persist_snapshot, publish
 from pyracast.forecasts.models import (
@@ -22,14 +16,20 @@ from pyracast.forecasts.models import (
     RequestAttempt,
     RequestPurpose,
 )
+from pyracast.forecasts.quota import (
+    RequestDeferredError,
+    record_provider_failure,
+    reserve_account_request,
+)
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.forecasts.timing import latest_forecast_slot
+from pyracast.forecasts.validation import validate_binding
 from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.provider_retry import retry_delay
 from pyracast.providers import SolcastProvider
-from pyracast.weather import WeatherData
+from pyracast.weather_data import WeatherData
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate
 from tests.support.metering import connected

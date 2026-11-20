@@ -9,6 +9,11 @@ from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.capacity_normalization import normalization_provenance
+from pyracast.forecasts.composition import (
+    ForecastComposition,
+    ForecastVintage,
+    compose_forecasts,
+)
 from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.intraday import (
     PreparedIntradaySource,
@@ -25,11 +30,6 @@ from pyracast.forecasts.models import (
 )
 from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.forecast_composition import (
-    ForecastComposition,
-    ForecastVintage,
-    compose_forecasts,
-)
 from pyracast.solar import daylight_window
 
 ACTUAL_COMPOSITION_POLICY = "native-estimated-actuals-coverage-v1"

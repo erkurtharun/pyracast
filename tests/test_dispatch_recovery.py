@@ -24,7 +24,12 @@ def test_dispatch_reconnects_after_its_postgresql_session_is_terminated(
         "make_epias_actor",
     ):
         monkeypatch.setattr(command, factory, MagicMock())
-    for operation in ("dispatch", "dispatch_epias", "purge_expired", "purge_finished_mail"):
+    for operation in (
+        "dispatch_collections",
+        "dispatch_epias",
+        "purge_expired",
+        "purge_finished_mail",
+    ):
         monkeypatch.setattr(command, operation, MagicMock())
     sessions: list[int] = []
 

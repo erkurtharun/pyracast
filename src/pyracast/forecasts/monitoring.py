@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from django.db.models import Count, F, OuterRef, Q, Subquery
@@ -25,13 +24,6 @@ from pyracast.notifications.models import (
 from pyracast.notifications.operations import invalid_reminder_recipient_count
 from pyracast.plants.models import active_plant
 from pyracast.regions.models import Region, active_region
-
-
-@dataclass(frozen=True)
-class PhaseOutcome:
-    published: int | None = None
-    # A bounded failure code (at most 100 characters); empty when the phase succeeded.
-    error: str = ""
 
 
 def record_dispatch_phase(

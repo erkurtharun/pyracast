@@ -10,9 +10,10 @@ from django.core.management import CommandError, call_command
 from dramatiq import Worker
 from dramatiq.brokers.stub import StubBroker
 
-from pyracast import runtime
+from pyracast.background import broker as broker_module
+from pyracast.background.failures import PhaseOutcome
+from pyracast.forecasts import runtime
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
-from pyracast.forecasts.monitoring import PhaseOutcome
 from pyracast.shutdown import ShutdownRequest
 from tests.support.domain import make_system
 
@@ -58,8 +59,8 @@ def test_dispatch_schedules_before_sending_and_repeats_pending(
     monkeypatch.setattr(runtime, "pending_job_ids", pending)
     broker = StubBroker()
     actor = runtime.make_actor(broker)
-    assert runtime.dispatch(actor) == PhaseOutcome(published=2)
-    assert runtime.dispatch(actor) == PhaseOutcome(published=2)
+    assert runtime.dispatch_collections(actor) == PhaseOutcome(published=2)
+    assert runtime.dispatch_collections(actor) == PhaseOutcome(published=2)
     assert broker.queues[actor.queue_name].qsize() == 4
     assert scheduled.call_count == 2
     assert pending.call_args.args == scheduled.call_args.args
@@ -67,9 +68,9 @@ def test_dispatch_schedules_before_sending_and_repeats_pending(
 
 def test_rabbitmq_broker_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     constructor = MagicMock()
-    monkeypatch.setattr(runtime, "RabbitmqBroker", constructor)
+    monkeypatch.setattr(broker_module, "RabbitmqBroker", constructor)
     monkeypatch.setenv("PYRACAST_RABBITMQ_URL", "amqp://example.invalid/test")
-    runtime.make_broker()
+    broker_module.make_broker()
     parameters = parse_qs(urlsplit(constructor.call_args.kwargs["url"]).query)
     assert parameters == {
         "socket_timeout": ["5"],
@@ -80,7 +81,7 @@ def test_rabbitmq_broker_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     }
     assert constructor.call_args.kwargs["confirm_delivery"] is True
     monkeypatch.delenv("PYRACAST_RABBITMQ_URL")
-    runtime.make_broker()
+    broker_module.make_broker()
     assert constructor.call_args.kwargs["url"].startswith("amqp://guest:guest@127.0.0.1:5672/%2F?")
 
 
@@ -91,7 +92,7 @@ def test_rabbitmq_failover_urls_preserve_explicit_parameters(
         "PYRACAST_RABBITMQ_URL",
         "amqp://node1.invalid/?heartbeat=60;amqp://node2.invalid/?socket_timeout=8",
     )
-    broker = runtime.make_broker()
+    broker = broker_module.make_broker()
     first, second = broker.parameters
     assert first.host == "node1.invalid"
     assert first.heartbeat == 60
@@ -115,7 +116,7 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "purge_finished_mail", purge_mail)
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "make_actor", lambda _: actor)
-    monkeypatch.setattr(command, "dispatch", send)
+    monkeypatch.setattr(command, "dispatch_collections", send)
     calibration_actor, send_calibrations = MagicMock(), MagicMock()
     monkeypatch.setattr(command, "make_calibration_actor", lambda _: calibration_actor)
     monkeypatch.setattr(command, "dispatch_calibrations", send_calibrations)
@@ -237,7 +238,7 @@ def test_commands_handle_termination_and_restore_previous_handlers(
         monkeypatch.setattr(command, "sweep_accounts", MagicMock())
         monkeypatch.setattr(command, "purge_finished_mail", MagicMock())
         for operation in (
-            "dispatch",
+            "dispatch_collections",
             "dispatch_calibrations",
             "dispatch_notifications",
             "dispatch_epias",
@@ -344,7 +345,7 @@ def test_dispatch_repeats_after_poll_timeout_until_stop_requested(
         "sweep_accounts",
         "purge_finished_mail",
         "publish_outbound_mail",
-        "dispatch",
+        "dispatch_collections",
         "dispatch_calibrations",
         "dispatch_notifications",
     ):

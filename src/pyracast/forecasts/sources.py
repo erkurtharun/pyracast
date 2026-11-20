@@ -9,7 +9,7 @@ from pyracast.errors import BusyError, ErrorCode
 from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot, SnapshotWeatherError
 from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import SourceKind
-from pyracast.weather import WeatherError, restore_weather
+from pyracast.weather_data import WeatherError, restore_weather
 
 
 def mark_forecast_fallback(payload: dict[str, object], cutoff: datetime) -> None:
