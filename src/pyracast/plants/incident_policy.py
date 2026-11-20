@@ -1,7 +1,7 @@
-from collections.abc import Iterable
-from datetime import datetime
+from collections.abc import Sequence
+from datetime import date, datetime
 
-from pyracast.incidents.evidence import IncidentEvidence, select_incidents
+from pyracast.incidents.evidence import select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import CalibrationRun, PlantConfiguration
 
@@ -27,12 +27,29 @@ def incidents_unchanged(run: CalibrationRun, known_at: datetime) -> bool:
     )
 
 
-def incidents_unchanged_within(run: CalibrationRun, evidence: Iterable[IncidentEvidence]) -> bool:
-    """The same comparison as `incidents_unchanged` over evidence selected once for a wider
-    window at the same knowledge time."""
-    start, end = run_window(run)
-    return sorted(run.incident_revision_ids) == sorted(
-        row.revision_id
-        for row in evidence
-        if row.starts_at < end and (row.ends_at is None or row.ends_at > start)
+def runs_with_unchanged_incidents(
+    configuration: PlantConfiguration,
+    items: Sequence[tuple[date, CalibrationRun]],
+    known_at: datetime,
+) -> list[tuple[date, CalibrationRun]]:
+    """The items whose run passes `incidents_unchanged`, reading the evidence once for the
+    widest window at the same knowledge time."""
+    if not items:
+        return []
+    windows = [run_window(run) for _, run in items]
+    evidence = select_incidents(
+        configuration.plant_id,
+        min(start for start, _ in windows),
+        max(end for _, end in windows),
+        known_at,
     )
+    return [
+        (item, run)
+        for (item, run), (start, end) in zip(items, windows, strict=True)
+        if sorted(run.incident_revision_ids)
+        == sorted(
+            row.revision_id
+            for row in evidence
+            if row.starts_at < end and (row.ends_at is None or row.ends_at > start)
+        )
+    ]

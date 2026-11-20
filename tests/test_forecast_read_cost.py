@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 from django.db import connection
@@ -7,9 +7,9 @@ from django.test.utils import CaptureQueriesContext
 
 from tests.support.domain import System
 from tests.support.forecast_history import (
-    DAY,
+    PLANT_READS,
+    REGION_READS,
     TODAY,
-    UNCOVERED,
     add_history,
     usable_calibration,
 )
@@ -17,29 +17,6 @@ from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
-TOMORROW = TODAY + timedelta(days=1)
-PLANT_READS = (
-    ("forecast", TODAY),
-    ("auto", TODAY),
-    ("estimated_actuals", TODAY),
-    ("archived_forecast", TODAY),
-    ("forecast", TOMORROW),
-    ("forecast", DAY),
-    ("auto", DAY),
-    ("estimated_actuals", DAY),
-    ("archived_forecast", DAY),
-    ("auto", UNCOVERED),
-)
-REGION_READS = (
-    ("forecast", TODAY),
-    ("auto", TODAY),
-    ("estimated_actuals", TODAY),
-    ("forecast", TOMORROW),
-    ("archived_forecast", DAY),
-    ("auto", DAY),
-    ("estimated_actuals", DAY),
-    ("auto", UNCOVERED),
-)
 PAYLOAD_CEILING_BYTES = 64_000
 
 

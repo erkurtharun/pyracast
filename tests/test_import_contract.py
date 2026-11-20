@@ -92,6 +92,10 @@ BACK_EDGES: dict[tuple[str, str], str] = {
         "plants.preparation",
     ): "an import prepares calibrations of its plants",
     ("forecasts.historical_upload", "plants.models"): "an upload previews the plants it feeds",
+    (
+        "forecasts.history",
+        "plants.forecast_archive",
+    ): "the saved region day lives in the plant archive",
     ("forecasts.history", "plants.forecast_sources"): "snapshot replay lives in plants",
     ("forecasts.intraday", "plants.forecast_sources"): "snapshot replay lives in plants",
     (
@@ -139,6 +143,7 @@ FUNCTION_IMPORTS: dict[tuple[str, str], str] = {
         "plants.automation",
     ): "member removal and administrator change call notifications and plants explicitly",
     ("forecasts.actuals", "forecasts.history"): "breaks an import cycle",
+    ("forecasts.history", "plants.forecast_archive"): "breaks an import cycle",
     (
         "forecasts.historical_import",
         "plants.preparation",

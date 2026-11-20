@@ -145,8 +145,7 @@ class CalibrationTimeline:
 
 
 def calibration_timeline(configuration: PlantConfiguration, as_of: datetime) -> CalibrationTimeline:
-    from pyracast.incidents.operations import select_incidents
-    from pyracast.plants.incident_policy import incidents_unchanged_within, run_window
+    from pyracast.plants.incident_policy import runs_with_unchanged_incidents
 
     activations = (
         CalibrationActivation.objects.select_related(
@@ -164,18 +163,7 @@ def calibration_timeline(configuration: PlantConfiguration, as_of: datetime) -> 
         start = _fitted_start(run)
         if start is not None and _fits(run, configuration, as_of):
             fitted.append((start, run))
-    if not fitted:
-        return CalibrationTimeline(())
-    windows = [run_window(run) for _, run in fitted]
-    evidence = select_incidents(
-        configuration.plant_id,
-        min(start for start, _ in windows),
-        max(end for _, end in windows),
-        as_of,
-    )
-    return CalibrationTimeline(
-        tuple((start, run) for start, run in fitted if incidents_unchanged_within(run, evidence))
-    )
+    return CalibrationTimeline(tuple(runs_with_unchanged_incidents(configuration, fitted, as_of)))
 
 
 def calibration_for_day(

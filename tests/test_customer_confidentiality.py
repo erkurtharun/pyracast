@@ -273,7 +273,6 @@ CUSTOMER_FIELDS = {
     "recipients",
     "recorded_by_id",
     "recorded_count",
-    "reference_available",
     "reference_capacity_normalization",
     "reference_kind",
     "reference_provenance",

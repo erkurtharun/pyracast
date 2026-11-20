@@ -4,11 +4,17 @@ from datetime import date
 import pytest
 from django.test import Client
 
-from tests.support.forecast_history import TODAY, UNCOVERED, add_history, usable_calibration
+from tests.support.forecast_history import (
+    PLANT_READS,
+    REGION_READS,
+    TODAY,
+    UNCOVERED,
+    add_history,
+    usable_calibration,
+)
 from tests.support.openapi import components, validate
 from tests.support.performance_history import FIRST, LAST, performance_history
 from tests.support.plant_operations import make_plant
-from tests.test_forecast_read_cost import PLANT_READS, REGION_READS
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
