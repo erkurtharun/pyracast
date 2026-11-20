@@ -376,7 +376,12 @@ function ReminderSettings({ scope, region }: ReminderProps) {
                             <AsyncButton
                                 variant="secondary"
                                 onClick={async () => {
-                                    await resource.reload();
+                                    try {
+                                        await resource.reload();
+                                    } catch {
+                                        // RefreshFailed reports it and the offer stays.
+                                        return;
+                                    }
                                     setForm((current) => ({
                                         generation: current.generation + 1,
                                         stale: false,
@@ -428,6 +433,10 @@ function ReminderSettings({ scope, region }: ReminderProps) {
                                         }));
                                     throw error;
                                 }
+                                setForm((current) => ({
+                                    ...current,
+                                    stale: false,
+                                }));
                                 await refresh.workspace(scope.tenant_id);
                             }}
                         >

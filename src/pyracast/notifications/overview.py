@@ -231,7 +231,6 @@ def reminder_summaries(tenant_id: int, region_ids: Sequence[int]) -> dict[int, R
 def plants_at_recipient_limit(tenant_id: int) -> int:
     """Plants whose reminders include the members, are sending and already reach the limit, so
     one more member pauses them."""
-    limit = recipient_limit()
     schedules = list(
         ReminderSchedule.objects.filter(
             region__in=Region.objects.active().filter(tenant_id=tenant_id),
@@ -239,6 +238,9 @@ def plants_at_recipient_limit(tenant_id: int) -> int:
             include_workspace_members=True,
         ).select_related("region__approved_binding__provider_account")
     )
+    if not schedules:
+        return 0
+    limit = recipient_limit()
     return sum(
         assessment.state == ReminderState.SENDING and len(assessment.recipients) == limit
         for assessment in assess(schedules, workspace(tenant_id), limit)

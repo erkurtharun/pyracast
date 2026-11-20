@@ -45,13 +45,12 @@ class Workspace:
 NO_MEMBERS = Workspace(frozenset(), ())
 
 
-def workspace(tenant_id: int) -> Workspace:
+def workspace(tenant_id: int, *, leaving: int | None = None) -> Workspace:
     """Active memberships and the verified primary addresses of their members, read now."""
-    members = list(
-        Membership.objects.filter(tenant_id=tenant_id, user__is_active=True)
-        .order_by("pk")
-        .values_list("pk", "user_id", "user__email")
-    )
+    memberships = Membership.objects.filter(tenant_id=tenant_id, user__is_active=True)
+    if leaving is not None:
+        memberships = memberships.exclude(pk=leaving)
+    members = list(memberships.order_by("pk").values_list("pk", "user_id", "user__email"))
     verified = {
         (user_id, recipient_key(email))
         for user_id, email in EmailAddress.objects.filter(
@@ -199,7 +198,7 @@ def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str
         .values_list("pk", flat=True)
     )
     rows = ReminderRecipient.objects.filter(schedule__region__tenant_id=tenant_id)
-    keys = {recipient_key(address) for address in emails}
+    keys = {key for address in emails if (key := recipient_key(address))}
     keys.update(rows.filter(ties__membership_id=membership_id).values_list("key", flat=True))
     removed = rows.filter(
         Q(ties__membership_id=membership_id) | Q(ties__isnull=True, key__in=keys)
@@ -209,8 +208,36 @@ def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str
     )
     ReminderRecipient.objects.filter(pk__in=removed).delete()
     ReminderSchedule.objects.filter(pk__in=changed).update(revision=F("revision") + 1)
+    _revoke_unauthorized(tenant_id, membership_id, keys)
+
+
+def _revoke_unauthorized(tenant_id: int, leaving: int, keys: set[str]) -> None:
+    """Revokes the open deliveries' rows of these keys that their schedule no longer authorizes
+    without the leaving membership; an address another active member holds stays."""
+    candidates = list(
+        DeliveryRecipient.objects.filter(
+            delivery__schedule__region__tenant_id=tenant_id,
+            delivery__status__in=OPEN_DELIVERIES,
+            key__in=keys,
+        ).values_list(
+            "pk",
+            "key",
+            "delivery__schedule_id",
+            "delivery__schedule__include_workspace_members",
+        )
+    )
+    if not candidates:
+        return
+    schedules = {schedule_id: include for _, _, schedule_id, include in candidates}
+    explicit = explicit_recipients(schedules)
+    members = workspace(tenant_id, leaving=leaving)
+    authorized = {
+        (schedule_id, recipient_key(address))
+        for schedule_id, include in schedules.items()
+        for address in effective(include, explicit.get(schedule_id, []), members)
+    }
     DeliveryRecipient.objects.filter(
-        delivery__schedule__region__tenant_id=tenant_id,
-        delivery__status__in=OPEN_DELIVERIES,
-        key__in=keys,
+        pk__in=[
+            pk for pk, key, schedule_id, _ in candidates if (schedule_id, key) not in authorized
+        ]
     ).update(revoked=True)

@@ -1,4 +1,5 @@
 import sys
+from collections import defaultdict
 from typing import ClassVar
 
 import django.db.models.deletion
@@ -21,35 +22,38 @@ def historical(apps: Apps, alias: str, name: str) -> models.QuerySet[models.Mode
 
 
 def copy_recipients(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
-    """Copies the lists verbatim: every schedule address with its pins as ties, every delivery
-    address with its revocation. A marked delivery's rows are its envelope by the marker, not
-    by its revocations; no status implies an envelope. A second spelling of one key is kept
-    once, with the pins of both, and counted."""
+    """Copies the lists verbatim: every schedule address with the pins of its key as ties,
+    every delivery address with its revocation. A marked delivery's rows are its envelope by
+    the marker, not by its revocations; no status implies an envelope. A second spelling of one
+    key is kept once, with the pins of both, and counted, as are pins that name no address."""
     alias = schema_editor.connection.alias
     schedules = historical(apps, alias, "ReminderSchedule")
     deliveries = historical(apps, alias, "NotificationDelivery")
     recipients = historical(apps, alias, "ReminderRecipient")
     ties = historical(apps, alias, "ReminderRecipientTie")
     delivered = historical(apps, alias, "DeliveryRecipient")
-    repeated = unbounded = 0
+    repeated = unbounded = orphaned = 0
     for schedule_id, addresses, pins in (
         schedules.order_by("pk").values_list("pk", "recipients", "recipient_memberships").iterator()
     ):
-        kept: dict[str, tuple[str, set[int]]] = {}
+        pinned: dict[str, set[int]] = defaultdict(set)
+        for pin_key, members in pins.items():
+            pinned[recipient_key(pin_key)].update(int(pin) for pin in members)
+        kept: dict[str, str] = {}
         for address in addresses:
-            members = {int(pin) for pin in pins.get(address.casefold(), [])}
-            unbounded += sum(pin > LARGEST_ID for pin in members)
-            members = {pin if pin <= LARGEST_ID else 0 for pin in members}
             key = recipient_key(address)
             if key in kept:
                 repeated += 1
-                kept[key][1].update(members)
             else:
-                kept[key] = (address, members)
-        for key, (address, members) in kept.items():
+                kept[key] = address
+        orphaned += sum(len(members) for key, members in pinned.items() if key not in kept)
+        for key, address in kept.items():
+            members = pinned.get(key, set())
+            unbounded += sum(pin > LARGEST_ID for pin in members)
             row = recipients.create(schedule_id=schedule_id, address=address, key=key)
             ties.bulk_create(
-                ties.model(recipient_id=row.pk, membership_id=pin) for pin in sorted(members)
+                ties.model(recipient_id=row.pk, membership_id=pin)
+                for pin in sorted({pin if pin <= LARGEST_ID else 0 for pin in members})
             )
     for delivery_id, addresses, revoked in (
         deliveries.order_by("pk").values_list("pk", "recipients", "revoked_recipients").iterator()
@@ -74,6 +78,11 @@ def copy_recipients(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None
         sys.stdout.write(
             f"\n  notifications: {unbounded} membership pin(s) beyond the id range were kept "
             "as a tie that names no membership."
+        )
+    if orphaned:
+        sys.stdout.write(
+            f"\n  notifications: {orphaned} membership pin(s) named no address of their list "
+            "and were not kept."
         )
 
 
