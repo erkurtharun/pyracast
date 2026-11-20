@@ -1,5 +1,5 @@
 "use client";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import {
     createContext,
@@ -10,6 +10,9 @@ import {
     type ReactNode,
 } from "react";
 import type { Tenant } from "@/lib/api";
+import { deviceZone } from "@/lib/format/time";
+import { useFormat } from "@/lib/format/use-format";
+import { contactEmail } from "@/lib/public-metadata";
 import { cadence, useApiList } from "@/lib/api/query";
 import { routes, screenOf, type Screen } from "@/lib/routes";
 import {
@@ -74,7 +77,7 @@ export function WorkspaceShell({
     children: ReactNode;
 }) {
     const t = useTranslations("Dashboard");
-    const locale = useLocale();
+    const format = useFormat();
     const router = useRouter();
     const screen = screenOf(usePathname());
     const { session } = useSessionState();
@@ -252,10 +255,9 @@ export function WorkspaceShell({
                     {endingSoon && (
                         <Notice>
                             {t("sessionEndingSoon", {
-                                time: new Date(endingSoon).toLocaleTimeString(
-                                    locale,
-                                    { timeStyle: "short" },
-                                ),
+                                time: format.time(endingSoon, deviceZone(), {
+                                    timeStyle: "short",
+                                }),
                             })}
                         </Notice>
                     )}
@@ -288,8 +290,10 @@ export function WorkspaceShell({
                                     {children}
                                 </Suspense>
                             ) : tenantId === undefined ? (
-                                <Empty title={t("noWorkspace")}>
-                                    {t("contactAdmin")}
+                                <Empty page title={t("noWorkspace")}>
+                                    {t("contactAdmin", {
+                                        contact: contactEmail,
+                                    })}
                                 </Empty>
                             ) : (
                                 <Notice error>

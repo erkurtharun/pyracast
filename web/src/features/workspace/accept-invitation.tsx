@@ -4,7 +4,7 @@ import { api } from "@/lib/api/client";
 import { authRequest } from "@/lib/auth-api";
 import { routes } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
-import { ActionForm } from "@/ui/ui";
+import { AsyncButton } from "@/ui/form";
 import { clearWorkspaceInvitation } from "./workspace-invitation";
 
 export function AcceptInvitation({
@@ -19,25 +19,30 @@ export function AcceptInvitation({
             <section className="auth-card">
                 <h1>{t("joinWorkspace")}</h1>
                 <p>{session?.user?.email}</p>
-                <ActionForm
-                    children={null}
-                    submit={t("accept")}
-                    onSubmit={async () => {
+                <AsyncButton
+                    permitted
+                    errorTitle={t("acceptFailed")}
+                    onClick={async () => {
                         await api.post("/api/invitations/accept/", {
                             body: { token: invitationToken },
                         });
                         clearWorkspaceInvitation();
                         window.location.replace(routes.workspaces());
                     }}
-                />
-                <ActionForm
-                    children={null}
-                    submit={t("useAnotherAccount")}
-                    onSubmit={async () => {
+                >
+                    {t("accept")}
+                </AsyncButton>
+                <AsyncButton
+                    permitted
+                    variant="secondary"
+                    errorTitle={t("signOutFailed")}
+                    onClick={async () => {
                         await authRequest("auth/session", "DELETE");
                         window.location.replace(routes.invitation());
                     }}
-                />
+                >
+                    {t("useAnotherAccount")}
+                </AsyncButton>
                 <button
                     type="button"
                     className="text-button"

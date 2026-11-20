@@ -17,7 +17,7 @@ export function WorkspaceMembers({
         <>
             <div className="page-heading">
                 <div>
-                    <p className="eyebrow">{tenant.name}</p>
+                    <p className="eyebrow name">{tenant.name}</p>
                     <h1>{t("title")}</h1>
                 </div>
             </div>

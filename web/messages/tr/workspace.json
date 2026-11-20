@@ -376,8 +376,6 @@
         "removing": "Çıkarılıyor…",
         "removed": "{email} bu çalışma alanından çıkarıldı.",
         "loading": "Yükleniyor…",
-        "admin": "Yönetici",
-        "viewer": "Üye",
         "pending": "Bekleyen davetler",
         "noInvitations": "Bekleyen davet yok.",
         "joinWorkspace": "Çalışma alanına katıl",
@@ -387,7 +385,13 @@
         "deliveryFailed": "Davet e-postası gönderilemedi. Daveti iptal edip yeniden davet edin.",
         "useAnotherAccount": "Başka hesap kullan",
         "dismiss": "Vazgeç",
-        "reminderLimitWarning": "{count, number} santralin e-posta hatırlatmaları çalışma alanı üyelerini içeriyor ve alıcı sınırına ulaştı. Yeni bir üye, liste kısaltılana kadar bu hatırlatmaları duraklatır."
+        "reminderLimitWarning": "{count, number} santralin e-posta hatırlatmaları çalışma alanı üyelerini içeriyor ve alıcı sınırına ulaştı. Yeni bir üye, liste kısaltılana kadar bu hatırlatmaları duraklatır.",
+        "inviteFailed": "Davet gönderilemedi",
+        "invitationSent": "Davet gönderildi.",
+        "cancelFailed": "Davet iptal edilemedi",
+        "cancelled": "Davet iptal edildi.",
+        "acceptFailed": "Davet kabul edilemedi",
+        "signOutFailed": "Oturumunuz hâlâ açık"
     },
     "ChangeRequests": {
         "atDecision": "Karar anında",

@@ -376,8 +376,6 @@
         "removing": "Removing…",
         "removed": "{email} was removed from this workspace.",
         "loading": "Loading…",
-        "admin": "Administrator",
-        "viewer": "Member",
         "pending": "Pending invitations",
         "noInvitations": "No pending invitations.",
         "joinWorkspace": "Join workspace",
@@ -387,7 +385,13 @@
         "deliveryFailed": "The invitation email was not sent. Cancel the invitation and invite again.",
         "useAnotherAccount": "Use another account",
         "dismiss": "Cancel",
-        "reminderLimitWarning": "{count, plural, one {# plant includes} other {# plants include}} the workspace members in its email reminders and already reaches the recipient limit. A new member will pause those reminders until the list is shortened."
+        "reminderLimitWarning": "{count, plural, one {# plant includes} other {# plants include}} the workspace members in its email reminders and already reaches the recipient limit. A new member will pause those reminders until the list is shortened.",
+        "inviteFailed": "The invitation was not sent",
+        "invitationSent": "Invitation sent.",
+        "cancelFailed": "The invitation was not cancelled",
+        "cancelled": "Invitation cancelled.",
+        "acceptFailed": "The invitation was not accepted",
+        "signOutFailed": "You are still signed in"
     },
     "ChangeRequests": {
         "proposeRevert": "Request provider reading",

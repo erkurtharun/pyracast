@@ -151,7 +151,7 @@
         "loadingWorkspaces": "Loading your workspaces…",
         "loadingScreen": "Loading…",
         "noWorkspace": "No workspace yet",
-        "contactAdmin": "Contact your administrator for access.",
+        "contactAdmin": "Ask your workspace administrator for an invitation, or write to Pyracast support at {contact}.",
         "portfolio": "Your solar portfolio",
         "closeForm": "Close form",
         "addPlant": "+ Add a plant",

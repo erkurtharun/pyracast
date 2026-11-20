@@ -4,7 +4,6 @@ import { useEffect } from "react";
 import { routes } from "@/lib/routes";
 import { useSessionState } from "@/lib/session-client";
 import { RequireUser } from "@/features/session/require-user";
-import { WorkspaceAccess } from "@/ui/workspace-access";
 import {
     storedInvitation,
     storeInvitation,
@@ -35,11 +34,7 @@ export function InvitationEntry() {
     }, [token, signedIn, router]);
     return (
         <RequireUser>
-            {token && (
-                <WorkspaceAccess value={true}>
-                    <AcceptInvitation invitationToken={token} />
-                </WorkspaceAccess>
-            )}
+            {token && <AcceptInvitation invitationToken={token} />}
         </RequireUser>
     );
 }

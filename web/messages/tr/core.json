@@ -151,7 +151,7 @@
         "loadingWorkspaces": "Çalışma alanlarınız yükleniyor…",
         "loadingScreen": "Yükleniyor…",
         "noWorkspace": "Henüz çalışma alanı yok",
-        "contactAdmin": "Erişim için yöneticinizle iletişime geçin.",
+        "contactAdmin": "Davet için çalışma alanı yöneticinize başvurun ya da {contact} adresinden Pyracast desteğine yazın.",
         "portfolio": "Güneş enerjisi portföyünüz",
         "closeForm": "Formu kapat",
         "addPlant": "+ Santral ekle",

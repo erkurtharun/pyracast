@@ -6,7 +6,10 @@ import { api } from "@/lib/api/client";
 import { useApiQuery, useRefresh } from "@/lib/api/query";
 import type { components } from "@/lib/schema";
 import { ConfirmAction } from "@/ui/action";
+import { useErrorMessage } from "@/ui/form";
+import { Resource } from "@/ui/resource";
 import { Notice } from "@/ui/ui";
+import { useLabel } from "@/ui/vocabulary";
 
 type Member = components["schemas"]["WorkspaceMemberOutput"];
 
@@ -25,6 +28,8 @@ export function MemberList({
 }) {
     const t = useTranslations("WorkspaceMembers");
     const refresh = useRefresh();
+    const label = useLabel();
+    const errorMessage = useErrorMessage();
     const [removal, setRemoval] = useState<Removal>({ status: "idle" });
     const removing = useRef(false);
     const heading = useRef<HTMLHeadingElement>(null);
@@ -43,7 +48,7 @@ export function MemberList({
         } catch (failure) {
             setRemoval({
                 status: "error",
-                message: (failure as Error).message,
+                message: errorMessage(failure),
             });
         } finally {
             removing.current = false;
@@ -56,46 +61,50 @@ export function MemberList({
             <h2 ref={heading} tabIndex={-1}>
                 {t("members")}
             </h2>
-            {members.loading && <p role="status">{t("loading")}</p>}
-            {members.error && <Notice error>{members.error}</Notice>}
             {removal.status === "success" && (
                 <Notice>{t("removed", { email: removal.email })}</Notice>
             )}
             {removal.status === "error" && (
                 <Notice error>{removal.message}</Notice>
             )}
-            <ul className="member-list">
-                {members.data?.members.map((member) => (
-                    <li key={member.id} className="workspace-member">
-                        <span>
-                            <span>{member.email}</span>
-                            <small className="field-hint">
-                                {t(member.role)}
-                            </small>
-                        </span>
-                        {tenant.role === "admin" &&
-                            member.role === "viewer" &&
-                            member.id !== userId && (
-                                <button
-                                    type="button"
-                                    className="text-button member-remove"
-                                    disabled={removal.status === "pending"}
-                                    aria-label={t("removeNamed", {
-                                        email: member.email,
-                                    })}
-                                    onClick={() =>
-                                        setRemoval({
-                                            status: "confirming",
-                                            member,
-                                        })
-                                    }
-                                >
-                                    {t("remove")}
-                                </button>
-                            )}
-                    </li>
-                ))}
-            </ul>
+            <Resource resource={members} loading={t("loading")}>
+                {(data) => (
+                    <ul className="member-list">
+                        {data.members.map((member) => (
+                            <li key={member.id} className="workspace-member">
+                                <span>
+                                    <span>{member.email}</span>
+                                    <small className="field-hint">
+                                        {label("WorkspaceRole", member.role)}
+                                    </small>
+                                </span>
+                                {tenant.role === "admin" &&
+                                    member.role === "viewer" &&
+                                    member.id !== userId && (
+                                        <button
+                                            type="button"
+                                            className="text-button member-remove"
+                                            disabled={
+                                                removal.status === "pending"
+                                            }
+                                            aria-label={t("removeNamed", {
+                                                email: member.email,
+                                            })}
+                                            onClick={() =>
+                                                setRemoval({
+                                                    status: "confirming",
+                                                    member,
+                                                })
+                                            }
+                                        >
+                                            {t("remove")}
+                                        </button>
+                                    )}
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </Resource>
             {(removal.status === "confirming" ||
                 removal.status === "pending") && (
                 <ConfirmAction
