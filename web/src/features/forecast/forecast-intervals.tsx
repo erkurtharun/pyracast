@@ -149,7 +149,7 @@ export function ForecastIntervals({
                                                     "estimated_actuals"
                                                   ? t("updated_estimate")
                                                   : t("forecast")
-                                            : "—"}
+                                            : MISSING}
                                     </td>
                                 )}
                             </tr>

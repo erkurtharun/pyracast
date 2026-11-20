@@ -1,5 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
+import { MISSING } from "@/lib/format/number";
 import { useFormat } from "@/lib/format/use-format";
 import type { Forecast } from "@/lib/api";
 import { JsonDetails, Tag } from "@/ui/ui";
@@ -173,7 +174,7 @@ export function ForecastProvenance({
                       })
                     : ""}
                 {t("model_version", {
-                    version: String(result.model_version ?? "—"),
+                    version: String(result.model_version ?? MISSING),
                 })}{" "}
                 {forecast.configuration_id
                     ? t("configuration_id", { id: forecast.configuration_id })
