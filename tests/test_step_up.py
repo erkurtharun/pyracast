@@ -28,8 +28,8 @@ from django.core import mail
 from django.db import DatabaseError, connection, connections, transaction
 from django.test import Client, override_settings
 
+from pyracast.accounts import adapters, processes, security, step_up
 from pyracast.accounts import middleware as account_middleware
-from pyracast.accounts import processes, security, step_up
 from pyracast.accounts.audit import refusal_throttle
 from pyracast.accounts.sessions import end_sessions
 from pyracast.notifications.models import OutboundMail
@@ -1405,6 +1405,35 @@ def test_an_address_change_whose_session_cannot_be_saved_sends_no_code(
     assert "email_change_requested" not in {line["event"] for line in events()}
     assert (response.status_code, response.json()["code"]) == (503, "busy")
     assert session_user(client) == user.pk
+
+
+@pytest.mark.parametrize("write", ["add-authenticator", "regenerate-recovery-codes"])
+def test_a_factor_write_whose_notice_cannot_be_stored_stores_nothing(
+    write: str, now: float, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    case = WRITES[write]
+    user, client, other = arranged(case)
+    prepared = case.prepare(client, now)
+    token = token_of(client)
+    token_of(other)
+    before = credentials(user)
+    events = capture_security_events(caplog, monkeypatch)
+    written = len(events())
+
+    def refused(*_args: Any, **_kwargs: Any) -> None:
+        raise DatabaseError("The notice could not be stored.")
+
+    monkeypatch.setattr(adapters, "enqueue_mail", refused)
+    client.raise_request_exception = False
+
+    response = case.send(client, token, prepared)
+
+    assert response.status_code == 500
+    assert credentials(user) == before
+    assert session_user(other) == user.pk
+    assert events()[written:] == []
+    assert list(OutboundMail.objects.values_list("kind", flat=True)) == []
+    assert mailed_to() == []
 
 
 @pytest.mark.parametrize("write", ["add-authenticator", "regenerate-recovery-codes"])
