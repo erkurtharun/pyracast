@@ -273,6 +273,7 @@ export function Auth({
                                         t,
                                     );
                                     if ("refusal" in step) {
+                                        setMessage("");
                                         setRefusal(step.refusal);
                                         return;
                                     }

@@ -66,7 +66,8 @@
         "leaveFailed": "The sign-in step was not ended",
         "ended": {
             "title": "This step has ended",
-            "text": "The code can no longer be used here: it expired, it was used, or too many wrong codes were entered. Start again to get a new code.",
+            "code": "The code can no longer be used here: it expired, it was used, or too many wrong codes were entered. Start again to get a new code.",
+            "step": "This step can no longer be completed. Start again from sign-in.",
             "action": "Start again"
         },
         "limited": {

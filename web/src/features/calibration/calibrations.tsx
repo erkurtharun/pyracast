@@ -238,7 +238,9 @@ export function Calibrations({
                                                     <button
                                                         className="text-button"
                                                         onClick={() =>
-                                                            void loadDetails(run.id)
+                                                            void loadDetails(
+                                                                run.id,
+                                                            )
                                                         }
                                                     >
                                                         {t("view_details")}
@@ -265,17 +267,18 @@ export function Calibrations({
                                                                     automationPending
                                                                 }
                                                                 onClick={() =>
-                                                                    void action(() =>
-                                                                        api.post(
-                                                                            "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/{calibration_id}/activate/",
-                                                                            {
-                                                                                path: {
-                                                                                    ...scope,
-                                                                                    calibration_id:
-                                                                                        run.id,
+                                                                    void action(
+                                                                        () =>
+                                                                            api.post(
+                                                                                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/{calibration_id}/activate/",
+                                                                                {
+                                                                                    path: {
+                                                                                        ...scope,
+                                                                                        calibration_id:
+                                                                                            run.id,
+                                                                                    },
                                                                                 },
-                                                                            },
-                                                                        ),
+                                                                            ),
                                                                     )
                                                                 }
                                                             >

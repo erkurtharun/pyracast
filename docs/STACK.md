@@ -105,7 +105,7 @@ Pyracast is a Django API with a Next.js single-page client, one PostgreSQL datab
 - On CI prefer `workers: 1`, always set a global timeout and do not cache browser binaries. [Playwright continuous integration](https://playwright.dev/docs/ci)
 - `forbidOnly` and `failOnFlakyTests` exist for CI: with retries enabled, a flaky test otherwise keeps the run green. [Playwright TestConfig](https://playwright.dev/docs/api/class-testconfig)
 - Next.js recommends running Playwright against production code (`next build` then `next start`); the dev server is only the alternative. [Next.js Playwright guide](https://nextjs.org/docs/app/guides/testing/playwright)
-- Target WCAG A and AA with `withTags(['wcag2a','wcag2aa','wcag21a','wcag21aa'])`, share one `AxeBuilder` configuration through a fixture, and remember that automated scans cannot detect every violation. [Playwright accessibility testing](https://playwright.dev/docs/accessibility-testing)
+- Target WCAG A and AA; the mocked browser suite scans through one shared `AxeBuilder` configuration (`web/tests/support/accessibility.ts`, WCAG 2.2 A and AA plus best practices). Remember that automated scans cannot detect every violation. [Playwright accessibility testing](https://playwright.dev/docs/accessibility-testing)
 - Status messages must be announced without moving focus: the `role="status"` container exists before the message is inserted into it. [WCAG technique ARIA22](https://www.w3.org/WAI/WCAG22/Techniques/aria/ARIA22)
 
 ## Build, deployment and operations

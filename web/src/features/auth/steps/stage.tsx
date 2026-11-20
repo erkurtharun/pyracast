@@ -53,7 +53,11 @@ export function RefusalStage({
     if (refusal === "ended")
         return (
             <>
-                <p>{t("ended.text")}</p>
+                <p>
+                    {mode === "verify" || mode === "reset"
+                        ? t("ended.code")
+                        : t("ended.step")}
+                </p>
                 <AsyncButton
                     permitted
                     errorTitle={t("leaveFailed")}

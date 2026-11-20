@@ -9,6 +9,10 @@ import { authRequest } from "@/lib/auth-api";
 const RESEND_SECONDS = 60;
 const RESEND_MILLISECONDS = RESEND_SECONDS * 1000;
 
+function secondsUntil(availableAt: number) {
+    return Math.max(0, Math.ceil((availableAt - Date.now()) / 1000));
+}
+
 export function ResendCode({
     sentAt,
     onSent,
@@ -21,7 +25,7 @@ export function ResendCode({
     const [availableAt, setAvailableAt] = useState(
         sentAt && sentAt + RESEND_MILLISECONDS,
     );
-    const [seconds, setSeconds] = useState(sentAt ? RESEND_SECONDS : 0);
+    const [seconds, setSeconds] = useState(() => secondsUntil(availableAt));
     const [state, setState] = useState<
         | { status: "idle" | "pending" }
         | { status: "error"; message: string; final: boolean }
@@ -29,10 +33,7 @@ export function ResendCode({
     useEffect(() => {
         if (!availableAt) return;
         const timer = window.setInterval(() => {
-            const remaining = Math.max(
-                0,
-                Math.ceil((availableAt - Date.now()) / 1000),
-            );
+            const remaining = secondsUntil(availableAt);
             setSeconds(remaining);
             if (!remaining) window.clearInterval(timer);
         }, 1000);

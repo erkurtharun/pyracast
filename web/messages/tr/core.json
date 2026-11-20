@@ -66,7 +66,8 @@
         "leaveFailed": "Giriş adımı sonlandırılamadı",
         "ended": {
             "title": "Bu adım sona erdi",
-            "text": "Kod burada artık kullanılamaz: süresi doldu, kullanıldı veya çok fazla yanlış kod girildi. Yeni bir kod almak için baştan başlayın.",
+            "code": "Kod burada artık kullanılamaz: süresi doldu, kullanıldı veya çok fazla yanlış kod girildi. Yeni bir kod almak için baştan başlayın.",
+            "step": "Bu adım artık tamamlanamaz. Girişten baştan başlayın.",
             "action": "Baştan başla"
         },
         "limited": {
