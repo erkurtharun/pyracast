@@ -1,4 +1,5 @@
 import json
+import shutil
 import signal
 import subprocess
 from collections.abc import Callable
@@ -17,6 +18,7 @@ SECRETS = (
     "mfa_authenticator: 0 primary, 1 fallback, 0 unreadable\n"
 )
 BOOTSTRAP = "-- bootstrap fixture\nSELECT 1;\n"
+FLOOR = int(10**12 * backup.FREE_FLOOR_FRACTION)
 
 
 class Usage(NamedTuple):
@@ -171,7 +173,7 @@ def rehearsed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Rehearsed:
     monkeypatch.setattr(rehearsal, "LOCK", tmp_path / "rehearsal.lock")
     monkeypatch.setattr(rehearsal, "MEMINFO", fake.meminfo)
     monkeypatch.setattr(rehearsal, "report", fake.report)
-    monkeypatch.setattr(rehearsal.shutil, "disk_usage", fake.usage)
+    monkeypatch.setattr(shutil, "disk_usage", fake.usage)
     monkeypatch.setattr(reset_database, "load_host", fake.helper)
     monkeypatch.setattr(reset_database, "capture", fake.docker.capture)
     monkeypatch.setattr(reset_database, "download_archive", fake.docker.download)
@@ -370,9 +372,9 @@ def test_the_rehearsal_starts_nothing_without_room_beside_the_running_site(
     if shortage == "memory":
         rehearsed.meminfo.write_text("MemTotal: 4000000 kB\nMemAvailable: 600000 kB\n")
     elif shortage == "docker":
-        rehearsed.free["/var/lib/docker"] = 10**11 + 3999
+        rehearsed.free["/var/lib/docker"] = FLOOR + 3999
     else:
-        rehearsed.free["directory"] = 10**11 + 999
+        rehearsed.free["directory"] = FLOOR + 999
         rehearsed.free["/var/lib/docker"] = 10**12
 
     assert rehearsed.run() == 1
@@ -386,8 +388,8 @@ def test_the_rehearsal_starts_nothing_without_room_beside_the_running_site(
 
 
 def test_room_exactly_above_the_floor_is_enough(rehearsed: Rehearsed) -> None:
-    rehearsed.free["/var/lib/docker"] = 10**11 + 4000
-    rehearsed.free["directory"] = 10**11 + 4000
+    rehearsed.free["/var/lib/docker"] = FLOOR + 4000
+    rehearsed.free["directory"] = FLOOR + 1000
 
     assert rehearsed.run() == 0
 

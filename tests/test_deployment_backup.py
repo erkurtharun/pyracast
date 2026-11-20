@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import re
+import shutil
 import signal
 import subprocess
 import time
@@ -72,46 +73,20 @@ def test_failed_dump_cannot_publish_a_successful_backup(
     uploaded: list[str] = []
 
     def failed_dump(command: list[str], **_kwargs: object) -> None:
-        raise subprocess.CalledProcessError(1, command)
+        raise subprocess.CalledProcessError(3, command)
 
     def upload(_bucket: str, name: str, _archive: Path) -> None:
         uploaded.append(name)
 
-    monkeypatch.setattr(subprocess, "run", failed_dump)
+    monkeypatch.setattr(backup, "bounded_run", failed_dump)
+    monkeypatch.setattr(subprocess, "run", forbidden)
     monkeypatch.setattr(backup, "upload_backup", upload)
     monkeypatch.setattr(host, "LAST_BACKUP", tmp_path / "last-backup.json")
+    monkeypatch.setattr(host, "RECOVERY_STATE", tmp_path / "reset")
     monkeypatch.setattr(host, "holds_release_lock", lambda descriptor: descriptor == 9)
     with pytest.raises(subprocess.CalledProcessError):
         backup.create_backup(tmp_path, "private-backups", "prerelease", tmp_path, 9)
     assert uploaded == []
-
-
-def test_restore_failure_removes_isolated_database_and_volume(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    archive = tmp_path / "database.dump"
-    archive.write_bytes(b"invalid dump")
-    commands: list[list[str]] = []
-
-    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        commands.append(command)
-        if "pg_restore" in command:
-            raise subprocess.CalledProcessError(1, command)
-        return subprocess.CompletedProcess(command, 0, b"", b"")
-
-    def configuration(_command: list[str], **_kwargs: object) -> str:
-        return json.dumps({"services": {"postgres": {"image": "postgres@sha256:fixture"}}})
-
-    monkeypatch.setattr(subprocess, "run", run)
-    monkeypatch.setattr(subprocess, "check_output", configuration)
-    with pytest.raises(subprocess.CalledProcessError):
-        backup.restore_archive(tmp_path, archive, "postgres/fixture.dump")
-    assert commands[-2][:3] == ["docker", "rm", "--force"]
-    assert commands[-1][:3] == ["docker", "volume", "rm"]
-    start = next(command for command in commands if command[:2] == ["docker", "run"])
-    assert start[start.index("--network") + 1] == "none"
-    assert not any("5432:" in argument for argument in start)
 
 
 def test_backup_recovers_when_upload_committed_before_response_was_lost(
@@ -132,40 +107,6 @@ def test_backup_recovers_when_upload_committed_before_response_was_lost(
     monkeypatch.setattr(urllib.request, "urlopen", upload)
     backup.upload_backup("private-backups", "postgres/hourly.dump", archive)
     assert methods == ["POST", "GET"]
-
-
-def test_restore_waits_for_the_final_tcp_server_instead_of_the_init_socket(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    archive = tmp_path / "database.dump"
-    archive.write_bytes(b"PGDMP")
-    tcp_probes = 0
-    restored = False
-
-    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        nonlocal tcp_probes, restored
-        if "pg_isready" in command:
-            if "-h" not in command:
-                return subprocess.CompletedProcess(command, 0)
-            assert command[command.index("-h") + 1] == "127.0.0.1"
-            tcp_probes += 1
-            return subprocess.CompletedProcess(command, 2 if tcp_probes == 1 else 0)
-        if "pg_restore" in command:
-            assert tcp_probes == 2, "The temporary initdb server must not accept a restore."
-            assert command[command.index("-h") + 1] == "127.0.0.1"
-            restored = True
-        return subprocess.CompletedProcess(command, 0)
-
-    def configuration(_command: list[str], **_kwargs: object) -> str:
-        return json.dumps({"services": {"postgres": {"image": "postgres@sha256:fixture"}}})
-
-    monkeypatch.setattr(subprocess, "run", run)
-    monkeypatch.setattr(subprocess, "check_output", configuration)
-    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
-    monkeypatch.setattr(backup, "report", lambda *_args, **_kwargs: None)
-    backup.restore_archive(tmp_path, archive, "postgres/fixture.dump")
-    assert restored
 
 
 @pytest.mark.parametrize("failure", [RuntimeError, TypeError])
@@ -382,33 +323,6 @@ def test_existing_object_with_another_checksum_is_refused(
         backup.upload_backup("private-backups", "postgres/hourly.dump", archive)
 
 
-@pytest.mark.parametrize("corrupt", [False, True])
-def test_rehearsal_verifies_the_downloaded_archive_before_restoring_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, corrupt: bool
-) -> None:
-    contents = b"PGDMP-archive"
-    restored: list[bytes] = []
-
-    def download(request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
-        if "alt=media" in request.full_url:
-            return io.BytesIO(contents + (b"-truncated-elsewhere" if corrupt else b""))
-        return io.BytesIO(json.dumps({"md5Hash": md5(contents), "size": "13"}).encode())
-
-    def restore(_release: Path, archive: Path, _name: str) -> None:
-        restored.append(archive.read_bytes())
-
-    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
-    monkeypatch.setattr(urllib.request, "urlopen", download)
-    monkeypatch.setattr(backup, "restore_archive", restore)
-    if corrupt:
-        with pytest.raises(ValueError, match="Downloaded backup does not match"):
-            backup.rehearse_restore(tmp_path, "private-backups", "postgres/x.dump", tmp_path)
-        assert restored == []
-    else:
-        backup.rehearse_restore(tmp_path, "private-backups", "postgres/x.dump", tmp_path)
-        assert restored == [contents]
-
-
 @pytest.fixture
 def fresh_instance_metadata() -> Iterator[None]:
     operations_log.log_resource.cache_clear()
@@ -466,42 +380,6 @@ def forbidden(*_args: object, **_kwargs: object) -> None:
     raise AssertionError("This step must not run.")
 
 
-@pytest.mark.parametrize("name", ["other/x.dump", "postgres/x.sql", "postgres/a b.dump"])
-def test_a_rehearsal_restores_only_a_postgresql_archive_of_the_bucket(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
-) -> None:
-    monkeypatch.setattr(backup, "download_backup", forbidden)
-    with pytest.raises(ValueError, match="Select a PostgreSQL archive object"):
-        backup.rehearse_restore(tmp_path, "private-backups", name, tmp_path)
-
-
-def test_a_restore_database_that_never_accepts_connections_is_removed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    archive = tmp_path / "database.dump"
-    archive.write_bytes(b"PGDMP")
-    commands: list[list[str]] = []
-
-    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
-        commands.append(command)
-        return subprocess.CompletedProcess(command, 2 if "pg_isready" in command else 0)
-
-    def configuration(_command: list[str], **_kwargs: object) -> str:
-        return json.dumps({"services": {"postgres": {"image": "postgres@sha256:fixture"}}})
-
-    monkeypatch.setattr(subprocess, "run", run)
-    monkeypatch.setattr(subprocess, "check_output", configuration)
-    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
-    with pytest.raises(RuntimeError, match="Restore database did not become ready"):
-        backup.restore_archive(tmp_path, archive, "postgres/fixture.dump")
-    assert sum("pg_isready" in command for command in commands) == 60
-    assert not any("pg_restore" in command for command in commands)
-    assert [command[:3] for command in commands[-2:]] == [
-        ["docker", "rm", "--force"],
-        ["docker", "volume", "rm"],
-    ]
-
-
 def host_configuration(tmp_path: Path, bucket: str) -> Path:
     config = tmp_path / "host.json"
     config.write_text(json.dumps({"backup_bucket": bucket}))
@@ -515,23 +393,6 @@ def test_backup_refuses_a_bucket_name_cloud_storage_would_not_accept(
     monkeypatch.setattr(backup, "create_backup", forbidden)
     with pytest.raises(ValueError, match="Invalid backup bucket"):
         backup.main([str(host_configuration(tmp_path, bucket))])
-
-
-def test_a_rehearsal_restores_the_named_archive_and_takes_no_backup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    rehearsed: list[tuple[Path, str, str]] = []
-
-    def rehearse(release: Path, bucket: str, name: str, _directory: Path) -> None:
-        rehearsed.append((release, bucket, name))
-
-    monkeypatch.setattr(backup, "rehearse_restore", rehearse)
-    monkeypatch.setattr(backup, "create_backup", forbidden)
-    config = host_configuration(tmp_path, "private-backups")
-    arguments = [str(config), "--release-dir", str(tmp_path), "--rehearse", "postgres/x.dump"]
-
-    assert backup.main(arguments) == 0
-    assert rehearsed == [(tmp_path, "private-backups", "postgres/x.dump")]
 
 
 class Process:
@@ -583,7 +444,7 @@ def bounded(
         return Disk(100, 100 - free[0], free.pop(0) if len(free) > 1 else free[0])
 
     monkeypatch.setattr(subprocess, "Popen", popen)
-    monkeypatch.setattr(backup.shutil, "disk_usage", usage)
+    monkeypatch.setattr(shutil, "disk_usage", usage)
     return started
 
 
@@ -605,7 +466,7 @@ def test_a_bounded_command_is_killed_when_its_disk_falls_below_the_floor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: list[float]
 ) -> None:
     process = Process([None, None])
-    bounded(monkeypatch, process, [50, 50, 9], clock)
+    bounded(monkeypatch, process, [50, 50, 4], clock)
 
     with pytest.raises(backup.CapacityError):
         backup.bounded_run(
@@ -619,7 +480,7 @@ def test_a_bounded_command_does_not_start_on_a_disk_already_below_the_floor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: list[float]
 ) -> None:
     process = Process([0])
-    started = bounded(monkeypatch, process, [5], clock)
+    started = bounded(monkeypatch, process, [4], clock)
 
     with pytest.raises(backup.CapacityError):
         backup.bounded_run(
@@ -677,7 +538,7 @@ def test_the_dump_counts_every_table_in_the_snapshot_it_exports_to_pg_dump(
         stderr.write(b'pyracast-counts { "plants_plant" : 3, "django_migrations" : 40 }\n')
         stderr.write(b"pg_dump: warning: fixture\n")
 
-    monkeypatch.setattr(backup, "bounded_run", run, raising=False)
+    monkeypatch.setattr(backup, "bounded_run", run)
     monkeypatch.setattr(subprocess, "run", forbidden)
     archive = tmp_path / "database.dump"
 
@@ -722,7 +583,7 @@ def test_a_dump_that_reports_no_table_counts_fails(
     def run(command: list[str], *, stderr: BinaryIO, **_options: object) -> None:
         stderr.write(errors.encode())
 
-    monkeypatch.setattr(backup, "bounded_run", run, raising=False)
+    monkeypatch.setattr(backup, "bounded_run", run)
     monkeypatch.setattr(subprocess, "run", forbidden)
 
     with pytest.raises(ValueError, match="no table counts"):
@@ -831,7 +692,7 @@ def test_the_hourly_backup_keeps_a_daily_copy_only_where_the_host_enables_it(
     monkeypatch.setattr(host, "release_lock", release_lock)
     monkeypatch.setattr(host, "RELEASE_BLOCKED", tmp_path / "release-blocked")
     monkeypatch.setattr(backup, "store_backup", store)
-    monkeypatch.setattr(backup, "copy_daily", copy, raising=False)
+    monkeypatch.setattr(backup, "copy_daily", copy)
     monkeypatch.setattr(
         backup,
         "report",

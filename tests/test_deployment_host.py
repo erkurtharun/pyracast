@@ -1,3 +1,4 @@
+import time
 import types
 from pathlib import Path
 
@@ -152,8 +153,8 @@ class Boot:
     def __init__(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         self.boot_id = root / "boot_id"
         self.uptime = root / "uptime"
-        monkeypatch.setattr(host, "BOOT_ID", self.boot_id, raising=False)
-        monkeypatch.setattr(host, "UPTIME", self.uptime, raising=False)
+        monkeypatch.setattr(host, "BOOT_ID", self.boot_id)
+        monkeypatch.setattr(host, "UPTIME", self.uptime)
         self.set("boot-a", 1000.0)
 
     def set(self, boot: str, uptime: float) -> None:
@@ -172,8 +173,8 @@ def test_a_mark_of_this_boot_ages_by_uptime_whatever_the_wall_clock_does(
 ) -> None:
     mark = host.clock_mark()
     boot.set("boot-a", 1600.0)
-    wall = host.time.time() + step
-    monkeypatch.setattr(host.time, "time", lambda: wall)
+    wall = time.time() + step
+    monkeypatch.setattr(time, "time", lambda: wall)
 
     assert mark == {"boot_id": "boot-a", "uptime_seconds": 1000.0}
     assert host.minimum_age(mark) == 600.0

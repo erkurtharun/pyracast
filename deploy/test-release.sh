@@ -25,7 +25,7 @@ cp /source/__init__.py /source/backup.py /source/host.py /source/operations_log.
   /source/release_state.py /source/release_environment.py /source/probe_origin_pull.py \
   /fixture/deploy/
 cp -R /source/systemd /fixture/deploy/
-units=(pyracast-backup.service pyracast-backup.timer pyracast-watchdog.service pyracast-watchdog.timer)
+units=(pyracast-backup.service pyracast-backup.timer pyracast-rehearsal.service pyracast-rehearsal.timer pyracast-watchdog.service pyracast-watchdog.timer)
 # State model: host.json names the runtime secret "new-runtime"; the serving release staged the
 # earlier "old-runtime". /role holds the secret the runtime role's password was last set to, and
 # /app-running exists while API and web containers run.
@@ -55,13 +55,20 @@ elif [[ ${1:-} == */bootstrap_database.py || ${1:-} == */backup.py ]]; then
     test ! -e /support-changed || exit 91
     touch /backup-entered
     case "$MODE" in backup|first-backup|resume-failed|maintenance-backup) exit 45 ;; esac
-    if [[ $MODE == retry-backup && $RUN == 2 ]]; then exit 45; fi
+    if [[ ($MODE == retry-backup || $MODE == recovered) && $RUN == 2 ]]; then exit 45; fi
     if [[ $MODE == killed-backup ]]; then kill -KILL "$PPID"; exit 0; fi
     touch /backup-complete
     release_dir=$(sed -n 's/.* --release-dir \([^ ]*\) .*/\1/p' <<<"$*")
     object=postgres/fixture-prerelease-$RUN.dump
-    if [[ $MODE == *record-invalid ]]; then object='postgres/x.dump; touch /record-injected'; fi
-    printf '{"object": "%s"}\n' "$object" >"$release_dir/prerelease-backup.json"
+    if [[ $MODE == *record-invalid ]]; then
+      object='postgres/x.dump; touch /record-injected'
+    else
+      # backup.py keeps the pre-release dump where the recovery helper looks for its archive.
+      mkdir -p /var/lib/pyracast/reset
+      printf 'archive of run %s\n' "$RUN" >"/var/lib/pyracast/reset/fixture-prerelease-$RUN.dump"
+    fi
+    printf '{"object": "%s", "counts": {"django_migrations": 40, "plants_plant": 3}}\n' "$object" \
+      >"$release_dir/prerelease-backup.json"
   fi
 elif [[ ${1:-} == */probe_origin_pull.py ]]; then
   printf 'python3 %s\n' "$*" >>/calls
@@ -81,8 +88,13 @@ if [[ "$*" == *metadata.google.internal* ]]; then
 else
   printf 'curl %s\n' "$*" >>/calls
   test -f /var/lib/pyracast/release-blocked || exit 90
-  [[ "$*" == *'--resolve example.com:443:127.0.0.1'* ]] || exit 91
-  [[ "$*" == *'https://example.com/health/ready/'* ]] || exit 92
+  # The recovery helper probes the loopback entrypoint; the fixture release has none.
+  if [[ "$*" == *'--resolve example.com:8443:127.0.0.1'* ]]; then
+    [[ "$*" == *'https://example.com:8443/health/ready/'* ]] || exit 92
+  else
+    [[ "$*" == *'--resolve example.com:443:127.0.0.1'* ]] || exit 91
+    [[ "$*" == *'https://example.com/health/ready/'* ]] || exit 92
+  fi
   [[ "$*" != *'--insecure'* ]] || exit 93
   case "$MODE" in
     tls) exit 60 ;;
@@ -191,6 +203,8 @@ case "$MODE:$*" in
   support-rabbit:*' up -d rabbitmq' | resume-unready:*' up -d rabbitmq') exit 42 ;;
   support-postgres:*' up -d postgres') exit 46 ;;
   migration:*' run --rm --no-deps migrate' | maintenance-migration:*' run --rm --no-deps migrate' | maintenance-replaced:*' run --rm --no-deps migrate' | maintenance-prepared:*' run --rm --no-deps migrate' | legacy-migration:*' run --rm --no-deps migrate' | retry-*:*' run --rm --no-deps migrate') exit 43 ;;
+  recovered:*' run --rm --no-deps migrate') if [[ $RUN == 1 ]]; then exit 43; fi ;;
+  recovered:*'current/deploy/compose.yaml up -d --wait --wait-timeout 180') if [[ $RUN == 2 ]]; then exit 57; fi ;;
   health:*'releases/'*' up -d --wait --wait-timeout 180') exit 44 ;;
   cancelled:*' run --rm --no-deps migrate')
     touch /migration-entered
@@ -215,6 +229,10 @@ case "$*" in
     ;;
   *' up -d --wait --wait-timeout 180') connects "$RELEASE_SECRETS"; touch /app-running ;;
   *' run --rm --no-deps api python -c import django'*) connects "$RELEASE_SECRETS" ;;
+  # The throwaway restores of the record step and the recovery helper's database queries.
+  *' config --format json') printf '{"services": {"postgres": {"image": "postgres@sha256:fixture"}}}\n' ;;
+  *query_to_xml*) printf 'django_migrations 40\nplants_plant 3\n' ;;
+  *'FROM pg_roles WHERE rolname IN'*) printf '2\n' ;;
 esac
 SH
 chmod 755 /mock-bin/*
@@ -332,7 +350,45 @@ units_untouched() {
 units_installed() {
   for unit in "${units[@]}"; do cmp "/source/systemd/$unit" "/etc/systemd/system/$unit"; done
   grep -Fxq 'host-owned unit' /etc/systemd/system/pyracast.service
-  grep -Fxq 'systemctl enable --now pyracast-backup.timer pyracast-watchdog.timer' /calls
+  grep -Fxq 'systemctl enable --now pyracast-backup.timer pyracast-rehearsal.timer pyracast-watchdog.timer' /calls
+}
+
+# The kept pre-release archives, their records and the session are gone; a reset's archive stays.
+maintenance_ended() {
+  if compgen -G '/var/lib/pyracast/reset/*-prerelease-*' >/dev/null; then
+    ls -l /var/lib/pyracast/reset >&2
+    return 1
+  fi
+  [[ ! -e /var/lib/pyracast/reset/session.json ]]
+}
+
+# The record kept this run's dump as the recovery point: its archive and the counted record.
+recovery_point_kept() {
+  [[ -f /var/lib/pyracast/reset/fixture-prerelease-$1.dump ]]
+  grep -Fq '"django_migrations": 40' "/var/lib/pyracast/reset/fixture-prerelease-$1.json"
+}
+
+next_run() {
+  rm -f /migration-entered /backup-entered /backup-complete /support-changed
+  printf '{"PGUSER":"owner","PGPASSWORD":"password"}\n' >/migration.json
+  RUN=$1
+  : >/calls
+  if run_release >/result 2>&1; then
+    result=0
+  else
+    result=$?
+  fi
+}
+
+# Runs the recovery command the failed release printed, through the previous release's helper.
+recover() {
+  local command
+  command=$(sed -n "s/^.*[Rr]ecover with: \(python3 \/opt\/pyracast\/current\/deploy\/reset_database.py .*\)$/\1/p" /result)
+  [[ $command == "$tool $1" ]]
+  bash -c "$command" >/recovered 2>&1 || { cat /recovered >&2; return 1; }
+  [[ ! -e /var/lib/pyracast/release-blocked ]]
+  [[ ! -e /var/lib/pyracast/reset/session.json ]]
+  [[ "$(readlink /opt/pyracast/current)" == /opt/pyracast/releases/old ]]
 }
 
 tool='python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json'
@@ -349,7 +405,7 @@ assert marker, 'The marker holds no identity'
 assert session == {'marker': marker, 'object': sys.argv[3], 'release': 'old', 'replaced': True}, session
 PY
 }
-for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image public-broker live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready stop-failed switch maintenance-backup migration legacy-migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-replaced maintenance-prepared maintenance-record-invalid record-invalid retry-migration retry-backup cancelled origin-pull origin-pull-open; do
+for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image public-broker live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready stop-failed switch maintenance-backup migration legacy-migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-replaced maintenance-prepared maintenance-record-invalid record-invalid retry-migration retry-backup recovered cancelled origin-pull origin-pull-open; do
   export MODE RUN=1
   cp /host.json /etc/pyracast/host.json
   if [[ $MODE == origin-pull* ]]; then
@@ -409,6 +465,11 @@ PY
     helper_services='"dispatcher", "worker", "notifications", "api", "web"'
     if [[ $MODE == legacy-* ]]; then helper_services+=', "gateway"'; fi
     printf 'APPLICATION_SERVICES = frozenset({%s})\n' "$helper_services" >"$live/deploy/reset_database.py"
+    if [[ $MODE == recovered ]]; then
+      # The serving release's real helper: deploy/reset_database.py is unchanged since main.
+      cp /source/__init__.py /source/backup.py /source/host.py /source/operations_log.py \
+        /source/reset_database.py /source/bootstrap.sql "$live/deploy/"
+    fi
     printf 'PGUSER=old-runtime\n' >"$PREVIOUS_SECRETS/runtime.env"
     printf 'RABBITMQ_DEFAULT_PASS=old-password\n' >"$PREVIOUS_SECRETS/broker.env"
     printf 'POSTGRES_PASSWORD=old-password\n' >"$PREVIOUS_SECRETS/database.env"
@@ -438,15 +499,25 @@ PY
     [[ "$result" == 43 ]]
     session_names postgres/fixture-prerelease-1.dump
     cp "$session" /first-session.json
-    rm -f /migration-entered /backup-entered /backup-complete /support-changed
-    printf '{"PGUSER":"owner","PGPASSWORD":"password"}\n' >/migration.json
-    RUN=2
-    : >/calls
-    if run_release >/result 2>&1; then
-      result=0
-    else
-      result=$?
-    fi
+    next_run 2
+  elif [[ $MODE == recovered ]]; then
+    # A release fails in migrate and the printed restore brings the data back from the archive
+    # kept on the host; the container has no network, so no bucket download is possible.
+    [[ "$result" == 43 ]]
+    recovery_point_kept 1
+    recover 'restore --confirm postgres/fixture-prerelease-1.dump'
+    grep -Fq 'postgres/fixture-prerelease-1.dump is restored and the previous release serves again' /recovered
+    recovery_point_kept 1
+    # A release fails before its record and cannot resume; the printed abort serves again.
+    next_run 2
+    [[ "$result" == 45 ]]
+    [[ ! -e /var/lib/pyracast/reset/fixture-prerelease-2.dump ]]
+    recover abort
+    grep -Fq 'The previous release serves again and the marker is removed.' /recovered
+    # The next successful release removes the kept pre-release files and leaves a reset's archive.
+    printf 'reset archive\n' >/var/lib/pyracast/reset/20261118T090000Z-prereset-kept.dump
+    next_run 3
+    [[ -f /var/lib/pyracast/reset/20261118T090000Z-prereset-kept.dump ]]
   fi
   [[ ! -e /switched-while-running ]]
   if [[ $MODE == lock-timeout ]]; then
@@ -469,6 +540,7 @@ PY
       [[ -f /migration-entered ]]
       # The session names this run's dump before migrate starts, and the recovery reads it.
       session_names postgres/fixture-prerelease-1.dump
+      recovery_point_kept 1
       /usr/local/bin/python3 "$new_release/deploy/release_record.py" /etc/pyracast/host.json recovery >/recovery
       grep -Fxq "Release a forward fix, or recover with: $tool restore --confirm postgres/fixture-prerelease-1.dump" /recovery
     else
@@ -602,10 +674,14 @@ PY
           maintenance-replaced|maintenance-prepared)
             session_names postgres/reset-archive.dump
             grep -Fxq "Release a forward fix, or recover with: $tool restore --confirm postgres/reset-archive.dump" /result
+            # The reset's archive is the recovery point; this run's dump is not kept.
+            [[ ! -e /var/lib/pyracast/reset/fixture-prerelease-1.dump ]]
             ;;
           migration|maintenance-migration|legacy-migration|health|tls|response|retry-*)
             session_names postgres/fixture-prerelease-1.dump
             grep -Fxq "Release a forward fix, or recover with: $tool restore --confirm postgres/fixture-prerelease-1.dump" /result
+            recovery_point_kept 1
+            [[ ! -e /var/lib/pyracast/reset/fixture-prerelease-2.dump ]]
             ;;
           *)
             [[ ! -e "$session" ]]
@@ -682,8 +758,9 @@ PY
         grep -Fq "Finish with: bash $new_release/deploy/install-units.sh install $new_release && systemctl start pyracast.service" /result
         units_installed
         ;;
-      success|prune|first-success|redeploy|lock-wait|maintenance-success|cancelled|origin-pull)
+      success|prune|first-success|redeploy|lock-wait|maintenance-success|recovered|cancelled|origin-pull)
         [[ "$result" == 0 ]]
+        maintenance_ended
         if [[ $MODE == origin-pull ]]; then
           grep -Fxq 'ORIGIN_PULL=required' "$new_release/deploy/release.env"
           cmp /source/origin-pull-off.pem "$new_release/deploy/origin-pull-ca.pem"
@@ -719,7 +796,8 @@ PY
         grep -Fxq 'PGUSER=new-runtime' "$RELEASE_SECRETS/runtime.env"
         cmp /role "$RELEASE_SECRETS/runtime.env"
         [[ ! -e "$RELEASE_SECRETS/migration.env" ]]
-        if [[ -n $live ]]; then grep -Fxq 'PGUSER=old-runtime' "$PREVIOUS_SECRETS/runtime.env"; fi
+        # A resumed earlier run of the mode recovered rendered the previous release's files anew.
+        if [[ -n $live && $MODE != recovered ]]; then grep -Fxq 'PGUSER=old-runtime' "$PREVIOUS_SECRETS/runtime.env"; fi
         kept=$live
         /usr/local/bin/python3 - "$new_release" "$kept" <<'PY'
 import json

@@ -5,7 +5,7 @@ import subprocess
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import IO, Any, BinaryIO
+from typing import IO, Any
 
 import pytest
 
@@ -58,14 +58,8 @@ class BackupHost:
         self.checked.append(descriptor)
         return descriptor == self.lock_holder
 
-    def run(self, command: list[str], **options: Any) -> subprocess.CompletedProcess[bytes]:
+    def run(self, command: list[str], **_options: Any) -> subprocess.CompletedProcess[bytes]:
         self.commands.append(command)
-        if "pg_dump" in command:
-            self.dumps.append((command, self.held))
-            if self.dump_error is not None:
-                raise self.dump_error
-            stream: BinaryIO = options["stdout"]
-            stream.write(b"PGDMP")
         return subprocess.CompletedProcess(command, 0, b"", b"")
 
     def bounded_run(
@@ -91,14 +85,14 @@ def backup_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> BackupHost:
     fake = BackupHost(tmp_path)
     monkeypatch.setattr(host, "RELEASE_BLOCKED", fake.blocked)
     monkeypatch.setattr(host, "LAST_BACKUP", fake.last_backup)
-    monkeypatch.setattr(host, "RECOVERY_STATE", fake.kept, raising=False)
-    monkeypatch.setattr(host, "BOOT_ID", fake.boot_id, raising=False)
-    monkeypatch.setattr(host, "UPTIME", fake.uptime, raising=False)
+    monkeypatch.setattr(host, "RECOVERY_STATE", fake.kept)
+    monkeypatch.setattr(host, "BOOT_ID", fake.boot_id)
+    monkeypatch.setattr(host, "UPTIME", fake.uptime)
     monkeypatch.setattr(host, "release_lock", fake.release_lock)
     monkeypatch.setattr(host, "holds_release_lock", fake.holds_release_lock)
     monkeypatch.setattr(backup, "upload_backup", fake.upload)
     monkeypatch.setattr(backup, "report", fake.report)
-    monkeypatch.setattr(backup, "bounded_run", fake.bounded_run, raising=False)
+    monkeypatch.setattr(backup, "bounded_run", fake.bounded_run)
     monkeypatch.setattr(subprocess, "run", fake.run)
     monkeypatch.setattr(signal, "signal", fake.handlers.__setitem__)
     replace = Path.replace
@@ -244,6 +238,22 @@ def test_prerelease_backup_keeps_its_dump_where_the_recovery_helper_looks(
     assert kept.read_bytes() == b"PGDMP"
     assert sorted(path.name for path in backup_host.kept.iterdir()) == [kept.name]
     assert list(backup_host.directory.iterdir()) == []
+
+
+def test_a_prerelease_backup_keeps_no_daily_copy_inside_the_maintenance(
+    backup_host: BackupHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def copied(_bucket: str, _name: str) -> str:
+        raise AssertionError("A maintenance never waits for the daily copy.")
+
+    monkeypatch.setattr(backup, "copy_daily", copied)
+
+    name = backup.create_backup(
+        backup_host.release, "private-backups", "prerelease", backup_host.directory, 9, daily=True
+    )
+
+    assert name is not None
+    assert [event for event, _, _ in backup_host.events] == ["pyracast_backup_succeeded"]
 
 
 def test_an_hourly_dump_stays_in_its_temporary_directory(backup_host: BackupHost) -> None:
@@ -447,25 +457,30 @@ VALID = "postgres/2026/11/18/20261118T010203Z-prerelease-0123456789abcdef.dump"
 @pytest.mark.parametrize(
     ("content", "expected"),
     [
-        (json.dumps({"object": VALID}), VALID),
-        (json.dumps({"object": VALID + "\n"}), None),
-        (json.dumps({"object": "postgres/x\u0000.dump"}), None),
-        (json.dumps({"object": "postgres/../x.dump"}), None),
-        (json.dumps({"object": "postgres/./x.dump"}), None),
-        (json.dumps({"object": "postgres/x.dump; touch /tmp/x"}), None),
-        (json.dumps({"object": 123}), None),
-        (json.dumps({"object": ["postgres/x.dump"]}), None),
+        (json.dumps({"object": VALID, "counts": COUNTS}), (VALID, COUNTS)),
+        (json.dumps({"object": VALID, "counts": {}}), (VALID, {})),
+        (json.dumps({"object": VALID}), None),
+        (json.dumps({"object": VALID, "counts": []}), None),
+        (json.dumps({"object": VALID, "counts": {"x": "many"}}), None),
+        (json.dumps({"object": VALID.replace("prerelease", "prereset"), "counts": {}}), None),
+        (json.dumps({"object": VALID + "\n", "counts": {}}), None),
+        (json.dumps({"object": "postgres/x-prerelease-\u0000.dump", "counts": {}}), None),
+        (json.dumps({"object": "postgres/../x-prerelease-.dump", "counts": {}}), None),
+        (json.dumps({"object": "postgres/./x-prerelease-.dump", "counts": {}}), None),
+        (json.dumps({"object": "postgres/x-prerelease-.dump; touch /tmp/x", "counts": {}}), None),
+        (json.dumps({"object": 123, "counts": {}}), None),
+        (json.dumps({"object": ["postgres/x-prerelease-.dump"], "counts": {}}), None),
         (json.dumps({}), None),
-        (json.dumps(["postgres/x.dump"]), None),
+        (json.dumps(["postgres/x-prerelease-.dump"]), None),
         ("not json", None),
         (None, None),
     ],
 )
-def test_release_record_yields_only_a_valid_object_name(
-    tmp_path: Path, content: str | None, expected: str | None
+def test_the_release_record_yields_only_a_valid_pre_release_object_with_its_counts(
+    tmp_path: Path, content: str | None, expected: tuple[str, dict[str, int]] | None
 ) -> None:
     record = tmp_path / host.PRERELEASE_RECORD
     if content is not None:
         record.write_text(content, encoding="utf-8")
 
-    assert release_record.object_name(record) == expected
+    assert release_record.dumped_backup(record) == expected

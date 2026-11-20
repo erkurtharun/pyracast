@@ -10,11 +10,18 @@ CURRENT_RELEASE = Path("/opt/pyracast/current")
 RELEASE_BLOCKED = Path("/var/lib/pyracast/release-blocked")
 RELEASE_LOCK = Path("/var/lib/pyracast/release.lock")
 LAST_BACKUP = Path("/var/lib/pyracast/last-backup.json")
+LAST_REHEARSAL = Path("/var/lib/pyracast/last-rehearsal.json")
+# The recovery helper's archives and session, on the data disk beside PostgreSQL.
+RECOVERY_STATE = Path("/var/lib/pyracast/reset")
 PRERELEASE_RECORD = "prerelease-backup.json"
+BOOT_ID = Path("/proc/sys/kernel/random/boot_id")
+UPTIME = Path("/proc/uptime")
 # The gateway's loopback entrypoint serves the public certificate without asking for the edge's.
 LOCAL_HTTPS_PORT = 8443
 # Covers the hourly timer, its 300 s randomized delay and the backup's 600 s lock wait.
 BACKUP_MAX_AGE_SECONDS = 90 * 60
+# The weekly timer, its 30-minute randomized delay and the rehearsal's one-hour deadline.
+REHEARSAL_MAX_AGE_SECONDS = 8 * 86400
 
 
 def open_lock(path: Path) -> IO[str]:
@@ -50,6 +57,26 @@ def holds_release_lock(descriptor: int) -> bool:
     except BlockingIOError:
         return False
     return True
+
+
+def boot_clock() -> tuple[str, float]:
+    return BOOT_ID.read_text().strip(), float(UPTIME.read_text().split()[0])
+
+
+def clock_mark() -> dict[str, object]:
+    boot, uptime = boot_clock()
+    return {"boot_id": boot, "uptime_seconds": uptime}
+
+
+def minimum_age(mark: object) -> float:
+    # Uptime counts from boot and never steps with the wall clock. A mark of an earlier boot, or
+    # one that cannot be read, is at least as old as this boot.
+    boot, uptime = boot_clock()
+    if isinstance(mark, dict) and mark.get("boot_id") == boot:
+        then = mark.get("uptime_seconds")
+        if isinstance(then, int | float) and 0 <= then <= uptime:
+            return uptime - then
+    return uptime
 
 
 @contextmanager

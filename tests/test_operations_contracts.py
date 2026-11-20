@@ -520,7 +520,7 @@ def test_gmail_authorization_helper_matches_the_backend_configuration() -> None:
 
 def test_host_configuration_provides_every_key_the_host_scripts_read() -> None:
     written = re.search(
-        r"host_config_base64 = base64encode\(jsonencode\(\{(.*?)\}\)\)",
+        r"host_config_base64 = base64encode\(jsonencode\(merge\(\{(.*?)\}, \{",
         text(TERRAFORM / "main.tf"),
         re.S,
     )
@@ -1354,7 +1354,7 @@ def test_the_origin_requires_the_edge_certificate_only_once_the_host_names_its_a
     placeholder = text(DEPLOY / "origin-pull-off.pem")
     variables = text(TERRAFORM / "variables.tf")
     host_config = re.search(
-        r"host_config_base64 = base64encode\(jsonencode\(\{(.*?)\}\)\)",
+        r"host_config_base64 = base64encode\(jsonencode\(merge\(\{(.*?)\}, \{",
         text(TERRAFORM / "main.tf"),
         re.S,
     )

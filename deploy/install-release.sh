@@ -232,7 +232,8 @@ sync -f "$release"
 wait_for_database
 "${compose[@]}" up -d rabbitmq
 # Once per maintenance, before the database changes, the reset helper's session names the object
-# that holds what the previous release served; every printed recovery and helper guard reads it.
+# that holds what the previous release served, kept on the data disk and counted by a throwaway
+# restore; every printed recovery and helper guard reads it.
 if [[ -n $previous ]]; then
   python3 "$release/deploy/release_record.py" /etc/pyracast/host.json record "$release/prerelease-backup.json"
   recorded=1
@@ -258,6 +259,8 @@ bash "$release/deploy/install-units.sh" install "$release"
 rm -f /var/lib/pyracast/release-blocked
 sync -f /var/lib/pyracast
 systemctl start pyracast.service
+python3 "$release/deploy/release_record.py" /etc/pyracast/host.json end \
+  || echo 'WARNING: the pre-release archives and the session in /var/lib/pyracast/reset were not removed; see the line above.' >&2
 if python3 "$release/deploy/release_state.py" record "$release" ${previous:+"$previous"}; then
   python3 "$release/deploy/release_state.py" prune || echo "WARNING: some old releases or images were not removed; see the lines above." >&2
 else

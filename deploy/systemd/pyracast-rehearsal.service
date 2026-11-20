@@ -1,0 +1,14 @@
+[Unit]
+Description=Pyracast restore rehearsal of the latest backup
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=/var/lib/pyracast
+ConditionPathExists=/opt/pyracast/current/deploy/rehearsal.py
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/pyracast/current/deploy/rehearsal.py /etc/pyracast/host.json
+PrivateTmp=true
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=3900

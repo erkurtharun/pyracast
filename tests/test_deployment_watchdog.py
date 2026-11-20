@@ -74,11 +74,7 @@ class Host:
 
     def backed_up(self, *, age: float, boot: str = "boot-a") -> None:
         mark = {"boot_id": boot, "uptime_seconds": UPTIME - age}
-        self.last_backup.write_text(
-            json.dumps(
-                {"object": "postgres/x.dump", "mark": mark, "completed_at": time.time() - age}
-            )
-        )
+        self.last_backup.write_text(json.dumps({"object": "postgres/x.dump", "mark": mark}))
 
     def rehearsed(self, status: str, *, age: float, boot: str = "boot-a") -> None:
         mark = {"boot_id": boot, "uptime_seconds": UPTIME - age}
@@ -156,9 +152,9 @@ def watched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Host:
     monkeypatch.setattr(host, "CURRENT_RELEASE", fake.release)
     monkeypatch.setattr(host, "RELEASE_BLOCKED", fake.blocked)
     monkeypatch.setattr(host, "LAST_BACKUP", fake.last_backup)
-    monkeypatch.setattr(host, "LAST_REHEARSAL", fake.last_rehearsal, raising=False)
-    monkeypatch.setattr(host, "BOOT_ID", fake.boot_id, raising=False)
-    monkeypatch.setattr(host, "UPTIME", fake.uptime, raising=False)
+    monkeypatch.setattr(host, "LAST_REHEARSAL", fake.last_rehearsal)
+    monkeypatch.setattr(host, "BOOT_ID", fake.boot_id)
+    monkeypatch.setattr(host, "UPTIME", fake.uptime)
     monkeypatch.setattr(host, "release_lock", fake.release_lock)
     monkeypatch.setattr(watchdog, "DELIVERY_CHECKED", fake.delivery_checked)
     monkeypatch.setattr(watchdog, "MEMINFO", fake.meminfo)
@@ -364,7 +360,7 @@ def test_first_delivery_check_runs_and_records_its_time(watched: Host) -> None:
 
 def step_wall_clock(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
     stepped = time.time() + seconds
-    monkeypatch.setattr(watchdog.time, "time", lambda: stepped)
+    monkeypatch.setattr(time, "time", lambda: stepped)
 
 
 @pytest.mark.parametrize("step", [-DAY, 0, DAY])
