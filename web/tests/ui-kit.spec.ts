@@ -363,3 +363,108 @@ test("the shell announces action outcomes through one live region that exists be
     ).toHaveCount(0);
     await expect(page.locator("[data-live-region]")).toHaveCount(1);
 });
+
+test("the shell speaks a repeated outcome again", async ({ page }) => {
+    let invitations = [7, 8].map((id) => ({
+        id,
+        email: `invitee${id}@example.test`,
+        role: "viewer",
+        delivery_status: "sent",
+    }));
+    await mockApi(page);
+    await page.route("**/api/tenants/1/members/", (route) =>
+        route.fulfill({
+            json: {
+                members: [{ id: user.id, email: user.email, role: "admin" }],
+            },
+        }),
+    );
+    await page.route(/\/api\/tenants\/\d+\/invitations\//, (route) => {
+        if (route.request().method() === "DELETE") {
+            invitations = invitations.filter(
+                (invitation) =>
+                    !route.request().url().endsWith(`/${invitation.id}/`),
+            );
+            return route.fulfill({ status: 204 });
+        }
+        return route.fulfill({ json: { invitations } });
+    });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: "Members", exact: true }).click();
+    const region = page.locator("[data-live-region]");
+    const cancel = page.getByRole("button", {
+        name: "Cancel invitation",
+        exact: true,
+    });
+    await cancel.first().click();
+    await expect(region).toHaveText("Invitation cancelled.");
+    await expect(cancel).toHaveCount(1);
+    await region.evaluate((element) => {
+        (window as unknown as { spoken: Node | null }).spoken =
+            element.firstChild;
+    });
+    await cancel.click();
+    await expect(cancel).toHaveCount(0);
+    await expect
+        .poll(() =>
+            region.evaluate(
+                (element) =>
+                    element.firstChild !==
+                    (window as unknown as { spoken: Node | null }).spoken,
+            ),
+        )
+        .toBe(true);
+    await expect(region).toHaveText("Invitation cancelled.");
+});
+
+test("a checkbox reports its field error like every other control", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/collection-schedule/", (route) =>
+        route.request().method() === "PUT"
+            ? route.fulfill({
+                  status: 400,
+                  json: errorBody("invalid_request", "Check the schedule.", {
+                      fields: { enabled: "Approval is required first." },
+                  }),
+              })
+            : route.fulfill({
+                  json: {
+                      enabled: false,
+                      times: ["09:00"],
+                      timezone: "Europe/Istanbul",
+                      last_success_at: null,
+                      next_collection_at: null,
+                      history_requests_reserved_per_day: 1,
+                      history_local_time: "03:00",
+                      history_retry_until_local: "09:00",
+                      history_retry_minutes: 30,
+                      max_forecast_times: 9,
+                      effective_from: "2026-01-01T00:00:00Z",
+                      recent_jobs: [],
+                  },
+              }),
+    );
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Data collection", exact: true })
+        .click();
+    await page
+        .getByRole("button", { name: "Save collection schedule", exact: true })
+        .click();
+    const enabled = page.getByRole("checkbox", {
+        name: "Enable data collection",
+        exact: true,
+    });
+    await expect(enabled).toHaveAttribute("aria-invalid", "true");
+    await expect(enabled).toHaveAccessibleDescription(
+        "Approval is required first.",
+    );
+    await expect(page.locator(".form-errors").getByRole("listitem")).toHaveText(
+        ["Enable data collection: Approval is required first."],
+    );
+    await scan(page, ".form-errors");
+});

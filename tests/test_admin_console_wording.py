@@ -3,7 +3,7 @@ from django.urls import reverse
 
 from pyracast.accounts.models import Tenant
 from pyracast.regions.models import Region
-from tests.support.admin_setup import admin_system, submitted_plant
+from tests.support.admin_setup import admin_system, setup_url, submitted_plant
 from tests.support.api import verified_admin
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
@@ -38,6 +38,15 @@ def test_plant_list_counts_and_names_statuses_in_english() -> None:
     assert ">2 plants</h2>" in html
     assert ">Awaiting approval</span>" in html
     assert ">Suspended</span>" in html
+
+
+def test_plant_review_names_the_review_status_from_its_enumeration() -> None:
+    system = admin_system()
+    Region.objects.filter(pk=system.region.pk).update(status="suspended")
+    client, _ = verified_admin()
+    html = client.get(setup_url(system), HTTP_ACCEPT_LANGUAGE="tr").content.decode()
+    assert html.count('<span class="badge badge--suspended">Askıya alındı</span>') == 1
+    assert '<span class="step-state">Askıya alındı</span>' in html
 
 
 def test_plant_list_states_an_empty_filter_and_the_page_in_one_sentence() -> None:
