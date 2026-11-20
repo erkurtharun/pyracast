@@ -113,6 +113,7 @@ export function RecycleBin({ tenant }: { tenant: number }) {
             setMessage(t("restored", { name: row.name }));
         } catch (failure) {
             setError((failure as Error).message);
+            void refresh.workspace(tenant);
         } finally {
             setWorking(null);
         }
@@ -181,7 +182,7 @@ export function RecycleBin({ tenant }: { tenant: number }) {
                                                 className="button secondary"
                                                 disabled={
                                                     working !== null ||
-                                                    !row.can_restore
+                                                    row.restore_blocker !== null
                                                 }
                                                 onClick={() =>
                                                     void restore(row)
@@ -193,9 +194,11 @@ export function RecycleBin({ tenant }: { tenant: number }) {
                                                           name: row.name,
                                                       })}
                                             </button>
-                                            {!row.can_restore && (
+                                            {row.restore_blocker && (
                                                 <p className="fine">
-                                                    {t("restoreExpired")}
+                                                    {t(
+                                                        `blockers.${row.restore_blocker}`,
+                                                    )}
                                                 </p>
                                             )}
                                         </div>

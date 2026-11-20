@@ -6,14 +6,12 @@ from uuid import UUID
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q, QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.change_requests.models import (
-    DECIDED,
     INCIDENT_EDITS,
     ChangeRequest,
     ChangeRequestKind,
@@ -22,6 +20,12 @@ from pyracast.change_requests.models import (
     IncidentChangeAction,
     ProductionChangeAction,
     ProductionChangeItem,
+)
+from pyracast.change_requests.policy import (
+    is_author,
+    is_unread,
+    pending_limit_reached,
+    request_for,
 )
 from pyracast.change_requests.preparation import (
     INCIDENT_FIELDS,
@@ -40,7 +44,7 @@ from pyracast.incidents.operations import (
     lock_incident_plant,
     save_incident,
 )
-from pyracast.plants.models import Plant, active_plant
+from pyracast.plants.models import Plant
 from pyracast.plants.production_changes import (
     AuditContext,
     ProductionChange,
@@ -82,12 +86,7 @@ def _create(
     key: UUID,
     payload_hash: str,
 ) -> ChangeRequest:
-    if (
-        ChangeRequest.objects.filter(
-            proposer_membership_id=membership.pk, plant=plant, status=ChangeRequestStatus.PENDING
-        ).count()
-        >= 20
-    ):
+    if pending_limit_reached(membership, plant):
         raise ConflictError(ErrorCode.PENDING_REQUEST_LIMIT)
     return ChangeRequest.objects.create(
         plant=plant,
@@ -231,27 +230,6 @@ def submit_incident(
     return request
 
 
-def visible_requests(actor: User, membership: Membership) -> QuerySet[ChangeRequest]:
-    tenant_id = membership.tenant_id
-    return ChangeRequest.objects.filter(
-        active_plant("plant__"),
-        Q(plant__region__tenant__membership__role=WorkspaceRole.ADMIN)
-        | Q(proposed_by_id=actor.pk, proposer_membership_id=membership.pk),
-        plant__region__tenant_id=tenant_id,
-        plant__region__tenant__membership__pk=membership.pk,
-        plant__region__tenant__membership__user__is_active=True,
-    )
-
-
-def _request(actor: User, tenant_id: int, request_id: int, *, lock: bool = False) -> ChangeRequest:
-    rows = visible_requests(actor, tenant_membership(actor, tenant_id)).select_related(
-        "plant__region", "configuration__binding", "proposed_by", "reviewed_by"
-    )
-    if lock:
-        rows = rows.select_for_update(of=("self",))
-    return rows.get(pk=request_id)
-
-
 def _terminal(request: ChangeRequest, status: str) -> bool:
     if request.status == status:
         return True
@@ -271,10 +249,10 @@ def _validate(actor: User, request: ChangeRequest, plant: Plant, *, lock: bool =
 def approve_request(
     actor: User, tenant_id: int, request_id: int, *, review_fingerprint: str
 ) -> ChangeRequest:
-    tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
-    scoped = _request(actor, tenant_id, request_id)
+    membership = tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
+    scoped = request_for(membership, request_id)
     plant = lock_incident_plant(tenant_id, scoped.plant.region_id, scoped.plant_id)
-    request = _request(actor, tenant_id, request_id, lock=True)
+    request = request_for(membership, request_id, lock=True)
     if _terminal(request, ChangeRequestStatus.APPROVED):
         return request
     _validate(actor, request, plant)
@@ -335,10 +313,10 @@ def _close(request: ChangeRequest, status: str, actor: User | None, reason: str 
 
 @transaction.atomic
 def reject_request(actor: User, tenant_id: int, request_id: int, *, reason: str) -> ChangeRequest:
-    tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
-    scoped = _request(actor, tenant_id, request_id)
+    membership = tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
+    scoped = request_for(membership, request_id)
     plant = lock_incident_plant(tenant_id, scoped.plant.region_id, scoped.plant_id)
-    request = _request(actor, tenant_id, request_id, lock=True)
+    request = request_for(membership, request_id, lock=True)
     if not _terminal(request, ChangeRequestStatus.REJECTED):
         reason = _reason(reason, required=True)
         request.reviewed_context = decision_context(request, plant)
@@ -350,8 +328,8 @@ def reject_request(actor: User, tenant_id: int, request_id: int, *, reason: str)
 @transaction.atomic
 def withdraw_request(actor: User, tenant_id: int, request_id: int) -> ChangeRequest:
     membership = tenant_membership(actor, tenant_id, lock=True)
-    request = _request(actor, tenant_id, request_id, lock=True)
-    if request.proposed_by_id != actor.pk or request.proposer_membership_id != membership.pk:
+    request = request_for(membership, request_id, lock=True)
+    if not is_author(request, membership):
         raise ChangeRequest.DoesNotExist
     if not _terminal(request, ChangeRequestStatus.WITHDRAWN):
         _close(request, ChangeRequestStatus.WITHDRAWN, None)
@@ -361,10 +339,10 @@ def withdraw_request(actor: User, tenant_id: int, request_id: int) -> ChangeRequ
 @transaction.atomic
 def mark_seen(actor: User, tenant_id: int, request_id: int) -> ChangeRequest:
     membership = tenant_membership(actor, tenant_id, lock=True)
-    request = _request(actor, tenant_id, request_id, lock=True)
-    if request.proposed_by_id != actor.pk or request.proposer_membership_id != membership.pk:
+    request = request_for(membership, request_id, lock=True)
+    if not is_author(request, membership):
         raise ChangeRequest.DoesNotExist
-    if request.status in DECIDED and request.outcome_seen_at is None:
+    if is_unread(request, membership):
         request.outcome_seen_at = timezone.now()
         request.save(update_fields=("outcome_seen_at",))
     return request

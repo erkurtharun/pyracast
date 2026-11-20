@@ -20,10 +20,10 @@ from pyracast.connections.operations import (
 from pyracast.forecasts.models import CollectionJob, RequestAttempt, RequestPurpose
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.regions.operations import (
+    approve_location_change,
     approve_region,
     configure_binding,
     request_location_change,
-    review_location_change,
     submit_region,
     transition_region,
     validate_location,
@@ -84,7 +84,7 @@ def test_revision_invalidates_approval_and_preserves_previous_configuration() ->
         longitude=20,
         timezone="UTC",
     )
-    review_location_change(system.admin, change.pk, approve=True)
+    approve_location_change(system.admin, change.pk, expected_revision=change.base_revision)
     changed = Region.objects.get(pk=system.region.pk)
     assert (changed.revision, changed.status, changed.approved_binding_id) == (2, "pending", None)
     system.binding.refresh_from_db()

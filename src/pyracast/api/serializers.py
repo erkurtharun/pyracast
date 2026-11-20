@@ -105,6 +105,7 @@ class LocationChangeOutput(serializers.ModelSerializer[RegionLocationChangeReque
             "status",
             "created_at",
             "reviewed_at",
+            "decision_reason",
         )
         read_only_fields = fields
 

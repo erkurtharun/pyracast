@@ -16,9 +16,10 @@ class RegionStatus(models.TextChoices):
 
 
 class LocationChangeStatus(models.TextChoices):
-    PENDING = "pending", "Pending"
+    PENDING = "pending", "Awaiting review"
     APPROVED = "approved", "Approved"
     REJECTED = "rejected", "Rejected"
+    WITHDRAWN = "withdrawn", "Withdrawn"
 
 
 class AuditAction(models.TextChoices):
@@ -29,6 +30,10 @@ class AuditAction(models.TextChoices):
     )
     LOCATION_CHANGE_APPROVED = "location_change_approved", gettext_lazy("Location change approved")
     LOCATION_CHANGE_REJECTED = "location_change_rejected", gettext_lazy("Location change rejected")
+    LOCATION_CHANGE_WITHDRAWN = (
+        "location_change_withdrawn",
+        gettext_lazy("Location change withdrawn"),
+    )
     LOCATION_CHANGE_REBASED = (
         "location_change_rebased",
         gettext_lazy("Location change request moved to the new revision"),
@@ -156,6 +161,7 @@ class RegionLocationChangeRequest(models.Model):
         related_name="reviewed_region_location_requests",
     )
     reviewed_at = models.DateTimeField(null=True)
+    decision_reason = models.CharField(max_length=500, blank=True, default="")
 
     class Meta:
         constraints = (
@@ -178,6 +184,13 @@ class RegionLocationChangeRequest(models.Model):
                         status=LocationChangeStatus.PENDING,
                         reviewed_by__isnull=True,
                         reviewed_at__isnull=True,
+                        decision_reason="",
+                    )
+                    | models.Q(
+                        status=LocationChangeStatus.WITHDRAWN,
+                        reviewed_by__isnull=True,
+                        reviewed_at__isnull=False,
+                        decision_reason="",
                     )
                     | models.Q(
                         status__in=(LocationChangeStatus.APPROVED, LocationChangeStatus.REJECTED),

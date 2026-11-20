@@ -11,7 +11,11 @@ from pyracast.plants.events import PLANT_EVENT_DETAILS, record_plant_event
 from pyracast.plants.models import PlantEvent, PlantEventAction
 from pyracast.regions.audit import AUDIT_DETAILS, record_audit
 from pyracast.regions.models import AuditAction, AuditEvent
-from pyracast.regions.operations import request_location_change, review_location_change
+from pyracast.regions.operations import (
+    approve_location_change,
+    reject_location_change,
+    request_location_change,
+)
 from tests.support.domain import make_system
 from tests.support.plant_operations import make_plant
 
@@ -169,9 +173,9 @@ def test_location_change_events_name_their_request() -> None:
         ).pk
 
     rejected = requested(41)
-    review_location_change(system.admin, rejected, approve=False)
+    reject_location_change(system.admin, rejected, expected_revision=1)
     approved = requested(42)
-    review_location_change(system.admin, approved, approve=True)
+    approve_location_change(system.admin, approved, expected_revision=1)
 
     assert sorted(
         AuditEvent.objects.filter(action__startswith="location_change_").values_list(

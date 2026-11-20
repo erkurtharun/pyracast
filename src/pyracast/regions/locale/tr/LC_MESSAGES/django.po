@@ -535,6 +535,9 @@ msgstr "Konum değişikliği talep edildi"
 msgid "Location change requests"
 msgstr "Konum değişikliği talepleri"
 
+msgid "Location change withdrawn"
+msgstr "Konum değişikliği geri çekildi"
+
 msgid "Location changes"
 msgstr "Konum değişiklikleri"
 
@@ -668,6 +671,9 @@ msgstr "Ayarlanmadı"
 
 msgid "Not validated"
 msgstr "Doğrulanmadı"
+
+msgid "Note for the customer (optional)"
+msgstr "Müşteriye not (isteğe bağlı)"
 
 msgid "Nothing changed."
 msgstr "Hiçbir şey değişmedi."

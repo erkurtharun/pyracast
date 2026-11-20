@@ -292,5 +292,5 @@ def test_trash_releases_the_lease_of_a_sending_delivery() -> None:
     admin = Membership.objects.get(tenant_id=region.tenant_id).user
     trash_region(admin, region.tenant_id, region.pk)
     delivery.refresh_from_db()
-    assert delivery.status == "uncertain"
+    assert delivery.status == "cancelled"
     assert lease_violations() == CLEAN

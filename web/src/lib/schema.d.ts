@@ -292,6 +292,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/location-change-requests/{request_id}/withdraw/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_regions_location_change_requests_withdraw_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/regions/{region_id}/plants/": {
         parameters: {
             query?: never;
@@ -680,6 +696,7 @@ export interface components {
          *     * `location_change_requested` - Location change requested
          *     * `location_change_approved` - Location change approved
          *     * `location_change_rejected` - Location change rejected
+         *     * `location_change_withdrawn` - Location change withdrawn
          *     * `location_change_rebased` - Location change request moved to the new revision
          *     * `binding_configured` - Provider connection configured
          *     * `connection_validated` - Provider connection validated
@@ -701,6 +718,7 @@ export interface components {
             | "location_change_requested"
             | "location_change_approved"
             | "location_change_rejected"
+            | "location_change_withdrawn"
             | "location_change_rebased"
             | "binding_configured"
             | "connection_validated"
@@ -1527,14 +1545,17 @@ export interface components {
             readonly created_at: string;
             /** Format: date-time */
             readonly reviewed_at: string | null;
+            readonly decision_reason: string;
         };
         /**
-         * @description * `pending` - Pending
+         * @description * `pending` - Awaiting review
          *     * `approved` - Approved
          *     * `rejected` - Rejected
+         *     * `withdrawn` - Withdrawn
          * @enum {string}
          */
-        LocationChangeStatusEnum: "pending" | "approved" | "rejected";
+        LocationChangeStatusEnum:
+            "pending" | "approved" | "rejected" | "withdrawn";
         /**
          * @description * `net_export` - Net export
          *     * `ac_generation` - AC generation
@@ -2308,6 +2329,13 @@ export interface components {
             /** Format: date-time */
             ends_at: string;
         };
+        /**
+         * @description * `trash_retention_expired` - Trash Retention Expired
+         *     * `location_already_exists` - Location Already Exists
+         * @enum {string}
+         */
+        RestoreBlockerEnum:
+            "trash_retention_expired" | "location_already_exists";
         RevisionInput: {
             expected_revision: number;
         };
@@ -2417,7 +2445,12 @@ export interface components {
             deleted_at: string;
             /** Format: date-time */
             readonly purge_after: string;
-            readonly can_restore: boolean;
+            readonly restore_blocker:
+                | (
+                      | components["schemas"]["RestoreBlockerEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
         };
         /**
          * @description * `configuration_unavailable` - configuration_unavailable
@@ -2835,7 +2868,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChangeRequestOutput"];
+                    "application/json": components["schemas"]["ChangeRequestSummaryOutput"];
                 };
             };
             /** @description The request input was refused. */
@@ -2915,7 +2948,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChangeRequestOutput"];
+                    "application/json": components["schemas"]["ChangeRequestSummaryOutput"];
                 };
             };
             /** @description The request input was refused. */
@@ -2991,7 +3024,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChangeRequestOutput"];
+                    "application/json": components["schemas"]["ChangeRequestSummaryOutput"];
                 };
             };
             /** @description The request input was refused. */
@@ -3058,7 +3091,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChangeRequestOutput"];
+                    "application/json": components["schemas"]["ChangeRequestSummaryOutput"];
                 };
             };
             /** @description The request input was refused. */
@@ -3817,6 +3850,74 @@ export interface operations {
             };
         };
     };
+    tenants_regions_location_change_requests_withdraw_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                region_id: number;
+                request_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocationChangeOutput"];
+                };
+            };
+            /** @description The request input was refused. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Sign-in is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Access was refused. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The addressed item or page does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     tenants_regions_plants_list: {
         parameters: {
             query?: {
@@ -4550,7 +4651,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChangeRequestOutput"];
+                    "application/json": components["schemas"]["ChangeRequestSummaryOutput"];
                 };
             };
             /** @description The request input was refused. */
@@ -4640,7 +4741,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChangeRequestOutput"];
+                    "application/json": components["schemas"]["ChangeRequestSummaryOutput"];
                 };
             };
             /** @description The request input was refused. */

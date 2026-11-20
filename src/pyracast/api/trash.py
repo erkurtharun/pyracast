@@ -4,7 +4,7 @@ from typing import Any, cast
 from django.contrib.auth.models import User
 from django.db.models import QuerySet
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, extend_schema_field
 from rest_framework import serializers
 from rest_framework.generics import GenericAPIView
 from rest_framework.request import Request
@@ -13,28 +13,33 @@ from rest_framework.views import APIView
 
 from pyracast import trash
 from pyracast.api.serializers import RegionOutput
+from pyracast.errors import ErrorCode
 from pyracast.plants.serializers import EmptyInput
 from pyracast.regions.models import Region
 
-
-def _purge_after(region: Region) -> datetime:
-    return cast(datetime, region.deleted_at) + trash.RETENTION
+RESTORE_BLOCKERS = (ErrorCode.TRASH_RETENTION_EXPIRED, ErrorCode.LOCATION_ALREADY_EXISTS)
 
 
 class TrashedRegionOutput(serializers.ModelSerializer[Region]):
     deleted_at = serializers.DateTimeField()
     purge_after = serializers.SerializerMethodField()
-    can_restore = serializers.SerializerMethodField()
+    restore_blocker = serializers.SerializerMethodField()
 
     def get_purge_after(self, region: Region) -> datetime:
-        return _purge_after(region)
+        return cast(datetime, region.deleted_at) + trash.RETENTION
 
-    def get_can_restore(self, region: Region) -> bool:
-        return timezone.now() < _purge_after(region)
+    @extend_schema_field(
+        serializers.ChoiceField(
+            choices=[(code.value, code.label) for code in RESTORE_BLOCKERS], allow_null=True
+        )
+    )
+    def get_restore_blocker(self, region: Region) -> str | None:
+        blocker = trash.restore_blocker(region, timezone.now())
+        return None if blocker is None else blocker.value
 
     class Meta:
         model = Region
-        fields = ("id", "name", "deleted_at", "purge_after", "can_restore")
+        fields = ("id", "name", "deleted_at", "purge_after", "restore_blocker")
         read_only_fields = fields
 
 
@@ -42,7 +47,7 @@ class TrashedRegionsView(GenericAPIView[Region]):
     serializer_class = TrashedRegionOutput
 
     def get_queryset(self) -> QuerySet[Region]:
-        return (
+        return trash.with_restore_facts(
             Region.objects.trashed()
             .filter(tenant_id=self.kwargs["tenant_id"], purge_started_at__isnull=True)
             .order_by("deleted_at", "id")

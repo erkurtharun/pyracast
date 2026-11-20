@@ -1,9 +1,11 @@
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from typing import TypedDict
 
 import pytest
 from django.contrib.auth.models import User
+from django.contrib.messages import get_messages
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection
 from django.test import Client
@@ -285,3 +287,91 @@ def test_a_plant_that_is_or_was_in_review_still_needs_an_operator_decision(state
     status, body = submit(system, latitude=42.5, longitude=31.5)
 
     assert (status, body["status"]) == (201, "pending")
+
+
+def test_a_concurrent_withdraw_and_approval_settle_the_request_once() -> None:
+    system = make_system(approved=True)
+    change = request_location_change(
+        system.member, system.region.pk, system.tenant.pk, expected_revision=1, **TARGET
+    )
+    barrier = Barrier(2)
+
+    def settle(decide: Callable[[], object]) -> str:
+        close_old_connections()
+        try:
+            barrier.wait(timeout=10)
+            decide()
+            return "settled"
+        except ValidationError as error:
+            return str(error.code)
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(
+                settle,
+                lambda: operations.withdraw_location_change(
+                    system.member, system.tenant.pk, system.region.pk, change.pk
+                ),
+            ),
+            pool.submit(
+                settle,
+                lambda: operations.approve_location_change(
+                    system.admin, change.pk, expected_revision=1
+                ),
+            ),
+        ]
+        results = sorted(future.result(timeout=15) for future in futures)
+
+    assert results == ["location_change_already_reviewed", "settled"]
+    change.refresh_from_db()
+    system.region.refresh_from_db()
+    moved = change.status == "approved"
+    assert change.status in {"approved", "withdrawn"}
+    assert system.region.revision == (2 if moved else 1)
+    assert (
+        AuditEvent.objects.filter(
+            action__in=("location_change_approved", "location_change_withdrawn")
+        ).count()
+        == 1
+    )
+
+
+def test_the_console_names_why_a_location_decision_was_refused() -> None:
+    system = make_system(approved=True)
+    change = request_location_change(
+        system.member, system.region.pk, system.tenant.pk, expected_revision=1, **TARGET
+    )
+    operator, _ = verified_admin()
+
+    refused = operator.post(
+        reverse("admin:workspace_decision", args=(system.region.pk,)),
+        {
+            "expected_revision": 2,
+            "expected_status": "approved",
+            "action": "reject_location",
+            "location_change_id": change.pk,
+        },
+    )
+
+    assert refused.status_code == 302
+    assert [str(message) for message in get_messages(refused.wsgi_request)] == [
+        "The plant location changed. Reopen the plant and try again."
+    ]
+    change.refresh_from_db()
+    assert change.status == "pending"
+
+
+def test_a_decision_note_longer_than_500_characters_is_refused() -> None:
+    system = make_system(approved=True)
+    change = request_location_change(
+        system.member, system.region.pk, system.tenant.pk, expected_revision=1, **TARGET
+    )
+
+    with raises_code("invalid_request"):
+        operations.reject_location_change(
+            system.admin, change.pk, expected_revision=1, reason="x" * 501
+        )
+    change.refresh_from_db()
+    assert change.status == "pending"

@@ -58,7 +58,7 @@ async function setup(page: Page) {
                     name,
                     deleted_at: "2026-01-07T10:00:00Z",
                     purge_after: "2026-02-06T10:00:00Z",
-                    can_restore: true,
+                    restore_blocker: null,
                 })),
             ),
         }),

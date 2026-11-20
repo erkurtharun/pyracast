@@ -57,24 +57,18 @@
               <div class="facts-wide"><dt>{% translate "Reason" %}</dt><dd>{{ change.reason|default:_("No reason given") }}</dd></div>
             </dl>
             <p class="callout callout--warn">{% translate "Accepting the new location removes approval. Set up, validate and approve a replacement connection before collection resumes." %}</p>
-            <div class="form-actions">
-              <form method="post" action="{% url 'admin:workspace_decision' region.pk %}">
-                {% csrf_token %}
-                <input type="hidden" name="{{ review_form.expected_revision.html_name }}" value="{{ review_form.expected_revision.value|unlocalize }}">
-                <input type="hidden" name="{{ review_form.expected_status.html_name }}" value="{{ review_form.expected_status.value }}">
-                <input type="hidden" name="{{ review_form.location_change_id.html_name }}" value="{{ change.id|unlocalize }}">
-                <input type="hidden" name="{{ review_form.action.html_name }}" value="approve_location">
-                <button type="submit" class="btn btn--primary">{% translate "Approve location change" %}</button>
-              </form>
-              <form method="post" action="{% url 'admin:workspace_decision' region.pk %}">
-                {% csrf_token %}
-                <input type="hidden" name="{{ review_form.expected_revision.html_name }}" value="{{ review_form.expected_revision.value|unlocalize }}">
-                <input type="hidden" name="{{ review_form.expected_status.html_name }}" value="{{ review_form.expected_status.value }}">
-                <input type="hidden" name="{{ review_form.location_change_id.html_name }}" value="{{ change.id|unlocalize }}">
-                <input type="hidden" name="{{ review_form.action.html_name }}" value="reject_location">
-                <button type="submit" class="btn btn--quiet">{% translate "Reject location change" %}</button>
-              </form>
-            </div>
+            <form method="post" action="{% url 'admin:workspace_decision' region.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="{{ review_form.expected_revision.html_name }}" value="{{ review_form.expected_revision.value|unlocalize }}">
+              <input type="hidden" name="{{ review_form.expected_status.html_name }}" value="{{ review_form.expected_status.value }}">
+              <input type="hidden" name="{{ review_form.location_change_id.html_name }}" value="{{ change.id|unlocalize }}">
+              <label class="field" for="decision-reason-{{ change.id|unlocalize }}">{{ review_form.decision_reason.label }}</label>
+              <textarea id="decision-reason-{{ change.id|unlocalize }}" name="{{ review_form.decision_reason.html_name }}" rows="2" maxlength="500"></textarea>
+              <div class="form-actions">
+                <button type="submit" name="{{ review_form.action.html_name }}" value="approve_location" class="btn btn--primary">{% translate "Approve location change" %}</button>
+                <button type="submit" name="{{ review_form.action.html_name }}" value="reject_location" class="btn btn--quiet">{% translate "Reject location change" %}</button>
+              </div>
+            </form>
           </li>
         {% endfor %}
       </ul>

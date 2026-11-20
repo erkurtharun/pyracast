@@ -749,6 +749,7 @@ FREE_TEXT = frozenset(
         ("regions.Region", "timezone"),
         ("regions.RegionLocationChangeRequest", "timezone"),
         ("regions.RegionLocationChangeRequest", "reason"),
+        ("regions.RegionLocationChangeRequest", "decision_reason"),
         ("connections.ProviderAccount", "external_account_id"),
         ("connections.ProviderAccount", "encrypted_api_key"),
         ("connections.ProviderAccount", "authorization_reference"),

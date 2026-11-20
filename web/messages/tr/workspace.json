@@ -113,7 +113,12 @@
         "currentLocation": "Mevcut konum: {latitude}°, {longitude}° · {timezone}",
         "location": "{latitude}°, {longitude}° · {timezone}",
         "approvalHelp": "Konum değişikliği yönetici onayı ve bağlantının yeniden doğrulanmasını gerektirir.",
-        "ianaTimezone": "IANA saat dilimi"
+        "ianaTimezone": "IANA saat dilimi",
+        "latestApproved": "Konum değişikliği {date} tarihinde onaylandı. Yeni bağlantı onaylanana kadar tahminler duraklar.",
+        "latestRejected": "Konum değişikliği {date} tarihinde reddedildi.",
+        "latestWithdrawn": "Konum değişikliği {date} tarihinde geri çekildi.",
+        "decisionNote": "Not: {reason}",
+        "withdraw": "Talebi geri çek"
     },
     "RegionWorkspace": {
         "allPlants": "Tüm santraller",
@@ -339,7 +344,10 @@
         "restore": "Geri yükle: {name}",
         "deletionHelp": "Veri toplama duracak. Bu santrali ve kayıtlı verilerini 30 gün boyunca geri yükleyebilirsiniz. Sonrasında kalıcı olarak silinirler.",
         "retentionHelp": "Silinen santraller ve verileri 30 gün saklanır.",
-        "restoreExpired": "30 günlük geri yükleme süresi doldu."
+        "blockers": {
+            "trash_retention_expired": "30 günlük geri yükleme süresi doldu.",
+            "location_already_exists": "Bu konumu artık başka bir santral kullanıyor. Önce o santrali taşıyın veya silin."
+        }
     },
     "WorkspaceMembers": {
         "title": "Üyeler",

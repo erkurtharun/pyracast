@@ -19,10 +19,12 @@ from pyracast.regions.audit import record_audit
 from pyracast.regions.models import (
     REGION_TRANSITIONS,
     AuditAction,
+    AuditEvent,
     LocationChangeStatus,
     Region,
     RegionLocationChangeRequest,
     RegionStatus,
+    active_region,
     location_coordinate,
 )
 
@@ -102,6 +104,40 @@ def submit_region(
         )
 
 
+def _require_free_target(tenant_id: int, latitude: float, longitude: float, region: Region) -> None:
+    require_available_location(tenant_id, latitude, longitude, exclude_region_id=region.pk)
+    if (
+        RegionLocationChangeRequest.objects.filter(
+            active_region("region__"),
+            region__tenant_id=tenant_id,
+            status=LocationChangeStatus.PENDING,
+        )
+        .exclude(region=region)
+        .annotate(
+            target_latitude=location_coordinate("latitude"),
+            target_longitude=location_coordinate("longitude"),
+        )
+        .filter(
+            target_latitude=Decimal(str(latitude)),
+            target_longitude=Decimal(str(longitude)),
+        )
+        .exists()
+    ):
+        raise DomainError(ErrorCode.LOCATION_ALREADY_EXISTS)
+
+
+def _awaits_first_setup(region: Region) -> bool:
+    """A plant that was never approved and has no connection for its current location loses
+    nothing when it moves, so its administrator moves it without an operator review."""
+    return (
+        region.status == RegionStatus.PENDING
+        and not SiteBinding.objects.filter(region=region, region_revision=region.revision).exists()
+        and not AuditEvent.objects.filter(
+            region=region, action=AuditAction.REGION_APPROVED
+        ).exists()
+    )
+
+
 def request_location_change(
     actor: User,
     region_id: int,
@@ -137,6 +173,7 @@ def request_location_change(
             raise ConflictError(ErrorCode.LOCATION_CHANGE_ALREADY_PENDING)
         if (region.latitude, region.longitude, region.timezone) == desired[:3]:
             raise DomainError(ErrorCode.LOCATION_UNCHANGED)
+        _require_free_target(tenant_id, latitude, longitude, region)
         change = RegionLocationChangeRequest.objects.create(
             region=region,
             requested_by=actor,
@@ -153,6 +190,8 @@ def request_location_change(
             revision=region.revision,
             details={"request_id": change.pk},
         )
+        if _awaits_first_setup(region):
+            _move(actor, change, region, "")
         return change
 
 
@@ -185,58 +224,131 @@ def correct_location(
             reason=reason,
             platform=True,
         )
-        return review_location_change(actor, change.pk, approve=True)
+        return approve_location_change(actor, change.pk, expected_revision=expected_revision)
 
 
-def review_location_change(
-    actor: User, request_id: int, *, approve: bool
+def _decision_note(reason: str) -> str:
+    if len(reason.strip()) > 500:
+        raise DomainError(ErrorCode.INVALID_REQUEST, field="decision_reason")
+    return reason.strip()
+
+
+def _locked_request(request_id: int) -> tuple[RegionLocationChangeRequest, Region]:
+    tenant_id, region_id = RegionLocationChangeRequest.objects.values_list(
+        "region__tenant_id", "region_id"
+    ).get(pk=request_id)
+    Tenant.objects.select_for_update().get(pk=tenant_id)
+    region = Region.objects.active().select_for_update().get(pk=region_id)
+    return RegionLocationChangeRequest.objects.select_for_update().get(pk=request_id), region
+
+
+def _settled(change: RegionLocationChangeRequest, status: str) -> bool:
+    if change.status == status:
+        return True
+    if change.status != LocationChangeStatus.PENDING:
+        raise ConflictError(ErrorCode.LOCATION_CHANGE_ALREADY_REVIEWED)
+    return False
+
+
+def _require_current(change: RegionLocationChangeRequest, region: Region, expected: int) -> None:
+    if expected != region.revision or change.base_revision != region.revision:
+        raise ConflictError(ErrorCode.REGION_REVISION_CHANGED)
+
+
+def _close(
+    actor: User | None,
+    change: RegionLocationChangeRequest,
+    status: LocationChangeStatus,
+    reason: str,
+) -> None:
+    change.status = status
+    change.reviewed_by = actor
+    change.reviewed_at = django_timezone.now()
+    change.decision_reason = reason
+    change.save(update_fields=("status", "reviewed_by", "reviewed_at", "decision_reason"))
+
+
+def _move(actor: User, change: RegionLocationChangeRequest, region: Region, reason: str) -> None:
+    region.latitude = change.latitude
+    region.longitude = change.longitude
+    region.timezone = change.timezone
+    region.revision += 1
+    region.status = RegionStatus.PENDING
+    region.approved_binding = None
+    region.save(
+        update_fields=(
+            "latitude",
+            "longitude",
+            "timezone",
+            "revision",
+            "status",
+            "approved_binding",
+        )
+    )
+    _close(actor, change, LocationChangeStatus.APPROVED, reason)
+    record_audit(
+        actor=actor,
+        region=region,
+        action=AuditAction.LOCATION_CHANGE_APPROVED,
+        revision=region.revision,
+        details={"request_id": change.pk},
+    )
+
+
+def approve_location_change(
+    actor: User, request_id: int, *, expected_revision: int, reason: str = ""
 ) -> RegionLocationChangeRequest:
     require_platform_admin(actor)
+    reason = _decision_note(reason)
     with transaction.atomic():
-        change = RegionLocationChangeRequest.objects.get(pk=request_id)
-        if approve:
-            tenant_id = Region.objects.values_list("tenant_id", flat=True).get(pk=change.region_id)
-            require_available_location(
-                tenant_id, change.latitude, change.longitude, exclude_region_id=change.region_id
-            )
-        region = Region.objects.active().select_for_update().get(pk=change.region_id)
-        change.refresh_from_db()
-        status = LocationChangeStatus.APPROVED if approve else LocationChangeStatus.REJECTED
-        if change.status == status:
+        change, region = _locked_request(request_id)
+        if _settled(change, LocationChangeStatus.APPROVED):
             return change
-        if change.status != LocationChangeStatus.PENDING:
-            raise ConflictError(ErrorCode.LOCATION_CHANGE_ALREADY_REVIEWED)
-        if approve:
-            if change.base_revision != region.revision:
-                raise ConflictError(ErrorCode.REGION_REVISION_CHANGED)
-            region.latitude = change.latitude
-            region.longitude = change.longitude
-            region.timezone = change.timezone
-            region.revision += 1
-            region.status = RegionStatus.PENDING
-            region.approved_binding = None
-            region.save(
-                update_fields=(
-                    "latitude",
-                    "longitude",
-                    "timezone",
-                    "revision",
-                    "status",
-                    "approved_binding",
-                )
-            )
-        change.status = status
-        change.reviewed_by = actor
-        change.reviewed_at = django_timezone.now()
-        change.save(update_fields=("status", "reviewed_by", "reviewed_at"))
+        _require_current(change, region, expected_revision)
+        require_available_location(
+            region.tenant_id, change.latitude, change.longitude, exclude_region_id=region.pk
+        )
+        _move(actor, change, region, reason)
+        return change
+
+
+def reject_location_change(
+    actor: User, request_id: int, *, expected_revision: int, reason: str = ""
+) -> RegionLocationChangeRequest:
+    require_platform_admin(actor)
+    reason = _decision_note(reason)
+    with transaction.atomic():
+        change, region = _locked_request(request_id)
+        if _settled(change, LocationChangeStatus.REJECTED):
+            return change
+        _require_current(change, region, expected_revision)
+        _close(actor, change, LocationChangeStatus.REJECTED, reason)
         record_audit(
             actor=actor,
             region=region,
-            action=(
-                AuditAction.LOCATION_CHANGE_APPROVED
-                if approve
-                else AuditAction.LOCATION_CHANGE_REJECTED
-            ),
+            action=AuditAction.LOCATION_CHANGE_REJECTED,
+            revision=region.revision,
+            details={"request_id": change.pk},
+        )
+        return change
+
+
+def withdraw_location_change(
+    actor: User, tenant_id: int, region_id: int, request_id: int
+) -> RegionLocationChangeRequest:
+    with transaction.atomic():
+        authorize_workspace_admin(actor, tenant_id)
+        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
+        change = RegionLocationChangeRequest.objects.select_for_update().get(
+            pk=request_id, region=region
+        )
+        if _settled(change, LocationChangeStatus.WITHDRAWN):
+            return change
+        _close(None, change, LocationChangeStatus.WITHDRAWN, "")
+        record_audit(
+            actor=actor,
+            region=region,
+            action=AuditAction.LOCATION_CHANGE_WITHDRAWN,
             revision=region.revision,
             details={"request_id": change.pk},
         )
