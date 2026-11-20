@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from django.contrib.auth.models import User
 from django.db import models
 
+from pyracast.background.lease import release, take
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.events import record_plant_event
 from pyracast.plants.incident_policy import incident_ids
@@ -118,11 +119,7 @@ def create_run(
 
 
 def start_run(run: CalibrationRun, now: datetime, lease: timedelta) -> uuid.UUID:
-    token = uuid.uuid4()
-    run.status = CalibrationStatus.RUNNING
-    run.attempts += 1
-    run.lease_token = token
-    run.lease_expires_at = now + lease
+    token = take(run, CalibrationStatus.RUNNING, now, lease)
     run.save(update_fields=("status", "attempts", "lease_token", "lease_expires_at"))
     return token
 
@@ -130,8 +127,7 @@ def start_run(run: CalibrationRun, now: datetime, lease: timedelta) -> uuid.UUID
 def requeue_run(run: CalibrationRun, reason: str) -> None:
     run.status = CalibrationStatus.PENDING
     run.last_error = reason
-    run.lease_token = None
-    run.lease_expires_at = None
+    release(run)
     run.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
 
 
@@ -139,8 +135,7 @@ def finish_run(run: CalibrationRun, status: str, now: datetime, reason: str = ""
     """End a run: the caller holds the plant lock and has set the result fields."""
     run.status = status
     run.completed_at = now
-    run.lease_token = None
-    run.lease_expires_at = None
+    release(run)
     run.last_error = reason if status == CalibrationStatus.FAILED else ""
     run.save()
     record_plant_event(
