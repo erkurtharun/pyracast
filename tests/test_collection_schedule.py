@@ -8,11 +8,13 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import close_old_connections, connection
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import MAX_DAILY_QUOTA, ProviderAccount, SiteBinding
+from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.jobs import claim, collect, persist_snapshot, retry
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -26,6 +28,7 @@ from pyracast.forecasts.schedule import configure_schedule, get_schedule, schedu
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import AuditEvent, Region
+from pyracast.regions.operations import approve_region
 from tests.support.collection_schedule import HistoricalFixture, no_calculation
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate
@@ -350,16 +353,17 @@ def test_schedule_rejects_invalid_or_excess_times(times: list[str]) -> None:
         )
 
 
-def test_schedule_requires_approval_membership_and_aware_timestamp() -> None:
+def test_schedule_keeps_intent_before_approval_and_requires_membership_and_aware_timestamp() -> (
+    None
+):
     system = make_system()
+    saved = configure_schedule(
+        system.member, system.tenant.pk, system.region.pk, enabled=True, times=["09:00"], now=NOW
+    )
+    assert (saved.enabled, saved.times) == (True, ["09:00"])
     with pytest.raises(ValidationError):
         configure_schedule(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            enabled=True,
-            times=["09:00"],
-            now=NOW,
+            system.member, system.tenant.pk, system.region.pk, enabled=True, times=[], now=NOW
         )
     with pytest.raises(ValidationError):
         configure_schedule(
@@ -389,6 +393,46 @@ def test_schedule_requires_approval_membership_and_aware_timestamp() -> None:
     )
 
 
+def test_collection_intent_saved_before_approval_collects_after_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(timezone, "now", lambda: NOW - timedelta(hours=2))
+    system = make_system()
+    client = APIClient()
+    client.force_authenticate(system.member)
+    url = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/collection-schedule/"
+    response = client.put(url, {"enabled": True, "times": ["17:00"]}, format="json")
+    assert response.status_code == 200
+    assert response.json()["enabled"] is True
+    validate_binding(system.admin, system.binding.pk, FakeAdapter(), NOW - timedelta(hours=1))
+    approve_region(system.admin, system.region.pk, system.binding.pk, NOW)
+    schedule = CollectionSchedule.objects.get(region=system.region)
+    assert (schedule.enabled, schedule.times) == (True, ["17:00"])
+    slot = NOW + timedelta(hours=1)
+    assert slot in {
+        CollectionJob.objects.get(pk=pk).scheduled_for
+        for pk in enqueue_due(slot)
+        if CollectionJob.objects.get(pk=pk).endpoint == "forecasts"
+    }
+
+
+def test_disabling_keeps_clocks_beyond_a_lowered_quota() -> None:
+    system = make_system(approved=True)
+    times = ["09:00", "16:00"]
+    configure_schedule(
+        system.member, system.tenant.pk, system.region.pk, enabled=True, times=times, now=NOW
+    )
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=2)
+    paused = configure_schedule(
+        system.member, system.tenant.pk, system.region.pk, enabled=False, times=times, now=NOW
+    )
+    assert (paused.enabled, paused.times) == (False, times)
+    with pytest.raises(ValidationError):
+        configure_schedule(
+            system.member, system.tenant.pk, system.region.pk, enabled=True, times=times, now=NOW
+        )
+
+
 def test_disabled_or_removed_collection_time_cancels_unstarted_job() -> None:
     system = make_system(approved=True)
     initial = CollectionJob.objects.get()
@@ -397,12 +441,14 @@ def test_disabled_or_removed_collection_time_cancels_unstarted_job() -> None:
     )
     assert claim(initial.pk, NOW) is None
     initial.refresh_from_db()
-    assert initial.status == "stale"
+    assert (initial.status, initial.last_error) == ("stale", "schedule_disabled")
     CollectionJob.objects.filter(pk=initial.pk).update(status="pending")
     CollectionSchedule.objects.filter(region=system.region).update(
         enabled=True, times=["17:00"], effective_from=NOW + timedelta(seconds=1)
     )
     assert claim(initial.pk, NOW) is None
+    initial.refresh_from_db()
+    assert (initial.status, initial.last_error) == ("stale", "slot_not_configured")
 
 
 def test_concurrent_daytime_schedulers_create_forecasts_without_history() -> None:

@@ -18,6 +18,7 @@ from pyracast.forecasts.models import (
     HistoricalReferenceImport,
     RequestAttempt,
 )
+from pyracast.forecasts.monitoring import delivery_health
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.providers import FixtureProvider, SolcastProvider
@@ -267,8 +268,9 @@ def test_paired_actuals_cannot_spend_reserved_future_forecast_quota() -> None:
         job.pk, SolcastProvider(httpx.MockTransport(forbidden)), lambda *_: {}, MORNING
     )
     job.refresh_from_db()
-    assert (job.status, job.last_error) == ("failed", "history_budget_reserved")
+    assert (job.status, job.last_error) == ("stale", "history_budget_reserved")
     assert job.attempts == 0
+    assert delivery_health(MORNING, timedelta(hours=1))["failed_collections"] == 0
     assert not RequestAttempt.objects.filter(job=job).exists()
 
 
@@ -293,7 +295,7 @@ def test_removing_forecast_clock_cancels_only_its_paired_actuals_job() -> None:
     )
     paired.refresh_from_db()
     night.refresh_from_db()
-    assert paired.status == "stale"
+    assert (paired.status, paired.last_error) == ("stale", "schedule_changed")
     assert night.status == "pending"
 
 

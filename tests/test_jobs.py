@@ -173,7 +173,7 @@ def test_quota_backoff_survives_until_next_utc_day() -> None:
     assert not collect(job.pk, FakeAdapter(), calculate, NOW)
     job.refresh_from_db()
     assert job.status == "retry"
-    assert job.available_at.isoformat() == "2026-11-10T00:00:00+00:00"
+    assert job.available_at.isoformat() == "2026-11-10T00:02:00+00:00"
     assert job.last_error == "quota_exhausted"
     assert collect(job.pk, FakeAdapter(), calculate, job.available_at)
 
@@ -205,7 +205,7 @@ def test_quota_retry_after_midnight_waits_for_the_following_utc_day(
 
     job.refresh_from_db()
     assert job.status == "retry"
-    assert job.available_at.isoformat() == "2026-11-11T00:00:00+00:00"
+    assert job.available_at.isoformat() == "2026-11-11T00:02:00+00:00"
     assert pending_job_ids(after_midnight) == []
     assert not RequestAttempt.objects.filter(purpose="forecast").exists()
 
@@ -253,7 +253,7 @@ def test_stale_binding_is_rejected_before_network(change: str) -> None:
     job = CollectionJob.objects.get()
     assert not collect(job.pk, FakeAdapter(), calculate, NOW)
     job.refresh_from_db()
-    assert job.status == "stale"
+    assert (job.status, job.last_error) == ("stale", "binding_not_current")
     assert RequestAttempt.objects.filter(purpose="forecast").count() == 0
 
 
@@ -269,7 +269,7 @@ def test_approval_change_during_network_prevents_publication_but_preserves_snaps
     assert ForecastSnapshot.objects.count() == 1
     assert ForecastResult.objects.count() == 0
     job.refresh_from_db()
-    assert job.status == "stale"
+    assert (job.status, job.last_error) == ("stale", "binding_not_current")
 
 
 def test_stale_worker_fetch_cannot_overwrite_reclaimed_lease() -> None:
