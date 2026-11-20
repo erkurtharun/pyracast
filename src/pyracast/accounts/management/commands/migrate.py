@@ -21,7 +21,10 @@ SET_TIMEOUTS = (
     "SELECT set_config('lock_timeout', %s, false), set_config('statement_timeout', %s, false), "
     "set_config('idle_in_transaction_session_timeout', %s, false)"
 )
-RESTORE_TIMEOUTS = SET_TIMEOUTS + ", pg_advisory_unlock(%s, %s)"
+RESTORE_TIMEOUTS = (
+    "SELECT set_config('lock_timeout', %s, false), set_config('statement_timeout', %s, false), "
+    "set_config('idle_in_transaction_session_timeout', %s, false), pg_advisory_unlock(%s, %s)"
+)
 
 
 @contextmanager
