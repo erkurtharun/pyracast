@@ -2768,3 +2768,39 @@ msgstr "Müşteri tarafından yeniden gönderildi"
 
 msgid "Provider connection validation failed"
 msgstr "Sağlayıcı bağlantısı doğrulanamadı"
+
+msgid "A provider site identity is required."
+msgstr "Sağlayıcı site kimliği gereklidir."
+
+msgid "Positive finite capacity is required."
+msgstr "Pozitif ve sonlu bir kapasite gereklidir."
+
+msgid "DC capacity must be finite and positive when specified."
+msgstr "DC kapasite girildiyse sonlu ve pozitif olmalıdır."
+
+msgid "An AC or DC power basis is required."
+msgstr "AC veya DC güç esası gereklidir."
+
+msgid "A verified horizontal reference configuration is required."
+msgstr "Doğrulanmış yatay referans yapılandırması gereklidir."
+
+msgid "Azimuth must be between 0 and 360 degrees."
+msgstr "Azimut 0 ile 360 derece arasında olmalıdır."
+
+msgid "Losses must be between 0 and 100 percent."
+msgstr "Kayıplar yüzde 0 ile 100 arasında olmalıdır."
+
+msgid "Confirmed site settings and installation date are required."
+msgstr "Doğrulanmış site ayarları ve kurulum tarihi gereklidir."
+
+msgid "Invalid provider account identity."
+msgstr "Sağlayıcı hesap kimliği geçersiz."
+
+msgid "Account quota must be between 1 and 10."
+msgstr "Hesap kotası 1 ile 10 arasında olmalıdır."
+
+msgid "A service authorization reference is required."
+msgstr "Hizmet yetkilendirme referansı gereklidir."
+
+msgid "An API key is required for a Solcast account."
+msgstr "Solcast hesabı için bir API anahtarı gereklidir."
