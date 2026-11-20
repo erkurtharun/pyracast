@@ -20,18 +20,17 @@ function takeSocialConnect(failed: boolean) {
 }
 
 const consoleRoot = "/admin/";
+const unprintable = /\\|(?! )[\p{C}\p{Z}]/u;
 
 // The server validates the return address too; this check keeps a crafted link on this
 // origin and inside the console after the browser has normalised it.
-function plain(text: string) {
-    return [...text].every(
-        (character) =>
-            character !== "\\" && character >= " " && character !== "\u007f",
-    );
-}
-
 function consoleDestination(next: string | null) {
-    if (!next || !plain(next) || !URL.canParse(next, window.location.origin))
+    if (
+        !next ||
+        next !== next.trim() ||
+        unprintable.test(next) ||
+        !URL.canParse(next, window.location.origin)
+    )
         return consoleRoot;
     const target = new URL(next, window.location.origin);
     return target.origin === window.location.origin &&
@@ -42,13 +41,14 @@ function consoleDestination(next: string | null) {
 
 function destination(canAdmin: boolean) {
     const { search } = window.location;
-    const callback = appQuery(new URLSearchParams(search)).socialCallback;
+    const params = new URLSearchParams(search);
+    const callback = appQuery(params).socialCallback;
     if (callback !== "none" && takeSocialConnect(callback === "failed"))
         return { href: `${routes.account()}${search}`, document: true };
     if (storedInvitation()) return { href: routes.invitation() };
     if (canAdmin)
         return {
-            href: consoleDestination(url.searchParams.get("next")),
+            href: consoleDestination(params.get("next")),
             document: true,
         };
     return { href: routes.workspaces() };

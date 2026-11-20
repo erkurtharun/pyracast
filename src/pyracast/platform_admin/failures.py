@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from django.contrib import messages
 from django.db import DatabaseError
-from django.http import HttpRequest
+from django.http import HttpRequest, JsonResponse
 from django.shortcuts import redirect
 from django.utils.translation import gettext_lazy
 
@@ -25,9 +25,11 @@ RETRY_MESSAGES = {
 }
 
 
+def wants_json(request: HttpRequest) -> bool:
+    return request.headers.get("Accept") == "application/json"
+
+
 def contained[V: Callable[..., Any]](view: V) -> V:
-    # A console write that meets a held row lock, a deadlock or the statement timeout has been
-    # rolled back: the operator returns to the form's page with a retry message, never a 500.
     def answer(request: HttpRequest, *args: Any, **kwargs: Any) -> Any:
         try:
             return view(request, *args, **kwargs)
@@ -40,6 +42,12 @@ def contained[V: Callable[..., Any]](view: V) -> V:
                 code.value,
                 getattr(request.resolver_match, "view_name", "-"),
             )
+            if wants_json(request):
+                return JsonResponse(
+                    {"message": str(RETRY_MESSAGES[code])},
+                    status=503,
+                    headers={"Retry-After": "1"},
+                )
             messages.error(request, RETRY_MESSAGES[code])
             return redirect(console_destination(request, request.headers.get("Referer")))
 

@@ -31,7 +31,7 @@ def save_user_language(user: User, language: Language) -> None:
         raise DomainError(
             ErrorCode.INVALID_REQUEST, _("Choose a supported language."), field="language"
         )
-    User.objects.select_for_update().get(pk=user.pk)
+    User.objects.select_for_update(no_key=True).get(pk=user.pk)
     UserLanguagePreference.objects.update_or_create(
         user_id=user.pk, defaults={"language": language}
     )

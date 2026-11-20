@@ -44,7 +44,7 @@ LIVE_ROWS: dict[type[Model], Q] = {
     CollectionJob: active_region("binding__region__"),
     RequestAttempt: active_region("binding__region__"),
     ForecastResult: active_region("snapshot__binding__region__"),
-    NotificationDelivery: active_region("binding__region__"),
+    NotificationDelivery: active_region("schedule__region__"),
     Plant: active_plant(),
     PlantConfiguration: active_plant("plant__"),
     ProductionObservation: active_plant("plant__"),

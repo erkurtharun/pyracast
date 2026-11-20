@@ -23,6 +23,7 @@ from pyracast.forecasts.historical_upload import (
     preview_historical_upload,
 )
 from pyracast.plants.models import Plant
+from pyracast.platform_admin.failures import wants_json
 from pyracast.regions.models import Region
 
 if TYPE_CHECKING:
@@ -188,7 +189,7 @@ def historical_import(
                         request,
                         _("Historical data saved. Repeated uploads reuse the existing import."),
                     )
-                    if request.headers.get("Accept") == "application/json":
+                    if wants_json(request):
                         return JsonResponse(
                             {
                                 "saved": True,
@@ -221,7 +222,7 @@ def historical_import(
         "title": _("Import historical Solcast data"),
     }
     status = 400 if form.errors else 200
-    if request.method == "POST" and request.headers.get("Accept") == "application/json":
+    if request.method == "POST" and wants_json(request):
         return JsonResponse(
             {
                 "html": render_to_string(
