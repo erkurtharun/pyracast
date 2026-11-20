@@ -98,6 +98,7 @@ MIGRATION = frozenset(
         "test_collection_times_migration",
         "test_epias_revision_migration",
         "test_invariant_migrations",
+        "test_invitation_lifecycle_migration",
         "test_invitation_link_migration",
         "test_invitation_role_migration",
         "test_ledger_invitation_and_recipient_migrations",
