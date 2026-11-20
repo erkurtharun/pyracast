@@ -68,5 +68,5 @@ export default defineConfig([
         "@/features/*/*/**",
         "../../*",
     ),
-    restrict(["src/app/**/*.{ts,tsx}"], "@/features/*/*/**"),
+    restrict(["src/app/**/*.{ts,tsx}"], "@/components/**", "@/features/*/*/**"),
 ]);
