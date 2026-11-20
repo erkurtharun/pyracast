@@ -110,3 +110,29 @@ for (const anonymous of [true, false])
             ),
         ).toBeNull();
     });
+
+test("a preview that cannot be loaded still lets the invitee accept", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/api/invitations/preview/", (route) =>
+        route.fulfill({
+            status: 503,
+            headers: { "Retry-After": "1" },
+            json: errorBody(
+                "busy",
+                "The workspace is busy. Try again in a moment.",
+                { retry_after: 1 },
+            ),
+        }),
+    );
+    await page.route("**/api/invitations/accept/", (route) =>
+        route.fulfill({ json: { tenant_id: 1, role: "viewer" } }),
+    );
+    await page.goto("/app/invitation/#token=invite-secret");
+    await expect(
+        page.getByText("The workspace is busy. Try again in a moment."),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Accept invitation" }).click();
+    await expect(page).toHaveURL("/app/w/1/");
+});

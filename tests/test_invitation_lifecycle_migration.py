@@ -83,7 +83,7 @@ def test_the_lifecycle_migration_keeps_every_invitation_and_records_no_reason_it
 
     after = WorkspaceInvitation.objects.order_by("pk")
     assert {pk: values for pk, *values in after.values_list("pk", *STORED)} == before
-    assert list(after.values_list("revoked_reason", flat=True).distinct()) == [""]
+    assert set(after.values_list("revoked_reason", flat=True)) == {""}
     assert not after.filter(accepted_by__isnull=False).exists()
     assert {
         name: WorkspaceInvitation.objects.get(pk=pk).state_at(timezone.now())
