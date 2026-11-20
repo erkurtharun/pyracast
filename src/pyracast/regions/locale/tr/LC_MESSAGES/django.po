@@ -2844,3 +2844,30 @@ msgstr "Sınırı aşan santraller"
 
 msgid "No plant is over the limit."
 msgstr "Sınırı aşan santral yok."
+
+msgid "plant location"
+msgstr "santral konumu"
+
+msgid "Audit trail"
+msgstr "Denetim kaydı"
+
+msgid "Plant events"
+msgstr "Santral olayları"
+
+msgid "Collection jobs"
+msgstr "Veri toplama işleri"
+
+msgid "Request attempts"
+msgstr "İstek denemeleri"
+
+msgid "Email deliveries"
+msgstr "E-posta gönderimleri"
+
+msgid "Provider bindings"
+msgstr "Sağlayıcı bağlantıları"
+
+msgid "Records:"
+msgstr "Kayıtlar:"
+
+msgid "View all"
+msgstr "Tümünü gör"
