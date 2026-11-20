@@ -157,12 +157,13 @@ def test_the_reset_notice_is_published_by_the_dispatcher_in_the_account_language
 
 
 def test_a_reset_that_fails_after_storing_its_notice_keeps_everything_and_mails_nothing(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, events: Callable[[], list[dict[str, Any]]]
 ) -> None:
     user = customer()
     with_factors(user)
     client = session_of(user)
     before = state(user)
+    signed_in = len(events())
     store = intents.enqueue_mail
 
     def stored_then_failed(*args: Any, **kwargs: Any) -> None:
@@ -176,6 +177,7 @@ def test_a_reset_that_fails_after_storing_its_notice_keeps_everything_and_mails_
 
     assert state(user) == before
     assert client.get("/api/session/").json()["user"]["id"] == user.pk
+    assert events()[signed_in:] == []
     assert notices() == []
     assert mailed() == []
 
