@@ -416,3 +416,28 @@ def test_change_lines_that_cannot_be_written_at_the_commit_change_nothing_else(
     ]
     assert User.objects.get(pk=user.pk).check_password(NEW_PASSWORD)
     assert session_user(other) is None
+
+
+@pytest.mark.parametrize("pending", ["signup", "address-change"])
+def test_a_verification_resend_whose_session_cannot_be_saved_queues_no_code_and_writes_no_line(
+    pending: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    if pending == "signup":
+        client = browser()
+        assert signup(client).status_code == 401
+    else:
+        client = signed_in(account("resender"), reauthenticated=True)
+        assert submit(client, "account/email", {"email": "moved@example.com"}).status_code == 200
+    deliver_mail()
+    one_minute_later(monkeypatch)
+    resend = prepared(client, "auth/email/verify/resend", {})
+    before = stored()
+    events = capture_security_events(caplog, monkeypatch)
+    written = len(events())
+
+    with session_row_held(session_key(client)):
+        response = resend()
+
+    assert stored() == before
+    assert events()[written:] == []
+    assert (response.status_code, response.json()["code"]) == (503, "busy")
