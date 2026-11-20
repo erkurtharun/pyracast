@@ -1,13 +1,9 @@
 "use client";
 import { useTranslations } from "next-intl";
+import type { components } from "@/lib/schema";
 import { Stat } from "@/ui/ui";
 
-type WeatherReference = {
-    status: "ready" | "partial" | "unavailable";
-    energy_kwh_m2?: number | null;
-    partial_energy_kwh_m2?: number | null;
-    coverage_fraction?: number;
-};
+type WeatherReference = components["schemas"]["WeatherReferenceOutput"];
 
 export function WeatherReferenceCard({
     reference,

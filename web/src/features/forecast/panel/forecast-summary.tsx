@@ -10,8 +10,8 @@ import { WeatherReferenceCard } from "../weather-reference";
 import { useFormat } from "@/lib/format/use-format";
 import { Freshness } from "./freshness";
 import {
+    dayEnergy,
     hasFlag,
-    type DaylightSummary,
     type ForecastResult,
     type OutageScenario,
     type ProductionDiagnostic,
@@ -37,16 +37,11 @@ export function ForecastSummary({
     const t = useTranslations("Forecast");
     const { number } = useFormat();
     const plant = useExportPlant();
-    const daylight = result.daylight as DaylightSummary | undefined;
+    const daylight = result.daylight;
     const primary = daylight ?? result;
-    const affectedDaylight = scenario?.result.daylight as
-        DaylightSummary | undefined;
+    const affectedDaylight = scenario?.result.daylight;
     const affectedSummary = affectedDaylight ?? scenario?.result;
     const noDaylight = daylight?.status === "polar_night";
-    const energyField = electrical ? "energy_mwh" : "energy_kwh_m2";
-    const partialEnergyField = electrical
-        ? "partial_energy_mwh"
-        : "partial_energy_kwh_m2";
     const partial = primary.complete !== true && !noDaylight;
     const affectedPartial =
         affectedSummary?.complete !== true &&
@@ -120,13 +115,7 @@ export function ForecastSummary({
                 </div>
             </div>
             {!electrical && result.weather_reference != null && (
-                <WeatherReferenceCard
-                    reference={
-                        result.weather_reference as Parameters<
-                            typeof WeatherReferenceCard
-                        >[0]["reference"]
-                    }
-                />
+                <WeatherReferenceCard reference={result.weather_reference} />
             )}
             {diagnostic?.evidence_state === "stale" ? (
                 <Notice>{t("production_comparison_is_out_of_date")}</Notice>
@@ -213,9 +202,7 @@ export function ForecastSummary({
                     value={
                         partial && primary.coverage_fraction === 0
                             ? undefined
-                            : primary[
-                                  partial ? partialEnergyField : energyField
-                              ]
+                            : dayEnergy(primary, electrical, partial)
                     }
                     unit={electrical ? "MWh" : "kWh/m²"}
                 />
@@ -230,11 +217,11 @@ export function ForecastSummary({
                             affectedPartial &&
                             affectedSummary?.coverage_fraction === 0
                                 ? undefined
-                                : affectedSummary?.[
-                                      affectedPartial
-                                          ? "partial_energy_mwh"
-                                          : "energy_mwh"
-                                  ]
+                                : dayEnergy(
+                                      affectedSummary,
+                                      true,
+                                      affectedPartial,
+                                  )
                         }
                         unit="MWh"
                     />
