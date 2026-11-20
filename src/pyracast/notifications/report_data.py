@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 from pyracast.forecasts.intraday import PreparedIntradaySource, apply_intraday_source
 from pyracast.forecasts.models import ForecastSnapshot
-from pyracast.incidents.operations import pinned_incidents
+from pyracast.incidents.evidence import pinned_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.sources import composed_report_source
@@ -15,11 +15,15 @@ from pyracast.plants.forecasting import (
     power_intervals,
     power_limit,
 )
-from pyracast.plants.incident_forecasts import incident_scenario
+from pyracast.plants.incident_forecasts import (
+    declared_capacity_holds,
+    incident_scenario,
+    operating_limits,
+)
 from pyracast.plants.measurements import production_identity_at
 from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration
 from pyracast.plants.numerics import PowerInterval, forecast
-from pyracast.plants.operating_limits import OperatingLimit, affected_power
+from pyracast.plants.operating_limits import affected_power
 
 
 class ReportDay(TypedDict):
@@ -53,18 +57,8 @@ def _report_intervals(
         snapshot.normalized_intervals if source_intervals is None else source_intervals,
     )
     start, end = local_day_bounds(day, configuration.binding.timezone)
-    limits = tuple(
-        OperatingLimit(
-            row.starts_at,
-            row.ends_at,
-            row.available_dc_mw if row.declared_configuration_id == configuration.pk else None,
-            row.available_inverter_mw
-            if row.declared_configuration_id == configuration.pk
-            else None,
-            row.available_export_mw if row.declared_configuration_id == configuration.pk else None,
-        )
-        for row in pinned_incidents(configuration.plant_id, revision_ids)
-    )
+    incidents = pinned_incidents(configuration.plant_id, revision_ids)
+    limits = operating_limits(incidents, declared_capacity_holds(incidents, configuration))
     intervals = affected_power(
         power_intervals(
             snapshot,
@@ -126,8 +120,9 @@ def _electrical_day(
         "calibration_id": calibration.pk if calibration else None,
         "result": normal,
     }
-    scenario = incident_scenario(outlook, day, 60, known_at)
-    normal = cast(dict[str, object], outlook["result"])
+    evaluated = incident_scenario(outlook, day, 60, known_at)
+    scenario = evaluated.scenario
+    normal = evaluated.replacement_result or normal
     normal["report_intervals"] = _report_intervals(
         configuration, snapshot, day, normal, [], intervals
     )

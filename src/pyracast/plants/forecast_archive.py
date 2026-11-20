@@ -144,7 +144,7 @@ def _prepare_for_configuration(
                 day,
                 int(resolution),
                 snapshot.collected_at,
-            )
+            ).scenario
             for resolution, payload in payloads.items()
         }
         prepared.append(

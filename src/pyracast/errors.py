@@ -60,6 +60,7 @@ class ErrorCode(models.TextChoices):
     INCIDENT_ENDS_BEFORE_START = "incident_ends_before_start"
     INCIDENT_ENDS_IN_FUTURE = "incident_ends_in_future"
     INCIDENT_CAPACITY_EXCEEDED = "incident_capacity_exceeded"
+    PRODUCTION_IMPLAUSIBLE = "production_implausible"
     INVITATION_UNAVAILABLE = "invitation_unavailable"
     INVITATION_MEMBER_EXISTS = "invitation_member_exists"
     WORKSPACE_ADMIN_NOT_REMOVABLE = "workspace_admin_not_removable"
@@ -158,6 +159,9 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.INCIDENT_ENDS_IN_FUTURE: _("The outage end must not be in the future."),
     ErrorCode.INCIDENT_CAPACITY_EXCEEDED: _(
         "Available capacity must not exceed the configured capacity."
+    ),
+    ErrorCode.PRODUCTION_IMPLAUSIBLE: _(
+        "Some values exceed what the plant can produce. Check the unit, then confirm to save."
     ),
     ErrorCode.INVITATION_UNAVAILABLE: _("The invitation is invalid or expired."),
     ErrorCode.INVITATION_MEMBER_EXISTS: _("This account already belongs to the workspace."),

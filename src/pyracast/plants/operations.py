@@ -1,7 +1,5 @@
-from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime
 from math import isfinite
-from typing import TypedDict
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
@@ -19,7 +17,6 @@ from pyracast.forecasts.actuals import ACTUAL_COMPOSITION_POLICY
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import SnapshotSourceKind
-from pyracast.plants.availability import interval_is_covered, reference_intervals
 from pyracast.plants.events import record_plant_event
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 from pyracast.plants.models import (
@@ -30,34 +27,16 @@ from pyracast.plants.models import (
     CalibrationStatus,
     MeasurementBasis,
     MountingType,
-    ObservationQuality,
     Plant,
     PlantConfiguration,
     PlantEventAction,
     PlantSubmission,
     ProductionObservation,
 )
-from pyracast.plants.numerics import POLICY_VERSION, PowerInterval
-from pyracast.plants.preparation import request_preparation
+from pyracast.plants.numerics import POLICY_VERSION
 from pyracast.plants.transfer import calibration_matches_transfer
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus
-
-
-@dataclass(frozen=True)
-class ObservationInput:
-    starts_at: datetime
-    ends_at: datetime
-    energy: float
-    quality: str = ObservationQuality.VALID
-    source: str = "operator"
-
-
-class ObservationImportResult(TypedDict):
-    created: int
-    existing: int
-    count: int
-    ids: list[int]
 
 
 def configuration_is_current(configuration: PlantConfiguration) -> bool:
@@ -347,108 +326,6 @@ def activate_submitted_plants(actor: User, region: Region, binding: SiteBinding)
                 **{name: getattr(parameters, name) for name in CONFIGURATION_PARAMETERS},
             },
         )
-
-
-def _observation(
-    observation: ObservationInput, unit: str, zone: ZoneInfo, now: datetime
-) -> tuple[datetime, datetime, float, str, str]:
-    start, end = observation.starts_at, observation.ends_at
-    if start.utcoffset() is None or end.utcoffset() is None:
-        raise ValidationError(gettext("Observation timestamps must be timezone-aware."))
-    start, end = start.astimezone(UTC), end.astimezone(UTC)
-    if end - start not in {timedelta(minutes=30), timedelta(minutes=60)} or end > now:
-        raise ValidationError(gettext("Completed 30 or 60 minute observations are required."))
-    local = start.astimezone(zone)
-    for stamp in (local, end.astimezone(zone)):
-        if stamp.minute not in (0, 30) or stamp.second or stamp.microsecond:
-            raise ValidationError(gettext("Observations must align to local half-hour boundaries."))
-    midnight = datetime.combine(local.date() + timedelta(days=1), datetime.min.time(), zone)
-    if end > midnight.astimezone(UTC):
-        raise ValidationError(gettext("Observations must not cross local midnight."))
-    value = observation.energy
-    if isinstance(value, bool) or not isfinite(value) or value < 0:
-        raise ValidationError(gettext("Observed energy must be finite and nonnegative."))
-    if observation.quality not in ObservationQuality.values:
-        raise ValidationError(gettext("Unsupported observation quality."))
-    source = observation.source.strip()
-    if not source or len(source) > 200:
-        raise ValidationError(
-            gettext("An observation source of at most 200 characters is required.")
-        )
-    return start, end, value / 1000 if unit == "kWh" else value, observation.quality, source
-
-
-def import_observations(
-    actor: User,
-    tenant_id: int,
-    region_id: int,
-    plant_id: int,
-    *,
-    configuration_id: int,
-    unit: str,
-    observations: list[ObservationInput],
-) -> ObservationImportResult:
-    if unit not in {"MWh", "kWh"} or not 1 <= len(observations) <= 2000:
-        raise ValidationError(gettext("Use MWh or kWh and a batch of 1 to 2000 observations."))
-    with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
-        region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
-        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
-        configuration = PlantConfiguration.objects.select_related("binding").get(
-            pk=configuration_id, plant=plant
-        )
-        now, zone = timezone.now(), ZoneInfo(configuration.binding.timezone)
-        created = 0
-        ids: list[int] = []
-        references: dict[date, tuple[PowerInterval, ...]] = {}
-        for item in observations:
-            start, end, value, quality, source = _observation(item, unit, zone, now)
-            overlap = ProductionObservation.objects.filter(
-                plant=plant, starts_at__lt=end, ends_at__gt=start, is_current=True
-            ).first()
-            if overlap is not None:
-                if (
-                    overlap.starts_at != start
-                    or overlap.ends_at != end
-                    or overlap.configuration_id != configuration.pk
-                    or overlap.energy_mwh != value
-                    or overlap.quality != quality
-                    or overlap.source != source
-                    or overlap.is_reverted
-                ):
-                    raise ValidationError(gettext("Conflicting or overlapping observation."))
-                ids.append(overlap.pk)
-                continue
-            if not configuration_is_current(configuration):
-                raise ValidationError(
-                    gettext("Production entry requires the current approved configuration.")
-                )
-            day = start.astimezone(zone).date()
-            if day not in references:
-                references[day] = reference_intervals(configuration, day, now)
-            if not interval_is_covered(references[day], start, end):
-                raise DomainError(ErrorCode.ESTIMATED_ACTUALS_UNAVAILABLE)
-            saved = ProductionObservation.objects.create(
-                plant=plant,
-                configuration=configuration,
-                starts_at=start,
-                ends_at=end,
-                energy_mwh=value,
-                quality=quality,
-                source=source,
-                recorded_by=actor,
-            )
-            ids.append(saved.pk)
-            created += 1
-        if created:
-            record_plant_event(
-                plant_id=plant.pk,
-                actor=actor,
-                action=PlantEventAction.OBSERVATIONS_IMPORTED,
-                details={"configuration_id": configuration.pk, "created": created, "ids": ids},
-            )
-            request_preparation([plant.pk])
-        return {"created": created, "existing": len(ids) - created, "count": len(ids), "ids": ids}
 
 
 def request_calibration(

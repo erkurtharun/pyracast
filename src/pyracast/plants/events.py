@@ -2,7 +2,15 @@ from collections.abc import Mapping
 
 from django.contrib.auth.models import User
 
-from pyracast.event_details import INTEGER, INTEGERS, OPTIONAL_INTEGER, TEXT, DetailShape, shaped
+from pyracast.event_details import (
+    INTEGER,
+    INTEGERS,
+    OPTIONAL_INTEGER,
+    OPTIONAL_TEXT,
+    TEXT,
+    DetailShape,
+    shaped,
+)
 from pyracast.plants.models import PlantEvent, PlantEventAction
 
 EPIAS_CONNECTION: DetailShape = {"provider_plant_id": INTEGER, "eic": TEXT, "revision": INTEGER}
@@ -23,7 +31,14 @@ PLANT_EVENT_DETAILS: Mapping[str, DetailShape] = {
         "created": INTEGER,
         "ids": INTEGERS,
     },
-    PlantEventAction.PRODUCTION_CHANGED: {"configuration_id": INTEGER, "ids": INTEGERS},
+    PlantEventAction.PRODUCTION_CHANGED: {
+        "origin": TEXT,
+        "configuration_id": INTEGER,
+        "created_ids": INTEGERS,
+        "unchanged": INTEGER,
+        "file_name": OPTIONAL_TEXT,
+        "file_sha256": OPTIONAL_TEXT,
+    },
     PlantEventAction.EPIAS_CONNECTED: EPIAS_CONNECTION,
     PlantEventAction.EPIAS_DISCONNECTED: EPIAS_CONNECTION,
     PlantEventAction.CALIBRATION_REQUESTED: {"calibration_id": INTEGER},

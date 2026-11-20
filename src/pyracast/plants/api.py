@@ -19,6 +19,8 @@ from pyracast.plants.models import (
 from pyracast.plants.performance import forecast_performance
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
+    AuditContext,
+    ObservationInput,
     ProductionChange,
     change_production,
     preview_production,
@@ -39,7 +41,7 @@ from pyracast.plants.serializers import (
     PlantForecastOutput,
     PlantInput,
     PlantOutput,
-    ProductionChangesInput,
+    ProductionCommitInput,
     ProductionHistoryOutput,
     ProductionPreviewOutput,
     ProductionQuery,
@@ -116,16 +118,15 @@ class ProductionView(ScopedView[Plant]):
         plant = self.plant()
         data = ProductionQuery(data=request.query_params)
         data.is_valid(raise_exception=True)
-        return Response(
-            production_history(plant, actor=cast(User, request.user), **data.validated_data)
-        )
+        result = production_history(plant, actor=cast(User, request.user), **data.validated_data)
+        return Response(ProductionHistoryOutput(result).data)
 
 
 class ProductionChangesView(ScopedView[Plant]):
-    @extend_schema(request=ProductionChangesInput, responses=ObservationImportOutput)
+    @extend_schema(request=ProductionCommitInput, responses=ObservationImportOutput)
     def post(self, request: Request, **_kwargs: Any) -> Response:
         scope = self.scope()
-        data = ProductionChangesInput(data=request.data)
+        data = ProductionCommitInput(data=request.data)
         data.is_valid(raise_exception=True)
         values = data.validated_data
         result = change_production(
@@ -133,6 +134,12 @@ class ProductionChangesView(ScopedView[Plant]):
             configuration_id=values["configuration_id"],
             unit=values["unit"],
             changes=[ProductionChange(**row) for row in values["changes"]],
+            audit=AuditContext(
+                values.get("origin", "editor"),
+                values.get("file_name", ""),
+                values.get("file_sha256", ""),
+            ),
+            confirm_implausible=values["confirm_implausible"],
         )
         return Response(result)
 
@@ -148,7 +155,7 @@ class ProductionPreviewView(ScopedView[Plant]):
             *scope,
             configuration_id=values["configuration_id"],
             unit=values["unit"],
-            observations=[operations.ObservationInput(**row) for row in values["observations"]],
+            observations=[ObservationInput(**row) for row in values["observations"]],
         )
         return Response(result)
 

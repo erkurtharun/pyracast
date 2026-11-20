@@ -20,6 +20,7 @@ from pyracast.notifications.operations import configure_reminders
 from pyracast.plants import operations
 from pyracast.plants.automation import set_calibration_automation
 from pyracast.plants.models import Plant, PlantEvent
+from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.sites import submit_site
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
 from pyracast.regions.operations import request_location_change, submit_region
@@ -101,14 +102,14 @@ def mutation_calls(system: System, actor: User, plant: Plant) -> list[Callable[[
         lambda: operations.revise_plant(
             actor, tenant_id, region_id, plant_id, name="Changed", dc_capacity_mw=2
         ),
-        lambda: operations.import_observations(
+        lambda: import_observations(
             actor,
             tenant_id,
             region_id,
             plant_id,
             configuration_id=1,
             unit="MWh",
-            observations=[operations.ObservationInput(NOW - timedelta(hours=1), NOW, 1)],
+            observations=[ObservationInput(NOW - timedelta(hours=1), NOW, 1)],
         ),
         lambda: operations.request_calibration(
             actor,

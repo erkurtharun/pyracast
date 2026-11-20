@@ -25,14 +25,16 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.operations import (
-    ObservationImportResult,
-    ObservationInput,
     activate_calibration,
     create_plant,
-    import_observations,
     request_calibration,
     reset_calibration,
     revise_plant,
+)
+from pyracast.plants.production_changes import (
+    ObservationImportResult,
+    ObservationInput,
+    import_observations,
 )
 from pyracast.regions.models import AuditEvent, Region
 from tests.support.domain import NOW, System, make_system

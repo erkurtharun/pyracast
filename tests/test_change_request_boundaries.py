@@ -21,8 +21,9 @@ from pyracast.change_requests.operations import (
 )
 from pyracast.change_requests.queries import inbox, request_detail
 from pyracast.errors import ConflictError
+from pyracast.incidents.evidence import select_incidents
 from pyracast.incidents.models import IncidentRevision, PlantIncident
-from pyracast.incidents.operations import save_incident, select_incidents
+from pyracast.incidents.operations import save_incident
 from pyracast.plants.measurements import select_measurements
 from pyracast.plants.models import CalibrationRun, PlantEvent, ProductionObservation
 from tests.support.change_request_boundaries import (

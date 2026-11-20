@@ -78,11 +78,11 @@ def test_reference_fallback_keeps_current_known_outage_visible(
     )
     assert cast(dict[str, Any], outlook["result"])["complete"] is True
     scenario = cast(dict[str, Any], outlook["outage_scenario"])
-    assert scenario["status"] == "unknown_impact"
+    assert scenario["status"] == "estimated"
     assert scenario["incidents"][0]["id"] == incident.pk
     assert scenario["evaluated_at"] == timezone.now().isoformat()
-    assert "outage_configuration_changed" in scenario["result"]["quality_flags"]
-    assert scenario["result"]["intervals"][12]["mean_power_mw"] is None
+    assert "outage_configuration_changed" not in scenario["result"]["quality_flags"]
+    assert scenario["result"]["intervals"][12]["mean_power_mw"] == pytest.approx(6.5)
 
 
 def test_past_automatic_labels_saved_forecast_when_solcast_actuals_are_missing(

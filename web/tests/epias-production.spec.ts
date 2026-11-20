@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "./support/test";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import AxeBuilder from "@axe-core/playwright";
@@ -30,6 +31,8 @@ async function productionApi(page: Page, viewer = false) {
         heads,
         writes,
         conflict: false,
+        implausible: false,
+        earlier: new Map<number, Record<string, unknown>[]>(),
         connected: true,
         total: undefined as number | null | undefined,
     };
@@ -81,21 +84,22 @@ async function productionApi(page: Page, viewer = false) {
                             source_kind: "settlement_injection",
                             provisional: false,
                         },
-                provider_original:
+                provider_originals:
                     energy === null
-                        ? null
-                        : {
-                              starts_at,
-                              ends_at,
-                              energy_mwh: energy,
-                              source_kind: "settlement_injection",
-                              snapshot_id: 1,
-                              collected_at: "2026-11-10T00:00:00Z",
-                              provisional: false,
-                          },
-                reference_available: true,
-                can_enter: !observation,
-                unavailable_reason: null,
+                        ? []
+                        : [
+                              {
+                                  starts_at,
+                                  ends_at,
+                                  energy_mwh: energy,
+                                  source_kind: "settlement_injection",
+                                  snapshot_id: 1,
+                                  collected_at: "2026-11-10T00:00:00Z",
+                                  provisional: false,
+                              },
+                          ],
+                previous_configuration_observations:
+                    state.earlier.get(hour) ?? [],
                 can_edit: true,
                 can_revert: Boolean(observation),
                 edit_unavailable_reason: null,
@@ -133,13 +137,22 @@ async function productionApi(page: Page, viewer = false) {
                     },
                 ],
                 intervals,
-                observations: [],
             },
         });
     });
     await page.route("**/production/changes/", async (route) => {
         const body = route.request().postDataJSON();
         writes.push(body);
+        if (state.implausible && body.confirm_implausible !== true) {
+            await route.fulfill({
+                status: 400,
+                json: errorBody(
+                    "production_implausible",
+                    "Production exceeds what the plant can produce.",
+                ),
+            });
+            return;
+        }
         if (state.conflict) {
             state.conflict = false;
             heads.set(8, 99);
@@ -208,7 +221,6 @@ function oneInterval(energy: number) {
         end_date: "2026-11-09",
         native_intervals: true,
         days: [{ date: "2026-11-09", total_mwh: null }],
-        observations: [],
         intervals: [
             {
                 starts_at: "2026-11-09T08:00:00+03:00",
@@ -223,6 +235,7 @@ function oneInterval(energy: number) {
                     aggregated: false,
                 },
                 provider_originals: [],
+                previous_configuration_observations: [],
                 can_edit: true,
                 can_revert: false,
             },
@@ -446,6 +459,70 @@ test("conflicting edits preserve attempted energy and require current values to 
     });
 });
 
+test("an implausible value is saved only after the administrator confirms it", async ({
+    page,
+}) => {
+    const state = await productionApi(page);
+    state.implausible = true;
+    await openProduction(page);
+    await page
+        .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
+        .click();
+    await page.getByLabel("Production for 08:00–09:00 (MWh)").fill("2500");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(
+        page
+            .getByRole("alert")
+            .filter({ hasText: "Production exceeds what the plant" }),
+    ).toBeVisible();
+    expect(state.writes[0]).toMatchObject({
+        confirm_implausible: false,
+        changes: [{ energy: 2500 }],
+    });
+    await page
+        .getByRole("button", { name: "Save anyway", exact: true })
+        .click();
+    await expect(
+        page.getByText("Production saved.", { exact: true }),
+    ).toBeVisible();
+    expect(state.writes[1]).toMatchObject({
+        confirm_implausible: true,
+        changes: [{ energy: 2500 }],
+    });
+    await expect(row(page, "08:00–09:00")).toContainText("2,500");
+});
+
+test("corrections recorded under an earlier configuration stay beside the intervals they overlap", async ({
+    page,
+}) => {
+    const state = await productionApi(page, true);
+    const earlier = (
+        id: number,
+        start: string,
+        end: string,
+        energy: number,
+    ) => ({
+        id,
+        configuration_id: 30,
+        configuration_revision: 1,
+        starts_at: `2026-11-09T${start}:00+03:00`,
+        ends_at: `2026-11-09T${end}:00+03:00`,
+        energy_mwh: energy,
+        quality: "valid",
+        source: "meter",
+    });
+    state.earlier.set(8, [earlier(5, "08:00", "08:30", 0.25)]);
+    state.earlier.set(9, [earlier(6, "09:00", "10:00", 0.5)]);
+    await openProduction(page);
+    await expect(row(page, "08:00–09:00")).toContainText(
+        "Recorded under configuration r1, 08:00–08:30: 0.25 MWh",
+    );
+    await expect(row(page, "09:00–10:00")).toContainText(
+        "Recorded under configuration r1: 0.5 MWh",
+    );
+    await expect(row(page, "10:00–11:00")).not.toContainText("Recorded under");
+});
+
 test("manual-only days distinguish absent production from a measured all-zero day", async ({
     page,
 }) => {
@@ -492,7 +569,6 @@ test("reloading a conflict preserves the draft when the native interval disappea
                 end_date: "2026-11-09",
                 native_intervals: true,
                 days: [{ date: "2026-11-09", total_mwh: null }],
-                observations: [],
                 intervals: [
                     {
                         starts_at: "2026-11-09T09:00:00+03:00",
@@ -506,6 +582,7 @@ test("reloading a conflict preserves the draft when the native interval disappea
                             source_kind: "settlement_injection",
                         },
                         provider_originals: [],
+                        previous_configuration_observations: [],
                         can_edit: true,
                         can_revert: false,
                     },
@@ -911,6 +988,82 @@ test("CSV preview reviews effective values and unit changes require a new previe
     expect(state.saved.get(8)?.energy).toBe(250);
 });
 
+test("a CSV import above plant capacity needs an acknowledgement and records its file identity", async ({
+    page,
+}) => {
+    const state = await productionApi(page);
+    const csv = Buffer.from(
+        "starts_at,ends_at,energy,quality,source\n2026-11-09T08:00:00+03:00,2026-11-09T09:00:00+03:00,250,valid,meter",
+    );
+    await page.route("**/production/preview/", (route) => {
+        const body = route.request().postDataJSON();
+        return route.fulfill({
+            json: {
+                changes: body.observations.map(
+                    (item: Record<string, unknown>) => ({
+                        ...item,
+                        action: "set",
+                        expected_revision_id: null,
+                    }),
+                ),
+                preview: [
+                    {
+                        starts_at: "2026-11-09T08:00:00+03:00",
+                        ends_at: "2026-11-09T09:00:00+03:00",
+                        current_energy_mwh: 1,
+                        new_energy_mwh: 250,
+                        corrected: false,
+                    },
+                ],
+                warnings: [
+                    {
+                        code: "energy_exceeds_capacity",
+                        starts_at: "2026-11-09T08:00:00+03:00",
+                        ends_at: "2026-11-09T09:00:00+03:00",
+                    },
+                ],
+            },
+        });
+    });
+    await openProduction(page);
+    await page.getByRole("button", { name: "Import CSV", exact: true }).click();
+    await page.getByLabel("Production CSV").setInputFiles({
+        name: "production.csv",
+        mimeType: "text/csv",
+        buffer: csv,
+    });
+    await page
+        .getByRole("combobox", { name: "Energy unit", exact: true })
+        .selectOption("MWh");
+    await page
+        .getByRole("button", { name: "Preview import", exact: true })
+        .click();
+    await expect(
+        page.getByText(/exceeds what the plant can produce/),
+    ).toBeVisible();
+    const acknowledgement = page.getByRole("checkbox", {
+        name: "I checked these values and want to save them.",
+    });
+    await page.getByRole("button", { name: "Confirm import (1)" }).click();
+    await expect(acknowledgement).toBeFocused();
+    expect(state.writes).toHaveLength(0);
+    await acknowledgement.check();
+    await page.getByRole("button", { name: "Confirm import (1)" }).click();
+    await expect(
+        page.getByText(
+            "Import complete: 1 created, 0 already present, 1 total.",
+        ),
+    ).toBeVisible();
+    expect(state.writes[0]).toMatchObject({
+        unit: "MWh",
+        origin: "csv_import",
+        file_name: "production.csv",
+        file_sha256: createHash("sha256").update(csv).digest("hex"),
+        confirm_implausible: true,
+        changes: [{ energy: 250 }],
+    });
+});
+
 test("native timeline preserves half-hour and offset-hour corrections with their provider bounds", async ({
     page,
 }) => {
@@ -965,6 +1118,7 @@ test("native timeline preserves half-hour and offset-hour corrections with their
             },
             effective: value(energy),
             provider_originals,
+            previous_configuration_observations: [],
             can_edit: true,
             can_revert: true,
         });
@@ -975,6 +1129,7 @@ test("native timeline preserves half-hour and offset-hour corrections with their
             observation: null,
             effective: null,
             provider_originals: [],
+            previous_configuration_observations: [],
             can_edit: true,
             can_revert: false,
         });
@@ -993,6 +1148,7 @@ test("native timeline preserves half-hour and offset-hour corrections with their
                         observation: null,
                         effective: value(1, "settlement_injection"),
                         provider_originals: [provider("07:00", "08:00", 1, 1)],
+                        previous_configuration_observations: [],
                         can_edit: true,
                         can_revert: false,
                     },
@@ -1006,7 +1162,6 @@ test("native timeline preserves half-hour and offset-hour corrections with their
                         provider("10:00", "11:00", 4, 4),
                     ]),
                 ],
-                observations: [],
             },
         });
     });
@@ -1185,7 +1340,6 @@ test("Turkish production at 320px keeps native corrections, decimal commas and i
                 end_date: "2026-11-09",
                 native_intervals: true,
                 days: [{ date: "2026-11-09", total_mwh: null }],
-                observations: [],
                 intervals: [
                     {
                         starts_at: "2026-11-09T13:30:00+03:00",
@@ -1206,6 +1360,7 @@ test("Turkish production at 320px keeps native corrections, decimal commas and i
                         },
                         can_edit: true,
                         can_revert: true,
+                        previous_configuration_observations: [],
                         provider_originals: [
                             {
                                 starts_at: "2026-11-09T13:00:00+03:00",

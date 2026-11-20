@@ -131,8 +131,8 @@ def test_production_loads_provider_once_and_preserves_original_under_manual_over
         result = production_history(plant, start_date=DAY, end_date=DAY)
     first = result["intervals"][0]
     assert first["effective"]["energy_mwh"] == 7
-    assert first["provider_original"]["energy_mwh"] == 26
-    assert first["provider_original"]["snapshot_id"] == source.pk
+    assert first["provider_originals"][0]["energy_mwh"] == 26
+    assert first["provider_originals"][0]["snapshot_id"] == source.pk
     assert first["observation"]["id"] == observation.pk
     provider_queries = [
         query["sql"]
@@ -167,9 +167,9 @@ def test_production_freezes_effective_and_original_provider_values_for_one_read(
         result = production_history(plant, start_date=DAY, end_date=DAY)
     assert published
     assert all(row["effective"]["energy_mwh"] == 26 for row in result["intervals"])
-    assert all(row["provider_original"]["energy_mwh"] == 26 for row in result["intervals"])
+    assert all(row["provider_originals"][0]["energy_mwh"] == 26 for row in result["intervals"])
     assert all(
-        row["provider_original"]["snapshot_id"] == original.pk for row in result["intervals"]
+        row["provider_originals"][0]["snapshot_id"] == original.pk for row in result["intervals"]
     )
 
 

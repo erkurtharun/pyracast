@@ -12,9 +12,10 @@ from pyracast.plants.calibration_data import build_calibration_dataset, current_
 from pyracast.plants.measurements import select_measurements, selection_fingerprint
 from pyracast.plants.models import CalibrationRun, Plant
 from pyracast.plants.numerics import POLICY_VERSION
-from pyracast.plants.operations import ObservationInput, activate_calibration, import_observations
+from pyracast.plants.operations import activate_calibration
 from pyracast.plants.performance import forecast_performance
 from pyracast.plants.preparation import prepare_calibration
+from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.training import run_calibration
 from tests.support.domain import NOW, System
 from tests.support.invariants import stored_again

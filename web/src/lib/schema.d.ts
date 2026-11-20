@@ -932,6 +932,12 @@ export interface components {
             incident_title: string | null;
         };
         /**
+         * @description * `provider_hour_incomplete` - provider_hour_incomplete
+         *     * `energy_exceeds_capacity` - energy_exceeds_capacity
+         * @enum {string}
+         */
+        CodeEnum: "provider_hour_incomplete" | "energy_exceeds_capacity";
+        /**
          * @description * `forecasts` - Forecasts
          *     * `estimated_actuals` - Estimated actuals
          *     * `historical_import` - Historical import
@@ -1078,6 +1084,24 @@ export interface components {
             | "calibration"
             | "retention"
             | "metering";
+        EarlierConfigurationObservationOutput: {
+            readonly id: number;
+            configuration_id: number;
+            /** Format: date-time */
+            readonly starts_at: string;
+            /** Format: date-time */
+            readonly ends_at: string;
+            /** Format: double */
+            readonly energy_mwh: number;
+            readonly quality: components["schemas"]["ObservationQualityEnum"];
+            readonly source: string;
+            recorded_by_id: number;
+            /** Format: date-time */
+            readonly created_at: string;
+            supersedes_id: number | null;
+            readonly is_reverted: boolean;
+            configuration_revision: number;
+        };
         EpiasConnectionOutput: {
             connected: boolean;
             provider_plant_id: number | null;
@@ -1196,6 +1220,7 @@ export interface components {
          *     * `incident_ends_before_start` - Incident Ends Before Start
          *     * `incident_ends_in_future` - Incident Ends In Future
          *     * `incident_capacity_exceeded` - Incident Capacity Exceeded
+         *     * `production_implausible` - Production Implausible
          *     * `invitation_unavailable` - Invitation Unavailable
          *     * `invitation_member_exists` - Invitation Member Exists
          *     * `workspace_admin_not_removable` - Workspace Admin Not Removable
@@ -1271,6 +1296,7 @@ export interface components {
             | "incident_ends_before_start"
             | "incident_ends_in_future"
             | "incident_capacity_exceeded"
+            | "production_implausible"
             | "invitation_unavailable"
             | "invitation_member_exists"
             | "workspace_admin_not_removable"
@@ -1639,6 +1665,12 @@ export interface components {
             quality: components["schemas"]["ObservationQualityEnum"];
             source: string;
         };
+        /**
+         * @description * `editor` - editor
+         *     * `csv_import` - csv_import
+         * @enum {string}
+         */
+        OriginEnum: "editor" | "csv_import";
         PaginatedCalibrationSummaryOutputList: {
             /** @example 123 */
             count: number;
@@ -1994,10 +2026,15 @@ export interface components {
             /** @default operator */
             source: string;
         };
-        ProductionChangesInput: {
+        ProductionCommitInput: {
             configuration_id: number;
             unit: components["schemas"]["UnitEnum"];
             changes: components["schemas"]["ProductionChangeRow"][];
+            origin?: components["schemas"]["OriginEnum"];
+            file_name?: string;
+            file_sha256?: string;
+            /** @default false */
+            confirm_implausible: boolean;
         };
         ProductionDayOutput: {
             /** Format: date */
@@ -2033,22 +2070,16 @@ export interface components {
             daylight_policy: string;
             days: components["schemas"]["ProductionDayOutput"][];
             intervals: components["schemas"]["ProductionIntervalOutput"][];
-            observations: components["schemas"]["ObservationOutput"][];
-            revisions: components["schemas"]["ObservationOutput"][];
         };
         ProductionIntervalOutput: {
             /** Format: date-time */
             starts_at: string;
             /** Format: date-time */
             ends_at: string;
-            reference_available: boolean;
             observation: components["schemas"]["ObservationOutput"] | null;
-            can_enter: boolean;
-            unavailable_reason: string | null;
+            previous_configuration_observations: components["schemas"]["EarlierConfigurationObservationOutput"][];
             revision_id: number | null;
             effective: components["schemas"]["ProductionValueOutput"] | null;
-            provider_original:
-                components["schemas"]["ProductionProviderOutput"] | null;
             provider_originals: components["schemas"]["ProductionProviderOutput"][];
             can_edit: boolean;
             can_revert: boolean;
@@ -2098,7 +2129,7 @@ export interface components {
             corrected: boolean;
         };
         ProductionPreviewWarningOutput: {
-            code: string;
+            code: components["schemas"]["CodeEnum"];
             /** Format: date-time */
             starts_at: string;
             /** Format: date-time */
@@ -5399,7 +5430,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProductionChangesInput"];
+                "application/json": components["schemas"]["ProductionCommitInput"];
             };
         };
         responses: {

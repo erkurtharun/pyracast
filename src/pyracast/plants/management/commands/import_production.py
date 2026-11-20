@@ -8,7 +8,7 @@ from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, Validat
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from pyracast.plants.models import Plant
-from pyracast.plants.operations import ObservationInput, import_observations
+from pyracast.plants.production_changes import ObservationInput, import_observations
 
 
 class Command(BaseCommand):

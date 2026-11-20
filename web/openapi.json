@@ -4287,7 +4287,7 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "$ref": "#/components/schemas/ProductionChangesInput"
+                                "$ref": "#/components/schemas/ProductionCommitInput"
                             }
                         }
                     },
@@ -5724,6 +5724,11 @@
                     "unread"
                 ]
             },
+            "CodeEnum": {
+                "enum": ["provider_hour_incomplete", "energy_exceeds_capacity"],
+                "type": "string",
+                "description": "* `provider_hour_incomplete` - provider_hour_incomplete\n* `energy_exceeds_capacity` - energy_exceeds_capacity"
+            },
             "CollectionEndpointEnum": {
                 "enum": [
                     "forecasts",
@@ -6027,6 +6032,78 @@
                 "type": "string",
                 "description": "* `collection` - Collection\n* `notifications` - Notifications\n* `calibration` - Calibration\n* `retention` - Retention\n* `metering` - Metering"
             },
+            "EarlierConfigurationObservationOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "configuration_id": {
+                        "type": "integer"
+                    },
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "energy_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true
+                    },
+                    "quality": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ObservationQualityEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "source": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "recorded_by_id": {
+                        "type": "integer"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "supersedes_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "is_reverted": {
+                        "type": "boolean",
+                        "readOnly": true
+                    },
+                    "configuration_revision": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "configuration_id",
+                    "configuration_revision",
+                    "created_at",
+                    "ends_at",
+                    "energy_mwh",
+                    "id",
+                    "is_reverted",
+                    "quality",
+                    "recorded_by_id",
+                    "source",
+                    "starts_at",
+                    "supersedes_id"
+                ]
+            },
             "EpiasConnectionOutput": {
                 "type": "object",
                 "properties": {
@@ -6202,6 +6279,7 @@
                     "incident_ends_before_start",
                     "incident_ends_in_future",
                     "incident_capacity_exceeded",
+                    "production_implausible",
                     "invitation_unavailable",
                     "invitation_member_exists",
                     "workspace_admin_not_removable",
@@ -6227,7 +6305,7 @@
                     "provider_account_unavailable"
                 ],
                 "type": "string",
-                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `request_too_large` - Request Too Large\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed\n* `reminder_time_required` - Reminder Time Required\n* `duplicate_reminder_times` - Duplicate Reminder Times\n* `too_many_reminder_times` - Too Many Reminder Times\n* `recipient_required` - Recipient Required\n* `duplicate_recipients` - Duplicate Recipients\n* `recipient_limit_exceeded` - Recipient Limit Exceeded\n* `plant_not_approved` - Plant Not Approved\n* `provider_account_unavailable` - Provider Account Unavailable"
+                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `request_too_large` - Request Too Large\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `production_implausible` - Production Implausible\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed\n* `reminder_time_required` - Reminder Time Required\n* `duplicate_reminder_times` - Duplicate Reminder Times\n* `too_many_reminder_times` - Too Many Reminder Times\n* `recipient_required` - Recipient Required\n* `duplicate_recipients` - Duplicate Recipients\n* `recipient_limit_exceeded` - Recipient Limit Exceeded\n* `plant_not_approved` - Plant Not Approved\n* `provider_account_unavailable` - Provider Account Unavailable"
             },
             "ForecastOutput": {
                 "type": "object",
@@ -7007,6 +7085,11 @@
                     }
                 },
                 "required": ["ends_at", "energy", "source", "starts_at"]
+            },
+            "OriginEnum": {
+                "enum": ["editor", "csv_import"],
+                "type": "string",
+                "description": "* `editor` - editor\n* `csv_import` - csv_import"
             },
             "PaginatedCalibrationSummaryOutputList": {
                 "type": "object",
@@ -7881,7 +7964,7 @@
                     "starts_at"
                 ]
             },
-            "ProductionChangesInput": {
+            "ProductionCommitInput": {
                 "type": "object",
                 "properties": {
                     "configuration_id": {
@@ -7896,6 +7979,21 @@
                         "items": {
                             "$ref": "#/components/schemas/ProductionChangeRow"
                         }
+                    },
+                    "origin": {
+                        "$ref": "#/components/schemas/OriginEnum"
+                    },
+                    "file_name": {
+                        "type": "string",
+                        "maxLength": 255
+                    },
+                    "file_sha256": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "confirm_implausible": {
+                        "type": "boolean",
+                        "default": false
                     }
                 },
                 "required": ["changes", "configuration_id", "unit"]
@@ -8011,18 +8109,6 @@
                         "items": {
                             "$ref": "#/components/schemas/ProductionIntervalOutput"
                         }
-                    },
-                    "observations": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/ObservationOutput"
-                        }
-                    },
-                    "revisions": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/ObservationOutput"
-                        }
                     }
                 },
                 "required": [
@@ -8034,10 +8120,8 @@
                     "end_date",
                     "intervals",
                     "native_intervals",
-                    "observations",
                     "plant_id",
                     "resolution_minutes",
-                    "revisions",
                     "slot_scope",
                     "start_date",
                     "timezone"
@@ -8054,9 +8138,6 @@
                         "type": "string",
                         "format": "date-time"
                     },
-                    "reference_available": {
-                        "type": "boolean"
-                    },
                     "observation": {
                         "allOf": [
                             {
@@ -8065,12 +8146,11 @@
                         ],
                         "nullable": true
                     },
-                    "can_enter": {
-                        "type": "boolean"
-                    },
-                    "unavailable_reason": {
-                        "type": "string",
-                        "nullable": true
+                    "previous_configuration_observations": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/EarlierConfigurationObservationOutput"
+                        }
                     },
                     "revision_id": {
                         "type": "integer",
@@ -8080,14 +8160,6 @@
                         "allOf": [
                             {
                                 "$ref": "#/components/schemas/ProductionValueOutput"
-                            }
-                        ],
-                        "nullable": true
-                    },
-                    "provider_original": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/ProductionProviderOutput"
                             }
                         ],
                         "nullable": true
@@ -8121,7 +8193,6 @@
                 },
                 "required": [
                     "can_edit",
-                    "can_enter",
                     "can_propose",
                     "can_propose_revert",
                     "can_revert",
@@ -8129,13 +8200,11 @@
                     "effective",
                     "ends_at",
                     "observation",
+                    "previous_configuration_observations",
                     "proposal_unavailable_reason",
-                    "provider_original",
                     "provider_originals",
-                    "reference_available",
                     "revision_id",
-                    "starts_at",
-                    "unavailable_reason"
+                    "starts_at"
                 ]
             },
             "ProductionItemOutput": {
@@ -8305,7 +8374,7 @@
                 "type": "object",
                 "properties": {
                     "code": {
-                        "type": "string"
+                        "$ref": "#/components/schemas/CodeEnum"
                     },
                     "starts_at": {
                         "type": "string",

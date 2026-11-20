@@ -90,6 +90,7 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     incident_revision_changed: true,
     idempotency_key_reused: true,
     pending_request_limit: true,
+    production_implausible: true,
     production_revision_changed: true,
     request_already_closed: true,
     request_conflict: true,

@@ -25,7 +25,7 @@ from pyracast.plants.models import (
     PlantEvent,
     ProductionObservation,
 )
-from pyracast.plants.operations import ObservationInput, import_observations
+from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.runtime import dispatch_calibrations, make_calibration_actor
 from tests.support.calibration_preparation import add_days
 from tests.support.concurrency import behind_open_transaction

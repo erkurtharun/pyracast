@@ -5,10 +5,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import (
     Plant,
 )
-from pyracast.plants.operations import (
-    ObservationInput,
-    import_observations,
-)
+from pyracast.plants.production_changes import ObservationInput, import_observations
 from tests.support.domain import System
 from tests.support.plant_operations import snapshot_for
 

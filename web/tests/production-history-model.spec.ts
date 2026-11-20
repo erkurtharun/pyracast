@@ -1,10 +1,12 @@
 import { expect, test } from "@playwright/test";
+import { ApiError } from "../src/lib/api/errors";
 import {
     intervalKey,
     mostFrequentReason,
     productionCsvRecords,
-    providerOriginals,
     reconcileEditor,
+    sameInterval,
+    saveFailure,
     shiftDay,
     type Editor,
     type History,
@@ -29,13 +31,10 @@ function row(hour: number, fields: Partial<Interval> = {}): Interval {
     return {
         starts_at,
         ends_at,
-        reference_available: true,
         observation: null,
-        can_enter: true,
-        unavailable_reason: null,
+        previous_configuration_observations: [],
         revision_id: hour,
         effective: null,
-        provider_original: null,
         provider_originals: [],
         can_edit: true,
         can_revert: false,
@@ -111,18 +110,43 @@ test("the most frequent unavailable reason names one of its rows", () => {
     expect(mostFrequentReason([row(1)])).toBeUndefined();
 });
 
-test("provider originals prefer the native list over the single original", () => {
-    const single = provider("a", "b", 1);
-    const native = [provider("a", "c", 2)];
-    expect(providerOriginals(row(1))).toEqual([]);
-    expect(providerOriginals(row(1, { provider_original: single }))).toEqual([
-        single,
-    ]);
+test("intervals match by instant, not by their offset spelling", () => {
+    const eight = row(8);
     expect(
-        providerOriginals(
-            row(1, { provider_original: single, provider_originals: native }),
+        sameInterval(eight, {
+            starts_at: "2026-11-09T11:00:00+03:00",
+            ends_at: "2026-11-09T12:00:00+03:00",
+        }),
+    ).toBe(true);
+    expect(
+        sameInterval(eight, {
+            starts_at: "2026-11-09T08:00:00Z",
+            ends_at: "2026-11-09T08:30:00Z",
+        }),
+    ).toBe(false);
+});
+
+test("only an implausible-value refusal offers to save anyway", () => {
+    expect(
+        saveFailure(
+            new ApiError("Above capacity.", {
+                status: 400,
+                code: "production_implausible",
+            }),
         ),
-    ).toBe(native);
+    ).toEqual({ error: "Above capacity.", implausible: true });
+    expect(
+        saveFailure(
+            new ApiError("Changed.", {
+                status: 409,
+                code: "production_revision_changed",
+            }),
+        ),
+    ).toEqual({ error: "Changed.", implausible: false });
+    expect(saveFailure(new Error("Offline."))).toEqual({
+        error: "Offline.",
+        implausible: false,
+    });
 });
 
 test("CSV records carry the effective value and every provider original", () => {

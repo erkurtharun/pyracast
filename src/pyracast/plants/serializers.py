@@ -18,6 +18,7 @@ from pyracast.plants.models import (
     PlantSubmission,
     ProductionObservation,
 )
+from pyracast.plants.production_changes import PRODUCTION_BATCH_LIMIT
 
 
 class AwareDateTime(serializers.DateTimeField):
@@ -132,7 +133,7 @@ class ObservationImport(InputSerializer):
     configuration_id = serializers.IntegerField(min_value=1)
     unit = serializers.ChoiceField(choices=("MWh", "kWh"))
     observations: Any = serializers.ListSerializer(
-        child=ObservationRow(), allow_empty=False, max_length=2000
+        child=ObservationRow(), allow_empty=False, max_length=PRODUCTION_BATCH_LIMIT
     )
 
 
@@ -164,8 +165,15 @@ class ProductionChangesInput(InputSerializer):
     configuration_id = serializers.IntegerField(min_value=1)
     unit = serializers.ChoiceField(choices=("MWh", "kWh"))
     changes: Any = serializers.ListSerializer(
-        child=ProductionChangeRow(), allow_empty=False, max_length=2000
+        child=ProductionChangeRow(), allow_empty=False, max_length=PRODUCTION_BATCH_LIMIT
     )
+
+
+class ProductionCommitInput(ProductionChangesInput):
+    origin = serializers.ChoiceField(choices=("editor", "csv_import"), required=False)
+    file_name = serializers.CharField(max_length=255, required=False)
+    file_sha256 = serializers.RegexField(r"^[0-9a-f]{64}$", required=False)
+    confirm_implausible = serializers.BooleanField(default=False)
 
 
 class ProductionPreviewRowOutput(serializers.Serializer[dict[str, Any]]):
@@ -177,7 +185,7 @@ class ProductionPreviewRowOutput(serializers.Serializer[dict[str, Any]]):
 
 
 class ProductionPreviewWarningOutput(serializers.Serializer[dict[str, Any]]):
-    code = serializers.CharField()
+    code = serializers.ChoiceField(choices=("provider_hour_incomplete", "energy_exceeds_capacity"))
     starts_at = serializers.DateTimeField()
     ends_at = serializers.DateTimeField()
 
@@ -339,16 +347,22 @@ class ProductionProviderOutput(serializers.Serializer[dict[str, Any]]):
     provisional = serializers.BooleanField()
 
 
+class EarlierConfigurationObservationOutput(ObservationOutput):
+    configuration_revision = serializers.IntegerField()
+
+    class Meta:
+        model = ProductionObservation
+        fields: tuple[str, ...] = (*ObservationOutput.Meta.fields, "configuration_revision")
+        read_only_fields = fields
+
+
 class ProductionIntervalOutput(serializers.Serializer[dict[str, Any]]):
     starts_at = serializers.DateTimeField()
     ends_at = serializers.DateTimeField()
-    reference_available = serializers.BooleanField()
     observation = ObservationOutput(allow_null=True)
-    can_enter = serializers.BooleanField()
-    unavailable_reason = serializers.CharField(allow_null=True)
+    previous_configuration_observations = EarlierConfigurationObservationOutput(many=True)
     revision_id = serializers.IntegerField(allow_null=True)
     effective = ProductionValueOutput(allow_null=True)
-    provider_original = ProductionProviderOutput(allow_null=True)
     provider_originals = ProductionProviderOutput(many=True)
     can_edit = serializers.BooleanField()
     can_revert = serializers.BooleanField()
@@ -372,8 +386,6 @@ class ProductionHistoryOutput(serializers.Serializer[dict[str, Any]]):
     daylight_policy = serializers.CharField()
     days = ProductionDayOutput(many=True)
     intervals = ProductionIntervalOutput(many=True)
-    observations = ObservationOutput(many=True)
-    revisions = ObservationOutput(many=True)
 
 
 class CalibrationOutput(serializers.ModelSerializer[CalibrationRun]):

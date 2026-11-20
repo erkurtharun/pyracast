@@ -13,14 +13,30 @@ type Preview = components["schemas"]["ProductionPreviewOutput"];
 type Selection =
     | { status: "empty" }
     | { status: "invalid"; error: string }
-    | { status: "ready"; fileName: string; observations: Observation[] }
+    | {
+          status: "ready";
+          fileName: string;
+          sha256: string;
+          observations: Observation[];
+      }
     | {
           status: "preview";
           fileName: string;
+          sha256: string;
           observations: Observation[];
           preview: Preview;
       };
 type ImportResult = components["schemas"]["ObservationImportOutput"];
+
+async function fileSha256(file: File) {
+    const digest = await crypto.subtle.digest(
+        "SHA-256",
+        await file.arrayBuffer(),
+    );
+    return Array.from(new Uint8Array(digest), (byte) =>
+        byte.toString(16).padStart(2, "0"),
+    ).join("");
+}
 
 export function ProductionImport({
     scope,
@@ -64,10 +80,12 @@ export function ProductionImport({
         }
         try {
             const observations = parseProduction(await file.text(), locale);
+            const sha256 = await fileSha256(file);
             if (current === sequence.current)
                 setSelection({
                     status: "ready",
                     fileName: file.name,
+                    sha256,
                     observations,
                 });
         } catch (error) {
@@ -103,6 +121,11 @@ export function ProductionImport({
             : [],
     );
     const time = (value: string) => timeFormatter.format(new Date(value));
+    const implausible =
+        selection.status === "preview" &&
+        (selection.preview.warnings ?? []).some(
+            (warning) => warning.code === "energy_exceeds_capacity",
+        );
     return (
         <section>
             <details>
@@ -208,6 +231,7 @@ export function ProductionImport({
                                         setSelection({
                                             status: "ready",
                                             fileName: selection.fileName,
+                                            sha256: selection.sha256,
                                             observations:
                                                 selection.observations,
                                         });
@@ -249,7 +273,7 @@ export function ProductionImport({
                             <Notice
                                 key={`${warning.code}/${warning.starts_at}`}
                             >
-                                {t("provider_hour_incomplete", {
+                                {t(warning.code, {
                                     start: new Date(
                                         warning.starts_at,
                                     ).toLocaleString(locale, {
@@ -326,6 +350,15 @@ export function ProductionImport({
                                                 unit,
                                                 changes:
                                                     selection.preview.changes,
+                                                origin: "csv_import",
+                                                file_name:
+                                                    selection.fileName.slice(
+                                                        0,
+                                                        255,
+                                                    ),
+                                                file_sha256: selection.sha256,
+                                                confirm_implausible:
+                                                    implausible,
                                             },
                                         },
                                     );
@@ -334,6 +367,7 @@ export function ProductionImport({
                                         setSelection({
                                             status: "ready",
                                             fileName: selection.fileName,
+                                            sha256: selection.sha256,
                                             observations:
                                                 selection.observations,
                                         });
@@ -344,7 +378,16 @@ export function ProductionImport({
                                 }
                             }}
                         >
-                            {null}
+                            {implausible && (
+                                <label className="check-field">
+                                    <input
+                                        type="checkbox"
+                                        name="confirm_implausible"
+                                        required
+                                    />
+                                    {t("confirm_implausible")}
+                                </label>
+                            )}
                         </ActionForm>
                     </>
                 )}

@@ -10,8 +10,9 @@ from django.db import close_old_connections, connection
 from django.test import Client
 from django.utils import timezone
 
+from pyracast.incidents.evidence import pinned_incidents, select_incidents
 from pyracast.incidents.models import IncidentRevision, PlantIncident
-from pyracast.incidents.operations import pinned_incidents, save_incident, select_incidents
+from pyracast.incidents.operations import save_incident
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant, revise_plant
 from pyracast.trash import RETENTION, purge_expired, restore_region, trash_region

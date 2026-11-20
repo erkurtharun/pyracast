@@ -2,8 +2,9 @@ from datetime import datetime, timedelta
 
 from pyracast.metering.models import EpiasConnection
 from pyracast.plants.models import Plant
-from pyracast.plants.operations import ObservationImportResult
 from pyracast.plants.production_changes import (
+    ObservationImportResult,
+    ProductionAction,
     ProductionChange,
     change_production,
 )
@@ -11,7 +12,12 @@ from tests.support.domain import System
 
 
 def write(
-    system: System, plant: Plant, changes: list[ProductionChange], *, unit: str = "MWh"
+    system: System,
+    plant: Plant,
+    changes: list[ProductionChange],
+    *,
+    unit: str = "MWh",
+    confirm_implausible: bool = False,
 ) -> ObservationImportResult:
     assert plant.current_configuration_id is not None
     return change_production(
@@ -22,6 +28,7 @@ def write(
         configuration_id=plant.current_configuration_id,
         unit=unit,
         changes=changes,
+        confirm_implausible=confirm_implausible,
     )
 
 
@@ -30,7 +37,7 @@ def edit(
     energy: float = 1,
     *,
     revision_id: int | None = None,
-    action: str = "set",
+    action: ProductionAction = "set",
     minutes: int = 60,
     quality: str = "valid",
 ) -> ProductionChange:

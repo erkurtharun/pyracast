@@ -5,7 +5,8 @@ import pytest
 from django.test import Client
 
 from pyracast.plants import production
-from pyracast.plants.operations import ObservationInput
+from pyracast.plants.models import ProductionObservation
+from pyracast.plants.production_changes import ObservationInput
 from tests.support.plant_operations import make_plant, saved_actuals
 from tests.support.production_history import upload
 
@@ -40,7 +41,7 @@ def test_daylight_journal_preserves_boundary_slots_and_defaults_to_one_day(
     assert result["days"][0]["sunset"] == SET
     half = production.production_history(plant, daylight_only=True, resolution_minutes=30)
     assert len(half["intervals"]) == 20
-    assert all(row["can_enter"] for row in half["intervals"])
+    assert half["days"][0]["available_count"] == 20
 
 
 def test_daylight_journal_keeps_night_records_without_inventing_missing_values(
@@ -59,8 +60,7 @@ def test_daylight_journal_keeps_night_records_without_inventing_missing_values(
         raising=False,
     )
     result = production.production_history(plant, daylight_only=True)
-    assert len(result["observations"]) == 1
-    assert result["observations"][0]["energy_mwh"] == 0.25
+    assert ProductionObservation.objects.get(plant=plant).energy_mwh == 0.25
     assert all(row["observation"] is None for row in result["intervals"])
     assert result["days"][0]["recorded_count"] == 0
     assert result["days"][0]["missing_count"] == 10
