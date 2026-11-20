@@ -1,4 +1,4 @@
-// Colours for places that cannot read CSS custom properties: SVG presentation attributes, generated images and the QR code.
+// Colours and spacing for places that cannot read CSS custom properties: SVG presentation attributes, generated images and the QR code.
 export const qrColours = { background: "#ffffff", foreground: "#000000" };
 
 export const illustrationColours = {
@@ -15,3 +15,5 @@ export const socialImageColours = {
     accent: "#efc778",
     muted: "#c7d9cc",
 };
+
+export const socialImageSpacing = { page: "70px 80px", lines: 26 };

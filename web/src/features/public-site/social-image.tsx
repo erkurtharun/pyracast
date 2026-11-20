@@ -1,6 +1,9 @@
 import { ImageResponse } from "next/og";
 import type { Language } from "@/i18n/language";
-import { socialImageColours as colours } from "@/styles/tokens";
+import {
+    socialImageColours as colours,
+    socialImageSpacing as spacing,
+} from "@/styles/tokens";
 
 export function createSocialImage(language: Language) {
     return new ImageResponse(
@@ -11,7 +14,7 @@ export function createSocialImage(language: Language) {
                 justifyContent: "space-between",
                 width: "100%",
                 height: "100%",
-                padding: "70px 80px",
+                padding: spacing.page,
                 background: colours.background,
                 color: colours.text,
             }}
@@ -21,7 +24,13 @@ export function createSocialImage(language: Language) {
             >
                 pyracast<span style={{ color: colours.accent }}>.</span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
+            <div
+                style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: spacing.lines,
+                }}
+            >
                 <div style={{ fontSize: 76, maxWidth: 900, lineHeight: 1.1 }}>
                     {language === "tr"
                         ? "Yarının üretimini bugünden planlayın."

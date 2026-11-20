@@ -9,7 +9,7 @@ import {
 } from "@/features/forecast/data-source";
 import { ViewNav } from "@/ui/action";
 import { plantDay } from "@/lib/format/time";
-import { ControlField } from "@/ui/form";
+import { ControlField, Select } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { PlantForecast } from "./forecast-reading";
 
@@ -80,24 +80,21 @@ export function ForecastSection({
                     }}
                 />
                 {view === "generation" && (
-                    <ControlField label={t("resolution")}>
-                        <select
-                            value={resolution}
-                            disabled={leavingGeneration}
-                            onChange={(event) =>
-                                onOptions({
-                                    ...options,
-                                    resolution:
-                                        event.target.value === "30"
-                                            ? "30"
-                                            : "60",
-                                })
-                            }
-                        >
-                            <option value="30">{t("minutes30")}</option>
-                            <option value="60">{t("minutes60")}</option>
-                        </select>
-                    </ControlField>
+                    <Select
+                        label={t("resolution")}
+                        value={resolution}
+                        disabled={leavingGeneration}
+                        onChange={(event) =>
+                            onOptions({
+                                ...options,
+                                resolution:
+                                    event.target.value === "30" ? "30" : "60",
+                            })
+                        }
+                    >
+                        <option value="30">{t("minutes30")}</option>
+                        <option value="60">{t("minutes60")}</option>
+                    </Select>
                 )}
                 <span className="fine">{t("localDates")}</span>
             </div>
