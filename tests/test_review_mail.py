@@ -13,13 +13,19 @@ from django.utils import timezone
 from psycopg import sql
 
 from pyracast.accounts.invitations import invite_workspace_member
-from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
+from pyracast.accounts.models import (
+    Membership,
+    OutboundMail,
+    Tenant,
+    UserLanguagePreference,
+    WorkspaceAdminChange,
+    WorkspaceRole,
+)
 from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.forecasts.validation import validate_binding
-from pyracast.notifications.models import OutboundMail
 from pyracast.plants.approval import ReviewDecision, approve_region
 from pyracast.plants.models import Plant, PlantSubmission
-from pyracast.regions.models import AuditAction, AuditEvent
+from pyracast.regions.models import AuditAction, AuditEvent, Region
 from pyracast.regions.operations import submit_region
 from tests.support.api import verified_admin
 from tests.support.domain import FakeAdapter, System, make_system
@@ -80,6 +86,21 @@ def decide(system: System, decision: str, reason: str = REASON) -> bool:
     from pyracast.plants.approval import decide_review
 
     return decide_review(system.admin, system.region.pk, decision, reason=reason)
+
+
+def another_workspace(name: str, address: str, language: str | None = None) -> Region:
+    tenant = Tenant.objects.create(name=f"{name} workspace")
+    administrator = addressed(User.objects.create_user(username=address), address, language)
+    Membership.objects.create(tenant=tenant, user=administrator, role=WorkspaceRole.ADMIN)
+    return submit_region(
+        administrator, tenant.pk, name=name, latitude=41, longitude=30, timezone="UTC"
+    )
+
+
+def reject(system: System, region: Region, reason: str = REASON) -> bool:
+    from pyracast.plants.approval import decide_review
+
+    return decide_review(system.admin, region.pk, ReviewDecision.REJECT, reason=reason)
 
 
 TRIGGERS: dict[str, tuple[bool, Callable[[System], bool], str]] = {
@@ -184,28 +205,24 @@ def test_review_mail_goes_only_to_an_active_administrator_with_a_verified_addres
     system = plant_system()
     viewer = addressed(User.objects.create_user(username="viewer"), "viewer@example.com")
     Membership.objects.create(tenant=system.tenant, user=viewer, role=WorkspaceRole.VIEWER)
-    unverified = make_system()
-    unverified.member.email = "unverified@example.com"
-    unverified.member.save(update_fields=["email"])
-    inactive = make_system()
-    addressed(inactive.member, "inactive@example.com")
-    User.objects.filter(pk=inactive.member.pk).update(is_active=False)
+    unverified = another_workspace("Unverified", "unverified@example.com")
+    EmailAddress.objects.filter(email="unverified@example.com").update(verified=False)
+    inactive = another_workspace("Inactive", "inactive@example.com")
+    User.objects.filter(username="inactive@example.com").update(is_active=False)
 
-    for each in (system, unverified, inactive):
-        decide(each, ReviewDecision.REJECT)
+    for region in (system.region, unverified, inactive):
+        reject(system, region)
 
     assert [recipient for _, recipient, *_ in intents()] == [ADMIN_ADDRESS]
 
 
 def test_the_language_follows_each_recipient() -> None:
     english = plant_system(language="en")
-    turkish = make_system()
-    addressed(turkish.member, "tr-admin@example.com", "tr")
-    default = make_system()
-    addressed(default.member, "default-admin@example.com")
+    turkish = another_workspace("Turkish", "tr-admin@example.com", "tr")
+    default = another_workspace("Default", "default-admin@example.com")
 
-    for each in (english, turkish, default):
-        decide(each, ReviewDecision.REJECT)
+    for region in (english.region, turkish, default):
+        reject(english, region)
 
     assert [(recipient, language) for _, recipient, language, _ in intents()] == [
         (ADMIN_ADDRESS, "en"),
@@ -274,12 +291,10 @@ def test_the_decision_mail_is_rendered_in_the_recipient_language(
 
 def test_no_reason_of_another_workspace_reaches_a_mail(recorder: type[Recorder]) -> None:
     first = plant_system()
-    second = make_system()
-    addressed(second.member, "second-admin@example.com")
-    Tenant.objects.filter(pk=second.tenant.pk).update(name="Second workspace")
+    second = another_workspace("Second", "second-admin@example.com")
 
-    decide(first, ReviewDecision.REJECT, "First workspace reason")
-    decide(second, ReviewDecision.REJECT, "Second workspace reason")
+    reject(first, first.region, "First workspace reason")
+    reject(first, second, "Second workspace reason")
     deliver_mail()
 
     bodies = {message.to[0]: str(message.body) for message in recorder.sent}
@@ -400,3 +415,16 @@ def test_each_plant_reaches_only_its_own_workspace() -> None:
     decide(first, ReviewDecision.REJECT)
 
     assert [recipient for _, recipient, *_ in intents()] == [ADMIN_ADDRESS]
+
+
+def test_a_role_mail_whose_change_record_is_gone_is_not_sent(recorder: type[Recorder]) -> None:
+    tenant, platform, former, chosen = role_system()
+    reassign_workspace_admin(platform, tenant.pk, chosen.pk, expected_admin_id=former.pk)
+    WorkspaceAdminChange.objects.all().delete()
+
+    assert deliver_mail() == 0
+
+    assert recorder.sent == []
+    assert set(OutboundMail.objects.values_list("status", "last_error")) == {
+        ("skipped", "subject_unavailable")
+    }
