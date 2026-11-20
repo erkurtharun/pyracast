@@ -46,6 +46,30 @@ test("every label group names a generated enumeration and labels each of its val
         );
 });
 
+function keys(node: unknown, prefix = ""): string[] {
+    return node && typeof node === "object"
+        ? Object.entries(node).flatMap(([key, value]) =>
+              keys(value, `${prefix}${key}.`),
+          )
+        : [prefix.slice(0, -1)];
+}
+
+test("both languages carry the same message keys", async () => {
+    for (const name of ["core", "workspace", "forecast"]) {
+        const [en, tr] = await Promise.all(
+            ["en", "tr"].map(async (language) =>
+                JSON.parse(
+                    await readFile(
+                        path.join(web, "messages", language, `${name}.json`),
+                        "utf8",
+                    ),
+                ),
+            ),
+        );
+        expect(keys(tr).sort(), name).toEqual(keys(en).sort());
+    }
+});
+
 test("screens label statuses and kinds only through the shared vocabulary", async () => {
     const files = [
         ...(await sources(path.join(web, "src/features"))),
