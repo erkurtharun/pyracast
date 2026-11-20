@@ -14,7 +14,11 @@ from django.urls import reverse
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.plants.sites import submit_site
 from pyracast.regions import operations
-from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
+from pyracast.regions.models import (
+    AuditEvent,
+    Region,
+    RegionLocationChangeRequest,
+)
 from pyracast.regions.operations import request_location_change, submit_region
 from tests.support.api import verified_admin
 from tests.support.domain import System, make_system
@@ -80,6 +84,14 @@ def test_an_occupied_target_is_refused_at_submission_through_the_api() -> None:
 def test_a_target_another_plant_already_requested_is_refused_at_submission() -> None:
     system = make_system(approved=True)
     other = second_region(system)
+    operations.configure_binding(
+        system.admin,
+        other.pk,
+        provider_account_id=system.account.pk,
+        site_id="second",
+        capacity_kw=1,
+        capacity_semantics_verified=True,
+    )
     assert submit(system, other)[0] == 201
 
     status, body = submit(system)
