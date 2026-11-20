@@ -1,6 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { runInNewContext } from "node:vm";
 
 type ClientManifest = {
     entryJSFiles?: Record<string, string[]>;
@@ -15,13 +14,14 @@ export function routeBytes(dist: string, route: string) {
     const build = JSON.parse(
         readFileSync(path.join(page, "build-manifest.json"), "utf8"),
     ) as { rootMainFiles: string[] };
-    const context: { __RSC_MANIFEST?: Record<string, ClientManifest> } = {};
-    runInNewContext(
-        readFileSync(`${page}_client-reference-manifest.js`, "utf8"),
-        context,
+    const source = readFileSync(`${page}_client-reference-manifest.js`, "utf8");
+    const start = source.indexOf(
+        `__RSC_MANIFEST[${JSON.stringify(`${route}/page`)}]`,
     );
-    const manifest = context.__RSC_MANIFEST?.[`${route}/page`];
-    if (!manifest) throw new Error(`No client manifest for ${route}.`);
+    if (start < 0) throw new Error(`No client manifest for ${route}.`);
+    const manifest = JSON.parse(
+        source.slice(source.indexOf("=", start) + 1, source.lastIndexOf(";")),
+    ) as ClientManifest;
     const entries = (record: Record<string, unknown[]> = {}) =>
         Object.entries(record)
             .filter(([entry]) => !entry.endsWith("--metadata"))
