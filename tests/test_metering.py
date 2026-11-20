@@ -516,7 +516,7 @@ def test_job_wait_clock_prevents_expired_publication(monkeypatch: pytest.MonkeyP
     def monotonic() -> float:
         return elapsed
 
-    monkeypatch.setattr("pyracast.metering.jobs.time.monotonic", monotonic)
+    monkeypatch.setattr("pyracast.background.clock.time.monotonic", monotonic)
 
     def fetch(plant: EpiasPlant, day: date) -> EpiasDay:
         nonlocal elapsed
