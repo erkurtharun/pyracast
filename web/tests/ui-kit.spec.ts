@@ -431,7 +431,7 @@ test("a checkbox reports its field error like every other control", async ({
               })
             : route.fulfill({
                   json: {
-                      enabled: false,
+                      enabled: true,
                       times: ["09:00"],
                       timezone: "Europe/Istanbul",
                       last_success_at: null,
