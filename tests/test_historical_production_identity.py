@@ -14,7 +14,7 @@ from pyracast.metering.models import (
 )
 from pyracast.plants.activation import activate_calibration
 from pyracast.plants.measurements import production_identity_at, production_identity_current
-from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
+from pyracast.plants.models import CalibrationRun, Plant
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
 from tests.support.historical_production_identity import record_identity
