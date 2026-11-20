@@ -26,6 +26,7 @@ from pyracast.accounts.invitations import (
     revoke_workspace_invitation,
 )
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
+from pyracast.background.retry_policy import MAIL
 from pyracast.errors import DomainError
 from pyracast.forecasts.monitoring import delivery_health
 from pyracast.mail.errors import NotSentError, PermanentlyNotSentError, SendCancelledError
@@ -33,6 +34,7 @@ from tests.support.api import verified_admin
 from tests.support.outbox import after_the_lease, deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+MAX_ATTEMPTS = MAIL.max_attempts
 
 
 class WorkerCrash(BaseException):
@@ -199,8 +201,6 @@ def test_retries_end_after_a_bound_and_the_failure_is_reported(
     transport: type[Transport],
     pyracast_logs: pytest.LogCaptureFixture,
 ) -> None:
-    from pyracast.notifications.outbox import MAX_ATTEMPTS
-
     invite(workspace)
     transport.open_failure = NotSentError("relay unavailable")
     moment = timezone.now()
@@ -374,7 +374,9 @@ def test_an_intent_that_expires_while_its_row_lock_is_awaited_is_skipped(
     moment = timezone.now()
     OutboundMail.objects.update(expires_at=moment + timedelta(seconds=10))
     elapsed = [0.0]
-    monkeypatch.setattr(outbox, "time", SimpleNamespace(monotonic=lambda: elapsed[0]))
+    monkeypatch.setattr(
+        "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: elapsed[0])
+    )
     locked = Event()
 
     def hold_the_row_past_the_expiry() -> None:
@@ -533,7 +535,9 @@ def test_a_worker_that_loses_its_lease_before_transmission_sends_nothing(
 
     invite(workspace)
     clock = iter([0.0, outbox.LEASE_DURATION.total_seconds() + 1, 400.0, 400.0])
-    monkeypatch.setattr(outbox, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    monkeypatch.setattr(
+        "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: next(clock))
+    )
 
     assert not outbox.send_outbound_mail(OutboundMail.objects.get().pk, timezone.now())
 
@@ -589,7 +593,9 @@ def test_an_intent_that_expires_while_its_connection_opens_is_skipped(
     moment = timezone.now()
     OutboundMail.objects.update(expires_at=moment + timedelta(seconds=10))
     clock = iter([0.0, 20.0, 20.0])
-    monkeypatch.setattr(outbox, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    monkeypatch.setattr(
+        "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: next(clock))
+    )
 
     assert not outbox.send_outbound_mail(OutboundMail.objects.get().pk, moment)
 
