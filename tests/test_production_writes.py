@@ -107,6 +107,18 @@ def test_replayed_production_change_answers_exactly_as_the_first_call(
     assert different.json()["code"] == "production_revision_changed"
 
 
+def test_batch_mixing_an_applied_change_with_a_new_one_is_a_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    start, _ = local_day_bounds(DAY, system.binding.timezone)
+    write(system, plant, [edit(start, 2)])
+    with raises_code("production_revision_changed"):
+        write(system, plant, [edit(start, 2), edit(start + timedelta(hours=1), 5)])
+    assert ProductionObservation.objects.filter(plant=plant).count() == 1
+    assert len(events(plant)) == 1
+
+
 def test_concurrent_identical_replays_store_one_revision_and_answer_alike(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -286,7 +298,7 @@ def test_earlier_configuration_correction_stays_visible_without_entering_totals(
         row = result["intervals"][0]
         assert row["effective"] is None
         assert row["edit_unavailable_reason"] == "configuration_mismatch"
-        earlier = row["previous_configuration_observation"]
+        [earlier] = row["previous_configuration_observations"]
         assert earlier["id"] == saved
         assert earlier["configuration_id"] == declared.pk
         assert earlier["configuration_revision"] == declared.revision
@@ -297,7 +309,8 @@ def test_earlier_configuration_correction_stays_visible_without_entering_totals(
         production_url(system, plant),
         {"start_date": DAY.isoformat(), "end_date": DAY.isoformat(), "native_intervals": "true"},
     )
-    assert response.json()["intervals"][0]["previous_configuration_observation"]["id"] == saved
+    [earlier] = response.json()["intervals"][0]["previous_configuration_observations"]
+    assert earlier["id"] == saved
 
 
 def test_production_history_payload_holds_only_declared_fields_within_a_ceiling(

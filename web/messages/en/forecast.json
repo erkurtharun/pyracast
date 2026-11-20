@@ -338,6 +338,7 @@
         "corrected": "Corrected",
         "provider_original": "Provider: {value}",
         "recorded_under": "Recorded under configuration r{revision}: {value}",
+        "recorded_under_interval": "Recorded under configuration r{revision}, {interval}: {value}",
         "save_implausible": "Save anyway",
         "edit": "Edit",
         "edit_interval": "Edit {interval}",

@@ -203,7 +203,7 @@ CUSTOMER_FIELDS = {
     "predicted_energy_mwh",
     "preview",
     "previous",
-    "previous_configuration_observation",
+    "previous_configuration_observations",
     "production_diagnostic",
     "production_items",
     "proposal_unavailable_reason",

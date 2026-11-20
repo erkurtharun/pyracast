@@ -140,13 +140,23 @@ def test_mixed_resolution_preserves_observations_after_revision_and_reference_lo
         system.member, system.tenant.pk, system.region.pk, plant.pk, name="New", dc_capacity_mw=140
     )
     plant.refresh_from_db()
+    saved = ProductionObservation.objects.get().pk
     result = production_history(plant, start_date=DAY, end_date=DAY)
     assert result["intervals"][0]["edit_unavailable_reason"] == "observation_overlap"
+    assert [row["id"] for row in result["intervals"][0]["previous_configuration_observations"]] == [
+        saved
+    ]
     half = production_history(plant, start_date=DAY, end_date=DAY, resolution_minutes=30)
     assert half["intervals"][0]["observation"]["energy_mwh"] == 0
-    earlier = half["intervals"][0]["previous_configuration_observation"]
+    [earlier] = half["intervals"][0]["previous_configuration_observations"]
     assert earlier["configuration_id"] == original_id
+    assert half["intervals"][1]["previous_configuration_observations"] == []
     assert half["intervals"][0]["edit_unavailable_reason"] == "configuration_mismatch"
+    native = production_history(plant, start_date=DAY, end_date=DAY, native_intervals=True)
+    first = native["intervals"][0]
+    assert first["ends_at"] - first["starts_at"] == timedelta(hours=1)
+    assert first["edit_unavailable_reason"] == "configuration_mismatch"
+    assert [row["id"] for row in first["previous_configuration_observations"]] == [saved]
     assert original_id is not None
     with pytest.raises(ValidationError, match="current approved configuration"):
         import_observations(

@@ -338,6 +338,7 @@
         "corrected": "Düzeltildi",
         "provider_original": "Sağlayıcı: {value}",
         "recorded_under": "r{revision} yapılandırmasıyla kaydedildi: {value}",
+        "recorded_under_interval": "r{revision} yapılandırmasıyla kaydedildi, {interval}: {value}",
         "save_implausible": "Yine de kaydet",
         "edit": "Düzenle",
         "edit_interval": "{interval} aralığını düzenle",

@@ -193,7 +193,8 @@ def test_current_configuration_and_meter_basis_boundaries(monkeypatch: pytest.Mo
     assert config is not None
     assert select_measurements(config, start, end, NOW)[0] == []
     history = production_history(plant, start_date=DAY, end_date=DAY)
-    assert history["intervals"][0]["previous_configuration_observation"]["id"] == first
+    [earlier] = history["intervals"][0]["previous_configuration_observations"]
+    assert earlier["id"] == first
     assert history["intervals"][0]["edit_unavailable_reason"] == "configuration_mismatch"
     assert history["intervals"][0]["provider_originals"] == []
     with pytest.raises(ValidationError, match="previous configuration"):

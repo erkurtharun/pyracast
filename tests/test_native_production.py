@@ -1,6 +1,6 @@
 from datetime import timedelta
 from itertools import pairwise
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -12,6 +12,7 @@ from pyracast.plants.operations import revise_plant
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
     ObservationInput,
+    ProductionAction,
     import_observations,
     preview_production,
 )
@@ -161,7 +162,8 @@ def test_native_earlier_configuration_correction_is_shown_apart_and_reentry_afte
     assert result["intervals"][0]["observation"] is None
     assert result["intervals"][0]["effective"] is None
     assert result["intervals"][0]["edit_unavailable_reason"] == "configuration_mismatch"
-    assert result["intervals"][0]["previous_configuration_observation"]["id"] == restored
+    [earlier] = result["intervals"][0]["previous_configuration_observations"]
+    assert earlier["id"] == restored
 
 
 @pytest.mark.parametrize(
@@ -169,6 +171,7 @@ def test_native_earlier_configuration_correction_is_shown_apart_and_reentry_afte
     [
         ("W", "valid", "Use MWh"),
         ("MWh", "empty", "batch"),
+        ("MWh", "action", "Unknown production action"),
         ("MWh", "revert", "no manual production"),
         ("MWh", "range", "within 31 local days"),
     ],
@@ -184,6 +187,8 @@ def test_invalid_batches_fail_at_application_boundary(
     rows = [edit(start)]
     if changes == "empty":
         rows = []
+    elif changes == "action":
+        rows = [edit(start, action=cast(ProductionAction, "delete"))]
     elif changes == "revert":
         rows = [edit(start, action="revert")]
     elif changes == "range":

@@ -136,9 +136,9 @@ def _role(actor: User | None, plant: Plant) -> str | None:
 
 def _earlier_configuration_heads(
     heads: list[ProductionObservation], configuration: PlantConfiguration | None
-) -> dict[tuple[datetime, datetime], dict[str, Any]]:
-    """Live corrections recorded under an earlier configuration, keyed by their interval; they are
-    shown beside the interval but never enter its effective value or the day total."""
+) -> list[tuple[ProductionObservation, dict[str, Any]]]:
+    """Live corrections recorded under an earlier configuration; they are shown beside every
+    interval they overlap but never enter its effective value or the day total."""
     earlier = [
         row
         for row in heads
@@ -150,11 +150,13 @@ def _earlier_configuration_heads(
             pk__in={row.configuration_id for row in earlier}
         ).values_list("pk", "revision")
     )
-    return {
-        (row.starts_at, row.ends_at): ObservationOutput(row).data
-        | {"configuration_revision": revisions[row.configuration_id]}
+    return [
+        (
+            row,
+            ObservationOutput(row).data | {"configuration_revision": revisions[row.configuration_id]},
+        )
         for row in earlier
-    }
+    ]
 
 
 def production_history(
@@ -269,7 +271,11 @@ def production_history(
                     "starts_at": cursor,
                     "ends_at": end,
                     "observation": encoded[exact.pk] if exact else None,
-                    "previous_configuration_observation": earlier.get((cursor, end)),
+                    "previous_configuration_observations": [
+                        data
+                        for row, data in earlier
+                        if row.starts_at < end and row.ends_at > cursor
+                    ],
                     "revision_id": head.pk if head else None,
                     "effective": _slot_value(effective, cursor, end),
                     "provider_originals": [_provider(row) for row in originals],

@@ -360,7 +360,7 @@ class ProductionIntervalOutput(serializers.Serializer[dict[str, Any]]):
     starts_at = serializers.DateTimeField()
     ends_at = serializers.DateTimeField()
     observation = ObservationOutput(allow_null=True)
-    previous_configuration_observation = EarlierConfigurationObservationOutput(allow_null=True)
+    previous_configuration_observations = EarlierConfigurationObservationOutput(many=True)
     revision_id = serializers.IntegerField(allow_null=True)
     effective = ProductionValueOutput(allow_null=True)
     provider_originals = ProductionProviderOutput(many=True)

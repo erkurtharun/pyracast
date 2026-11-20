@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import date, timedelta
 from typing import Any, cast
 
@@ -12,6 +13,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.notifications.report_data import saved_report_context
 from pyracast.plants.forecast_archive import prepare_forecast_issuances
 from pyracast.plants.history import plant_outlook
+from pyracast.plants.incident_forecasts import incident_scenario
 from pyracast.plants.models import CalibrationActivation, Plant
 from pyracast.plants.operations import activate_calibration, revise_plant
 from pyracast.regions.models import Region
@@ -208,6 +210,31 @@ def test_invalidated_calibration_and_active_outage_through_the_live_outlook(
     assert scenario["result"]["energy_mwh"] < normal["energy_mwh"]
     assert "uncalibrated" in scenario["result"]["quality_flags"]
     assert scenario["result"]["provenance"]["snapshot_id"] == normal["provenance"]["snapshot_id"]
+
+
+def test_scenario_of_a_calibrated_outlook_replaces_it_after_outage_history_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    ready = ready_run(system, plant)
+    scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
+    activate_calibration(*scope, ready.pk)
+    target = date(2026, 11, 10)
+    publish_snapshot(snapshot_for(system, target, collected_at=NOW))
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=1))
+    outlook = plant_outlook(*scope, target_date=target, resolution_minutes=60)
+    assert outlook["calibration_id"] == ready.pk
+    before = deepcopy(outlook)
+    history_start, _ = local_day_bounds(date(2026, 11, 4), system.binding.timezone)
+    incident(system, plant, history_start + timedelta(hours=9), history_start + timedelta(hours=10))
+    evaluated = incident_scenario(outlook, target, 60, timezone.now())
+    assert outlook == before
+    assert evaluated.scenario is None
+    replacement = cast(dict[str, Any], evaluated.replacement_result)
+    assert replacement["factor"] == 1
+    assert "calibration_invalidated_by_outage_history" in replacement["quality_flags"]
+    normal = cast(dict[str, Any], outlook["result"])
+    assert replacement["provenance"]["snapshot_id"] == normal["provenance"]["snapshot_id"]
 
 
 def test_invalidated_calibration_and_active_outage_through_the_saved_report(

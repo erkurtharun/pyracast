@@ -182,8 +182,11 @@ def prepare_production_changes(
     capture_revisions: bool = False,
 ) -> list[PreparedChange]:
     """Validate a batch against the current heads. A change whose token was already superseded
-    by the identical value it asks for is a replay of an applied change, not a conflict."""
+    by the identical value it asks for is a replay of an applied change, not a conflict; a batch
+    is replayed whole or not at all."""
     validate_batch(unit, len(changes))
+    if any(change.action not in {"set", "revert"} for change in changes):
+        raise ValidationError(gettext("Unknown production action."))
     now, zone = timezone.now(), ZoneInfo(configuration.binding.timezone)
     normalized = [
         normalize_observation(
@@ -238,6 +241,8 @@ def prepare_production_changes(
                 start, end, value, quality, source, change.action == "revert", previous, replayed
             )
         )
+    if any(row.replayed for row in result) and any(row.writes for row in result):
+        raise ConflictError(ErrorCode.PRODUCTION_REVISION_CHANGED)
     return result
 
 
