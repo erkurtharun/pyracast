@@ -88,7 +88,6 @@ def chain_gain(
 
 
 fixtures = root / "tests" / "fixtures"
-# v1 gives both steps one zenith; v2 gives Erbs the true and the geometry the apparent zenith.
 versions = {
     "v1": (fixtures / "tracking_gain_reference.json", "zenith", "zenith"),
     "v2": (fixtures / "tracking_gain_reference_v2.json", "true_zenith", "apparent_zenith"),

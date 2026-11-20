@@ -179,13 +179,15 @@ Geometry versions: `tracking-geometry-transfer-v1` gives Astral's refraction-adj
 to both the Erbs split and the tracker geometry. `tracking-geometry-transfer-v2` gives the
 true zenith to the Erbs split (clearness index, DNI and the 87° cut-off) and the apparent
 zenith to rotation and transposition, as `docs/STACK.md` requires; the two differ by up to
-about 5 % in the gain near the cut-off and below 0.1 % at high sun. `tracking.DEFAULT_MODEL`
-names the version new results use. Every result records its model (`model_version` on
-forecasts and issuances, `transfer_model` on calibrations), and outage scenarios and reports
-replay that model; a stored result is never recomputed under another version. A tracking
-plant forecasts with the version its active calibration was fitted under and uses the default
-only while uncalibrated; a refit is fitted under the default, compared only with an incumbent
-of the same model and moves the plant when it is activated.
+about 5 % in the gain near the cut-off and below 0.1 % at high sun. New results use
+`tracking.DEFAULT_MODEL`; it is v1, as the recorded evaluation below decided. Every result
+records its model (`model_version` on forecasts, issuances and recomputed performance days,
+`transfer_model` on calibrations) and is replayed under it, never under another version; an
+unknown model is refused. A tracking plant forecasts with the version its active calibration
+was fitted under and uses the default only while uncalibrated; a refit is fitted under the
+default, compared only with an incumbent of the same model and moves the plant when it is
+activated. Derating evidence is shown only next to a forecast of the model it was fitted
+under.
 
 The reference gains in `tests/fixtures/tracking_gain_reference.json` (v1) and
 `tracking_gain_reference_v2.json` (v2) come from an independent pvlib 0.16.1 chain: the same
@@ -196,14 +198,14 @@ Hay–Davies `get_total_irradiance` with pvlib's extraterrestrial irradiance (so
 zenith. The stored gains are that chain's values rounded to four decimals.
 `scripts/check_scientific.py` recomputes both chains in CI on Windows and Ubuntu and requires
 the stored gains within 0.0001 of them and the pure-Python gain within 0.012; the unit tests
-hold the model to the stored gains with the same 0.012, and v1 to the outputs of `main` at
-14fa0004 bit for bit (`tests/fixtures/tracking_v1_golden.json`).
+hold the model to the stored gains with the same 0.012, and v1 bit for bit to the outputs the
+code gave before the versions existed (`tests/fixtures/tracking_v1_golden.json`).
 
-`scripts/evaluate_tracker_geometry.py` decides the default (OD-37) on an archive database
-read-only and prints aggregates per plant ordinal only. It compares hourly EPIAS readings
-(settlement before real-time, latest snapshot per day and kind) with estimated actuals (the
-latest snapshot covering each hour) inside daylight on complete days; hours a manual
-observation overlaps are skipped. Each week after the first is scored with factors that
+`scripts/evaluate_tracker_geometry.py` decides the default on an archive database, read-only,
+and prints aggregates per plant ordinal only. It compares the hourly EPIAS readings of the
+plant's enabled connection and its provider plants (settlement before real-time, latest
+snapshot per day and kind) with estimated actuals (the latest snapshot covering each hour)
+inside daylight on complete days; hours a manual observation overlaps are skipped. Each week after the first is scored with factors that
 `fit_calibration` refits per version on the same 37 preceding days. v2 is not worse unless
 the 95 % delete-one-week jackknife interval of RMSE(v2) − RMSE(v1) lies wholly above zero,
 with at least four scored weeks.

@@ -1,4 +1,4 @@
-"""Compare the tracker geometry versions on an archive database, read-only (OD-37).
+"""Compare the tracker geometry versions on an archive database, read-only.
 
 Prints aggregates per plant ordinal only; the rules are in docs/IRRADIANCE.md, "Tracking
 geometry transfer".
@@ -52,8 +52,12 @@ SELECT DISTINCT ON (s.target_day, s.source_kind)
        s.target_day, s.source_kind, s.normalization_policy, s.readings
   FROM metering_epiassnapshot AS s
   JOIN metering_epiasconnection AS e ON e.id = s.connection_id
- WHERE s.configuration_id = %s AND e.plant_id = %s
-   AND s.source_kind IN ('settlement_injection', 'realtime_generation')
+ WHERE s.configuration_id = %s AND e.plant_id = %s AND e.enabled
+   AND s.provider_plant -> 'eic' = to_jsonb(e.eic)
+   AND ((s.source_kind = 'realtime_generation'
+         AND s.provider_plant -> 'id' = to_jsonb(e.provider_plant_id))
+     OR (s.source_kind = 'settlement_injection'
+         AND s.provider_plant -> 'id' = to_jsonb(e.settlement_plant_id)))
  ORDER BY s.target_day, s.source_kind, s.collected_at DESC, s.available_at DESC, s.id DESC
 """
 MANUAL = """
@@ -309,6 +313,8 @@ def _references(
 ) -> dict[datetime, tuple[Native, ...]]:
     """Per measured hour, the native intervals of the latest snapshot that covers it whole."""
     covered: dict[datetime, tuple[Native, ...]] = {}
+    if not needed:
+        return covered
     with connection.cursor(name="tracker_references") as cursor:
         cursor.itersize = 20
         cursor.execute(REFERENCES, (configuration.binding_id,))

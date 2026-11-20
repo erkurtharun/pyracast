@@ -53,12 +53,17 @@ def reference_power_mw(
 ) -> float:
     """Uncalibrated plant-basis power for one reference interval mean under the model a
     result records."""
+    if model_version != MODEL_VERSION and model_version not in tracking.MODELS:
+        raise ValueError("Unknown transfer model")
     binding = configuration.binding
     power_mw = power_kw / binding.capacity_kw * configuration.dc_capacity_mw
-    model = _tracker_model(model_version)
-    if model is None or not tracking_modeled(configuration) or binding.dc_capacity_kw is None:
+    if (
+        model_version == MODEL_VERSION
+        or not tracking_modeled(configuration)
+        or binding.dc_capacity_kw is None
+    ):
         return power_mw
     loss_free = power_kw / binding.dc_capacity_kw / (1 - binding.losses_percent / 100)
     return power_mw * tracking.interval_gain(
-        start, end, loss_free, binding.latitude, binding.longitude, model=model
+        start, end, loss_free, binding.latitude, binding.longitude, model=model_version
     )

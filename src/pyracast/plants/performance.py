@@ -188,10 +188,12 @@ def _day(
                 readings, issuance_power_intervals(issuance, baseline=True), 1.0, None
             )
         else:
+            model = transfer_model(configuration, calibration)
+            result["model_version"] = model
             intervals = power_intervals(
                 snapshot,
                 configuration,
-                model_version=transfer_model(configuration, calibration),
+                model_version=model,
                 source_intervals=actual_source.composition.intervals
                 if actual_source is not None and actual_source.composition is not None
                 else None,
