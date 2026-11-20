@@ -6,7 +6,12 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
 from pyracast.irradiance import local_day_bounds
-from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
+from pyracast.metering.models import (
+    EpiasCollectionJob,
+    EpiasConnection,
+    EpiasConnectionRevision,
+    EpiasSnapshot,
+)
 from pyracast.plants.activation import activate_calibration
 from pyracast.plants.measurements import production_identity_at, production_identity_current
 from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
@@ -159,24 +164,6 @@ def test_conflicting_settlement_job_identity_is_not_silently_selected(
         assert not production_identity_at(run, cutoff)
 
 
-def test_invalid_event_identity_cannot_authorize_a_saved_calibration(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run, _, _, cutoff = historical_source(monkeypatch)
-    events = PlantEvent.objects.filter(plant_id=run.plant_id, action="epias_connected")
-    for key, invalid in (
-        ("revision", True),
-        ("revision", "1"),
-        ("revision", 0),
-        ("provider_plant_id", False),
-        ("provider_plant_id", -1),
-        ("eic", None),
-        ("eic", ""),
-    ):
-        events.update(details={"revision": 1, "provider_plant_id": 2, "eic": "EIC", key: invalid})
-        assert not production_identity_at(run, cutoff)
-
-
 def test_pinned_source_identity_and_service_must_be_valid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -190,23 +177,19 @@ def test_pinned_source_identity_and_service_must_be_valid(
     assert not production_identity_at(run, cutoff)
 
 
-@pytest.mark.parametrize("change", ["event", "source", "publication", "policy", "malformed_event"])
+@pytest.mark.parametrize("change", ["revision", "source", "publication", "policy"])
 def test_historical_identity_rejects_missing_or_mismatched_evidence(
     monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
     run, _, snapshot, cutoff = historical_source(monkeypatch)
-    if change == "event":
-        PlantEvent.objects.filter(plant_id=run.plant_id, action="epias_connected").delete()
+    if change == "revision":
+        EpiasConnectionRevision.objects.filter(connection__plant_id=run.plant_id).delete()
     elif change == "source":
         run.production_snapshot_ids = [snapshot.pk + 1000]
     elif change == "publication":
         stored_again(snapshot, available_at=cutoff + timedelta(seconds=1))
-    elif change == "policy":
-        stored_again(snapshot, normalization_policy="unknown")
     else:
-        PlantEvent.objects.filter(plant_id=run.plant_id, action="epias_connected").update(
-            details={}
-        )
+        stored_again(snapshot, normalization_policy="unknown")
     assert not production_identity_at(run, cutoff)
 
 

@@ -254,3 +254,22 @@ def test_concurrent_reservations_of_one_binding_stay_inside_its_daily_bound() ->
 
     assert sorted(admitted) == [False, True]
     assert forecast_requests(system.binding) == 1
+
+
+def test_a_binding_without_forecast_clocks_has_no_daily_bound() -> None:
+    system = make_system(approved=True)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=10)
+    CollectionSchedule.objects.create(
+        region=system.region, enabled=False, times=["16:00"], effective_from=NOW
+    )
+    job = CollectionJob.objects.create(
+        binding=system.binding,
+        endpoint="forecasts",
+        scheduled_for=NOW + timedelta(minutes=1),
+        target_date=NOW.date() + timedelta(days=1),
+        available_at=NOW,
+    )
+
+    reserve_request(system.binding, NOW, purpose=RequestPurpose.FORECAST, job=job)
+
+    assert forecast_requests(system.binding) == 1

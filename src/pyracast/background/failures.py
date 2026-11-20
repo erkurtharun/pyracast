@@ -7,6 +7,10 @@ from pathlib import Path
 
 from django.db import close_old_connections
 from dramatiq import Actor
+from dramatiq.brokers.rabbitmq import RabbitmqBroker
+from dramatiq.brokers.stub import StubBroker
+
+from pyracast.background.deadlines import QUEUE_DEPTH_LIMIT
 
 _PACKAGE = Path(__file__).resolve().parents[1]
 BACK_OFF = timedelta(minutes=15)
@@ -109,7 +113,30 @@ class Deferrals:
         self._until[key] = now + self._delay
 
 
-def _send(identifiers: Sequence[int], actor: Actor[[int], None]) -> int:
+def queue_depth(actor: Actor[[int], None]) -> int | None:
+    broker = actor.broker
+    if isinstance(broker, RabbitmqBroker):
+        return int(broker.get_queue_message_counts(actor.queue_name)[0])
+    if isinstance(broker, StubBroker):
+        return int(broker.queues[actor.queue_name].qsize())
+    return None
+
+
+def queue_full(actor: Actor[[int], None], logger: logging.Logger) -> bool:
+    """Ids stay in the database, so a skipped publication loses nothing while workers are down."""
+    depth = queue_depth(actor)
+    if depth is None or depth < QUEUE_DEPTH_LIMIT:
+        return False
+    logger.warning("publication_skipped queue=%s depth=%s", actor.queue_name, depth)
+    return True
+
+
+def _send(
+    pending: Callable[[], Sequence[int]], actor: Actor[[int], None], logger: logging.Logger
+) -> int:
+    if queue_full(actor, logger):
+        return 0
+    identifiers = pending()
     for identifier in identifiers:
         actor.send(identifier)
     return len(identifiers)
@@ -129,11 +156,11 @@ def publish_after(
     except Exception as error:
         close_old_connections()
         try:
-            published: int | None = _send(pending(), actor)
+            published: int | None = _send(pending, actor, logger)
         except Exception as publish_error:
             log_failure(logger, f"{phase}_publish_failed", publish_error)
             published = None
         if isinstance(error, ItemsFailedError):
             error.published = published
         raise
-    return _send(pending(), actor)
+    return _send(pending, actor, logger)

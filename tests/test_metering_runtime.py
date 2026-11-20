@@ -27,7 +27,7 @@ def test_runtime_factory_requires_credentials_and_caches_once(
     client._cached_client.cache_clear()
     monkeypatch.delenv("EPIAS_USERNAME", raising=False)
     monkeypatch.delenv("EPIAS_PASSWORD", raising=False)
-    with pytest.raises(EpiasError, match="credentials_unavailable"):
+    with pytest.raises(EpiasError, match="epias_credentials_missing"):
         client.get_epias_client()
     monkeypatch.setenv("EPIAS_USERNAME", "fixture-user")
     monkeypatch.setenv("EPIAS_PASSWORD", "fixture-value")

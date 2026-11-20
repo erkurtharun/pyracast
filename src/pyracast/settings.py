@@ -5,6 +5,13 @@ from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.csp import CSP
 
+from pyracast.background.deadlines import (
+    DATABASE_CONNECT_SECONDS,
+    DATABASE_IDLE_IN_TRANSACTION_SECONDS,
+    DATABASE_LOCK_SECONDS,
+    DATABASE_STATEMENT_SECONDS,
+    MAIL_SOCKET_SECONDS,
+)
 from pyracast.environment import load_environment
 from pyracast.local_time import CLOCK_PATTERN
 
@@ -16,6 +23,7 @@ if not CLOCK_PATTERN.fullmatch(_cutoff):
 PYRACAST_CUTOFF_LOCAL = time(int(_cutoff[:2]), int(_cutoff[3:]))
 PYRACAST_WEATHER_ENABLED = os.environ.get("PYRACAST_WEATHER_ENABLED", "1") == "1"
 PYRACAST_OPEN_METEO_API_KEY = os.environ.get("PYRACAST_OPEN_METEO_API_KEY", "")
+PYRACAST_RABBITMQ_URL = os.environ.get("PYRACAST_RABBITMQ_URL", "")
 
 SECRET_KEY = os.environ.get("PYRACAST_SECRET_KEY", "")
 SECRET_KEY_FALLBACKS = os.environ.get("PYRACAST_SECRET_KEY_FALLBACKS", "").split()
@@ -80,9 +88,14 @@ DATABASES = {
         "HOST": os.environ.get("PGHOST", "127.0.0.1"),
         "PORT": os.environ.get("PGPORT", "5432"),
         "CONN_MAX_AGE": 60,
+        "CONN_HEALTH_CHECKS": True,
         "OPTIONS": {
-            "connect_timeout": 5,
-            "options": "-c lock_timeout=5s -c statement_timeout=60s",
+            "connect_timeout": DATABASE_CONNECT_SECONDS,
+            "options": (
+                f"-c lock_timeout={DATABASE_LOCK_SECONDS}s"
+                f" -c statement_timeout={DATABASE_STATEMENT_SECONDS}s"
+                f" -c idle_in_transaction_session_timeout={DATABASE_IDLE_IN_TRANSACTION_SECONDS}s"
+            ),
         },
     }
 }
@@ -349,7 +362,7 @@ if _email_backend == "smtp":
             "password": os.environ.get("PYRACAST_EMAIL_PASSWORD", ""),
             "use_tls": os.environ.get("PYRACAST_EMAIL_TLS", "0" if _email_ssl else "1") == "1",
             "use_ssl": _email_ssl,
-            "timeout": 15,
+            "timeout": MAIL_SOCKET_SECONDS,
         },
     }
 elif _email_backend == "gmail":
@@ -359,7 +372,7 @@ elif _email_backend == "gmail":
             "client_id": os.environ.get("PYRACAST_GMAIL_CLIENT_ID", ""),
             "client_secret": os.environ.get("PYRACAST_GMAIL_CLIENT_SECRET", ""),
             "refresh_token": os.environ.get("PYRACAST_GMAIL_REFRESH_TOKEN", ""),
-            "timeout": 15,
+            "timeout": MAIL_SOCKET_SECONDS,
         },
     }
 else:

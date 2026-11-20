@@ -87,6 +87,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0002_epias_vocabulary_choices",
             "0003_lease_check_and_snapshot_trigger",
             "0004_schema_naming_convention",
+            "0005_epias_connection_revisions",
         ),
         "notifications": (
             "0002_delivery_vocabulary_checks",

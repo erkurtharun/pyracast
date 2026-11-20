@@ -12,9 +12,10 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from pyracast.background.failures import log_failure
+from pyracast.background.deadlines import ACTORS, LAST_REQUEST_START
+from pyracast.background.failures import BACK_OFF, log_failure
 from pyracast.collection_window import NIGHT_RETRY_DELAY
-from pyracast.epias import TIMEZONE, EpiasDay, EpiasError, EpiasPlant
+from pyracast.epias import TIMEZONE, EpiasCredentialsError, EpiasDay, EpiasError, EpiasPlant
 from pyracast.forecasts.models import CollectionSchedule
 from pyracast.metering.client import get_epias_client
 from pyracast.metering.models import (
@@ -31,7 +32,7 @@ from pyracast.provider_retry import next_retry_at
 from pyracast.regions.models import Region
 
 Fetcher = Callable[[EpiasPlant, date], EpiasDay]
-LEASE_DURATION = timedelta(minutes=5)
+LEASE_DURATION = ACTORS["collect_epias"].lease
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +155,9 @@ def _finish_failure(
     *,
     error: EpiasJobError = EpiasJobError.PROVIDER_FAILURE,
     retryable: bool = True,
+    waiting: bool = False,
 ) -> None:
+    """``waiting``: nothing was asked of EPIAS, so the attempt is returned."""
     started = time.monotonic()
     with transaction.atomic():
         job = _locked_job(lease.job.pk)
@@ -162,7 +165,10 @@ def _finish_failure(
         if job is None or not _owns(job, lease, now):
             return
         job.last_error = error
-        if not retryable:
+        if waiting:
+            job.attempts -= 1
+            _schedule_retry(job, now, BACK_OFF)
+        elif not retryable:
             job.status = EpiasJobStatus.FAILED
         elif job.retry_until is not None:
             retry_at = next_retry_at(
@@ -292,6 +298,7 @@ def run_epias_job(
 ) -> bool:
     now = now or timezone.now()
     started = time.monotonic()
+    deadline = started + LAST_REQUEST_START.total_seconds()
     lease = claim_epias_job(job_id, now)
     if lease is None:
         return False
@@ -305,10 +312,13 @@ def run_epias_job(
             data = fetch(plant, lease.job.target_date)
         elif lease.job.source_kind == EpiasSourceKind.SETTLEMENT_INJECTION:
             data = get_epias_client().fetch_settlement(
-                plant, lease.job.target_date, lease.job.period_end_day or lease.job.target_date
+                plant,
+                lease.job.target_date,
+                lease.job.period_end_day or lease.job.target_date,
+                deadline=deadline,
             )
         else:
-            data = get_epias_client().fetch_day(plant, lease.job.target_date)
+            data = get_epias_client().fetch_day(plant, lease.job.target_date, deadline=deadline)
         if (
             data.plant.id != plant.id
             or data.plant.eic != plant.eic
@@ -318,6 +328,16 @@ def run_epias_job(
         ):
             raise EpiasError("epias_response_identity_mismatch")
         return _publish(lease, data, now + timedelta(seconds=time.monotonic() - started))
+    except EpiasCredentialsError as exc:
+        logger.warning("metering_credentials_unusable job=%s code=%s", job_id, exc.args[0])
+        _finish_failure(
+            lease,
+            now + timedelta(seconds=time.monotonic() - started),
+            None,
+            error=EpiasJobError(exc.args[0]),
+            waiting=True,
+        )
+        return False
     except Exception as exc:
         log_failure(logger, "metering_job_failed", exc, job=job_id, attempt=lease.job.attempts)
         retry_after = exc.retry_after_seconds if isinstance(exc, EpiasError) else None

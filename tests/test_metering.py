@@ -20,7 +20,12 @@ from pyracast.metering.jobs import (
     pending_epias_ids,
     run_epias_job,
 )
-from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
+from pyracast.metering.models import (
+    EpiasCollectionJob,
+    EpiasConnection,
+    EpiasConnectionRevision,
+    EpiasSnapshot,
+)
 from pyracast.metering.operations import (
     connect_epias,
     disconnect_epias,
@@ -446,6 +451,7 @@ def test_reconnection_same_clock_starts_new_jobs_and_hides_previous_mapping(
     job = EpiasCollectionJob.objects.first()
     assert job is not None
     assert run_epias_job(job.pk, fetch=day_data, now=NOW)
+    disconnect_epias(plant.pk, actor=system.admin)
     reconnected = connect(plant, system.admin)
     assert reconnected.revision == linked.revision + 1
     assert EpiasCollectionJob.objects.filter(status="pending").count() == 90
@@ -555,6 +561,7 @@ def test_collection_tolerates_purge_after_reading_work_identifiers(
                 assert purge_expired(NOW)["regions"] == 1
             else:
                 EpiasCollectionJob.objects.filter(connection=linked).delete()
+                EpiasConnectionRevision.objects.filter(connection=linked).delete()
                 linked.delete()
         return execute(sql, params, many, context)
 

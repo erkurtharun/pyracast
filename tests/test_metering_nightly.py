@@ -10,7 +10,7 @@ from pyracast.metering.jobs import EpiasLease, claim_epias_job, pending_epias_id
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.metering.scheduler import enqueue_due_epias_jobs
 from pyracast.plants.models import CalibrationRun
-from tests.support.metering import NEXT_NIGHT, connect, connected, day_data
+from tests.support.metering import NEXT_NIGHT, connect, connected, day_data, unconnected
 from tests.support.metering_settlement import SettlementClient
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -49,7 +49,7 @@ def test_initial_yesterday_collection_uses_the_remaining_night_window(
 def test_initial_backfill_outside_an_enabled_night_keeps_its_independent_budget(
     monkeypatch: pytest.MonkeyPatch, minutes: int, enabled: bool
 ) -> None:
-    system, plant, _ = connected(monkeypatch)
+    system, plant = unconnected(monkeypatch)
     now = NEXT_NIGHT + timedelta(minutes=minutes)
     monkeypatch.setattr("django.utils.timezone.now", lambda: now)
     CollectionSchedule.objects.create(region=system.region, enabled=enabled, effective_from=now)
@@ -64,7 +64,7 @@ def test_initial_backfill_outside_an_enabled_night_keeps_its_independent_budget(
 def test_initial_yesterday_partial_data_can_recover_after_three_attempts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    system, plant, _ = connected(monkeypatch)
+    system, plant = unconnected(monkeypatch)
     now = NEXT_NIGHT + timedelta(minutes=93)
     monkeypatch.setattr("django.utils.timezone.now", lambda: now)
     monkeypatch.setattr("pyracast.metering.jobs.time.monotonic", lambda: 0.0)

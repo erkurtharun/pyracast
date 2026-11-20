@@ -13,6 +13,7 @@ from django.views.decorators.debug import sensitive_variables
 from pyracast.accounts.account_mail import compose_account_mail
 from pyracast.accounts.invitations import compose_invitation
 from pyracast.accounts.models import InvitationDeliveryStatus, WorkspaceInvitation
+from pyracast.background.deadlines import ACTORS
 from pyracast.encryption import secret_cipher
 from pyracast.mail.errors import (
     DeliveryUncertainError,
@@ -33,7 +34,7 @@ from pyracast.notifications.models import (
 
 logger = logging.getLogger(__name__)
 
-LEASE_DURATION = timedelta(minutes=5)
+LEASE_DURATION = ACTORS["send_outbound_mail"].lease
 MAX_ATTEMPTS = 8
 REPUBLISH_AFTER = timedelta(minutes=1)
 RETENTION = timedelta(days=7)

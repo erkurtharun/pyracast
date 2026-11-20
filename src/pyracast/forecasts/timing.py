@@ -1,19 +1,31 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
 
 from pyracast.collection_window import SLOT_SEARCH_DAYS
+from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import CollectionEndpoint, CollectionJob, CollectionSchedule
 from pyracast.local_time import local_slot
+
+HISTORY_REQUESTS_PER_DAY = 1
 
 
 @dataclass(frozen=True)
 class ForecastTiming:
     times: tuple[str, ...]
     effective_from: datetime
+    first_job_id: int
+
+
+def default_times() -> list[str]:
+    return [settings.PYRACAST_CUTOFF_LOCAL.strftime("%H:%M")]
+
+
+def forecast_time_limit(daily_quota: int) -> int:
+    return max(daily_quota - HISTORY_REQUESTS_PER_DAY, 0)
 
 
 def approval_job(binding_id: int) -> tuple[int, datetime] | None:
@@ -28,21 +40,21 @@ def approval_job(binding_id: int) -> tuple[int, datetime] | None:
     )
 
 
-def effective_forecast_schedule(
-    *,
-    first_slot: datetime | None,
-    schedule: CollectionSchedule | None,
-    daily_quota: int,
-    cutoff: time | None = None,
+def forecast_timing(
+    binding: SiteBinding, schedule: CollectionSchedule | None
 ) -> ForecastTiming | None:
-    if first_slot is None or (schedule is not None and not schedule.enabled):
+    """The clocks a binding collects forecasts at and the moment they apply from; None while
+    it collects none. ``schedule`` is the binding region's schedule, None for the default."""
+    first = approval_job(binding.pk)
+    if first is None or (schedule is not None and not schedule.enabled):
         return None
-    cutoff = settings.PYRACAST_CUTOFF_LOCAL if cutoff is None else cutoff
-    times = schedule.times if schedule is not None else [cutoff.strftime("%H:%M")]
+    first_job_id, first_slot = first
+    times = schedule.times if schedule is not None else default_times()
     effective_from = (
         max(first_slot, schedule.effective_from) if schedule is not None else first_slot
     )
-    return ForecastTiming(tuple(times[: max(daily_quota - 1, 0)]), effective_from)
+    limit = forecast_time_limit(binding.provider_account.daily_quota)
+    return ForecastTiming(tuple(times[:limit]), effective_from, first_job_id)
 
 
 def latest_forecast_slot(

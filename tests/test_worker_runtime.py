@@ -1,5 +1,8 @@
+import logging
 import threading
 import time
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import dramatiq
@@ -8,12 +11,13 @@ from django.conf import LazySettings
 from django.core.checks import run_checks
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
-from dramatiq import Broker
+from dramatiq import Actor, Broker
+from dramatiq.brokers.rabbitmq import RabbitmqBroker
 from dramatiq.brokers.stub import StubBroker
 from dramatiq.middleware.time_limit import TimeLimitExceeded
 
 from pyracast.background import broker as broker_module
-from pyracast.background.failures import PhaseOutcome
+from pyracast.background.failures import PhaseOutcome, queue_depth, queue_full
 from pyracast.forecasts import runtime
 from pyracast.forecasts.management.commands import worker as command
 from pyracast.metering.runtime import dispatch_epias, make_epias_actor
@@ -149,3 +153,19 @@ def test_a_queue_ten_batches_deep_receives_no_more_metering_jobs(
 
     assert dispatch_epias(actor) == 0
     assert broker.queues[actor.queue_name].qsize() == 1000
+
+
+def test_the_queue_depth_comes_from_the_broker_holding_the_queue(
+    pyracast_logs: pytest.LogCaptureFixture,
+) -> None:
+    rabbitmq = MagicMock(spec=RabbitmqBroker)
+    rabbitmq.get_queue_message_counts.return_value = (1000, 0, 0)
+    deep = SimpleNamespace(broker=rabbitmq, queue_name="epias")
+    unknown = SimpleNamespace(broker=MagicMock(), queue_name="epias")
+
+    assert queue_depth(cast("Actor[[int], None]", deep)) == 1000
+    assert queue_full(cast("Actor[[int], None]", deep), logging.getLogger("pyracast.test"))
+    rabbitmq.get_queue_message_counts.assert_called_with("epias")
+    assert queue_depth(cast("Actor[[int], None]", unknown)) is None
+    assert not queue_full(cast("Actor[[int], None]", unknown), logging.getLogger("pyracast.test"))
+    assert "publication_skipped queue=epias depth=1000" in pyracast_logs.text

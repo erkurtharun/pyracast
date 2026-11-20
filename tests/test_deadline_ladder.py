@@ -1,14 +1,17 @@
 import inspect
 import math
 import re
+import runpy
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+import pytest
 import yaml
 from django.conf import settings
 from dramatiq.brokers.stub import StubBroker
 
+from pyracast import outbound
 from pyracast.background import deadlines
 from pyracast.forecasts import jobs as collection_jobs
 from pyracast.forecasts.management.commands import dispatch, worker
@@ -19,6 +22,7 @@ from pyracast.plants.training import pending_calibration_ids
 from scripts import dev as launcher
 
 DEPLOY = Path(__file__).resolve().parents[1] / "deploy"
+SETTINGS = DEPLOY.parent / "src" / "pyracast" / "settings.py"
 
 
 def compose_services() -> dict[str, dict[str, Any]]:
@@ -116,10 +120,11 @@ def test_the_dispatcher_polls_well_inside_its_heartbeat_lag() -> None:
 
 def test_database_sessions_carry_the_ladder_timeouts() -> None:
     database = settings.DATABASES["default"]
-    options = database["OPTIONS"]["options"]
+    session = cast("dict[str, object]", database["OPTIONS"])
+    options = str(session["options"])
 
     assert database["CONN_HEALTH_CHECKS"] is True
-    assert database["OPTIONS"]["connect_timeout"] == deadlines.DATABASE_CONNECT_SECONDS
+    assert session["connect_timeout"] == deadlines.DATABASE_CONNECT_SECONDS
     assert f"-c lock_timeout={deadlines.DATABASE_LOCK_SECONDS}s" in options
     assert f"-c statement_timeout={deadlines.DATABASE_STATEMENT_SECONDS}s" in options
     assert (
@@ -133,10 +138,16 @@ def test_database_sessions_carry_the_ladder_timeouts() -> None:
     )
 
 
-def test_mail_sockets_use_the_ladder_timeout() -> None:
-    options = settings.MAILERS["default"]["OPTIONS"]
+def test_provider_bodies_are_read_within_the_ladder_deadline() -> None:
+    assert deadlines.HTTP_BODY_SECONDS == outbound.READ_DEADLINE_SECONDS
 
-    assert options["timeout"] == deadlines.MAIL_SOCKET_SECONDS
+
+@pytest.mark.parametrize("backend", ["smtp", "gmail"])
+def test_mail_sockets_use_the_ladder_timeout(monkeypatch: pytest.MonkeyPatch, backend: str) -> None:
+    monkeypatch.setenv("PYRACAST_EMAIL_BACKEND", backend)
+    mailers = runpy.run_path(str(SETTINGS))["MAILERS"]
+
+    assert mailers["default"]["OPTIONS"]["timeout"] == deadlines.MAIL_SOCKET_SECONDS
 
 
 def test_publication_stops_ten_batches_deep() -> None:

@@ -15,6 +15,7 @@ from typing import Any, BinaryIO
 import httpx
 import psutil
 
+from pyracast.background.deadlines import DRAIN, STOP_GRACE
 from pyracast.environment import load_environment
 from scripts.dev_dependencies import ensure_dependencies
 
@@ -211,7 +212,7 @@ def process_stop_file(root: Path, role: str, process: psutil.Process) -> Path | 
 
 
 def stop_cooperatively(
-    root: Path, role: str, process: psutil.Process, timeout: float = 300
+    root: Path, role: str, process: psutil.Process, timeout: float = STOP_GRACE.total_seconds()
 ) -> bool:
     try:
         stop_file = process_stop_file(root, role, process)
@@ -407,7 +408,7 @@ def start(root: Path, state: dict[str, Any]) -> None:
     print("Open http://127.0.0.1:3000. Services stay running; use stop.cmd to stop them.")
 
 
-def wait_for_jobs(timeout: float = 300) -> None:
+def wait_for_jobs(timeout: float = DRAIN.total_seconds()) -> None:
     import django
 
     django.setup()
@@ -436,7 +437,11 @@ def stop(root: Path, state: dict[str, Any], frontend_only: bool = False) -> None
         record = state["processes"].get(role, {})
         process = recorded_process(root, role, record)
         if process is not None:
-            print(f"Stopping {role} (up to five minutes for background work)...", flush=True)
+            print(
+                f"Stopping {role} (up to {round(STOP_GRACE.total_seconds() / 60)} minutes "
+                "for background work)...",
+                flush=True,
+            )
             if not stop_cooperatively(root, role, process):
                 if role in ("worker", "mailer"):
                     wait_for_jobs()

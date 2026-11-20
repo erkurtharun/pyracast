@@ -1,5 +1,7 @@
 import logging
 from calendar import monthrange
+from collections import Counter
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta
 from functools import partial
 from itertools import chain
@@ -14,8 +16,14 @@ from pyracast.collection_window import nightly_window
 from pyracast.epias import EpiasError, EpiasPlant
 from pyracast.forecasts.models import CollectionSchedule
 from pyracast.metering.client import get_epias_client
-from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSourceKind
-from pyracast.plants.models import Plant, active_plant
+from pyracast.metering.models import (
+    EpiasCollectionJob,
+    EpiasConnection,
+    EpiasJobStatus,
+    EpiasSnapshot,
+    EpiasSourceKind,
+)
+from pyracast.plants.models import Plant, PlantConfiguration, active_plant
 from pyracast.plants.operations import configuration_is_current
 from pyracast.regions.models import Region
 
@@ -23,6 +31,13 @@ MARKET_ZONE = ZoneInfo("Europe/Istanbul")
 INITIAL_SETTLEMENT_MONTHS = 12
 SETTLEMENT_RECHECK = timedelta(days=1)
 SETTLEMENT_RETRY = timedelta(hours=1)
+HORIZON_DAYS = 90
+ROLLING_DAYS = 7
+ROLLING_MONTHS = 3
+# A slot whose collection keeps failing is repaired on at most this many nights, so a deterministic
+# failure ends visibly; each repair spends at most MAX_ATTEMPTS requests.
+REPAIR_NIGHTS = 3
+REPAIRS_PER_NIGHT = 31
 
 logger = logging.getLogger(__name__)
 _deferrals = Deferrals(BACK_OFF)
@@ -42,6 +57,17 @@ def _daily_window(connection: EpiasConnection, now: datetime) -> tuple[datetime,
     ):
         return None
     return window
+
+
+def _provider_plant(connection: EpiasConnection, kind: str) -> dict[str, object]:
+    return {
+        "id": connection.settlement_plant_id
+        if kind == EpiasSourceKind.SETTLEMENT_INJECTION
+        else connection.provider_plant_id,
+        "eic": connection.eic,
+        "name": connection.name,
+        "short_name": "",
+    }
 
 
 def enqueue_connection(
@@ -96,7 +122,7 @@ def enqueue_connection(
         if existing_slot is not None:
             scheduled_for = existing_slot
     jobs = []
-    for offset in range(1, 91 if initial else 8):
+    for offset in range(1, (HORIZON_DAYS if initial else ROLLING_DAYS) + 1):
         job, _ = EpiasCollectionJob.objects.get_or_create(
             connection=connection,
             plant=plant,
@@ -106,12 +132,7 @@ def enqueue_connection(
             source_kind=EpiasSourceKind.REALTIME_GENERATION,
             scheduled_for=scheduled_for,
             defaults={
-                "provider_plant": {
-                    "id": connection.provider_plant_id,
-                    "eic": connection.eic,
-                    "name": connection.name,
-                    "short_name": "",
-                },
+                "provider_plant": _provider_plant(connection, EpiasSourceKind.REALTIME_GENERATION),
                 "available_at": now,
                 "retry_until": retry_until if not initial or offset == 1 else None,
             },
@@ -148,12 +169,9 @@ def enqueue_connection(
                 scheduled_for=scheduled_for,
                 defaults={
                     "period_end_day": month_end,
-                    "provider_plant": {
-                        "id": connection.settlement_plant_id,
-                        "eic": connection.eic,
-                        "name": connection.name,
-                        "short_name": "",
-                    },
+                    "provider_plant": _provider_plant(
+                        connection, EpiasSourceKind.SETTLEMENT_INJECTION
+                    ),
                     "available_at": now,
                     "retry_until": None if initial else retry_until,
                 },
@@ -162,6 +180,102 @@ def enqueue_connection(
             month_end = month_start - timedelta(days=1)
             offset += 1
     return jobs
+
+
+def _horizon(connection: EpiasConnection, today: date) -> dict[tuple[str, date], date | None]:
+    """The slots behind the rolling re-collection that a repair may collect, with their end."""
+    slots: dict[tuple[str, date], date | None] = {
+        (EpiasSourceKind.REALTIME_GENERATION, today - timedelta(days=offset)): None
+        for offset in range(ROLLING_DAYS + 1, HORIZON_DAYS + 1)
+    }
+    if connection.settlement_plant_id is not None:
+        month_end = today.replace(day=1) - timedelta(days=1)
+        for offset in range(INITIAL_SETTLEMENT_MONTHS):
+            month_start = month_end.replace(day=1)
+            if offset >= ROLLING_MONTHS:
+                slots[(EpiasSourceKind.SETTLEMENT_INJECTION, month_start)] = month_end
+            month_end = month_start - timedelta(days=1)
+    return slots
+
+
+def _slot(source_kind: str, target_date: date) -> tuple[str, date]:
+    if source_kind == EpiasSourceKind.SETTLEMENT_INJECTION:
+        return source_kind, target_date.replace(day=1)
+    return source_kind, target_date
+
+
+def _slots(rows: Iterable[tuple[str, date]]) -> list[tuple[str, date]]:
+    return [_slot(kind, target) for kind, target in rows]
+
+
+def repair_connection(
+    connection: EpiasConnection, configuration: PlantConfiguration, now: datetime
+) -> list[int]:
+    """Under tonight's slot, collect again each slot of the horizon that has no snapshot of this
+    identity and configuration and no open job, newest first and within the caps."""
+    window = _daily_window(connection, now)
+    if window is None or not configuration_is_current(configuration):
+        return []
+    slot, retry_until = window
+    horizon = _horizon(connection, slot.astimezone(MARKET_ZONE).date())
+    oldest = min(target for _, target in horizon)
+    jobs = EpiasCollectionJob.objects.filter(
+        connection=connection,
+        connection_revision=connection.revision,
+        configuration=configuration,
+        target_date__gte=oldest,
+    )
+    kinds_and_dates = ("source_kind", "target_date")
+    tonight = set(_slots(jobs.filter(scheduled_for=slot).values_list(*kinds_and_dates)))
+    busy = set(
+        _slots(
+            jobs.filter(status__in=(EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING)).values_list(
+                *kinds_and_dates
+            )
+        )
+    )
+    collected = set(
+        _slots(
+            EpiasSnapshot.objects.filter(
+                job__in=jobs.values("pk"), target_date__gte=oldest
+            ).values_list(*kinds_and_dates)
+        )
+    )
+    failures = Counter(
+        _slots(jobs.filter(status=EpiasJobStatus.FAILED).values_list(*kinds_and_dates))
+    )
+    candidates = sorted(
+        (
+            key
+            for key in horizon.keys() - tonight - busy - collected
+            if failures[key] <= REPAIR_NIGHTS
+        ),
+        key=lambda key: (key[1], key[0]),
+        reverse=True,
+    )
+    for kind, target in candidates[: max(REPAIRS_PER_NIGHT - len(tonight & horizon.keys()), 0)]:
+        EpiasCollectionJob.objects.get_or_create(
+            connection=connection,
+            plant_id=connection.plant_id,
+            connection_revision=connection.revision,
+            configuration=configuration,
+            source_kind=kind,
+            target_date=target,
+            scheduled_for=slot,
+            defaults={
+                "period_end_day": horizon[(kind, target)],
+                "provider_plant": _provider_plant(connection, kind),
+                "available_at": now,
+                "retry_until": retry_until,
+            },
+        )
+    return [
+        pk
+        for pk, kind, target in jobs.filter(scheduled_for=slot)
+        .order_by("source_kind", "-target_date", "pk")
+        .values_list("pk", *kinds_and_dates)
+        if (kind, target) in horizon
+    ]
 
 
 class _SettlementDirectory:
@@ -284,4 +398,6 @@ def _enqueue_due_connection(
             ):
                 identifiers.extend(enqueue_connection(current, now, initial=True))
         identifiers.extend(enqueue_connection(current, now))
+        if configuration is not None and current.enabled:
+            identifiers.extend(repair_connection(current, configuration, now))
     return identifiers

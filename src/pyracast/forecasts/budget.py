@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from django.db.models import Q
+
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import (
     CollectionEndpoint,
@@ -9,9 +11,12 @@ from pyracast.forecasts.models import (
     CollectionSchedule,
     RequestAttempt,
 )
-from pyracast.forecasts.timing import approval_job, effective_forecast_schedule
+from pyracast.forecasts.timing import forecast_timing
 from pyracast.local_time import local_slot
 from pyracast.regions.models import active_region
+
+OPEN = (CollectionJobStatus.PENDING, CollectionJobStatus.RETRY, CollectionJobStatus.RUNNING)
+ENDED = (CollectionJobStatus.SUCCEEDED, CollectionJobStatus.FAILED, CollectionJobStatus.STALE)
 
 
 def remaining_forecast_requests(account: ProviderAccount, now: datetime) -> int:
@@ -29,55 +34,39 @@ def remaining_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         region__approved_binding_id__isnull=False,
         region__status="approved",
         validated_credential_revision=account.credential_revision,
-    ).select_related("region")
+    ).select_related("region", "provider_account")
     for binding in bindings:
         if binding.region.approved_binding_id != binding.pk:
             continue
-        _, first_slot = approval_job(binding.pk) or (None, None)
-        timing = effective_forecast_schedule(
-            first_slot=first_slot,
-            schedule=CollectionSchedule.objects.filter(region_id=binding.region_id).first(),
-            daily_quota=account.daily_quota,
+        timing = forecast_timing(
+            binding, CollectionSchedule.objects.filter(region_id=binding.region_id).first()
         )
         if timing is None:
             continue
         jobs = list(
-            CollectionJob.objects.filter(binding=binding, endpoint=CollectionEndpoint.FORECASTS)
+            CollectionJob.objects.filter(
+                Q(status__in=OPEN) | Q(scheduled_for__gte=day_start, scheduled_for__lt=day_end),
+                binding=binding,
+                endpoint=CollectionEndpoint.FORECASTS,
+                reference_import__isnull=True,
+            )
         )
-        paid_or_terminal = {
-            job.scheduled_for
-            for job in jobs
-            if job.pk in attempted
-            or job.status
-            in {
-                CollectionJobStatus.SUCCEEDED,
-                CollectionJobStatus.FAILED,
-                CollectionJobStatus.STALE,
-            }
+        paid_or_ended = {
+            job.scheduled_for for job in jobs if job.pk in attempted or job.status in ENDED
         }
         for job in jobs:
-            if (
-                job.status
-                in {
-                    CollectionJobStatus.PENDING,
-                    CollectionJobStatus.RETRY,
-                    CollectionJobStatus.RUNNING,
-                }
-                and job.pk not in attempted
-                and job.available_at < day_end
-            ):
+            if job.status in OPEN and job.pk not in attempted and job.available_at < day_end:
                 needed.add((binding.pk, job.scheduled_for))
         zone = ZoneInfo(binding.region.timezone)
-        first = day_start.astimezone(zone).date()
+        day = day_start.astimezone(zone).date()
         last = (day_end - timedelta(microseconds=1)).astimezone(zone).date()
-        day = first
         while day <= last:
             for clock in timing.times:
                 slot = local_slot(day, clock, zone)
                 if (
                     slot is not None
                     and max(now, timing.effective_from, day_start) <= slot < day_end
-                    and slot not in paid_or_terminal
+                    and slot not in paid_or_ended
                 ):
                     needed.add((binding.pk, slot))
             day += timedelta(days=1)

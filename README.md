@@ -59,7 +59,7 @@ The complete example is [`.env.example`](.env.example). The main groups are:
 | `PYRACAST_SECRET_KEY` | Shared application encryption/session secret; preserve it with backups |
 | `PYRACAST_DEBUG`, `PYRACAST_HOSTS` | Local debug mode and accepted hostnames |
 | `PYRACAST_PUBLIC_ORIGIN`, `PYRACAST_CSRF_ORIGINS` | Frontend origin and allowed mutation origins |
-| `PYRACAST_RABBITMQ_URL` | Broker connection |
+| `PYRACAST_RABBITMQ_URL` | Broker connection; required unless `PYRACAST_DEBUG=1` |
 | `PYRACAST_EMAIL_BACKEND` | `console` for local development; `gmail` or `smtp` for delivery |
 | `EPIAS_USERNAME`, `EPIAS_PASSWORD` | Optional shared EP?A? transparency-service credentials |
 | `PYRACAST_WEATHER_ENABLED`, `PYRACAST_OPEN_METEO_API_KEY` | Auxiliary weather switch and optional commercial key |

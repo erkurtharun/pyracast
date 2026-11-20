@@ -7,7 +7,8 @@ import dramatiq
 from django.db import close_old_connections, connections
 from dramatiq import Actor, Broker
 
-from pyracast.background.failures import ItemsFailedError, publish_after
+from pyracast.background.deadlines import time_limit_ms
+from pyracast.background.failures import ItemsFailedError, publish_after, queue_full
 from pyracast.notifications.jobs import pending_notification_ids, process_notification
 from pyracast.notifications.outbox import end_expired_mail, publish_due_mail, send_outbound_mail
 from pyracast.notifications.scheduler import enqueue_due
@@ -37,6 +38,7 @@ def make_notification_actor(broker: Broker) -> Actor[[int], None]:
         actor_name="send_forecast_reminder",
         queue_name="notifications",
         max_retries=0,
+        time_limit=time_limit_ms("send_forecast_reminder"),
     )(deliver_notification)
 
 
@@ -46,12 +48,15 @@ def make_outbound_mail_actor(broker: Broker) -> Actor[[int], None]:
         actor_name="send_outbound_mail",
         queue_name="notifications",
         max_retries=0,
+        time_limit=time_limit_ms("send_outbound_mail"),
     )(deliver_outbound_mail)
 
 
 def publish_outbound_mail(actor: Actor[[int], None], now: datetime | None = None) -> int:
     timestamp = now or datetime.now(UTC)
     end_expired_mail(timestamp)
+    if queue_full(actor, logger):
+        return 0
     return publish_due_mail(actor.send, timestamp)
 
 

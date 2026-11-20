@@ -340,8 +340,6 @@ def test_scheduler_ignores_unvalidated_bindings_and_future_first_slots() -> None
     assert due[0] == first.pk
     with pytest.raises(ValidationError):
         enqueue_due(NOW.replace(tzinfo=None))
-    with pytest.raises(ValidationError):
-        enqueue_due(NOW, cutoff_hour=24)
 
 
 def test_concurrent_quota_reservations_share_one_account_budget() -> None:

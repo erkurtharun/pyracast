@@ -39,10 +39,34 @@ class EpiasConnection(models.Model):
         )
 
 
+class EpiasConnectionRevision(models.Model):
+    """The provider identity a connection collected under from ``connected_at`` on."""
+
+    connection = models.ForeignKey(EpiasConnection, on_delete=models.PROTECT)
+    revision = models.PositiveIntegerField()
+    provider_plant_id = models.PositiveBigIntegerField()
+    eic = models.CharField(max_length=100)
+    connected_at = models.DateTimeField()
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=("connection", "revision"), name="%(class)s_connection_revision_uniq"
+            ),
+            models.CheckConstraint(condition=Q(revision__gte=1), name="%(class)s_revision_chk"),
+            models.CheckConstraint(
+                condition=Q(provider_plant_id__gte=1), name="%(class)s_provider_plant_id_chk"
+            ),
+            models.CheckConstraint(condition=~Q(eic=""), name="%(class)s_eic_chk"),
+        )
+
+
 class EpiasJobError(models.TextChoices):
     RETRY_WINDOW_EXPIRED = "retry_window_expired", "Retry window expired"
     ATTEMPTS_EXHAUSTED = "attempts_exhausted", "Attempts exhausted"
     PROVIDER_FAILURE = "epias_provider_failure", "Epias provider failure"
+    CREDENTIALS_MISSING = "epias_credentials_missing", "EPIAS credentials missing"
+    CREDENTIALS_REJECTED = "epias_credentials_rejected", "EPIAS credentials rejected"
     UNPUBLISHED_DATA = "unpublished_data", "Unpublished data"
     PARTIAL_DATA = "partial_data", "Partial data"
 

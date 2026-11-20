@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from pyracast.accounts.retention import sweep_accounts
 from pyracast.background.broker import make_broker
+from pyracast.background.deadlines import DISPATCH_POLL_SECONDS
 from pyracast.background.failures import ItemsFailedError, PhaseOutcome, log_failure
 from pyracast.forecasts.monitoring import record_dispatch_phase
 from pyracast.forecasts.runtime import dispatch_collections, make_actor
@@ -71,7 +72,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: Any) -> None:
         parser.add_argument("--loop", action="store_true")
-        parser.add_argument("--poll-seconds", type=float, default=60.0)
+        parser.add_argument("--poll-seconds", type=float, default=DISPATCH_POLL_SECONDS)
         parser.add_argument("--stop-file", type=Path)
         parser.add_argument("--heartbeat-file", type=Path)
 

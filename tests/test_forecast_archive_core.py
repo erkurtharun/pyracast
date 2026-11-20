@@ -25,10 +25,10 @@ from pyracast.plants.models import (
     ForecastIssuance,
     Plant,
     PlantConfiguration,
-    PlantEvent,
 )
 from pyracast.trash import RETENTION, purge_expired, trash_region
 from tests.support.domain import NOW
+from tests.support.historical_production_identity import record_identity
 from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, ready_run, snapshot_for
 from tests.support.provisional_measurements import acquisition
@@ -142,12 +142,7 @@ def test_new_acquisition_uses_identity_known_then_and_preserves_older_issuance(
         name="Plant",
         connected_by=system.member,
     )
-    PlantEvent.objects.create(
-        plant=plant,
-        actor=system.member,
-        action="epias_connected",
-        details={"provider_plant_id": 2, "eic": "EIC", "revision": connection.revision},
-    )
+    record_identity(monkeypatch, connection, NOW)
     production = acquisition((configuration, connection))
     run = ready_run(system, plant)
     run.production_snapshot_ids = [production.pk]
@@ -159,16 +154,9 @@ def test_new_acquisition_uses_identity_known_then_and_preserves_older_issuance(
     assert frozen.calibration_id == run.pk
     original = deepcopy(frozen.payloads)
     moment = NOW + timedelta(minutes=1)
-    monkeypatch.setattr(timezone, "now", lambda: moment)
     connection.provider_plant_id = 3
     connection.revision += 1
-    connection.save(update_fields=("provider_plant_id", "revision"))
-    PlantEvent.objects.create(
-        plant=plant,
-        actor=system.member,
-        action="epias_connected",
-        details={"provider_plant_id": 3, "eic": "EIC", "revision": connection.revision},
-    )
+    record_identity(monkeypatch, connection, moment)
     later = snapshot_for(system, DAY, collected_at=moment)
     updated = freeze(later, plant)
     assert updated.factor == 1.0

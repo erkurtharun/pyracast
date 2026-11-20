@@ -1,5 +1,5 @@
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -7,7 +7,13 @@ from django.db import transaction
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.budget import remaining_forecast_requests
-from pyracast.forecasts.models import CollectionJob, RequestAttempt, RequestPurpose
+from pyracast.forecasts.models import (
+    CollectionJob,
+    CollectionSchedule,
+    RequestAttempt,
+    RequestPurpose,
+)
+from pyracast.forecasts.timing import forecast_timing
 from pyracast.provider_retry import next_provider_day, next_retry_at, rate_limit_retry_after
 
 
@@ -27,10 +33,34 @@ class AccountUnavailableError(QuotaExceededError):
     pass
 
 
+class BindingDayExhaustedError(QuotaExceededError):
+    pass
+
+
 class RequestDeferredError(QuotaExceededError):
     def __init__(self, available_at: datetime | None) -> None:
         super().__init__("Provider requests are temporarily unavailable.")
         self.available_at = available_at
+
+
+def _binding_day_spent(binding: SiteBinding, job: CollectionJob, utc_day: date) -> bool:
+    """A binding's forecasts collected for distinct jobs in one UTC day stay within its clocks,
+    however often they are edited. Retries of one job and the approval collection are free."""
+    timing = forecast_timing(
+        binding, CollectionSchedule.objects.filter(region_id=binding.region_id).first()
+    )
+    if timing is None or job.pk == timing.first_job_id:
+        return False
+    spent = (
+        RequestAttempt.objects.filter(
+            binding=binding, purpose=RequestPurpose.FORECAST, utc_day=utc_day, job__isnull=False
+        )
+        .exclude(job_id__in=(job.pk, timing.first_job_id))
+        .values("job_id")
+        .distinct()
+        .count()
+    )
+    return spent >= len(timing.times)
 
 
 def reserve_account_request(
@@ -65,6 +95,13 @@ def reserve_account_request(
         used = RequestAttempt.objects.filter(provider_account=account, utc_day=utc_day).count()
         if used >= account.daily_quota:
             raise QuotaExceededError
+        if (
+            job is not None
+            and binding is not None
+            and purpose == RequestPurpose.FORECAST
+            and _binding_day_spent(binding, job, utc_day)
+        ):
+            raise BindingDayExhaustedError
         if (
             job is not None
             and purpose == RequestPurpose.ESTIMATED_ACTUALS

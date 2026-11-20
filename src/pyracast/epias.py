@@ -11,11 +11,14 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from pyracast import provider_retry
+from pyracast.background.deadlines import HTTP_CONNECT_SECONDS, HTTP_READ_SECONDS
 
 AUTH_URL = "https://giris.epias.com.tr/cas/v1/tickets"
 BASE_URL = "https://seffaflik.epias.com.tr/electricity-service/v1/generation/data"
 TIMEZONE = ZoneInfo("Europe/Istanbul")
 SourceKind = Literal["realtime_generation", "settlement_injection"]
+CREDENTIALS_MISSING = "epias_credentials_missing"
+CREDENTIALS_REJECTED = "epias_credentials_rejected"
 
 
 class EpiasError(Exception):
@@ -25,6 +28,14 @@ class EpiasError(Exception):
         super().__init__(code)
         self.retry_after_seconds = retry_after_seconds
         self.retryable = retryable
+
+
+class EpiasCredentialsError(EpiasError):
+    """Missing or rejected credentials: no data request was sent, and none can succeed until
+    the process restarts with other credentials."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code, retryable=False)
 
 
 @dataclass(frozen=True)
@@ -146,7 +157,7 @@ class EpiasClient:
         self, client: httpx.Client, *, username: str, password: str, page_size: int = 100
     ) -> None:
         if not username or not password:
-            raise EpiasError("missing_epias_credentials")
+            raise EpiasCredentialsError(CREDENTIALS_MISSING)
         if isinstance(page_size, bool) or not 1 <= page_size <= 100:
             raise EpiasError("invalid_epias_page_size")
         self._client = client
@@ -156,6 +167,7 @@ class EpiasClient:
         self._ticket = ""
         self._ticket_expires = 0.0
         self._ticket_lock = Lock()
+        self._rejected = False
 
     def _request(
         self,
@@ -174,7 +186,7 @@ class EpiasClient:
                 headers=headers,
                 json=body,
                 data=form,
-                timeout=httpx.Timeout(20, connect=5),
+                timeout=httpx.Timeout(HTTP_READ_SECONDS, connect=HTTP_CONNECT_SECONDS),
                 follow_redirects=False,
                 auth=None,
             )
@@ -183,10 +195,13 @@ class EpiasClient:
         if response.status_code != expected_status:
             if response.status_code in (401, 403):
                 self._ticket = ""
+                if url == AUTH_URL:
+                    self._rejected = True
+                    raise EpiasCredentialsError(CREDENTIALS_REJECTED)
             raise EpiasError(
                 "epias_request_failed",
                 retryable=provider_retry.retryable_status(response.status_code)
-                or (response.status_code == 401 and url != AUTH_URL),
+                or response.status_code == 401,
                 retry_after_seconds=(
                     provider_retry.retry_after_seconds(response.headers.get("Retry-After"))
                     if response.status_code in (429, 503)
@@ -197,6 +212,8 @@ class EpiasClient:
 
     def _tgt(self) -> str:
         with self._ticket_lock:
+            if self._rejected:
+                raise EpiasCredentialsError(CREDENTIALS_REJECTED)
             if self._ticket and time.monotonic() < self._ticket_expires:
                 return self._ticket
             response = self._request(
@@ -262,13 +279,15 @@ class EpiasClient:
             result.append(plant)
         return tuple(result)
 
-    def fetch_day(self, plant: EpiasPlant, day: date) -> EpiasDay:
-        return self._fetch_period(plant, day, day, "realtime_generation")
+    def fetch_day(self, plant: EpiasPlant, day: date, *, deadline: float | None = None) -> EpiasDay:
+        return self._fetch_period(plant, day, day, "realtime_generation", deadline)
 
-    def fetch_settlement(self, plant: EpiasPlant, start_day: date, end_day: date) -> EpiasDay:
+    def fetch_settlement(
+        self, plant: EpiasPlant, start_day: date, end_day: date, *, deadline: float | None = None
+    ) -> EpiasDay:
         if end_day < start_day or (end_day - start_day).days > 30:
             raise EpiasError("invalid_epias_period")
-        return self._fetch_period(plant, start_day, end_day, "settlement_injection")
+        return self._fetch_period(plant, start_day, end_day, "settlement_injection", deadline)
 
     def _fetch_period(
         self,
@@ -276,7 +295,9 @@ class EpiasClient:
         day: date,
         end_day: date,
         source_kind: SourceKind,
+        deadline: float | None,
     ) -> EpiasDay:
+        """``deadline`` is a ``time.monotonic()`` value after which no page is requested."""
         if _integer(plant.id) == 0:
             raise EpiasError("invalid_epias_plant")
         start = datetime.combine(day, datetime.min.time(), TIMEZONE)
@@ -289,6 +310,8 @@ class EpiasClient:
         total: int | None = None
         number = 1
         while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                raise EpiasError("epias_deadline_exceeded")
             payload = self._data(
                 endpoint,
                 {

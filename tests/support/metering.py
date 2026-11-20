@@ -42,7 +42,7 @@ class FixtureClient:
         assert not connection.in_atomic_block
         return ()
 
-    def fetch_day(self, plant: EpiasPlant, day: date) -> EpiasDay:
+    def fetch_day(self, plant: EpiasPlant, day: date, *, deadline: float | None = None) -> EpiasDay:
         assert not connection.in_atomic_block
         return day_data(plant, day)
 
@@ -72,7 +72,11 @@ def connect(plant: Plant, actor: User, client: FixtureClient | None = None) -> E
     )
 
 
-def connected(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant, EpiasConnection]:
+def unconnected(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant]:
     monkeypatch.setattr("pyracast.metering.scheduler.get_epias_client", lambda: FixtureClient())
-    system, plant = make_plant(monkeypatch)
+    return make_plant(monkeypatch)
+
+
+def connected(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant, EpiasConnection]:
+    system, plant = unconnected(monkeypatch)
     return system, plant, connect(plant, system.admin)

@@ -1246,6 +1246,8 @@ export interface components {
          * @description * `retry_window_expired` - Retry window expired
          *     * `attempts_exhausted` - Attempts exhausted
          *     * `epias_provider_failure` - Epias provider failure
+         *     * `epias_credentials_missing` - EPIAS credentials missing
+         *     * `epias_credentials_rejected` - EPIAS credentials rejected
          *     * `unpublished_data` - Unpublished data
          *     * `partial_data` - Partial data
          * @enum {string}
@@ -1254,6 +1256,8 @@ export interface components {
             | "retry_window_expired"
             | "attempts_exhausted"
             | "epias_provider_failure"
+            | "epias_credentials_missing"
+            | "epias_credentials_rejected"
             | "unpublished_data"
             | "partial_data";
         /**

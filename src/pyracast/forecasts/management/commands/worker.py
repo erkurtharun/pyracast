@@ -2,14 +2,25 @@ from pathlib import Path
 from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
-from dramatiq import Worker
+from dramatiq import Broker, Worker
 
 from pyracast.background.broker import make_broker
+from pyracast.background.deadlines import DRAIN
 from pyracast.forecasts.runtime import make_actor
 from pyracast.metering.runtime import make_epias_actor
 from pyracast.notifications.runtime import make_notification_actor, make_outbound_mail_actor
 from pyracast.plants.runtime import make_calibration_actor
 from pyracast.shutdown import shutdown_control
+
+DRAIN_MILLISECONDS = round(DRAIN.total_seconds() * 1000)
+
+
+def register_actors(broker: Broker) -> None:
+    make_actor(broker)
+    make_calibration_actor(broker)
+    make_notification_actor(broker)
+    make_outbound_mail_actor(broker)
+    make_epias_actor(broker)
 
 
 class Command(BaseCommand):
@@ -34,11 +45,9 @@ class Command(BaseCommand):
                 return
             broker = make_broker()
             try:
-                make_actor(broker)
-                make_calibration_actor(broker)
-                make_notification_actor(broker)
-                make_outbound_mail_actor(broker)
-                make_epias_actor(broker)
+                register_actors(broker)
+                # The Dramatiq CLI emits this; without it the TimeLimit middleware never runs.
+                broker.emit_after("process_boot")
                 worker = Worker(broker, worker_threads=threads, queues=set(options["queues"]))
                 try:
                     worker.start()
@@ -46,6 +55,6 @@ class Command(BaseCommand):
                 except KeyboardInterrupt:
                     pass
                 finally:
-                    worker.stop()
+                    worker.stop(timeout=DRAIN_MILLISECONDS)
             finally:
                 broker.close()

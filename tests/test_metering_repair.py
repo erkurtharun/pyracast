@@ -12,6 +12,7 @@ from pyracast.epias import TIMEZONE, EpiasDay, EpiasPlant
 from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.metering.scheduler import enqueue_due_epias_jobs
+from pyracast.regions.models import Region
 from tests.support.metering import NEXT_NIGHT, connected, day_data
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -150,3 +151,12 @@ def test_concurrent_schedulers_repair_each_slot_once_inside_the_nightly_cap(
     assert results[0] == results[1]
     assert repairs(NEXT_NIGHT) == days[:REPAIRS_PER_NIGHT]
     assert EpiasCollectionJob.objects.count() == 90 + 7 + REPAIRS_PER_NIGHT
+
+
+def test_a_suspended_plant_is_not_repaired(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, _, _ = connected(monkeypatch)
+    fail([date(2026, 10, 10)])
+    Region.objects.filter(pk=system.region.pk).update(status="suspended")
+
+    assert enqueue_due_epias_jobs(now=NEXT_NIGHT) == []
+    assert repairs(NEXT_NIGHT) == []

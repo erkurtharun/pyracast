@@ -7,26 +7,29 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts.jobs import collect, pending_job_ids
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
-from pyracast.forecasts.timing import effective_forecast_schedule
+from pyracast.forecasts.timing import ForecastTiming, forecast_timing
 from pyracast.forecasts.validation import validate_binding
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate
 
 
-def test_effective_collection_schedule_covers_default_trim_disabled_and_approval_boundary() -> None:
-    timing = effective_forecast_schedule(first_slot=NOW, schedule=None, daily_quota=10)
-    assert timing is not None
-    assert (timing.times, timing.effective_from) == (("16:00",), NOW)
+@pytest.mark.django_db(transaction=True)
+def test_forecast_timing_covers_default_trim_disabled_and_approval_boundary() -> None:
+    system = make_system(approved=True)
+    approval = CollectionJob.objects.get()
+    binding = SiteBinding.objects.select_related("provider_account").get(pk=system.binding.pk)
+    binding.provider_account.daily_quota = 10
+    assert forecast_timing(binding, None) == ForecastTiming(("16:00",), NOW, approval.pk)
     schedule = CollectionSchedule(
         enabled=True, times=["16:00", "17:00"], effective_from=NOW - timedelta(hours=1)
     )
-    timing = effective_forecast_schedule(first_slot=NOW, schedule=schedule, daily_quota=2)
-    assert timing is not None
-    assert (timing.times, timing.effective_from) == (("16:00",), NOW)
+    binding.provider_account.daily_quota = 2
+    assert forecast_timing(binding, schedule) == ForecastTiming(("16:00",), NOW, approval.pk)
     schedule.enabled = False
-    assert effective_forecast_schedule(first_slot=NOW, schedule=schedule, daily_quota=10) is None
-    assert effective_forecast_schedule(first_slot=None, schedule=None, daily_quota=10) is None
+    assert forecast_timing(binding, schedule) is None
+    approval.delete()
+    assert forecast_timing(binding, None) is None
 
 
 @pytest.mark.django_db(transaction=True)

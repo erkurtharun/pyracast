@@ -58,7 +58,9 @@ class SettlementClient(FixtureClient):
         assert not connection.in_atomic_block
         return (SETTLEMENT,)
 
-    def fetch_settlement(self, plant: EpiasPlant, start: date, end: date) -> EpiasDay:
+    def fetch_settlement(
+        self, plant: EpiasPlant, start: date, end: date, *, deadline: float | None = None
+    ) -> EpiasDay:
         assert not connection.in_atomic_block
         assert plant.id == SETTLEMENT.id
         return month_data(plant, start, end)

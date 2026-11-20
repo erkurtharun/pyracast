@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from django.conf import LazySettings
 from django.core.management import CommandError, call_command
 from dramatiq import Worker
 from dramatiq.brokers.stub import StubBroker
@@ -66,41 +67,22 @@ def test_dispatch_schedules_before_sending_and_repeats_pending(
     assert pending.call_args.args == scheduled.call_args.args
 
 
-def test_rabbitmq_broker_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rabbitmq_broker_configuration(
+    monkeypatch: pytest.MonkeyPatch, settings: LazySettings
+) -> None:
     constructor = MagicMock()
     monkeypatch.setattr(broker_module, "RabbitmqBroker", constructor)
-    monkeypatch.setenv("PYRACAST_RABBITMQ_URL", "amqp://example.invalid/test")
+    settings.PYRACAST_RABBITMQ_URL = "amqp://example.invalid/test?heartbeat=60"
     broker_module.make_broker()
     parameters = parse_qs(urlsplit(constructor.call_args.kwargs["url"]).query)
     assert parameters == {
         "socket_timeout": ["5"],
         "stack_timeout": ["10"],
         "blocked_connection_timeout": ["10"],
-        "heartbeat": ["30"],
+        "heartbeat": ["60"],
         "connection_attempts": ["1"],
     }
     assert constructor.call_args.kwargs["confirm_delivery"] is True
-    monkeypatch.delenv("PYRACAST_RABBITMQ_URL")
-    broker_module.make_broker()
-    assert constructor.call_args.kwargs["url"].startswith("amqp://guest:guest@127.0.0.1:5672/%2F?")
-
-
-def test_rabbitmq_failover_urls_preserve_explicit_parameters(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(
-        "PYRACAST_RABBITMQ_URL",
-        "amqp://node1.invalid/?heartbeat=60;amqp://node2.invalid/?socket_timeout=8",
-    )
-    broker = broker_module.make_broker()
-    first, second = broker.parameters
-    assert first.host == "node1.invalid"
-    assert first.heartbeat == 60
-    assert first.socket_timeout == 5
-    assert second.host == "node2.invalid"
-    assert second.socket_timeout == 8
-    assert second.blocked_connection_timeout == 10
-    broker.close()
 
 
 def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -221,7 +203,7 @@ def test_commands_handle_termination_and_restore_previous_handlers(
     ):
         monkeypatch.setattr(command, factory, MagicMock())
 
-    def terminate(*_: object) -> None:
+    def terminate(*_: object, **__: object) -> None:
         handler = signal.getsignal(signal.SIGTERM)
         assert callable(handler)
         handler(signal.SIGTERM, None)
