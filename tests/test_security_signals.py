@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from django.dispatch import Signal
 from django.test import RequestFactory
 
 from pyracast.accounts.audit import (
+    CHANGE_EVENTS,
     LINE_KEYS,
     SECURITY_EVENT_DETAILS,
     SIGNAL_EVENTS,
@@ -109,9 +111,43 @@ WRITTEN = frozenset(
         "workspace_admin_reassigned",
     }
 )
+CHANGES = frozenset(
+    {
+        "login_succeeded",
+        "logout",
+        "sessions_revoked",
+        "reauthenticated",
+        "mfa_succeeded",
+        "signup",
+        "email_verified",
+        "email_added",
+        "email_change_requested",
+        "email_changed",
+        "email_removed",
+        "password_changed",
+        "password_set",
+        "password_reset",
+        "mfa_added",
+        "mfa_removed",
+        "mfa_reset",
+        "social_account_connected",
+        "social_account_disconnected",
+        "admin_mfa_provisioned",
+        "mfa_reset_by_operator",
+        "invitation_sent",
+        "invitation_revoked",
+        "invitation_accepted",
+        "workspace_member_removed",
+        "workspace_admin_reassigned",
+    }
+)
 ADDRESS = "Private.Person@Example.com"
 HIDDEN = "test-only-hidden-value"
 USER_ID = 4821
+
+
+class RolledBackError(Exception):
+    pass
 
 
 @pytest.fixture(autouse=True)
@@ -475,4 +511,73 @@ def test_a_line_bound_to_a_commit_is_written_only_when_the_transaction_commits(
 
     assert lines(caplog) == [
         {"event": "invitation_sent", "user_id": USER_ID, "client_ip": None, "target_id": 2}
+    ]
+
+
+def test_the_change_lines_are_the_pinned_ones() -> None:
+    assert {event.value for event in CHANGE_EVENTS} == CHANGES
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("event", sorted(CHANGES))
+def test_a_change_line_leaves_only_with_the_commit_of_its_transaction(
+    event: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with suppress(RolledBackError), transaction.atomic():
+        record_security_event(SecurityEvent(event), user_id=USER_ID)
+        raise RolledBackError
+    with transaction.atomic():
+        record_security_event(SecurityEvent(event), user_id=USER_ID)
+        assert lines(caplog) == []
+
+    assert lines(caplog) == [{"event": event, "user_id": USER_ID, "client_ip": None}]
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("event", sorted({event.value for event in SecurityEvent} - CHANGES))
+def test_any_other_line_is_written_at_once_also_in_a_transaction_that_rolls_back(
+    event: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with suppress(RolledBackError), transaction.atomic():
+        record_security_event(SecurityEvent(event), user_id=USER_ID)
+        assert len(lines(caplog)) == 1
+        raise RolledBackError
+
+    assert lines(caplog) == [{"event": event, "user_id": USER_ID, "client_ip": None}]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_savepoint_that_rolls_back_drops_only_its_own_change_lines(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with transaction.atomic():
+        record_security_event(SecurityEvent.EMAIL_ADDED, user_id=USER_ID)
+        with suppress(RolledBackError), transaction.atomic():
+            record_security_event(SecurityEvent.EMAIL_REMOVED, user_id=USER_ID)
+            raise RolledBackError
+        record_security_event(SecurityEvent.LOGOUT, user_id=USER_ID)
+
+    assert [line["event"] for line in lines(caplog)] == ["email_added", "logout"]
+
+
+class FailingHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        raise RuntimeError("security sink unavailable")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_change_line_that_cannot_be_written_at_the_commit_is_reported_and_skips_no_hook(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reported_failures(caplog, monkeypatch)
+    monkeypatch.setattr(logger, "handlers", [FailingHandler()])
+    later: list[str] = []
+
+    with transaction.atomic():
+        record_security_event(SecurityEvent.LOGOUT, user_id=USER_ID)
+        transaction.on_commit(lambda: later.append("ran"))
+
+    assert later == ["ran"]
+    assert [record.getMessage() for record in caplog.records] == [
+        "security_line_failed event=logout error_type=RuntimeError"
     ]

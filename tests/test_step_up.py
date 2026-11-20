@@ -2,8 +2,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterator
-from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import contextmanager
+from concurrent.futures import Future
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
 from typing import Any
@@ -25,7 +24,7 @@ from allauth.socialaccount.models import SocialAccount
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
 from django.core import mail
-from django.db import DatabaseError, connection, connections, transaction
+from django.db import DatabaseError, transaction
 from django.test import Client, override_settings
 
 from pyracast.accounts import adapters, processes, security, step_up
@@ -44,6 +43,7 @@ from tests.support.account_sessions import (
     moment,
     session_cookie,
     session_key,
+    session_row_held,
     session_user,
 )
 from tests.support.admin_mfa_bootstrap import run
@@ -1099,40 +1099,6 @@ def test_a_provider_callback_whose_session_ended_while_it_ran_answers_like_nothi
     assert session_user(jar) == user.pk
     # The same browser's callback, its session gone, finds nothing pending and answers alike.
     assert complete(client, state)["Location"] == response["Location"]
-
-
-@contextmanager
-def session_row_held(key: str) -> Iterator[None]:
-    # Another connection holds the session's row, and this connection waits at most 200 ms.
-    held, release = threading.Event(), threading.Event()
-
-    def hold() -> None:
-        try:
-            with transaction.atomic(), connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT 1 FROM django_session WHERE session_key = %s FOR UPDATE", [key]
-                )
-                held.set()
-                release.wait(10)
-        finally:
-            connections.close_all()
-
-    with connection.cursor() as cursor:
-        cursor.execute("SHOW lock_timeout")
-        row = cursor.fetchone()
-        assert row is not None
-        original = row[0]
-        cursor.execute("SET lock_timeout = '200ms'")
-    with ThreadPoolExecutor(1) as pool:
-        holding = pool.submit(hold)
-        try:
-            assert held.wait(10)
-            yield
-        finally:
-            release.set()
-            holding.result(timeout=10)
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT set_config('lock_timeout', %s, false)", [original])
 
 
 def test_a_provider_callback_whose_session_save_times_out_answers_busy_and_keeps_its_state(
