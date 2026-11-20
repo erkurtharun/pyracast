@@ -1,13 +1,25 @@
 "use client";
-import { createContext, useContext, useState, type ReactNode } from "react";
+import {
+    createContext,
+    useCallback,
+    useContext,
+    useState,
+    type ReactNode,
+} from "react";
 
 const Announce = createContext<(message: string) => void>(() => {});
 
 // Mounted once and empty before the first message, so assistive technology already watches it when a message arrives.
+// Each message replaces the node, so a repeated message is spoken again.
 export function LiveRegion({ children }: { children: ReactNode }) {
-    const [message, setMessage] = useState("");
+    const [message, setMessage] = useState({ text: "", count: 0 });
+    const announce = useCallback(
+        (text: string) =>
+            setMessage((current) => ({ text, count: current.count + 1 })),
+        [],
+    );
     return (
-        <Announce value={setMessage}>
+        <Announce value={announce}>
             {children}
             <div
                 className="sr-only"
@@ -15,7 +27,7 @@ export function LiveRegion({ children }: { children: ReactNode }) {
                 aria-live="polite"
                 aria-atomic="true"
             >
-                {message}
+                <span key={message.count}>{message.text}</span>
             </div>
         </Announce>
     );

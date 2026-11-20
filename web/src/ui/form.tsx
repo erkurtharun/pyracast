@@ -202,6 +202,7 @@ export function ControlField(
 
 export function CheckboxField({
     label,
+    name,
     onChange,
     ...input
 }: {
@@ -213,17 +214,22 @@ export function CheckboxField({
     disabled?: boolean;
     onChange?: (checked: boolean) => void;
 }) {
+    const control = useControl(name);
     return (
-        <label className="check-field">
-            <input
-                {...input}
-                type="checkbox"
-                onChange={
-                    onChange && ((event) => onChange(event.target.checked))
-                }
-            />{" "}
-            {label}
-        </label>
+        <>
+            <label className="check-field">
+                <input
+                    {...input}
+                    {...control.props}
+                    type="checkbox"
+                    onChange={
+                        onChange && ((event) => onChange(event.target.checked))
+                    }
+                />{" "}
+                {label}
+            </label>
+            <Messages id={control.id} error={control.error} />
+        </>
     );
 }
 
