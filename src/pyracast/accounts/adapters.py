@@ -35,6 +35,9 @@ from pyracast.notifications.intents import enqueue_lock_notice, enqueue_mail
 from pyracast.notifications.models import MAIL_CONTEXT_KEYS, OutboundMailKind
 
 NOTICE_LIFETIME = timedelta(days=1)
+TOTP_ACTIVATED = "mfa/email/totp_activated"
+RECOVERY_CODES_GENERATED = "mfa/email/recovery_codes_generated"
+WRITE_NOTICES = frozenset({TOTP_ACTIVATED, RECOVERY_CODES_GENERATED})
 CODE_TIMEOUTS = {
     "account/email/email_confirmation": "ACCOUNT_EMAIL_VERIFICATION_BY_CODE_TIMEOUT",
     "account/email/email_confirmation_signup": "ACCOUNT_EMAIL_VERIFICATION_BY_CODE_TIMEOUT",
@@ -195,6 +198,19 @@ class AccountAdapter(DefaultAccountAdapter):
         return True
 
     def send_notification_mail(
+        self,
+        template_prefix: str,
+        user: AbstractBaseUser,
+        context: dict[str, Any] | None = None,
+        email: str | None = None,
+    ) -> None:
+        # allauth sends these from the commit of their write, outside its transaction; the
+        # write's view stores them in that transaction instead (mfa_views).
+        if template_prefix in WRITE_NOTICES:
+            return
+        self.notify(template_prefix, user, context, email)
+
+    def notify(
         self,
         template_prefix: str,
         user: AbstractBaseUser,
