@@ -55,6 +55,7 @@ VALIDATION_FAILURES: tuple[tuple[str, int | None, str], ...] = (
     ("invalid_provider_interval", None, UNREADABLE_ANSWER),
     ("invalid_provider_endpoint", None, UNREADABLE_ANSWER),
     ("unsafe_provider_response", None, UNREADABLE_ANSWER),
+    ("provider_response_too_large", None, UNREADABLE_ANSWER),
     ("unsupported_provider", None, UNSUPPORTED_ACCOUNT),
     ("fixture_account_required", None, UNSUPPORTED_ACCOUNT),
 )

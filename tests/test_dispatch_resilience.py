@@ -196,7 +196,7 @@ def test_the_mail_purge_runs_beside_retention_steps_whose_items_failed(
     mock_runtime(monkeypatch)
     for name in ("dispatch_notifications", "dispatch_calibrations", "dispatch_epias"):
         monkeypatch.setattr(command, name, MagicMock(return_value=0))
-    monkeypatch.setattr(command, "dispatch", MagicMock(return_value=PhaseOutcome()))
+    monkeypatch.setattr(command, "dispatch_collections", MagicMock(return_value=PhaseOutcome()))
     monkeypatch.setattr(command, "purge_expired", MagicMock(side_effect=ItemsFailedError(1)))
     monkeypatch.setattr(command, "sweep_accounts", MagicMock(side_effect=ItemsFailedError(2)))
     purge_mail = MagicMock()

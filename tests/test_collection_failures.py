@@ -114,6 +114,18 @@ def test_unreachable_provider_and_unusable_answer_have_their_own_outcomes() -> N
 
 
 @pytest.mark.django_db(transaction=True)
+def test_secret_echoing_answer_fails_once_without_a_second_request() -> None:
+    keyed_system()
+    job = CollectionJob.objects.get()
+    provider = solcast(lambda request: httpx.Response(200, json={"error": "test-credential"}))
+    assert not collect(job.pk, provider, calculate, NOW)
+    job.refresh_from_db()
+    assert (job.status, job.last_error) == ("failed", "provider_invalid_response")
+    assert not collect(job.pk, provider, calculate, NOW + timedelta(hours=1))
+    assert RequestAttempt.objects.filter(purpose="forecast").count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
 def test_payload_postgresql_cannot_store_fails_once_without_a_second_request() -> None:
     keyed_system()
     job = CollectionJob.objects.get()

@@ -56,6 +56,11 @@ ORCHESTRATION_MODULES = {
 
 # Each entry is an import against the layer order that is not resolved yet, with its reason.
 BACK_EDGES: dict[tuple[str, str], str] = {
+    ("accounts.account_mail", "notifications.models"): "account mail goes through the outbox",
+    ("accounts.adapters", "notifications.intents"): "account mail goes through the outbox",
+    ("accounts.adapters", "notifications.models"): "account mail goes through the outbox",
+    ("accounts.invitations", "notifications.intents"): "account mail goes through the outbox",
+    ("accounts.invitations", "notifications.models"): "account mail goes through the outbox",
     (
         "accounts.operations",
         "notifications.recipients",
@@ -141,7 +146,7 @@ FUNCTION_IMPORTS: dict[tuple[str, str], str] = {
         "accounts.operations",
         "plants.automation",
     ): "member removal and administrator change call notifications and plants explicitly",
-    ("forecasts.actuals", "forecasts.history"): "snapshot composition lives in plants",
+    ("forecasts.actuals", "forecasts.history"): "breaks an import cycle",
     (
         "forecasts.historical_import",
         "plants.preparation",
@@ -211,9 +216,8 @@ def _modules() -> Iterator[tuple[str, ast.Module]]:
 def _names(node: ast.Import | ast.ImportFrom) -> list[str]:
     if isinstance(node, ast.Import):
         return [alias.name for alias in node.names]
-    if node.module == "pyracast":
-        return [f"pyracast.{alias.name}" for alias in node.names]
-    return [node.module or ""]
+    # Each name may be a submodule; _internal trims it to the longest module that exists.
+    return [f"{node.module}.{alias.name}" for alias in node.names]
 
 
 def _imports(tree: ast.Module) -> Iterator[tuple[str, bool]]:
@@ -265,6 +269,12 @@ def framework_imports_in_pure_modules() -> set[tuple[str, str]]:
         for name, _nested in _imports(tree)
         if name.split(".")[0] in FRAMEWORKS
     }
+
+
+def test_a_module_imported_from_its_package_keeps_its_own_layer() -> None:
+    tree = ast.parse("from pyracast.forecasts import views\nfrom pyracast import errors\n")
+    imported = {name for name, _nested in _internal(tree, {"forecasts", "forecasts.views"})}
+    assert imported == {"forecasts.views", "errors"}
 
 
 def test_every_module_belongs_to_a_layer() -> None:

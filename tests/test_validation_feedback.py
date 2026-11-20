@@ -63,6 +63,7 @@ TURKISH_FAILURES: dict[tuple[str, int | None], str] = {
     ("invalid_provider_interval", None): UNREADABLE_ANSWER_TR,
     ("invalid_provider_endpoint", None): UNREADABLE_ANSWER_TR,
     ("unsafe_provider_response", None): UNREADABLE_ANSWER_TR,
+    ("provider_response_too_large", None): UNREADABLE_ANSWER_TR,
     ("unsupported_provider", None): UNSUPPORTED_ACCOUNT_TR,
     ("fixture_account_required", None): UNSUPPORTED_ACCOUNT_TR,
     ("unrecognized_failure", None): (

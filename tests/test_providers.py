@@ -230,5 +230,6 @@ def test_secret_echoing_success_bodies_are_rejected(body: bytes) -> None:
     def handle(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=body)
 
-    with pytest.raises(ProviderError, match=r"^unsafe_provider_response$"):
+    with pytest.raises(ProviderError, match=r"^unsafe_provider_response$") as caught:
         SolcastProvider(httpx.MockTransport(handle)).fetch(binding_for(), TARGET)
+    assert not caught.value.retryable

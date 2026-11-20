@@ -100,7 +100,7 @@ def test_shutdown_finishes_active_work_and_closes_broker(
                 command.make_actor = MagicMock()
                 command.purge_expired = lambda now: record("ready")
                 command.sweep_accounts = MagicMock()
-                command.dispatch = MagicMock()
+                command.dispatch_collections = MagicMock()
                 command.dispatch_calibrations = MagicMock()
                 command.dispatch_notifications = MagicMock()
                 command.dispatch_epias = MagicMock()

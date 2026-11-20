@@ -241,26 +241,25 @@ def solcast_get(
                     if response.status_code in {429, 503}
                     else None,
                     status_code=response.status_code,
-                )
+                ) from None
             body = read_bounded(response, started).decode("utf-8")
             headers = response.headers
     except UnboundedResponseError as exc:
-        raise ProviderError(
-            "provider_response_too_large" if exc.too_large else "provider_request_failed",
-            retryable=not exc.too_large,
-        ) from None
-    except UnicodeDecodeError:
+        if exc.too_large:
+            raise ProviderError("provider_response_too_large", retryable=False) from None
+        raise ProviderError("provider_request_failed") from None
+    except httpx.DecodingError, UnicodeDecodeError:
         raise ProviderError("invalid_provider_schema") from None
     except httpx.HTTPError:
         raise ProviderError("provider_request_failed") from None
     if secret in body:
-        raise ProviderError("unsafe_provider_response")
+        raise ProviderError("unsafe_provider_response", retryable=False)
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
         raise ProviderError("invalid_provider_schema") from None
     if contains_text(payload, secret) or contains_text(dict(headers), secret):
-        raise ProviderError("unsafe_provider_response")
+        raise ProviderError("unsafe_provider_response", retryable=False)
     return SolcastAnswer(payload, headers)
 
 
