@@ -1146,3 +1146,49 @@ def test_a_lock_notice_is_stamped_once_its_address_lock_is_granted(
     notice = OutboundMail.objects.get(kind="account/email/login_locked")
     granted = asked + timedelta(seconds=4)
     assert (notice.created_at, notice.expires_at) == (granted, granted + timedelta(hours=24))
+
+
+def test_without_a_daily_allowance_nothing_is_reserved_forgotten_or_locked() -> None:
+    request = RequestFactory().post("/")
+
+    with override_settings(ACCOUNT_RATE_LIMITS={"login_failed": ""}):
+        reservation = login_limits.reserve_address_failure(request, "member@example.com")
+
+        assert reservation is not None
+        assert reservation.usage == []
+        assert not login_limits.locked_on_finished_failures("daily")
+
+
+def test_an_unfinished_check_that_another_worker_already_forgot_leaves_the_history_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = RequestFactory().post("/")
+    history = login_limits.failure_history(request, "member@example.com")
+    assert history is not None
+    cache.set(history, [time.time() - login_limits.REQUEST_CEILING_SECONDS - 10], 86400)
+    cache_lock = ratelimit.cache_lock
+
+    @contextmanager
+    def lock_after_another_worker(cache_key: str) -> Iterator[bool]:
+        with cache_lock(cache_key) as locked:
+            cache.set(cache_key, [], 86400)
+            yield locked
+
+    monkeypatch.setattr(ratelimit, "cache_lock", lock_after_another_worker)
+
+    login_limits.reserve_address_failure(request, "member@example.com")
+
+    assert len(cache.get(history)) == 1
+
+
+def test_a_failure_without_an_address_that_locks_queues_no_lock_notice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(adapters, "locked_on_finished_failures", lambda history: True)
+    slot = ratelimit.SingleRateLimitUsage(cache_key="daily", cache_duration=86400, timestamp=1.0)
+    adapter = AccountAdapter()
+    adapter._login_failed_rl_usage = ratelimit.RateLimitUsage(usage=[slot])
+
+    adapter.authentication_failed(RequestFactory().post("/"), password=WRONG)
+
+    assert lock_notices() == []

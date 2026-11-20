@@ -625,3 +625,11 @@ def test_ended_intents_are_purged_after_a_week(
 
     assert purge_finished_mail(finished + timedelta(seconds=1)) == 1
     assert list(OutboundMail.objects.values_list("pk", flat=True)) == [second.pk]
+
+
+def test_an_outbound_mail_names_its_kind_and_status() -> None:
+    from pyracast.notifications.models import OutboundMail
+
+    mail = OutboundMail(pk=7, kind="workspace_invitation", status="pending")
+
+    assert str(mail) == "Outbound mail 7 (workspace_invitation): pending"
