@@ -289,6 +289,9 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     assert all(row["purge_started_at"] is None for row in after["regions_region"])
     for row in after["regions_region"]:
         del row["purge_started_at"]
+    assert all(row["updated_at"] == row["created_at"] for row in after["plants_plantsubmission"])
+    for row in after["plants_plantsubmission"]:
+        del row["updated_at"]
     assert after.pop("notifications_outboundmail") == []
     assert [after.pop(table) for table in RECIPIENT_TABLES] == [[], [], []]
     revisions = after.pop("metering_epiasconnectionrevision")
