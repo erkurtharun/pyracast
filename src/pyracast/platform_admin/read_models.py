@@ -162,8 +162,16 @@ def summarize_plant(region: WithAnnotations[Region, WorkspaceAnnotations]) -> Pl
     )
 
 
-def plant_list_context(query: str, status: str, page: str, issue: str = "") -> dict[str, Any]:
+def plant_list_context(
+    query: str, status: str, page: str, issue: str = "", *, location_change: str = ""
+) -> dict[str, Any]:
     regions = workspace_regions()
+    if location_change == LocationChangeStatus.PENDING:
+        regions = regions.filter(
+            regionlocationchangerequest__status=LocationChangeStatus.PENDING
+        ).distinct()
+    else:
+        location_change = ""
     health_filter = None
     if issue:
         now = timezone.now()
@@ -189,6 +197,7 @@ def plant_list_context(query: str, status: str, page: str, issue: str = "") -> d
         "status": status,
         "status_choices": RegionStatus.choices,
         "health_filter": health_filter,
+        "location_change": location_change,
     }
 
 
@@ -202,7 +211,9 @@ def overview_context() -> dict[str, Any]:
             for row in regions.values("status").annotate(count=Count("pk")).order_by()
         }
     )
-    counts["total"] = sum(counts.values())
+    counts["needs_attention"] = sum(
+        summarize_plant(region).connection == "Needs attention" for region in regions
+    )
     counts["location_changes"] = RegionLocationChangeRequest.objects.filter(
         active_region("region__"), status=LocationChangeStatus.PENDING
     ).count()
@@ -237,13 +248,20 @@ def overview_context() -> dict[str, Any]:
 def recent_activity_context(
     region_id: int | None = None, *, limit: int = 5
 ) -> list[dict[str, Any]]:
-    events = AuditEvent.objects.filter(active_region("region__"), region__isnull=False)
+    """Events of live plants and, on the overview, of provider accounts."""
+    events = AuditEvent.objects.filter(
+        Q(active_region("region__"), region__isnull=False) | Q(provider_account__isnull=False)
+    )
     if region_id is not None:
         events = events.filter(region_id=region_id)
     return [
         {**row, "action_label": str(AuditAction(row["action"]).label)}
         for row in events.order_by("-created_at", "-pk").values(
-            "action", "created_at", "region__name", "actor__username"
+            "action",
+            "created_at",
+            "region__name",
+            "provider_account__external_account_id",
+            "actor__username",
         )[:limit]
     ]
 

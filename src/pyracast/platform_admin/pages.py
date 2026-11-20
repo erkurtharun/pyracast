@@ -28,6 +28,7 @@ def plants(request: HttpRequest, *, site: PlatformAdminSite) -> HttpResponse:
         request.GET.get("status", ""),
         request.GET.get("page", "1"),
         request.GET.get("issue", "")[:80],
+        location_change=request.GET.get("location_change", ""),
     )
     query = request.GET.copy()
     query.pop("page", None)

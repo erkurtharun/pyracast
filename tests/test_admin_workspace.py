@@ -126,12 +126,12 @@ def test_workspace_search_filters_pagination_and_safe_cross_company_summaries() 
     assert "encrypted_api_key" not in str(summary)
     overview = overview_context()
     assert overview["counts"] == {
-        "total": 22,
         "pending": 1,
         "approved": 0,
         "suspended": 21,
         "rejected": 0,
         "location_changes": 0,
+        "needs_attention": 0,
     }
     assert len(overview["review_plants"]) == 1
 
