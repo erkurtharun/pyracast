@@ -30,14 +30,18 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         if binding.region.approved_binding_id != binding.pk:
             continue
         schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
-        if schedule is not None and not schedule.enabled:
+        first_slot = (
+            CollectionJob.objects.filter(binding=binding, endpoint="forecasts")
+            .order_by("created_at", "pk")
+            .values_list("scheduled_for", flat=True)
+            .first()
+        )
+        if first_slot is None or (schedule is not None and not schedule.enabled):
             continue
-        jobs = list(CollectionJob.objects.filter(binding=binding, endpoint="forecasts"))
-        if not jobs:
-            continue
-        effective = schedule.effective_from if schedule else min(job.scheduled_for for job in jobs)
         clocks = schedule.times if schedule else [settings.PYRACAST_CUTOFF_LOCAL.strftime("%H:%M")]
         clocks = clocks[: max(account.daily_quota - 1, 0)]
+        effective = max(first_slot, schedule.effective_from) if schedule else first_slot
+        jobs = list(CollectionJob.objects.filter(binding=binding, endpoint="forecasts"))
         paid_or_terminal = {
             job.scheduled_for
             for job in jobs

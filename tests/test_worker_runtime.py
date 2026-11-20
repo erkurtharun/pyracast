@@ -21,9 +21,16 @@ from pyracast.background.failures import PhaseOutcome, queue_depth, queue_full
 from pyracast.forecasts import runtime
 from pyracast.forecasts.management.commands import worker as command
 from pyracast.metering.runtime import dispatch_epias, make_epias_actor
+from pyracast.notifications.runtime import make_outbound_mail_actor, publish_outbound_mail
 from pyracast.shutdown import ShutdownRequest
 
-FACTORIES = ("make_actor", "make_calibration_actor", "make_notification_actor", "make_epias_actor")
+FACTORIES = (
+    "make_actor",
+    "make_calibration_actor",
+    "make_notification_actor",
+    "make_outbound_mail_actor",
+    "make_epias_actor",
+)
 
 
 def test_the_worker_arms_each_actor_time_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -69,12 +76,13 @@ def test_the_worker_drains_for_ten_minutes(monkeypatch: pytest.MonkeyPatch) -> N
     broker.emit_after.assert_called_once_with("process_boot")
 
 
+@pytest.mark.parametrize("configured", ["", "  "])
 def test_a_missing_broker_url_stops_production_processes_at_start(
-    settings: LazySettings, monkeypatch: pytest.MonkeyPatch
+    settings: LazySettings, monkeypatch: pytest.MonkeyPatch, configured: str
 ) -> None:
     monkeypatch.delenv("PYRACAST_RABBITMQ_URL", raising=False)
     settings.DEBUG = False
-    settings.PYRACAST_RABBITMQ_URL = ""
+    settings.PYRACAST_RABBITMQ_URL = configured
 
     with pytest.raises(ImproperlyConfigured, match="PYRACAST_RABBITMQ_URL"):
         broker_module.make_broker()
@@ -153,6 +161,23 @@ def test_a_queue_ten_batches_deep_receives_no_more_metering_jobs(
 
     assert dispatch_epias(actor) == 0
     assert broker.queues[actor.queue_name].qsize() == 1000
+
+
+def test_a_queue_ten_batches_deep_receives_no_more_mail(monkeypatch: pytest.MonkeyPatch) -> None:
+    broker = StubBroker()
+    actor = make_outbound_mail_actor(broker)
+    for identifier in range(1000):
+        actor.send(identifier)
+    expired, publish = MagicMock(return_value=0), MagicMock(return_value=2)
+    monkeypatch.setattr("pyracast.notifications.runtime.end_expired_mail", expired)
+    monkeypatch.setattr("pyracast.notifications.runtime.publish_due_mail", publish)
+
+    assert publish_outbound_mail(actor) == 0
+    expired.assert_called_once()
+    publish.assert_not_called()
+    broker.queues[actor.queue_name].get_nowait()
+
+    assert publish_outbound_mail(actor) == 2
 
 
 def test_the_queue_depth_comes_from_the_broker_holding_the_queue(

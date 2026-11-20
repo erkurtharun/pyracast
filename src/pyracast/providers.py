@@ -21,7 +21,7 @@ from pyracast.connections.models import SiteBinding
 from pyracast.connections.secrets import decrypt_api_key
 from pyracast.intervals import NormalizedInterval, Sunlight
 from pyracast.irradiance import local_day_bounds
-from pyracast.outbound import UnboundedResponseError, read_bounded
+from pyracast.outbound import TIMEOUT, UnboundedResponseError, read_bounded
 from pyracast.provider_retry import retry_after_seconds, retryable_status
 
 
@@ -223,9 +223,7 @@ def solcast_get(
     started = time.monotonic()
     try:
         with (
-            httpx.Client(
-                timeout=httpx.Timeout(20, connect=5), transport=transport, follow_redirects=False
-            ) as client,
+            httpx.Client(timeout=TIMEOUT, transport=transport, follow_redirects=False) as client,
             client.stream(
                 "GET",
                 f"https://api.solcast.com.au{path}",

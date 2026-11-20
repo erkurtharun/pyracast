@@ -7,22 +7,33 @@ from django.db import migrations, models
 from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.migrations.operations.base import Operation
 
+INTEGER_MAX = 2**31 - 1
+BIGINT_MAX = 2**63 - 1
 
-def _identifier(value: object) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+def _identifier(value: object, maximum: int) -> int | None:
+    return (
+        value
+        if isinstance(value, int) and not isinstance(value, bool) and 0 < value <= maximum
+        else None
+    )
 
 
-def copy_connection_events(apps: Apps, _schema_editor: BaseDatabaseSchemaEditor | None) -> None:
+def copy_connection_events(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     """One revision per stored epias_connected event, at the event's time; the events stay as
     history. An event without a usable identity or connection, or naming a revision already
     stored with another identity, is skipped and counted."""
+    alias = schema_editor.connection.alias
     connections = dict(
-        apps.get_model("metering", "EpiasConnection")._default_manager.values_list("plant_id", "pk")
+        apps.get_model("metering", "EpiasConnection")
+        ._default_manager.using(alias)
+        .values_list("plant_id", "pk")
     )
-    revisions = apps.get_model("metering", "EpiasConnectionRevision")._default_manager
+    revisions = apps.get_model("metering", "EpiasConnectionRevision")._default_manager.using(alias)
     events = (
         apps.get_model("plants", "PlantEvent")
-        ._default_manager.filter(action="epias_connected")
+        ._default_manager.using(alias)
+        .filter(action="epias_connected")
         .order_by("created_at", "pk")
         .values_list("plant_id", "details", "created_at")
     )
@@ -30,8 +41,8 @@ def copy_connection_events(apps: Apps, _schema_editor: BaseDatabaseSchemaEditor 
     for plant_id, details, created_at in events.iterator():
         identity = details if isinstance(details, dict) else {}
         connection_id = connections.get(plant_id)
-        revision = _identifier(identity.get("revision"))
-        provider_plant_id = _identifier(identity.get("provider_plant_id"))
+        revision = _identifier(identity.get("revision"), INTEGER_MAX)
+        provider_plant_id = _identifier(identity.get("provider_plant_id"), BIGINT_MAX)
         eic = identity.get("eic")
         if (
             connection_id is None

@@ -5,7 +5,7 @@ import pytest
 
 from pyracast.epias import AUTH_URL, EpiasClient, EpiasError
 from pyracast.metering import client
-from pyracast.metering.jobs import run_epias_job
+from pyracast.metering.jobs import claim_epias_job, pending_epias_ids, run_epias_job
 from pyracast.metering.models import EpiasCollectionJob
 from tests.support.domain import NOW
 from tests.support.epias import PASSWORD, PLANT, TICKET, USERNAME
@@ -103,6 +103,34 @@ def test_a_job_tells_rejected_credentials_from_a_provider_outage(
     job.refresh_from_db()
     assert (job.status, job.attempts, job.last_error) == outcome
     assert job.available_at > NOW
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("expire", ["publication", "claim"])
+@pytest.mark.parametrize("error", ["epias_credentials_missing", "epias_credentials_rejected"])
+def test_a_night_that_ends_without_usable_credentials_keeps_their_cause(
+    monkeypatch: pytest.MonkeyPatch, expire: str, error: str
+) -> None:
+    connected(monkeypatch)
+    job = EpiasCollectionJob.objects.order_by("pk").first()
+    assert job is not None
+    EpiasCollectionJob.objects.filter(pk=job.pk).update(
+        retry_until=NOW, available_at=NOW, last_error=error
+    )
+    other = EpiasCollectionJob.objects.exclude(pk=job.pk).order_by("pk").first()
+    assert other is not None
+    EpiasCollectionJob.objects.filter(pk=other.pk).update(retry_until=NOW, available_at=NOW)
+
+    if expire == "publication":
+        assert job.pk not in pending_epias_ids(NOW)
+    else:
+        assert claim_epias_job(job.pk, NOW) is None
+
+    job.refresh_from_db()
+    assert (job.status, job.attempts, job.last_error) == ("failed", 0, error)
+    if expire == "publication":
+        other.refresh_from_db()
+        assert (other.status, other.last_error) == ("failed", "retry_window_expired")
 
 
 @pytest.mark.usefixtures("no_cached_client")

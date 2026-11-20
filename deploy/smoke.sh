@@ -141,7 +141,6 @@ database_log=$("${compose[@]}" logs --no-log-prefix postgres)
 "${compose[@]}" run --rm --no-deps migrate
 "${bootstrap[@]}" converge "$temporary" "$temporary"
 "${compose[@]}" run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING
-# Without its broker URL a release fails its deployment check and a worker refuses to start.
 no_broker=("${compose[@]}" run --rm -T --no-deps --env PYRACAST_RABBITMQ_URL=)
 if "${no_broker[@]}" migrate pyracast check --deploy --fail-level WARNING; then exit 1; fi
 refused=0
@@ -455,7 +454,8 @@ dump_database(release, release / 'database.dump')
 restore_archive(release, release / 'database.dump', 'local-smoke')
 PY
 "${compose[@]}" exec -T api pyracast dispatch
-"${compose[@]}" stop -t 30 dispatcher worker notifications
+"${compose[@]}" stop -t 30 dispatcher
+"${compose[@]}" stop -t 30 worker notifications
 # Each drained and exited by itself; a container stopped by SIGKILL exits with 137.
 for service in dispatcher worker notifications; do
   [[ $(docker inspect --format '{{.State.ExitCode}}' "$("${compose[@]}" ps -aq "$service")") == 0 ]]

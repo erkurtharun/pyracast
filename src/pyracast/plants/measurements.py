@@ -480,7 +480,7 @@ def production_identity_at(run: CalibrationRun, as_of: datetime) -> bool:
         EpiasConnectionRevision.objects.filter(
             connection__plant_id=run.plant_id, connected_at__lte=as_of
         )
-        .order_by("-connected_at", "-pk")
+        .order_by("-connected_at", "-revision")
         .first()
     )
     if identity is None:

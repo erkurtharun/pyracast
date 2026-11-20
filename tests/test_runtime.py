@@ -72,17 +72,32 @@ def test_rabbitmq_broker_configuration(
 ) -> None:
     constructor = MagicMock()
     monkeypatch.setattr(broker_module, "RabbitmqBroker", constructor)
-    settings.PYRACAST_RABBITMQ_URL = "amqp://example.invalid/test?heartbeat=60"
+    settings.PYRACAST_RABBITMQ_URL = "amqp://example.invalid/test"
     broker_module.make_broker()
     parameters = parse_qs(urlsplit(constructor.call_args.kwargs["url"]).query)
     assert parameters == {
         "socket_timeout": ["5"],
         "stack_timeout": ["10"],
         "blocked_connection_timeout": ["10"],
-        "heartbeat": ["60"],
+        "heartbeat": ["30"],
         "connection_attempts": ["1"],
     }
     assert constructor.call_args.kwargs["confirm_delivery"] is True
+
+
+def test_rabbitmq_failover_urls_preserve_explicit_parameters(settings: LazySettings) -> None:
+    settings.PYRACAST_RABBITMQ_URL = (
+        "amqp://node1.invalid/?heartbeat=60;amqp://node2.invalid/?socket_timeout=8"
+    )
+    broker = broker_module.make_broker()
+    first, second = broker.parameters
+    assert first.host == "node1.invalid"
+    assert first.heartbeat == 60
+    assert first.socket_timeout == 5
+    assert second.host == "node2.invalid"
+    assert second.socket_timeout == 8
+    assert second.blocked_connection_timeout == 10
+    broker.close()
 
 
 def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:

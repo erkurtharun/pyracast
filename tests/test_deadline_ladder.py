@@ -2,27 +2,34 @@ import inspect
 import math
 import re
 import runpy
+from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import MagicMock
+from urllib.parse import parse_qs, urlsplit
 
+import httpx
 import pytest
 import yaml
-from django.conf import settings
+from django.conf import LazySettings, settings
 from dramatiq.brokers.stub import StubBroker
 
 from pyracast import outbound
+from pyracast.background import broker as broker_module
 from pyracast.background import deadlines
 from pyracast.forecasts import jobs as collection_jobs
 from pyracast.forecasts.management.commands import dispatch, worker
 from pyracast.metering import jobs as metering_jobs
 from pyracast.notifications import jobs as notification_jobs
+from pyracast.notifications import outbox
 from pyracast.plants import training
 from pyracast.plants.training import pending_calibration_ids
 from scripts import dev as launcher
 
 DEPLOY = Path(__file__).resolve().parents[1] / "deploy"
 SETTINGS = DEPLOY.parent / "src" / "pyracast" / "settings.py"
+MAIL_ACTORS = ("send_forecast_reminder", "send_outbound_mail")
 
 
 def compose_services() -> dict[str, dict[str, Any]]:
@@ -54,8 +61,11 @@ def test_every_registered_actor_runs_under_its_bound() -> None:
 
 
 def test_mail_actors_are_never_interrupted_after_their_transmit_marker() -> None:
-    assert deadlines.ACTORS["send_forecast_reminder"].time_limit is None
-    assert registered_actors()["send_forecast_reminder"].options["time_limit"] == math.inf
+    actors = registered_actors()
+
+    for name in MAIL_ACTORS:
+        assert deadlines.ACTORS[name].time_limit is None, name
+        assert actors[name].options["time_limit"] == math.inf, name
 
 
 def test_an_interrupted_actor_stops_before_its_lease_can_be_claimed_again() -> None:
@@ -66,13 +76,60 @@ def test_an_interrupted_actor_stops_before_its_lease_can_be_claimed_again() -> N
             deadlines.MAIL_SOCKET_SECONDS,
         )
     )
+    commit = timedelta(seconds=deadlines.DATABASE_STATEMENT_SECONDS)
+
+    assert timedelta(0) < deadlines.LAST_REQUEST_START
     for name, bound in deadlines.ACTORS.items():
         if bound.time_limit is not None:
             assert bound.time_limit + blocking_call < bound.lease, name
-            assert bound.time_limit > deadlines.LAST_REQUEST_START + deadlines.PROVIDER_REQUEST
+            assert (
+                deadlines.LAST_REQUEST_START + deadlines.PROVIDER_REQUEST + commit
+                <= bound.time_limit
+            ), name
 
 
-def test_the_time_limit_is_a_backstop_above_the_measured_fit() -> None:
+def test_a_provider_request_ends_within_its_body_deadline_and_one_read() -> None:
+    assert (
+        deadlines.HTTP_CONNECT_SECONDS < deadlines.HTTP_READ_SECONDS <= deadlines.HTTP_BODY_SECONDS
+    )
+    assert (
+        timedelta(seconds=deadlines.HTTP_BODY_SECONDS + deadlines.HTTP_READ_SECONDS)
+        <= deadlines.PROVIDER_REQUEST
+    )
+    assert (
+        httpx.Timeout(deadlines.HTTP_READ_SECONDS, connect=deadlines.HTTP_CONNECT_SECONDS)
+        == outbound.TIMEOUT
+    )
+
+
+class Chunks(httpx.SyncByteStream):
+    def __iter__(self) -> Iterator[bytes]:
+        yield from (b"a", b"b", b"c")
+
+
+@pytest.mark.parametrize(
+    ("elapsed", "complete"),
+    [
+        ((1, deadlines.HTTP_BODY_SECONDS, deadlines.HTTP_BODY_SECONDS), True),
+        ((1, 2, deadlines.HTTP_BODY_SECONDS + 1), False),
+    ],
+)
+def test_an_answer_body_is_read_until_the_ladder_body_deadline(
+    monkeypatch: pytest.MonkeyPatch, elapsed: tuple[int, ...], complete: bool
+) -> None:
+    clock = iter(elapsed)
+    monkeypatch.setattr("time.monotonic", lambda: next(clock))
+    response = httpx.Response(200, stream=Chunks())
+
+    if complete:
+        assert outbound.read_bounded(response, 0) == b"abc"
+    else:
+        with pytest.raises(outbound.UnboundedResponseError) as error:
+            outbound.read_bounded(response, 0)
+        assert error.value.too_large is False
+
+
+def test_the_calibration_time_limit_is_a_backstop_above_the_measured_fit() -> None:
     calibration = deadlines.ACTORS["calibrate_plant"]
 
     assert calibration.time_limit is not None
@@ -84,6 +141,7 @@ def test_job_leases_are_the_ladder_leases() -> None:
     assert deadlines.ACTORS["collect_epias"].lease == metering_jobs.LEASE_DURATION
     assert deadlines.ACTORS["calibrate_plant"].lease == training.LEASE_DURATION
     assert deadlines.ACTORS["send_forecast_reminder"].lease == notification_jobs.LEASE_DURATION
+    assert deadlines.ACTORS["send_outbound_mail"].lease == outbox.LEASE_DURATION
 
 
 def test_the_drain_outlasts_every_actor_and_the_stop_grace_outlasts_the_drain() -> None:
@@ -102,6 +160,24 @@ def test_the_drain_outlasts_every_actor_and_the_stop_grace_outlasts_the_drain() 
 
 def test_the_worker_drains_for_the_drain_bound() -> None:
     assert deadlines.DRAIN.total_seconds() * 1000 == worker.DRAIN_MILLISECONDS
+
+
+def test_the_smoke_drains_the_dispatcher_before_its_consumers() -> None:
+    stops = [
+        tuple(match[1].split())
+        for match in re.finditer(
+            r'^"\$\{compose\[@\]\}" stop -t \d+ ([a-z ]+)$',
+            (DEPLOY / "smoke.sh").read_text(encoding="utf-8"),
+            re.M,
+        )
+    ]
+    background = [stop for stop in stops if {"dispatcher", "worker", "notifications"} & set(stop)]
+
+    assert background
+    for index, stop in enumerate(background):
+        if "dispatcher" in stop:
+            assert stop == ("dispatcher",)
+            assert set(background[index + 1]) == {"worker", "notifications"}
 
 
 def test_the_dispatcher_polls_well_inside_its_heartbeat_lag() -> None:
@@ -132,14 +208,32 @@ def test_database_sessions_carry_the_ladder_timeouts() -> None:
         in options
     )
     assert (
-        deadlines.DATABASE_LOCK_SECONDS
+        deadlines.DATABASE_CONNECT_SECONDS
+        <= deadlines.DATABASE_LOCK_SECONDS
         < deadlines.DATABASE_STATEMENT_SECONDS
         < deadlines.DATABASE_IDLE_IN_TRANSACTION_SECONDS
     )
 
 
-def test_provider_bodies_are_read_within_the_ladder_deadline() -> None:
-    assert deadlines.HTTP_BODY_SECONDS == outbound.READ_DEADLINE_SECONDS
+def test_the_broker_connection_carries_the_ladder_bounds(
+    monkeypatch: pytest.MonkeyPatch, settings: LazySettings
+) -> None:
+    constructor = MagicMock()
+    monkeypatch.setattr(broker_module, "RabbitmqBroker", constructor)
+    settings.PYRACAST_RABBITMQ_URL = "amqp://example.invalid/"
+
+    broker_module.make_broker()
+
+    parameters = parse_qs(urlsplit(constructor.call_args.kwargs["url"]).query)
+    assert parameters["socket_timeout"] == [str(deadlines.BROKER_SOCKET_SECONDS)]
+    assert parameters["stack_timeout"] == [str(deadlines.BROKER_CALL_SECONDS)]
+    assert parameters["blocked_connection_timeout"] == [str(deadlines.BROKER_CALL_SECONDS)]
+    assert parameters["heartbeat"] == [str(deadlines.BROKER_HEARTBEAT_SECONDS)]
+    assert (
+        deadlines.BROKER_SOCKET_SECONDS
+        < deadlines.BROKER_CALL_SECONDS
+        < deadlines.BROKER_HEARTBEAT_SECONDS
+    )
 
 
 @pytest.mark.parametrize("backend", ["smtp", "gmail"])

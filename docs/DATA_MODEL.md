@@ -20,7 +20,7 @@ no model and is not shown.
 
 ## Overview
 
-59 tables and 115 single-column foreign keys.
+60 tables and 116 single-column foreign keys.
 
 ```mermaid
 erDiagram

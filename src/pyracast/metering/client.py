@@ -5,6 +5,7 @@ from threading import Lock
 import httpx
 
 from pyracast.epias import CREDENTIALS_MISSING, EpiasClient, EpiasCredentialsError
+from pyracast.outbound import TIMEOUT
 
 _client_lock = Lock()
 
@@ -20,4 +21,4 @@ def _cached_client() -> EpiasClient:
     password = os.environ.get("EPIAS_PASSWORD", "")
     if not username or not password:
         raise EpiasCredentialsError(CREDENTIALS_MISSING)
-    return EpiasClient(httpx.Client(timeout=30), username=username, password=password)
+    return EpiasClient(httpx.Client(timeout=TIMEOUT), username=username, password=password)

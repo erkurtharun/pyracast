@@ -1,9 +1,11 @@
 import importlib
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from django.apps import apps
+from django.db import connection
 from django.utils import timezone
 
 from pyracast.metering.models import EpiasConnection
@@ -88,6 +90,8 @@ def test_the_revision_table_replays_every_connection_event_once(
         {"provider_plant_id": True, "eic": "EIC", "revision": 4},
         {"provider_plant_id": 2, "eic": "", "revision": 4},
         {"provider_plant_id": 10, "eic": "OTHER", "revision": 1},
+        {"provider_plant_id": 2, "eic": "EIC", "revision": 2**31},
+        {"provider_plant_id": 2**63, "eic": "EIC", "revision": 4},
     ):
         event(
             monkeypatch, other if malformed.get("eic") == "OTHER" else reconnected, NOW, malformed
@@ -107,7 +111,7 @@ def test_the_revision_table_replays_every_connection_event_once(
         (second.pk, 1, 9, "OTHER", moments[0]),
     ]
     assert stored() == expected
-    assert "EPIAS connection revisions: 4 written, 6 skipped." in capsys.readouterr().out
+    assert "EPIAS connection revisions: 4 written, 8 skipped." in capsys.readouterr().out
     run = CalibrationRun(
         plant=reconnected, configuration=configuration, production_snapshot_ids=[snapshot.pk]
     )
@@ -115,6 +119,6 @@ def test_the_revision_table_replays_every_connection_event_once(
     assert not production_identity_at(run, NOW + timedelta(hours=3))
 
     backfill: Any = importlib.import_module(MIGRATION).copy_connection_events
-    backfill(apps, None)
+    backfill(apps, SimpleNamespace(connection=connection))
     assert stored() == expected
-    assert "EPIAS connection revisions: 0 written, 6 skipped." in capsys.readouterr().out
+    assert "EPIAS connection revisions: 0 written, 8 skipped." in capsys.readouterr().out

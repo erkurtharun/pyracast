@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from pyracast.outbound import UnboundedResponseError, read_bounded
+from pyracast.outbound import TIMEOUT, UnboundedResponseError, read_bounded
 from pyracast.weather_data import (
     HOURLY_UNITS,
     WeatherData,
@@ -77,7 +77,7 @@ class OpenMeteoProvider:
             with (
                 httpx.Client(
                     transport=transport,
-                    timeout=httpx.Timeout(20, connect=5),
+                    timeout=TIMEOUT,
                     follow_redirects=False,
                 ) as client,
                 client.stream("GET", f"https://{host}/v1/forecast", params=params) as response,

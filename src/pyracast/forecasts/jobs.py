@@ -43,10 +43,12 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.projections import prepare_daily_payloads
 from pyracast.forecasts.quota import (
     AccountUnavailableError,
+    BindingDayExhaustedError,
     ForecastBudgetReservedError,
     HistoryWindowClosedError,
     QuotaExceededError,
     RequestDeferredError,
+    ScheduleDisabledError,
     record_provider_failure,
     reserve_request,
 )
@@ -105,6 +107,8 @@ class RetryKind(StrEnum):
     PROVIDER_DAY = "provider_day"
     # Returns the attempt and fails: an operator must act first or the job's window has closed.
     BLOCKED = "blocked"
+    # Returns the attempt and ends the job as stale: its binding may not collect it at all.
+    SKIPPED = "skipped"
     PERMANENT = "permanent"
 
 
@@ -163,6 +167,10 @@ def _refusal(error: QuotaExceededError, now: datetime) -> Failure:
         return Failure(CollectionJobError.HISTORY_BUDGET_RESERVED, RetryKind.PROVIDER_DAY)
     if isinstance(error, AccountUnavailableError):
         return Failure(CollectionJobError.ACCOUNT_UNAVAILABLE, RetryKind.PROVIDER_DAY)
+    if isinstance(error, ScheduleDisabledError):
+        return Failure(CollectionJobError.SCHEDULE_DISABLED, RetryKind.SKIPPED)
+    if isinstance(error, BindingDayExhaustedError):
+        return Failure(CollectionJobError.QUOTA_EXHAUSTED, RetryKind.SKIPPED)
     return Failure(CollectionJobError.QUOTA_EXHAUSTED, RetryKind.PROVIDER_DAY)
 
 
@@ -336,17 +344,22 @@ def retry(lease: Lease, now: datetime, failure: Failure) -> None:
         if job.lease_token != lease.token or job.status != CollectionJobStatus.RUNNING:
             return
         job.last_error = failure.code
-        if failure.kind in {RetryKind.WAITING, RetryKind.PROVIDER_DAY, RetryKind.BLOCKED}:
+        if failure.kind in {
+            RetryKind.WAITING,
+            RetryKind.PROVIDER_DAY,
+            RetryKind.BLOCKED,
+            RetryKind.SKIPPED,
+        }:
             job.attempts -= 1
         available = (
             None
-            if failure.kind in {RetryKind.BLOCKED, RetryKind.PERMANENT}
+            if failure.kind in {RetryKind.BLOCKED, RetryKind.PERMANENT, RetryKind.SKIPPED}
             else _retry_at(job, now, failure)
         )
         if available is not None:
             job.status = CollectionJobStatus.RETRY
             job.available_at = available
-        elif failure.kind == RetryKind.PROVIDER_DAY:
+        elif failure.kind in {RetryKind.PROVIDER_DAY, RetryKind.SKIPPED}:
             # A refusal that outlives the job's window is a planned skip, not a failure.
             job.status = CollectionJobStatus.STALE
         else:

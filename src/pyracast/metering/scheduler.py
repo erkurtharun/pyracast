@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import QuerySet
 from django.utils import timezone
 
 from pyracast.background.failures import BACK_OFF, Deferrals, isolate, log_failure
@@ -34,8 +35,8 @@ SETTLEMENT_RETRY = timedelta(hours=1)
 HORIZON_DAYS = 90
 ROLLING_DAYS = 7
 ROLLING_MONTHS = 3
-# A slot whose collection keeps failing is repaired on at most this many nights, so a deterministic
-# failure ends visibly; each repair spends at most MAX_ATTEMPTS requests.
+# A slot whose repairs keep failing after a request is repaired on at most this many nights, so a
+# deterministic failure ends visibly; each repair job ends after three requests.
 REPAIR_NIGHTS = 3
 REPAIRS_PER_NIGHT = 31
 
@@ -183,7 +184,6 @@ def enqueue_connection(
 
 
 def _horizon(connection: EpiasConnection, today: date) -> dict[tuple[str, date], date | None]:
-    """The slots behind the rolling re-collection that a repair may collect, with their end."""
     slots: dict[tuple[str, date], date | None] = {
         (EpiasSourceKind.REALTIME_GENERATION, today - timedelta(days=offset)): None
         for offset in range(ROLLING_DAYS + 1, HORIZON_DAYS + 1)
@@ -208,11 +208,25 @@ def _slots(rows: Iterable[tuple[str, date]]) -> list[tuple[str, date]]:
     return [_slot(kind, target) for kind, target in rows]
 
 
+def _failed_repairs(
+    connection: EpiasConnection, jobs: QuerySet[EpiasCollectionJob]
+) -> Counter[tuple[str, date]]:
+    horizons: dict[date, set[tuple[str, date]]] = {}
+    failed: Counter[tuple[str, date]] = Counter()
+    for kind, target, scheduled_for in jobs.filter(
+        status=EpiasJobStatus.FAILED, retry_until__isnull=False, attempts__gt=0
+    ).values_list("source_kind", "target_date", "scheduled_for"):
+        night = scheduled_for.astimezone(MARKET_ZONE).date()
+        if night not in horizons:
+            horizons[night] = set(_horizon(connection, night))
+        if (key := _slot(kind, target)) in horizons[night]:
+            failed[key] += 1
+    return failed
+
+
 def repair_connection(
     connection: EpiasConnection, configuration: PlantConfiguration, now: datetime
 ) -> list[int]:
-    """Under tonight's slot, collect again each slot of the horizon that has no snapshot of this
-    identity and configuration and no open job, newest first and within the caps."""
     window = _daily_window(connection, now)
     if window is None or not configuration_is_current(configuration):
         return []
@@ -241,14 +255,12 @@ def repair_connection(
             ).values_list(*kinds_and_dates)
         )
     )
-    failures = Counter(
-        _slots(jobs.filter(status=EpiasJobStatus.FAILED).values_list(*kinds_and_dates))
-    )
+    failures = _failed_repairs(connection, jobs)
     candidates = sorted(
         (
             key
             for key in horizon.keys() - tonight - busy - collected
-            if failures[key] <= REPAIR_NIGHTS
+            if failures[key] < REPAIR_NIGHTS
         ),
         key=lambda key: (key[1], key[0]),
         reverse=True,

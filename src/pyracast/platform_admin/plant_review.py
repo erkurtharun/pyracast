@@ -20,7 +20,7 @@ from rest_framework.exceptions import ValidationError as APIValidationError
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.recovery import clear_provider_cooldown
-from pyracast.epias import EpiasError
+from pyracast.epias import EpiasCredentialsError, EpiasError
 from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.quota import QuotaExceededError, RequestDeferredError
 from pyracast.forecasts.validation import validate_binding
@@ -251,7 +251,7 @@ def _epias(page: PlantPage, operation: Callable[[Plant], object], done: str) -> 
         form.add_error(
             None,
             _("EPİAŞ service credentials are unavailable. Contact the deployment operator.")
-            if str(error) == "credentials_unavailable"
+            if isinstance(error, EpiasCredentialsError)
             else _("EPİAŞ is currently unavailable. Try connecting again later."),
         )
     except (ObjectDoesNotExist, ValidationError) as error:

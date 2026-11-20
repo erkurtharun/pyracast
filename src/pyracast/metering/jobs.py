@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Case, F, Q, Value, When
 from django.utils import timezone
 
 from pyracast.background.deadlines import ACTORS, LAST_REQUEST_START
@@ -33,6 +33,7 @@ from pyracast.regions.models import Region
 
 Fetcher = Callable[[EpiasPlant, date], EpiasDay]
 LEASE_DURATION = ACTORS["collect_epias"].lease
+CREDENTIAL_ERRORS = (EpiasJobError.CREDENTIALS_MISSING, EpiasJobError.CREDENTIALS_REJECTED)
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,8 @@ def claim_epias_job(job_id: int, now: datetime) -> EpiasLease | None:
             job.status = EpiasJobStatus.SUPERSEDED
         elif job.retry_until is not None and now >= job.retry_until:
             job.status = EpiasJobStatus.FAILED
-            job.last_error = EpiasJobError.RETRY_WINDOW_EXPIRED
+            if job.last_error not in CREDENTIAL_ERRORS:
+                job.last_error = EpiasJobError.RETRY_WINDOW_EXPIRED
         elif not _nightly_retry(job) and job.attempts >= 3:
             job.status = EpiasJobStatus.FAILED
             job.last_error = EpiasJobError.ATTEMPTS_EXHAUSTED
@@ -356,7 +358,10 @@ def pending_epias_ids(now: datetime, *, limit: int = 100) -> list[int]:
     )
     EpiasCollectionJob.objects.filter(eligible, retry_until__lte=now).update(
         status=EpiasJobStatus.FAILED,
-        last_error=EpiasJobError.RETRY_WINDOW_EXPIRED,
+        last_error=Case(
+            When(last_error__in=CREDENTIAL_ERRORS, then=F("last_error")),
+            default=Value(EpiasJobError.RETRY_WINDOW_EXPIRED),
+        ),
         lease_token=None,
         lease_expires_at=None,
     )

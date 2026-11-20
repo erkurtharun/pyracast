@@ -114,6 +114,54 @@ def test_a_day_that_keeps_failing_is_repaired_on_three_nights_and_then_left_fail
     assert set(jobs.values_list("status", flat=True)) == {"failed"}
 
 
+def test_a_day_that_failed_in_the_rolling_window_is_still_repaired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connected(monkeypatch)
+    day = NEWEST_REPAIRABLE
+    fail([day])
+    initial = EpiasCollectionJob.objects.get(target_date=day)
+    for nights_before in range(1, REPAIR_NIGHTS + 2):
+        slot, end = window(night(-nights_before))
+        for target in (day, day + timedelta(days=1)):
+            EpiasCollectionJob.objects.create(
+                connection=initial.connection,
+                plant=initial.plant,
+                connection_revision=initial.connection_revision,
+                configuration=initial.configuration,
+                provider_plant=initial.provider_plant,
+                target_date=target,
+                scheduled_for=slot,
+                available_at=slot,
+                retry_until=end,
+                status="failed",
+                attempts=3,
+                last_error="epias_provider_failure",
+            )
+
+    enqueue_due_epias_jobs(now=NEXT_NIGHT)
+
+    assert repairs(NEXT_NIGHT) == [day]
+
+
+def test_repair_nights_that_sent_no_request_are_not_counted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connected(monkeypatch)
+    day = OLDEST_REPAIRABLE + timedelta(days=REPAIR_NIGHTS + 1)
+    fail([day])
+    for offset in range(REPAIR_NIGHTS):
+        enqueue_due_epias_jobs(now=night(offset))
+        assert repairs(night(offset)) == [day]
+        EpiasCollectionJob.objects.filter(
+            target_date=day, scheduled_for=window(night(offset))[0]
+        ).update(status="failed", attempts=0, last_error="epias_credentials_missing")
+
+    enqueue_due_epias_jobs(now=night(REPAIR_NIGHTS))
+
+    assert repairs(night(REPAIR_NIGHTS)) == [day]
+
+
 def test_repairs_of_one_connection_are_capped_per_night_newest_first(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

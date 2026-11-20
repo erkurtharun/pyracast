@@ -1,10 +1,12 @@
 import json
 import time
+from collections.abc import Iterator
 from datetime import date, datetime, timedelta
 
 import httpx
 import pytest
 
+from pyracast.background.deadlines import HTTP_READ_SECONDS
 from pyracast.epias import AUTH_URL, TIMEZONE, EpiasClient, EpiasDay, EpiasError, EpiasPlant
 from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
@@ -12,9 +14,9 @@ from tests.support.domain import NOW
 from tests.support.epias import PASSWORD, TICKET, USERNAME
 from tests.support.metering_settlement import SETTLEMENT, SettlementClient, link_settlement
 
-# The ladder lets a request start until 115 s after the job began (time limit 210 s, minus one
-# 35 s provider request and one 60 s statement for the commit).
-LAST_REQUEST_START_SECONDS = 115
+# The ladder lets a request start until 100 s after the job began (time limit 210 s, minus one
+# 50 s provider request and one 60 s statement for the commit).
+LAST_REQUEST_START_SECONDS = 100
 MONTH_START, MONTH_END = date(2026, 10, 1), date(2026, 10, 31)
 
 
@@ -57,6 +59,71 @@ def test_a_month_stops_between_pages_once_its_deadline_has_passed() -> None:
         )
     assert len(complete.readings) == len(rows)
     assert pages == [1, *range(1, 9)]
+
+
+def test_a_sign_in_that_ends_past_the_deadline_sends_no_data_request() -> None:
+    pages: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == AUTH_URL:
+            time.sleep(0.2)
+            return httpx.Response(201, text=TICKET)
+        pages.append(json.loads(request.content)["page"]["number"])
+        return httpx.Response(200, json={"items": [], "page": {"number": 1, "size": 100}})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as transport:
+        client = EpiasClient(transport, username=USERNAME, password=PASSWORD)
+        with pytest.raises(EpiasError, match="epias_deadline_exceeded"):
+            client.fetch_settlement(
+                SETTLEMENT, MONTH_START, MONTH_END, deadline=time.monotonic() + 0.1
+            )
+
+    assert pages == []
+
+
+class Dripping(httpx.SyncByteStream):
+    def __iter__(self) -> Iterator[bytes]:
+        yield b'{"items": [], "pad": "'
+        for _ in range(10):
+            yield b"x"
+        yield b'"}'
+
+
+def test_a_dripping_answer_ends_at_the_body_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    answers = iter(
+        [httpx.Response(200, json={"items": []}), httpx.Response(200, stream=Dripping())]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == AUTH_URL:
+            return httpx.Response(201, text=TICKET)
+        return next(answers)
+
+    ticks = iter(range(0, 10_000, HTTP_READ_SECONDS))
+    with httpx.Client(transport=httpx.MockTransport(handler)) as transport:
+        client = EpiasClient(transport, username=USERNAME, password=PASSWORD)
+        assert client.list_plants() == ()
+        monkeypatch.setattr("time.monotonic", lambda: next(ticks))
+        with pytest.raises(EpiasError, match="epias_request_failed") as error:
+            client.list_plants()
+
+    assert error.value.retryable is True
+
+
+def test_an_oversized_answer_is_refused_without_a_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == AUTH_URL:
+            return httpx.Response(201, text=TICKET)
+        return httpx.Response(200, json={"items": [], "pad": "x" * 64})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as transport:
+        client = EpiasClient(transport, username=USERNAME, password=PASSWORD)
+        assert client.list_plants() == ()
+        monkeypatch.setattr("pyracast.epias.MAX_RESPONSE_BYTES", 32)
+        with pytest.raises(EpiasError, match="epias_response_too_large") as error:
+            client.list_plants()
+
+    assert error.value.retryable is False
 
 
 @pytest.mark.django_db(transaction=True)

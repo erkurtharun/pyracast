@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Exists, OuterRef
 
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
@@ -37,30 +38,44 @@ class BindingDayExhaustedError(QuotaExceededError):
     pass
 
 
+class ScheduleDisabledError(QuotaExceededError):
+    pass
+
+
 class RequestDeferredError(QuotaExceededError):
     def __init__(self, available_at: datetime | None) -> None:
         super().__init__("Provider requests are temporarily unavailable.")
         self.available_at = available_at
 
 
-def _binding_day_spent(binding: SiteBinding, job: CollectionJob, utc_day: date) -> bool:
-    """A binding's forecasts collected for distinct jobs in one UTC day stay within its clocks,
-    however often they are edited. Retries of one job and the approval collection are free."""
+def _admit_forecast(
+    binding: SiteBinding, account: ProviderAccount, job: CollectionJob, utc_day: date
+) -> None:
+    """A binding starts at most as many forecast jobs per UTC day as it has clocks, however often
+    they are edited; a job counts on the UTC day of its first request, so its retries and the
+    approval collection are free."""
     timing = forecast_timing(
-        binding, CollectionSchedule.objects.filter(region_id=binding.region_id).first()
+        binding,
+        CollectionSchedule.objects.filter(region_id=binding.region_id).first(),
+        daily_quota=account.daily_quota,
     )
-    if timing is None or job.pk == timing.first_job_id:
-        return False
-    spent = (
+    if timing is None:
+        raise ScheduleDisabledError
+    if job.pk == timing.first_job_id or RequestAttempt.objects.filter(job=job).exists():
+        return
+    earlier = RequestAttempt.objects.filter(job_id=OuterRef("job_id"), utc_day__lt=utc_day)
+    started = (
         RequestAttempt.objects.filter(
             binding=binding, purpose=RequestPurpose.FORECAST, utc_day=utc_day, job__isnull=False
         )
-        .exclude(job_id__in=(job.pk, timing.first_job_id))
+        .exclude(job_id=timing.first_job_id)
+        .exclude(Exists(earlier))
         .values("job_id")
         .distinct()
         .count()
     )
-    return spent >= len(timing.times)
+    if started >= len(timing.times):
+        raise BindingDayExhaustedError
 
 
 def reserve_account_request(
@@ -95,13 +110,8 @@ def reserve_account_request(
         used = RequestAttempt.objects.filter(provider_account=account, utc_day=utc_day).count()
         if used >= account.daily_quota:
             raise QuotaExceededError
-        if (
-            job is not None
-            and binding is not None
-            and purpose == RequestPurpose.FORECAST
-            and _binding_day_spent(binding, job, utc_day)
-        ):
-            raise BindingDayExhaustedError
+        if job is not None and binding is not None and purpose == RequestPurpose.FORECAST:
+            _admit_forecast(binding, account, job, utc_day)
         if (
             job is not None
             and purpose == RequestPurpose.ESTIMATED_ACTUALS

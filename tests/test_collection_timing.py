@@ -9,20 +9,26 @@ from django.db import close_old_connections, connection
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.budget import remaining_forecast_requests
-from pyracast.forecasts.jobs import collect
+from pyracast.forecasts.jobs import collect, pending_job_ids
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
     RequestAttempt,
     RequestPurpose,
 )
-from pyracast.forecasts.quota import QuotaExceededError, reserve_request
+from pyracast.forecasts.quota import (
+    BindingDayExhaustedError,
+    QuotaExceededError,
+    ScheduleDisabledError,
+    reserve_request,
+)
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
+from pyracast.provider_retry import next_provider_day
 from pyracast.regions.models import Region
 from tests.support.budget_reference import reference_forecast_requests
 from tests.support.collection_schedule import HistoricalFixture
-from tests.support.domain import NOW, System, make_system
+from tests.support.domain import NOW, FakeAdapter, System, make_system
 from tests.support.jobs import calculate
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -191,9 +197,56 @@ def test_clock_edits_spend_no_more_forecast_requests_than_the_saved_clocks() -> 
     assert edited[0].status == "succeeded"
     for job in edited[1:]:
         assert (job.status, job.last_error, job.attempts) in {
-            ("retry", "quota_exhausted", 0),
+            ("stale", "quota_exhausted", 0),
             ("stale", "forecast_superseded", 0),
         }
+
+
+def test_a_job_past_the_daily_bound_is_skipped_and_the_next_day_collects_on_time() -> None:
+    system = make_system(approved=True)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=10)
+    edit_clock_and_collect(system, NOW + timedelta(minutes=10))
+
+    refused = edit_clock_and_collect(system, NOW + timedelta(minutes=20))
+
+    assert (refused.status, refused.last_error, refused.attempts) == ("stale", "quota_exhausted", 0)
+    assert refused.pk not in pending_job_ids(next_provider_day(NOW))
+    tomorrow = refused.scheduled_for + timedelta(days=1)
+    enqueue_due(tomorrow)
+    job = CollectionJob.objects.get(
+        binding=system.binding, endpoint="forecasts", scheduled_for=tomorrow
+    )
+    assert collect(job.pk, HistoricalFixture(tomorrow), calculate, tomorrow)
+
+
+def test_a_retry_after_utc_midnight_leaves_the_next_day_its_collection() -> None:
+    system = make_system(approved=True)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=10)
+    CollectionSchedule.objects.create(
+        region=system.region, times=["02:50"], effective_from=NOW - timedelta(days=1)
+    )
+    slots = [datetime(2026, 11, 9, 23, 50, tzinfo=UTC) + timedelta(days=day) for day in (0, 1)]
+    late, next_day = (
+        CollectionJob.objects.create(
+            binding=system.binding,
+            endpoint="forecasts",
+            scheduled_for=slot,
+            target_date=slot.date() + timedelta(days=2),
+            available_at=slot,
+        )
+        for slot in slots
+    )
+
+    reserve_request(system.binding, slots[0], purpose=RequestPurpose.FORECAST, job=late)
+    reserve_request(
+        system.binding,
+        slots[0] + timedelta(minutes=20),
+        purpose=RequestPurpose.FORECAST,
+        job=late,
+    )
+    reserve_request(system.binding, slots[1], purpose=RequestPurpose.FORECAST, job=next_day)
+
+    assert RequestAttempt.objects.filter(job=next_day).count() == 1
 
 
 def test_the_daily_bound_is_per_binding_and_admits_retries_and_the_approval_job() -> None:
@@ -256,7 +309,7 @@ def test_concurrent_reservations_of_one_binding_stay_inside_its_daily_bound() ->
     assert forecast_requests(system.binding) == 1
 
 
-def test_a_binding_without_forecast_clocks_has_no_daily_bound() -> None:
+def test_a_binding_with_collection_disabled_is_refused_forecast_requests() -> None:
     system = make_system(approved=True)
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=10)
     CollectionSchedule.objects.create(
@@ -270,6 +323,53 @@ def test_a_binding_without_forecast_clocks_has_no_daily_bound() -> None:
         available_at=NOW,
     )
 
-    reserve_request(system.binding, NOW, purpose=RequestPurpose.FORECAST, job=job)
+    with pytest.raises(ScheduleDisabledError):
+        reserve_request(system.binding, NOW, purpose=RequestPurpose.FORECAST, job=job)
 
-    assert forecast_requests(system.binding) == 1
+    assert forecast_requests(system.binding) == 0
+
+
+class DisablingAdapter(FakeAdapter):
+    def prepare(self, binding: SiteBinding) -> None:
+        CollectionSchedule.objects.filter(region_id=binding.region_id).update(enabled=False)
+
+
+def test_collection_disabled_after_the_claim_skips_the_job_without_a_request() -> None:
+    system = make_system(approved=True)
+    CollectionSchedule.objects.create(
+        region=system.region, times=["16:00"], effective_from=NOW - timedelta(days=1)
+    )
+    job = CollectionJob.objects.get()
+
+    assert not collect(job.pk, DisablingAdapter(), calculate, NOW)
+
+    job.refresh_from_db()
+    assert (job.status, job.last_error, job.attempts) == ("stale", "schedule_disabled", 0)
+    assert not RequestAttempt.objects.filter(job=job).exists()
+
+
+def test_the_daily_bound_reads_the_quota_of_the_locked_account() -> None:
+    system = make_system(approved=True)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=10)
+    CollectionSchedule.objects.create(
+        region=system.region, times=["16:00", "17:00"], effective_from=NOW - timedelta(days=1)
+    )
+    binding = SiteBinding.objects.select_related("provider_account").get(pk=system.binding.pk)
+    tomorrow = NOW + timedelta(days=1)
+    first, second = (
+        CollectionJob.objects.create(
+            binding=binding,
+            endpoint="forecasts",
+            scheduled_for=tomorrow + timedelta(minutes=minute),
+            target_date=tomorrow.date() + timedelta(days=1),
+            available_at=tomorrow,
+        )
+        for minute in (1, 2)
+    )
+    reserve_request(binding, tomorrow, purpose=RequestPurpose.FORECAST, job=first)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=2)
+
+    with pytest.raises(BindingDayExhaustedError):
+        reserve_request(binding, tomorrow, purpose=RequestPurpose.FORECAST, job=second)
+
+    assert RequestAttempt.objects.filter(binding=binding, utc_day=tomorrow.date()).count() == 1

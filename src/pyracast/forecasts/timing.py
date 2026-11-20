@@ -41,10 +41,8 @@ def approval_job(binding_id: int) -> tuple[int, datetime] | None:
 
 
 def forecast_timing(
-    binding: SiteBinding, schedule: CollectionSchedule | None
+    binding: SiteBinding, schedule: CollectionSchedule | None, *, daily_quota: int | None = None
 ) -> ForecastTiming | None:
-    """The clocks a binding collects forecasts at and the moment they apply from; None while
-    it collects none. ``schedule`` is the binding region's schedule, None for the default."""
     first = approval_job(binding.pk)
     if first is None or (schedule is not None and not schedule.enabled):
         return None
@@ -53,7 +51,9 @@ def forecast_timing(
     effective_from = (
         max(first_slot, schedule.effective_from) if schedule is not None else first_slot
     )
-    limit = forecast_time_limit(binding.provider_account.daily_quota)
+    limit = forecast_time_limit(
+        binding.provider_account.daily_quota if daily_quota is None else daily_quota
+    )
     return ForecastTiming(tuple(times[:limit]), effective_from, first_job_id)
 
 

@@ -4,7 +4,7 @@ from datetime import timedelta
 
 HTTP_CONNECT_SECONDS = 5
 HTTP_READ_SECONDS = 20
-# A whole answer body; httpx bounds each socket read, not the body.
+# A whole answer, checked after each socket read: httpx bounds only the reads.
 HTTP_BODY_SECONDS = 30
 MAIL_SOCKET_SECONDS = 15
 BROKER_SOCKET_SECONDS = 5
@@ -24,7 +24,7 @@ TIME_LIMIT = LEASE - LEASE_MARGIN
 # 90 days of quarter-hour samples fit in 8.4 s on a development workstation (2026-11-20); the
 # host is taken as up to 3.5 times slower.
 CALIBRATION_FIT = timedelta(seconds=30)
-PROVIDER_REQUEST = timedelta(seconds=HTTP_CONNECT_SECONDS + HTTP_BODY_SECONDS)
+PROVIDER_REQUEST = timedelta(seconds=HTTP_BODY_SECONDS + HTTP_READ_SECONDS)
 # The last moment after its start at which a job may send a provider request: the request and the
 # commit after it still end before the time limit.
 LAST_REQUEST_START = TIME_LIMIT - PROVIDER_REQUEST - timedelta(seconds=DATABASE_STATEMENT_SECONDS)

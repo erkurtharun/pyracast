@@ -17,18 +17,15 @@ MISSING_URL = "Set PYRACAST_RABBITMQ_URL; only development falls back to a local
 
 
 def broker_url() -> str:
-    return settings.PYRACAST_RABBITMQ_URL or (LOCAL_BROKER_URL if settings.DEBUG else "")
+    return settings.PYRACAST_RABBITMQ_URL.strip() or (LOCAL_BROKER_URL if settings.DEBUG else "")
 
 
 def check_broker_url(**_kwargs: Any) -> list[CheckMessage]:
     return [] if broker_url() else [Error(MISSING_URL, id="background.E001")]
 
 
-def make_broker() -> RabbitmqBroker:
-    configured = broker_url()
-    if not configured:
-        raise ImproperlyConfigured(MISSING_URL)
-    parts = urlsplit(configured)
+def _bounded(url: str) -> str:
+    parts = urlsplit(url)
     parameters = {
         "socket_timeout": str(BROKER_SOCKET_SECONDS),
         "stack_timeout": str(BROKER_CALL_SECONDS),
@@ -37,5 +34,13 @@ def make_broker() -> RabbitmqBroker:
         "connection_attempts": "1",
         **dict(parse_qsl(parts.query, keep_blank_values=True)),
     }
-    url = urlunsplit(parts._replace(query=urlencode(parameters)))
-    return RabbitmqBroker(url=url, confirm_delivery=True)
+    return urlunsplit(parts._replace(query=urlencode(parameters)))
+
+
+def make_broker() -> RabbitmqBroker:
+    configured = broker_url()
+    if not configured:
+        raise ImproperlyConfigured(MISSING_URL)
+    # Semicolons separate failover nodes.
+    urls = ";".join(_bounded(url) for url in configured.split(";"))
+    return RabbitmqBroker(url=urls, confirm_delivery=True)
