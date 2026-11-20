@@ -230,7 +230,7 @@ for (const section of ["Forecast", "Settings"] as const) {
         approved = true;
         await page.clock.fastForward(120_000);
         await expect(page.locator(".plant-identity .tag")).toHaveText(
-            "approved",
+            "Approved",
         );
         await expect(
             page.getByText(/Awaiting administrator approval/),

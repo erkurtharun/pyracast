@@ -3,7 +3,7 @@ import { useTranslations } from "next-intl";
 
 import { useState } from "react";
 import type { components } from "@/lib/schema";
-import { Field, Select } from "@/ui/ui";
+import { Field, Select } from "@/ui/form";
 
 type Configuration = Pick<
     components["schemas"]["ConfigurationOutput"],
@@ -75,6 +75,7 @@ export function PlantConfigurationFields({
                         label={t("plantName")}
                         name="name"
                         defaultValue={name}
+                        required
                     />
                 )}
                 <Field
@@ -84,6 +85,7 @@ export function PlantConfigurationFields({
                     step="any"
                     min={0.000001}
                     defaultValue={configuration?.dc_capacity_mw}
+                    required
                 />
                 <Field
                     label={t("inverterCapacityLabel")}
@@ -91,7 +93,6 @@ export function PlantConfigurationFields({
                     type="number"
                     step="any"
                     min={0.000001}
-                    required={false}
                     defaultValue={
                         configuration?.inverter_capacity_mw ?? undefined
                     }
@@ -102,7 +103,6 @@ export function PlantConfigurationFields({
                     type="number"
                     step="any"
                     min={0.000001}
-                    required={false}
                     defaultValue={configuration?.export_limit_mw ?? undefined}
                 />
                 <Select
@@ -113,18 +113,16 @@ export function PlantConfigurationFields({
                     <option value="net_export">{t("netExport")}</option>
                     <option value="ac_generation">{t("acGeneration")}</option>
                 </Select>
-                <label className="field">
-                    {t("mountingType")}
-                    <select
-                        name="mounting_type"
-                        value={mounting}
-                        onChange={(event) => setMounting(event.target.value)}
-                    >
-                        <option value="unknown">{t("unknown")}</option>
-                        <option value="fixed">{t("fixed")}</option>
-                        <option value="tracking">{t("tracking")}</option>
-                    </select>
-                </label>
+                <Select
+                    label={t("mountingType")}
+                    name="mounting_type"
+                    value={mounting}
+                    onChange={(event) => setMounting(event.target.value)}
+                >
+                    <option value="unknown">{t("unknown")}</option>
+                    <option value="fixed">{t("fixed")}</option>
+                    <option value="tracking">{t("tracking")}</option>
+                </Select>
                 {mounting === "fixed" && (
                     <>
                         <Field
@@ -134,36 +132,30 @@ export function PlantConfigurationFields({
                             step="any"
                             min={0}
                             max={90}
-                            required={false}
                             defaultValue={
                                 configuration?.surface_tilt_degrees ?? undefined
                             }
                         />
-                        <label className="field">
-                            {t("surfaceAzimuthDegreesOptional")}
-                            <input
-                                name="surface_azimuth_degrees"
-                                type="number"
-                                step="any"
-                                min={0}
-                                max={360}
-                                defaultValue={
-                                    configuration?.surface_azimuth_degrees ??
-                                    undefined
-                                }
-                                onChange={(event) =>
-                                    event.currentTarget.setCustomValidity(
-                                        event.currentTarget.value !== "" &&
-                                            event.currentTarget.valueAsNumber >=
-                                                360
-                                            ? t(
-                                                  "azimuthMustBeLessThan360Degrees",
-                                              )
-                                            : "",
-                                    )
-                                }
-                            />
-                        </label>
+                        <Field
+                            label={t("surfaceAzimuthDegreesOptional")}
+                            name="surface_azimuth_degrees"
+                            type="number"
+                            step="any"
+                            min={0}
+                            max={360}
+                            defaultValue={
+                                configuration?.surface_azimuth_degrees ??
+                                undefined
+                            }
+                            onChange={(event) =>
+                                event.currentTarget.setCustomValidity(
+                                    event.currentTarget.value !== "" &&
+                                        event.currentTarget.valueAsNumber >= 360
+                                        ? t("azimuthMustBeLessThan360Degrees")
+                                        : "",
+                                )
+                            }
+                        />
                     </>
                 )}
             </div>
