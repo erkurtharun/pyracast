@@ -1,7 +1,13 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+    useCallback,
+    useEffect,
+    useEffectEvent,
+    useRef,
+    useState,
+} from "react";
 import { ApiError, displayMessage } from "@/lib/api/errors";
 import {
     authRequest,
@@ -54,6 +60,7 @@ export function TwoFactorSettings({
     const [codeError, setCodeError] = useState<Feedback>();
     const stepHeadingRef = useRef<HTMLHeadingElement>(null);
     const errorRef = useRef<HTMLDivElement>(null);
+    const inFlight = useRef(false);
     const blobUrls = useRef<Set<{ url: string; timer: number }>>(new Set());
 
     const show = useCallback((next: TwoFactorView) => {
@@ -69,7 +76,7 @@ export function TwoFactorSettings({
         [locale],
     );
 
-    const readFacts = useCallback(async () => {
+    async function readFacts() {
         const result = await authRequest<AuthenticatorRecord[]>(
             "account/authenticators",
             "GET",
@@ -77,12 +84,14 @@ export function TwoFactorSettings({
         if (result.status === 401)
             await refreshExpiredSession(t("sessionExpired"));
         return parseAuthenticators(result.data);
-    }, [t]);
+    }
+
+    const loadFacts = useEffectEvent(readFacts);
 
     useEffect(() => {
         let active = true;
         const urls = blobUrls.current;
-        readFacts()
+        loadFacts()
             .then(({ totpEnabled, facts }) => {
                 if (active)
                     setView(
@@ -106,7 +115,7 @@ export function TwoFactorSettings({
             }
             urls.clear();
         };
-    }, [loadCount, readFacts]);
+    }, [loadCount]);
 
     // Codes shown once must reach the screen even when the list cannot be read after them.
     const currentFacts = () =>
@@ -140,6 +149,8 @@ export function TwoFactorSettings({
     }
 
     async function run(action: Action, work: () => Promise<void>) {
+        if (inFlight.current) return;
+        inFlight.current = true;
         setRunning(action);
         setNotice(undefined);
         setError(undefined);
@@ -153,6 +164,7 @@ export function TwoFactorSettings({
             if (action !== "setup" && !refused(failure))
                 await reconcile(action);
         } finally {
+            inFlight.current = false;
             setRunning(undefined);
         }
     }
