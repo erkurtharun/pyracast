@@ -236,6 +236,17 @@ test("the document keeps its title while the workspace changes address", async (
     await titlesKeptSinceFirst();
 });
 
+test("the workspace document carries no message catalog", async ({ page }) => {
+    await mockApi(page);
+    const html = await (await page.goto("/app/w/1/"))!.text();
+    expect(html).not.toContain(
+        "Language could not be saved. Please try again.",
+    );
+    await expect(
+        page.getByRole("button", { name: /East array/ }),
+    ).toBeVisible();
+});
+
 test("plant sections carry their own document title", async ({ page }) => {
     await mockApi(page);
     await page.goto("/app/w/1/plants/11/forecast/");
