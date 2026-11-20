@@ -27,6 +27,8 @@ from tests.support.provisional_measurements import DAY
 
 CUSTOMER_FIELDS = {
     "action",
+    "activation_blocker",
+    "activation_id",
     "actor_id",
     "addresses",
     "aggregated",
@@ -57,6 +59,9 @@ CUSTOMER_FIELDS = {
     "can_edit",
     "can_propose",
     "can_propose_revert",
+    "configuration_current",
+    "current_calibration",
+    "disabled_cause",
     "restore_blocker",
     "can_revert",
     "can_review",
@@ -248,6 +253,7 @@ CUSTOMER_FIELDS = {
     "scored_intervals",
     "selection_cutoff",
     "selection_policy",
+    "selection_state",
     "sent_at",
     "settlement_plant_id",
     "settlement_snapshot_ids",

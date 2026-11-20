@@ -34,10 +34,10 @@ from pyracast.notifications.models import (
     NotificationDeliveryStatus,
     ReminderSchedule,
 )
+from pyracast.plants.calibration_runs import SupersedeReason, supersede_open_runs
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
-    CalibrationStatus,
     ForecastIssuance,
     Plant,
     PlantConfiguration,
@@ -98,14 +98,7 @@ def restore_blocker(region: Region, now: datetime) -> ErrorCode | None:
 
 
 def _cancel_calibrations(plants: list[int], now: datetime) -> None:
-    CalibrationRun.objects.filter(
-        plant_id__in=plants, status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING)
-    ).update(
-        status=CalibrationStatus.SUPERSEDED,
-        completed_at=now,
-        lease_token=None,
-        lease_expires_at=None,
-    )
+    supersede_open_runs(plants, SupersedeReason.TRASHED, now)
 
 
 def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:

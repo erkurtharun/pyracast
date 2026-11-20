@@ -12,7 +12,9 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin
+from pyracast.errors import DomainError
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.activation import activate_calibration, reset_calibration
 from pyracast.plants.automation import (
     automation_status,
     prepare_due_calibrations,
@@ -26,7 +28,7 @@ from pyracast.plants.models import (
     PlantEvent,
     ProductionObservation,
 )
-from pyracast.plants.operations import activate_calibration, reset_calibration, revise_plant
+from pyracast.plants.operations import revise_plant
 from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region
@@ -614,12 +616,14 @@ def test_automation_enable_requires_approval_but_disable_remains_available(
     system, plant = make_plant(monkeypatch)
     Region.objects.filter(pk=system.region.pk).update(status="suspended")
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    with pytest.raises(ValidationError, match="approved configuration"):
+    with pytest.raises(DomainError) as refusal:
         set_calibration_automation(*scope, enabled=True)
+    assert refusal.value.code == "configuration_changed"
     assert not set_calibration_automation(*scope, enabled=False).automatic_calibration_enabled
     Plant.objects.filter(pk=plant.pk).update(current_configuration=None)
-    with pytest.raises(ValidationError, match="approved configuration"):
+    with pytest.raises(DomainError) as refusal:
         set_calibration_automation(*scope, enabled=True)
+    assert refusal.value.code == "configuration_unavailable"
 
 
 def test_malformed_automatic_evaluation_never_activates_a_factor(

@@ -680,6 +680,20 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description * `configuration_changed` - Configuration Changed
+         *     * `production_source_changed` - Production Source Changed
+         *     * `outage_history_changed` - Outage History Changed
+         *     * `incumbent_changed` - Incumbent Changed
+         *     * `calibration_not_activatable` - Calibration Not Activatable
+         * @enum {string}
+         */
+        ActivationBlockerEnum:
+            | "configuration_changed"
+            | "production_source_changed"
+            | "outage_history_changed"
+            | "incumbent_changed"
+            | "calibration_not_activatable";
         ActivationOutput: {
             readonly id: number;
             configuration_id: number;
@@ -774,8 +788,17 @@ export interface components {
             enabled: boolean;
             authorized: boolean;
             configuration_id: number | null;
+            configuration_current: boolean;
             /** Format: date-time */
             next_check_at: string | null;
+            disabled_cause:
+                | (
+                      | components["schemas"]["DisabledCauseEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            current_calibration:
+                components["schemas"]["CurrentCalibrationOutput"] | null;
             last_attempt:
                 | components["schemas"]["AutomaticCalibrationAttemptOutput"]
                 | null;
@@ -811,14 +834,27 @@ export interface components {
             /** Format: date-time */
             readonly completed_at: string | null;
             readonly status: components["schemas"]["CalibrationStatusEnum"];
+            readonly reason:
+                | (
+                      | components["schemas"]["CalibrationErrorEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            readonly selection_state: components["schemas"]["SelectionStateEnum"];
             readonly assessment:
                 | components["schemas"]["CalibrationAssessmentEnum"]
                 | components["schemas"]["BlankEnum"];
             /** Format: double */
             readonly factor: number | null;
             readonly result: unknown;
-            readonly dataset_manifest: unknown;
             readonly dataset_sha256: string;
+            readonly activation_blocker:
+                | (
+                      | components["schemas"]["ActivationBlockerEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            readonly dataset_manifest: unknown;
         };
         /**
          * @description * `pending` - Pending
@@ -854,6 +890,13 @@ export interface components {
             /** Format: date-time */
             readonly completed_at: string | null;
             readonly status: components["schemas"]["CalibrationStatusEnum"];
+            readonly reason:
+                | (
+                      | components["schemas"]["CalibrationErrorEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            readonly selection_state: components["schemas"]["SelectionStateEnum"];
             readonly assessment:
                 | components["schemas"]["CalibrationAssessmentEnum"]
                 | components["schemas"]["BlankEnum"];
@@ -1103,6 +1146,23 @@ export interface components {
             code: string;
             message: string;
         };
+        CurrentCalibrationOutput: {
+            activation_id: number;
+            calibration_id: number | null;
+            /** Format: double */
+            factor: number | null;
+            actor_id: number | null;
+            origin: components["schemas"]["CurrentCalibrationOutputOriginEnum"];
+            /** Format: date-time */
+            created_at: string;
+            effective: boolean;
+        };
+        /**
+         * @description * `manual` - manual
+         *     * `automatic` - automatic
+         * @enum {string}
+         */
+        CurrentCalibrationOutputOriginEnum: "manual" | "automatic";
         /**
          * @description * `normal` - normal
          *     * `polar_day` - polar_day
@@ -1116,6 +1176,20 @@ export interface components {
             /** Format: date-time */
             ends_at: string;
         };
+        /**
+         * @description * `toggle` - Toggle
+         *     * `manual_activation` - Manual Activation
+         *     * `reset` - Reset
+         *     * `configuration_revised` - Configuration Revised
+         *     * `workspace_disabled` - Workspace Disabled
+         * @enum {string}
+         */
+        DisabledCauseEnum:
+            | "toggle"
+            | "manual_activation"
+            | "reset"
+            | "configuration_revised"
+            | "workspace_disabled";
         /**
          * @description * `collection` - Collection
          *     * `notifications` - Notifications
@@ -1290,6 +1364,11 @@ export interface components {
          *     * `recipient_limit_exceeded` - Recipient Limit Exceeded
          *     * `plant_not_approved` - Plant Not Approved
          *     * `provider_account_unavailable` - Provider Account Unavailable
+         *     * `configuration_changed` - Configuration Changed
+         *     * `production_source_changed` - Production Source Changed
+         *     * `outage_history_changed` - Outage History Changed
+         *     * `incumbent_changed` - Incumbent Changed
+         *     * `calibration_not_activatable` - Calibration Not Activatable
          * @enum {string}
          */
         ErrorCode:
@@ -1365,7 +1444,12 @@ export interface components {
             | "duplicate_recipients"
             | "recipient_limit_exceeded"
             | "plant_not_approved"
-            | "provider_account_unavailable";
+            | "provider_account_unavailable"
+            | "configuration_changed"
+            | "production_source_changed"
+            | "outage_history_changed"
+            | "incumbent_changed"
+            | "calibration_not_activatable";
         ForecastOutput: {
             /** Format: date */
             date: string;
@@ -1714,12 +1798,6 @@ export interface components {
             quality: components["schemas"]["ObservationQualityEnum"];
             source: string;
         };
-        /**
-         * @description * `editor` - editor
-         *     * `csv_import` - csv_import
-         * @enum {string}
-         */
-        OriginEnum: "editor" | "csv_import";
         PaginatedCalibrationSummaryOutputList: {
             /** @example 123 */
             count: number;
@@ -2079,12 +2157,18 @@ export interface components {
             configuration_id: number;
             unit: components["schemas"]["UnitEnum"];
             changes: components["schemas"]["ProductionChangeRow"][];
-            origin?: components["schemas"]["OriginEnum"];
+            origin?: components["schemas"]["ProductionCommitInputOriginEnum"];
             file_name?: string;
             file_sha256?: string;
             /** @default false */
             confirm_implausible: boolean;
         };
+        /**
+         * @description * `editor` - editor
+         *     * `csv_import` - csv_import
+         * @enum {string}
+         */
+        ProductionCommitInputOriginEnum: "editor" | "csv_import";
         ProductionDayOutput: {
             /** Format: date */
             date: string;
@@ -2367,6 +2451,15 @@ export interface components {
         RevisionInput: {
             expected_revision: number;
         };
+        /**
+         * @description * `active` - Active
+         *     * `candidate` - Candidate
+         *     * `previous_configuration` - Previous Configuration
+         *     * `not_ready` - Not Ready
+         * @enum {string}
+         */
+        SelectionStateEnum:
+            "active" | "candidate" | "previous_configuration" | "not_ready";
         SessionOutput: {
             user: components["schemas"]["SessionUserOutput"] | null;
             csrf_token: string;

@@ -8,6 +8,7 @@ from django.utils import timezone
 from pyracast.incidents.operations import finish_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants import training
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.calibration_data import build_calibration_dataset
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.incident_policy import incidents_unchanged
@@ -19,7 +20,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.numerics import FitResult, fit_calibration
-from pyracast.plants.operations import activate_calibration, revise_plant
+from pyracast.plants.operations import revise_plant
 from tests.support.domain import NOW
 from tests.support.incident_calibration import incident
 from tests.support.plant_operations import (

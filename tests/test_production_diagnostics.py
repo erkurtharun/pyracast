@@ -6,6 +6,7 @@ import pytest
 from django.core.exceptions import ValidationError
 
 from pyracast.connections.models import SiteBinding
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.automation import set_calibration_automation
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import (
@@ -15,7 +16,6 @@ from pyracast.plants.models import (
     PlantConfiguration,
     PlantEvent,
 )
-from pyracast.plants.operations import activate_calibration
 from pyracast.plants.tracking import MODEL_VERSION as TRACKING_MODEL_VERSION
 from tests.support.calibration_automation import declare_native_sources, evaluated_run, promote
 from tests.support.domain import NOW, System

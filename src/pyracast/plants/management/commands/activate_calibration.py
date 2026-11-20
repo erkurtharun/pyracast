@@ -1,11 +1,10 @@
 from typing import Any
 
-from django.contrib.auth.models import User
-from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
-from pyracast.plants.models import Plant
-from pyracast.plants.operations import activate_calibration, reset_calibration
+from pyracast.plants.activation import activate_calibration, reset_calibration
+from pyracast.plants.management.operator import operator_scope, refusals
+from pyracast.plants.models import CalibrationRun
 
 
 class Command(BaseCommand):
@@ -19,16 +18,16 @@ class Command(BaseCommand):
         choice.add_argument("--baseline", action="store_true")
 
     def handle(self, *args: Any, **options: Any) -> None:
-        try:
-            actor = User.objects.get(username=options["username"])
-            plant = Plant.objects.select_related("region").get(pk=options["plant_id"])
-            scope = (actor, plant.region.tenant_id, plant.region_id, plant.pk)
-            if options["baseline"]:
-                activation = reset_calibration(*scope)
-            else:
-                activation = activate_calibration(*scope, options["calibration_id"])
-        except (ObjectDoesNotExist, PermissionDenied, ValidationError) as exc:
-            raise CommandError("Activation failed: invalid input, access, or record.") from exc
+        scope = operator_scope(options["username"], options["plant_id"])
+        with refusals("Activation", options["username"], options["plant_id"]):
+            try:
+                activation = (
+                    reset_calibration(*scope)
+                    if options["baseline"]
+                    else activate_calibration(*scope, options["calibration_id"])
+                )
+            except CalibrationRun.DoesNotExist as error:
+                raise CommandError(f"Calibration {options['calibration_id']} not found.") from error
         self.stdout.write(
             f"Activation {activation.pk}; calibration {activation.calibration_id or 'baseline'}."
         )

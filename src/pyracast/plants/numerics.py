@@ -1,8 +1,10 @@
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from heapq import heappop, heappush
 from itertools import pairwise
-from math import ceil, isfinite
+from math import ceil, inf, isfinite
 from statistics import median
 from typing import Literal, cast
 from zoneinfo import ZoneInfo
@@ -31,6 +33,9 @@ DERATING_MIN_DAYS = 3
 DERATING_MIN_HOURS = 3.0
 DERATING_MIN_POWER_FRACTION = 0.25
 DERATING_THRESHOLD = 0.92
+# Relative to the summed magnitude of every term: far above the rounding error of either sum.
+SCREEN_TOLERANCE = 1e-7
+NARROW_SEGMENT = 1e-9
 
 
 @dataclass(frozen=True)
@@ -258,12 +263,11 @@ def _rows(
             exclusions["source_incomplete"] += 1
         else:
             rows.append(_Row(day, sample, pieces, hours))
-    days = sorted({row.day for row in rows})
+    by_day = _by_day(rows)
     valid = []
-    for day in days:
+    for day, day_rows in sorted(by_day.items()):
         day_start = datetime.combine(day, datetime.min.time(), zone)
         day_end = datetime.combine(day + timedelta(days=1), datetime.min.time(), zone)
-        day_rows = [row for row in rows if row.day == day]
         windows = (
             ((day_start.astimezone(UTC), day_end.astimezone(UTC)),)
             if windows_by_day is None
@@ -273,7 +277,15 @@ def _rows(
             valid.append(day)
         else:
             exclusions["incomplete_day"] += len(day_rows)
-    return [row for row in rows if row.day in valid], exclusions, valid
+    included = set(valid)
+    return [row for row in rows if row.day in included], exclusions, valid
+
+
+def _by_day(rows: list[_Row]) -> dict[date, list[_Row]]:
+    grouped: dict[date, list[_Row]] = defaultdict(list)
+    for row in rows:
+        grouped[row.day].append(row)
+    return grouped
 
 
 def _required_windows(
@@ -369,8 +381,15 @@ def _fit(rows: list[_Row], normalization: float, cap: float | None) -> float:
             )
         return _finite(result, "Calibration gradient")
 
-    candidates = list(boundaries)
-    for left, right in pairwise(boundaries):
+    screen = None if cap is None else _screen(rows, hours, normalization, cap, boundaries)
+    candidates = [
+        value
+        for index, value in enumerate(boundaries)
+        if screen is None or index in screen.boundaries
+    ]
+    for index, (left, right) in enumerate(pairwise(boundaries)):
+        if screen is not None and index not in screen.segments:
+            continue
         midpoint = (left + right) / 2
         segment_slopes = [
             sum(
@@ -390,6 +409,145 @@ def _fit(rows: list[_Row], normalization: float, cap: float | None) -> float:
                     right = midpoint
             candidates.append((left + right) / 2)
     return min(candidates, key=loss)
+
+
+@dataclass(frozen=True)
+class _Screen:
+    segments: frozenset[int]
+    boundaries: frozenset[int]
+
+
+class _Sweep:
+    """Loss and gradient terms of all rows summed by Huber region.
+
+    Between two breakpoints a row's normalized residual is affine, a - b * factor, so these sums
+    give the loss and gradient at any factor without visiting the rows.
+    """
+
+    def __init__(self, normalization: float, hours: float) -> None:
+        self.normalization = normalization
+        self.hours = hours
+        self.sums = [[0.0] * 6 for _ in range(3)]
+        self.mass = 4 * IDENTITY_PENALTY
+
+    def coefficients(self, row: _Row, capped: float, slope: float) -> tuple[float, float, float]:
+        scale = row.hours * self.normalization
+        return row.hours / self.hours, (row.sample.energy_mwh - capped) / scale, slope / scale
+
+    def add(self, region: int, weight: float, a: float, b: float, sign: int) -> None:
+        sums = self.sums[region]
+        terms = (weight, weight * a, weight * b, weight * a * b, weight * b * b, weight * a * a)
+        for position, term in enumerate(terms):
+            sums[position] += sign * term
+        magnitude = 1 + abs(a) + b
+        self.mass += 4 * weight * magnitude * magnitude
+
+    def gradient(self, factor: float) -> float:
+        upper, middle, lower = self.sums
+        return (
+            2 * IDENTITY_PENALTY * (factor - 1)
+            - HUBER_DELTA * upper[2]
+            - (middle[3] - factor * middle[4])
+            + HUBER_DELTA * lower[2]
+        )
+
+    def loss(self, factor: float) -> float:
+        upper, middle, lower = self.sums
+        half = HUBER_DELTA / 2
+        return (
+            IDENTITY_PENALTY * (factor - 1) ** 2
+            + HUBER_DELTA * (upper[1] - factor * upper[2] - half * upper[0])
+            + 0.5 * (middle[5] - 2 * factor * middle[3] + factor * factor * middle[4])
+            + HUBER_DELTA * (factor * lower[2] - lower[1] - half * lower[0])
+        )
+
+
+def _region(a: float, b: float, factor: float) -> int:
+    residual = a - b * factor
+    return 0 if residual > HUBER_DELTA else 2 if residual < -HUBER_DELTA else 1
+
+
+def _crossing(region: int, a: float, b: float) -> float:
+    if region == 2 or b <= 0:
+        return inf
+    return (a - HUBER_DELTA if region == 0 else a + HUBER_DELTA) / b
+
+
+def _screen(
+    rows: list[_Row], hours: float, normalization: float, cap: float, boundaries: list[float]
+) -> _Screen | None:
+    """Segments whose one-sided gradients may bracket a root and boundaries whose loss may be
+    the minimum, from one sweep over the breakpoints.
+
+    The estimates err by orders of magnitude less than the tolerance, so `_fit` evaluates only
+    these candidates exactly and still selects what the exhaustive search selects. None when an
+    estimate is not finite: the caller then searches exhaustively.
+    """
+    index = {value: position for position, value in enumerate(boundaries[:-1])}
+    sweep = _Sweep(normalization, hours)
+    changes: dict[int, list[tuple[int, float, float]]] = defaultdict(list)
+    state: list[list[float]] = []
+    regions: list[int] = []
+    versions: list[int] = []
+    pending: list[tuple[float, int, int]] = []
+    for position, row in enumerate(rows):
+        capped = slope = 0.0
+        for power, duration in row.pieces:
+            if power > 0 and cap / power <= boundaries[0]:
+                capped += cap * duration
+                continue
+            slope += power * duration
+            if power > 0 and cap / power in index:
+                changes[index[cap / power]].append((position, cap * duration, power * duration))
+        weight, a, b = sweep.coefficients(row, capped, slope)
+        regions.append(_region(a, b, boundaries[0]))
+        sweep.add(regions[position], weight, a, b, 1)
+        state.append([capped, slope, weight, a, b])
+        versions.append(0)
+        heappush(pending, (_crossing(regions[position], a, b), position, 0))
+    gradients: list[tuple[float, float]] = []
+    losses: list[float] = []
+    left = 0.0
+    for position, factor in enumerate(boundaries):
+        while pending and pending[0][0] <= factor:
+            _, row_index, version = heappop(pending)
+            if version != versions[row_index]:
+                continue
+            _, _, weight, a, b = state[row_index]
+            sweep.add(regions[row_index], weight, a, b, -1)
+            regions[row_index] += 1
+            sweep.add(regions[row_index], weight, a, b, 1)
+            heappush(pending, (_crossing(regions[row_index], a, b), row_index, version))
+        if position:
+            gradients.append((left, sweep.gradient(factor)))
+        losses.append(sweep.loss(factor))
+        for row_index, capped_energy, slope_energy in changes.get(position, ()):
+            capped, slope, weight, a, b = state[row_index]
+            sweep.add(regions[row_index], weight, a, b, -1)
+            capped, slope = capped + capped_energy, slope - slope_energy
+            weight, a, b = sweep.coefficients(rows[row_index], capped, slope)
+            sweep.add(regions[row_index], weight, a, b, 1)
+            state[row_index] = [capped, slope, weight, a, b]
+            versions[row_index] += 1
+            heappush(pending, (_crossing(regions[row_index], a, b), row_index, versions[row_index]))
+        left = sweep.gradient(factor)
+    estimates = (*(value for pair in gradients for value in pair), *losses, sweep.mass)
+    if not all(isfinite(value) for value in estimates):
+        return None
+    tolerance = SCREEN_TOLERANCE * sweep.mass
+    lowest = min(losses)
+    return _Screen(
+        segments=frozenset(
+            position
+            for position, (start, end) in enumerate(gradients)
+            if (start < tolerance and end > -tolerance)
+            or boundaries[position + 1] - boundaries[position]
+            <= NARROW_SEGMENT * boundaries[position + 1]
+        ),
+        boundaries=frozenset(
+            position for position, value in enumerate(losses) if value <= lowest + 2 * tolerance
+        ),
+    )
 
 
 def _metrics(rows: list[_Row], factor: float, cap: float | None) -> dict[str, float]:
@@ -432,8 +590,9 @@ def evaluate_samples(
         required_windows=required_windows,
     )
     daily = []
+    by_day = _by_day(rows)
     for day in days:
-        day_rows = [row for row in rows if row.day == day]
+        day_rows = by_day[day]
         measured = _finite(sum(row.sample.energy_mwh for row in day_rows), "Measured daily energy")
         predicted = _finite(
             sum(_energy(row.pieces, factor, limit_mw) for row in day_rows),
@@ -462,6 +621,10 @@ def evaluate_samples(
     }
 
 
+def _producing_days(rows: list[_Row]) -> set[date]:
+    return {row.day for row in rows if row.sample.energy_mwh > 0}
+
+
 def _eligible(rows: list[_Row], cap: float | None) -> list[_Row]:
     informative_days = {
         row.day
@@ -482,11 +645,10 @@ def _support(
 ) -> dict[str, object]:
     daily: list[dict[str, object]] = []
     supported = 0
+    by_day = _by_day(rows)
     for day in days:
         hours = leverage = 0.0
-        for row in rows:
-            if row.day != day:
-                continue
+        for row in by_day.get(day, ()):
             pieces = tuple(
                 (power, duration)
                 for power, duration in row.pieces
@@ -524,6 +686,7 @@ def _derating(
     reference_kind: str,
 ) -> dict[str, object]:
     first = end - timedelta(days=DERATING_LOOKBACK_DAYS - 1) if end is not None else None
+    producing = _producing_days(rows)
     totals: dict[date, list[float]] = {}
     limit_reached = False
     for row in rows:
@@ -549,7 +712,7 @@ def _derating(
             "status": "shortfall"
             if measured / predicted < DERATING_THRESHOLD
             else "within_threshold",
-            "observed_zero": not any(row.sample.energy_mwh > 0 for row in rows if row.day == day),
+            "observed_zero": day not in producing,
         }
         for day, (measured, predicted, hours) in sorted(totals.items())
         if hours >= DERATING_MIN_HOURS
@@ -611,11 +774,13 @@ def _rolling_origin(
             continue
         training_days = days[:evaluation_start]
         evaluation_days = days[evaluation_start : evaluation_start + 3]
-        eligible = _eligible([row for row in rows if row.day in training_days], cap)
+        training = set(training_days)
+        eligible = _eligible([row for row in rows if row.day in training], cap)
         if not _support(eligible, training_days, normalization, cap)["sufficient"]:
             continue
         factor = _fit(eligible, normalization, cap)
-        validation = [row for row in rows if row.day in evaluation_days]
+        evaluation = set(evaluation_days)
+        validation = [row for row in rows if row.day in evaluation]
         folds.append(
             {
                 "training_day_dates": [day.isoformat() for day in training_days],
@@ -692,19 +857,18 @@ def fit_calibration(
     first_training_day = holdout_days[0] - timedelta(days=TRAINING_LOOKBACK_DAYS)
     training_days = [day for day in days[:-holdout_count] if day >= first_training_day]
     training = [row for row in rows if first_training_day <= row.day < holdout_days[0]]
-    validation = [row for row in rows if row.day in holdout_days]
+    holdout = set(holdout_days)
+    validation = [row for row in rows if row.day in holdout]
+    producing = _producing_days(validation)
+    sourced = {row.day for row in validation if any(power > 0 for power, _ in row.pieces)}
     zero_production_holdout_days = sum(
-        not any(row.sample.energy_mwh > 0 for row in validation if row.day == day)
-        and any(power > 0 for row in validation if row.day == day for power, _ in row.pieces)
-        for day in holdout_days
+        day not in producing and day in sourced for day in holdout_days
     )
     informative = _eligible(training, None)
     eligible = _eligible(informative, limit_mw)
     exclusions["uninformative_training"] = len(training) - len(informative)
-    exclusions["zero_production_training_days"] = sum(
-        not any(row.sample.energy_mwh > 0 for row in training if row.day == day)
-        for day in training_days
-    )
+    producing = _producing_days(training)
+    exclusions["zero_production_training_days"] = sum(day not in producing for day in training_days)
     exclusions["censored_training"] = len(informative) - len(eligible)
     support = _support(eligible, training_days, normalization_mw, limit_mw)
     report.update(

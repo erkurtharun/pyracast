@@ -1,5 +1,5 @@
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from functools import partial
 from math import isfinite
 from typing import Any, cast
@@ -12,9 +12,16 @@ from django.utils import timezone
 
 from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
-from pyracast.background.failures import isolate
-from pyracast.irradiance import local_day_bounds
+from pyracast.background.failures import isolate, log_failure
+from pyracast.plants.activation import (
+    activation_blocker,
+    current_selection,
+    record_activation,
+    selection,
+)
+from pyracast.plants.automation_state import AutomationCause, next_check, set_automation_state
 from pyracast.plants.calibration_data import current_source_validation
+from pyracast.plants.calibration_runs import OPEN_STATUSES
 from pyracast.plants.events import record_plant_event
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -26,7 +33,7 @@ from pyracast.plants.models import (
     PlantEventAction,
     PlantQuerySet,
 )
-from pyracast.plants.operations import _activate, _validate_activation, configuration_is_current
+from pyracast.plants.operations import configuration_is_current, current_configuration
 from pyracast.plants.preparation import prepare_calibration, request_preparation
 from pyracast.regions.models import Region, active_region
 
@@ -35,13 +42,9 @@ MIN_NEW_HOLDOUT_DAYS = 7
 MIN_INCUMBENT_IMPROVEMENT = 0.01
 MAX_LATEST_HOLDOUT_AGE_DAYS = 7
 MAX_EARLIEST_HOLDOUT_AGE_DAYS = 14
+MAX_PROMOTION_FAILURES = 3
 
 logger = logging.getLogger(__name__)
-
-
-def _next_check(plant: Plant, now: datetime) -> datetime:
-    tomorrow = now.astimezone(ZoneInfo(plant.region.timezone)).date() + timedelta(days=1)
-    return local_day_bounds(tomorrow, plant.region.timezone)[0]
 
 
 def _authorized(plant: Plant, *, lock: bool = False) -> bool:
@@ -78,11 +81,25 @@ def _last_attempt(plant: Plant) -> PlantEvent | None:
 
 def automation_status(plant: Plant) -> dict[str, Any]:
     last = _last_attempt(plant)
+    configuration = plant.current_configuration
+    disabled = (
+        None
+        if plant.automatic_calibration_enabled
+        else PlantEvent.objects.filter(
+            plant=plant, action=PlantEventAction.CALIBRATION_AUTOMATION_DISABLED
+        )
+        .order_by("-created_at", "-pk")
+        .first()
+    )
     return {
         "enabled": plant.automatic_calibration_enabled,
         "authorized": _authorized(plant),
         "configuration_id": plant.current_configuration_id,
+        "configuration_current": configuration is not None
+        and configuration_is_current(configuration),
         "next_check_at": plant.next_calibration_check_at,
+        "disabled_cause": disabled.details.get("cause") if disabled is not None else None,
+        "current_calibration": current_selection(plant, timezone.now()),
         "last_attempt": (
             {
                 "calibration_id": last.details.get("calibration_id"),
@@ -96,31 +113,6 @@ def automation_status(plant: Plant) -> dict[str, Any]:
             else None
         ),
     }
-
-
-def update_automation(plant: Plant, actor: User, *, enabled: bool, now: datetime) -> None:
-    if plant.automatic_calibration_enabled == enabled and (
-        not enabled or plant.automatic_calibration_enabled_by_id == actor.pk
-    ):
-        return
-    plant.automatic_calibration_enabled = enabled
-    plant.automatic_calibration_enabled_by = actor if enabled else None
-    plant.next_calibration_check_at = _next_check(plant, now) if enabled else None
-    plant.save(
-        update_fields=(
-            "automatic_calibration_enabled",
-            "automatic_calibration_enabled_by",
-            "next_calibration_check_at",
-        )
-    )
-    record_plant_event(
-        plant_id=plant.pk,
-        actor=actor,
-        action=PlantEventAction.CALIBRATION_AUTOMATION_ENABLED
-        if enabled
-        else PlantEventAction.CALIBRATION_AUTOMATION_DISABLED,
-        details={"configuration_id": plant.current_configuration_id},
-    )
 
 
 @transaction.atomic
@@ -140,7 +132,9 @@ def disable_workspace_automation(actor: User, tenant_id: int) -> None:
     )
     now = timezone.now()
     for plant in plants:
-        update_automation(plant, actor, enabled=False, now=now)
+        set_automation_state(
+            plant, actor, enabled=False, cause=AutomationCause.WORKSPACE_DISABLED, now=now
+        )
 
 
 def set_calibration_automation(
@@ -150,14 +144,11 @@ def set_calibration_automation(
         tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
-        if enabled and (
-            plant.current_configuration is None
-            or not configuration_is_current(plant.current_configuration)
-        ):
-            raise ValidationError(
-                "Automatic calibration requires the current approved configuration."
-            )
-        update_automation(plant, actor, enabled=enabled, now=timezone.now())
+        if enabled:
+            current_configuration(plant)
+        set_automation_state(
+            plant, actor, enabled=enabled, cause=AutomationCause.TOGGLE, now=timezone.now()
+        )
         if enabled:
             latest = (
                 CalibrationRun.objects.filter(
@@ -169,8 +160,9 @@ def set_calibration_automation(
             if (
                 latest is not None
                 and latest.status == CalibrationStatus.READY
+                and selection(plant).active_calibration_id != latest.pk
                 and not CalibrationRun.objects.filter(
-                    plant=plant, status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING)
+                    plant=plant, status__in=OPEN_STATUSES
                 ).exists()
             ):
                 promote_automatic_calibration(plant, latest, timezone.now())
@@ -275,23 +267,32 @@ def promote_automatic_calibration(plant: Plant, run: CalibrationRun, now: dateti
     elif run.status != CalibrationStatus.READY:
         reason = f"candidate_{run.status}"
     else:
-        try:
-            _validate_activation(plant, run.configuration, run, now)
-        except ValidationError as exc:
-            reason = exc.messages[0]
-        else:
-            reason = _promotion_reason(run, now)
+        reason = activation_blocker(plant, run.configuration, run, now) or _promotion_reason(
+            run, now
+        )
     if reason is not None:
         record_automatic_skip(plant, run.pk, reason)
         return False
-    _activate(None, plant, run.configuration, run)
+    record_activation(None, plant, run.configuration, run)
+    return True
+
+
+def attempt_promotion(plant: Plant, run: CalibrationRun, now: datetime) -> bool:
+    """Promote in a savepoint; a raising promotion is recorded as skip promotion_failed."""
+    try:
+        with transaction.atomic():
+            promote_automatic_calibration(plant, run, now)
+    except Exception as error:
+        log_failure(logger, "calibration_promotion_failed", error, run=run.pk)
+        record_automatic_skip(plant, run.pk, "promotion_failed")
+        return False
     return True
 
 
 def _undecided_candidate(plant: Plant) -> CalibrationRun | None:
     """The latest run of the current configuration while it is ready and its promotion is
-    undecided: neither activated nor skipped for a reason. A promotion that raised decides
-    nothing."""
+    undecided: neither activated nor skipped for a reason. A raising promotion decides nothing
+    until it has failed MAX_PROMOTION_FAILURES times."""
     run = (
         CalibrationRun.objects.filter(plant=plant, configuration_id=plant.current_configuration_id)
         .order_by("-created_at", "-pk")
@@ -299,31 +300,33 @@ def _undecided_candidate(plant: Plant) -> CalibrationRun | None:
     )
     if run is None or run.status != CalibrationStatus.READY:
         return None
+    decisions = PlantEvent.objects.filter(
+        plant=plant,
+        details__calibration_id=run.pk,
+        action__in=(
+            PlantEventAction.CALIBRATION_AUTOMATIC_SKIPPED,
+            PlantEventAction.CALIBRATION_AUTOMATICALLY_ACTIVATED,
+        ),
+    )
+    failed = decisions.filter(
+        action=PlantEventAction.CALIBRATION_AUTOMATIC_SKIPPED, details__reason="promotion_failed"
+    )
     decided = (
         CalibrationActivation.objects.filter(calibration=run).exists()
-        or PlantEvent.objects.filter(
-            plant=plant,
-            details__calibration_id=run.pk,
-            action__in=(
-                PlantEventAction.CALIBRATION_AUTOMATIC_SKIPPED,
-                PlantEventAction.CALIBRATION_AUTOMATICALLY_ACTIVATED,
-            ),
-        )
-        .exclude(
-            action=PlantEventAction.CALIBRATION_AUTOMATIC_SKIPPED,
-            details__reason="promotion_failed",
-        )
-        .exists()
+        or decisions.exclude(pk__in=failed).exists()
+        or failed.count() >= MAX_PROMOTION_FAILURES
     )
     return None if decided else run
 
 
-def promote_undecided_candidate(plant_id: int, now: datetime) -> None:
-    """Promote a ready candidate whose promotion is undecided; the caller holds the plant lock."""
+def promote_undecided_candidate(plant_id: int, now: datetime) -> bool:
+    """Promote a ready candidate whose promotion is undecided; the caller holds the plant lock.
+
+    False while a raising promotion has attempts left: the caller retries later.
+    """
     plant = Plant.objects.select_related("region").get(pk=plant_id)
     run = _undecided_candidate(plant) if plant.automatic_calibration_enabled else None
-    if run is not None:
-        promote_automatic_calibration(plant, run, now)
+    return run is None or attempt_promotion(plant, run, now) or _undecided_candidate(plant) is None
 
 
 def prepare_due_calibrations(now: datetime, limit: int = 100) -> list[int]:
@@ -365,17 +368,26 @@ def _prepare_due(row: tuple[int, int, int], now: datetime) -> int | None:
         run = None
         if _authorized(plant, lock=True):
             run = prepare_calibration(plant.pk, now)
-        else:
+        elif not _paused(plant):
             record_automatic_skip(plant, None, "authorization_revoked")
-        plant.next_calibration_check_at = _next_check(plant, now)
+        plant.next_calibration_check_at = next_check(plant, now)
         plant.save(update_fields=("next_calibration_check_at",))
         return None if run is None else run.pk
+
+
+def _paused(plant: Plant) -> bool:
+    last = _last_attempt(plant)
+    return (
+        last is not None
+        and last.action == PlantEventAction.CALIBRATION_AUTOMATIC_SKIPPED
+        and last.details.get("reason") == "authorization_revoked"
+    )
 
 
 def _defer_due_check(row: tuple[int, int, int], now: datetime) -> None:
     plant = Plant.objects.select_related("region").get(pk=row[0])
     with transaction.atomic():
         if Plant.objects.filter(pk=plant.pk, automatic_calibration_enabled=True).update(
-            next_calibration_check_at=_next_check(plant, now)
+            next_calibration_check_at=next_check(plant, now)
         ):
             record_automatic_skip(plant, None, "preparation_failed")

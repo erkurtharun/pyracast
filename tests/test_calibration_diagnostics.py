@@ -2,8 +2,8 @@ from datetime import date
 
 import pytest
 
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.models import CalibrationActivation, CalibrationRun
-from pyracast.plants.operations import activate_calibration
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
 from tests.support.calibration_preparation import add_days

@@ -17,7 +17,7 @@ from pyracast.forecasts.schedule import configure_schedule
 from pyracast.incidents.operations import finish_incident, save_incident
 from pyracast.notifications.models import ReminderSchedule
 from pyracast.notifications.operations import configure_reminders
-from pyracast.plants import operations
+from pyracast.plants import activation, operations
 from pyracast.plants.automation import set_calibration_automation
 from pyracast.plants.models import Plant, PlantEvent
 from pyracast.plants.production_changes import ObservationInput, import_observations
@@ -120,8 +120,8 @@ def mutation_calls(system: System, actor: User, plant: Plant) -> list[Callable[[
             start_date=(NOW - timedelta(days=10)).date(),
             end_date=NOW.date(),
         ),
-        lambda: operations.activate_calibration(actor, tenant_id, region_id, plant_id, 1),
-        lambda: operations.reset_calibration(actor, tenant_id, region_id, plant_id),
+        lambda: activation.activate_calibration(actor, tenant_id, region_id, plant_id, 1),
+        lambda: activation.reset_calibration(actor, tenant_id, region_id, plant_id),
         lambda: set_calibration_automation(actor, tenant_id, region_id, plant_id, enabled=False),
         lambda: save_incident(actor, tenant_id, region_id, plant_id),
         lambda: finish_incident(

@@ -4,11 +4,11 @@ from typing import Any, cast
 import pytest
 
 from pyracast.connections.models import SiteBinding
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.forecasting import plant_forecast
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.numerics import MODEL_VERSION
-from pyracast.plants.operations import activate_calibration
 from tests.support.domain import NOW, System
 from tests.support.incident_calibration import incident
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for

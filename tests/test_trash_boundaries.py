@@ -20,9 +20,10 @@ from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAtte
 from pyracast.forecasts.scheduler import enqueue_due as enqueue_collections
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.scheduler import enqueue_due as enqueue_reminders
+from pyracast.plants.activation import reset_calibration
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import CalibrationRun, Plant
-from pyracast.plants.operations import configuration_is_current, reset_calibration
+from pyracast.plants.operations import configuration_is_current
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region

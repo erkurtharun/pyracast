@@ -14,6 +14,7 @@ from django.utils import timezone
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.plants import training
+from pyracast.plants.activation import activate_calibration, reset_calibration
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -21,7 +22,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.numerics import FitResult, fit_calibration
-from pyracast.plants.operations import activate_calibration, reset_calibration, revise_plant
+from pyracast.plants.operations import revise_plant
 from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.training import LEASE_DURATION, pending_calibration_ids, run_calibration
 from pyracast.regions.models import Region
@@ -289,7 +290,7 @@ def test_invalid_or_interrupted_run_state(monkeypatch: pytest.MonkeyPatch, case:
     system, plant = make_plant(monkeypatch)
     run = request_run(system, plant)
     if case == "future_cutoff":
-        run.cutoff_at = NOW + timedelta(seconds=1)
+        run.cutoff_at = NOW + LEASE_DURATION + timedelta(seconds=1)
     elif case == "exhausted":
         run.attempts = 3
     else:

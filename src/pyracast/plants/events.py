@@ -21,7 +21,7 @@ ACTIVATION: DetailShape = {
     "origin": TEXT,
     "enabled_by_id": OPTIONAL_INTEGER,
 }
-AUTOMATION: DetailShape = {"configuration_id": OPTIONAL_INTEGER}
+AUTOMATION: DetailShape = {"configuration_id": OPTIONAL_INTEGER, "cause": TEXT}
 PLANT_EVENT_DETAILS: Mapping[str, DetailShape] = {
     PlantEventAction.SUBMISSION_SAVED: {},
     PlantEventAction.CONFIGURATION_CREATED: {"configuration_id": INTEGER},
@@ -45,10 +45,12 @@ PLANT_EVENT_DETAILS: Mapping[str, DetailShape] = {
     PlantEventAction.CALIBRATION_SCHEDULED: {
         "calibration_id": INTEGER,
         "observation_id_cutoff": INTEGER,
+        "origin": TEXT,
     },
     PlantEventAction.CALIBRATION_COMPLETED: {
         "calibration_id": INTEGER,
         "status": TEXT,
+        "reason": OPTIONAL_TEXT,
         "dataset_sha256": TEXT,
     },
     PlantEventAction.CALIBRATION_ACTIVATED: ACTIVATION,

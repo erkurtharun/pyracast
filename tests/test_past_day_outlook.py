@@ -3,9 +3,10 @@ from typing import Any, cast
 
 import pytest
 
+from pyracast.plants.activation import activate_calibration, reset_calibration
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import CalibrationRun, Plant
-from pyracast.plants.operations import activate_calibration, reset_calibration, revise_plant
+from pyracast.plants.operations import revise_plant
 from tests.support.domain import NOW, System
 from tests.support.plant_operations import make_plant, ready_run, saved_actuals
 

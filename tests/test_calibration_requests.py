@@ -187,8 +187,10 @@ def test_a_finished_calibration_persists_while_its_follow_up_raises(
     assert run.status == "ready"
     assert run.last_error == ""
     if step == "promotion":
-        skipped = PlantEvent.objects.get(plant=plant, action="calibration_automatic_skipped")
-        assert skipped.details["reason"] == "promotion_failed"
+        assert (
+            automatic_decisions(plant)
+            == [("calibration_automatic_skipped", "promotion_failed")] * 2
+        )
     else:
         assert committed_request(plant.pk) is not None
     assert "private preparation detail" not in pyracast_logs.text
@@ -341,10 +343,31 @@ def test_a_failed_promotion_is_retried_after_an_unrelated_daily_check_failure(
     assert CalibrationRun.objects.count() == 1
     assert automatic_decisions(plant) == [
         ("calibration_automatic_skipped", "promotion_failed"),
+        ("calibration_automatic_skipped", "promotion_failed"),
         ("calibration_automatic_skipped", "preparation_failed"),
         ("calibration_automatically_activated", None),
     ]
     assert committed_request(plant.pk) is None
+
+
+def test_a_promotion_that_keeps_raising_stops_after_three_recorded_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    run = automated_candidate(system, plant)
+    calls = failing_promotions(monkeypatch, 99)
+
+    assert training.run_calibration(run.pk, NOW)
+    retry_at = committed_request(plant.pk)
+    assert retry_at is not None
+    assert preparation.prepare_requested_calibrations(retry_at) == []
+
+    assert calls == [run.pk] * 3
+    assert committed_request(plant.pk) is None
+    assert preparation.prepare_requested_calibrations(retry_at + timedelta(days=1)) == []
+    assert calls == [run.pk] * 3
+    assert automatic_decisions(plant) == [("calibration_automatic_skipped", "promotion_failed")] * 3
+    assert not CalibrationActivation.objects.exists()
 
 
 @pytest.fixture

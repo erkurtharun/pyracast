@@ -16,9 +16,10 @@ from pyracast.accounts.models import Membership
 from pyracast.connections.models import ProviderAccount
 from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.activation import activate_calibration
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import Plant
-from pyracast.plants.operations import activate_calibration, revise_plant
+from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import Region
 from tests.support.concurrency import row_locked_elsewhere, short_lock_timeout
 from tests.support.domain import NOW, System

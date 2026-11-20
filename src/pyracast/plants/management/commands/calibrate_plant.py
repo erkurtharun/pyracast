@@ -1,11 +1,10 @@
 from datetime import date
 from typing import Any
 
-from django.contrib.auth.models import User
-from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
-from pyracast.plants.models import Plant
+from pyracast.plants.calibration_runs import OPEN_STATUSES
+from pyracast.plants.management.operator import operator_scope, refusals
 from pyracast.plants.operations import request_calibration
 from pyracast.plants.training import run_calibration
 
@@ -22,23 +21,25 @@ class Command(BaseCommand):
         parser.add_argument("--run", action="store_true")
 
     def handle(self, *args: Any, **options: Any) -> None:
+        scope = operator_scope(options["username"], options["plant_id"])
         try:
-            actor = User.objects.get(username=options["username"])
-            plant = Plant.objects.select_related("region").get(pk=options["plant_id"])
-            run = request_calibration(
-                actor,
-                plant.region.tenant_id,
-                plant.region_id,
-                plant.pk,
-                configuration_id=options["configuration_id"],
-                start_date=date.fromisoformat(options["start_date"]),
-                end_date=date.fromisoformat(options["end_date"]),
+            start, end = (
+                date.fromisoformat(options["start_date"]),
+                date.fromisoformat(options["end_date"]),
             )
-            if options["run"]:
-                run_calibration(run.pk)
-                run.refresh_from_db()
-        except (ValueError, ObjectDoesNotExist, PermissionDenied, ValidationError) as exc:
-            raise CommandError("Calibration failed: invalid input, access, or record.") from exc
+        except ValueError as error:
+            raise CommandError("Use ISO dates (YYYY-MM-DD).") from error
+        with refusals("Calibration", options["username"], options["plant_id"]):
+            run = request_calibration(
+                *scope, configuration_id=options["configuration_id"], start_date=start, end_date=end
+            )
+        if options["run"]:
+            run_calibration(run.pk)
+            run.refresh_from_db()
+            if run.status in OPEN_STATUSES:
+                raise CommandError(
+                    f"Calibration {run.pk} is held by another worker or waits for its cutoff."
+                )
         self.stdout.write(
             f"Calibration {run.pk}: {run.status}; assessment: {run.assessment or 'pending'}. "
             "No activation was performed."

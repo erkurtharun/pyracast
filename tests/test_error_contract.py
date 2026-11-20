@@ -699,6 +699,39 @@ CASES: dict[str, Case] = {
         domain("DomainError", "provider_account_unavailable", field="enabled"),
         fields=("enabled",),
     ),
+    "configuration_changed": Case(
+        400,
+        "The plant configuration is no longer current.",
+        "Santral yap\u0131land\u0131rmas\u0131 art\u0131k g\u00fcncel de\u011fil. "
+        "Santrali yeniden a\u00e7\u0131n.",
+        domain("DomainError", "configuration_changed"),
+    ),
+    "production_source_changed": Case(
+        400,
+        "The production source changed; request a new calibration.",
+        "\u00dcretim kayna\u011f\u0131 de\u011fi\u015fti; yeni bir kalibrasyon isteyin.",
+        domain("DomainError", "production_source_changed"),
+    ),
+    "outage_history_changed": Case(
+        400,
+        "The outage history changed; request a new calibration.",
+        "Kesinti ge\u00e7mi\u015fi de\u011fi\u015fti; yeni bir kalibrasyon isteyin.",
+        domain("DomainError", "outage_history_changed"),
+    ),
+    "incumbent_changed": Case(
+        400,
+        "The active calibration changed; request a new comparison.",
+        "Etkin kalibrasyon de\u011fi\u015fti; yeni bir kar\u015f\u0131la\u015ft\u0131rma isteyin.",
+        domain("DomainError", "incumbent_changed"),
+    ),
+    "calibration_not_activatable": Case(
+        400,
+        "Only a completed, held-out evaluated calibration can be activated.",
+        "Yaln\u0131zca tamamlanm\u0131\u015f ve ayr\u0131 do\u011frulama verileriyle "
+        "de\u011ferlendirilmi\u015f bir "
+        "kalibrasyon etkinle\u015ftirilebilir.",
+        domain("DomainError", "calibration_not_activatable"),
+    ),
 }
 
 
