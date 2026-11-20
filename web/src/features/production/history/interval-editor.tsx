@@ -73,19 +73,22 @@ export function IntervalEditor({
                 </select>
             </ControlField>
             {!canManage && (
-                <ControlField label={proposals("reason")}>
-                    <textarea
-                        required
-                        maxLength={500}
-                        value={editor.reason ?? ""}
-                        disabled={saving}
-                        onChange={(event) =>
-                            onChange({ reason: event.target.value })
-                        }
-                    />
-                    <span className="field-hint">
-                        {proposals("approvalHelp")}
-                    </span>
+                <ControlField
+                    label={proposals("reason")}
+                    hint={proposals("approvalHelp")}
+                >
+                    {(describedBy) => (
+                        <textarea
+                            required
+                            maxLength={500}
+                            aria-describedby={describedBy}
+                            value={editor.reason ?? ""}
+                            disabled={saving}
+                            onChange={(event) =>
+                                onChange({ reason: event.target.value })
+                            }
+                        />
+                    )}
                 </ControlField>
             )}
             <div className="button-group">

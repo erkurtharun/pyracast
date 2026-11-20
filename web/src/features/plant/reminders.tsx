@@ -7,7 +7,8 @@ import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { isLanguage } from "@/i18n/language";
 import { useApiQuery, useRefresh } from "@/lib/api/query";
-import { ActionForm, Empty, Notice, RefreshFailed, Tag } from "@/ui/ui";
+import { Resource } from "@/ui/resource";
+import { ActionForm, Empty, Notice, Tag } from "@/ui/ui";
 type ReminderSchedule = components["schemas"]["ReminderOutput"];
 function useRowFocus(rows: { id: number }[]) {
     const prefix = useId();
@@ -351,278 +352,321 @@ function ReminderSettings({ scope, region }: ReminderProps) {
     }>({ edition: 0 });
     if (editor.savedAt !== undefined && resource.updatedAt > editor.savedAt)
         setEditor({ edition: editor.edition + 1 });
-    const data = resource.data;
-    if (data === undefined)
-        return resource.error ? (
-            <Notice error>{resource.error}</Notice>
-        ) : (
-            <p role="status">{t("loadingEmailReminders")}</p>
-        );
     return (
-        <>
-            <RefreshFailed resource={resource} />
-            <section className="panel">
-                <div className="section-heading">
-                    <div>
-                        <h2>{t("emailReminders")}</h2>
-                    </div>
-                    <Tag
-                        tone={data.state === "sending" ? "success" : "neutral"}
-                    >
-                        {stateLabels[data.state]}
-                    </Tag>
-                </div>
-                <ActionForm
-                    key={`${editor.edition}:${JSON.stringify(data)}`}
-                    submit={t("saveReminders")}
-                    onSubmit={async (form) => {
-                        const times = form
-                            .getAll("times")
-                            .map((time) => String(time).trim())
-                            .filter(Boolean);
-                        if (
-                            times.some(
-                                (time) =>
-                                    !/^([01]\d|2[0-3]):[0-5]\d$/.test(time),
-                            )
-                        )
-                            throw new Error(t("invalidDeliveryTime"));
-                        const recipients = form
-                            .getAll("recipients")
-                            .map((value) => String(value).trim())
-                            .filter(Boolean);
-                        const enabled = form.get("enabled") === "on";
-                        const includeWorkspaceMembers =
-                            form.get("include_workspace_members") === "on";
-                        const recipientCount = new Set(
-                            [
-                                ...recipients,
-                                ...(includeWorkspaceMembers
-                                    ? (data.addresses?.workspace_recipients ??
-                                      [])
-                                    : []),
-                            ].map((email) => email.toLowerCase()),
-                        ).size;
-                        if (enabled && !times.length)
-                            throw new Error(t("deliveryTimeRequired"));
-                        if (
-                            enabled &&
-                            recipientCount > data.recipient_limit &&
-                            !(
-                                data.recipient_limit_exceeded &&
-                                recipientCount < data.recipient_count
-                            )
-                        )
-                            throw new Error(
-                                t("recipientLimit", {
-                                    limit: data.recipient_limit,
-                                }),
-                            );
-                        if (
-                            new Set(
-                                recipients.map((email) => email.toLowerCase()),
-                            ).size !== recipients.length
-                        )
-                            throw new Error(t("duplicateEmail"));
-                        const language = String(form.get("language"));
-                        await api.put(
-                            "/api/tenants/{tenant_id}/regions/{region_id}/reminders/",
-                            {
-                                path: scope,
-                                body: {
-                                    enabled,
-                                    recipients,
-                                    include_workspace_members:
-                                        includeWorkspaceMembers,
-                                    language: isLanguage(language)
-                                        ? language
-                                        : "en",
-                                    times: [...new Set(times)].sort(
-                                        (a, b) =>
-                                            Number(a.replace(":", "")) -
-                                            Number(b.replace(":", "")),
-                                    ),
-                                },
-                            },
-                        );
-                        setEditor((current) => ({
-                            ...current,
-                            savedAt: resource.updatedAt,
-                        }));
-                        await refresh.workspace(scope.tenant_id);
-                    }}
-                >
-                    <label className="check-field">
-                        <input
-                            type="checkbox"
-                            name="enabled"
-                            defaultChecked={data.enabled}
-                        />{" "}
-                        {t("enableForecastEmailsForThisPlant")}
-                    </label>
-                    {region.status !== "approved" && (
-                        <Notice>{t("approvalRequired")}</Notice>
-                    )}
-                    <DeliveryTimes data={data} timezone={region.timezone} />
-                    <RecipientFields data={data} />
-                    <div className="field">
-                        <label htmlFor={languageId}>{t("emailLanguage")}</label>
-                        <select
-                            id={languageId}
-                            name="language"
-                            defaultValue={data.language}
+        <Resource resource={resource} loading={t("loadingEmailReminders")}>
+            {(data) => (
+                <>
+                    <section className="panel">
+                        <div className="section-heading">
+                            <div>
+                                <h2>{t("emailReminders")}</h2>
+                            </div>
+                            <Tag
+                                tone={
+                                    data.state === "sending"
+                                        ? "success"
+                                        : "neutral"
+                                }
+                            >
+                                {stateLabels[data.state]}
+                            </Tag>
+                        </div>
+                        <ActionForm
+                            key={`${editor.edition}:${JSON.stringify(data)}`}
+                            submit={t("saveReminders")}
+                            onSubmit={async (form) => {
+                                const times = form
+                                    .getAll("times")
+                                    .map((time) => String(time).trim())
+                                    .filter(Boolean);
+                                if (
+                                    times.some(
+                                        (time) =>
+                                            !/^([01]\d|2[0-3]):[0-5]\d$/.test(
+                                                time,
+                                            ),
+                                    )
+                                )
+                                    throw new Error(t("invalidDeliveryTime"));
+                                const recipients = form
+                                    .getAll("recipients")
+                                    .map((value) => String(value).trim())
+                                    .filter(Boolean);
+                                const enabled = form.get("enabled") === "on";
+                                const includeWorkspaceMembers =
+                                    form.get("include_workspace_members") ===
+                                    "on";
+                                const recipientCount = new Set(
+                                    [
+                                        ...recipients,
+                                        ...(includeWorkspaceMembers
+                                            ? (data.addresses
+                                                  ?.workspace_recipients ?? [])
+                                            : []),
+                                    ].map((email) => email.toLowerCase()),
+                                ).size;
+                                if (enabled && !times.length)
+                                    throw new Error(t("deliveryTimeRequired"));
+                                if (
+                                    enabled &&
+                                    recipientCount > data.recipient_limit &&
+                                    !(
+                                        data.recipient_limit_exceeded &&
+                                        recipientCount < data.recipient_count
+                                    )
+                                )
+                                    throw new Error(
+                                        t("recipientLimit", {
+                                            limit: data.recipient_limit,
+                                        }),
+                                    );
+                                if (
+                                    new Set(
+                                        recipients.map((email) =>
+                                            email.toLowerCase(),
+                                        ),
+                                    ).size !== recipients.length
+                                )
+                                    throw new Error(t("duplicateEmail"));
+                                const language = String(form.get("language"));
+                                await api.put(
+                                    "/api/tenants/{tenant_id}/regions/{region_id}/reminders/",
+                                    {
+                                        path: scope,
+                                        body: {
+                                            enabled,
+                                            recipients,
+                                            include_workspace_members:
+                                                includeWorkspaceMembers,
+                                            language: isLanguage(language)
+                                                ? language
+                                                : "en",
+                                            times: [...new Set(times)].sort(
+                                                (a, b) =>
+                                                    Number(a.replace(":", "")) -
+                                                    Number(b.replace(":", "")),
+                                            ),
+                                        },
+                                    },
+                                );
+                                setEditor((current) => ({
+                                    ...current,
+                                    savedAt: resource.updatedAt,
+                                }));
+                                await refresh.workspace(scope.tenant_id);
+                            }}
                         >
-                            <option value="en">English</option>
-                            <option value="tr">Türkçe</option>
-                        </select>
-                    </div>
-                    <details>
-                        <summary>{t("reminderDetails")}</summary>
-                        <p className="fine">
-                            {t("reminderPolicy", {
-                                limit:
-                                    data.daily_reminder_limit == null
-                                        ? "?"
-                                        : format.number(
-                                              data.daily_reminder_limit,
-                                          ),
-                            })}
-                        </p>
+                            <label className="check-field">
+                                <input
+                                    type="checkbox"
+                                    name="enabled"
+                                    defaultChecked={data.enabled}
+                                />{" "}
+                                {t("enableForecastEmailsForThisPlant")}
+                            </label>
+                            {region.status !== "approved" && (
+                                <Notice>{t("approvalRequired")}</Notice>
+                            )}
+                            <DeliveryTimes
+                                data={data}
+                                timezone={region.timezone}
+                            />
+                            <RecipientFields data={data} />
+                            <div className="field">
+                                <label htmlFor={languageId}>
+                                    {t("emailLanguage")}
+                                </label>
+                                <select
+                                    id={languageId}
+                                    name="language"
+                                    defaultValue={data.language}
+                                >
+                                    <option value="en">English</option>
+                                    <option value="tr">Türkçe</option>
+                                </select>
+                            </div>
+                            <details>
+                                <summary>{t("reminderDetails")}</summary>
+                                <p className="fine">
+                                    {t("reminderPolicy", {
+                                        limit:
+                                            data.daily_reminder_limit == null
+                                                ? "?"
+                                                : format.number(
+                                                      data.daily_reminder_limit,
+                                                  ),
+                                    })}
+                                </p>
+                            </details>
+                        </ActionForm>
+                    </section>
+                    <details className="panel">
+                        <summary>{t("recentDeliveries")}</summary>
+                        {data.deliveries.length ? (
+                            <ScrollRegion
+                                label={t("recentForecastEmailDeliveries")}
+                            >
+                                <table>
+                                    <caption className="sr-only">
+                                        {t("recentForecastEmailDeliveries")}
+                                    </caption>
+                                    <thead>
+                                        <tr>
+                                            <th>
+                                                {t("scheduled", {
+                                                    timezone: region.timezone,
+                                                })}
+                                            </th>
+                                            <th>{t("emailRecipients")}</th>
+                                            <th>{t("status")}</th>
+                                            <th>{t("collected")}</th>
+                                            <th>{t("dataAge")}</th>
+                                            <th>{t("sent")}</th>
+                                            <th>{t("details")}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {data.deliveries.map((row) => (
+                                            <tr key={row.id}>
+                                                <td>
+                                                    {new Date(
+                                                        row.scheduled_for,
+                                                    ).toLocaleString(locale, {
+                                                        timeZone:
+                                                            region.timezone,
+                                                    })}
+                                                </td>
+                                                <td className="delivery-recipients">
+                                                    {row.recipients
+                                                        ? row.recipients.map(
+                                                              (email) => (
+                                                                  <div
+                                                                      key={
+                                                                          email
+                                                                      }
+                                                                  >
+                                                                      {email}
+                                                                  </div>
+                                                              ),
+                                                          )
+                                                        : t(
+                                                              "deliveryRecipientCount",
+                                                              {
+                                                                  count: row.recipient_count,
+                                                              },
+                                                          )}
+                                                </td>
+                                                <td>
+                                                    <Tag
+                                                        tone={
+                                                            row.status ===
+                                                            "failed"
+                                                                ? "danger"
+                                                                : row.status ===
+                                                                    "sent"
+                                                                  ? "success"
+                                                                  : [
+                                                                          "pending",
+                                                                          "retry",
+                                                                          "uncertain",
+                                                                      ].includes(
+                                                                          row.status,
+                                                                      )
+                                                                    ? "warning"
+                                                                    : "neutral"
+                                                        }
+                                                    >
+                                                        {deliveryLabels[
+                                                            row.status
+                                                        ] ??
+                                                            t(
+                                                                "statusUnavailable",
+                                                            )}
+                                                    </Tag>
+                                                    {row.forecast_status && (
+                                                        <div className="fine">
+                                                            {forecastLabels[
+                                                                row
+                                                                    .forecast_status
+                                                            ] ??
+                                                                t(
+                                                                    "forecastUnavailable",
+                                                                )}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td>
+                                                    {row.collected_at
+                                                        ? new Date(
+                                                              row.collected_at,
+                                                          ).toLocaleString(
+                                                              locale,
+                                                              {
+                                                                  timeZone:
+                                                                      region.timezone,
+                                                              },
+                                                          )
+                                                        : "—"}
+                                                </td>
+                                                <td>
+                                                    {row.source_age_seconds ==
+                                                    null
+                                                        ? "—"
+                                                        : t("sourceAge", {
+                                                              hours: Math.floor(
+                                                                  row.source_age_seconds /
+                                                                      3600,
+                                                              ),
+                                                              minutes:
+                                                                  Math.floor(
+                                                                      (row.source_age_seconds %
+                                                                          3600) /
+                                                                          60,
+                                                                  ),
+                                                          })}
+                                                    {row.stale && (
+                                                        <Tag>stale</Tag>
+                                                    )}
+                                                </td>
+                                                <td>
+                                                    {row.sent_at
+                                                        ? new Date(
+                                                              row.sent_at,
+                                                          ).toLocaleString(
+                                                              locale,
+                                                              {
+                                                                  timeZone:
+                                                                      region.timezone,
+                                                              },
+                                                          )
+                                                        : "—"}
+                                                </td>
+                                                <td>
+                                                    {row.late
+                                                        ? t("lateDelivery")
+                                                        : ""}
+                                                    {row.last_error
+                                                        ? (deliveryDetails[
+                                                              row.last_error
+                                                          ] ??
+                                                          t(
+                                                              "deliveryNeedsAttention",
+                                                          ))
+                                                        : "—"}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </ScrollRegion>
+                        ) : (
+                            <Empty title={t("noDeliveriesYet")}>
+                                {t("scheduledDeliveriesAppearHere")}
+                            </Empty>
+                        )}
                     </details>
-                </ActionForm>
-            </section>
-            <details className="panel">
-                <summary>{t("recentDeliveries")}</summary>
-                {data.deliveries.length ? (
-                    <ScrollRegion label={t("recentForecastEmailDeliveries")}>
-                        <table>
-                            <caption className="sr-only">
-                                {t("recentForecastEmailDeliveries")}
-                            </caption>
-                            <thead>
-                                <tr>
-                                    <th>
-                                        {t("scheduled", {
-                                            timezone: region.timezone,
-                                        })}
-                                    </th>
-                                    <th>{t("emailRecipients")}</th>
-                                    <th>{t("status")}</th>
-                                    <th>{t("collected")}</th>
-                                    <th>{t("dataAge")}</th>
-                                    <th>{t("sent")}</th>
-                                    <th>{t("details")}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {data.deliveries.map((row) => (
-                                    <tr key={row.id}>
-                                        <td>
-                                            {new Date(
-                                                row.scheduled_for,
-                                            ).toLocaleString(locale, {
-                                                timeZone: region.timezone,
-                                            })}
-                                        </td>
-                                        <td className="delivery-recipients">
-                                            {row.recipients
-                                                ? row.recipients.map(
-                                                      (email) => (
-                                                          <div key={email}>
-                                                              {email}
-                                                          </div>
-                                                      ),
-                                                  )
-                                                : t("deliveryRecipientCount", {
-                                                      count: row.recipient_count,
-                                                  })}
-                                        </td>
-                                        <td>
-                                            <Tag
-                                                tone={
-                                                    row.status === "failed"
-                                                        ? "danger"
-                                                        : row.status === "sent"
-                                                          ? "success"
-                                                          : [
-                                                                  "pending",
-                                                                  "retry",
-                                                                  "uncertain",
-                                                              ].includes(
-                                                                  row.status,
-                                                              )
-                                                            ? "warning"
-                                                            : "neutral"
-                                                }
-                                            >
-                                                {deliveryLabels[row.status] ??
-                                                    t("statusUnavailable")}
-                                            </Tag>
-                                            {row.forecast_status && (
-                                                <div className="fine">
-                                                    {forecastLabels[
-                                                        row.forecast_status
-                                                    ] ??
-                                                        t(
-                                                            "forecastUnavailable",
-                                                        )}
-                                                </div>
-                                            )}
-                                        </td>
-                                        <td>
-                                            {row.collected_at
-                                                ? new Date(
-                                                      row.collected_at,
-                                                  ).toLocaleString(locale, {
-                                                      timeZone: region.timezone,
-                                                  })
-                                                : "—"}
-                                        </td>
-                                        <td>
-                                            {row.source_age_seconds == null
-                                                ? "—"
-                                                : t("sourceAge", {
-                                                      hours: Math.floor(
-                                                          row.source_age_seconds /
-                                                              3600,
-                                                      ),
-                                                      minutes: Math.floor(
-                                                          (row.source_age_seconds %
-                                                              3600) /
-                                                              60,
-                                                      ),
-                                                  })}
-                                            {row.stale && <Tag>stale</Tag>}
-                                        </td>
-                                        <td>
-                                            {row.sent_at
-                                                ? new Date(
-                                                      row.sent_at,
-                                                  ).toLocaleString(locale, {
-                                                      timeZone: region.timezone,
-                                                  })
-                                                : "—"}
-                                        </td>
-                                        <td>
-                                            {row.late ? t("lateDelivery") : ""}
-                                            {row.last_error
-                                                ? (deliveryDetails[
-                                                      row.last_error
-                                                  ] ??
-                                                  t("deliveryNeedsAttention"))
-                                                : "—"}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </ScrollRegion>
-                ) : (
-                    <Empty title={t("noDeliveriesYet")}>
-                        {t("scheduledDeliveriesAppearHere")}
-                    </Empty>
-                )}
-            </details>
-        </>
+                </>
+            )}
+        </Resource>
     );
 }

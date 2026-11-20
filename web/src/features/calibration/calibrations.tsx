@@ -8,7 +8,8 @@ import { cadence, useApiList, useRefresh } from "@/lib/api/query";
 import { CalibrationAutomationPanel } from "./calibration-automation";
 import { CsvDownload } from "@/ui/csv-download";
 import { ScrollRegion } from "@/ui/scroll-region";
-import { Empty, JsonDetails, Notice, RefreshFailed, Stat, Tag } from "@/ui/ui";
+import { Resource } from "@/ui/resource";
+import { Empty, JsonDetails, Notice, Stat, Tag } from "@/ui/ui";
 
 type DetailState =
     | { status: "idle" | "loading" }
@@ -152,130 +153,136 @@ export function Calibrations({
                         )}
                     </Notice>
                 )}
-                <RefreshFailed resource={resource} />
-                {resource.loading ? (
-                    <p role="status">{t("loading_calibration_runs")}</p>
-                ) : !resource.data ? (
-                    <Notice error>{resource.error}</Notice>
-                ) : resource.data.results.length ? (
-                    <ScrollRegion label={t("calibration_runs")}>
-                        <table>
-                            <caption className="sr-only">
-                                {t("calibration_runs")}
-                            </caption>
-                            <thead>
-                                <tr>
-                                    <th>{t("run")}</th>
-                                    <th>{t("window")}</th>
-                                    <th>{t("status")}</th>
-                                    <th>{t("assessment")}</th>
-                                    <th>{t("factor")}</th>
-                                    <th>{t("actions")}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {resource.data.results.map((run) => (
-                                    <tr key={run.id}>
-                                        <td>#{run.id}</td>
-                                        <td>
-                                            {run.window_start} →{" "}
-                                            {run.window_end}
-                                        </td>
-                                        <td>
-                                            <Tag>{run.status}</Tag>
-                                            {run.configuration_id !==
-                                                currentConfigurationId && (
-                                                <Tag>
-                                                    {t(
-                                                        "previous_configuration",
+                <Resource
+                    resource={resource}
+                    loading={t("loading_calibration_runs")}
+                >
+                    {(data) =>
+                        data.results.length ? (
+                            <ScrollRegion label={t("calibration_runs")}>
+                                <table>
+                                    <caption className="sr-only">
+                                        {t("calibration_runs")}
+                                    </caption>
+                                    <thead>
+                                        <tr>
+                                            <th>{t("run")}</th>
+                                            <th>{t("window")}</th>
+                                            <th>{t("status")}</th>
+                                            <th>{t("assessment")}</th>
+                                            <th>{t("factor")}</th>
+                                            <th>{t("actions")}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {data.results.map((run) => (
+                                            <tr key={run.id}>
+                                                <td>#{run.id}</td>
+                                                <td>
+                                                    {run.window_start} →{" "}
+                                                    {run.window_end}
+                                                </td>
+                                                <td>
+                                                    <Tag>{run.status}</Tag>
+                                                    {run.configuration_id !==
+                                                        currentConfigurationId && (
+                                                        <Tag>
+                                                            {t(
+                                                                "previous_configuration",
+                                                            )}
+                                                        </Tag>
                                                     )}
-                                                </Tag>
-                                            )}
-                                        </td>
-                                        <td>
-                                            {enumLabel(run.assessment)}{" "}
-                                            {(
-                                                run.result as Record<
-                                                    string,
-                                                    unknown
-                                                > | null
-                                            )?.provisional_production ===
-                                                true && (
-                                                <Tag tone="warning">
-                                                    {t(
-                                                        "provisional_production",
+                                                </td>
+                                                <td>
+                                                    {enumLabel(run.assessment)}{" "}
+                                                    {(
+                                                        run.result as Record<
+                                                            string,
+                                                            unknown
+                                                        > | null
+                                                    )
+                                                        ?.provisional_production ===
+                                                        true && (
+                                                        <Tag tone="warning">
+                                                            {t(
+                                                                "provisional_production",
+                                                            )}
+                                                        </Tag>
                                                     )}
-                                                </Tag>
-                                            )}
-                                        </td>
-                                        <td>
-                                            {run.factor === null
-                                                ? "—"
-                                                : new Intl.NumberFormat(
-                                                      locale,
-                                                      {
-                                                          maximumFractionDigits: 4,
-                                                      },
-                                                  ).format(run.factor)}
-                                        </td>
-                                        <td>
-                                            <button
-                                                className="text-button"
-                                                onClick={() =>
-                                                    loadDetails(run.id)
-                                                }
-                                            >
-                                                {t("view_details")}
-                                            </button>
-                                            {run.status === "ready" &&
-                                                run.configuration_id !==
-                                                    currentConfigurationId && (
-                                                    <span>
-                                                        {t(
-                                                            "only_the_current_configuration_can_be_activated",
-                                                        )}
-                                                    </span>
-                                                )}
-                                            {canManage &&
-                                                run.status === "ready" &&
-                                                run.configuration_id ===
-                                                    currentConfigurationId && (
+                                                </td>
+                                                <td>
+                                                    {run.factor === null
+                                                        ? "—"
+                                                        : new Intl.NumberFormat(
+                                                              locale,
+                                                              {
+                                                                  maximumFractionDigits: 4,
+                                                              },
+                                                          ).format(run.factor)}
+                                                </td>
+                                                <td>
                                                     <button
                                                         className="text-button"
-                                                        disabled={
-                                                            actionState.status ===
-                                                                "pending" ||
-                                                            automationPending
-                                                        }
                                                         onClick={() =>
-                                                            action(() =>
-                                                                api.post(
-                                                                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/{calibration_id}/activate/",
-                                                                    {
-                                                                        path: {
-                                                                            ...scope,
-                                                                            calibration_id:
-                                                                                run.id,
-                                                                        },
-                                                                    },
-                                                                ),
-                                                            )
+                                                            loadDetails(run.id)
                                                         }
                                                     >
-                                                        {t("activate")}
+                                                        {t("view_details")}
                                                     </button>
-                                                )}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </ScrollRegion>
-                ) : (
-                    <Empty title={t("no_calibration_runs")}>
-                        {t("save_complete_paired_days_in_the_production")}
-                    </Empty>
-                )}
+                                                    {run.status === "ready" &&
+                                                        run.configuration_id !==
+                                                            currentConfigurationId && (
+                                                            <span>
+                                                                {t(
+                                                                    "only_the_current_configuration_can_be_activated",
+                                                                )}
+                                                            </span>
+                                                        )}
+                                                    {canManage &&
+                                                        run.status ===
+                                                            "ready" &&
+                                                        run.configuration_id ===
+                                                            currentConfigurationId && (
+                                                            <button
+                                                                className="text-button"
+                                                                disabled={
+                                                                    actionState.status ===
+                                                                        "pending" ||
+                                                                    automationPending
+                                                                }
+                                                                onClick={() =>
+                                                                    action(() =>
+                                                                        api.post(
+                                                                            "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/{calibration_id}/activate/",
+                                                                            {
+                                                                                path: {
+                                                                                    ...scope,
+                                                                                    calibration_id:
+                                                                                        run.id,
+                                                                                },
+                                                                            },
+                                                                        ),
+                                                                    )
+                                                                }
+                                                            >
+                                                                {t("activate")}
+                                                            </button>
+                                                        )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </ScrollRegion>
+                        ) : (
+                            <Empty title={t("no_calibration_runs")}>
+                                {t(
+                                    "save_complete_paired_days_in_the_production",
+                                )}
+                            </Empty>
+                        )
+                    }
+                </Resource>
                 {detail.status === "error" && (
                     <Notice error>{detail.error}</Notice>
                 )}

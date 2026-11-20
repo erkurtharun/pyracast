@@ -24,6 +24,7 @@ export function ViewNav<K extends string>({
             {views.map(([key, text]) => (
                 <button
                     key={key}
+                    type="button"
                     className={current === key ? "active" : ""}
                     aria-current={current === key ? "page" : undefined}
                     onFocus={

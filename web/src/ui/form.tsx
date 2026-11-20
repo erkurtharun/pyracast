@@ -1,17 +1,32 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
-export function ControlField({
-    label,
-    children,
-}: {
-    label: ReactNode;
-    children: ReactNode;
-}) {
+export function ControlField(
+    props:
+        | { label: ReactNode; hint?: undefined; children: ReactNode }
+        | {
+              label: ReactNode;
+              hint: string;
+              children: (describedBy: string) => ReactNode;
+          },
+) {
+    const hintId = `${useId()}-hint`;
+    if (props.hint === undefined)
+        return (
+            <label className="field">
+                {props.label}
+                {props.children}
+            </label>
+        );
     return (
-        <label className="field">
-            {label}
-            {children}
-        </label>
+        <div className="field">
+            <label className="field-control">
+                {props.label}
+                {props.children(hintId)}
+            </label>
+            <span className="field-hint" id={hintId}>
+                {props.hint}
+            </span>
+        </div>
     );
 }
 

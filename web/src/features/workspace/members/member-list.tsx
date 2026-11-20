@@ -99,6 +99,7 @@ export function MemberList({
             {(removal.status === "confirming" ||
                 removal.status === "pending") && (
                 <ConfirmAction
+                    key={removal.member.id}
                     label={t("confirmRemoval")}
                     cancel={t("keepMember")}
                     confirm={t("remove")}

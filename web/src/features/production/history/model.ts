@@ -16,9 +16,8 @@ export type Draft = {
 
 export type Editor =
     | { status: "closed" }
-    | ({
-          status: "editing" | "saving" | "reloading" | "failed" | "orphaned";
-      } & Draft);
+    | ({ status: "editing" | "saving" | "reloading" } & Draft)
+    | ({ status: "failed" | "orphaned"; error: string } & Draft);
 
 export function intervalKey(row: Pick<Interval, "starts_at" | "ends_at">) {
     return `${row.starts_at}/${row.ends_at}`;

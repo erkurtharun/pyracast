@@ -52,13 +52,17 @@ const history = (intervals: Interval[]) => ({ intervals }) as History;
 const draft = (
     status: Exclude<Editor["status"], "closed">,
     key: string,
-): Editor => ({
-    status,
-    key,
-    energy: "2",
-    quality: "valid",
-    expectedRevision: 1,
-});
+): Editor => {
+    const fields = {
+        key,
+        energy: "2",
+        quality: "valid" as const,
+        expectedRevision: 1,
+    };
+    return status === "failed" || status === "orphaned"
+        ? { status, ...fields, error: "gone" }
+        : { status, ...fields };
+};
 
 test("days step across month and year ends", () => {
     expect(shiftDay("2026-12-31", 1)).toBe("2027-01-01");
