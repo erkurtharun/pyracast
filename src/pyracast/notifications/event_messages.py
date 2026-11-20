@@ -2,6 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -68,7 +69,12 @@ def plant_time(moment: datetime, region: Region) -> str:
     return date_format(moment.astimezone(ZoneInfo(region.timezone)), "j M Y H:i")
 
 
-def _review(event_id: int) -> EventMessage | None:
+def _subject(mail: OutboundMail) -> int:
+    return int(mail.context["subject_id"])
+
+
+def _review(mail: OutboundMail) -> EventMessage | None:
+    event_id = _subject(mail)
     event = AuditEvent.objects.filter(pk=event_id).first()
     region = Region.objects.active().select_related("tenant").filter(auditevent=event_id).first()
     if event is None or region is None:
@@ -91,8 +97,8 @@ def _review(event_id: int) -> EventMessage | None:
     )
 
 
-def _role(change_id: int, *, assigned: bool) -> EventMessage | None:
-    change = WorkspaceAdminChange.objects.select_related("tenant").filter(pk=change_id).first()
+def _role(mail: OutboundMail, *, assigned: bool) -> EventMessage | None:
+    change = WorkspaceAdminChange.objects.select_related("tenant").filter(pk=_subject(mail)).first()
     if change is None:
         return None
     values = {"workspace": change.tenant.name}
@@ -124,12 +130,51 @@ def _role(change_id: int, *, assigned: bool) -> EventMessage | None:
     )
 
 
-COMPOSERS: dict[str, Callable[[int], EventMessage | None]] = {
+def _purge_warning(mail: OutboundMail) -> EventMessage | None:
+    """A warning outlived by a restore, or by a newer warning after the plant was trashed
+    again, is not sent."""
+    region = (
+        Region.objects.select_related("tenant")
+        .filter(
+            pk=_subject(mail),
+            deleted_at__isnull=False,
+            purge_started_at__isnull=True,
+            purge_warning_sent_at__lte=mail.created_at,
+        )
+        .first()
+    )
+    if region is None:
+        return None
+    values = {
+        "plant": plant_name(region),
+        "workspace": region.tenant.name,
+        "trashed": plant_time(cast(datetime, region.deleted_at), region),
+        # The warning expires when the purge is due.
+        "time": plant_time(mail.expires_at, region),
+        "zone": region.timezone,
+    }
+    return EventMessage(
+        region.tenant_id,
+        region.tenant.name,
+        _("%(plant)s will be deleted permanently") % values,
+        _(
+            "%(plant)s has been in the recycle bin of %(workspace)s since %(trashed)s. It will "
+            "be deleted permanently on %(time)s (%(zone)s) with its forecasts and history. "
+            "Restore it before then to keep it."
+        )
+        % values,
+        str(_("Open recycle bin")),
+        workspace_url(region.tenant_id, "trash/"),
+    )
+
+
+COMPOSERS: dict[str, Callable[[OutboundMail], EventMessage | None]] = {
     OutboundMailKind.PLANT_APPROVED: _review,
     OutboundMailKind.PLANT_REJECTED: _review,
     OutboundMailKind.PLANT_SUSPENDED: _review,
     OutboundMailKind.WORKSPACE_ADMIN_ASSIGNED: partial(_role, assigned=True),
     OutboundMailKind.WORKSPACE_ADMIN_RELEASED: partial(_role, assigned=False),
+    OutboundMailKind.PURGE_WARNING: _purge_warning,
 }
 
 
@@ -143,7 +188,7 @@ def compose_event_mail(mail: OutboundMail) -> EmailMultiAlternatives | OutboundM
     """Renders the intent from the row it names, so a reported item that is gone or a
     recipient who left the workspace receives nothing."""
     with translation.override(mail.language):
-        message = COMPOSERS[mail.kind](int(mail.context["subject_id"]))
+        message = COMPOSERS[mail.kind](mail)
         if message is None:
             return OutboundMailError.SUBJECT_UNAVAILABLE
         if not _still_member(message.tenant_id, mail.recipient):

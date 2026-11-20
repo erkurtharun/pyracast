@@ -32,6 +32,7 @@ def render_forecast(
     *,
     prepared_at: datetime,
     report_context: dict[str, object] | None,
+    footer: str,
 ) -> dict[str, str]:
     context = report_context if report_context is not None else saved_report_context(delivery)
     zone = ZoneInfo(cast(str, context["timezone"]))
@@ -87,6 +88,7 @@ def render_forecast(
         "updated": updated,
         "warnings": report.warnings,
         "url": report.url,
+        "footer": footer,
     }
     return {
         "format": PreparedMessageFormat.XLSX,

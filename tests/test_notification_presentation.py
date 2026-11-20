@@ -235,6 +235,7 @@ def test_email_labels_actuals_and_mixed_partial_without_hiding_unknown_outage(
             [None],
             prepared_at=START,
             report_context=source,
+            footer="",
         )
     labels = {
         "en": {"estimated_actuals": "Estimated actuals", "mixed": "Estimated + forecast"},

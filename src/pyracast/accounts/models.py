@@ -247,6 +247,7 @@ class OutboundMailKind(models.TextChoices):
     PLANT_SUSPENDED = "plant_suspended", "Plant suspended"
     WORKSPACE_ADMIN_ASSIGNED = "workspace_admin_assigned", "Administrator role received"
     WORKSPACE_ADMIN_RELEASED = "workspace_admin_released", "Administrator role moved away"
+    PURGE_WARNING = "plant_purge_warning", "Plant deletion warning"
 
 
 # Mail about a workspace event: its context names only the row it reports (`subject_id`), and
@@ -257,6 +258,7 @@ EVENT_MAIL = (
     OutboundMailKind.PLANT_SUSPENDED,
     OutboundMailKind.WORKSPACE_ADMIN_ASSIGNED,
     OutboundMailKind.WORKSPACE_ADMIN_RELEASED,
+    OutboundMailKind.PURGE_WARNING,
 )
 CODED_MAIL = (
     OutboundMailKind.EMAIL_CONFIRMATION_SIGNUP,

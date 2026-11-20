@@ -168,8 +168,8 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
         now = timezone.now()
         if (blocker := restore_blocker(region, now)) is not None:
             raise DomainError(blocker)
-        region.deleted_at = None
-        region.save(update_fields=("deleted_at",))
+        region.deleted_at = region.purge_warning_sent_at = None
+        region.save(update_fields=("deleted_at", "purge_warning_sent_at"))
         CollectionSchedule.objects.get_or_create(
             region=region,
             defaults={

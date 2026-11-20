@@ -107,6 +107,9 @@ class Region(models.Model):
     deleted_at = models.DateTimeField(null=True, db_index=True)
     # Set by the first purge transaction; such a region can no longer be restored.
     purge_started_at = models.DateTimeField(null=True)
+    # Set when the administrators are warned before the purge, cleared by a restore. Regions
+    # already in the trash when the column was added carry the migration time: never warned.
+    purge_warning_sent_at = models.DateTimeField(null=True)
 
     objects = RegionQuerySet.as_manager()
 
