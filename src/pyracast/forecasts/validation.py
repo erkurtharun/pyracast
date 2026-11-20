@@ -48,7 +48,9 @@ def validate_binding(
     if binding.provider_account.provider == Provider.SOLCAST and (
         not binding.settings_verification_reference or binding.installation_date is None
     ):
-        raise ValidationError("Confirmed site settings and installation date are required.")
+        raise ValidationError(
+            gettext("Confirmed site settings and installation date are required.")
+        )
     adapter.prepare(binding)
     with transaction.atomic():
         current = Region.objects.active().select_for_update().filter(pk=binding.region_id).first()
