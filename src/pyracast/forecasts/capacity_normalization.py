@@ -10,8 +10,8 @@ from django.utils import timezone
 
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.calculation import calculate
+from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,

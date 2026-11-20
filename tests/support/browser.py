@@ -27,9 +27,9 @@ from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.mfa import MFAAdapter
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.calculation import calculate
-from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob
+from pyracast.forecasts.validation import validate_binding
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.plants.sites import submit_site
 from pyracast.providers import FixtureProvider

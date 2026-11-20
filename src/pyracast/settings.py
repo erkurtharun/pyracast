@@ -1,5 +1,4 @@
 import os
-import re
 from datetime import time
 from pathlib import Path
 
@@ -7,14 +6,16 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils.csp import CSP
 
 from pyracast.environment import load_environment
+from pyracast.local_time import CLOCK_PATTERN
 
 load_environment()
 
 _cutoff = os.environ.get("PYRACAST_CUTOFF_LOCAL", "16:00")
-if not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", _cutoff):
+if not CLOCK_PATTERN.fullmatch(_cutoff):
     raise ImproperlyConfigured("PYRACAST_CUTOFF_LOCAL must be a valid HH:MM time.")
 PYRACAST_CUTOFF_LOCAL = time(int(_cutoff[:2]), int(_cutoff[3:]))
 PYRACAST_WEATHER_ENABLED = os.environ.get("PYRACAST_WEATHER_ENABLED", "1") == "1"
+PYRACAST_OPEN_METEO_API_KEY = os.environ.get("PYRACAST_OPEN_METEO_API_KEY", "")
 
 SECRET_KEY = os.environ.get("PYRACAST_SECRET_KEY", "")
 SECRET_KEY_FALLBACKS = os.environ.get("PYRACAST_SECRET_KEY_FALLBACKS", "").split()

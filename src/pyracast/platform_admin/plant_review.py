@@ -19,14 +19,11 @@ from rest_framework.exceptions import ValidationError as APIValidationError
 
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
-from pyracast.connections.operations import (
-    QuotaExceededError,
-    RequestDeferredError,
-    validate_binding,
-)
 from pyracast.connections.recovery import clear_provider_cooldown
 from pyracast.epias import EpiasError
 from pyracast.errors import DomainError, ErrorCode
+from pyracast.forecasts.quota import QuotaExceededError, RequestDeferredError
+from pyracast.forecasts.validation import validate_binding
 from pyracast.metering.models import EpiasConnection
 from pyracast.metering.operations import connect_epias, disconnect_epias
 from pyracast.plants.models import Plant, PlantSubmission

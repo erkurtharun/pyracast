@@ -5,9 +5,10 @@ import pytest
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
+from pyracast.background.failures import PhaseOutcome
 from pyracast.connections.contracts import ProviderData
+from pyracast.connections.currency import binding_is_current
 from pyracast.forecasts.jobs import (
-    binding_is_current,
     claim,
     collect,
     pending_job_ids,
@@ -16,7 +17,6 @@ from pyracast.forecasts.jobs import (
 )
 from pyracast.forecasts.management.commands import dispatch as dispatch_command
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
-from pyracast.forecasts.monitoring import PhaseOutcome
 from pyracast.forecasts.scheduler import enqueue_due as enqueue_collections
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.scheduler import enqueue_due as enqueue_reminders
@@ -112,7 +112,7 @@ def test_dispatch_prioritizes_notifications_and_continues_all_queues(
         calls.append("dispatch")
         return PhaseOutcome()
 
-    monkeypatch.setattr(dispatch_command, "dispatch", collection)
+    monkeypatch.setattr(dispatch_command, "dispatch_collections", collection)
     dispatch_command.Command().handle(loop=False, poll_seconds=60.0)
     assert calls == [
         "dispatch_notifications",

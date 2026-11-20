@@ -22,6 +22,7 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.forecasts.monitoring import delivery_health
+from pyracast.local_time import local_slot
 from pyracast.mail.errors import NotSentError, PermanentlyNotSentError
 from pyracast.mail.send import send
 from pyracast.notifications.jobs import (
@@ -36,7 +37,6 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.operations import configure_reminders, get_reminder_schedule
 from pyracast.notifications.recipients import effective_recipients
-from pyracast.notifications.schedule import local_slot
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.platform_admin.health_queries import notification_deliveries_for_issue
 from pyracast.regions.models import Region

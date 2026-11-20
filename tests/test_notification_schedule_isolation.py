@@ -14,7 +14,7 @@ from rest_framework.test import APIClient
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.background.failures import ItemsFailedError
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.operations import validate_binding
+from pyracast.forecasts.validation import validate_binding
 from pyracast.notifications import runtime
 from pyracast.notifications import scheduler as notification_scheduler
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule

@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
 from pyracast.background.failures import ItemsFailedError, isolate
-from pyracast.forecasts.jobs import binding_is_current
+from pyracast.connections.currency import binding_is_current
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
 from pyracast.plants.availability import reference_intervals

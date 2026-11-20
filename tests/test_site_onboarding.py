@@ -10,8 +10,8 @@ from django.test import Client
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
-from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.models import CollectionJob
+from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
 from pyracast.plants.operations import create_plant, revise_plant
 from pyracast.plants.sites import site_queryset, submit_site

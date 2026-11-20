@@ -6,9 +6,9 @@ import pytest
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.forecasts.composition import ForecastVintage, compose_forecasts
 from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.forecast_composition import ForecastVintage, compose_forecasts
 from pyracast.plants.numerics import PowerInterval, forecast
 from pyracast.plants.operating_limits import OperatingLimit, affected_power
 from pyracast.solar import Daylight, daylight_energy_windows, daylight_window, summarize_daylight

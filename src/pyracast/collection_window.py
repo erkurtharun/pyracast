@@ -1,7 +1,7 @@
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from pyracast.notifications.schedule import local_slot
+from pyracast.local_time import local_slot
 
 HISTORY_CLOCK = "00:00"
 HISTORY_END_CLOCK = "09:00"

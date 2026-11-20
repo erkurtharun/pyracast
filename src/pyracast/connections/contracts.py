@@ -6,7 +6,7 @@ from typing import Literal, Protocol, runtime_checkable
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import SnapshotWeatherError
 from pyracast.intervals import NormalizedInterval
-from pyracast.weather import WeatherData
+from pyracast.weather_data import WeatherData
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,9 @@ class ProviderError(Exception):
 
 
 class ProviderAdapter(Protocol):
+    # Local checks that run before a ledger request is reserved; raise a non-retryable error.
+    def prepare(self, binding: SiteBinding) -> None: ...
+
     def validate(self, binding: SiteBinding) -> None: ...
 
     def fetch(self, binding: SiteBinding, target_date: date) -> ProviderData: ...

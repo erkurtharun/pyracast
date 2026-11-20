@@ -11,8 +11,10 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from pyracast.accounts.retention import sweep_accounts
-from pyracast.background.failures import ItemsFailedError, log_failure
-from pyracast.forecasts.monitoring import PhaseOutcome, record_dispatch_phase
+from pyracast.background.broker import make_broker
+from pyracast.background.failures import ItemsFailedError, PhaseOutcome, log_failure
+from pyracast.forecasts.monitoring import record_dispatch_phase
+from pyracast.forecasts.runtime import dispatch_collections, make_actor
 from pyracast.metering.runtime import dispatch_epias, make_epias_actor
 from pyracast.notifications.outbox import purge_finished_mail
 from pyracast.notifications.runtime import (
@@ -22,7 +24,6 @@ from pyracast.notifications.runtime import (
     publish_outbound_mail,
 )
 from pyracast.plants.runtime import dispatch_calibrations, make_calibration_actor
-from pyracast.runtime import dispatch, make_actor, make_broker
 from pyracast.shutdown import ShutdownRequest, shutdown_control
 from pyracast.trash import purge_expired
 
@@ -94,7 +95,7 @@ class Command(BaseCommand):
                         "notifications",
                         _published(partial(dispatch_notifications, notification_actor, mail_actor)),
                     ),
-                    ("collection", partial(dispatch, actor)),
+                    ("collection", partial(dispatch_collections, actor)),
                     ("calibration", _published(partial(dispatch_calibrations, calibration_actor))),
                     ("retention", _retention),
                     ("metering", _published(partial(dispatch_epias, epias_actor))),

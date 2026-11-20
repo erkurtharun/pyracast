@@ -8,10 +8,8 @@ from django.db import connection
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import (
-    create_account,
-    validate_binding,
-)
+from pyracast.connections.operations import create_account
+from pyracast.forecasts.validation import validate_binding
 from pyracast.regions.models import Region
 from pyracast.regions.operations import (
     approve_region,
@@ -29,6 +27,9 @@ def provider_key(name: str = "TEST_KEY") -> str:
 class FakeAdapter:
     def __init__(self, action: Callable[[], None] = lambda: None) -> None:
         self.action = action
+
+    def prepare(self, binding: SiteBinding) -> None:
+        pass
 
     def validate(self, binding: SiteBinding) -> None:
         assert not connection.in_atomic_block

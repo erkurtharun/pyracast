@@ -10,6 +10,7 @@ from django.db import transaction
 from pyracast.accounts.models import Tenant
 from pyracast.background.failures import BACK_OFF, Deferrals, isolate
 from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
+from pyracast.local_time import local_slot
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationDelivery,
@@ -23,7 +24,6 @@ from pyracast.notifications.operations import (
     validate_recipient,
 )
 from pyracast.notifications.recipients import pin_recipient_memberships
-from pyracast.notifications.schedule import local_slot
 from pyracast.regions.models import Region, active_region
 
 MAX_LATENESS = timedelta(hours=2)

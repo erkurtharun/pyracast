@@ -8,7 +8,7 @@ from django.core.management import CommandError, call_command
 from django.db import IntegrityError, connection, transaction
 from django.test.utils import CaptureQueriesContext
 
-from pyracast.connections.operations import rotate_secret, validate_binding
+from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -17,6 +17,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
 )
 from pyracast.forecasts.monitoring import delivery_health, record_dispatch_phase
+from pyracast.forecasts.validation import validate_binding
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.regions.models import Region

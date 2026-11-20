@@ -1,6 +1,7 @@
 import logging
 import traceback
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -16,6 +17,13 @@ class ItemsFailedError(Exception):
         super().__init__(f"{count} item(s) failed")
         self.count = count
         self.published: int | None = None
+
+
+@dataclass(frozen=True)
+class PhaseOutcome:
+    published: int | None = None
+    # A bounded failure code (at most 100 characters); empty when the phase succeeded.
+    error: str = ""
 
 
 def _chain(error: BaseException) -> list[BaseException]:

@@ -9,7 +9,8 @@ import dramatiq
 import pytest
 from dramatiq import Worker
 
-from pyracast import runtime
+from pyracast.background.broker import make_broker
+from pyracast.forecasts import runtime
 from pyracast.forecasts.models import (
     CollectionJob,
     ForecastResult,
@@ -28,7 +29,7 @@ def test_rabbitmq_delivery_publishes_forecast(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(runtime, "datetime", SimpleNamespace(now=lambda _: NOW))
     make_system(approved=True)
     job = CollectionJob.objects.get()
-    broker = runtime.make_broker()
+    broker = make_broker()
     original = runtime.make_actor(broker)
     queue = f"test_forecast_{uuid.uuid4().hex}"
     actor = dramatiq.actor(broker=broker, actor_name=queue, queue_name=queue, max_retries=0)(
@@ -69,7 +70,7 @@ def test_rabbitmq_actuals_redelivery_archives_once_with_one_provider_request(
         available_at=NOW,
     )
     requests = RequestAttempt.objects.count()
-    broker = runtime.make_broker()
+    broker = make_broker()
     original = runtime.make_actor(broker)
     queue = f"test_actuals_{uuid.uuid4().hex}"
     actor = dramatiq.actor(broker=broker, actor_name=queue, queue_name=queue, max_retries=0)(

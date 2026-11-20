@@ -17,7 +17,7 @@ from pyracast.mail.errors import MailFailure
 from pyracast.notifications.models import PAUSED_DELIVERY_ERRORS, NotificationDeliveryError
 from pyracast.plants.models import CalibrationAssessment
 from pyracast.plants.numerics import FitAssessment
-from pyracast.weather import WeatherFailure
+from pyracast.weather_data import WeatherFailure
 from tests.support.vocabularies import (
     COVERED_APPS,
     FAILURE_CODES,

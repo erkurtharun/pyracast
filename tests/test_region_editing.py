@@ -12,7 +12,8 @@ from django.test import Client
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
-from pyracast.connections.operations import create_account, validate_binding
+from pyracast.connections.operations import create_account
+from pyracast.forecasts.validation import validate_binding
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
 from pyracast.regions.operations import (
     approve_region,

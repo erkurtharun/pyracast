@@ -65,11 +65,10 @@ def capture(
 
     from pyracast.connections.contracts import ProviderError
     from pyracast.connections.models import ProviderAccount, SiteBinding
-    from pyracast.connections.operations import record_provider_failure, reserve_account_request
     from pyracast.connections.secrets import decrypt_api_key
     from pyracast.forecasts.models import RequestAttempt, RequestPurpose
-    from pyracast.provider_retry import retry_after_seconds, retryable_status
-    from pyracast.providers import contains_secret
+    from pyracast.forecasts.quota import record_provider_failure, reserve_account_request
+    from pyracast.providers import solcast_get
     from pyracast.regions.models import active_region
 
     if kind not in {"settings", "forecast"}:
@@ -101,29 +100,13 @@ def capture(
         attempt = reserve_account_request(account, now, purpose=purpose, binding=binding)
     path = "/rooftop_sites" if kind == "settings" else f"/rooftop_sites/{site_id}/forecasts"
     try:
-        with httpx.Client(
-            timeout=httpx.Timeout(20, connect=5), follow_redirects=False, transport=transport
-        ) as client:
-            response = client.get(
-                "https://api.solcast.com.au" + path,
-                headers={"Authorization": f"Bearer {secret}"},
-                params={"format": "json"},
-            )
-            if response.status_code != 200:
-                raise ProviderError(
-                    f"provider_http_{response.status_code}",
-                    retryable=retryable_status(response.status_code),
-                    retry_after_seconds=retry_after_seconds(response.headers.get("Retry-After"))
-                    if response.status_code in {429, 503}
-                    else None,
-                    status_code=response.status_code,
-                )
-            payload = response.json()
-        if contains_secret(payload, secret) or contains_secret(dict(response.headers), secret):
-            raise ProviderError("unsafe_provider_response")
-        safe = sanitize(payload, kind, site_id)
-    except (httpx.HTTPError, ValueError, ProviderError) as exc:
-        RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
+        answer = solcast_get(secret, path, {}, transport=transport)
+        safe = sanitize(answer.payload, kind, site_id)
+    except (ValueError, ProviderError) as exc:
+        RequestAttempt.objects.filter(pk=attempt.pk).update(
+            outcome="failed",
+            http_status=exc.status_code if isinstance(exc, ProviderError) else None,
+        )
         if isinstance(exc, ProviderError):
             record_provider_failure(account, exc, timezone.now())
         raise ProviderError(
@@ -143,7 +126,7 @@ def capture(
         "request_attempt_id": attempt.pk,
         "rate_limit_headers": {
             key: value
-            for key, value in response.headers.items()
+            for key, value in answer.headers.items()
             if key.lower()
             in {
                 "x-ratelimit-limit",

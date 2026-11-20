@@ -21,13 +21,14 @@ from pyracast.change_requests.models import ChangeRequest, IncidentChange, Produ
 from pyracast.change_requests.operations import submit_incident, submit_production
 from pyracast.change_requests.serializers import IncidentRequestInput
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import create_account, reserve_account_request
+from pyracast.connections.operations import create_account
 from pyracast.forecasts.models import (
     CollectionJob,
     DispatcherStatus,
     ForecastSnapshot,
     RequestAttempt,
 )
+from pyracast.forecasts.quota import reserve_account_request
 from pyracast.incidents.api import IncidentInput
 from pyracast.incidents.models import PlantIncident
 from pyracast.incidents.operations import save_incident

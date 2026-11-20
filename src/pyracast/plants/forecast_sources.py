@@ -1,12 +1,12 @@
 from datetime import datetime
 from typing import Any, cast
 
-from pyracast.forecasts.models import ForecastSnapshot
-from pyracast.plants.forecast_composition import (
+from pyracast.forecasts.composition import (
     ForecastComposition,
     ForecastVintage,
     compose_forecasts,
 )
+from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.plants.models import PlantConfiguration
 
 SELECTION_POLICY = "latest-forecast-coverage-v2"

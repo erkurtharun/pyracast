@@ -18,6 +18,7 @@ from pyracast.forecasts.models import (
     HistoricalReferenceImport,
     RequestAttempt,
 )
+from pyracast.forecasts.monitoring import delivery_health
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.providers import FixtureProvider, SolcastProvider
@@ -239,8 +240,9 @@ def test_same_slot_pair_is_durable_and_concurrent_redelivery_uses_one_actuals_re
 def test_paired_actuals_cannot_spend_reserved_future_forecast_quota() -> None:
     system = make_system(approved=True)
     CollectionJob.objects.update(status="succeeded")
+    system.account.encrypted_api_key = encrypt_secret("test-credential")
     system.account.daily_quota = 3
-    system.account.save(update_fields=("daily_quota",))
+    system.account.save(update_fields=("daily_quota", "encrypted_api_key"))
     CollectionSchedule.objects.create(
         region=system.region, enabled=True, times=["08:45", "16:00"], effective_from=MORNING
     )
@@ -267,8 +269,9 @@ def test_paired_actuals_cannot_spend_reserved_future_forecast_quota() -> None:
         job.pk, SolcastProvider(httpx.MockTransport(forbidden)), lambda *_: {}, MORNING
     )
     job.refresh_from_db()
-    assert (job.status, job.last_error) == ("failed", "history_budget_reserved")
+    assert (job.status, job.last_error) == ("stale", "history_budget_reserved")
     assert job.attempts == 0
+    assert delivery_health(MORNING, timedelta(hours=1))["failed_collections"] == 0
     assert not RequestAttempt.objects.filter(job=job).exists()
 
 
@@ -293,7 +296,7 @@ def test_removing_forecast_clock_cancels_only_its_paired_actuals_job() -> None:
     )
     paired.refresh_from_db()
     night.refresh_from_db()
-    assert paired.status == "stale"
+    assert (paired.status, paired.last_error) == ("stale", "schedule_changed")
     assert night.status == "pending"
 
 

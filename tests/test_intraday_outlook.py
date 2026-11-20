@@ -22,7 +22,7 @@ from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import CalibrationActivation
 from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
-from pyracast.weather import serialize_weather
+from pyracast.weather_data import serialize_weather
 from tests.support.domain import System
 from tests.support.errors import raises_code
 from tests.support.invariants import stored_again

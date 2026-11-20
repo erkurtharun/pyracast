@@ -90,6 +90,9 @@ msgstr "Güncel ve onaylı bir sağlayıcı bağlantısı gereklidir."
 msgid "An approved current region and at least one time are required."
 msgstr "Güncel ve onaylı bir konum ile en az bir saat gereklidir."
 
+msgid "At least one time is required."
+msgstr "En az bir saat gereklidir."
+
 msgid "An issuance cutoff requires archived_forecast comparison."
 msgstr "Yayın kesim saati için arşiv tahmini karşılaştırmasını seçin."
 

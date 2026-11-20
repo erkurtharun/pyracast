@@ -2,10 +2,11 @@ from datetime import timedelta
 
 import pytest
 
-from pyracast.connections.operations import rotate_secret, validate_binding
+from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts.jobs import claim, collect
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.scheduler import enqueue_due
+from pyracast.forecasts.validation import validate_binding
 from pyracast.regions.models import Region
 from pyracast.regions.operations import approve_region
 from tests.support.domain import NOW, FakeAdapter, make_system

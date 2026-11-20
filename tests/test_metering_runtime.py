@@ -12,11 +12,11 @@ import pytest
 from dramatiq import Worker
 from dramatiq.brokers.stub import StubBroker
 
+from pyracast.background.broker import make_broker
 from pyracast.epias import EpiasClient, EpiasError
 from pyracast.metering import client
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.metering.runtime import dispatch_epias, make_epias_actor
-from pyracast.runtime import make_broker
 from tests.support.domain import NOW
 from tests.support.metering import FixtureClient, connected
 

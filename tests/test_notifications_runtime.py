@@ -10,7 +10,7 @@ from django.core import mail
 from dramatiq import Worker
 from dramatiq.brokers.stub import StubBroker
 
-from pyracast import runtime as forecast_runtime
+from pyracast.background.broker import make_broker
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.notifications import runtime
 from pyracast.notifications.models import NotificationDelivery
@@ -76,7 +76,7 @@ def test_rabbitmq_duplicate_reminder_sends_one_mail_without_provider_requests(
     delivery = ready()
     requests, jobs = RequestAttempt.objects.count(), CollectionJob.objects.count()
     monkeypatch.setattr(runtime, "datetime", SimpleNamespace(now=lambda _: SLOT))
-    broker = forecast_runtime.make_broker()
+    broker = make_broker()
     original = runtime.make_notification_actor(broker)
     queue = f"test_reminders_{uuid.uuid4().hex}"
     actor = dramatiq.actor(broker=broker, actor_name=queue, queue_name=queue, max_retries=0)(

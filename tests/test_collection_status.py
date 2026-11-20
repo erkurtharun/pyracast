@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 import pytest
 from django.test import Client
 
-from pyracast.connections.operations import reserve_request
 from pyracast.forecasts.models import (
     CollectionJob,
     ForecastSnapshot,
@@ -11,6 +10,7 @@ from pyracast.forecasts.models import (
     RequestAttempt,
     RequestPurpose,
 )
+from pyracast.forecasts.quota import reserve_request
 from pyracast.forecasts.schedule import configure_schedule, get_schedule, schedule_payload
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.operations import configure_binding, submit_region, transition_region

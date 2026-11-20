@@ -7,14 +7,10 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection
 
-from pyracast.connections import operations
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.operations import (
-    QuotaExceededError,
-    reserve_account_request,
-    reserve_request,
-)
+from pyracast.forecasts import quota
 from pyracast.forecasts.models import CollectionJob, RequestAttempt, RequestPurpose
+from pyracast.forecasts.quota import QuotaExceededError, reserve_account_request, reserve_request
 from pyracast.regions.operations import configure_binding
 from tests.support.domain import NOW, make_system
 
@@ -32,7 +28,7 @@ def test_quota_uses_utc_day_after_account_lock_wait(
     if next_day_full:
         reserve_request(system.binding, reserved, purpose=RequestPurpose.VALIDATION)
     ticks = iter([0.0, 2.0])
-    monkeypatch.setattr(operations, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    monkeypatch.setattr(quota, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
 
     if next_day_full:
         with pytest.raises(QuotaExceededError):

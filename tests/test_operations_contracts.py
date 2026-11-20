@@ -38,11 +38,11 @@ from pyracast.forecasts.management.commands.check_delivery_health import (
     Command as DeliveryHealthCommand,
 )
 from pyracast.forecasts.management.commands.worker import Command as WorkerCommand
+from pyracast.forecasts.runtime import make_actor
 from pyracast.mail import gmail
 from pyracast.metering.runtime import make_epias_actor
 from pyracast.notifications.runtime import make_notification_actor, make_outbound_mail_actor
 from pyracast.plants.runtime import make_calibration_actor
-from pyracast.runtime import make_actor
 from pyracast.urls import urlpatterns
 from tests.support.gateway_routes import (
     backend_route,

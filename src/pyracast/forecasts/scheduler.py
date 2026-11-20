@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -9,7 +10,8 @@ from django.db.models.functions import Greatest
 
 from pyracast.background.failures import log_failure
 from pyracast.collection_window import INTRADAY_HISTORY_WINDOW, nightly_window
-from pyracast.forecasts.jobs import binding_is_current
+from pyracast.connections.currency import binding_is_current
+from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
@@ -33,8 +35,114 @@ class CollectionSchedulingError(RuntimeError):
         self.failed_region_ids = failed_region_ids
 
 
+@dataclass(frozen=True)
+class _RegionContext:
+    binding: SiteBinding
+    timezone: str
+    now: datetime
+
+    @property
+    def zone(self) -> ZoneInfo:
+        return ZoneInfo(self.timezone)
+
+
+def _schedule_night_history(context: _RegionContext) -> int | None:
+    binding, now = context.binding, context.now
+    today = now.astimezone(context.zone).date()
+    window = nightly_window(today, context.timezone)
+    if window is None or not window[0] <= now < window[1]:
+        return None
+    history = (
+        CollectionJob.objects.filter(
+            binding=binding,
+            endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
+            reference_import__isnull=True,
+            target_date=today - timedelta(days=1),
+            scheduled_for__gte=window[0],
+            scheduled_for__lt=window[1],
+            retry_until=window[1],
+        )
+        .order_by("scheduled_for", "pk")
+        .first()
+    )
+    if history is None:
+        history, _ = CollectionJob.objects.get_or_create(
+            binding=binding,
+            endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
+            scheduled_for=window[0],
+            defaults={
+                "target_date": today - timedelta(days=1),
+                "available_at": now,
+                "retry_until": window[1],
+            },
+        )
+    CollectionJob.objects.filter(
+        binding=binding,
+        endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
+        target_date=today - timedelta(days=1),
+        scheduled_for__gte=window[0],
+        retry_until=window[1],
+        status=CollectionJobStatus.STALE,
+        forecastsnapshot__isnull=True,
+    ).update(
+        status=CollectionJobStatus.PENDING,
+        available_at=Greatest("available_at", now),
+        last_error="",
+        lease_token=None,
+        lease_expires_at=None,
+    )
+    return history.pk
+
+
+def _schedule_forecast_slot(context: _RegionContext, slot: datetime) -> int:
+    binding, now = context.binding, context.now
+    CollectionJob.objects.filter(
+        binding=binding,
+        endpoint=CollectionEndpoint.FORECASTS,
+        scheduled_for__lt=slot,
+        status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY),
+    ).update(
+        status=CollectionJobStatus.STALE,
+        last_error=CollectionJobError.FORECAST_SUPERSEDED,
+        lease_token=None,
+        lease_expires_at=None,
+    )
+    job, _ = CollectionJob.objects.get_or_create(
+        binding=binding,
+        endpoint=CollectionEndpoint.FORECASTS,
+        scheduled_for=slot,
+        defaults={
+            "target_date": slot.astimezone(context.zone).date() + timedelta(days=1),
+            "available_at": now,
+        },
+    )
+    CollectionJob.objects.filter(pk=job.pk, status=CollectionJobStatus.STALE).update(
+        status=CollectionJobStatus.PENDING,
+        available_at=now,
+        last_error="",
+        lease_token=None,
+        lease_expires_at=None,
+    )
+    return job.pk
+
+
+def _schedule_paired_actuals(context: _RegionContext, slot: datetime) -> int | None:
+    if context.now >= slot + INTRADAY_HISTORY_WINDOW:
+        return None
+    history, _ = CollectionJob.objects.get_or_create(
+        binding=context.binding,
+        endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
+        scheduled_for=slot,
+        defaults={
+            "target_date": slot.astimezone(context.zone).date(),
+            "available_at": context.now,
+            "retry_until": slot + INTRADAY_HISTORY_WINDOW,
+        },
+    )
+    return history.pk
+
+
 def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
-    jobs: list[int] = []
     with transaction.atomic():
         region = (
             Region.objects.select_for_update(of=("self",))
@@ -43,106 +151,27 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
             .first()
         )
         if region is None:
-            return jobs
+            return []
         binding = region.approved_binding
         if binding is None or binding.validated_at is None or not binding_is_current(binding):
-            return jobs
+            return []
         _, first_slot = approval_job(binding.pk) or (None, None)
-        schedule = CollectionSchedule.objects.filter(region=region).first()
         timing = effective_forecast_schedule(
             first_slot=first_slot,
-            schedule=schedule,
+            schedule=CollectionSchedule.objects.filter(region=region).first(),
             daily_quota=binding.provider_account.daily_quota,
             cutoff=cutoff,
         )
         if timing is None:
-            return jobs
-        zone = ZoneInfo(region.timezone)
-        today = now.astimezone(zone).date()
-        window = nightly_window(today, region.timezone)
-        if window is not None and window[0] <= now < window[1]:
-            history = (
-                CollectionJob.objects.filter(
-                    binding=binding,
-                    endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
-                    reference_import__isnull=True,
-                    target_date=today - timedelta(days=1),
-                    scheduled_for__gte=window[0],
-                    scheduled_for__lt=window[1],
-                    retry_until=window[1],
-                )
-                .order_by("scheduled_for", "pk")
-                .first()
-            )
-            if history is None:
-                history, _ = CollectionJob.objects.get_or_create(
-                    binding=binding,
-                    endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
-                    scheduled_for=window[0],
-                    defaults={
-                        "target_date": today - timedelta(days=1),
-                        "available_at": now,
-                        "retry_until": window[1],
-                    },
-                )
-            CollectionJob.objects.filter(
-                binding=binding,
-                endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
-                target_date=today - timedelta(days=1),
-                scheduled_for__gte=window[0],
-                retry_until=window[1],
-                status=CollectionJobStatus.STALE,
-                forecastsnapshot__isnull=True,
-            ).update(
-                status=CollectionJobStatus.PENDING,
-                available_at=Greatest("available_at", now),
-                lease_token=None,
-                lease_expires_at=None,
-            )
-            jobs.append(history.pk)
+            return []
+        context = _RegionContext(binding, region.timezone, now)
+        jobs = [pk for pk in (_schedule_night_history(context),) if pk is not None]
         slot = latest_forecast_slot(now, region.timezone, timing.times, timing.effective_from)
         if slot is None:
             return jobs
-        CollectionJob.objects.filter(
-            binding=binding,
-            endpoint=CollectionEndpoint.FORECASTS,
-            scheduled_for__lt=slot,
-            status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY),
-        ).update(
-            status=CollectionJobStatus.STALE,
-            last_error=CollectionJobError.FORECAST_SUPERSEDED,
-            lease_token=None,
-            lease_expires_at=None,
-        )
-        job, _ = CollectionJob.objects.get_or_create(
-            binding=binding,
-            endpoint=CollectionEndpoint.FORECASTS,
-            scheduled_for=slot,
-            defaults={
-                "target_date": slot.astimezone(zone).date() + timedelta(days=1),
-                "available_at": now,
-            },
-        )
-        CollectionJob.objects.filter(pk=job.pk, status=CollectionJobStatus.STALE).update(
-            status=CollectionJobStatus.PENDING,
-            available_at=now,
-            lease_token=None,
-            lease_expires_at=None,
-        )
-        jobs.append(job.pk)
-        if now < slot + INTRADAY_HISTORY_WINDOW:
-            history, _ = CollectionJob.objects.get_or_create(
-                binding=binding,
-                endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
-                scheduled_for=slot,
-                defaults={
-                    "target_date": slot.astimezone(zone).date(),
-                    "available_at": now,
-                    "retry_until": slot + INTRADAY_HISTORY_WINDOW,
-                },
-            )
-            jobs.append(history.pk)
-    return jobs
+        jobs.append(_schedule_forecast_slot(context, slot))
+        paired = _schedule_paired_actuals(context, slot)
+        return jobs if paired is None else [*jobs, paired]
 
 
 def enqueue_due(now: datetime, cutoff_hour: int | None = None) -> list[int]:

@@ -1,8 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from django.conf import settings
-
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import (
     CollectionEndpoint,
@@ -11,7 +9,8 @@ from pyracast.forecasts.models import (
     CollectionSchedule,
     RequestAttempt,
 )
-from pyracast.notifications.schedule import local_slot
+from pyracast.forecasts.timing import approval_job, effective_forecast_schedule
+from pyracast.local_time import local_slot
 from pyracast.regions.models import active_region
 
 
@@ -34,17 +33,17 @@ def remaining_forecast_requests(account: ProviderAccount, now: datetime) -> int:
     for binding in bindings:
         if binding.region.approved_binding_id != binding.pk:
             continue
-        schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
-        if schedule is not None and not schedule.enabled:
+        _, first_slot = approval_job(binding.pk) or (None, None)
+        timing = effective_forecast_schedule(
+            first_slot=first_slot,
+            schedule=CollectionSchedule.objects.filter(region_id=binding.region_id).first(),
+            daily_quota=account.daily_quota,
+        )
+        if timing is None:
             continue
         jobs = list(
             CollectionJob.objects.filter(binding=binding, endpoint=CollectionEndpoint.FORECASTS)
         )
-        if not jobs:
-            continue
-        effective = schedule.effective_from if schedule else min(job.scheduled_for for job in jobs)
-        clocks = schedule.times if schedule else [settings.PYRACAST_CUTOFF_LOCAL.strftime("%H:%M")]
-        clocks = clocks[: max(account.daily_quota - 1, 0)]
         paid_or_terminal = {
             job.scheduled_for
             for job in jobs
@@ -73,11 +72,11 @@ def remaining_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         last = (day_end - timedelta(microseconds=1)).astimezone(zone).date()
         day = first
         while day <= last:
-            for clock in clocks:
+            for clock in timing.times:
                 slot = local_slot(day, clock, zone)
                 if (
                     slot is not None
-                    and max(now, effective, day_start) <= slot < day_end
+                    and max(now, timing.effective_from, day_start) <= slot < day_end
                     and slot not in paid_or_terminal
                 ):
                     needed.add((binding.pk, slot))

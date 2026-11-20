@@ -6,6 +6,7 @@ from django.db.models import Case, IntegerField, Q, Value, When
 
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
+from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import SiteBinding
 from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.actuals import (
@@ -20,7 +21,6 @@ from pyracast.forecasts.intraday import (
     prepare_intraday_source,
     preserve_forecast_weather,
 )
-from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJobStatus,

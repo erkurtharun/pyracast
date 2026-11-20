@@ -57,19 +57,37 @@ class CollectionJobError(models.TextChoices):
     HISTORY_WINDOW_CLOSED = "history_window_closed", "History window closed"
     ATTEMPTS_EXHAUSTED = "attempts_exhausted", "Attempts exhausted"
     FORECAST_SUPERSEDED = "forecast_superseded", "Forecast superseded"
+    BINDING_NOT_CURRENT = "binding_not_current", "Binding not current"
+    SCHEDULE_DISABLED = "schedule_disabled", "Schedule disabled"
+    SLOT_NOT_CONFIGURED = "slot_not_configured", "Slot not configured"
+    SCHEDULE_CHANGED = "schedule_changed", "Schedule changed"
     HISTORY_INCOMPLETE = "history_incomplete", "History incomplete"
     HISTORY_ALREADY_ARCHIVED = "history_already_archived", "History already archived"
     PROVIDER_AUTHENTICATION_FAILED = (
         "provider_authentication_failed",
         "Provider authentication failed",
     )
+    PROVIDER_ALLOWANCE_EXHAUSTED = "provider_allowance_exhausted", "Provider allowance exhausted"
+    PROVIDER_ACCESS_DENIED = "provider_access_denied", "Provider access denied"
+    PROVIDER_SITE_NOT_FOUND = "provider_site_not_found", "Provider site not found"
     PROVIDER_THROTTLED = "provider_throttled", "Provider throttled"
+    PROVIDER_SERVER_ERROR = "provider_server_error", "Provider server error"
+    PROVIDER_UNREACHABLE = "provider_unreachable", "Provider unreachable"
+    PROVIDER_INVALID_RESPONSE = "provider_invalid_response", "Provider invalid response"
+    PROVIDER_CONFIGURATION_INVALID = (
+        "provider_configuration_invalid",
+        "Provider configuration invalid",
+    )
+    ACCOUNT_UNAVAILABLE = "account_unavailable", "Account unavailable"
     HISTORY_BUDGET_RESERVED = "history_budget_reserved", "History budget reserved"
     QUOTA_EXHAUSTED = "quota_exhausted", "Quota exhausted"
+    # Any other provider answer: a status this vocabulary does not name.
     PROVIDER_FAILURE = "provider_failure", "Provider failure"
     PROVIDER_UNEXPECTED_FAILURE = "provider_unexpected_failure", "Provider unexpected failure"
     INVALID_SOURCE_KIND = "invalid_source_kind", "Invalid source kind"
     CALCULATION_FAILURE = "calculation_failure", "Calculation failure"
+    LOCK_CONTENTION = "lock_contention", "Lock contention"
+    PUBLICATION_FAILURE = "publication_failure", "Publication failure"
 
 
 class SnapshotWeatherError(models.TextChoices):
@@ -221,12 +239,18 @@ class RequestAttempt(models.Model):
         max_length=20, choices=RequestOutcome, default=RequestOutcome.UNCERTAIN
     )
     correlation_id = models.UUIDField(default=uuid.uuid4, unique=True)
+    http_status = models.PositiveSmallIntegerField(null=True)
 
     class Meta:
         constraints = (
             models.CheckConstraint(
                 condition=models.Q(job__isnull=True) | models.Q(binding__isnull=False),
                 name="%(class)s_job_binding_chk",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(http_status__isnull=True)
+                | models.Q(http_status__gte=100, http_status__lte=599),
+                name="%(class)s_http_status_chk",
             ),
             choices_check("purpose", RequestPurpose),
             choices_check("outcome", RequestOutcome),

@@ -390,7 +390,7 @@ def test_failed_validation_shows_its_cause_once_and_logs_one_line(
     assert [
         record.getMessage()
         for record in pyracast_logs.records
-        if record.name == "pyracast.connections.operations"
+        if record.name == "pyracast.forecasts.validation"
     ] == [
         f"provider_validation_failed provider=solcast binding_id={system.binding.pk} "
         f"error_code={code} status_code={status}"

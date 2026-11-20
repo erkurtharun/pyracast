@@ -2,13 +2,8 @@ from datetime import UTC, datetime, timedelta
 
 from django.db import connection
 
-from pyracast.weather import (
-    OpenMeteoProvider,
-    WeatherData,
-    WeatherError,
-    WeatherFailure,
-    normalize_weather,
-)
+from pyracast.weather import OpenMeteoProvider
+from pyracast.weather_data import WeatherData, WeatherError, WeatherFailure, normalize_weather
 from tests.support.domain import NOW
 
 
