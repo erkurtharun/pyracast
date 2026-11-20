@@ -106,7 +106,7 @@ for (const role of ["admin", "viewer"] as const) {
         const day = page.getByLabel("Day", { exact: true });
         await day.fill("2026-10-25");
         const table = page.getByRole("table", {
-            name: "Production intervals · Europe/Berlin",
+            name: "Production intervals",
         });
         const fullDay = page.getByRole("checkbox", { name: "Show full day" });
         await expect(fullDay).not.toBeChecked();

@@ -1,5 +1,8 @@
 "use client";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
+import { useFormat } from "@/lib/format/use-format";
+import { qualityOf } from "@/lib/production";
+import { useLabel } from "@/ui/vocabulary";
 import { sameInterval, type Interval } from "./model";
 
 export function ProductionReading({
@@ -10,11 +13,8 @@ export function ProductionReading({
     timeFormatter: Intl.DateTimeFormat;
 }) {
     const t = useTranslations("ProductionHistory");
-    const locale = useLocale();
-    const number = (value: number) =>
-        new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(
-            value,
-        );
+    const format = useFormat();
+    const label = useLabel();
     const time = (value: string) => timeFormatter.format(new Date(value));
     const corrected =
         row.observation != null || row.effective?.aggregated === true;
@@ -31,7 +31,7 @@ export function ProductionReading({
             <div className="production-value">
                 {row.effective == null
                     ? t("missing")
-                    : number(row.effective.energy_mwh)}{" "}
+                    : format.number(row.effective.energy_mwh)}{" "}
                 {corrected ? (
                     <span className="production-correction">
                         {t("corrected")}
@@ -42,7 +42,7 @@ export function ProductionReading({
             </div>
             {quality && quality !== "valid" && (
                 <div className="fine">
-                    {t.has(quality) ? t(quality) : quality}
+                    {label("ObservationQuality", qualityOf(quality))}
                 </div>
             )}
             {corrected &&
@@ -59,7 +59,10 @@ export function ProductionReading({
                                     : "provider_original",
                                 {
                                     interval: `${time(original.starts_at)}–${time(original.ends_at)}`,
-                                    value: `${number(original.energy_mwh)} MWh`,
+                                    value: format.quantity(
+                                        original.energy_mwh,
+                                        "MWh",
+                                    ),
                                 },
                             )}
                         </div>
@@ -78,7 +81,7 @@ export function ProductionReading({
                         {
                             revision: observation.configuration_revision,
                             interval: `${time(observation.starts_at)}–${time(observation.ends_at)}`,
-                            value: `${number(observation.energy_mwh)} MWh`,
+                            value: format.quantity(observation.energy_mwh, "MWh"),
                         },
                     )}
                 </div>

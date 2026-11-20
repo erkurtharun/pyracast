@@ -398,7 +398,7 @@ for (const width of [320, 390, 768, 1440]) {
             }
             if (tab === "Production") {
                 const table = page.getByRole("table", {
-                    name: "Production intervals · Europe/Istanbul",
+                    name: "Production intervals",
                 });
                 const fullDay = page.getByRole("checkbox", {
                     name: "Show full day",

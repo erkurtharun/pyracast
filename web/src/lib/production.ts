@@ -1,6 +1,7 @@
 import Papa from "papaparse";
 import { createTranslator } from "next-intl";
 import { isLanguage } from "@/i18n/language";
+import { DisplayError } from "@/lib/api/errors";
 import { messages } from "@/i18n/messages";
 export const QUALITIES = ["valid", "outage", "curtailed", "invalid"] as const;
 export type Quality = (typeof QUALITIES)[number];
@@ -25,7 +26,7 @@ export function parseProduction(text: string, language = "en"): Observation[] {
         messages: messages[locale].ProductionCsv,
     });
     if (new TextEncoder().encode(text).length > 2 * 1024 * 1024)
-        throw new Error(t("size"));
+        throw new DisplayError(t("size"));
     const parsed = Papa.parse<Record<string, string>>(text, {
         header: true,
         delimiter: ",",
@@ -38,11 +39,11 @@ export function parseProduction(text: string, language = "en"): Observation[] {
         parsed.meta.fields?.join(",") !==
         "starts_at,ends_at,energy,quality,source"
     )
-        throw new Error(t("header"));
+        throw new DisplayError(t("header"));
     const [error] = parsed.errors;
-    if (error) throw new Error(t("parse", { reason: error.message }));
+    if (error) throw new DisplayError(t("parse", { reason: error.message }));
     if (parsed.data.length < 1 || parsed.data.length > 2000)
-        throw new Error(t("count"));
+        throw new DisplayError(t("count"));
     const rows = parsed.data.map((row, index) => {
         const {
             starts_at = "",
@@ -62,13 +63,14 @@ export function parseProduction(text: string, language = "en"): Observation[] {
             !Number.isFinite(end) ||
             ![1800000, 3600000].includes(end - start)
         )
-            throw new Error(t("interval", { row: index + 2 }));
-        if (end > Date.now()) throw new Error(t("future", { row: index + 2 }));
+            throw new DisplayError(t("interval", { row: index + 2 }));
+        if (end > Date.now())
+            throw new DisplayError(t("future", { row: index + 2 }));
         if (!rawEnergy || !Number.isFinite(energy) || energy < 0)
-            throw new Error(t("energy", { row: index + 2 }));
+            throw new DisplayError(t("energy", { row: index + 2 }));
         const known = QUALITIES.find((value) => value === quality);
         if (!known || !source || source.length > 200)
-            throw new Error(t("quality", { row: index + 2 }));
+            throw new DisplayError(t("quality", { row: index + 2 }));
         return { starts_at, ends_at, energy, quality: known, source };
     });
     const sorted = [...rows].sort(
@@ -83,6 +85,6 @@ export function parseProduction(text: string, language = "en"): Observation[] {
             );
         })
     )
-        throw new Error(t("overlap"));
+        throw new DisplayError(t("overlap"));
     return rows;
 }
