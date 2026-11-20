@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import BooleanField, Exists, ExpressionWrapper, OuterRef, Q, QuerySet
+from django.db.models import BooleanField, Exists, ExpressionWrapper, F, OuterRef, Q, QuerySet
 from django.utils import timezone
 
 from pyracast.accounts.authorization import tenant_membership
@@ -29,9 +29,12 @@ from pyracast.forecasts.models import (
 from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.notifications.models import (
+    DeliveryRecipient,
     NotificationDelivery,
     NotificationDeliveryError,
     NotificationDeliveryStatus,
+    ReminderRecipient,
+    ReminderRecipientTie,
     ReminderSchedule,
 )
 from pyracast.plants.calibration_runs import SupersedeReason, supersede_open_runs
@@ -171,7 +174,9 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
             },
         )
         CollectionSchedule.objects.filter(region=region).update(effective_from=now)
-        ReminderSchedule.objects.filter(region=region).update(effective_from=now)
+        ReminderSchedule.objects.filter(region=region).update(
+            effective_from=now, revision=F("revision") + 1
+        )
         record_audit(
             actor=actor, region=region, action=AuditAction.REGION_RESTORED, revision=region.revision
         )
@@ -267,7 +272,10 @@ def _purge_region(region: Region, plants: list[Plant], budget: _Budget) -> None:
     )
     for plant in plants:
         _purge_plant(plant, budget)
+    _delete(DeliveryRecipient.objects.filter(delivery__schedule__region=region), budget)
     _delete(NotificationDelivery.objects.filter(schedule__region=region), budget)
+    _delete(ReminderRecipientTie.objects.filter(recipient__schedule__region=region), budget)
+    _delete(ReminderRecipient.objects.filter(schedule__region=region), budget)
     _delete(ReminderSchedule.objects.filter(region=region), budget)
     _delete(CollectionSchedule.objects.filter(region=region), budget)
     _detach(

@@ -15,7 +15,14 @@ from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.scheduler import enqueue_due
 from tests.support.notification_groups import group, member
 from tests.support.notification_transmission import OpeningBackend, replying
-from tests.support.notifications import SLOT, configured, reminder_schedule_payload
+from tests.support.notifications import (
+    SLOT,
+    candidates,
+    configured,
+    reminder_schedule_payload,
+    revoked,
+    ties,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -26,7 +33,7 @@ def test_external_recipient_removed_after_join_cannot_rejoin_an_old_pending_grou
     group(system, ["EXTERNAL@example.com"])
     (delivery_id,) = enqueue_due(SLOT)
     original = NotificationDelivery.objects.get(pk=delivery_id)
-    assert "external@example.com" not in original.recipient_memberships
+    assert "external@example.com" not in ties(original.schedule)
     external = member(system, "external@example.com")
     removed_membership = Membership.objects.get(user=external)
     remove_workspace_member(system.member, system.tenant.pk, external.pk)
@@ -34,14 +41,13 @@ def test_external_recipient_removed_after_join_cannot_rejoin_an_old_pending_grou
     assert replacement.pk != removed_membership.pk
     assert process_notification(delivery_id, SLOT)
     original.refresh_from_db()
-    assert original.revoked_recipients == [external.email]
-    assert original.recipients == [retained.email]
+    assert (candidates(original), revoked(original)) == ([retained.email], [])
     assert mail.outbox[0].bcc == [retained.email]
     next_slot = SLOT + timedelta(days=1)
     next_id = enqueue_due(next_slot)[-1]
     next_delivery = NotificationDelivery.objects.get(pk=next_id)
-    assert set(next_delivery.recipients) == {retained.email, external.email}
-    assert next_delivery.revoked_recipients == []
+    assert set(candidates(next_delivery)) == {retained.email, external.email}
+    assert revoked(next_delivery) == []
     assert process_notification(next_id, next_slot)
     assert set(mail.outbox[1].bcc) == {retained.email, external.email}
 
@@ -68,8 +74,7 @@ def test_known_non_acceptance_marker_does_not_exempt_a_retry_from_member_revocat
     Membership.objects.create(tenant=system.tenant, user=external)
     assert process_notification(delivery_id, delivery.available_at)
     delivery.refresh_from_db()
-    assert delivery.revoked_recipients == [external.email]
-    assert delivery.recipients == [retained.email]
+    assert (candidates(delivery), revoked(delivery)) == ([retained.email], [])
     assert delivery.prepared_message == frozen
     assert delivery.attempts == 2
     assert attempted == [["EXTERNAL@example.com", retained.email]]
@@ -101,8 +106,7 @@ def test_join_remove_and_rejoin_during_connection_open_cannot_restore_the_envelo
     assert len(OpeningBackend.sent) == 1
     assert OpeningBackend.sent[0].bcc == [retained.email]
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
-    assert delivery.revoked_recipients == ["external@example.com"]
-    assert delivery.recipients == [retained.email]
+    assert (candidates(delivery), revoked(delivery)) == ([retained.email], [])
 
 
 def test_a_member_removed_after_authorization_stays_in_the_history_of_the_sent_delivery() -> None:
@@ -151,7 +155,7 @@ def test_revocation_after_permission_preserves_the_attempt_but_excludes_safe_ret
         delivery = NotificationDelivery.objects.get(pk=delivery_id)
         assert delivery.status == "sending"
         assert delivery.transmit_started_at is not None
-        assert message.bcc == delivery.recipients == original_recipients
+        assert message.bcc == candidates(delivery) == original_recipients
         if recover_interrupted:
             clock[0] = LEASE_DURATION.total_seconds() + 1
             assert not process_notification(delivery_id, SLOT + timedelta(seconds=clock[0]))
@@ -161,8 +165,8 @@ def test_revocation_after_permission_preserves_the_attempt_but_excludes_safe_ret
         remove_workspace_member(system.member, system.tenant.pk, external.pk)
         Membership.objects.create(tenant=system.tenant, user=external)
         delivery.refresh_from_db()
-        assert delivery.revoked_recipients == [external.email]
-        assert delivery.recipients == original_recipients
+        assert revoked(delivery) == [external.email]
+        assert candidates(delivery) == original_recipients
         assert message.bcc == original_recipients
         raise NotSentError
 
@@ -171,13 +175,13 @@ def test_revocation_after_permission_preserves_the_attempt_but_excludes_safe_ret
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     frozen = delivery.prepared_message
     assert delivery.status == "retry"
-    assert delivery.recipients == original_recipients
-    assert delivery.revoked_recipients == ["external@example.com"]
+    assert candidates(delivery) == original_recipients
+    assert revoked(delivery) == ["external@example.com"]
     assert process_notification(delivery_id, delivery.available_at)
     delivery.refresh_from_db()
     assert delivery.status == "sent"
     assert delivery.attempts == 2
-    assert delivery.recipients == [retained.email]
+    assert candidates(delivery) == [retained.email]
     assert delivery.prepared_message == frozen
     assert attempted[0].bcc == original_recipients
     assert mail.outbox[0].bcc == [retained.email]

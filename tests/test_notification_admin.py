@@ -6,8 +6,25 @@ from django.urls import reverse
 from pyracast.notifications.models import NotificationSettings
 from tests.support.api import verified_admin
 from tests.support.domain import make_system
+from tests.support.notifications import ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+
+def test_a_delivery_record_names_its_recipients_and_is_found_by_any_spelling_of_one() -> None:
+    delivery = ready()
+    client, _ = verified_admin()
+    records = reverse("admin:notifications_notificationdelivery_changelist")
+
+    found = client.get(records, {"q": "DEFAULT@example.com"})
+    missing = client.get(records, {"q": "nobody@example.com"})
+    detail = client.get(
+        reverse("admin:notifications_notificationdelivery_change", args=(delivery.pk,))
+    )
+
+    assert [response.context["cl"].result_count for response in (found, missing)] == [1, 0]
+    assert detail.status_code == 200
+    assert b"default@example.com" in detail.content
 
 
 def test_stock_settings_page_is_read_only_and_members_see_the_global_limit() -> None:

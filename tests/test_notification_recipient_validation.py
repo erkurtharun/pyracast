@@ -11,7 +11,7 @@ from pyracast.notifications.operations import configure_reminders, validate_reci
 from pyracast.notifications.serializers import ReminderInput
 from tests.support.domain import NOW
 from tests.support.notification_recipient_validation import recipient
-from tests.support.notifications import configured
+from tests.support.notifications import configured, schedule_addresses
 
 
 @pytest.mark.parametrize("length", [255, 320])
@@ -53,6 +53,7 @@ def test_exact_delivery_storage_limit_is_accepted_at_both_boundaries() -> None:
             "recipients": [padded],
             "times": ["10:00"],
             "language": "en",
+            "expected_revision": 0,
         }
     )
     assert serializer.is_valid(), serializer.errors
@@ -68,7 +69,7 @@ def test_exact_delivery_storage_limit_is_accepted_at_both_boundaries() -> None:
         language="en",
         now=NOW,
     )
-    assert schedule.recipients == [address]
+    assert schedule_addresses(schedule) == [address]
 
 
 def test_pending_messages_are_dispatched_before_a_scheduling_failure_is_reported(

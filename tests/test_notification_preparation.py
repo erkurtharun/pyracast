@@ -33,6 +33,7 @@ from tests.support.notifications import (
     configured,
     reminder_schedule_payload,
     saved,
+    schedule_addresses,
 )
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -468,7 +469,7 @@ def test_notification_settings_remain_editable_after_provider_credentials_rotate
         now=NOW,
     )
     assert schedule.enabled
-    assert schedule.recipients == ["updated@example.com"]
+    assert schedule_addresses(schedule) == ["updated@example.com"]
     assert schedule.times == ["11:00"]
 
 

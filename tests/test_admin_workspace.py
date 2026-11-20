@@ -35,7 +35,7 @@ from tests.support.admin_setup import admin_system, setup_input, submitted_plant
 from tests.support.api import verified_admin
 from tests.support.delivery_health import recent_forecast
 from tests.support.domain import make_system
-from tests.support.notifications import ready
+from tests.support.notifications import freeze, ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -366,14 +366,15 @@ def test_operations_show_safe_recent_records_and_recorded_dispatch_health() -> N
         scheduled_for=now,
         preparation_deadline=now + PREPARATION_GRACE,
         available_at=now,
-        recipients=["customer@example.com"],
         status="uncertain",
         attempts=1,
     )
+    freeze(delivery, ["customer@example.com"])
     context = operations_context()
     assert context["collections"][0]["plant_name"] == "Site"
     assert context["deliveries"][0]["id"] == delivery.pk
     assert context["deliveries"][0]["status"] == "uncertain"
+    assert context["deliveries"][0]["recipient"] == "customer@example.com"
     phases = {phase["label"]: phase for phase in context["dispatch_phases"]}
     assert phases["Notifications"]["state_label"] == "Current"
     assert phases["Collection"]["state_label"] == "Needs attention"

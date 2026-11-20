@@ -377,13 +377,13 @@
             "viewer": "Member"
         },
         "ReminderState": {
-            "sending": "Enabled",
+            "sending": "Sending",
             "paused_by_user": "Paused",
             "waiting_for_approval": "Waiting for approval",
             "provider_attention": "Provider account needs attention",
-            "no_recipients": "Not sent because no recipient is left.",
-            "invalid_recipient": "Not sent because a saved recipient address is invalid.",
-            "over_recipient_limit": "Not sent because the plant has more recipients than the limit allows."
+            "no_recipients": "No recipients",
+            "invalid_recipient": "Invalid recipient",
+            "over_recipient_limit": "Over the recipient limit"
         },
         "CalibrationAssessment": {
             "insufficient": "Insufficient data",

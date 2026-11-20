@@ -2,7 +2,6 @@ import logging
 import secrets
 import time
 import uuid
-from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import cast
 from zoneinfo import ZoneInfo
@@ -32,7 +31,7 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
-from pyracast.notifications.recipients import permitted_recipients
+from pyracast.notifications.recipients import narrow_recipients
 from pyracast.notifications.scheduler import MAX_LATENESS, slot_recipients
 from pyracast.regions.models import Region, active_region
 
@@ -40,23 +39,25 @@ LEASE_DURATION = timedelta(minutes=5)
 logger = logging.getLogger(__name__)
 
 
-def _skip_reason(delivery: NotificationDelivery, limit: int) -> str | None:
+def _authorize(delivery: NotificationDelivery, limit: int) -> tuple[list[str], str]:
+    """The addresses still permitted, narrowed in the database, or the reason to skip."""
     schedule = delivery.schedule
     clock = delivery.scheduled_for.astimezone(ZoneInfo(schedule.region.timezone)).strftime("%H:%M")
     if not schedule.enabled or clock not in schedule.times:
-        return NotificationDeliveryError.CANCELLED_BY_SETTINGS_CHANGE
-    if reason := slot_recipients(schedule, limit)[1]:
-        return reason
-    delivery.recipients = permitted_recipients(delivery)
-    if not delivery.recipients:
-        return NotificationDeliveryError.NO_RECIPIENTS
+        return [], NotificationDeliveryError.CANCELLED_BY_SETTINGS_CHANGE
+    current, reason = slot_recipients(schedule, limit)
+    if reason:
+        return [], reason
+    addresses = narrow_recipients(delivery, current)
+    if not addresses:
+        return [], NotificationDeliveryError.NO_RECIPIENTS
     if (
         schedule.region_id != delivery.binding.region_id
         or clock not in schedule.times[: delivery.binding.provider_account.daily_quota]
         or not binding_can_notify(delivery.binding)
     ):
-        return NotificationDeliveryError.SCHEDULE_OR_AUTHORITY_CHANGED
-    return None
+        return [], NotificationDeliveryError.SCHEDULE_OR_AUTHORITY_CHANGED
+    return addresses, ""
 
 
 def _recover_interrupted(delivery: NotificationDelivery, now: datetime) -> None:
@@ -115,12 +116,12 @@ def _mark_transmit(
             or delivery.lease_token != token
         ):
             return False
-        reason = _skip_reason(delivery, limit)
+        addresses, reason = _authorize(delivery, limit)
         now += timedelta(seconds=time.monotonic() - started)
         if delivery.lease_expires_at is None or delivery.lease_expires_at <= now:
             _recover_interrupted(delivery, now)
             return False
-        if reason is not None or now - delivery.scheduled_for > MAX_LATENESS:
+        if reason or now - delivery.scheduled_for > MAX_LATENESS:
             delivery.status = NotificationDeliveryStatus.SKIPPED
             delivery.last_error = reason or NotificationDeliveryError.DELIVERY_DEADLINE_EXCEEDED
             delivery.lease_token = None
@@ -128,17 +129,12 @@ def _mark_transmit(
             delivery.save()
             return False
         delivery.transmit_started_at = now
-        delivery.save(update_fields=("recipients", "transmit_started_at"))
-        message.bcc = list(delivery.recipients)
+        delivery.save(update_fields=("transmit_started_at",))
+        message.bcc = addresses
         return True
 
 
-def process_notification(
-    delivery_id: int,
-    now: datetime,
-    *,
-    sender: Callable[[EmailMultiAlternatives], None] | None = None,
-) -> bool:
+def process_notification(delivery_id: int, now: datetime) -> bool:
     started = time.monotonic()
     entered_at = now
     if now.tzinfo is None:
@@ -160,7 +156,8 @@ def process_notification(
             or delivery.available_at > now
         ):
             return False
-        if (reason := _skip_reason(delivery, limit)) is not None:
+        addresses, reason = _authorize(delivery, limit)
+        if reason:
             delivery.status, delivery.last_error = NotificationDeliveryStatus.SKIPPED, reason
             delivery.save()
             return False
@@ -189,6 +186,7 @@ def process_notification(
                     cast(str, frozen.get("prepared_at", delivery.scheduled_for.isoformat()))
                 )
             message, delivery.prepared_message = build_unavailable_message(delivery, prepared_at)
+        message.bcc = addresses
         token = uuid.uuid4()
         delivery.status, delivery.lease_token = NotificationDeliveryStatus.SENDING, token
         delivery.lease_expires_at = now + LEASE_DURATION
@@ -219,12 +217,7 @@ def process_notification(
         return NotificationDeliveryStatus.FAILED, now
 
     try:
-        if sender is None:
-            send(message, before_send=before_send)
-        elif before_send():
-            sender(message)
-        else:
-            return False
+        send(message, before_send=before_send)
     except SendCancelledError:
         return False
     except PermanentlyNotSentError as error:

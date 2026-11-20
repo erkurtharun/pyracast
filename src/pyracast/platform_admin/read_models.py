@@ -24,6 +24,7 @@ from pyracast.forecasts.monitoring import delivery_health
 from pyracast.metering.models import EpiasJobError, EpiasJobStatus
 from pyracast.notifications.models import PreparedMessageKind
 from pyracast.notifications.operations import recipient_limit
+from pyracast.notifications.recipients import delivery_addresses
 from pyracast.plants.models import Plant
 from pyracast.platform_admin.forms import ReviewDecisionForm, WorkspaceSettingsForm
 from pyracast.platform_admin.health import summarize_health
@@ -303,7 +304,7 @@ def recent_work_context(
             "id": row.pk,
             "plant_name": row.display_plant_name,
             "company": row.schedule.region.tenant.name,
-            "recipient": ", ".join(row.recipients),
+            "recipient": ", ".join(delivery_addresses(row)),
             "status": row.status,
             "status_label": {
                 "sent": _("Accepted by email service"),
@@ -323,9 +324,9 @@ def recent_work_context(
                 else ""
             ),
         }
-        for row in delivery_rows.select_related("schedule__region__tenant").order_by(
-            "-scheduled_for", "-pk"
-        )[:limit]
+        for row in delivery_rows.select_related("schedule__region__tenant")
+        .prefetch_related("recipient_rows")
+        .order_by("-scheduled_for", "-pk")[:limit]
     ]
     metering = [
         {

@@ -14,7 +14,7 @@ from pyracast.notifications.models import (
     ReminderRecipient,
     ReminderSchedule,
 )
-from pyracast.notifications.recipients import delivery_addresses
+from pyracast.notifications.recipients import delivery_addresses, effective_recipients
 from tests.support.domain import NOW, System, make_system
 from tests.support.migrations import forward, migrate
 from tests.support.notification_groups import member
@@ -76,7 +76,7 @@ def rows(delivery_id: int) -> list[tuple[str, bool]]:
 
 
 def test_every_schedule_address_and_pin_is_copied_as_stored(
-    previous: tuple[System, Apps],
+    previous: tuple[System, Apps], capsys: pytest.CaptureFixture[str]
 ) -> None:
     system, apps = previous
     holder = member(system, "holder@example.com")
@@ -84,8 +84,17 @@ def test_every_schedule_address_and_pin_is_copied_as_stored(
     schedule_id = old_schedule(
         system,
         apps,
-        recipients=["Holder@Example.com", "gone@example.com", "external@example.com"],
-        recipient_memberships={"holder@example.com": [held], "gone@example.com": [987654321]},
+        recipients=[
+            "Holder@Example.com",
+            "gone@example.com",
+            "external@example.com",
+            "beyond@example.com",
+        ],
+        recipient_memberships={
+            "holder@example.com": [held],
+            "gone@example.com": [987654321],
+            "beyond@example.com": [2**70],
+        },
         include_workspace_members=True,
     )
 
@@ -95,9 +104,12 @@ def test_every_schedule_address_and_pin_is_copied_as_stored(
         ("Holder@Example.com", [held]),
         ("gone@example.com", [987654321]),
         ("external@example.com", []),
+        ("beyond@example.com", [0]),
     ]
     schedule = ReminderSchedule.objects.get(pk=schedule_id)
     assert (schedule.revision, schedule.include_workspace_members) == (0, True)
+    assert effective_recipients(schedule) == ["Holder@Example.com", "external@example.com"]
+    assert "1 membership pin(s) beyond the id range" in capsys.readouterr().out
 
 
 def test_a_delivery_marked_for_transmission_keeps_its_whole_list_as_its_envelope(

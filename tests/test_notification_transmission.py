@@ -15,13 +15,12 @@ from pyracast.notifications.mail import build_message
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationSettings,
-    ReminderSchedule,
 )
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.scheduler import MAX_LATENESS
 from pyracast.regions.models import Region
 from tests.support.notification_transmission import BACKEND, OpeningBackend
-from tests.support.notifications import SLOT, ready
+from tests.support.notifications import SLOT, candidates, ready, store
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -127,9 +126,7 @@ def test_open_connection_does_not_authorize_a_changed_delivery(
             delivery.schedule.save(update_fields=("enabled",))
         elif change == "limit":
             NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
-            ReminderSchedule.objects.filter(pk=delivery.schedule_id).update(
-                recipients=[*delivery.recipients, "other@example.com"]
-            )
+            store(delivery.schedule, [*candidates(delivery), "other@example.com"])
         elif change == "deadline":
             clock[0] = 2
         elif change == "deleted":

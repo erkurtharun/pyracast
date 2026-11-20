@@ -20,6 +20,7 @@ from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
 from pyracast.trash import trash_region
 from tests.support.domain import NOW, System, make_system
+from tests.support.notifications import schedule_addresses, store
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -60,17 +61,24 @@ def submission(**changes: Any) -> dict[str, Any]:
         "language": "en",
         "recipients": ["ops@example.com"],
         "times": ["17:00"],
+        "expected_revision": 0,
     } | changes
 
 
 def put(system: System, **changes: Any) -> Any:
+    revision = ReminderSchedule.objects.filter(region=system.region).values_list(
+        "revision", flat=True
+    )
     return client_for(system.member).put(
-        url(system), submission(**changes), content_type="application/json"
+        url(system),
+        submission(expected_revision=revision.first() or 0) | changes,
+        content_type="application/json",
     )
 
 
 def save(system: System, **changes: Any) -> ReminderSchedule:
     values = submission(**changes)
+    del values["expected_revision"]
     return configure_reminders(system.member, system.tenant.pk, system.region.pk, now=NOW, **values)
 
 
@@ -314,14 +322,18 @@ def test_concurrent_first_saves_of_one_plant_keep_one_schedule() -> None:
         close_old_connections()
         try:
             start.wait(timeout=10)
-            return int(put(system, recipients=[f"ops-{index}@example.com"]).status_code)
+            return int(
+                put(
+                    system, recipients=[f"ops-{index}@example.com"], expected_revision=0
+                ).status_code
+            )
         finally:
             connections.close_all()
 
     with ThreadPoolExecutor(4) as pool:
         statuses = list(pool.map(save_concurrently, range(4)))
 
-    assert statuses == [200] * 4
+    assert sorted(statuses) == [200, 409, 409, 409]
     (schedule,) = ReminderSchedule.objects.all()
     stored = client_for(system.member).get(url(system)).json()["addresses"]["recipients"]
     assert stored in [[f"ops-{index}@example.com"] for index in range(4)]
@@ -369,8 +381,6 @@ def test_an_enabled_schedule_of_a_plant_out_of_approval_waits(
 def test_an_invalid_saved_recipient_names_its_state() -> None:
     system = approved()
     schedule = save(system)
-    ReminderSchedule.objects.filter(pk=schedule.pk).update(
-        recipients=[*schedule.recipients, "not-an-address"]
-    )
+    store(schedule, [*schedule_addresses(schedule), "not-an-address"])
 
     assert client_for(system.member).get(url(system)).json()["state"] == "invalid_recipient"

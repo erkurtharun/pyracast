@@ -92,6 +92,7 @@ def test_reminder_limit_translates_parameters_without_changing_english(
             "recipients": ["one@example.com", "two@example.com", "three@example.com"],
             "times": [],
             "language": "en",
+            "expected_revision": 0,
         },
         content_type="application/json",
         HTTP_ACCEPT_LANGUAGE=language,

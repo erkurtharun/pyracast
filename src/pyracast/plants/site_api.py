@@ -9,6 +9,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from pyracast.api.serializers import RegionInput, RegionOutput
+from pyracast.notifications.overview import reminder_summaries
+from pyracast.notifications.serializers import ReminderSummaryOutput
 from pyracast.plants.models import Plant
 from pyracast.plants.serializers import PlantInput, PlantOutput
 from pyracast.plants.sites import site_queryset, submit_site
@@ -21,16 +23,22 @@ class SiteInput(RegionInput, PlantInput):
 
 class SiteOutput(RegionOutput):
     plant = serializers.SerializerMethodField()
+    reminder = serializers.SerializerMethodField()
 
     class Meta:
         model = Region
-        fields = (*RegionOutput.Meta.fields, "plant")
+        fields = (*RegionOutput.Meta.fields, "plant", "reminder")
         read_only_fields = fields
 
     @extend_schema_field(PlantOutput(allow_null=True))
     def get_plant(self, region: Region) -> dict[str, Any] | None:
         plants = cast(list[Plant], region.__dict__["active_plants"])
         return dict(PlantOutput(plants[0]).data) if plants else None
+
+    @extend_schema_field(ReminderSummaryOutput(allow_null=True))
+    def get_reminder(self, region: Region) -> dict[str, Any] | None:
+        summary = self.context.get("reminders", {}).get(region.pk)
+        return None if summary is None else dict(ReminderSummaryOutput(summary).data)
 
 
 class SitesView(GenericAPIView[Region]):
@@ -41,8 +49,11 @@ class SitesView(GenericAPIView[Region]):
 
     @extend_schema(responses=SiteOutput(many=True))
     def get(self, request: Request, tenant_id: int) -> Response:
-        page = self.paginate_queryset(self.get_queryset())
-        return self.get_paginated_response(SiteOutput(page, many=True).data)
+        page = cast(list[Region], self.paginate_queryset(self.get_queryset()))
+        reminders = reminder_summaries(tenant_id, [region.pk for region in page])
+        return self.get_paginated_response(
+            SiteOutput(page, many=True, context={"reminders": reminders}).data
+        )
 
     @extend_schema(request=SiteInput, responses={201: SiteOutput})
     def post(self, request: Request, tenant_id: int) -> Response:

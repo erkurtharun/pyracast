@@ -26,6 +26,7 @@ AUDIT_DETAILS: Mapping[str, DetailShape] = {
     AuditAction.REGION_TRASHED: {},
     AuditAction.REGION_RESTORED: {},
     AuditAction.COLLECTION_SCHEDULE_UPDATED: {},
+    AuditAction.REMINDER_SCHEDULE_UPDATED: {"schedule_revision": INTEGER},
     AuditAction.HISTORICAL_REFERENCE_IMPORTED: {},
     AuditAction.REFERENCE_CAPACITY_NORMALIZED: {},
     AuditAction.PROVIDER_ACCOUNT_CREATED: {},

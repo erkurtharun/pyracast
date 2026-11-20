@@ -82,6 +82,7 @@ class ErrorCode(models.TextChoices):
     RECIPIENT_REQUIRED = "recipient_required"
     DUPLICATE_RECIPIENTS = "duplicate_recipients"
     RECIPIENT_LIMIT_EXCEEDED = "recipient_limit_exceeded"
+    REMINDER_SCHEDULE_CHANGED = "reminder_schedule_changed"
     PLANT_NOT_APPROVED = "plant_not_approved"
     PROVIDER_ACCOUNT_UNAVAILABLE = "provider_account_unavailable"
     CONFIGURATION_CHANGED = "configuration_changed"
@@ -201,6 +202,7 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.RECIPIENT_REQUIRED: _("Add a recipient or include the workspace members."),
     ErrorCode.DUPLICATE_RECIPIENTS: _("Recipient addresses must be distinct (case-insensitive)."),
     ErrorCode.RECIPIENT_LIMIT_EXCEEDED: _("This plant allows fewer recipient addresses."),
+    ErrorCode.REMINDER_SCHEDULE_CHANGED: _("The email reminders changed. Reload before saving."),
     ErrorCode.PLANT_NOT_APPROVED: _("Reminders can be turned on once the plant is approved."),
     ErrorCode.PROVIDER_ACCOUNT_UNAVAILABLE: _(
         "Reminders can be turned on once the plant's forecast provider account is enabled."

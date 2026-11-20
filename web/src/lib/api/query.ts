@@ -81,6 +81,7 @@ export type Loaded<T> = {
     updatedAt: number;
     retry: () => void;
     reload: () => Promise<T>;
+    replace(value: T): void;
 };
 
 type Polling = { poll?: number | false };
@@ -100,9 +101,11 @@ function useLoaded<T>(
 ): Loaded<T> {
     const owner = useOwner();
     const locale = useLocale();
+    const client = useQueryClient();
     const url = buildUrl(path, options);
+    const queryKey = keys.request(owner, path, options, locale);
     const query = useQuery({
-        queryKey: keys.request(owner, path, options, locale),
+        queryKey,
         queryFn: () => read(url),
         select: (fetched) => fetched.value,
         refetchInterval: (query) =>
@@ -124,6 +127,8 @@ function useLoaded<T>(
             if (result.error) throw result.error;
             return result.data as T;
         },
+        replace: (value) =>
+            client.setQueryData<Fetched<T>>(queryKey, { value, requests: 1 }),
     };
 }
 

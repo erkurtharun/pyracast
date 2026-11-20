@@ -15,8 +15,11 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.notifications.models import (
+    DeliveryRecipient,
     NotificationDelivery,
     NotificationSettings,
+    ReminderRecipient,
+    ReminderRecipientTie,
     ReminderSchedule,
 )
 from pyracast.plants.models import (
@@ -88,6 +91,12 @@ def test_every_model_the_console_shows_has_its_own_label() -> None:
             "Delivery 12 of schedule 7: sent",
         ),
         (ReminderSchedule(region_id=3), "Reminders of region 3"),
+        (ReminderRecipient(pk=5, schedule_id=7), "Recipient 5 of schedule 7"),
+        (
+            ReminderRecipientTie(recipient_id=5, membership_id=2),
+            "Recipient 5 tied to membership 2",
+        ),
+        (DeliveryRecipient(pk=6, delivery_id=12), "Recipient 6 of delivery 12"),
         (
             RegionLocationChangeRequest(pk=1, region_id=3, status="pending"),
             "Location change 1 of region 3: pending",

@@ -377,13 +377,13 @@
             "viewer": "Üye"
         },
         "ReminderState": {
-            "sending": "Etkin",
+            "sending": "Gönderiliyor",
             "paused_by_user": "Duraklatıldı",
             "waiting_for_approval": "Onay bekleniyor",
             "provider_attention": "Sağlayıcı hesabı ilgi bekliyor",
-            "no_recipients": "Gönderilecek alıcı kalmadığı için gönderilmedi.",
-            "invalid_recipient": "Kayıtlı bir alıcı adresi geçersiz olduğu için gönderilmedi.",
-            "over_recipient_limit": "Santralin alıcı sayısı sınırı aştığı için gönderilmedi."
+            "no_recipients": "Alıcı yok",
+            "invalid_recipient": "Geçersiz alıcı",
+            "over_recipient_limit": "Alıcı sınırı aşıldı"
         },
         "CalibrationAssessment": {
             "insufficient": "Yetersiz veri",

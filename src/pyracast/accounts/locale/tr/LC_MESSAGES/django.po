@@ -316,6 +316,9 @@ msgstr "Bir alıcı ekleyin veya çalışma alanı üyelerini dahil edin."
 msgid "This plant allows fewer recipient addresses."
 msgstr "Bu santral daha az alıcı adresine izin verir."
 
+msgid "The email reminders changed. Reload before saving."
+msgstr "E-posta hatırlatıcıları değişti. Kaydetmeden önce yeniden yükleyin."
+
 msgid "Reminders can be turned on once the plant is approved."
 msgstr "Hatırlatmalar santral onaylandıktan sonra açılabilir."
 

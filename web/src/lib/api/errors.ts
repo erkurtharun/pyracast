@@ -105,6 +105,7 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     recipient_required: true,
     duplicate_recipients: true,
     recipient_limit_exceeded: true,
+    reminder_schedule_changed: true,
     plant_not_approved: true,
     provider_account_unavailable: true,
     configuration_changed: true,

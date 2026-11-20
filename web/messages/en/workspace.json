@@ -153,9 +153,6 @@
         "reminderPolicy": "Emails use the latest saved forecast and show its collection time and age; they do not request new provider data. Daylight-saving gaps are skipped and repeated local times run once. Daily limit: {limit}.",
         "scheduled": "Scheduled",
         "sourceAge": "{hours, number}h {minutes, number}m",
-        "invalidDeliveryTime": "Enter a valid delivery time.",
-        "deliveryTimeRequired": "Add at least one delivery time.",
-        "duplicateEmail": "Enter each email address only once.",
         "approvalRequired": "Reminders can be enabled once this plant is approved.",
         "quotaCount": "{count, number} / {limit, number}",
         "includeWorkspaceMembers": "Include workspace members",
@@ -165,7 +162,11 @@
         "otherAddresses": "Other addresses",
         "groupPrivacy": "One email per send time. Recipients cannot see each other (BCC).",
         "recipientCountOnly": "{count, plural, one {# recipient} other {# recipients}} of at most {limit, number}. Only the workspace administrator sees the addresses.",
-        "deliveryRecipientCount": "{count, plural, one {# recipient} other {# recipients}}"
+        "deliveryRecipientCount": "{count, plural, one {# recipient} other {# recipients}}",
+        "dailyEmail": "Daily email: {state}",
+        "lastEmail": "Last email: {status} (scheduled {scheduled}).",
+        "noEmailYet": "No email has been scheduled yet.",
+        "reloadReminders": "Reload reminders"
     },
     "Outages": {
         "plantOutages": "Plant outages",

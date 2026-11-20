@@ -12,7 +12,7 @@ from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.trash import purge_expired, trash_region
 from tests.support.domain import NOW
-from tests.support.notifications import SLOT, configured, ready
+from tests.support.notifications import SLOT, configured, ready, schedule_addresses, ties
 from tests.support.trash_boundaries import _race_before_region_lock
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -38,14 +38,14 @@ def test_removing_a_verified_alias_preserves_other_members_and_external_addresse
         now=NOW,
     )
     (delivery_id,) = enqueue_due(SLOT)
-    assert schedule.recipient_memberships == {
+    assert ties(schedule) == {
         "alias@example.com": [removed_membership.pk],
         retained.email: [retained_membership.pk],
     }
     remove_workspace_member(system.member, system.tenant.pk, removed.pk)
     schedule.refresh_from_db()
-    assert schedule.recipients == [retained.email, "external@example.com"]
-    assert schedule.recipient_memberships == {retained.email: [retained_membership.pk]}
+    assert schedule_addresses(schedule) == [retained.email, "external@example.com"]
+    assert ties(schedule) == {retained.email: [retained_membership.pk]}
     assert process_notification(delivery_id, SLOT)
     assert mail.outbox[0].bcc == [retained.email, "external@example.com"]
 

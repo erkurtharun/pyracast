@@ -21,7 +21,15 @@ from pyracast.notifications.recipients import effective_recipients
 from pyracast.notifications.scheduler import enqueue_due
 from tests.support.notification_groups import group, member
 from tests.support.notification_transmission import OpeningBackend, replying
-from tests.support.notifications import SLOT, configured, reminder_schedule_payload
+from tests.support.notifications import (
+    SLOT,
+    candidates,
+    configured,
+    reminder_schedule_payload,
+    schedule_addresses,
+    store,
+    ties,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -37,7 +45,7 @@ def test_one_bcc_message_with_deduplicated_verified_workspace_members() -> None:
     Membership.objects.create(tenant=other, user=outsider)
     EmailAddress.objects.create(user=outsider, email=outsider.email, verified=True)
     schedule = group(system, ["ALICE@example.com", "external@example.com"])
-    assert schedule.recipients == ["ALICE@example.com", "external@example.com"]
+    assert schedule_addresses(schedule) == ["ALICE@example.com", "external@example.com"]
     assert set(effective_recipients(schedule)) == {
         "ALICE@example.com",
         bob.email,
@@ -54,9 +62,9 @@ def test_one_bcc_message_with_deduplicated_verified_workspace_members() -> None:
     assert set(message.bcc) == {"ALICE@example.com", bob.email, "external@example.com"}
     assert message.message().get("Bcc") is None
     delivery = NotificationDelivery.objects.get(pk=ids[0])
-    assert delivery.recipient_memberships[alice.email] == [Membership.objects.get(user=alice).pk]
+    assert ties(schedule)[alice.email] == [Membership.objects.get(user=alice).pk]
     history = cast(list[dict[str, object]], reminder_schedule_payload(schedule, SLOT)["deliveries"])
-    assert history[0]["recipients"] == delivery.recipients
+    assert history[0]["recipients"] == candidates(delivery)
 
 
 def test_new_members_only_join_future_slots_and_removed_members_leave_pending_group() -> None:
@@ -71,7 +79,7 @@ def test_new_members_only_join_future_slots_and_removed_members_leave_pending_gr
     assert not mail.outbox
     next_ids = enqueue_due(SLOT + timedelta(days=1))
     next_delivery = NotificationDelivery.objects.get(pk=next_ids[-1])
-    assert next_delivery.recipients == [second.email]
+    assert candidates(next_delivery) == [second.email]
     assert process_notification(next_delivery.pk, SLOT + timedelta(days=1))
     assert mail.outbox[0].bcc == [second.email]
 
@@ -97,8 +105,8 @@ def test_removal_during_connection_open_shrinks_the_actual_envelope() -> None:
         OpeningBackend.action = None
     assert len(OpeningBackend.sent) == 1
     assert OpeningBackend.sent[0].bcc == [retained.email]
-    assert NotificationDelivery.objects.get(pk=key).recipients == [retained.email]
-    assert ReminderSchedule.objects.get().recipients == []
+    assert candidates(NotificationDelivery.objects.get(pk=key)) == [retained.email]
+    assert schedule_addresses(ReminderSchedule.objects.get()) == []
 
 
 def test_email_change_resave_and_removal_keep_the_original_member_link() -> None:
@@ -113,10 +121,10 @@ def test_email_change_resave_and_removal_keep_the_original_member_link() -> None
     key = enqueue_due(SLOT)[0]
     remove_workspace_member(system.member, system.tenant.pk, user.pk)
     schedule = ReminderSchedule.objects.get()
-    assert schedule.recipients == ["external@example.com"]
+    assert schedule_addresses(schedule) == ["external@example.com"]
     assert process_notification(key, SLOT)
     assert mail.outbox[0].bcc == ["external@example.com"]
-    assert NotificationDelivery.objects.get(pk=key).recipients == ["external@example.com"]
+    assert candidates(NotificationDelivery.objects.get(pk=key)) == ["external@example.com"]
 
 
 def test_removing_and_rejoining_cannot_revive_pinned_membership() -> None:
@@ -133,8 +141,7 @@ def test_removing_and_rejoining_cannot_revive_pinned_membership() -> None:
 def paused_slot(schedule: ReminderSchedule) -> NotificationDelivery:
     delivery = NotificationDelivery.objects.get(schedule=schedule, scheduled_for=SLOT)
     assert delivery.status == "skipped"
-    assert delivery.recipients == []
-    assert delivery.recipient_memberships == {}
+    assert candidates(delivery) == []
     assert delivery.snapshot is None
     return delivery
 
@@ -156,7 +163,7 @@ def test_member_growth_pauses_without_truncation_and_removal_resumes_next_slot()
     assert NotificationDelivery.objects.filter(schedule=schedule).count() == 2
     resumed = NotificationDelivery.objects.get(schedule=schedule, scheduled_for=next_slot)
     assert resumed.status == "pending"
-    assert set(resumed.recipients) == {user.email for user in users}
+    assert set(candidates(resumed)) == {user.email for user in users}
 
 
 def test_over_limit_slot_records_a_skipped_row() -> None:
@@ -175,7 +182,7 @@ def test_over_limit_slot_records_a_skipped_row() -> None:
 
 def test_no_recipient_slot_records_a_skipped_row() -> None:
     _, schedule = configured()
-    ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[])
+    store(schedule, [])
     enqueue_due(SLOT)
     assert paused_slot(schedule).last_error == "no_recipients"
     assert not process_notification(paused_slot(schedule).pk, SLOT)
@@ -193,7 +200,7 @@ def test_member_removal_does_not_change_accepted_history_or_other_workspaces() -
     remove_workspace_member(system.member, system.tenant.pk, user.pk)
     schedule.refresh_from_db()
     assert effective_recipients(schedule) == []
-    assert NotificationDelivery.objects.get(pk=key).recipients == [user.email]
+    assert candidates(NotificationDelivery.objects.get(pk=key)) == [user.email]
     assert Membership.objects.filter(pk=other_membership.pk).exists()
 
 
@@ -209,6 +216,7 @@ def test_group_setting_is_workspace_admin_only_and_viewers_can_read() -> None:
         "recipients": [],
         "times": ["10:00"],
         "language": "en",
+        "expected_revision": 1,
     }
     assert client.put(url, payload, format="json").status_code == 403
     client.force_authenticate(system.member)
@@ -281,7 +289,6 @@ def test_one_delivery_per_reminder_slot_prevents_duplicate_dispatch() -> None:
         scheduled_for=SLOT,
         preparation_deadline=SLOT,
         available_at=SLOT,
-        recipients=["sent@example.com"],
         status="sent",
     )
     assert enqueue_due(SLOT) == [first.pk]
@@ -296,7 +303,6 @@ def test_one_delivery_per_reminder_slot_prevents_duplicate_dispatch() -> None:
             scheduled_for=SLOT,
             preparation_deadline=SLOT,
             available_at=SLOT,
-            recipients=["duplicate@example.com"],
         )
 
 
@@ -305,7 +311,7 @@ def test_unverified_alias_cannot_claim_or_remove_an_external_recipient() -> None
     user = member(system, "member@example.com")
     EmailAddress.objects.create(user=user, email="external@example.com", verified=False)
     schedule = group(system, ["external@example.com"])
-    assert "external@example.com" not in schedule.recipient_memberships
+    assert "external@example.com" not in ties(schedule)
     remove_workspace_member(system.member, system.tenant.pk, user.pk)
     schedule.refresh_from_db()
     assert effective_recipients(schedule) == ["external@example.com"]

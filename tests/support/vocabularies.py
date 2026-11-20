@@ -722,6 +722,7 @@ INPUT_VOCABULARIES = (
             "language": "en",
             "recipients": [],
             "times": ["10:00"],
+            "expected_revision": 0,
         },
         "language",
         _configure_reminders,

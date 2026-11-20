@@ -104,7 +104,7 @@ def reminder_events(system: System) -> list[tuple[int, int, str]]:
 
 
 def save(system: System, **changes: Any) -> None:
-    values = {
+    values: dict[str, Any] = {
         "enabled": True,
         "recipients": ["ops@example.com"],
         "times": ["10:00"],

@@ -49,6 +49,10 @@ class AuditAction(models.TextChoices):
         "collection_schedule_updated",
         gettext_lazy("Collection schedule updated"),
     )
+    REMINDER_SCHEDULE_UPDATED = (
+        "reminder_schedule_updated",
+        gettext_lazy("Email reminders updated"),
+    )
     HISTORICAL_REFERENCE_IMPORTED = (
         "historical_reference_imported",
         gettext_lazy("Historical reference imported"),

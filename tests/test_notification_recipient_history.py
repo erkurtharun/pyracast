@@ -20,57 +20,25 @@ from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.operations import submit_region
 from tests.support.domain import NOW, System
 from tests.support.notification_groups import group, member
-from tests.support.notifications import SLOT, configured, reminder_schedule_payload
+from tests.support.notifications import (
+    SLOT,
+    candidates,
+    configured,
+    freeze,
+    reminder_schedule_payload,
+    revoked,
+    schedule_addresses,
+    store,
+    ties,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def test_sent_history_revokes_an_address_that_another_delivery_pinned_as_external() -> None:
-    system, _ = configured()
-    schedule = group(system, ["old@example.com", "retained@example.com"])
-    pending = NotificationDelivery.objects.get(pk=enqueue_due(SLOT)[0])
-    assert pending.recipient_memberships == {}
-    user = member(system, "old@example.com")
-    membership = Membership.objects.get(tenant=system.tenant, user=user)
-    historical = NotificationDelivery.objects.create(
-        schedule=schedule,
-        binding=system.binding,
-        scheduled_for=SLOT + timedelta(minutes=1),
-        preparation_deadline=SLOT + timedelta(minutes=1),
-        available_at=SLOT,
-        status="sent",
-        recipients=[user.email],
-        recipient_memberships={user.email: [membership.pk]},
-        sent_at=SLOT + timedelta(minutes=1),
-    )
-    user.email = "new@example.com"
-    user.save(update_fields=["email"])
-    EmailAddress.objects.filter(user=user).delete()
-    EmailAddress.objects.create(user=user, email=user.email, primary=True, verified=True)
-    remove_workspace_member(system.member, system.tenant.pk, user.pk)
-    pending.refresh_from_db()
-    historical.refresh_from_db()
-    schedule.refresh_from_db()
-    assert pending.revoked_recipients == ["old@example.com"]
-    assert pending.recipients == ["old@example.com", "retained@example.com"]
-    assert schedule.recipients == ["retained@example.com"]
-    assert historical.status == "sent"
-    assert historical.recipients == ["old@example.com"]
-    assert historical.revoked_recipients == []
-
-    Membership.objects.create(tenant=system.tenant, user=user)
-    user.email = "old@example.com"
-    user.save(update_fields=["email"])
-    EmailAddress.objects.create(user=user, email=user.email, verified=True)
-    assert set(effective_recipients(schedule)) == {"old@example.com", "retained@example.com"}
-    assert process_notification(pending.pk, SLOT)
-    assert mail.outbox[0].bcc == ["retained@example.com"]
-
-
-def test_later_schedule_alias_evidence_prunes_earlier_external_schedule() -> None:
+def test_another_schedule_tied_to_the_member_prunes_the_same_address_kept_as_external() -> None:
     system, _ = configured()
     first = group(system, ["OLD@example.com", "retained@example.com"])
-    assert first.recipient_memberships == {}
+    assert ties(first) == {}
     user = member(system, "old@example.com")
     membership = Membership.objects.get(tenant=system.tenant, user=user)
     region = submit_region(
@@ -81,29 +49,22 @@ def test_later_schedule_alias_evidence_prunes_earlier_external_schedule() -> Non
         longitude=30,
         timezone="Europe/Istanbul",
     )
-    evidence = ReminderSchedule.objects.create(
-        region=region,
-        effective_from=NOW,
-        recipients=[user.email],
-        recipient_memberships={user.email: [membership.pk]},
-    )
+    evidence = ReminderSchedule.objects.create(region=region, effective_from=NOW)
+    store(evidence, [user.email], {user.email: [membership.pk]})
     user.email = "new@example.com"
     user.save(update_fields=["email"])
     EmailAddress.objects.filter(user=user).delete()
     EmailAddress.objects.create(user=user, email=user.email, verified=True)
     remove_workspace_member(system.member, system.tenant.pk, user.pk)
-    first.refresh_from_db()
-    evidence.refresh_from_db()
-    assert first.recipients == ["retained@example.com"]
+    assert schedule_addresses(first) == ["retained@example.com"]
     assert effective_recipients(first) == ["retained@example.com"]
-    assert evidence.recipients == []
-    assert evidence.recipient_memberships == {}
+    assert schedule_addresses(evidence) == []
+    assert ties(evidence) == {}
 
 
-def test_historical_alias_does_not_revoke_a_different_pinned_member() -> None:
+def test_removing_a_member_keeps_an_address_tied_to_another_member() -> None:
     system, _ = configured()
     former = member(system, "former@example.com")
-    former_membership = Membership.objects.get(tenant=system.tenant, user=former)
     current = member(system, "shared@example.com")
     current_membership = Membership.objects.get(tenant=system.tenant, user=current)
     schedule = group(system, [current.email])
@@ -115,19 +76,13 @@ def test_historical_alias_does_not_revoke_a_different_pinned_member() -> None:
         preparation_deadline=SLOT - timedelta(days=1),
         available_at=SLOT - timedelta(days=1),
         status="sent",
-        recipients=[current.email],
-        recipient_memberships={current.email: [former_membership.pk]},
     )
+    freeze(historical, [current.email, former.email])
     remove_workspace_member(system.member, system.tenant.pk, former.pk)
-    schedule.refresh_from_db()
-    pending.refresh_from_db()
-    historical.refresh_from_db()
-    assert schedule.recipients == [current.email]
-    assert schedule.recipient_memberships == {current.email: [current_membership.pk]}
-    assert pending.recipient_memberships[current.email] == [current_membership.pk]
-    assert pending.revoked_recipients == [former.email]
-    assert historical.recipients == [current.email]
-    assert historical.revoked_recipients == []
+    assert schedule_addresses(schedule) == [current.email]
+    assert ties(schedule) == {current.email: [current_membership.pk]}
+    assert revoked(pending) == [former.email]
+    assert (candidates(historical), revoked(historical)) == ([current.email, former.email], [])
     assert process_notification(pending.pk, SLOT)
     assert mail.outbox[0].bcc == [current.email]
 
@@ -176,9 +131,7 @@ def test_an_address_pinned_to_an_inactive_member_reaches_the_member_holding_it_n
     system, _ = configured()
     former = member(system, "shared@example.com")
     schedule = group(system, ["shared@example.com"])
-    assert schedule.recipient_memberships == {
-        "shared@example.com": [Membership.objects.get(user=former).pk]
-    }
+    assert ties(schedule) == {"shared@example.com": [Membership.objects.get(user=former).pk]}
     User.objects.filter(pk=former.pk).update(is_active=False, email="former@example.com")
     EmailAddress.objects.filter(user=former).delete()
     holder = User.objects.create(username="holder", email="shared@example.com")

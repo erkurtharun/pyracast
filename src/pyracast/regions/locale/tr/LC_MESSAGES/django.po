@@ -220,6 +220,9 @@ msgstr "Veri toplama ve e-posta durumu."
 msgid "Collection schedule updated"
 msgstr "Veri toplama programı güncellendi"
 
+msgid "Email reminders updated"
+msgstr "E-posta hatırlatıcıları güncellendi"
+
 msgid "Collection times must use HH:MM."
 msgstr "Veri toplama saatleri SS:DD biçiminde olmalıdır."
 
@@ -939,6 +942,9 @@ msgid "Recipient addresses must be distinct (case-insensitive)."
 msgstr ""
 "Alıcı adresleri büyük/küçük harf ayrımı olmadan birbirinden farklı "
 "olmalıdır."
+
+msgid "Recipients"
+msgstr "Alıcılar"
 
 msgid "Recipients per plant"
 msgstr "Santral başına alıcı"

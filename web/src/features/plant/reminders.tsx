@@ -1,20 +1,69 @@
 ﻿"use client";
 import { useTranslations } from "next-intl";
 import { ScrollRegion } from "@/ui/scroll-region";
-import { useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import type { components } from "@/lib/schema";
 import type { Region, RegionScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
-import { DisplayError } from "@/lib/api/errors";
+import { ApiError } from "@/lib/api/errors";
 import { MISSING } from "@/lib/format/number";
 import { useFormat } from "@/lib/format/use-format";
 import { isLanguage } from "@/i18n/language";
 import { useApiQuery, useRefresh } from "@/lib/api/query";
-import { ActionForm, CheckboxField, Select } from "@/ui/form";
+import { ActionForm, AsyncButton, CheckboxField, Select } from "@/ui/form";
 import { Resource } from "@/ui/resource";
 import { Empty, Notice } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
 type ReminderSchedule = components["schemas"]["ReminderOutput"];
+type Delivery = ReminderSchedule["deliveries"][number];
+type Outcome = Pick<Delivery, "scheduled_for" | "status" | "last_error">;
+export type ReminderSummary = components["schemas"]["ReminderSummaryOutput"];
+const PATH = "/api/tenants/{tenant_id}/regions/{region_id}/reminders/";
+function ReminderOutcome({
+    outcome,
+    timezone,
+}: {
+    outcome: Outcome;
+    timezone: string;
+}) {
+    const t = useTranslations("Reminders");
+    const format = useFormat();
+    const label = useLabel();
+    return (
+        <>
+            {t("lastEmail", {
+                status: label("NotificationDeliveryStatus", outcome.status),
+                scheduled: format.time(outcome.scheduled_for, timezone),
+            })}
+            {outcome.last_error &&
+                ` ${label("NotificationDeliveryError", outcome.last_error)}`}
+        </>
+    );
+}
+export function ReminderLine({
+    reminder,
+    timezone,
+}: {
+    reminder: ReminderSummary;
+    timezone: string;
+}) {
+    const t = useTranslations("Reminders");
+    const label = useLabel();
+    return (
+        <p className="fine">
+            {t("dailyEmail", { state: label("ReminderState", reminder.state) })}
+            {reminder.last_delivery && (
+                <>
+                    {" · "}
+                    <ReminderOutcome
+                        outcome={reminder.last_delivery}
+                        timezone={timezone}
+                    />
+                </>
+            )}
+        </p>
+    );
+}
 function useRowFocus(rows: { id: number }[]) {
     const prefix = useId();
     const pending = useRef<number | null>(null);
@@ -152,6 +201,7 @@ function RecipientRows({
     const [includeMembers, setIncludeMembers] = useState(
         data.include_workspace_members,
     );
+    // A hint only: the server decides the limit and which addresses count.
     const count = new Set(
         [
             ...rows.map((row) => row.value.trim()).filter(Boolean),
@@ -280,160 +330,144 @@ export function Reminders(props: ReminderProps) {
     return <ReminderSettings key={props.scope.region_id} {...props} />;
 }
 
+function entered(form: FormData, name: string) {
+    return form
+        .getAll(name)
+        .map((value) => String(value).trim())
+        .filter(Boolean);
+}
+
 function ReminderSettings({ scope, region }: ReminderProps) {
     const t = useTranslations("Reminders");
     const refresh = useRefresh();
     const format = useFormat();
     const label = useLabel();
+    const headingId = useId();
     const time = (value: string | null | undefined) =>
         format.time(value, region.timezone);
 
-    const resource = useApiQuery(
-        "/api/tenants/{tenant_id}/regions/{region_id}/reminders/",
-        { path: scope },
-    );
-    // A save resets the editor only once a later read has succeeded; a failed read keeps what is on screen.
-    const [editor, setEditor] = useState<{
-        edition: number;
-        savedAt?: number;
-    }>({ edition: 0 });
-    if (editor.savedAt !== undefined && resource.updatedAt > editor.savedAt)
-        setEditor({ edition: editor.edition + 1 });
+    const resource = useApiQuery(PATH, { path: scope });
+    const [form, setForm] = useState({ generation: 0, stale: false });
     return (
         <Resource resource={resource} loading={t("loadingEmailReminders")}>
             {(data) => (
                 <>
-                    <section className="panel">
+                    <section className="panel" aria-labelledby={headingId}>
                         <div className="section-heading">
                             <div>
-                                <h2>{t("emailReminders")}</h2>
+                                <h2 id={headingId}>{t("emailReminders")}</h2>
                             </div>
                             <StatusTag
                                 group="ReminderState"
                                 value={data.state}
                             />
                         </div>
+                        <p className="fine" role="status">
+                            {data.deliveries[0] ? (
+                                <ReminderOutcome
+                                    outcome={data.deliveries[0]}
+                                    timezone={region.timezone}
+                                />
+                            ) : (
+                                t("noEmailYet")
+                            )}
+                        </p>
+                        {form.stale && (
+                            <AsyncButton
+                                variant="secondary"
+                                onClick={async () => {
+                                    await resource.reload();
+                                    setForm((current) => ({
+                                        generation: current.generation + 1,
+                                        stale: false,
+                                    }));
+                                }}
+                            >
+                                {t("reloadReminders")}
+                            </AsyncButton>
+                        )}
                         <ActionForm
-                            key={`${editor.edition}:${JSON.stringify(data)}`}
+                            key={form.generation}
                             submit={t("saveReminders")}
-                            onSubmit={async (form) => {
-                                const times = form
-                                    .getAll("times")
-                                    .map((time) => String(time).trim())
-                                    .filter(Boolean);
-                                if (
-                                    times.some(
-                                        (time) =>
-                                            !/^([01]\d|2[0-3]):[0-5]\d$/.test(
-                                                time,
-                                            ),
-                                    )
-                                )
-                                    throw new DisplayError(
-                                        t("invalidDeliveryTime"),
-                                    );
-                                const recipients = form
-                                    .getAll("recipients")
-                                    .map((value) => String(value).trim())
-                                    .filter(Boolean);
-                                const enabled = form.get("enabled") === "on";
-                                const includeWorkspaceMembers =
-                                    form.get("include_workspace_members") ===
-                                    "on";
-                                const recipientCount = new Set(
-                                    [
-                                        ...recipients,
-                                        ...(includeWorkspaceMembers
-                                            ? (data.addresses
-                                                  ?.workspace_recipients ?? [])
-                                            : []),
-                                    ].map((email) => email.toLowerCase()),
-                                ).size;
-                                if (enabled && !times.length)
-                                    throw new DisplayError(
-                                        t("deliveryTimeRequired"),
-                                    );
-                                if (
-                                    enabled &&
-                                    recipientCount > data.recipient_limit &&
-                                    !(
-                                        data.recipient_limit_exceeded &&
-                                        recipientCount < data.recipient_count
-                                    )
-                                )
-                                    throw new DisplayError(
-                                        t("recipientLimit", {
-                                            limit: data.recipient_limit,
+                            onSubmit={async (values) => {
+                                const language = String(values.get("language"));
+                                try {
+                                    resource.replace(
+                                        await api.put(PATH, {
+                                            path: scope,
+                                            body: {
+                                                enabled:
+                                                    values.get("enabled") ===
+                                                    "on",
+                                                recipients: entered(
+                                                    values,
+                                                    "recipients",
+                                                ),
+                                                include_workspace_members:
+                                                    values.get(
+                                                        "include_workspace_members",
+                                                    ) === "on",
+                                                language: isLanguage(language)
+                                                    ? language
+                                                    : "en",
+                                                times: entered(values, "times"),
+                                                expected_revision:
+                                                    data.revision,
+                                            },
                                         }),
                                     );
-                                if (
-                                    new Set(
-                                        recipients.map((email) =>
-                                            email.toLowerCase(),
-                                        ),
-                                    ).size !== recipients.length
-                                )
-                                    throw new DisplayError(t("duplicateEmail"));
-                                const language = String(form.get("language"));
-                                await api.put(
-                                    "/api/tenants/{tenant_id}/regions/{region_id}/reminders/",
-                                    {
-                                        path: scope,
-                                        body: {
-                                            enabled,
-                                            recipients,
-                                            include_workspace_members:
-                                                includeWorkspaceMembers,
-                                            language: isLanguage(language)
-                                                ? language
-                                                : "en",
-                                            times: [...new Set(times)].sort(
-                                                (a, b) =>
-                                                    Number(a.replace(":", "")) -
-                                                    Number(b.replace(":", "")),
-                                            ),
-                                        },
-                                    },
-                                );
-                                setEditor((current) => ({
-                                    ...current,
-                                    savedAt: resource.updatedAt,
-                                }));
+                                } catch (error) {
+                                    if (
+                                        error instanceof ApiError &&
+                                        error.code ===
+                                            "reminder_schedule_changed"
+                                    )
+                                        setForm((current) => ({
+                                            ...current,
+                                            stale: true,
+                                        }));
+                                    throw error;
+                                }
                                 await refresh.workspace(scope.tenant_id);
                             }}
                         >
-                            <CheckboxField
-                                label={t("enableForecastEmailsForThisPlant")}
-                                name="enabled"
-                                defaultChecked={data.enabled}
-                            />
-                            {region.status !== "approved" && (
-                                <Notice>{t("approvalRequired")}</Notice>
-                            )}
-                            <DeliveryTimes data={data} />
-                            <RecipientFields data={data} />
-                            <Select
-                                label={t("emailLanguage")}
-                                name="language"
-                                defaultValue={data.language}
-                                required
-                            >
-                                <option value="en">English</option>
-                                <option value="tr">Türkçe</option>
-                            </Select>
-                            <details>
-                                <summary>{t("reminderDetails")}</summary>
-                                <p className="fine">
-                                    {t("reminderPolicy", {
-                                        limit:
-                                            data.daily_reminder_limit == null
-                                                ? "?"
-                                                : format.number(
-                                                      data.daily_reminder_limit,
-                                                  ),
-                                    })}
-                                </p>
-                            </details>
+                            <Fragment key={JSON.stringify(data)}>
+                                <CheckboxField
+                                    label={t(
+                                        "enableForecastEmailsForThisPlant",
+                                    )}
+                                    name="enabled"
+                                    defaultChecked={data.enabled}
+                                />
+                                {region.status !== "approved" && (
+                                    <Notice>{t("approvalRequired")}</Notice>
+                                )}
+                                <DeliveryTimes data={data} />
+                                <RecipientFields data={data} />
+                                <Select
+                                    label={t("emailLanguage")}
+                                    name="language"
+                                    defaultValue={data.language}
+                                    required
+                                >
+                                    <option value="en">English</option>
+                                    <option value="tr">Türkçe</option>
+                                </Select>
+                                <details>
+                                    <summary>{t("reminderDetails")}</summary>
+                                    <p className="fine">
+                                        {t("reminderPolicy", {
+                                            limit:
+                                                data.daily_reminder_limit ==
+                                                null
+                                                    ? "?"
+                                                    : format.number(
+                                                          data.daily_reminder_limit,
+                                                      ),
+                                        })}
+                                    </p>
+                                </details>
+                            </Fragment>
                         </ActionForm>
                     </section>
                     <details className="panel">

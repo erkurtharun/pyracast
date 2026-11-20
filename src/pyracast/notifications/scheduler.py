@@ -9,6 +9,7 @@ from django.db import transaction
 
 from pyracast.accounts.models import Tenant
 from pyracast.background.failures import BACK_OFF, Deferrals, isolate
+from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.local_time import local_slot
 from pyracast.notifications.eligibility import binding_can_notify
@@ -23,7 +24,7 @@ from pyracast.notifications.operations import (
     recipient_limit,
     validate_recipient,
 )
-from pyracast.notifications.recipients import pin_recipient_memberships
+from pyracast.notifications.recipients import freeze_recipients
 from pyracast.regions.models import Region, active_region
 
 MAX_LATENESS = timedelta(hours=2)
@@ -54,100 +55,107 @@ def enqueue_due(now: datetime) -> list[int]:
     return list(chain.from_iterable(batches))
 
 
-def slot_recipients(schedule: ReminderSchedule, limit: int) -> tuple[list[str], str]:
+def recipient_refusal(recipients: list[str], limit: int) -> str:
     try:
-        recipients = effective_recipients(schedule)
         for address in recipients:
             validate_recipient(address)
     except ValidationError:
-        return [], NotificationDeliveryError.INVALID_RECIPIENT
+        return NotificationDeliveryError.INVALID_RECIPIENT
     if not recipients:
-        return [], NotificationDeliveryError.NO_RECIPIENTS
+        return NotificationDeliveryError.NO_RECIPIENTS
     if len(recipients) > limit:
-        return [], NotificationDeliveryError.RECIPIENT_LIMIT_EXCEEDED
-    return recipients, ""
+        return NotificationDeliveryError.RECIPIENT_LIMIT_EXCEEDED
+    return ""
+
+
+def slot_recipients(schedule: ReminderSchedule, limit: int) -> tuple[list[str], str]:
+    recipients = effective_recipients(schedule)
+    return recipients, recipient_refusal(recipients, limit)
 
 
 def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
-    ids: list[int] = []
-    region, binding = schedule.region, schedule.region.approved_binding
+    binding = schedule.region.approved_binding
     if binding is None or not binding_can_notify(binding):
         return []
-    zone = ZoneInfo(region.timezone)
+    zone = ZoneInfo(schedule.region.timezone)
     today = now.astimezone(zone).date()
-    for day in (today - timedelta(days=1), today):
-        for clock in schedule.times[: binding.provider_account.daily_quota]:
-            slot = local_slot(day, clock, zone)
-            if slot is None or slot > now or slot < schedule.effective_from:
-                continue
-            with transaction.atomic():
-                Tenant.objects.select_for_update().get(pk=region.tenant_id)
-                limit = recipient_limit(lock=True)
-                locked_region = Region.objects.select_for_update().filter(pk=region.pk).first()
-                current = ReminderSchedule.objects.filter(pk=schedule.pk).first()
-                if (
-                    locked_region is None
-                    or current is None
-                    or not binding_can_notify(binding)
-                    or not current.enabled
-                    or current.effective_from > slot
-                    or clock not in current.times[: binding.provider_account.daily_quota]
-                ):
-                    continue
-                existing_ids = list(
-                    NotificationDelivery.objects.filter(schedule=current, scheduled_for=slot)
-                    .order_by("pk")
-                    .values_list("pk", flat=True)
-                )
-                if existing_ids:
-                    ids.extend(existing_ids)
-                    continue
-                recipients, reason = slot_recipients(current, limit)
-                if reason:
-                    logger.info(
-                        "notification_slot_skipped schedule_id=%s reason=%s", current.pk, reason
-                    )
-                    paused = NotificationDelivery.objects.create(
-                        schedule=current,
-                        scheduled_for=slot,
-                        recipients=[],
-                        recipient_memberships={},
-                        language=current.language,
-                        binding=binding,
-                        preparation_deadline=slot + PREPARATION_GRACE,
-                        available_at=now,
-                        status=NotificationDeliveryStatus.SKIPPED,
-                        last_error=reason,
-                    )
-                    ids.append(paused.pk)
-                    continue
-                snapshot = (
-                    ForecastSnapshot.objects.filter(
-                        job__binding=binding,
-                        job__status=CollectionJobStatus.SUCCEEDED,
-                        source_kind="forecast",
-                        collected_at__lte=slot,
-                        forecastresult__published_at__lte=slot,
-                    )
-                    .order_by("-collected_at", "-pk")
-                    .first()
-                )
-                delivery = NotificationDelivery.objects.create(
-                    schedule=current,
-                    scheduled_for=slot,
-                    recipients=recipients,
-                    recipient_memberships=pin_recipient_memberships(current, recipients),
-                    language=current.language,
-                    snapshot=snapshot,
-                    binding=binding,
-                    preparation_deadline=slot + PREPARATION_GRACE,
-                    available_at=now,
-                    status=NotificationDeliveryStatus.SKIPPED
-                    if now - slot > MAX_LATENESS
-                    else NotificationDeliveryStatus.PENDING,
-                    last_error=NotificationDeliveryError.MISSED_SCHEDULE
-                    if now - slot > MAX_LATENESS
-                    else "",
-                )
-                ids.append(delivery.pk)
+    slots = [
+        (clock, slot)
+        for day in (today - timedelta(days=1), today)
+        for clock in schedule.times[: binding.provider_account.daily_quota]
+        if (slot := local_slot(day, clock, zone)) is not None
+        and schedule.effective_from <= slot <= now
+    ]
+    existing = dict(
+        NotificationDelivery.objects.filter(
+            schedule=schedule, scheduled_for__in=[slot for _, slot in slots]
+        ).values_list("scheduled_for", "pk")
+    )
+    ids: list[int] = []
+    for clock, slot in slots:
+        delivery_id = existing.get(slot) or _create_slot(schedule, binding, clock, slot, now)
+        if delivery_id is not None:
+            ids.append(delivery_id)
     return ids
+
+
+def _latest_snapshot(binding: SiteBinding, slot: datetime) -> ForecastSnapshot | None:
+    """The forecast saved by the slot; a slot that is never prepared shows its age."""
+    return (
+        ForecastSnapshot.objects.filter(
+            job__binding=binding,
+            job__status=CollectionJobStatus.SUCCEEDED,
+            source_kind="forecast",
+            collected_at__lte=slot,
+            forecastresult__published_at__lte=slot,
+        )
+        .order_by("-collected_at", "-pk")
+        .first()
+    )
+
+
+def _create_slot(
+    schedule: ReminderSchedule, binding: SiteBinding, clock: str, slot: datetime, now: datetime
+) -> int | None:
+    with transaction.atomic():
+        Tenant.objects.select_for_update().get(pk=schedule.region.tenant_id)
+        limit = recipient_limit(lock=True)
+        region = Region.objects.select_for_update().filter(pk=schedule.region_id).first()
+        current = ReminderSchedule.objects.filter(pk=schedule.pk).first()
+        if (
+            region is None
+            or current is None
+            or not binding_can_notify(binding)
+            or not current.enabled
+            or current.effective_from > slot
+            or clock not in current.times[: binding.provider_account.daily_quota]
+        ):
+            return None
+        existing: int | None = (
+            NotificationDelivery.objects.filter(schedule=current, scheduled_for=slot)
+            .values_list("pk", flat=True)
+            .first()
+        )
+        if existing is not None:
+            return existing
+        current.region = region
+        recipients, reason = slot_recipients(current, limit)
+        late = now - slot > MAX_LATENESS
+        if reason:
+            logger.info("notification_slot_skipped schedule_id=%s reason=%s", current.pk, reason)
+        delivery = NotificationDelivery.objects.create(
+            schedule=current,
+            scheduled_for=slot,
+            language=current.language,
+            snapshot=None if reason else _latest_snapshot(binding, slot),
+            binding=binding,
+            preparation_deadline=slot + PREPARATION_GRACE,
+            available_at=now,
+            status=NotificationDeliveryStatus.SKIPPED
+            if reason or late
+            else NotificationDeliveryStatus.PENDING,
+            last_error=reason or (NotificationDeliveryError.MISSED_SCHEDULE if late else ""),
+        )
+        if not reason:
+            freeze_recipients(delivery, recipients)
+        return delivery.pk

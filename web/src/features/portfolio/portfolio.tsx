@@ -10,6 +10,7 @@ import { PlantOnboarding } from "./plant-onboarding";
 import { Field, Select } from "@/ui/form";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
+import { ReminderLine } from "@/features/plant/reminders";
 import { useWorkspace } from "@/features/workspace/workspace-shell";
 
 export function Portfolio() {
@@ -150,6 +151,12 @@ export function Portfolio() {
                                         {" · "}
                                         {site.timezone}
                                     </p>
+                                    {site.reminder && (
+                                        <ReminderLine
+                                            reminder={site.reminder}
+                                            timezone={site.timezone}
+                                        />
+                                    )}
                                     <div className="region-card-bottom">
                                         <span>
                                             {site.plant

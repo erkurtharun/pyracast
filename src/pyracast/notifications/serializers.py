@@ -10,7 +10,13 @@ from pyracast.notifications.models import (
     ReminderState,
 )
 from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT, RECIPIENT_MAX_LENGTH
-from pyracast.notifications.overview import ReminderAddresses, ReminderDelivery, ReminderOverview
+from pyracast.notifications.overview import (
+    ReminderAddresses,
+    ReminderDelivery,
+    ReminderOutcome,
+    ReminderOverview,
+    ReminderSummary,
+)
 
 
 class ReminderInput(InputSerializer):
@@ -25,6 +31,7 @@ class ReminderInput(InputSerializer):
         child=serializers.RegexField(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"),
         max_length=MAX_DAILY_QUOTA,
     )
+    expected_revision = serializers.IntegerField(min_value=0)
 
 
 class ReminderDeliveryOutput(serializers.Serializer[ReminderDelivery]):
@@ -53,6 +60,7 @@ class ReminderAddressesOutput(serializers.Serializer[ReminderAddresses]):
 class ReminderOutput(serializers.Serializer[ReminderOverview]):
     enabled = serializers.BooleanField()
     state = serializers.ChoiceField(choices=ReminderState.choices)
+    revision = serializers.IntegerField()
     include_workspace_members = serializers.BooleanField()
     language = serializers.ChoiceField(choices=Language.choices)
     times = serializers.ListField(child=serializers.CharField())
@@ -63,3 +71,16 @@ class ReminderOutput(serializers.Serializer[ReminderOverview]):
     daily_reminder_limit = serializers.IntegerField(allow_null=True)
     addresses = ReminderAddressesOutput(allow_null=True)
     deliveries = ReminderDeliveryOutput(many=True)
+
+
+class ReminderOutcomeOutput(serializers.Serializer[ReminderOutcome]):
+    scheduled_for = serializers.DateTimeField()
+    status = serializers.ChoiceField(choices=NotificationDeliveryStatus.choices)
+    last_error = serializers.ChoiceField(
+        choices=NotificationDeliveryError.choices, allow_blank=True
+    )
+
+
+class ReminderSummaryOutput(serializers.Serializer[ReminderSummary]):
+    state = serializers.ChoiceField(choices=ReminderState.choices)
+    last_delivery = ReminderOutcomeOutput(allow_null=True)
