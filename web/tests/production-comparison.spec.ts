@@ -21,6 +21,9 @@ test("available historical model days appear without empty grid rows", async ({
                 end_date: "2026-11-10",
                 matched_days: 8,
                 requested_days: 30,
+                relative_error: 0.2,
+                skill_score: 0.125,
+                skill_days: 3,
                 missing_days: 21,
                 excluded_days: 1,
                 scored_intervals: 64,
@@ -68,6 +71,19 @@ test("available historical model days appear without empty grid rows", async ({
         0,
     );
     await expect(comparison.getByRole("row")).toHaveCount(9);
+    await expect(
+        comparison.locator(".stat").filter({ hasText: "Relative error" }),
+    ).toContainText("20%");
+    await expect(
+        comparison
+            .locator(".stat")
+            .filter({ hasText: "Skill vs uncalibrated model" }),
+    ).toContainText("12.5%");
+    await expect(
+        comparison.getByText(
+            "Skill uses 3 days outside the calibration's training period.",
+        ),
+    ).toBeVisible();
     await expect(
         comparison.locator(".stat").filter({ hasText: "Missing days" }),
     ).toContainText("21");
@@ -136,6 +152,9 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
                 end_date: "2026-11-10",
                 matched_days: 0,
                 requested_days: 30,
+                relative_error: null,
+                skill_score: null,
+                skill_days: 0,
                 metrics: null,
                 baseline_metrics: null,
                 days: Array.from({ length: 30 }, (_, index) => ({

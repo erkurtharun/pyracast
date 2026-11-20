@@ -7,9 +7,17 @@ import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
-from pyracast.plants.models import CalibrationActivation, CalibrationRun
+from pyracast.metering.models import EpiasConnection
+from pyracast.plants.models import (
+    CalibrationActivation,
+    CalibrationRun,
+    ForecastIssuance,
+    Plant,
+    PlantConfiguration,
+)
 from pyracast.plants.performance import forecast_performance
-from tests.support.domain import NOW
+from tests.support.domain import NOW, System
+from tests.support.invariants import stored_again
 from tests.support.performance_history import FIRST, LAST, performance_history
 from tests.support.performance_pins import performance_numbers
 from tests.support.plant_operations import make_plant
@@ -40,12 +48,42 @@ def test_performance_numbers_equal_the_pinned_numbers(
     assert numbers == PINS[f"{comparison}-{daylight_only}"]
 
 
+def _connect(system: System, plant: Plant) -> None:
+    EpiasConnection.objects.create(
+        plant=plant,
+        provider_plant_id=2,
+        settlement_plant_id=77,
+        eic="EIC",
+        name="Plant",
+        connected_by=system.member,
+    )
+
+
+def _revision(system: System, plant: Plant, revision: int) -> PlantConfiguration:
+    configuration = PlantConfiguration.objects.create(
+        region_id=plant.region_id,
+        plant=plant,
+        binding=system.binding,
+        revision=revision,
+        dc_capacity_mw=130,
+        inverter_capacity_mw=100,
+        created_by=system.member,
+    )
+    PlantConfiguration.objects.filter(pk=configuration.pk).update(
+        created_at=NOW - timedelta(days=100)
+    )
+    return configuration
+
+
 @pytest.mark.parametrize("comparison", COMPARISONS)
+@pytest.mark.parametrize("connected", [False, True])
 def test_ninety_days_of_performance_take_at_most_eight_queries(
-    monkeypatch: pytest.MonkeyPatch, comparison: str
+    monkeypatch: pytest.MonkeyPatch, comparison: str, connected: bool
 ) -> None:
     system, plant = make_plant(monkeypatch)
     performance_history(system, plant)
+    if connected:
+        _connect(system, plant)
     with CaptureQueriesContext(connection) as queries:
         result = _read(plant, comparison, start=LAST - timedelta(days=89))
     assert result["requested_days"] == 90
@@ -76,6 +114,23 @@ def test_performance_query_count_does_not_grow_with_activation_history(
         result = _read(plant, comparison)
     assert len(after) == len(before)
     assert result["metrics"] == expected["metrics"]
+
+
+def test_archived_performance_cost_does_not_grow_with_configuration_revisions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    performance_history(system, plant)
+    _connect(system, plant)
+    counts = []
+    for revision, day in ((2, 3), (3, 4), (4, 5)):
+        configuration = _revision(system, plant, revision)
+        for issuance in ForecastIssuance.objects.filter(target_date=date(2026, 11, day)):
+            stored_again(issuance, configuration=configuration, calibration=None, factor=1)
+        with CaptureQueriesContext(connection) as queries:
+            _read(plant, "archived_forecast", start=LAST - timedelta(days=89))
+        counts.append(len(queries))
+    assert counts[0] == counts[1] == counts[2] <= 8
 
 
 def test_historical_days_state_whether_their_calibration_trained_on_them(

@@ -91,6 +91,25 @@ def test_region_archived_forecast_is_the_forecast_published_before_the_day(
     assert provenance["selection_cutoff"] == forecast_cutoff(DAY, system.binding).isoformat()
 
 
+def test_region_archive_skips_a_forecast_issued_after_its_acquisition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _ = make_plant(monkeypatch)
+    start, _ = local_day_bounds(DAY, system.binding.timezone)
+    publish_snapshot(
+        snapshot_for(
+            system,
+            DAY,
+            collected_at=start - timedelta(hours=3),
+            issued_at=start - timedelta(hours=2),
+        )
+    )
+    client = Client()
+    client.force_login(system.member)
+    body = _read(client, system, "archived_forecast").json()
+    assert (body["freshness"], body["result"]) == ("missing", None)
+
+
 def test_region_archived_forecast_without_an_issued_forecast_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

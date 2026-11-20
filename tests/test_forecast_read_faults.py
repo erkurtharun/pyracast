@@ -19,13 +19,20 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 FAULTS = "pyracast.forecasts.faults"
 DAMAGE = "08.11.2026 00:00"
+MISSING = object()
+DAMAGES = pytest.mark.parametrize(
+    "damage", [DAMAGE, MISSING, None, 7], ids=["text", "missing", "null", "number"]
+)
 
 
-def _damaged_actuals(system: System, day: date) -> ForecastSnapshot:
+def _damaged_actuals(system: System, day: date, damage: object = DAMAGE) -> ForecastSnapshot:
     _, end = local_day_bounds(day, system.binding.timezone)
     snapshot = estimated_actuals(system, day, 0.3, end + timedelta(hours=1))
     rows = [dict(row) for row in snapshot.normalized_intervals]
-    rows[3]["start"] = DAMAGE
+    if damage is MISSING:
+        del rows[3]["start"]
+    else:
+        rows[3]["start"] = damage
     return stored_again(snapshot, normalized_intervals=rows)
 
 
@@ -41,11 +48,16 @@ def _client(system: System) -> Client:
 
 @pytest.mark.parametrize("scope", ["plant", "region"])
 @pytest.mark.parametrize("source", ["estimated_actuals", "auto"])
+@DAMAGES
 def test_damaged_estimated_actuals_fail_the_past_read_cleanly_with_one_warning(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, scope: str, source: str
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    scope: str,
+    source: str,
+    damage: object,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    _damaged_actuals(system, DAY)
+    _damaged_actuals(system, DAY, damage)
     region = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/"
     url = f"{region}plants/{plant.pk}/forecast/" if scope == "plant" else f"{region}forecast/"
     with caplog.at_level(logging.WARNING, logger=FAULTS):
@@ -78,8 +90,9 @@ def test_a_damaged_archived_issuance_fails_cleanly_with_one_warning(
     assert "KeyError" in record.getMessage()
 
 
+@DAMAGES
 def test_one_damaged_day_leaves_the_other_performance_days_scored(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, damage: object
 ) -> None:
     from tests.support.performance_history import FIRST, performance_history
 
@@ -89,7 +102,7 @@ def test_one_damaged_day_leaves_the_other_performance_days_scored(
         plant, start_date=FIRST, end_date=DAY, comparison="historical_model"
     )
     damaged_day = date(2026, 11, 6)
-    _damaged_actuals(system, damaged_day)
+    _damaged_actuals(system, damaged_day, damage)
     with caplog.at_level(logging.WARNING, logger=FAULTS):
         result = forecast_performance(
             plant, start_date=FIRST, end_date=DAY, comparison="historical_model"
