@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 from django.core import mail
-from django.core.mail import EmailMultiAlternatives
+from django.core.mail import EmailMessage
 from django.test import override_settings
 
 from pyracast.accounts.models import Membership
@@ -14,7 +14,7 @@ from pyracast.notifications.jobs import LEASE_DURATION, process_notification
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.scheduler import enqueue_due
 from tests.support.notification_groups import group, member
-from tests.support.notification_transmission import OpeningBackend
+from tests.support.notification_transmission import OpeningBackend, replying
 from tests.support.notifications import SLOT, configured, reminder_schedule_payload
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -53,11 +53,12 @@ def test_known_non_acceptance_marker_does_not_exempt_a_retry_from_member_revocat
     (delivery_id,) = enqueue_due(SLOT)
     attempted: list[list[str]] = []
 
-    def rejected(message: EmailMultiAlternatives) -> None:
+    def rejected(message: EmailMessage) -> None:
         attempted.append(list(message.bcc))
         raise NotSentError
 
-    assert not process_notification(delivery_id, SLOT, sender=rejected)
+    with replying(rejected):
+        assert not process_notification(delivery_id, SLOT)
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     frozen = delivery.prepared_message
     assert delivery.status == "retry"
@@ -112,11 +113,12 @@ def test_a_member_removed_after_authorization_stays_in_the_history_of_the_sent_d
     (delivery_id,) = enqueue_due(SLOT)
     envelopes: list[list[str]] = []
 
-    def accepted_after_removal(message: EmailMultiAlternatives) -> None:
+    def accepted_after_removal(message: EmailMessage) -> None:
         envelopes.append(sorted(message.bcc))
         remove_workspace_member(system.member, system.tenant.pk, leaving.pk)
 
-    assert process_notification(delivery_id, SLOT, sender=accepted_after_removal)
+    with replying(accepted_after_removal):
+        assert process_notification(delivery_id, SLOT)
 
     administrator, viewer = (
         reminder_schedule_payload(schedule, SLOT, administrator=flag)["deliveries"][0]
@@ -141,10 +143,10 @@ def test_revocation_after_permission_preserves_the_attempt_but_excludes_safe_ret
     (delivery_id,) = enqueue_due(SLOT)
     clock = [0.0]
     monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: clock[0]))
-    attempted: list[EmailMultiAlternatives] = []
+    attempted: list[EmailMessage] = []
     original_recipients = ["EXTERNAL@example.com", retained.email]
 
-    def rejected_after_revocation(message: EmailMultiAlternatives) -> None:
+    def rejected_after_revocation(message: EmailMessage) -> None:
         attempted.append(message)
         delivery = NotificationDelivery.objects.get(pk=delivery_id)
         assert delivery.status == "sending"
@@ -164,7 +166,8 @@ def test_revocation_after_permission_preserves_the_attempt_but_excludes_safe_ret
         assert message.bcc == original_recipients
         raise NotSentError
 
-    assert not process_notification(delivery_id, SLOT, sender=rejected_after_revocation)
+    with replying(rejected_after_revocation):
+        assert not process_notification(delivery_id, SLOT)
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     frozen = delivery.prepared_message
     assert delivery.status == "retry"

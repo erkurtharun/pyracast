@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from typing import Any
 
 import pytest
-from django.core.mail import EmailMultiAlternatives
+from django.core.mail import EmailMessage
 from django.db import IntegrityError, models, transaction
 
 from pyracast.accounts.invitations import invite_workspace_member
@@ -28,6 +28,7 @@ from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.invariants import lease_violations
 from tests.support.jobs import calculate
 from tests.support.metering import connected, day_data
+from tests.support.notification_transmission import replying
 from tests.support.notifications import SLOT, ready
 from tests.support.plant_operations import make_plant, request_run
 
@@ -266,20 +267,21 @@ def test_calibration_lease_writers_keep_the_lease_with_the_running_status(
     assert lease_violations() == CLEAN
 
 
-def _sent(message: EmailMultiAlternatives) -> None:
+def _sent(message: EmailMessage) -> None:
     return None
 
 
-def _interrupted(message: EmailMultiAlternatives) -> None:
+def _interrupted(message: EmailMessage) -> None:
     raise ConnectionError("interrupted")
 
 
-@pytest.mark.parametrize(("sender", "outcome"), [(_sent, "sent"), (_interrupted, "uncertain")])
+@pytest.mark.parametrize(("reply", "outcome"), [(_sent, "sent"), (_interrupted, "uncertain")])
 def test_notification_lease_writers_keep_the_lease_with_the_sending_status(
-    sender: Callable[[EmailMultiAlternatives], None], outcome: str
+    reply: Callable[[EmailMessage], None], outcome: str
 ) -> None:
     delivery = ready()
-    process_notification(delivery.pk, SLOT, sender=sender)
+    with replying(reply):
+        process_notification(delivery.pk, SLOT)
     delivery.refresh_from_db()
     assert delivery.status == outcome
     assert lease_violations() == CLEAN

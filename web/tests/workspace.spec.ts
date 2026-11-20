@@ -1251,6 +1251,7 @@ test("mock contract: saves cached forecast reminders without provider queries", 
         recipients: [user.email],
         language: "en",
         times: ["08:00", "17:30"],
+        expected_revision: 0,
     });
     await page.getByText("Reminder details", { exact: true }).click();
     await expect(

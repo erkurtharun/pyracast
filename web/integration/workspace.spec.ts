@@ -426,7 +426,7 @@ test("a customer manages one plant site through the real API", async ({
     await expect(
         page.getByLabel("Delivery time 1", { exact: true }),
     ).toHaveValue("10:00");
-    await expect(page.getByText("Enabled", { exact: true })).toBeVisible();
+    await expect(page.getByText("Sending", { exact: true })).toBeVisible();
     await page
         .getByLabel("Email address 1", { exact: true })
         .fill("forecast-one@example.test");

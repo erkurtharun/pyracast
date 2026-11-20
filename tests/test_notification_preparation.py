@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from django.core import mail
-from django.core.mail import EmailMultiAlternatives
+from django.core.mail import EmailMessage
 from django.db.models.fetch_modes import FetchMode
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -26,6 +26,7 @@ from pyracast.regions.models import Region
 from tests.support.domain import NOW
 from tests.support.invariants import stored_again
 from tests.support.notification_preparation import complete_saved
+from tests.support.notification_transmission import replying
 from tests.support.notifications import (
     SLOT,
     attached_sheet,
@@ -208,13 +209,14 @@ def test_shared_recipients_and_retries_keep_the_same_prepared_content() -> None:
         now=NOW,
     )
     (delivery_id,) = enqueue_due(SLOT)
-    attempted: list[EmailMultiAlternatives] = []
+    attempted: list[EmailMessage] = []
 
-    def fail(message: EmailMultiAlternatives) -> None:
+    def fail(message: EmailMessage) -> None:
         attempted.append(message)
         raise NotSentError
 
-    assert not process_notification(delivery_id, SLOT, sender=fail)
+    with replying(fail):
+        assert not process_notification(delivery_id, SLOT)
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     original = delivery.prepared_message
     assert original is not None

@@ -9,8 +9,8 @@ import pytest
 from django.contrib.auth.models import User
 from django.core import mail
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.core.mail import EmailMultiAlternatives
-from django.db import IntegrityError, close_old_connections, connection, connections, transaction
+from django.core.mail import EmailMessage, EmailMultiAlternatives
+from django.db import IntegrityError, close_old_connections, connections, transaction
 from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant
@@ -42,6 +42,7 @@ from pyracast.platform_admin.health_queries import notification_deliveries_for_i
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System, make_system
 from tests.support.invariants import stored_again
+from tests.support.notification_transmission import replying
 from tests.support.notifications import (
     SLOT,
     attached_sheet,
@@ -310,30 +311,32 @@ def test_delivery_failure_and_retry_policy(mode: str, monkeypatch: pytest.Monkey
     delivery = ready()
     monkeypatch.setattr("pyracast.notifications.jobs.secrets.randbelow", lambda bound: 0)
 
-    def fail(message: EmailMultiAlternatives) -> None:
-        assert not connection.in_atomic_block
+    def fail(message: EmailMessage) -> None:
         if mode == "safe":
             raise NotSentError
         if mode == "permanent":
             raise PermanentlyNotSentError
         raise TimeoutError
 
-    assert not process_notification(delivery.pk, SLOT, sender=fail)
-    delivery.refresh_from_db()
-    assert (
-        delivery.status == {"safe": "retry", "uncertain": "uncertain", "permanent": "failed"}[mode]
-    )
-    if mode == "safe":
-        assert not process_notification(delivery.pk, SLOT + timedelta(seconds=30), sender=fail)
-        assert pending_notification_ids(delivery.available_at) == [delivery.pk]
-        assert not process_notification(delivery.pk, delivery.available_at, sender=fail)
-        for attempt in range(3, 9):
-            delivery.refresh_from_db()
-            assert not process_notification(delivery.pk, delivery.available_at, sender=fail)
-            delivery.refresh_from_db()
-            assert delivery.attempts == attempt
-        assert delivery.status == "failed"
-        assert delivery.attempts == 8
+    with replying(fail) as accepted:
+        assert not process_notification(delivery.pk, SLOT)
+        delivery.refresh_from_db()
+        assert (
+            delivery.status
+            == {"safe": "retry", "uncertain": "uncertain", "permanent": "failed"}[mode]
+        )
+        if mode == "safe":
+            assert not process_notification(delivery.pk, SLOT + timedelta(seconds=30))
+            assert pending_notification_ids(delivery.available_at) == [delivery.pk]
+            assert not process_notification(delivery.pk, delivery.available_at)
+            for attempt in range(3, 9):
+                delivery.refresh_from_db()
+                assert not process_notification(delivery.pk, delivery.available_at)
+                delivery.refresh_from_db()
+                assert delivery.attempts == attempt
+            assert delivery.status == "failed"
+            assert delivery.attempts == 8
+    assert accepted == []
 
 
 def test_interrupted_transmission_never_retries_ambiguous_delivery() -> None:
@@ -901,7 +904,7 @@ def test_multiple_recipients_share_one_private_message_and_delivery_outcome(outc
     saved(system)
     (delivery_id,) = enqueue_due(SLOT)
 
-    def sender(message: EmailMultiAlternatives) -> None:
+    def reply(message: EmailMessage) -> None:
         assert not message.to
         assert not message.cc
         assert message.bcc == addresses
@@ -910,16 +913,16 @@ def test_multiple_recipients_share_one_private_message_and_delivery_outcome(outc
             raise NotSentError
         if outcome == "uncertain":
             raise TimeoutError
-        send(message)
 
-    assert process_notification(delivery_id, SLOT, sender=sender) is (outcome == "sent")
+    with replying(reply) as accepted:
+        assert process_notification(delivery_id, SLOT) is (outcome == "sent")
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.recipients == addresses
     assert delivery.status == outcome
     assert pending_notification_ids(delivery.available_at) == (
         [delivery_id] if outcome == "retry" else []
     )
-    assert len(mail.outbox) == (1 if outcome == "sent" else 0)
+    assert len(accepted) == (1 if outcome == "sent" else 0)
     payload = reminder_schedule_payload(schedule, SLOT)
     assert isinstance(payload["deliveries"], list)
     assert len(payload["deliveries"]) == 1

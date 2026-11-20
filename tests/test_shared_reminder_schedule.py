@@ -2,8 +2,8 @@ from datetime import timedelta
 
 import pytest
 from django.contrib.auth.models import User
+from django.core import mail
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.core.mail import EmailMultiAlternatives
 from django.test import Client
 from django.utils import timezone
 
@@ -68,9 +68,8 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
     delivery = NotificationDelivery.objects.get(pk=identifiers[0])
     assert delivery.recipients == ["original@example.com"]
     assert delivery.language == "tr"
-    messages: list[EmailMultiAlternatives] = []
-    assert process_notification(delivery.pk, SLOT, sender=messages.append)
-    assert len(messages) == 1
+    assert process_notification(delivery.pk, SLOT)
+    assert len(mail.outbox) == 1
     assert RequestAttempt.objects.count() == before
     response = new_client.put(url, values, content_type="application/json")
     assert response.status_code == 200, response.content
@@ -117,7 +116,7 @@ def test_schedule_survives_configurer_departure_and_other_workspaces_are_isolate
     schedule.save(update_fields=["configured_by"])
     assert len(enqueue_due(SLOT)) == 1
     delivery = NotificationDelivery.objects.get()
-    assert process_notification(delivery.pk, SLOT, sender=lambda message: None)
+    assert process_notification(delivery.pk, SLOT)
     other = Tenant.objects.create(name="Other shared workspace")
     actor = User.objects.create_user(username="other-admin", email="other@example.com")
     Membership.objects.create(user=actor, tenant=other, role=WorkspaceRole.ADMIN)

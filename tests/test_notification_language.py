@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from django.contrib.auth.models import User
-from django.core.mail import EmailMultiAlternatives
+from django.core import mail
 from django.db import IntegrityError, transaction
 from django.utils import translation
 
@@ -66,8 +66,8 @@ def test_missing_saved_data_is_reported_in_the_pinned_language_without_inventing
     schedule.save(update_fields=["language"])
     requests = RequestAttempt.objects.count()
     (delivery_id,) = enqueue_due(SLOT)
-    messages: list[EmailMultiAlternatives] = []
-    assert process_notification(delivery_id, SLOT, sender=messages.append)
+    assert process_notification(delivery_id, SLOT)
+    messages = mail.outbox
     assert missing in messages[0].body
     assert "0.000 kWh/m²" not in messages[0].body
     assert "0,000 kWh/m²" not in messages[0].body

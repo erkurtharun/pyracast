@@ -125,6 +125,7 @@ export async function mockApi(
                     ...region,
                     ...route.request().postDataJSON(),
                     status: "pending",
+                    reminder: null,
                     plant: {
                         ...plant,
                         ...route.request().postDataJSON(),
@@ -144,7 +145,7 @@ export async function mockApi(
                         ? [submittedSite]
                         : empty
                           ? []
-                          : [{ ...region, plant }],
+                          : [{ ...region, plant, reminder: null }],
                 );
         } else if (path.endsWith("/plants/"))
             data = method === "POST" ? plant : paged([submittedPlant ?? plant]);
@@ -232,6 +233,7 @@ export async function mockApi(
             data = {
                 enabled: false,
                 state: "paused_by_user",
+                revision: 0,
                 language: "en",
                 include_workspace_members: false,
                 addresses: {

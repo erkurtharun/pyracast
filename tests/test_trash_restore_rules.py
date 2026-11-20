@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from django.core.mail import EmailMultiAlternatives
+from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import connection
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
@@ -21,6 +21,7 @@ from pyracast.notifications.models import NotificationDelivery
 from pyracast.plants.models import Plant
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
+from tests.support.notification_transmission import replying
 from tests.support.notifications import SLOT, ready
 from tests.support.plant_operations import make_plant
 from tests.support.trash_operations import sibling
@@ -186,7 +187,6 @@ def test_a_delivery_trashed_before_its_transmission_marker_is_cancelled_not_unce
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     delivery = ready()
-    sent: list[EmailMultiAlternatives] = []
     marker = jobs._mark_transmit
 
     def trash_before_marker(
@@ -197,7 +197,8 @@ def test_a_delivery_trashed_before_its_transmission_marker_is_cancelled_not_unce
 
     monkeypatch.setattr(jobs, "_mark_transmit", trash_before_marker)
 
-    assert not process_notification(delivery.pk, SLOT, sender=sent.append)
+    with replying(lambda message: None) as sent:
+        assert not process_notification(delivery.pk, SLOT)
 
     delivery.refresh_from_db()
     assert (delivery.status, delivery.last_error) == ("cancelled", "definition_trashed")
@@ -222,7 +223,7 @@ def test_a_delivery_trashed_while_transmitting_waits_for_its_late_outcome(
         NotificationDelivery.objects.filter(pk=delivery.pk).update(attempts=7)
     seen: list[tuple[str, str, bool]] = []
 
-    def trash_while_sending(message: EmailMultiAlternatives) -> None:
+    def trash_while_sending(message: EmailMessage) -> None:
         _trash_location(delivery)
         row = NotificationDelivery.objects.get(pk=delivery.pk)
         seen.append((row.status, row.last_error, row.lease_token is not None))
@@ -231,7 +232,8 @@ def test_a_delivery_trashed_while_transmitting_waits_for_its_late_outcome(
         if outcome in {"not_sent", "last_not_sent"}:
             raise NotSentError("connection refused before DATA")
 
-    process_notification(delivery.pk, SLOT, sender=trash_while_sending)
+    with replying(trash_while_sending):
+        process_notification(delivery.pk, SLOT)
 
     assert seen == [("uncertain", "definition_trashed", True)]
     delivery.refresh_from_db()

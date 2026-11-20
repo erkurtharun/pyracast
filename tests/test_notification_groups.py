@@ -20,7 +20,7 @@ from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.recipients import effective_recipients
 from pyracast.notifications.scheduler import enqueue_due
 from tests.support.notification_groups import group, member
-from tests.support.notification_transmission import OpeningBackend
+from tests.support.notification_transmission import OpeningBackend, replying
 from tests.support.notifications import SLOT, configured, reminder_schedule_payload
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -229,7 +229,6 @@ def test_removal_and_group_transmission_serialize_on_workspace_lock() -> None:
     removed_inside_transaction = Event()
     worker_entered = Event()
     commit_removal = Event()
-    sent: list[list[str]] = []
     sending_pids: list[int] = []
 
     def remove() -> None:
@@ -249,13 +248,11 @@ def test_removal_and_group_transmission_serialize_on_workspace_lock() -> None:
                 cursor.execute("SELECT pg_backend_pid()")
                 sending_pids.append(cursor.fetchone()[0])
             worker_entered.set()
-            return process_notification(
-                key, SLOT, sender=lambda message: sent.append(list(message.bcc))
-            )
+            return process_notification(key, SLOT)
         finally:
             connections.close_all()
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with replying(lambda message: None) as sent, ThreadPoolExecutor(max_workers=2) as pool:
         removing = pool.submit(remove)
         assert removed_inside_transaction.wait(10)
         sending = pool.submit(send)
@@ -273,7 +270,7 @@ def test_removal_and_group_transmission_serialize_on_workspace_lock() -> None:
             commit_removal.set()
         removing.result(timeout=15)
         assert sending.result(timeout=15)
-    assert sent == [[retained.email]]
+    assert [message.bcc for message in sent] == [[retained.email]]
 
 
 def test_one_delivery_per_reminder_slot_prevents_duplicate_dispatch() -> None:
