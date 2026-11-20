@@ -310,9 +310,6 @@ msgstr "EPİAŞ bağlantısını kes"
 msgid "Disconnected"
 msgstr "Bağlı değil"
 
-msgid "Dispatch"
-msgstr "Dağıtım"
-
 msgid "Done"
 msgstr "Tamamlandı"
 
@@ -1581,9 +1578,6 @@ msgstr "Kısmi tahmin"
 
 msgid "Period"
 msgstr "Dönem"
-
-msgid "Production collection"
-msgstr "Üretim verisi toplama"
 
 msgid "Recent outcomes need review"
 msgstr "Son kayıtları inceleyin"
