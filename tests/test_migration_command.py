@@ -117,6 +117,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0006_reminder_schedule_audit",
             "0007_audit_region_resubmitted",
             "0008_region_purge_warning_sent_at",
+            "0009_audit_connection_validation_failed",
         ),
     }
     expected = {app: names | set(forward.get(app, ())) for app, names in baseline.items()}

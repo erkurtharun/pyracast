@@ -762,6 +762,7 @@ export interface components {
          *     * `location_change_rebased` - Location change request moved to the new revision
          *     * `binding_configured` - Provider connection configured
          *     * `connection_validated` - Provider connection validated
+         *     * `connection_validation_failed` - Provider connection validation failed
          *     * `region_approved` - Plant approved
          *     * `region_rejected` - Plant rejected
          *     * `region_suspended` - Plant suspended
@@ -786,6 +787,7 @@ export interface components {
             | "location_change_rebased"
             | "binding_configured"
             | "connection_validated"
+            | "connection_validation_failed"
             | "region_approved"
             | "region_rejected"
             | "region_suspended"

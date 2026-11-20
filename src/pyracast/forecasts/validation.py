@@ -85,6 +85,17 @@ def validate_binding(
         )
         if refuses_binding(exc):
             SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
+        record_audit(
+            actor=actor,
+            region=binding.region,
+            action=AuditAction.CONNECTION_VALIDATION_FAILED,
+            revision=binding.region_revision,
+            details={
+                "binding_id": binding.pk,
+                "error_code": exc.code,
+                "status_code": exc.status_code,
+            },
+        )
         record_provider_failure(
             binding.provider_account, exc, now + timedelta(seconds=time.monotonic() - started)
         )

@@ -2765,3 +2765,6 @@ msgstr "Müşteriye gösterilen gerekçe"
 
 msgid "Resubmitted by the customer"
 msgstr "Müşteri tarafından yeniden gönderildi"
+
+msgid "Provider connection validation failed"
+msgstr "Sağlayıcı bağlantısı doğrulanamadı"
