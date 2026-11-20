@@ -21,6 +21,7 @@ from allauth.socialaccount.models import SocialAccount
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import mail
+from django.core.cache.backends.locmem import LocMemCache
 from django.core.mail import EmailMultiAlternatives
 from django.test import Client
 from django.utils import dateformat, translation
@@ -894,6 +895,14 @@ def provider_requests(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     monkeypatch.setattr(requests.Session, "request", request)
     return profile
+
+
+class LocalAuthenticationCache(LocMemCache):
+    # The authentication cache's take for a single-threaded test whose transaction never commits.
+    def take(self, key: str, version: int | None = None) -> Any:
+        value = self.get(key, version=version)
+        self.delete(key, version=version)
+        return value
 
 
 def matrix_settings() -> dict[str, Any]:

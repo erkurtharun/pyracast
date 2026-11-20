@@ -82,7 +82,7 @@ class CommitClient(Client):
 def local_mail() -> Iterator[None]:
     # The authentication cache needs an autocommit connection, which a rolled-back test
     # transaction does not have; the rate limits stay those of ACCOUNT_RATE_LIMITS.
-    caches = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+    caches = {"default": {"BACKEND": "tests.support.account_mail.LocalAuthenticationCache"}}
     with override_settings(**matrix_settings(), CACHES=caches):
         cache.clear()
         yield
