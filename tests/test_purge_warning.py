@@ -5,15 +5,21 @@ from typing import ClassVar, cast
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.core.mail.backends.base import BaseEmailBackend
 from django.test import override_settings
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
+from pyracast.accounts.models import (
+    Membership,
+    OutboundMail,
+    Tenant,
+    UserLanguagePreference,
+    WorkspaceRole,
+)
 from pyracast.background.failures import ItemsFailedError
 from pyracast.mail.errors import NotSentError
-from pyracast.notifications.models import OutboundMail
 from pyracast.plants.models import Plant
 from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
@@ -216,3 +222,18 @@ def test_a_warning_that_cannot_be_written_never_holds_back_the_purge(
     assert not Region.objects.filter(pk=expired.pk).exists()
     assert Region.objects.get(pk=waiting.pk).purge_warning_sent_at is None
     assert warnings() == []
+
+
+def test_a_region_restored_after_it_was_listed_is_not_warned() -> None:
+    from pyracast import purge_warning
+
+    region, _ = trashed("Listed", NOW - RETENTION + LEAD)
+    Region.objects.filter(pk=region.pk).update(deleted_at=None)
+
+    assert purge_warning._warn(region.pk, NOW) is False
+    assert warnings() == []
+
+
+def test_a_warning_needs_an_aware_time() -> None:
+    with pytest.raises(ValidationError):
+        warn(NOW.replace(tzinfo=None))

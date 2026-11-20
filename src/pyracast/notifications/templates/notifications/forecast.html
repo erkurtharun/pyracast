@@ -15,4 +15,5 @@
 {% for warning in warnings %}<p style="margin:8px 0;font-size:14px;">{{ warning }}</p>{% endfor %}
 <p style="margin:16px 0;font-size:14px;">{% translate "Interval forecasts are in the attached Excel file." %}</p>
 {% translate "View forecasts" as action_label %}{% include "mail/action_link.html" with action_url=url action_label=action_label %}
+<p style="margin:20px 0 0;color:#526370;font-size:13px;">{{ footer }}</p>
 {% endblock %}

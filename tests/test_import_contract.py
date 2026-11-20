@@ -28,7 +28,7 @@ LAYERS: tuple[tuple[str, ...], ...] = (
     ("plants",),
     ("incidents", "metering"),
     ("change_requests", "notifications"),
-    ("trash",),
+    ("trash", "purge_warning"),
     ("orchestration",),
     ("http",),
     ("platform_admin",),

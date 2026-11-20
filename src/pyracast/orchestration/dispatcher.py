@@ -31,6 +31,7 @@ from pyracast.orchestration.kinds import (
     register_actors,
 )
 from pyracast.plants.runtime import dispatch_calibrations
+from pyracast.purge_warning import warn_before_purge
 from pyracast.shutdown import ShutdownRequest
 from pyracast.trash import purge_expired
 
@@ -49,7 +50,7 @@ def _retention() -> PhaseOutcome:
     # them because its items are already logged one by one.
     now = timezone.now()
     failed = 0
-    for step in (purge_expired, sweep_accounts, purge_finished_mail):
+    for step in (purge_expired, warn_before_purge, sweep_accounts, purge_finished_mail):
         try:
             step(now)
         except ItemsFailedError as error:

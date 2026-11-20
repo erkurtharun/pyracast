@@ -33,7 +33,7 @@ def test_the_dispatcher_publishes_every_job_kind_in_exactly_one_stored_phase(
         monkeypatch.setattr(
             dispatcher, name, lambda *actors, name=name: received.setdefault(name, list(actors))
         )
-    for step in ("purge_expired", "sweep_accounts", "purge_finished_mail"):
+    for step in ("purge_expired", "warn_before_purge", "sweep_accounts", "purge_finished_mail"):
         monkeypatch.setattr(dispatcher, step, MagicMock())
     actors = {kind.actor: kind.make_actor(StubBroker()) for kind in KINDS}
 
