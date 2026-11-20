@@ -37,6 +37,48 @@ test("stylesheets take colours and spacing only from the tokens", async () => {
     ).toEqual([]);
 });
 
+test("colour functions, named colours and viewport or font lengths are literals too", async () => {
+    expect(
+        await findings(
+            "src/app/globals.css",
+            [
+                ".probe {",
+                "    background: rgb(0 0 0 / 10%);",
+                "    color: Red;",
+                "    border-color: oklch(70% 0.1 150);",
+                "    padding: 2vw 1ch;",
+                "    margin: 5% auto;",
+                "    background: color-mix(in srgb, var(--line) 50%, transparent);",
+                "    border: 1px solid currentColor;",
+                "}",
+                "",
+            ].join("\n"),
+        ),
+    ).toEqual([2, 3, 4, 5]);
+});
+
+test("inline styles take spacing from the tokens", async () => {
+    expect(
+        await findings(
+            "src/features/probe/probe.tsx",
+            [
+                "export const box = (",
+                "    <div",
+                "        style={{",
+                "            padding: 20,",
+                '            gap: "1rem",',
+                "            margin: 0,",
+                '            shadow: "rgba(0, 0, 0, 0.2)",',
+                '            height: "50%",',
+                "        }}",
+                "    />",
+                ");",
+                "",
+            ].join("\n"),
+        ),
+    ).toEqual([4, 5, 7]);
+});
+
 test("an inline directive cannot switch the token rule off", async () => {
     expect(
         await findings(
