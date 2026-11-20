@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "./support/test";
-import AxeBuilder from "@axe-core/playwright";
+import { accessibilityViolations } from "./support/accessibility";
 import type { components } from "../src/lib/schema";
 import { errorBody } from "./support/errors";
 import { mockApi, paged, region, user, tenantRow } from "./support/workspace";
@@ -289,8 +289,8 @@ async function fits(page: Page, name: string, audit: boolean) {
             );
         expect(outside, `${name}: controls outside viewport`).toEqual([]);
         if (audit) {
-            const result = await new AxeBuilder({ page }).analyze();
-            expect(result.violations, `${name}: accessibility`).toEqual([]);
+            const result = await accessibilityViolations(page);
+            expect(result, `${name}: accessibility`).toEqual([]);
         }
     } finally {
         await page.locator("details").evaluateAll((rows, states) => {

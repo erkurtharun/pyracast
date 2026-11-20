@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "./support/test";
+import { accessibilityViolations } from "./support/accessibility";
 import { mockApi, paged, user } from "./support/workspace";
 import { nativeProductionHistory } from "./support/native-production";
-import AxeBuilder from "@axe-core/playwright";
 import { errorBody } from "./support/errors";
 
 const reading = {
@@ -535,9 +535,7 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
         path: testInfo.outputPath("inbox-admin-320.png"),
         fullPage: true,
     });
-    expect(
-        (await new AxeBuilder({ page }).include("main").analyze()).violations,
-    ).toEqual([]);
+    expect(await accessibilityViolations(page, "main")).toEqual([]);
     expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(320);

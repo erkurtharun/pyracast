@@ -2,7 +2,7 @@
 import { useTranslations } from "next-intl";
 import { api } from "@/lib/api/client";
 import { useApiQuery, useRefresh } from "@/lib/api/query";
-import { ActionForm, Field } from "@/ui/form";
+import { ActionForm, Field, formText } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 
 export function InviteMember({ tenantId }: { tenantId: number }) {
@@ -28,7 +28,7 @@ export function InviteMember({ tenantId }: { tenantId: number }) {
                 onSubmit={async (data) => {
                     await api.post("/api/tenants/{tenant_id}/invitations/", {
                         path: { tenant_id: tenantId },
-                        body: { email: String(data.get("email") ?? "") },
+                        body: { email: formText(data, "email") },
                     });
                     await refresh.workspace(tenantId);
                 }}

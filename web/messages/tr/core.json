@@ -25,7 +25,6 @@
         "verifyCode": "Kodu doğrula",
         "sendReset": "Sıfırlama kodu gönder",
         "resetPassword": "Şifreyi sıfırla",
-        "resetSent": "Bu adresle bir hesap varsa sıfırlama kodu gönderilecek.",
         "invalidReset": "Sıfırlama kodu geçersiz veya süresi dolmuş.",
         "resetDone": "Şifreniz sıfırlandı. Yeni şifrenizle giriş yapın.",
         "verified": "E-postanız doğrulandı. Giriş yapabilirsiniz.",
@@ -48,7 +47,33 @@
         "signInFailed": "Oturum açılamadı",
         "registrationFailed": "Hesap oluşturulamadı",
         "verificationFailed": "E-posta adresi doğrulanamadı",
-        "resetFailed": "Parola sıfırlanamadı"
+        "resetFailed": "Parola sıfırlanamadı",
+        "passwordHint": "En az 15 karakter kullanın.",
+        "guide": {
+            "forgot": "Hesabınızın e-posta adresini girin. Bu adresi kullanan bir hesap varsa parolayı sıfırlamak için bir kod göndeririz.",
+            "verify": "{address} adresine bir kod gönderdik. Adresi doğrulamak için kodu buraya girin.",
+            "verifyUnknown": "Girdiğiniz adrese bir kod gönderdik. Adresi doğrulamak için kodu buraya girin.",
+            "reset": "{address} adresini kullanan bir hesap varsa bu adrese bir kod gönderdik. Kodu girin ve yeni bir parola seçin.",
+            "resetUnknown": "Girdiğiniz adresi kullanan bir hesap varsa bu adrese bir kod gönderdik. Kodu girin ve yeni bir parola seçin.",
+            "mfa": "Doğrulayıcı uygulamanızdaki kodu veya kurtarma kodlarınızdan birini girin."
+        },
+        "leave": {
+            "verify": "Başka bir adres kullan",
+            "mfa": "Başka bir hesap kullan",
+            "reset": "Parola sıfırlamayı iptal et",
+            "socialSignup": "Başka bir giriş yöntemi kullan"
+        },
+        "leaveFailed": "Giriş adımı sonlandırılamadı",
+        "ended": {
+            "title": "Bu adım sona erdi",
+            "text": "Kod burada artık kullanılamaz: süresi doldu, kullanıldı veya çok fazla yanlış kod girildi. Yeni bir kod almak için baştan başlayın.",
+            "action": "Baştan başla"
+        },
+        "limited": {
+            "title": "Çok fazla deneme",
+            "text": "Birkaç dakika bekleyip tekrar deneyin. Adım o zamana kadar açık kalır.",
+            "retry": "Tekrar dene"
+        }
     },
     "Security": {
         "sessionExpired": "Oturumunuzun süresi doldu. Tekrar giriş yapın.",

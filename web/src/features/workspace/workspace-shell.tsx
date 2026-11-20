@@ -227,13 +227,15 @@ export function WorkspaceShell({
                     <button
                         title={t("signOut")}
                         aria-label={t("signOut")}
-                        onClick={async () => {
-                            try {
-                                await signOut();
-                            } catch (error) {
-                                setLogoutError(errorMessage(error));
-                            }
-                        }}
+                        onClick={() =>
+                            void (async () => {
+                                try {
+                                    await signOut();
+                                } catch (error) {
+                                    setLogoutError(errorMessage(error));
+                                }
+                            })()
+                        }
                     >
                         ↪
                     </button>

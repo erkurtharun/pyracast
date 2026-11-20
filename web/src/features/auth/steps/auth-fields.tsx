@@ -65,6 +65,7 @@ export function AuthFields({
                                 ? "current-password"
                                 : "new-password"
                         }
+                        hint={mode === "login" ? undefined : t("passwordHint")}
                         minLength={mode === "login" ? undefined : 15}
                         maxLength={1024}
                         required

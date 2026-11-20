@@ -37,7 +37,7 @@ export function CollectionSchedule({
                     data={data}
                     scope={scope}
                     region={region}
-                    onSaved={() => refresh.workspace(tenant_id)}
+                    onSaved={() => void refresh.workspace(tenant_id)}
                 />
             )}
         </Resource>

@@ -9,8 +9,8 @@ const config = (phase: string): NextConfig => ({
     poweredByHeader: false,
     trailingSlash: true,
     skipTrailingSlashRedirect: true,
-    async headers() {
-        return [
+    headers() {
+        return Promise.resolve([
             {
                 source: "/:path*",
                 // The gateway sets nosniff, HSTS and the permissions and opener policies.
@@ -19,11 +19,11 @@ const config = (phase: string): NextConfig => ({
                     { key: "X-Frame-Options", value: "DENY" },
                 ],
             },
-        ];
+        ]);
     },
-    async rewrites() {
-        if (phase !== PHASE_DEVELOPMENT_SERVER) return [];
-        return [
+    rewrites() {
+        if (phase !== PHASE_DEVELOPMENT_SERVER) return Promise.resolve([]);
+        return Promise.resolve([
             {
                 source: "/admin/:path*/",
                 destination: `${process.env.DJANGO_API_ORIGIN ?? "http://127.0.0.1:8000"}/admin/:path*/`,
@@ -40,7 +40,7 @@ const config = (phase: string): NextConfig => ({
                 source: "/api/:path*/",
                 destination: `${process.env.DJANGO_API_ORIGIN ?? "http://127.0.0.1:8000"}/api/:path*/`,
             },
-        ];
+        ]);
     },
 });
 const withNextIntl = createNextIntlPlugin();

@@ -11,7 +11,7 @@ import {
     refreshExpiredSession,
     type ReauthMode,
 } from "./security-reauthentication";
-import { ActionForm, Field } from "@/ui/form";
+import { ActionForm, Field, formText } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 
 type Step =
@@ -66,9 +66,7 @@ export function EmailChange({
             ) : (
                 <ActionForm
                     submit={t("sendVerification")}
-                    onSubmit={(data) =>
-                        requestCode(String(data.get("email") ?? ""))
-                    }
+                    onSubmit={(data) => requestCode(formText(data, "email"))}
                 >
                     <Field
                         label={t("newEmail")}

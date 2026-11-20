@@ -23,6 +23,18 @@ const FormErrors = createContext<Record<string, string>>({});
 const buttonClass = (variant: Variant) =>
     variant === "primary" ? "button" : `button ${variant}`;
 
+// A file entry reads as empty text.
+export function formText(data: FormData, name: string) {
+    const value = data.get(name);
+    return typeof value === "string" ? value : "";
+}
+
+export function formTexts(data: FormData, name: string) {
+    return data
+        .getAll(name)
+        .map((value) => (typeof value === "string" ? value : ""));
+}
+
 export function useErrorMessage() {
     const t = useTranslations("Common");
     return (error: unknown) => displayMessage(error, t("unexpected"));
@@ -356,28 +368,30 @@ export function ActionForm({
             onChange={() => {
                 if (state.status === "success") setState({ status: "idle" });
             }}
-            onSubmit={async (event) => {
-                event.preventDefault();
-                if (!canSubmit || running.current) return;
-                running.current = true;
-                const data = new FormData(event.currentTarget);
-                setState({ status: "pending" });
-                try {
-                    await onSubmit(data);
-                    setState({ status: "success" });
-                } catch (error) {
-                    const fields =
-                        error instanceof ApiError ? error.fields : {};
-                    setState({
-                        status: "error",
-                        message: errorMessage(error),
-                        fields,
-                        entries: fieldEntries(formRef.current, fields),
-                    });
-                } finally {
-                    running.current = false;
-                }
-            }}
+            onSubmit={(event) =>
+                void (async () => {
+                    event.preventDefault();
+                    if (!canSubmit || running.current) return;
+                    running.current = true;
+                    const data = new FormData(event.currentTarget);
+                    setState({ status: "pending" });
+                    try {
+                        await onSubmit(data);
+                        setState({ status: "success" });
+                    } catch (error) {
+                        const fields =
+                            error instanceof ApiError ? error.fields : {};
+                        setState({
+                            status: "error",
+                            message: errorMessage(error),
+                            fields,
+                            entries: fieldEntries(formRef.current, fields),
+                        });
+                    } finally {
+                        running.current = false;
+                    }
+                })()
+            }
         >
             {state.status === "error" && (
                 <FormAlert
@@ -460,23 +474,25 @@ export function AsyncButton({
                 type="button"
                 className={buttonClass(variant)}
                 disabled={state.status === "pending"}
-                onClick={async () => {
-                    if (running.current) return;
-                    running.current = true;
-                    setState({ status: "pending" });
-                    try {
-                        await onClick();
-                        setState({ status: "idle" });
-                        if (success) announce(success);
-                    } catch (error) {
-                        setState({
-                            status: "error",
-                            message: errorMessage(error),
-                        });
-                    } finally {
-                        running.current = false;
-                    }
-                }}
+                onClick={() =>
+                    void (async () => {
+                        if (running.current) return;
+                        running.current = true;
+                        setState({ status: "pending" });
+                        try {
+                            await onClick();
+                            setState({ status: "idle" });
+                            if (success) announce(success);
+                        } catch (error) {
+                            setState({
+                                status: "error",
+                                message: errorMessage(error),
+                            });
+                        } finally {
+                            running.current = false;
+                        }
+                    })()
+                }
             >
                 {state.status === "pending" ? t("working") : children}
             </button>

@@ -8,14 +8,23 @@ export type Mode =
     | "forgot"
     | "reset"
     | "socialSignup";
+export type PendingMode = Extract<
+    Mode,
+    "verify" | "mfa" | "reset" | "socialSignup"
+>;
 export type AuthMessage =
-    | ""
-    | "codeSent"
-    | "resetSent"
-    | "resetDone"
-    | "verified"
-    | "codeRequested"
-    | "passwordChanged";
+    "" | "resetDone" | "verified" | "codeRequested" | "passwordChanged";
+// A stage the server no longer holds (409) or that the rate limit refuses for now (429).
+export type Refusal = "ended" | "limited";
+
+export function isPending(mode: Mode): mode is PendingMode {
+    return (
+        mode === "verify" ||
+        mode === "mfa" ||
+        mode === "reset" ||
+        mode === "socialSignup"
+    );
+}
 
 export function modeForPendingFlow(result: AuthResult): Mode | undefined {
     const pending = result.data?.flows?.find((flow) => flow.is_pending)?.id;

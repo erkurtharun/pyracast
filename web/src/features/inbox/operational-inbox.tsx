@@ -9,7 +9,12 @@ import { MISSING } from "@/lib/format/number";
 import { useFormat } from "@/lib/format/use-format";
 import { qualityOf } from "@/lib/production";
 import type { components } from "@/lib/schema";
-import { ActionForm, TextAreaField, useErrorMessage } from "@/ui/form";
+import {
+    ActionForm,
+    TextAreaField,
+    useErrorMessage,
+    formText,
+} from "@/ui/form";
 import { Notice, RefreshFailed } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
 
@@ -460,8 +465,9 @@ function RequestDetail({
                                 permitted={!pending}
                                 submit={t("reject")}
                                 onSubmit={async (data) => {
-                                    const reason = String(
-                                        data.get("reason") ?? "",
+                                    const reason = formText(
+                                        data,
+                                        "reason",
                                     ).trim();
                                     if (!reason)
                                         throw new DisplayError(

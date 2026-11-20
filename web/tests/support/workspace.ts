@@ -3,7 +3,18 @@ import { errorBody } from "./errors";
 
 import type { components } from "../../src/lib/schema";
 
-type TenantRow = components["schemas"]["TenantOutput"];
+type Schemas = components["schemas"];
+type TenantRow = Schemas["TenantOutput"];
+// A mocked answer may leave fields out; every field it sets has the type the API declares.
+export type Mock<T> = T extends readonly (infer U)[]
+    ? Mock<U>[]
+    : T extends object
+      ? { [K in keyof T]?: Mock<T[K]> }
+      : T;
+export const answer = <K extends keyof Schemas>(
+    _schema: K,
+    value: Mock<Schemas[K]>,
+) => value;
 
 export const tenantRow = (
     tenant: Pick<TenantRow, "id" | "name" | "role">,
@@ -15,7 +26,7 @@ export const tenantRow = (
     ...counts,
 });
 
-export const region: components["schemas"]["RegionOutput"] = {
+export const region: Schemas["RegionOutput"] = {
     id: 11,
     name: "Antalya solar park",
     latitude: 36.9,
@@ -39,7 +50,7 @@ export const plant = {
         export_limit_mw: null,
         measurement_basis: "net_export",
     },
-};
+} satisfies Mock<Schemas["PlantOutput"]>;
 export const user = {
     id: 1,
     username: "solar.user",
@@ -47,8 +58,8 @@ export const user = {
     can_admin: false,
     mfa_required: false,
     has_usable_password: true,
-};
-export const paged = (results: unknown[]) => ({
+} satisfies Mock<Schemas["SessionUserOutput"]>;
+export const paged = <T>(results: T[]) => ({
     results,
     count: results.length,
     next: null,
@@ -60,8 +71,8 @@ export async function mockApi(
 ) {
     let signedIn = !anonymous;
     let automationEnabled = false;
-    let submittedSite: unknown;
-    let submittedPlant: unknown;
+    let submittedSite: Mock<Schemas["SiteOutput"]> | undefined;
+    let submittedPlant: Mock<Schemas["PlantOutput"]> | undefined;
     await page.route("**/api/**", async (route) => {
         const path = new URL(route.request().url()).pathname,
             method = route.request().method();
@@ -94,18 +105,25 @@ export async function mockApi(
         } else if (path === "/api/auth/browser/v1/account/authenticators") {
             data = { status: 200, data: admin ? [{ type: "totp" }] : [] };
         } else if (path === "/api/session/") {
-            data = {
+            data = answer("SessionOutput", {
                 user: signedIn
                     ? { ...user, can_admin: admin, mfa_required: admin }
                     : null,
                 csrf_token: signedIn ? "signed-token" : "anonymous-token",
-            };
+            });
         } else if (path === "/api/tenants/")
-            data = paged([
-                tenantRow({ id: 1, name: "Sunfield Energy", role: "admin" }),
-            ]);
+            data = answer(
+                "PaginatedTenantOutputList",
+                paged([
+                    tenantRow({
+                        id: 1,
+                        name: "Sunfield Energy",
+                        role: "admin",
+                    }),
+                ]),
+            );
         else if (/\/api\/tenants\/\d+\/change-requests\/$/.test(path)) {
-            data = paged([]);
+            data = answer("PaginatedChangeRequestSummaryOutputList", paged([]));
         } else if (
             path === "/api/tenants/1/regions/" ||
             path === "/api/tenants/1/sites/"
@@ -138,24 +156,33 @@ export async function mockApi(
                 };
                 submittedSite = created;
                 submittedPlant = created.plant;
-                data = created;
+                data = answer("SiteOutput", created);
             } else
-                data = paged(
-                    submittedSite
-                        ? [submittedSite]
-                        : empty
-                          ? []
-                          : [{ ...region, plant, reminder: null }],
+                data = answer(
+                    "PaginatedSiteOutputList",
+                    paged(
+                        submittedSite
+                            ? [submittedSite]
+                            : empty
+                              ? []
+                              : [{ ...region, plant, reminder: null }],
+                    ),
                 );
         } else if (path.endsWith("/plants/"))
-            data = method === "POST" ? plant : paged([submittedPlant ?? plant]);
+            data =
+                method === "POST"
+                    ? plant
+                    : answer(
+                          "PaginatedPlantOutputList",
+                          paged([submittedPlant ?? plant]),
+                      );
         else if (path.endsWith("/production-source/"))
-            data = {
+            data = answer("EpiasConnectionOutput", {
                 connected: false,
                 name: "",
                 archived_days: 0,
                 last_error: "",
-            };
+            });
         else if (path.endsWith("/production/preview/")) {
             const body = route.request().postDataJSON();
             data = {
@@ -187,9 +214,14 @@ export async function mockApi(
                 configuration_id: 31,
                 unit: "kWh",
             });
-            data = { created: 1, existing: 0, count: 1, ids: [1] };
+            data = answer("ObservationImportOutput", {
+                created: 1,
+                existing: 0,
+                count: 1,
+                ids: [1],
+            });
         } else if (path.endsWith("/production/"))
-            data = {
+            data = answer("ProductionHistoryOutput", {
                 timezone: region.timezone,
                 available_start_date: null,
                 available_end_date: null,
@@ -197,17 +229,17 @@ export async function mockApi(
                 end_date: "2026-01-07",
                 days: [],
                 intervals: [],
-            };
+            });
         else if (path.endsWith("/calibration/automation/")) {
             if (method === "PATCH")
                 automationEnabled = route.request().postDataJSON().enabled;
-            data = {
+            data = answer("CalibrationAutomationOutput", {
                 enabled: automationEnabled,
                 authorized: automationEnabled,
                 configuration_id: automationEnabled ? 31 : null,
                 next_check_at: null,
                 last_attempt: null,
-            };
+            });
         } else if (path.endsWith("/calibrations/"))
             data =
                 method === "POST"
@@ -228,9 +260,12 @@ export async function mockApi(
                           result: {},
                           dataset_sha256: "",
                       }
-                    : paged([]);
+                    : answer(
+                          "PaginatedCalibrationSummaryOutputList",
+                          paged([]),
+                      );
         else if (path.endsWith("/reminders/"))
-            data = {
+            data = answer("ReminderOutput", {
                 enabled: false,
                 state: "paused_by_user",
                 revision: 0,
@@ -247,10 +282,11 @@ export async function mockApi(
                 times: ["08:00"],
                 daily_reminder_limit: 10,
                 deliveries: [],
-            };
-        else if (path.endsWith("/location-change-requests/")) data = paged([]);
+            });
+        else if (path.endsWith("/location-change-requests/"))
+            data = answer("PaginatedLocationChangeOutputList", paged([]));
         else if (path.endsWith("/performance/"))
-            data = {
+            data = answer("PerformanceOutput", {
                 start_date: "2026-01-01",
                 end_date: "2026-01-01",
                 matched_days: 0,
@@ -258,7 +294,7 @@ export async function mockApi(
                 metrics: null,
                 baseline_metrics: null,
                 days: [],
-            };
+            });
         else if (path.endsWith("/forecast/"))
             data = {
                 region_id: 11,

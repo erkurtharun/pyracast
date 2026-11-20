@@ -3,6 +3,7 @@ import js from "@eslint/js";
 import ts from "typescript-eslint";
 import next from "@next/eslint-plugin-next";
 import hooks from "eslint-plugin-react-hooks";
+import a11y from "eslint-plugin-jsx-a11y-x";
 import css from "@eslint/css";
 import pyracast from "./eslint/design-tokens.mjs";
 
@@ -26,6 +27,29 @@ const restrict = (files, ...group) => ({
     },
 });
 const screens = ["**/app/**", "**/components/**"];
+// The type-checked rules of typescript-eslint's recommended set, without its no-unsafe-* family.
+const typeAware = Object.fromEntries(
+    [
+        "await-thenable",
+        "no-array-delete",
+        "no-base-to-string",
+        "no-duplicate-type-constituents",
+        "no-floating-promises",
+        "no-for-in-array",
+        "no-implied-eval",
+        "no-misused-promises",
+        "no-redundant-type-constituents",
+        "no-unnecessary-type-assertion",
+        "no-unsafe-enum-comparison",
+        "no-unsafe-unary-minus",
+        "only-throw-error",
+        "prefer-promise-reject-errors",
+        "require-await",
+        "restrict-plus-operands",
+        "restrict-template-expressions",
+        "unbound-method",
+    ].map((rule) => [`@typescript-eslint/${rule}`, "error"]),
+);
 export default defineConfig([
     globalIgnores([
         ".next/**",
@@ -44,11 +68,31 @@ export default defineConfig([
             js.configs.recommended,
             ...ts.configs.recommended,
             hooks.configs.flat.recommended,
+            a11y.configs.recommended,
         ],
+        languageOptions: {
+            parserOptions: {
+                projectService: true,
+                tsconfigRootDir: import.meta.dirname,
+            },
+        },
         plugins: { "@next/next": next },
         rules: {
             ...next.configs.recommended.rules,
             ...next.configs["core-web-vitals"].rules,
+            ...typeAware,
+            "jsx-a11y-x/no-autofocus": ["error", { ignoreNonDOM: true }],
+        },
+    },
+    {
+        files: ["**/*.mjs"],
+        extends: [js.configs.recommended],
+        languageOptions: {
+            globals: {
+                console: "readonly",
+                process: "readonly",
+                URL: "readonly",
+            },
         },
     },
     restrict(
@@ -89,6 +133,6 @@ export default defineConfig([
         files: ["src/styles/tokens.{ts,css}"],
         rules: { "pyracast/design-tokens": "off" },
     },
-    // Inline directives could switch the token rule off; no source file needs one.
+    // Inline directives could switch a rule off; no source file needs one.
     { linterOptions: { noInlineConfig: true } },
 ]);

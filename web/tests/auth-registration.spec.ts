@@ -1,5 +1,5 @@
-import AxeBuilder from "@axe-core/playwright";
 import { test, expect, type Page } from "./support/test";
+import { accessibilityViolations } from "./support/accessibility";
 import { mockApi, user } from "./support/workspace";
 import { allauthErrorBody, errorBody } from "./support/errors";
 
@@ -1000,5 +1000,5 @@ test("account access reflows on a narrow screen without accessibility violations
             () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
     ).toBe(true);
-    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(await accessibilityViolations(page)).toEqual([]);
 });

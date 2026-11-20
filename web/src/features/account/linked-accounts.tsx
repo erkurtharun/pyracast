@@ -229,7 +229,7 @@ export function LinkedAccounts({
                     <button
                         className="button secondary"
                         disabled={busy || !!reauth}
-                        onClick={() => disconnect(account)}
+                        onClick={() => void disconnect(account)}
                         aria-label={`${t("disconnect")} ${account.display}`}
                     >
                         {t("disconnect")}
@@ -263,7 +263,7 @@ export function LinkedAccounts({
                         className="button secondary"
                         type="button"
                         disabled={busy}
-                        onClick={confirmConnection}
+                        onClick={() => void confirmConnection()}
                     >
                         {t("connectAccount")}
                     </button>

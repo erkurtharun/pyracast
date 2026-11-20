@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "./support/test";
-import AxeBuilder from "@axe-core/playwright";
+import { accessibilityViolations } from "./support/accessibility";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import { mockApi, region, user } from "./support/workspace";
@@ -357,10 +357,8 @@ for (const scenario of ["outage"] as const) {
                 .nth(1)
                 .evaluate((element) => getComputedStyle(element).textAlign),
         ).toBe("right");
-        const scan = await new AxeBuilder({ page })
-            .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-            .analyze();
-        expect(scan.violations).toEqual([]);
+        const scan = await accessibilityViolations(page);
+        expect(scan).toEqual([]);
         await page.screenshot({
             path: testInfo.outputPath("intervals-mobile-390.png"),
             fullPage: true,

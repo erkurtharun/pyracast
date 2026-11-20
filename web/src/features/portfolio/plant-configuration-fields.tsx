@@ -3,7 +3,7 @@ import { useTranslations } from "next-intl";
 
 import { useState } from "react";
 import type { components } from "@/lib/schema";
-import { Field, Select } from "@/ui/form";
+import { Field, Select, formText } from "@/ui/form";
 
 type Configuration = Pick<
     components["schemas"]["ConfigurationOutput"],
@@ -37,7 +37,7 @@ export function configurationInput(data: FormData) {
         "tracking",
     ]);
     return {
-        name: String(data.get("name") ?? ""),
+        name: formText(data, "name"),
         dc_capacity_mw: Number(data.get("dc_capacity_mw")),
         inverter_capacity_mw: optional("inverter_capacity_mw"),
         export_limit_mw: optional("export_limit_mw"),

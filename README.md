@@ -258,7 +258,7 @@ Additional checks:
 
 | Command or opt-in | Boundary |
 | --- | --- |
-| `npm --prefix web run check:coverage` | Production-browser V8 coverage of authored TypeScript; writes `web/coverage/lcov.info` |
+| `npm --prefix web run check:coverage` | Production-browser V8 coverage of authored TypeScript; writes `web/coverage/lcov.info` and fails below `web/coverage-floor.json` |
 | `npm --prefix web run build`, then `uv run --locked pytest tests/e2e -m browser -n 1 --no-cov` | Browser ? real Django/PostgreSQL behind the production routes and web build, fixture providers/mail |
 | `PYRACAST_LIVE_QUEUE=1` and dedicated `PYRACAST_RABBITMQ_URL` | Real-broker tests; uses default/calibration queues |
 | `uv run --no-project --python 3.15.2 python scripts/check_scientific.py` | Locked optional scientific stack with checksum-pinned HDF5 build; pvlib recomputation of the tracker gain table |

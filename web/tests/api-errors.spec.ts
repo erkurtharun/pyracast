@@ -148,11 +148,13 @@ test.describe("authentication requests", () => {
     });
 
     function answer(status: number, body: unknown) {
-        globalThis.fetch = async () =>
-            new Response(JSON.stringify(body), {
-                status,
-                headers: { "Content-Type": "application/json" },
-            });
+        globalThis.fetch = () =>
+            Promise.resolve(
+                new Response(JSON.stringify(body), {
+                    status,
+                    headers: { "Content-Type": "application/json" },
+                }),
+            );
     }
 
     test("a contract body keeps every property", async () => {

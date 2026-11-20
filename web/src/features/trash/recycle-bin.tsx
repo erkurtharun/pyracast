@@ -54,20 +54,22 @@ export function MoveToRecycleBin({
                 <button
                     className="button danger"
                     disabled={working}
-                    onClick={async () => {
-                        setWorking(true);
-                        setError("");
-                        try {
-                            await api.delete(
-                                "/api/tenants/{tenant_id}/regions/{region_id}/",
-                                { path: scope },
-                            );
-                            onDeleted();
-                        } catch (failure) {
-                            setError(errorMessage(failure));
-                            setWorking(false);
-                        }
-                    }}
+                    onClick={() =>
+                        void (async () => {
+                            setWorking(true);
+                            setError("");
+                            try {
+                                await api.delete(
+                                    "/api/tenants/{tenant_id}/regions/{region_id}/",
+                                    { path: scope },
+                                );
+                                onDeleted();
+                            } catch (failure) {
+                                setError(errorMessage(failure));
+                                setWorking(false);
+                            }
+                        })()
+                    }
                 >
                     {working ? t("moving") : t("movePlantToRecycleBin")}
                 </button>

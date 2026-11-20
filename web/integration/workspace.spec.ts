@@ -157,7 +157,7 @@ test("a customer manages one plant site through the real API", async ({
             .getByRole("button", { name: "Download CSV", exact: true })
             .first()
             .click();
-        const bytes = await readFile((await (await download).path())!);
+        const bytes = await readFile(await (await download).path());
         expect([...bytes.subarray(0, 3)]).toEqual([239, 187, 191]);
         const parsed = Papa.parse<Record<string, string>>(
             bytes.toString("utf8"),
@@ -239,7 +239,7 @@ test("a customer manages one plant site through the real API", async ({
         .getByRole("button", { name: "Download both scenarios CSV" })
         .click();
     const outageCsv = Papa.parse<Record<string, string>>(
-        await readFile((await (await outageDownload).path())!, "utf8"),
+        await readFile(await (await outageDownload).path(), "utf8"),
         { header: true, skipEmptyLines: true },
     );
     expect(outageCsv.errors).toEqual([]);

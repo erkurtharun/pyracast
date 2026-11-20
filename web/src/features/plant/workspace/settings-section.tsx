@@ -90,7 +90,7 @@ export function SettingsSection({
                     <MoveToRecycleBin
                         name={plant.name}
                         scope={scope}
-                        onDeleted={onDeleted}
+                        onDeleted={() => void onDeleted()}
                     />
                 </section>
             )}

@@ -1,5 +1,5 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "./support/test";
+import { accessibilityViolations } from "./support/accessibility";
 import { mockApi, user } from "./support/workspace";
 import { allauthErrorBody } from "./support/errors";
 
@@ -49,7 +49,7 @@ test("enabled providers submit a CSRF protected native redirect form on mobile",
         page.getByRole("button", { name: "Sign in with Microsoft" }),
     ).toBeVisible();
     expect((await google.boundingBox())!.width).toBeGreaterThan(250);
-    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(await accessibilityViolations(page)).toEqual([]);
     await page.screenshot({
         path: test.info().outputPath("login-mobile.png"),
         fullPage: true,
@@ -485,7 +485,7 @@ test("Turkish provider buttons fit a 320px screen", async ({
             () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
     ).toBe(true);
-    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(await accessibilityViolations(page)).toEqual([]);
     await page.screenshot({
         path: test.info().outputPath("login-turkish-320.png"),
         fullPage: true,

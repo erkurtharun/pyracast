@@ -88,7 +88,7 @@ test("an inline directive cannot switch the token rule off", async () => {
     ).toEqual([3]);
     expect(
         await findings(
-            "src/features/probe/probe.tsx",
+            "src/features/auth/steps/auth-story.tsx",
             '// eslint-disable-next-line\nexport const colour = "#a17537";\n',
         ),
     ).toEqual([2]);
@@ -97,7 +97,7 @@ test("an inline directive cannot switch the token rule off", async () => {
 test("scripts take colours from the tokens module", async () => {
     expect(
         await findings(
-            "src/features/probe/probe.tsx",
+            "src/features/auth/steps/auth-story.tsx",
             'export const colour = "#a17537";\nexport const fill = `#fff`;\nexport const anchor = "#members-title";\n',
         ),
     ).toEqual([1, 2]);

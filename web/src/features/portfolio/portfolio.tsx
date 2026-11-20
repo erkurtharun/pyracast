@@ -67,10 +67,12 @@ export function Portfolio() {
                 <PlantOnboarding
                     tenant={tenant.id}
                     onCancel={() => setCreating(false)}
-                    onCreated={async (site) => {
-                        await refresh.workspace(tenant.id);
-                        open(site.id);
-                    }}
+                    onCreated={(site) =>
+                        void (async () => {
+                            await refresh.workspace(tenant.id);
+                            open(site.id);
+                        })()
+                    }
                 />
             )}
             <section className="panel" aria-label={t("plants")}>

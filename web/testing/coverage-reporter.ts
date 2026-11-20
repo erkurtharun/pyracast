@@ -6,6 +6,7 @@ import {
     coverageOptions,
     sourcePath,
 } from "./coverage-options";
+import { coverageShortfalls, type Floor } from "./coverage-floor";
 
 export default class CoverageReporter implements Reporter {
     async onEnd() {
@@ -34,5 +35,11 @@ export default class CoverageReporter implements Reporter {
         if (!/^DA:\d+,[1-9]\d*/m.test(lcov)) {
             throw new Error("LCOV contains no measured execution");
         }
+        const floor = JSON.parse(
+            await readFile("coverage-floor.json", "utf8"),
+        ) as Floor;
+        const shortfalls = coverageShortfalls(lcov, floor);
+        if (shortfalls.length)
+            throw new Error(`Frontend coverage fell: ${shortfalls.join("; ")}`);
     }
 }

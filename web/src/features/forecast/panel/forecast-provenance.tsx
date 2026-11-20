@@ -174,7 +174,10 @@ export function ForecastProvenance({
                       })
                     : ""}
                 {t("model_version", {
-                    version: String(result.model_version ?? MISSING),
+                    version:
+                        typeof result.model_version === "string"
+                            ? result.model_version
+                            : MISSING,
                 })}{" "}
                 {forecast.configuration_id
                     ? t("configuration_id", { id: forecast.configuration_id })

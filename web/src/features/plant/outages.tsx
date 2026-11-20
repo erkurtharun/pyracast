@@ -18,6 +18,7 @@ import {
     Field,
     Select,
     TextAreaField,
+    formText,
 } from "@/ui/form";
 import { Notice, Tag } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
@@ -54,7 +55,7 @@ function timestamp(
     key: string,
     t: ReturnType<typeof useTranslations<"Outages">>,
 ): string | null {
-    const value = String(data.get(key) ?? "");
+    const value = formText(data, key);
     if (!value) return null;
     const date = new Date(value);
     if (!Number.isFinite(date.getTime()) || date.getTime() > Date.now())
@@ -391,9 +392,9 @@ export function Outages({
                                                     expected_revision:
                                                         outage.revision,
                                                     ends_at: ends,
-                                                    reason: String(
-                                                        data.get("reason") ??
-                                                            "",
+                                                    reason: formText(
+                                                        data,
+                                                        "reason",
                                                     ),
                                                 });
                                             else
@@ -451,10 +452,9 @@ export function Outages({
                                                         incident_id: outage.id,
                                                         expected_revision:
                                                             outage.revision,
-                                                        reason: String(
-                                                            data.get(
-                                                                "reason",
-                                                            ) ?? "",
+                                                        reason: formText(
+                                                            data,
+                                                            "reason",
                                                         ),
                                                     });
                                                 else
@@ -548,7 +548,7 @@ function OutageForm({
                     impact === "total"
                         ? 0
                         : impact === "unknown" ||
-                            String(data.get(key) ?? "").trim() === ""
+                            formText(data, key).trim() === ""
                           ? null
                           : Number(data.get(key));
                 const kind = INCIDENT_KINDS.find(
@@ -568,13 +568,13 @@ function OutageForm({
                 await onSave(
                     {
                         kind,
-                        title: String(data.get("title") ?? ""),
-                        notes: String(data.get("notes") ?? ""),
+                        title: formText(data, "title"),
+                        notes: formText(data, "notes"),
                         starts_at: starts,
                         ends_at: ends,
                         ...capacities,
                     },
-                    String(data.get("reason") ?? ""),
+                    formText(data, "reason"),
                 );
             }}
         >

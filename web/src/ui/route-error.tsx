@@ -19,19 +19,21 @@ export function RouteError({ retry }: { retry: () => void }) {
                 className="button"
                 type="button"
                 disabled={state.status === "pending"}
-                onClick={async () => {
-                    setState({ status: "pending" });
-                    try {
-                        await loadSession();
-                        retry();
-                        setState({ status: "idle" });
-                    } catch (error) {
-                        setState({
-                            status: "failed",
-                            message: errorMessage(error),
-                        });
-                    }
-                }}
+                onClick={() =>
+                    void (async () => {
+                        setState({ status: "pending" });
+                        try {
+                            await loadSession();
+                            retry();
+                            setState({ status: "idle" });
+                        } catch (error) {
+                            setState({
+                                status: "failed",
+                                message: errorMessage(error),
+                            });
+                        }
+                    })()
+                }
             >
                 {t("retry")}
             </button>

@@ -143,7 +143,7 @@ export function Calibrations({
                                     automationPending
                                 }
                                 onClick={() =>
-                                    action(() =>
+                                    void action(() =>
                                         api.post(
                                             "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibration/reset/",
                                             {
@@ -238,7 +238,7 @@ export function Calibrations({
                                                     <button
                                                         className="text-button"
                                                         onClick={() =>
-                                                            loadDetails(run.id)
+                                                            void loadDetails(run.id)
                                                         }
                                                     >
                                                         {t("view_details")}
@@ -265,7 +265,7 @@ export function Calibrations({
                                                                     automationPending
                                                                 }
                                                                 onClick={() =>
-                                                                    action(() =>
+                                                                    void action(() =>
                                                                         api.post(
                                                                             "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/{calibration_id}/activate/",
                                                                             {
