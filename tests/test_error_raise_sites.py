@@ -34,6 +34,9 @@ ALLAUTH_PROTOCOL = {
     "accounts/social.py:SocialAccountAdapter.validate_disconnect",
     "accounts/step_up.py:step_up_required",
 }
+# The operator console is not the public API: its script-sent retry answer carries the message the
+# console page shows.
+CONSOLE_PROTOCOL = {"platform_admin/failures.py:contained.answer"}
 
 
 def modules() -> list[tuple[Path, ast.Module]]:
@@ -219,11 +222,11 @@ def old_style_sites() -> list[str]:
 
 
 def test_no_error_is_raised_or_answered_outside_the_shared_contract() -> None:
-    assert sorted(set(old_style_sites()) - ALLAUTH_PROTOCOL) == []
+    assert sorted(set(old_style_sites()) - ALLAUTH_PROTOCOL - CONSOLE_PROTOCOL) == []
 
 
 def test_every_allauth_protocol_exception_is_still_a_site() -> None:
-    assert sorted(ALLAUTH_PROTOCOL - set(old_style_sites())) == []
+    assert sorted((ALLAUTH_PROTOCOL | CONSOLE_PROTOCOL) - set(old_style_sites())) == []
 
 
 def test_the_scan_recognises_each_old_style_shape() -> None:
