@@ -39,7 +39,13 @@ def signed_in(user: User) -> Client:
 
 def test_production_rates_cover_every_endpoint_kind() -> None:
     rates = cast(dict[str, str], settings.REST_FRAMEWORK.get("DEFAULT_THROTTLE_RATES", {}))
-    assert set(rates) == {"forecast", "calibration", "production_import", "submission"}
+    assert set(rates) == {
+        "forecast",
+        "calibration",
+        "production_import",
+        "submission",
+        "invitation",
+    }
 
 
 def test_a_throttled_read_answers_429_with_retry_after_in_the_error_contract(

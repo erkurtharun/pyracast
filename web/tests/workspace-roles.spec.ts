@@ -1,6 +1,7 @@
 import { test, expect } from "./support/test";
 import { mockApi, paged, user, tenantRow } from "./support/workspace";
 import { allauthErrorBody, errorBody } from "./support/errors";
+import type { components } from "../src/lib/schema";
 
 test("Turkish workspace roles and invitation labels preserve readable characters", async ({
     page,
@@ -129,18 +130,44 @@ test("viewer reads shared settings without write controls or requests", async ({
     expect(writes).toEqual([]);
 });
 
-test("workspace administrator invites a viewer and sees invitation errors", async ({
+test("workspace administrator invites, sends again and cancels with the server's answers", async ({
     page,
 }, testInfo) => {
     await mockApi(page);
     await page.setViewportSize({ width: 390, height: 844 });
-    let email = "";
+    type Invitation = components["schemas"]["InvitationOutput"];
+    const sentAt = "2026-11-20T09:00:00Z";
+    const validUntil = "2026-11-27T09:00:00Z";
+    let rows: Invitation[] = [
+        {
+            id: 3,
+            email: "late@example.test",
+            role: "viewer",
+            state: "expired",
+            created_at: "2026-11-01T09:00:00Z",
+            expires_at: "2026-11-08T09:00:00Z",
+            delivery_status: "sent",
+        },
+    ];
+    let next = 4;
+    const issue = (email: string): Invitation => ({
+        id: next++,
+        email,
+        role: "viewer",
+        state: "pending",
+        created_at: sentAt,
+        expires_at: validUntil,
+        delivery_status: "pending",
+    });
+    const invitationId = (url: string) =>
+        Number(new URL(url).pathname.split("/")[5]);
     await page.route("**/api/tenants/1/members/", (route) =>
         route.fulfill({
             json: {
                 members: [
                     { id: 1, email: "owner@example.test", role: "admin" },
                 ],
+                plants_at_recipient_limit: 0,
             },
         }),
     );
@@ -149,37 +176,46 @@ test("workspace administrator invites a viewer and sees invitation errors", asyn
             expect(route.request().headers()["x-csrftoken"]).toBe(
                 "signed-token",
             );
-            if (email)
+            const { email } = route.request().postDataJSON();
+            if (rows.some((row) => row.email === email))
                 return route.fulfill({
-                    status: 400,
+                    status: 429,
+                    headers: { "Retry-After": "60" },
                     json: errorBody(
-                        "invalid_request",
-                        "An invitation is already pending.",
+                        "invitation_rate_limited",
+                        "Too many invitations were sent. Try again later.",
+                        { retry_after: 60 },
                     ),
                 });
-            email = route.request().postDataJSON().email;
-            return route.fulfill({
-                status: 201,
-                json: { id: 4, email, expires_at: "2026-12-01T00:00:00Z" },
-            });
+            const created = issue(email);
+            rows = [created, ...rows];
+            return route.fulfill({ status: 201, json: created });
         }
-        return route.fulfill({
-            json: {
-                invitations: email
-                    ? [{ id: 4, email, expires_at: "2026-12-01T00:00:00Z" }]
-                    : [],
-            },
-        });
+        return route.fulfill({ json: { invitations: rows } });
     });
-    await page.route("**/api/tenants/1/invitations/4/", async (route) => {
+    await page.route("**/api/tenants/1/invitations/*/resend/", (route) => {
+        expect(route.request().method()).toBe("POST");
+        expect(route.request().headers()["x-csrftoken"]).toBe("signed-token");
+        const id = invitationId(route.request().url());
+        const created = issue(rows.find((row) => row.id === id)!.email);
+        rows = [created, ...rows.filter((row) => row.id !== id)];
+        return route.fulfill({ status: 201, json: created });
+    });
+    await page.route(/\/api\/tenants\/1\/invitations\/\d+\/$/, (route) => {
         expect(route.request().method()).toBe("DELETE");
         expect(route.request().headers()["x-csrftoken"]).toBe("signed-token");
-        email = "";
-        await route.fulfill({ status: 204 });
+        const id = invitationId(route.request().url());
+        rows = rows.filter((row) => row.id !== id);
+        return route.fulfill({ status: 204 });
     });
+    const row = (email: string) =>
+        page.locator(".workspace-member", { hasText: email });
     await page.goto("/app/");
     await page.getByRole("button", { name: "Members", exact: true }).click();
     await expect(page.getByText("owner@example.test")).toBeVisible();
+    await expect(
+        row("late@example.test").getByText("Expired", { exact: true }),
+    ).toBeVisible();
     await page
         .getByLabel("Email address", { exact: true })
         .fill("viewer@example.test");
@@ -187,27 +223,46 @@ test("workspace administrator invites a viewer and sees invitation errors", asyn
         .getByRole("button", { name: "Send invitation", exact: true })
         .click();
     await expect(
-        page.getByText("viewer@example.test", { exact: true }),
+        row("viewer@example.test").getByText("Pending", { exact: true }),
+    ).toBeVisible();
+    await page
+        .getByRole("button", { name: "Send invitation", exact: true })
+        .click();
+    await expect(page.locator(".form-errors")).toContainText(
+        "Too many invitations were sent. Try again later.",
+    );
+    await page
+        .getByRole("button", {
+            name: "Send the invitation to late@example.test again",
+            exact: true,
+        })
+        .click();
+    await expect(page.locator("[data-live-region]")).toHaveText(
+        "A new invitation link is being sent to late@example.test.",
+    );
+    await expect(
+        row("late@example.test").getByText("Pending", { exact: true }),
     ).toBeVisible();
     await page.screenshot({
         path: testInfo.outputPath("members-mobile.png"),
         fullPage: true,
     });
-    await page
-        .getByRole("button", { name: "Send invitation", exact: true })
-        .click();
-    await expect(page.locator(".form-errors")).toContainText(
-        "An invitation is already pending.",
-    );
     expect(
         await page.evaluate(
             () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
     ).toBe(true);
     await page
-        .getByRole("button", { name: "Cancel invitation", exact: true })
+        .getByRole("button", {
+            name: "Cancel the invitation for viewer@example.test",
+            exact: true,
+        })
         .click();
-    await expect(page.getByText("No pending invitations.")).toBeVisible();
+    await expect(page.locator("[data-live-region]")).toHaveText(
+        "Invitation cancelled.",
+    );
+    await expect(row("viewer@example.test")).toHaveCount(0);
+    await expect(row("late@example.test")).toHaveCount(1);
 });
 
 test("invitation signup preserves token without creating another workspace", async ({

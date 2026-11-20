@@ -394,7 +394,7 @@ def test_reissuing_and_revoking_an_invitation_store_it_and_open_the_invitations(
     )
     assert (revoked.status_code, revoked["Location"]) == (302, invitations)
     replacement.refresh_from_db()
-    assert replacement.expires_at <= timezone.now()
+    assert replacement.state_at(timezone.now()) == "revoked"
 
 
 def test_removing_a_member_deletes_the_membership_and_opens_the_members() -> None:

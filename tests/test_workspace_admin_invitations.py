@@ -44,7 +44,10 @@ def verified_account(username: str, email: str) -> User:
 def pending(tenant: Tenant) -> list[tuple[str, str]]:
     return list(
         WorkspaceInvitation.objects.filter(
-            tenant=tenant, accepted_at__isnull=True, expires_at__gt=timezone.now()
+            tenant=tenant,
+            accepted_at__isnull=True,
+            revoked_at__isnull=True,
+            expires_at__gt=timezone.now(),
         )
         .order_by("pk")
         .values_list("email", "role")
@@ -204,7 +207,7 @@ def test_competing_acceptances_of_an_administrator_invitation_record_one_change(
     owner = verified_account("owner", "owner@example.com")
     accept = outcome(lambda: accept_workspace_invitation(owner, token))
 
-    assert behind_open_transaction(accept, accept) == ("done", "invitation_unavailable")
+    assert behind_open_transaction(accept, accept) == ("done", "done")
     assert Membership.objects.get(tenant=tenant).user == owner
     assert Membership.objects.get(tenant=tenant).role == WorkspaceRole.ADMIN
     assert WorkspaceAdminChange.objects.get(tenant=tenant).administrator == owner

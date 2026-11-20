@@ -113,7 +113,7 @@ def test_workspace_console_routes_require_a_verified_platform_administrator(
     assert list(Tenant.objects.values_list("name", flat=True)) == ["Solar workspace"]
     assert Membership.objects.get(user=owner).role == WorkspaceRole.ADMIN
     assert Membership.objects.filter(user=viewer).exists()
-    assert WorkspaceInvitation.objects.get().expires_at > timezone.now()
+    assert WorkspaceInvitation.objects.get().state_at(timezone.now()) == "pending"
     deliver_mail()
     assert len(mail.outbox) == sent
     assert Region.objects.get().name == "Console site"
@@ -152,7 +152,7 @@ def test_workspace_console_routes_guard_methods_csrf_and_unknown_records() -> No
     ):
         assert client.post(path, HTTP_X_CSRFTOKEN=token).status_code == 404, path
     assert tenant.name == Tenant.objects.get(pk=tenant.pk).name
-    assert WorkspaceInvitation.objects.get().expires_at > timezone.now()
+    assert WorkspaceInvitation.objects.get().state_at(timezone.now()) == "pending"
 
 
 def test_workspace_list_offers_creation_and_shows_each_administrator_state() -> None:
@@ -439,7 +439,7 @@ def test_pending_invitations_are_reissued_and_revoked_from_the_workspace_page() 
     reissued = client.post(f"{base}invitations/{invitation.pk}/reissue/")
     assert reissued["Location"] == f"{base}#invitations-title"
     invitation.refresh_from_db()
-    assert invitation.expires_at <= timezone.now()
+    assert invitation.state_at(timezone.now()) == "superseded"
     replacement = WorkspaceInvitation.objects.latest("pk")
     assert (replacement.email, replacement.role) == ("guest@example.com", WorkspaceRole.VIEWER)
     deliver_mail()
@@ -449,7 +449,7 @@ def test_pending_invitations_are_reissued_and_revoked_from_the_workspace_page() 
     revoked = client.post(f"{base}invitations/{replacement.pk}/revocation/")
     assert revoked["Location"] == f"{base}#invitations-title"
     replacement.refresh_from_db()
-    assert replacement.expires_at <= timezone.now()
+    assert replacement.state_at(timezone.now()) == "revoked"
     html = client.get(base).content.decode()
     assert "Invitation to guest@example.com revoked." in html
     assert "No pending invitations." in html
@@ -477,7 +477,7 @@ def test_a_resend_waiting_for_an_administrator_change_does_not_revive_the_invita
     assert resent["Location"] == f"{base}#invitations-title"
     assert Membership.objects.get(user=viewer).role == WorkspaceRole.ADMIN
     assert list(WorkspaceInvitation.objects.values_list("pk", flat=True)) == [invitation.pk]
-    assert WorkspaceInvitation.objects.get().expires_at <= timezone.now()
+    assert WorkspaceInvitation.objects.get().state_at(timezone.now()) == "revoked"
     deliver_mail()
     assert len(mail.outbox) == sent
     assert "The invitation is invalid or expired." in client.get(base).content.decode()

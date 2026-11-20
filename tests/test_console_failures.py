@@ -350,7 +350,7 @@ def revocation(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) 
         reverse("admin:workspace_invitation_revocation", args=(tenant.pk, sent.pk)),
         {},
         tenant,
-        lambda: WorkspaceInvitation.objects.get().expires_at > timezone.now(),
+        lambda: WorkspaceInvitation.objects.get().revoked_at is None,
     )
 
 

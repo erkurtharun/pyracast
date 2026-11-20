@@ -58,6 +58,13 @@ export const user = {
     mfa_required: false,
     has_usable_password: true,
 } satisfies Mock<Schemas["SessionUserOutput"]>;
+export const invitationPreview: Schemas["InvitationPreviewOutput"] = {
+    workspace: "Sunfield Energy",
+    role: "viewer",
+    inviter: "owner@example.test",
+    email: user.email,
+    expires_at: "2026-12-01T00:00:00Z",
+};
 export const paged = <T>(results: T[]) => ({
     results,
     count: results.length,
@@ -303,6 +310,7 @@ export async function mockApi(
                       collected_at: null,
                       issued_at: null,
                   });
+        else if (path === "/api/invitations/preview/") data = invitationPreview;
         else throw new Error(`Unmocked API: ${method} ${path}`);
         await route.fulfill({ json: data });
     });

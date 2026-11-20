@@ -31,7 +31,6 @@ from tests.support.invariants import (
     ADMINISTRATOR_CHANGE_RULE,
     AUDIT_DETAILS_RULE,
     INCIDENT_INTERVAL_RULE,
-    INVITATION_STATE_RULE,
     MEMBERSHIPS_RULE,
     OPEN_INVITATION_RULE,
     RECIPIENTS_RULE,
@@ -71,9 +70,13 @@ NEW = {
     },
     "regions_auditevent": {"auditevent_details_chk"},
 }
+# The invitation rule these migrations installed: a revocation ended the deadline.
+REVOKED_DEADLINE_RULE = (
+    "revoked_at IS NULL OR (accepted_at IS NULL AND NOT expires_at > revoked_at)"
+)
 RULES = {
     "accounts_workspaceadminchange": (ADMINISTRATOR_CHANGE_RULE,),
-    "accounts_workspaceinvitation": (INVITATION_STATE_RULE, OPEN_INVITATION_RULE),
+    "accounts_workspaceinvitation": (REVOKED_DEADLINE_RULE, OPEN_INVITATION_RULE),
     "change_requests_changerequest": (REJECTION_REASON_RULE,),
     "change_requests_incidentchange": (INCIDENT_INTERVAL_RULE,),
     "notifications_reminderschedule": (RECIPIENTS_RULE, MEMBERSHIPS_RULE, REMINDER_TIMES_RULE),
