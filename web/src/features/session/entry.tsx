@@ -30,7 +30,7 @@ function consoleDestination(next: string | null) {
 function destination(canAdmin: boolean) {
     const { search } = window.location;
     const params = new URLSearchParams(search);
-    // A signed-in browser returns from a provider only to connect it.
+    // A signed-in browser completes every provider return on the account page.
     if (appQuery(params).socialCallback !== "none")
         return { href: `${routes.account()}${search}`, document: true };
     if (storedInvitation()) return { href: routes.invitation() };

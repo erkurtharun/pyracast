@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { ApiError } from "@/lib/api/errors";
-import { authRequest, type AuthenticatorRecord } from "@/lib/auth-api";
+import {
+    authRequest,
+    type AuthenticatorRecord,
+    type AuthResult,
+} from "@/lib/auth-api";
 import { addressWithout, appQuery, callbackParams } from "@/lib/routes";
 import {
     SocialProviderButtons,
@@ -49,19 +53,29 @@ export function LinkedAccounts({
             appQuery(new URLSearchParams(window.location.search))
                 .socialCallback === "failed",
     );
+    const completion = useRef<
+        Promise<AuthResult<ProviderAccount[]>> | undefined
+    >(undefined);
     useEffect(() => {
+        let active = true;
         const url = new URL(window.location.href);
         const outcome = appQuery(url.searchParams).socialCallback;
-        if (outcome === "none") return;
-        window.history.replaceState(
-            window.history.state,
-            "",
-            addressWithout(url, callbackParams),
-        );
-        if (outcome !== "succeeded") return;
+        if (outcome !== "none")
+            window.history.replaceState(
+                window.history.state,
+                "",
+                addressWithout(url, callbackParams),
+            );
         // The provider's redirect back only verified the identity; this request connects it.
-        authRequest<ProviderAccount[]>("auth/provider/complete", "POST")
-            .then(async (result) => {
+        if (outcome === "succeeded")
+            completion.current = authRequest<ProviderAccount[]>(
+                "auth/provider/complete",
+                "POST",
+            );
+        completion.current
+            ?.then(async (result) => {
+                if (!active) return;
+                completion.current = undefined;
                 if (result.status === 401) {
                     if (!result.meta?.is_authenticated)
                         await refreshExpiredSession(security("sessionExpired"));
@@ -74,11 +88,16 @@ export function LinkedAccounts({
                 setVersion((v) => v + 1);
                 setNotice("connected");
             })
-            .catch((err) => {
+            .catch((err: unknown) => {
+                if (!active) return;
+                completion.current = undefined;
                 if (err instanceof ApiError && err.status === 400)
                     setError(err.message);
                 else setCallbackError(true);
             });
+        return () => {
+            active = false;
+        };
     }, [hasPassword, security]);
     useEffect(() => {
         let active = true;

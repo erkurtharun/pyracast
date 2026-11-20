@@ -77,6 +77,18 @@ class AuthenticationCache(BaseCache):
             )
             return {stored[cache_key]: json.loads(value) for cache_key, value in cursor.fetchall()}
 
+    def take(self, key: str, version: int | None = None) -> Any:
+        cache_key = self.make_and_validate_key(key, version=version)
+        with self._cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM pyracast_authentication_cache "
+                "WHERE cache_key = %s AND (expires IS NULL OR expires > clock_timestamp()) "
+                "RETURNING value::text",
+                [cache_key],
+            )
+            row = cursor.fetchone()
+        return json.loads(row[0]) if row else None
+
     def delete(self, key: str, version: int | None = None) -> bool:
         cache_key = self.make_and_validate_key(key, version=version)
         with self._cursor() as cursor:

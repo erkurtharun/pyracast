@@ -238,11 +238,14 @@ class ProviderCallbackView(OAuth2CallbackView):
     def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         adapter: Any = self.adapter
         provider = adapter.get_provider()
+        session = request.session
         state, response = self._get_state(request, provider)
+        # allauth saved the session as it took the state, also an expired one, and swapped in a
+        # store marked modified; nothing is saved or sent after that.
+        if request.session is not session:
+            request.session.modified = False
         if response:
             return cast(HttpResponseBase, response)
-        # allauth saved the session with its state taken; nothing is saved or sent after that.
-        request.session.modified = False
         release_session()
         if "error" in request.GET or "code" not in request.GET:
             cancelled = request.GET.get("error", None) == adapter.login_cancelled_error
@@ -334,8 +337,8 @@ def sign_in(request: HttpRequest, login: SocialLogin) -> HttpResponseBase:
 
 
 def connect(request: HttpRequest, login: SocialLogin) -> HttpResponseBase:
-    # Only the account that started the round trip connects, inside its credential write and
-    # without allauth's lookup; a refusal asks it to confirm with the factor it needs.
+    # Without allauth's lookup, which writes the identity row of whichever account holds it and
+    # drops the browser's pending provider sign-up.
     provider = login.account.provider
     initiator = (login.state.get("data") or {}).get("user_id")
     reason = (

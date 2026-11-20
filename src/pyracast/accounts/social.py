@@ -20,6 +20,7 @@ from django.utils.crypto import salted_hmac
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event, refusal_throttle
 from pyracast.accounts.authorization import requires_admin_mfa
+from pyracast.accounts.cache import AuthenticationCache
 from pyracast.accounts.processes import identified_accounts, lock_account
 from pyracast.accounts.session_cookie import SessionStore
 from pyracast.db import violated_constraint
@@ -81,19 +82,18 @@ def _verified_login_key(session_key: str) -> str:
 
 
 def store_verified_login(session_key: str, login: SocialLogin) -> None:
-    # Bound to the browser session that started the round trip, for as long as its state lives.
     cache.set(_verified_login_key(session_key), login.serialize(), statekit.STATE_TTL)
 
 
 def take_verified_login(request: HttpRequest) -> SocialLogin | None:
-    # Once: the delete decides. Only the stored session the request carries finds it, so a login
-    # stored before that session ended (a sign-out, a password change) is never found.
+    # Once: the delete that returns it decides. Only the stored session the request carries finds
+    # it, so a login stored before that session ended (a sign-out, a password change) is never
+    # found.
     session_key = cast(SessionStore, request.session).stored_key()
     if session_key is None:
         return None
-    key = _verified_login_key(session_key)
-    data = cache.get(key)
-    if data is None or not cache.delete(key):
+    data = cast(AuthenticationCache, cache).take(_verified_login_key(session_key))
+    if data is None:
         return None
     try:
         return SocialLogin.deserialize(data)

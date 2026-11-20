@@ -23,18 +23,21 @@ import {
 import { ResendCode } from "./steps/resend-code";
 import { submitAuth } from "./steps/submit";
 
-// The provider's redirect back only verified the login; this request signs in. Answers whether it
-// was refused.
-async function completeProviderLogin(): Promise<boolean> {
+type ProviderCompletion = "signedIn" | "pending" | "refused";
+
+// The provider's redirect back only verified the login; this request signs in.
+async function completeProviderLogin(): Promise<ProviderCompletion> {
     try {
         const result = await authRequest("auth/provider/complete", "POST");
         if (result.meta?.is_authenticated) {
             await loadSession();
-            return false;
+            return "signedIn";
         }
-        return !result.data?.flows?.some((flow) => flow.is_pending);
+        return result.data?.flows?.some((flow) => flow.is_pending)
+            ? "pending"
+            : "refused";
     } catch {
-        return true;
+        return "refused";
     }
 }
 
@@ -55,7 +58,9 @@ export function Auth({
     const [message, setMessage] = useState<AuthMessage>("");
     const social = useTranslations("SocialAuth");
     const callbackErrorRef = useRef<boolean | undefined>(undefined);
-    const completionRef = useRef<Promise<boolean> | undefined>(undefined);
+    const completionRef = useRef<
+        Promise<ProviderCompletion | undefined> | undefined
+    >(undefined);
     const [socialEmail, setSocialEmail] = useState("");
     const [socialError, setSocialError] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
@@ -94,7 +99,7 @@ export function Auth({
         const completion = (completionRef.current ??=
             outcome === "succeeded"
                 ? completeProviderLogin()
-                : Promise.resolve(false));
+                : Promise.resolve(undefined));
         let refused = false;
         if (outcome !== "none")
             window.history.replaceState(
@@ -103,11 +108,10 @@ export function Auth({
                 addressWithout(callback, callbackParams),
             );
         completion
-            .then((answer) => {
-                refused = answer;
-                return authRequest("auth/session", "GET");
-            })
-            .then((result) => {
+            .then(async (completed) => {
+                if (completed === "signedIn") return;
+                refused = completed === "refused";
+                const result = await authRequest("auth/session", "GET");
                 if (!active) return;
                 setSocialError(callbackError || refused);
                 if (takePasswordChanged()) setMessage("passwordChanged");
