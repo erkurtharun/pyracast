@@ -511,6 +511,156 @@ test("a rate-limited verification shows a wait stage that returns to the code or
     expect(stage.ended()).toBe(1);
 });
 
+for (const [status, code, title] of [
+    [409, "conflict", "This step has ended"],
+    [429, "throttled", "Too many attempts"],
+] as const) {
+    test(`a ${status} refusal after a resend replaces the resend notice`, async ({
+        page,
+    }) => {
+        await pendingStage(page, "verify_email");
+        await page.route(
+            "**/api/auth/browser/v1/auth/email/verify/resend",
+            (route) => route.fulfill({ json: { status: 200 } }),
+        );
+        await page.route("**/api/auth/browser/v1/auth/email/verify", (route) =>
+            route.fulfill({
+                status,
+                json: allauthErrorBody(status, code, [{ message: "Refused." }]),
+            }),
+        );
+        await page.goto("/app/");
+        await page
+            .getByRole("button", {
+                name: "Resend verification code",
+                exact: true,
+            })
+            .click();
+        await expect(page.getByText("A new code was requested.")).toBeVisible();
+        await page.getByLabel("Email code").fill("ABCD-EFGH");
+        await page
+            .getByRole("button", { name: "Verify email", exact: true })
+            .click();
+        await expect(
+            page.getByRole("heading", { name: title, exact: true }),
+        ).toBeFocused();
+        await expect(page.getByText("A new code was requested.")).toHaveCount(
+            0,
+        );
+    });
+}
+
+for (const [flow, field, value, submit] of [
+    [
+        "mfa_authenticate",
+        "Authenticator or recovery code",
+        "123456",
+        "Verify code",
+    ],
+    [
+        "provider_signup",
+        "Company name",
+        "Solar Company",
+        "Complete your account",
+    ],
+] as const) {
+    test(`an ended ${flow} stage does not speak of an emailed code`, async ({
+        page,
+    }) => {
+        await pendingStage(page, flow);
+        await page.route(
+            /\/api\/auth\/browser\/v1\/auth\/(2fa\/authenticate|provider\/signup)$/,
+            (route) =>
+                route.request().method() === "POST"
+                    ? route.fulfill({
+                          status: 409,
+                          json: allauthErrorBody(409, "conflict", [
+                              { message: "Conflict." },
+                          ]),
+                      })
+                    : route.fallback(),
+        );
+        await page.goto("/app/");
+        await page.getByLabel(field, { exact: true }).fill(value);
+        if (flow === "provider_signup")
+            await page.getByLabel("Email").fill("owner@example.test");
+        await page.getByRole("button", { name: submit, exact: true }).click();
+        await expect(
+            page.getByRole("heading", {
+                name: "This step has ended",
+                exact: true,
+            }),
+        ).toBeFocused();
+        await expect(
+            page.getByText(
+                "This step can no longer be completed. Start again from sign-in.",
+                { exact: true },
+            ),
+        ).toBeVisible();
+        await expect(
+            page.getByText("The code can no longer be used here"),
+        ).toHaveCount(0);
+    });
+}
+
+test("a resend offered again after a wait stage counts from the code that was sent", async ({
+    page,
+}) => {
+    await page.clock.install();
+    await mockApi(page, { anonymous: true });
+    await page.route("**/api/auth/browser/v1/auth/signup", (route) =>
+        route.fulfill({
+            status: 401,
+            json: {
+                status: 401,
+                data: { flows: [{ id: "verify_email", is_pending: true }] },
+                meta: { is_authenticated: false },
+            },
+        }),
+    );
+    await page.route("**/api/auth/browser/v1/auth/email/verify", (route) =>
+        route.fulfill({
+            status: 429,
+            json: allauthErrorBody(429, "throttled", [
+                { message: "Too many requests." },
+            ]),
+        }),
+    );
+    await page.goto("/app/?signup=1");
+    await page.getByLabel("Company name").fill("Solar Company");
+    await page.getByLabel("Email").fill("owner@example.test");
+    await page
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await page
+        .getByRole("button", { name: "Create company account", exact: true })
+        .click();
+    await expect(
+        page.getByRole("button", { name: "Resend code in 60 s", exact: true }),
+    ).toBeDisabled();
+    await page.clock.runFor(45_000);
+    await page.getByLabel("Email code").fill("ABCD-EFGH");
+    await page
+        .getByRole("button", { name: "Verify email", exact: true })
+        .click();
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(
+        page.getByRole("button", { name: "Resend code in 15 s", exact: true }),
+    ).toBeDisabled();
+    await page.clock.runFor(15_000);
+    await page.getByLabel("Email code").fill("ABCD-EFGH");
+    await page
+        .getByRole("button", { name: "Verify email", exact: true })
+        .click();
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(
+        page.getByRole("button", {
+            name: "Resend verification code",
+            exact: true,
+        }),
+    ).toBeEnabled();
+});
+
 test("a failed exit keeps the stage and says the sign-in was not ended", async ({
     page,
 }) => {
@@ -527,9 +677,9 @@ test("a failed exit keeps the stage and says the sign-in was not ended", async (
     await page
         .getByRole("button", { name: "Use a different account", exact: true })
         .click();
-    await expect(page.getByRole("alert")).toContainText(
-        "Try again in a moment.",
-    );
+    const alert = page.getByRole("main").getByRole("alert");
+    await expect(alert).toContainText("The sign-in step was not ended");
+    await expect(alert).toContainText("Try again in a moment.");
     await expect(
         page.getByRole("heading", {
             name: "Two-factor authentication",

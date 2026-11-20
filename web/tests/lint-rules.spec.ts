@@ -6,6 +6,14 @@ const web = path.resolve();
 const eslint = new ESLint({ cwd: web });
 
 // Type-aware rules parse through the TypeScript project, so each probe lints an existing file.
+// Building that program takes about 20 s once per worker: the probes share one worker and
+// build it before they run, with a budget sized for the build.
+test.describe.configure({ mode: "default" });
+test.beforeAll(async () => {
+    test.setTimeout(120_000);
+    await eslint.lintFiles(["src/lib/routes.ts"]);
+});
+
 async function rules(file: string, source: string) {
     const [result] = await eslint.lintText(source, {
         filePath: path.join(web, file),

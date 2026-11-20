@@ -184,31 +184,30 @@ export async function mockApi(
                 last_error: "",
             });
         else if (path.endsWith("/production/preview/")) {
-            const body = route.request().postDataJSON();
-            data = {
-                warnings: [],
-                changes: body.observations.map(
-                    (row: Record<string, unknown>) => ({
-                        ...row,
-                        action: "set",
-                        expected_revision_id: null,
-                    }),
-                ),
-                preview: body.observations.map(
-                    (row: {
-                        starts_at: string;
-                        ends_at: string;
-                        energy: number;
-                    }) => ({
-                        starts_at: row.starts_at,
-                        ends_at: row.ends_at,
-                        current_energy_mwh: null,
-                        new_energy_mwh:
-                            row.energy / (body.unit === "kWh" ? 1000 : 1),
-                        corrected: false,
-                    }),
-                ),
+            const body = route.request().postDataJSON() as {
+                unit: string;
+                observations: {
+                    starts_at: string;
+                    ends_at: string;
+                    energy: number;
+                }[];
             };
+            data = answer("ProductionPreviewOutput", {
+                warnings: [],
+                changes: body.observations.map((row) => ({
+                    ...row,
+                    action: "set",
+                    expected_revision_id: null,
+                })),
+                preview: body.observations.map((row) => ({
+                    starts_at: row.starts_at,
+                    ends_at: row.ends_at,
+                    current_energy_mwh: null,
+                    new_energy_mwh:
+                        row.energy / (body.unit === "kWh" ? 1000 : 1),
+                    corrected: false,
+                })),
+            });
         } else if (path.endsWith("/production/changes/")) {
             expect(route.request().postDataJSON()).toMatchObject({
                 configuration_id: 31,
@@ -243,23 +242,15 @@ export async function mockApi(
         } else if (path.endsWith("/calibrations/"))
             data =
                 method === "POST"
-                    ? {
+                    ? answer("CalibrationOutput", {
                           id: 41,
+                          configuration_id: 31,
                           status: "pending",
-                          plant: {
-                              ...plant,
-                              ...route.request().postDataJSON(),
-                              current_configuration: null,
-                              submission: {
-                                  ...plant.current_configuration,
-                                  ...route.request().postDataJSON(),
-                              },
-                          },
-                          assessment: "pending",
+                          assessment: "",
                           factor: null,
                           result: {},
                           dataset_sha256: "",
-                      }
+                      })
                     : answer(
                           "PaginatedCalibrationSummaryOutputList",
                           paged([]),
@@ -296,20 +287,23 @@ export async function mockApi(
                 days: [],
             });
         else if (path.endsWith("/forecast/"))
-            data = {
-                region_id: 11,
-                date: "2026-01-01",
-                timezone: region.timezone,
-                status: "approved",
-                freshness: "missing",
-                result: null,
-                collected_at: null,
-                issued_at: null,
-                ...(path.includes("/plants/") && {
-                    configuration_id: 31,
-                    unavailable_reason: "forecast_unavailable",
-                }),
-            };
+            data = path.includes("/plants/")
+                ? answer("PlantForecastOutput", {
+                      date: "2026-01-01",
+                      timezone: region.timezone,
+                      freshness: "missing",
+                      result: null,
+                      configuration_id: 31,
+                      unavailable_reason: "forecast_unavailable",
+                  })
+                : answer("ForecastOutput", {
+                      date: "2026-01-01",
+                      timezone: region.timezone,
+                      freshness: "missing",
+                      result: null,
+                      collected_at: null,
+                      issued_at: null,
+                  });
         else throw new Error(`Unmocked API: ${method} ${path}`);
         await route.fulfill({ json: data });
     });

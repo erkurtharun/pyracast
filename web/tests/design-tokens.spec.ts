@@ -60,7 +60,7 @@ test("colour functions, named colours and viewport or font lengths are literals 
 test("inline styles take spacing from the tokens", async () => {
     expect(
         await findings(
-            "src/features/probe/probe.tsx",
+            "src/features/auth/steps/auth-story.tsx",
             [
                 "export const box = (",
                 "    <div",

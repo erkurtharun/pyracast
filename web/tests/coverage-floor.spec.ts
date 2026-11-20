@@ -24,6 +24,16 @@ test("the totals add every source record of the LCOV report", () => {
     });
 });
 
+test("the totals read an LCOV report with Windows line endings", () => {
+    expect(
+        lcovTotals(`${record([10, 8], [4, 3])}\n`.replace(/\n/g, "\r\n")),
+    ).toEqual({
+        lines: { found: 10, hit: 8 },
+        branches: { found: 4, hit: 3 },
+        functions: { found: 4, hit: 3 },
+    });
+});
+
 test("coverage at the floor passes and coverage below it names each metric", () => {
     const floor = { lines: 95, branches: 90, functions: 75 };
     const report = `${record([10, 8], [4, 3])}\n${record([30, 30], [6, 6])}\n`;

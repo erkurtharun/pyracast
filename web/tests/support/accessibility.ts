@@ -10,7 +10,6 @@ const TAGS = [
     "best-practice",
 ];
 
-// WCAG 2.2 A and AA plus axe best practices; the full result is attached to the test.
 export async function accessibilityViolations(page: Page, include?: string) {
     const builder = new AxeBuilder({ page }).withTags(TAGS);
     const results = await (
