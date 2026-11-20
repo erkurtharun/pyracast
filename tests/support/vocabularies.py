@@ -15,7 +15,6 @@ from rest_framework import serializers
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.language import save_user_language
 from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceInvitation
-from pyracast.api.serializers import BindingInput
 from pyracast.api.session import LanguageInput
 from pyracast.change_requests.models import ChangeRequest, IncidentChange, ProductionChangeItem
 from pyracast.change_requests.operations import submit_incident, submit_production
@@ -42,6 +41,7 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.serializers import ReminderInput
+from pyracast.plants.approval import decide_review
 from pyracast.plants.models import (
     CalibrationRun,
     PlantConfiguration,
@@ -57,7 +57,7 @@ from pyracast.plants.production_changes import (
 )
 from pyracast.plants.serializers import ObservationRow, PlantInput, ProductionChangeRow
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
-from pyracast.regions.operations import configure_binding, transition_region
+from pyracast.regions.operations import configure_binding
 from tests.support.change_request_boundaries import (
     incident_request,
     incident_values,
@@ -455,9 +455,9 @@ def _configure_binding(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], objec
     )
 
 
-def _transition_region(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+def _review_decision(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
     system = make_system()
-    return lambda status: transition_region(system.admin, system.region.pk, status)
+    return lambda decision: decide_review(system.admin, system.region.pk, decision)
 
 
 def _save_language(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
@@ -596,7 +596,7 @@ INPUT_VOCABULARIES = (
     ),
     InputVocabulary(
         "power_basis",
-        BindingInput,
+        None,
         {
             "provider_account_id": 1,
             "site_id": "site",
@@ -610,13 +610,13 @@ INPUT_VOCABULARIES = (
         error="An AC or DC power basis is required.",
     ),
     InputVocabulary(
-        "region_transition",
+        "review_decision",
         None,
-        {"status": "rejected"},
-        "status",
-        _transition_region,
-        accepted="suspended",
-        error="Use approval for approval transitions.",
+        {"decision": "suspend"},
+        "decision",
+        _review_decision,
+        accepted="reject",
+        error="Choose a review decision.",
         rejected=(OUTSIDE, "approved", "pending"),
     ),
     InputVocabulary(

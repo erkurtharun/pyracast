@@ -125,15 +125,7 @@ BACK_EDGES: dict[tuple[str, str], str] = {
     (
         "regions.operations",
         "connections.models",
-    ): "approval workflows span connections, forecasts and plants",
-    (
-        "regions.operations",
-        "forecasts.models",
-    ): "approval workflows span connections, forecasts and plants",
-    (
-        "regions.operations",
-        "plants.operations",
-    ): "approval workflows span connections, forecasts and plants",
+    ): "binding configuration writes the provider binding of a region",
 }
 
 # Each entry is a function-level pyracast import that breaks a cycle, with its reason.
@@ -170,10 +162,6 @@ FUNCTION_IMPORTS: dict[tuple[str, str], str] = {
     ("plants.operations", "metering.models"): "plant configuration schedules metering",
     ("plants.operations", "metering.scheduler"): "plant configuration schedules metering",
     ("plants.preparation", "plants.automation"): "plant analytics read metering",
-    (
-        "regions.operations",
-        "plants.operations",
-    ): "approval workflows span connections, forecasts and plants",
     ("trash", "change_requests.models"): "a purge removes change requests",
 }
 

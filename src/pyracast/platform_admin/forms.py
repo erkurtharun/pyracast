@@ -1,45 +1,31 @@
 from collections.abc import Callable
+from dataclasses import fields
 from typing import TYPE_CHECKING, Any, cast
 
 from django import forms
-from django.contrib.admin.models import CHANGE, LogEntry
-from django.contrib.auth.models import User
-from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from django.http import HttpRequest, HttpResponse, QueryDict
 from django.template.response import TemplateResponse
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from django.views.decorators.debug import sensitive_variables
 
-from pyracast.accounts.authorization import require_platform_admin
 from pyracast.accounts.inputs import SecondFactorReauthenticateInput
-from pyracast.api.serializers import BindingInput
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import (
     MAX_DAILY_QUOTA,
+    SITE_ID_PATTERN,
     PowerBasis,
     Provider,
     ProviderAccount,
     SiteBinding,
 )
-from pyracast.connections.operations import create_account, rotate_secret
+from pyracast.connections.setup import BindingSpec, ExistingAccount, NewAccount
 from pyracast.errors import DomainError, ErrorCode
-from pyracast.notifications.models import NotificationSettings
 from pyracast.notifications.operations import MAX_RECIPIENT_LIMIT
-from pyracast.regions.models import (
-    Region,
-    RegionLocationChangeRequest,
-    RegionStatus,
-    active_region,
-)
-from pyracast.regions.operations import (
-    approve_location_change,
-    configure_binding,
-    reject_location_change,
-    transition_region,
-)
+from pyracast.plants.approval import ReviewSnapshot
+from pyracast.regions.models import Region, RegionStatus
+from pyracast.regions.operations import SITE_ID_REFUSED
 
 if TYPE_CHECKING:
     from pyracast.platform_admin.site import PlatformAdminSite
@@ -80,10 +66,7 @@ _FAILURES_WITHOUT_STATUS = {
     "provider_request_failed": gettext_lazy(
         "The provider could not be reached. Try validating again in a few minutes."
     ),
-    "invalid_site_id": gettext_lazy(
-        "The resource ID contains characters the provider does not use. "
-        "Use only letters, digits, hyphens and underscores."
-    ),
+    "invalid_site_id": SITE_ID_REFUSED,
     "invalid_provider_secret": gettext_lazy(
         "The saved API key cannot be read. Enter the key again, then validate."
     ),
@@ -175,6 +158,9 @@ class EpiasConnectionForm(forms.Form):
     )
 
 
+BINDING_FIELDS = tuple(field.name for field in fields(BindingSpec))
+
+
 class ProviderSetupForm(forms.Form):
     expected_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     expected_binding_id = forms.IntegerField(min_value=1, required=False, widget=forms.HiddenInput)
@@ -222,7 +208,12 @@ class ProviderSetupForm(forms.Form):
         label=gettext_lazy("New account daily request limit"),
         help_text=gettext_lazy("Existing accounts retain their shared limit."),
     )
-    site_id = forms.CharField(max_length=200, label=gettext_lazy("Solcast resource ID"))
+    site_id = forms.RegexField(
+        rf"\A{SITE_ID_PATTERN}\Z",
+        max_length=200,
+        label=gettext_lazy("Solcast resource ID"),
+        error_messages={"invalid": SITE_ID_REFUSED},
+    )
     capacity_kw = forms.FloatField(min_value=0, label=gettext_lazy("Reference capacity (kW)"))
     dc_capacity_kw = forms.FloatField(
         min_value=0, required=False, label=gettext_lazy("Reference DC capacity (kW, optional)")
@@ -294,56 +285,20 @@ class ProviderSetupForm(forms.Form):
         return data
 
     @sensitive_variables()
-    def configure(self, actor: User, region: Region) -> SiteBinding:
+    def account(self) -> NewAccount | ExistingAccount:
         data = self.cleaned_data
-        with transaction.atomic():
-            current = Region.objects.active().select_for_update().get(pk=region.pk)
-            if current.revision != data["expected_revision"]:
-                raise ValidationError(_("The plant changed. Reload this page before saving."))
-            current_binding_id = (
-                SiteBinding.objects.filter(region=current, region_revision=current.revision)
-                .values_list("pk", flat=True)
-                .first()
+        if data["account_mode"] == "new":
+            return NewAccount(
+                external_account_id=data["external_account_id"],
+                api_key=data["api_key"],
+                daily_quota=data["daily_quota"],
+                authorization_reference=data["authorization_reference"],
             )
-            if current_binding_id != data["expected_binding_id"]:
-                raise ValidationError(
-                    _("The provider setup changed. Reload this page before saving.")
-                )
-            if data["account_mode"] == "new":
-                account = create_account(
-                    actor,
-                    provider=Provider.SOLCAST,
-                    external_account_id=data["external_account_id"],
-                    api_key=data["api_key"],
-                    daily_quota=data["daily_quota"],
-                    authorization_reference=data["authorization_reference"],
-                    require_new=True,
-                )
-            else:
-                account_id, revision = data["existing_account"].split(":")
-                account = ProviderAccount.objects.select_for_update().get(
-                    pk=account_id, provider=Provider.SOLCAST, enabled=True
-                )
-                if account.credential_revision != int(revision):
-                    raise ValidationError(_("The account changed. Reload this page before saving."))
-                if data["api_key"]:
-                    rotate_secret(actor, account.pk, data["api_key"])
-            serializer = BindingInput(
-                data={
-                    "provider_account_id": account.pk,
-                    "site_id": data["site_id"],
-                    "capacity_kw": data["capacity_kw"],
-                    "dc_capacity_kw": data["dc_capacity_kw"],
-                    "power_basis": data["power_basis"],
-                    "capacity_semantics_verified": data["capacity_semantics_verified"],
-                    "installation_date": data["installation_date"],
-                    "azimuth_degrees": data["azimuth_degrees"],
-                    "losses_percent": data["losses_percent"],
-                    "settings_verification_reference": data["settings_verification_reference"],
-                }
-            )
-            serializer.is_valid(raise_exception=True)
-            return configure_binding(actor, current.pk, **serializer.validated_data)
+        account_id, revision = data["existing_account"].split(":")
+        return ExistingAccount(int(account_id), int(revision), data["api_key"])
+
+    def binding(self) -> BindingSpec:
+        return BindingSpec(**{name: self.cleaned_data[name] for name in BINDING_FIELDS})
 
 
 class BindingActionForm(forms.Form):
@@ -352,6 +307,10 @@ class BindingActionForm(forms.Form):
     credential_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     expected_cooldown_until = forms.DateTimeField(required=False, widget=forms.HiddenInput)
     expected_validated_at = forms.DateTimeField(required=False, widget=forms.HiddenInput)
+    expected_status = forms.ChoiceField(
+        choices=RegionStatus.choices, required=False, widget=forms.HiddenInput
+    )
+    declaration = forms.CharField(max_length=64, required=False, widget=forms.HiddenInput)
     provider_recovered = forms.BooleanField(
         required=False,
         label=gettext_lazy("The provider has confirmed that this account can make requests again"),
@@ -382,30 +341,6 @@ class WorkspaceSettingsForm(forms.Form):
     )
     expected_max_recipients = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
 
-    def apply(self, actor: User) -> None:
-        require_platform_admin(actor)
-        with transaction.atomic():
-            settings, _created = NotificationSettings.objects.select_for_update().get_or_create(
-                pk=1
-            )
-            if settings.max_recipients != self.cleaned_data["expected_max_recipients"]:
-                raise ValidationError(_("Settings changed. Reload before saving."))
-            value = self.cleaned_data["max_recipients"]
-            if value == settings.max_recipients:
-                return
-            previous = settings.max_recipients
-            settings.max_recipients = value
-            settings.full_clean()
-            settings.save(update_fields=("max_recipients",))
-            LogEntry.objects.create(
-                user=actor,
-                content_type=ContentType.objects.get_for_model(NotificationSettings),
-                object_id=str(settings.pk),
-                object_repr="Email reminder settings",
-                action_flag=CHANGE,
-                change_message=f"Recipient limit changed from {previous} to {value}.",
-            )
-
 
 class ReviewDecisionForm(forms.Form):
     expected_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
@@ -424,42 +359,8 @@ class ReviewDecisionForm(forms.Form):
         widget=forms.Textarea(attrs={"rows": 2, "maxlength": 500}),
     )
 
-    def apply(self, actor: User, region_id: int) -> None:
-        require_platform_admin(actor)
-        data = self.cleaned_data
-        if data["action"] in LOCATION_DECISIONS:
-            change = RegionLocationChangeRequest.objects.get(
-                active_region("region__"), pk=data["location_change_id"], region_id=region_id
-            )
-            LOCATION_DECISIONS[data["action"]](
-                actor,
-                change.pk,
-                expected_revision=data["expected_revision"],
-                reason=data["decision_reason"],
-            )
-            return
-        with transaction.atomic():
-            region = Region.objects.active().select_for_update().get(pk=region_id)
-            if (
-                region.revision != data["expected_revision"]
-                or region.status != data["expected_status"]
-            ):
-                raise ValidationError(_("The plant changed. Reload before reviewing it."))
-            required_status = (
-                RegionStatus.PENDING if data["action"] == "reject" else RegionStatus.APPROVED
-            )
-            if region.status != required_status:
-                raise ValidationError(
-                    _("This decision is unavailable for the current review status.")
-                )
-            transition_region(
-                actor,
-                region.pk,
-                RegionStatus.REJECTED if data["action"] == "reject" else RegionStatus.SUSPENDED,
-            )
-
-
-LOCATION_DECISIONS = {
-    "approve_location": approve_location_change,
-    "reject_location": reject_location_change,
-}
+    def seen(self) -> ReviewSnapshot:
+        return ReviewSnapshot(
+            status=self.cleaned_data["expected_status"],
+            revision=self.cleaned_data["expected_revision"],
+        )

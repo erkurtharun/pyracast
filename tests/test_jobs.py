@@ -34,8 +34,8 @@ from pyracast.forecasts.models import (
 )
 from pyracast.forecasts.quota import QuotaExceededError, reserve_request
 from pyracast.forecasts.scheduler import enqueue_due
+from pyracast.plants.approval import ReviewDecision, approve_region, decide_review
 from pyracast.regions.models import AuditEvent, Region
-from pyracast.regions.operations import approve_region, transition_region
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate
 
@@ -246,7 +246,7 @@ def test_failure_backoff_starts_after_the_failed_operation_finishes(
 def test_stale_binding_is_rejected_before_network(change: str) -> None:
     system = make_system(approved=True)
     if change == "suspended":
-        transition_region(system.admin, system.region.pk, "suspended")
+        decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND)
     elif change == "revision":
         Region.objects.filter(pk=system.region.pk).update(revision=2)
     elif change == "credential":
@@ -265,7 +265,7 @@ def test_approval_change_during_network_prevents_publication_but_preserves_snaps
     job = CollectionJob.objects.get()
 
     def suspend() -> None:
-        transition_region(system.admin, system.region.pk, "suspended")
+        decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND)
 
     adapter = FakeAdapter(suspend)
     assert not collect(job.pk, adapter, calculate, NOW)
@@ -375,7 +375,7 @@ def test_concurrent_approvals_share_atomic_first_job() -> None:
         close_old_connections()
         try:
             barrier.wait(timeout=10)
-            return approve_region(system.admin, system.region.pk, system.binding.pk, NOW).pk
+            return approve_region(system.admin, system.region.pk, system.binding.pk, NOW).job.pk
         finally:
             connection.close()
 

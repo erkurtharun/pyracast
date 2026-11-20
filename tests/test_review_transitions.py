@@ -7,8 +7,8 @@ from django.core.exceptions import ValidationError
 from django.db import connection, connections, transaction
 from django.db.models import Field
 
-from pyracast.connections.operations import validate_binding
 from pyracast.errors import ConflictError
+from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import (
     DECLARED_FIELDS,
     UNDECLARED_FIELDS,

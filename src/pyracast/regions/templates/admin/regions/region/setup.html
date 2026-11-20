@@ -93,6 +93,7 @@
         <div><dt>{% translate "Mounting" %}</dt><dd>{% translate submission.get_mounting_type_display %}</dd></div>
         <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ submission.surface_tilt_degrees|default_if_none:_("Unknown") }}{% if submission.surface_tilt_degrees != None %}°{% endif %} / {{ submission.surface_azimuth_degrees|default_if_none:_("Unknown") }}{% if submission.surface_azimuth_degrees != None %}°{% endif %}</dd></div>
         <div><dt>{% translate "Submitted by" %}</dt><dd>{{ submission.submitted_by.username }} · <time datetime="{{ submission.created_at|date:'c' }}">{{ submission.created_at|date:"j M Y, H:i T" }}</time></dd></div>
+        <div><dt>{% translate "Last changed" %}</dt><dd><time datetime="{{ submission.updated_at|date:'c' }}">{{ submission.updated_at|date:"j M Y, H:i T" }}</time></dd></div>
       </dl>
     {% empty %}
       {% for plant in plants %}
@@ -253,9 +254,9 @@
         {% csrf_token %}
         {% for field in action_form.hidden_fields %}{{ field }}{% endfor %}
         <button type="submit" name="action" value="validate" class="btn btn--quiet">{% translate "Validate connection" %}</button>
-        {% if region.status != "approved" %}<button type="submit" name="action" value="approve" class="btn btn--primary"{% if not can_approve %} disabled aria-describedby="approve-hint"{% endif %}>{% translate "Approve plant" %}</button>{% endif %}
+        {% if approvable %}<button type="submit" name="action" value="approve" class="btn btn--primary"{% if not can_approve %} disabled aria-describedby="approve-hint"{% endif %}>{% translate "Approve plant" %}</button>{% endif %}
       </form>
-      {% if region.status == "approved" %}<p class="row-meta">{% translate "This plant is approved. Connection health and saved forecast availability are shown above." %}</p>{% elif not can_approve %}<p class="row-meta" id="approve-hint">{% translate "Validate the current setup and key revision to enable approval." %}</p>{% endif %}
+      {% if region.status == "approved" %}<p class="row-meta">{% translate "This plant is approved. Connection health and saved forecast availability are shown above." %}</p>{% elif approvable and approval_blockers %}<ul class="plain-list row-meta" id="approve-hint">{% for blocker in approval_blockers %}<li>{{ blocker }}</li>{% endfor %}</ul>{% endif %}
     {% else %}
       <p class="empty">{% translate "Save the private connection to continue." %}</p>
     {% endif %}

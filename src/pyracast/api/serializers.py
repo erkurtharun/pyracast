@@ -4,7 +4,6 @@ from django.utils.translation import gettext
 from rest_framework import serializers
 
 from pyracast.accounts.models import Tenant, WorkspaceRole
-from pyracast.connections.models import PowerBasis
 from pyracast.forecasts.models import SnapshotSourceKind
 from pyracast.regions.models import (
     Region,
@@ -108,21 +107,6 @@ class LocationChangeOutput(serializers.ModelSerializer[RegionLocationChangeReque
             "decision_reason",
         )
         read_only_fields = fields
-
-
-class BindingInput(InputSerializer):
-    provider_account_id = serializers.IntegerField(min_value=1)
-    site_id = serializers.CharField(max_length=200)
-    capacity_kw = serializers.FloatField(min_value=0)
-    dc_capacity_kw = serializers.FloatField(min_value=0, allow_null=True, default=None)
-    power_basis = serializers.ChoiceField(choices=PowerBasis.choices, default=PowerBasis.AC)
-    capacity_semantics_verified = serializers.BooleanField()
-    azimuth_degrees = serializers.FloatField(default=0)
-    losses_percent = serializers.FloatField(default=0)
-    installation_date = serializers.DateField(required=True)
-    settings_verification_reference = serializers.CharField(
-        max_length=500, required=False, default=""
-    )
 
 
 class ForecastQuery(InputSerializer):

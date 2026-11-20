@@ -365,7 +365,8 @@ from pyracast.connections.operations import create_account
 from pyracast.forecasts.validation import validate_binding
 from pyracast.forecasts.models import ForecastResult
 from pyracast.providers import FixtureProvider
-from pyracast.regions.operations import approve_region, configure_binding, submit_region
+from pyracast.plants.approval import approve_region
+from pyracast.regions.operations import configure_binding, submit_region
 from pyracast.background.broker import make_broker
 from pyracast.forecasts.runtime import make_actor
 assert os.getuid() != 0
@@ -405,7 +406,7 @@ binding = configure_binding(actor, region.pk, provider_account_id=account.pk,
                             site_id='synthetic', capacity_kw=1000, dc_capacity_kw=1000,
                             capacity_semantics_verified=True)
 validate_binding(actor, binding.pk, FixtureProvider(), timezone.now())
-job = approve_region(actor, region.pk, binding.pk, timezone.now())
+job = approve_region(actor, region.pk, binding.pk, timezone.now()).job
 broker = make_broker()
 try:
     make_actor(broker).send(job.pk)

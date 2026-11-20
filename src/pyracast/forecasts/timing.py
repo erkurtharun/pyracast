@@ -29,7 +29,7 @@ def forecast_time_limit(daily_quota: int) -> int:
 
 
 def approval_job(binding_id: int) -> tuple[int, datetime] | None:
-    # Approval creates a binding's first forecasts job (regions.operations.approve_region)
+    # Approval creates a binding's first forecasts job (plants.approval.approve_region)
     # and the binding's schedule starts at its slot. Restored collections are created later
     # with earlier slots, so creation order, not the slot, finds it.
     return (

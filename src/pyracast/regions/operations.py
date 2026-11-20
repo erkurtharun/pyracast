@@ -1,5 +1,7 @@
 import math
-from datetime import date, datetime, timedelta
+import re
+from dataclasses import dataclass
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -12,12 +14,16 @@ from django.utils.translation import gettext_lazy as _
 
 from pyracast.accounts.authorization import authorize_workspace_admin, require_platform_admin
 from pyracast.accounts.models import Tenant
-from pyracast.connections.models import PowerBasis, Provider, ProviderAccount, SiteBinding
+from pyracast.connections.models import (
+    SITE_ID_PATTERN,
+    PowerBasis,
+    Provider,
+    ProviderAccount,
+    SiteBinding,
+)
 from pyracast.errors import ConflictError, DomainError, ErrorCode
-from pyracast.forecasts.models import CollectionJob
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import (
-    REGION_TRANSITIONS,
     AuditAction,
     AuditEvent,
     LocationChangeStatus,
@@ -26,6 +32,12 @@ from pyracast.regions.models import (
     RegionStatus,
     active_region,
     location_coordinate,
+)
+from pyracast.regions.review import require_seen_status, set_review_status
+
+SITE_ID_REFUSED = _(
+    "The resource ID contains characters the provider does not use. "
+    "Use only letters, digits, hyphens and underscores."
 )
 
 
@@ -224,7 +236,13 @@ def correct_location(
             reason=reason,
             platform=True,
         )
-        return approve_location_change(actor, change.pk, expected_revision=expected_revision)
+        return approve_location_change(actor, change.pk, expected_revision=expected_revision).change
+
+
+@dataclass(frozen=True)
+class LocationDecision:
+    change: RegionLocationChangeRequest
+    changed: bool
 
 
 def _decision_note(reason: str) -> str:
@@ -250,7 +268,10 @@ def _settled(change: RegionLocationChangeRequest, status: str) -> bool:
     return False
 
 
-def _require_current(change: RegionLocationChangeRequest, region: Region, expected: int) -> None:
+def _require_current(
+    change: RegionLocationChangeRequest, region: Region, expected: int, status: str | None
+) -> None:
+    require_seen_status(region, status)
     if expected != region.revision or change.base_revision != region.revision:
         raise ConflictError(ErrorCode.REGION_REVISION_CHANGED)
 
@@ -273,18 +294,9 @@ def _move(actor: User, change: RegionLocationChangeRequest, region: Region, reas
     region.longitude = change.longitude
     region.timezone = change.timezone
     region.revision += 1
-    region.status = RegionStatus.PENDING
-    region.approved_binding = None
-    region.save(
-        update_fields=(
-            "latitude",
-            "longitude",
-            "timezone",
-            "revision",
-            "status",
-            "approved_binding",
-        )
-    )
+    region.save(update_fields=("latitude", "longitude", "timezone", "revision"))
+    if region.status != RegionStatus.PENDING:
+        set_review_status(region, RegionStatus.PENDING)
     _close(actor, change, LocationChangeStatus.APPROVED, reason)
     record_audit(
         actor=actor,
@@ -296,32 +308,42 @@ def _move(actor: User, change: RegionLocationChangeRequest, region: Region, reas
 
 
 def approve_location_change(
-    actor: User, request_id: int, *, expected_revision: int, reason: str = ""
-) -> RegionLocationChangeRequest:
+    actor: User,
+    request_id: int,
+    *,
+    expected_revision: int,
+    expected_status: str | None = None,
+    reason: str = "",
+) -> LocationDecision:
     require_platform_admin(actor)
     reason = _decision_note(reason)
     with transaction.atomic():
         change, region = _locked_request(request_id)
         if _settled(change, LocationChangeStatus.APPROVED):
-            return change
-        _require_current(change, region, expected_revision)
+            return LocationDecision(change, changed=False)
+        _require_current(change, region, expected_revision, expected_status)
         require_available_location(
             region.tenant_id, change.latitude, change.longitude, exclude_region_id=region.pk
         )
         _move(actor, change, region, reason)
-        return change
+        return LocationDecision(change, changed=True)
 
 
 def reject_location_change(
-    actor: User, request_id: int, *, expected_revision: int, reason: str = ""
-) -> RegionLocationChangeRequest:
+    actor: User,
+    request_id: int,
+    *,
+    expected_revision: int,
+    expected_status: str | None = None,
+    reason: str = "",
+) -> LocationDecision:
     require_platform_admin(actor)
     reason = _decision_note(reason)
     with transaction.atomic():
         change, region = _locked_request(request_id)
         if _settled(change, LocationChangeStatus.REJECTED):
-            return change
-        _require_current(change, region, expected_revision)
+            return LocationDecision(change, changed=False)
+        _require_current(change, region, expected_revision, expected_status)
         _close(actor, change, LocationChangeStatus.REJECTED, reason)
         record_audit(
             actor=actor,
@@ -330,7 +352,7 @@ def reject_location_change(
             revision=region.revision,
             details={"request_id": change.pk},
         )
-        return change
+        return LocationDecision(change, changed=True)
 
 
 def withdraw_location_change(
@@ -357,9 +379,9 @@ def withdraw_location_change(
 
 def _start_revision(actor: User, region: Region) -> None:
     region.revision += 1
-    region.status = RegionStatus.PENDING
-    region.approved_binding = None
-    region.save(update_fields=("revision", "status", "approved_binding"))
+    region.save(update_fields=("revision",))
+    if region.status != RegionStatus.PENDING:
+        set_review_status(region, RegionStatus.PENDING)
     if RegionLocationChangeRequest.objects.filter(
         region=region, status=LocationChangeStatus.PENDING
     ).update(base_revision=region.revision):
@@ -389,6 +411,8 @@ def configure_binding(
     require_platform_admin(actor)
     if not site_id.strip() or len(site_id) > 200:
         raise ValidationError("A provider site identity is required.")
+    if not re.fullmatch(SITE_ID_PATTERN, site_id.strip()):
+        raise ValidationError(SITE_ID_REFUSED)
     if not math.isfinite(capacity_kw) or capacity_kw <= 0:
         raise ValidationError("Positive finite capacity is required.")
     if dc_capacity_kw is not None and (
@@ -442,66 +466,3 @@ def configure_binding(
             details={"binding_id": binding.pk},
         )
     return binding
-
-
-def approve_region(actor: User, region_id: int, binding_id: int, now: datetime) -> CollectionJob:
-    require_platform_admin(actor)
-    if now.tzinfo is None:
-        raise ValidationError("An aware timestamp is required.")
-    with transaction.atomic():
-        region = Region.objects.active().select_for_update().get(pk=region_id)
-        binding = SiteBinding.objects.select_related("provider_account").get(
-            pk=binding_id, region=region, region_revision=region.revision
-        )
-        account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
-        if (
-            binding.validated_at is None
-            or binding.validated_credential_revision != account.credential_revision
-            or not account.enabled
-            or account.authorized_at is None
-            or (
-                account.provider == Provider.SOLCAST
-                and (
-                    not binding.settings_verification_reference or binding.installation_date is None
-                )
-            )
-        ):
-            raise ValidationError("The current configuration must be validated first.")
-        if region.status == RegionStatus.APPROVED and region.approved_binding_id == binding.pk:
-            return CollectionJob.objects.filter(binding=binding).earliest("created_at")
-        region.status = RegionStatus.APPROVED
-        region.approved_binding = binding
-        region.save(update_fields=("status", "approved_binding"))
-        from pyracast.plants.operations import activate_submitted_plants
-
-        activate_submitted_plants(actor, region, binding)
-        record_audit(
-            actor=actor,
-            region=region,
-            action=AuditAction.REGION_APPROVED,
-            revision=region.revision,
-            details={"binding_id": binding.pk},
-        )
-        job, _ = CollectionJob.objects.get_or_create(
-            binding=binding,
-            endpoint="forecasts",
-            scheduled_for=now,
-            defaults={
-                "target_date": now.astimezone(ZoneInfo(region.timezone)).date() + timedelta(days=1),
-                "available_at": now,
-            },
-        )
-    return job
-
-
-def transition_region(actor: User, region_id: int, status: str) -> Region:
-    require_platform_admin(actor)
-    action = REGION_TRANSITIONS.get(status)
-    if action is None:
-        raise ValidationError("Use approval for approval transitions.")
-    with transaction.atomic():
-        region = Region.objects.active().select_for_update().get(pk=region_id)
-        region.status = status
-        region.save(update_fields=("status",))
-        record_audit(actor=actor, region=region, action=action, revision=region.revision)
-    return region

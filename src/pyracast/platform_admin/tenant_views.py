@@ -106,8 +106,11 @@ def workspace_administrator(
     )
 
     def reassign() -> HttpResponse:
-        form.apply(_actor(request))
-        messages.success(request, _("Workspace administrator updated."))
+        label = {"member": member_label(form.cleaned_data["administrator"])}
+        if form.apply(_actor(request)):
+            messages.success(request, _("%(member)s is now the workspace administrator.") % label)
+        else:
+            messages.info(request, _("%(member)s is already the workspace administrator.") % label)
         return _workspace_section(tenant.pk, "members-title")
 
     return submitted(request, form, reassign) or form_page(

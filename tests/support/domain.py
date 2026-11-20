@@ -10,12 +10,9 @@ from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import create_account
 from pyracast.forecasts.validation import validate_binding
+from pyracast.plants.approval import approve_region
 from pyracast.regions.models import Region
-from pyracast.regions.operations import (
-    approve_region,
-    configure_binding,
-    submit_region,
-)
+from pyracast.regions.operations import configure_binding, submit_region
 
 NOW = datetime(2026, 11, 9, 13, tzinfo=UTC)
 

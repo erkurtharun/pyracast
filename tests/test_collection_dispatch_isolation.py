@@ -16,9 +16,10 @@ from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.forecasts.scheduler import CollectionSchedulingError, enqueue_due
 from pyracast.forecasts.validation import validate_binding
+from pyracast.plants.approval import approve_region
 from pyracast.providers import normalize_payload
 from pyracast.regions.models import Region
-from pyracast.regions.operations import approve_region, configure_binding, submit_region
+from pyracast.regions.operations import configure_binding, submit_region
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate
 

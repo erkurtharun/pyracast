@@ -1,14 +1,16 @@
 from dataclasses import dataclass, replace
 from datetime import datetime
 
+from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth.models import User
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import connection, transaction
 from django.utils import translation
 from django.utils.translation import gettext
 
-from pyracast.accounts.authorization import tenant_membership
+from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.accounts.models import Language, WorkspaceRole
 from pyracast.connections.models import MAX_DAILY_QUOTA
 from pyracast.errors import ConflictError, DomainError, ErrorCode
@@ -105,6 +107,43 @@ def recipient_limit(*, lock: bool = False) -> int:
         NotificationSettings.objects.get_or_create(pk=1)
         return recipient_limit(lock=True)
     return int(row[0])
+
+
+@dataclass(frozen=True)
+class RecipientLimitChange:
+    previous: int
+    current: int
+
+    @property
+    def changed(self) -> bool:
+        return self.previous != self.current
+
+
+def set_recipient_limit(actor: User, value: int, *, expected: int) -> RecipientLimitChange:
+    """A value equal to the stored limit is reported unchanged before the stale check, so a
+    repeated submit is not refused."""
+    require_platform_admin(actor)
+    with transaction.atomic():
+        settings, _created = NotificationSettings.objects.select_for_update().get_or_create(pk=1)
+        previous = settings.max_recipients
+        if value == previous:
+            return RecipientLimitChange(previous, previous)
+        if previous != expected:
+            raise ConflictError(
+                ErrorCode.CONFLICT, gettext("The settings changed. Reload this page before saving.")
+            )
+        settings.max_recipients = value
+        settings.full_clean()
+        settings.save(update_fields=("max_recipients",))
+        LogEntry.objects.create(
+            user=actor,
+            content_type=ContentType.objects.get_for_model(NotificationSettings),
+            object_id=str(settings.pk),
+            object_repr="Email reminder settings",
+            action_flag=CHANGE,
+            change_message=f"Recipient limit changed from {previous} to {value}.",
+        )
+    return RecipientLimitChange(previous, value)
 
 
 @dataclass(frozen=True)

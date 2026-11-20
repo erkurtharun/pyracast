@@ -63,7 +63,10 @@ def test_workspace_admin_selects_only_active_members_and_transfers_permissions()
     assert response.status_code == 302
     assert Membership.objects.get(tenant=tenant, user=owner).role == "viewer"
     assert Membership.objects.get(tenant=tenant, user=viewer).role == "admin"
-    assert b"Workspace administrator updated." in client.get(response["Location"]).content
+    assert (
+        f"{viewer.email} is now the workspace administrator.".encode()
+        in client.get(response["Location"]).content
+    )
     response = client.post(path, {"administrator": owner.pk, "expected_admin_id": owner.pk})
     assert response.status_code == 400
     assert Membership.objects.get(tenant=tenant, user=viewer).role == "admin"

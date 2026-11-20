@@ -63,9 +63,18 @@ def remove_workspace_member(
 @transaction.atomic
 def reassign_workspace_admin(
     actor: User, tenant_id: int, user_id: int, *, expected_admin_id: int | None
-) -> Membership:
+) -> bool:
+    """False when the chosen member already administers the workspace; that is checked before
+    the stale check, so a repeated submit is reported once and not refused."""
     require_platform_admin(actor)
     Tenant.objects.select_for_update().get(pk=tenant_id)
+    membership = Membership.objects.filter(
+        tenant_id=tenant_id, user_id=user_id, user__is_active=True
+    ).first()
+    if membership is None:
+        raise DomainError(ErrorCode.MEMBER_UNAVAILABLE)
+    if membership.role == WorkspaceRole.ADMIN:
+        return False
     current_admin_id = (
         Membership.objects.filter(tenant_id=tenant_id, role=WorkspaceRole.ADMIN)
         .values_list("user_id", flat=True)
@@ -73,34 +82,28 @@ def reassign_workspace_admin(
     )
     if current_admin_id != expected_admin_id:
         raise ConflictError(ErrorCode.WORKSPACE_ADMIN_CHANGED)
-    membership = Membership.objects.filter(
-        tenant_id=tenant_id, user_id=user_id, user__is_active=True
-    ).first()
-    if membership is None:
-        raise DomainError(ErrorCode.MEMBER_UNAVAILABLE)
-    if membership.role != WorkspaceRole.ADMIN:
-        from pyracast.plants.automation import disable_workspace_automation
+    from pyracast.plants.automation import disable_workspace_automation
 
-        disable_workspace_automation(actor, tenant_id)
-        Membership.objects.filter(tenant_id=tenant_id, role=WorkspaceRole.ADMIN).update(
-            role=WorkspaceRole.VIEWER
-        )
-        membership.role = WorkspaceRole.ADMIN
-        membership.save(update_fields=["role"])
-        now = timezone.now()
-        WorkspaceInvitation.objects.filter(
-            tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=now
-        ).update(expires_at=now, revoked_at=now)
-        WorkspaceAdminChange.objects.create(
-            tenant_id=tenant_id,
-            actor=actor,
-            administrator_id=user_id,
-            previous_administrator_id=current_admin_id,
-        )
-        record_security_event(
-            SecurityEvent.WORKSPACE_ADMIN_REASSIGNED,
-            user_id=actor.pk,
-            tenant_id=tenant_id,
-            target_id=user_id,
-        )
-    return membership
+    disable_workspace_automation(actor, tenant_id)
+    Membership.objects.filter(tenant_id=tenant_id, role=WorkspaceRole.ADMIN).update(
+        role=WorkspaceRole.VIEWER
+    )
+    membership.role = WorkspaceRole.ADMIN
+    membership.save(update_fields=["role"])
+    now = timezone.now()
+    WorkspaceInvitation.objects.filter(
+        tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=now
+    ).update(expires_at=now, revoked_at=now)
+    WorkspaceAdminChange.objects.create(
+        tenant_id=tenant_id,
+        actor=actor,
+        administrator_id=user_id,
+        previous_administrator_id=current_admin_id,
+    )
+    record_security_event(
+        SecurityEvent.WORKSPACE_ADMIN_REASSIGNED,
+        user_id=actor.pk,
+        tenant_id=tenant_id,
+        target_id=user_id,
+    )
+    return True

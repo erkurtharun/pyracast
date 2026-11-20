@@ -7,7 +7,8 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.forecasts.validation import validate_binding
 from pyracast.notifications.models import ReminderSchedule
 from pyracast.notifications.operations import configure_reminders
-from pyracast.regions.operations import approve_region, configure_binding, submit_region
+from pyracast.plants.approval import approve_region
+from pyracast.regions.operations import configure_binding, submit_region
 from tests.support.domain import NOW, FakeAdapter, System
 
 

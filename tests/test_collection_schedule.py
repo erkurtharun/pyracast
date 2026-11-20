@@ -26,9 +26,9 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.schedule import configure_schedule, get_schedule, schedule_payload
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.forecasts.validation import validate_binding
+from pyracast.plants.approval import approve_region
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import AuditEvent, Region
-from pyracast.regions.operations import approve_region
 from tests.support.collection_schedule import HistoricalFixture, no_calculation
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate

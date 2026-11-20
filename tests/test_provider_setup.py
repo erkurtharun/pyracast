@@ -9,9 +9,9 @@ from django.urls import reverse
 
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import BindingHealth, SiteBinding
-from pyracast.connections.operations import validate_binding
 from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.models import RequestAttempt, RequestOutcome
+from pyracast.forecasts.validation import validate_binding
 from pyracast.providers import SolcastProvider
 from pyracast.regions.operations import configure_binding
 from tests.support.admin_setup import admin_system, setup_input

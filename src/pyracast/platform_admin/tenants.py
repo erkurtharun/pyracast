@@ -87,9 +87,9 @@ class WorkspaceAdministratorForm(forms.Form):
             "email", "username", "pk"
         )
 
-    def apply(self, actor: User) -> None:
+    def apply(self, actor: User) -> bool:
         user: User = self.cleaned_data["administrator"]
-        reassign_workspace_admin(
+        return reassign_workspace_admin(
             actor,
             self.tenant.pk,
             user.pk,

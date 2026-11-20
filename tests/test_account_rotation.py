@@ -11,8 +11,8 @@ from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import create_account, rotate_secret
 from pyracast.connections.secrets import decrypt_api_key
 from pyracast.forecasts.models import RequestAttempt
+from pyracast.plants.approval import approve_region
 from pyracast.regions.models import AuditAction, AuditEvent
-from pyracast.regions.operations import approve_region
 from tests.support.api import verified_admin
 from tests.support.domain import NOW, make_system
 

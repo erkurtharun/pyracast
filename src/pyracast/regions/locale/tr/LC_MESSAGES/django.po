@@ -353,9 +353,6 @@ msgstr "İşlem gerektiren e-postalar"
 msgid "Email reminder settings"
 msgstr "E-posta hatırlatma ayarları"
 
-msgid "Email reminder settings saved."
-msgstr "E-posta hatırlatma ayarları kaydedildi."
-
 msgid "Email reminders"
 msgstr "E-posta hatırlatmaları"
 
@@ -778,9 +775,6 @@ msgstr "Santral sayfaları"
 msgid "Plant rejected"
 msgstr "Santral reddedildi"
 
-msgid "Plant review saved."
-msgstr "Santral incelemesi kaydedildi."
-
 msgid "Plant submitted"
 msgstr "Santral başvurusu yapıldı"
 
@@ -1139,9 +1133,6 @@ msgstr "Hizmet sağlığı"
 msgid "Settings"
 msgstr "Ayarlar"
 
-msgid "Settings changed. Reload before saving."
-msgstr "Ayarlar değişti. Kaydetmeden önce yeniden yükleyin."
-
 msgid "Settings verification reference"
 msgstr "Ayar doğrulama referansı"
 
@@ -1240,9 +1231,6 @@ msgstr ""
 
 msgid "The outage history changed; request a new calibration."
 msgstr "Kesinti geçmişi değişti; yeni bir kalibrasyon isteyin."
-
-msgid "The plant changed. Reload before reviewing it."
-msgstr "Santral değişti. İncelemeden önce yeniden yükleyin."
 
 msgid "The plant changed. Reload this page before saving."
 msgstr "Santral değişti. Kaydetmeden önce bu sayfayı yeniden yükleyin."
@@ -1347,9 +1335,6 @@ msgstr ""
 
 msgid "This account cannot be validated here. Select a Solcast account."
 msgstr "Bu hesap burada doğrulanamaz. Bir Solcast hesabı seçin."
-
-msgid "This decision is unavailable for the current review status."
-msgstr "Bu karar güncel inceleme durumu için kullanılamaz."
 
 msgid ""
 "This forecast could not be calculated. Choose another day or contact your "
@@ -1470,10 +1455,6 @@ msgstr "Bağlantıyı doğrula"
 msgid "Validate the current private key before collections resume."
 msgstr "Veri toplamaya devam etmeden önce güncel özel anahtarı doğrulayın."
 
-msgid "Validate the current setup and key revision to enable approval."
-msgstr ""
-"Onayı etkinleştirmek için güncel kurulumu ve anahtar revizyonunu doğrulayın."
-
 msgid "Verification"
 msgstr "Doğrulama"
 
@@ -1551,9 +1532,6 @@ msgstr "Üyeler"
 
 msgid "Workspace pages"
 msgstr "Çalışma alanı sayfaları"
-
-msgid "Workspace administrator updated."
-msgstr "Çalışma alanı yöneticisi güncellendi."
 
 msgid ""
 "After a change, the new administrator must enable automatic calibration "
@@ -2635,3 +2613,92 @@ msgid ""
 msgstr ""
 "Bu bağlantı, sayfa açıldıktan sonra doğrulandı. Yeniden doğrulamadan önce "
 "sayfayı yenileyin."
+
+msgid "This review decision is unavailable for the current review status."
+msgstr "Bu inceleme kararı güncel inceleme durumu için kullanılamaz."
+
+msgid ""
+"The review status changed after this page opened. Reload the plant and review"
+" it again."
+msgstr ""
+"Bu sayfa açıldıktan sonra inceleme durumu değişti. Santrali yeniden yükleyip "
+"tekrar inceleyin."
+
+msgid ""
+"The plant setup changed after this page opened. Reload the plant and review "
+"it again."
+msgstr ""
+"Bu sayfa açıldıktan sonra santral kurulumu değişti. Santrali yeniden yükleyip"
+" tekrar inceleyin."
+
+msgid ""
+"The declared plant details changed after this page opened. Review them again "
+"before approving."
+msgstr ""
+"Bu sayfa açıldıktan sonra beyan edilen santral bilgileri değişti. Onaylamadan"
+" önce bunları yeniden inceleyin."
+
+msgid "Validate the current setup and key revision before approval."
+msgstr "Onaydan önce güncel kurulumu ve anahtar revizyonunu doğrulayın."
+
+msgid ""
+"The last validation failed. Validate the connection again before approval."
+msgstr ""
+"Son doğrulama başarısız oldu. Onaydan önce bağlantıyı yeniden doğrulayın."
+
+msgid ""
+"The provider rejected this account's current key. Replace it, then validate "
+"again."
+msgstr ""
+"Sağlayıcı bu hesabın güncel anahtarını reddetti. Anahtarı değiştirip yeniden "
+"doğrulayın."
+
+msgid "The provider account is disabled or not authorized for this service."
+msgstr "Sağlayıcı hesabı devre dışı ya da bu hizmet için yetkilendirilmemiş."
+
+msgid ""
+"Confirm the provider site settings and installation date before approval."
+msgstr "Onaydan önce sağlayıcı saha ayarlarını ve kurulum tarihini onaylayın."
+
+msgid "This plant is already approved."
+msgstr "Bu santral zaten onaylı."
+
+msgid "Plant rejected."
+msgstr "Santral reddedildi."
+
+msgid "This plant is already rejected."
+msgstr "Bu santral zaten reddedilmiş."
+
+msgid "Plant suspended."
+msgstr "Santral askıya alındı."
+
+msgid "This plant is already suspended."
+msgstr "Bu santral zaten askıya alınmış."
+
+msgid "Location change approved."
+msgstr "Konum değişikliği onaylandı."
+
+msgid "This location change is already approved."
+msgstr "Bu konum değişikliği zaten onaylanmış."
+
+msgid "Location change rejected."
+msgstr "Konum değişikliği reddedildi."
+
+msgid "This location change is already rejected."
+msgstr "Bu konum değişikliği zaten reddedilmiş."
+
+msgid "Recipient limit changed from %(previous)s to %(current)s."
+msgstr ""
+"Alıcı sınırı %(previous)s değerinden %(current)s değerine değiştirildi."
+
+msgid "The recipient limit is already %(limit)s."
+msgstr "Alıcı sınırı zaten %(limit)s."
+
+msgid "%(member)s is now the workspace administrator."
+msgstr "%(member)s artık çalışma alanı yöneticisi."
+
+msgid "%(member)s is already the workspace administrator."
+msgstr "%(member)s zaten çalışma alanı yöneticisi."
+
+msgid "Last changed"
+msgstr "Son değişiklik"

@@ -14,10 +14,10 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.operations import create_account
 from pyracast.forecasts.validation import validate_binding
+from pyracast.plants.approval import approve_region
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
 from pyracast.regions.operations import (
     approve_location_change,
-    approve_region,
     configure_binding,
     reject_location_change,
     request_location_change,
@@ -101,11 +101,13 @@ def test_location_review_requires_new_binding_and_follows_binding_revisions() ->
         approve_location_change(system.member, change.pk, expected_revision=change.base_revision)
     reviewed = approve_location_change(
         system.admin, change.pk, expected_revision=change.base_revision
-    )
+    ).change
     assert reviewed.reviewed_by_id == system.admin.pk
     assert reviewed.reviewed_at is not None
     assert (
-        approve_location_change(system.admin, change.pk, expected_revision=change.base_revision).pk
+        approve_location_change(
+            system.admin, change.pk, expected_revision=change.base_revision
+        ).change.pk
         == change.pk
     )
     with raises_code("location_change_already_reviewed"):
@@ -159,10 +161,12 @@ def test_location_review_requires_new_binding_and_follows_binding_revisions() ->
     assert second.base_revision == 3
     rejected = reject_location_change(
         system.admin, second.pk, expected_revision=second.base_revision
-    )
+    ).change
     assert rejected.status == "rejected"
     assert (
-        reject_location_change(system.admin, second.pk, expected_revision=second.base_revision).pk
+        reject_location_change(
+            system.admin, second.pk, expected_revision=second.base_revision
+        ).change.pk
         == second.pk
     )
     system.region.refresh_from_db()
@@ -190,10 +194,10 @@ def test_approved_location_requires_validated_replacement_before_collection_resu
         capacity_semantics_verified=True,
     )
     assert (replacement.latitude, replacement.longitude, replacement.timezone) == (41, 30, "UTC")
-    with pytest.raises(ValidationError, match="validated first"):
+    with pytest.raises(ValidationError, match="Validate the current setup"):
         approve_region(system.admin, system.region.pk, replacement.pk, NOW)
     validate_binding(system.admin, replacement.pk, FakeAdapter(), NOW)
-    job = approve_region(system.admin, system.region.pk, replacement.pk, NOW)
+    job = approve_region(system.admin, system.region.pk, replacement.pk, NOW).job
     system.region.refresh_from_db()
     assert (system.region.status, system.region.approved_binding_id) == ("approved", replacement.pk)
     assert job.binding_id == replacement.pk
@@ -323,7 +327,7 @@ def test_concurrent_reviews_apply_location_at_most_once() -> None:
             barrier.wait(timeout=10)
             return approve_location_change(
                 system.admin, change.pk, expected_revision=change.base_revision
-            ).status
+            ).change.status
         finally:
             connection.close()
 
@@ -500,7 +504,7 @@ def test_binding_replacement_rebases_pending_location_request() -> None:
     assert (
         approve_location_change(
             system.admin, change.pk, expected_revision=change.base_revision
-        ).status
+        ).change.status
         == "approved"
     )
     system.region.refresh_from_db()

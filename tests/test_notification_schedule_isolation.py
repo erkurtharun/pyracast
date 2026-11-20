@@ -20,8 +20,9 @@ from pyracast.notifications import scheduler as notification_scheduler
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.operations import configure_reminders, invalid_reminder_recipient_count
 from pyracast.notifications.scheduler import enqueue_due
+from pyracast.plants.approval import approve_region
 from pyracast.regions.models import Region
-from pyracast.regions.operations import approve_region, configure_binding, submit_region
+from pyracast.regions.operations import configure_binding, submit_region
 from tests.support.domain import NOW, FakeAdapter, System
 from tests.support.notification_recipient_validation import recipient
 from tests.support.notifications import SLOT, candidates, configured, schedule_addresses, store

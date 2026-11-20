@@ -31,7 +31,7 @@ from pyracast.regions.models import (
     RegionStatus,
 )
 from pyracast.regions.operations import request_location_change
-from tests.support.admin_setup import admin_system, setup_input, submitted_plant
+from tests.support.admin_setup import admin_system, review_fields, setup_input, submitted_plant
 from tests.support.api import verified_admin
 from tests.support.domain import FakeAdapter, System
 from tests.support.historical_reference_import import system_for_import
@@ -51,6 +51,7 @@ def binding_action(system: System, action: str, **changes: object) -> dict[str, 
         "expected_revision": system.region.revision,
         "binding_id": system.binding.pk,
         "credential_revision": system.account.credential_revision,
+        **review_fields(system),
         **changes,
     }
 

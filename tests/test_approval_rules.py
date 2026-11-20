@@ -4,7 +4,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from pyracast.connections.contracts import ProviderError
-from pyracast.connections.operations import validate_binding
+from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
@@ -30,6 +30,7 @@ LAST_VALIDATION_FAILED = (
 )
 REJECTED = "Plant rejected."
 ALREADY_REJECTED = "This plant is already rejected."
+REVIEW_NOT_APPLIED = "The review could not be applied. Reload and review the current plant."
 LOCATION_APPROVED = "Location change approved."
 LOCATION_ALREADY_APPROVED = "This location change is already approved."
 
@@ -182,6 +183,17 @@ def test_a_double_rejection_reports_the_rejection_once() -> None:
     assert notices(client, url, seen) == (302, [REJECTED])
     assert notices(client, url, seen) == (302, [ALREADY_REJECTED])
     assert AuditEvent.objects.filter(action=AuditAction.REGION_REJECTED).count() == 1
+
+
+def test_a_location_decision_without_a_location_change_is_refused() -> None:
+    system = admin_system()
+    client, _ = verified_admin()
+
+    outcome = notices(
+        client, decision_url(system.region), review_decision(system.region, "approve_location")
+    )
+
+    assert outcome == (302, [REVIEW_NOT_APPLIED])
 
 
 def test_a_double_location_approval_reports_the_approval_once() -> None:
