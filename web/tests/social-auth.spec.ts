@@ -267,7 +267,7 @@ for (const hasPassword of [true, false]) {
                 return route.fulfill({ json: { status: 200 } });
             },
         );
-        await page.goto("/app/?account=security");
+        await page.goto("/app/account/");
         const accounts = page.getByRole("region", {
             name: "Connected accounts",
         });
