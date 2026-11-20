@@ -441,6 +441,19 @@ def test_an_address_change_longer_than_an_account_address_is_refused_before_any_
     assert not EmailAddress.objects.filter(email=address).exists()
 
 
+def test_an_address_change_longer_than_any_address_names_only_the_account_limit() -> None:
+    client = reauthenticated_changer(0)
+    address = "a" + LONGEST_ADDRESS
+
+    response = submit(client, "account/email", {"email": address})
+
+    assert response.status_code == 400
+    assert [
+        error["message"] for error in response.json()["errors"] if error["code"] == "max_length"
+    ] == [f"Ensure this value has at most 254 characters (it has {len(address)})."]
+    assert intents() == []
+
+
 @pytest.mark.parametrize("address", [OVERLONG_ACCOUNT_ADDRESS, "added@example.com"])
 def test_an_address_change_is_checked_against_the_sessions_authority_before_its_input(
     address: str,
