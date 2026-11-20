@@ -23,6 +23,9 @@ test("lib and i18n import neither screens nor routes", async () => {
             "@/ui/ui",
             "@/app/app/page",
             "@/components/ui",
+            "../features/session/app-root",
+            "../ui/ui",
+            "../app/app/page",
         ])
             expect(
                 await restricted(file, imports(specifier)),
@@ -30,6 +33,12 @@ test("lib and i18n import neither screens nor routes", async () => {
             ).toEqual([1]);
         expect(await restricted(file, imports("@/lib/routes"))).toEqual([]);
     }
+    expect(
+        await restricted("src/lib/api/probe.ts", imports("../../ui/ui")),
+    ).toEqual([1]);
+    expect(
+        await restricted("src/lib/api/probe.ts", imports("../schema")),
+    ).toEqual([]);
 });
 
 test("ui imports no feature and no route", async () => {
@@ -92,6 +101,21 @@ test("routes use features only through their top-level modules", async () => {
     expect(await restricted(route, imports("@/components/portfolio"))).toEqual([
         1,
     ]);
+    expect(
+        await restricted(
+            "src/app/app/page.tsx",
+            imports("../../features/auth/steps/submit"),
+        ),
+    ).toEqual([1]);
+    expect(
+        await restricted(
+            "src/app/app/page.tsx",
+            imports("../../features/portfolio/portfolio"),
+        ),
+    ).toEqual([]);
+    expect(
+        await restricted("src/app/app/not-found.tsx", imports("../not-found")),
+    ).toEqual([]);
     expect(
         await restricted(route, imports("@/features/portfolio/portfolio")),
     ).toEqual([]);

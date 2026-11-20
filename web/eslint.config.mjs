@@ -23,7 +23,7 @@ const restrict = (files, ...group) => ({
         ],
     },
 });
-const screens = ["@/app/**", "@/components/**"];
+const screens = ["**/app/**", "**/components/**"];
 export default defineConfig([
     globalIgnores([
         ".next/**",
@@ -52,8 +52,8 @@ export default defineConfig([
     restrict(
         ["src/lib/**/*.{ts,tsx}", "src/i18n/**/*.{ts,tsx}"],
         ...screens,
-        "@/features/**",
-        "@/ui/**",
+        "**/features/**",
+        "**/ui/**",
     ),
     restrict(["src/ui/**/*.{ts,tsx}"], ...screens, "@/features/**", "../*"),
     restrict(
@@ -68,5 +68,9 @@ export default defineConfig([
         "@/features/*/*/**",
         "../../*",
     ),
-    restrict(["src/app/**/*.{ts,tsx}"], "@/components/**", "@/features/*/*/**"),
+    restrict(
+        ["src/app/**/*.{ts,tsx}"],
+        "**/components/**",
+        "**/features/*/*/**",
+    ),
 ]);
