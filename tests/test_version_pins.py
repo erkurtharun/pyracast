@@ -38,8 +38,11 @@ IMAGES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "Go": ("golang", ("deploy/gateway/Dockerfile",)),
     "Node.js": ("node", ("web/Dockerfile",)),
-    "PostgreSQL in development and CI": ("postgres", ("scripts/start_postgres.py",)),
-    "PostgreSQL in production": ("postgres", ("deploy/postgres/Dockerfile",)),
+    "PostgreSQL in development": ("postgres", ("scripts/start_postgres.py",)),
+    "PostgreSQL in production and CI": (
+        "postgres",
+        ("deploy/postgres/Dockerfile", "scripts/start_postgres.py"),
+    ),
     "Python": ("python", ("Dockerfile", ".github/workflows/ci.yml", "deploy/scan-images.sh")),
     "RabbitMQ": (
         "rabbitmq",
@@ -59,6 +62,11 @@ IMAGES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("deploy/gateway/Dockerfile",),
     ),
     "uv": ("ghcr.io/astral-sh/uv", ("Dockerfile",)),
+}
+# Both PostgreSQL images live in scripts/start_postgres.py; the tag tells them apart.
+TAGS = {
+    "PostgreSQL in development": r"\d+\.\d+",
+    "PostgreSQL in production and CI": r"\d+\.\d+-alpine\d+\.\d+",
 }
 
 
@@ -146,15 +154,19 @@ PINS: dict[str, list[Text | ActionInput]] = {
         Text("README.md", rf"Node\.js \*\*{VERSION}\+\*\*"),
         Text("docs/STACK.md", rf"; {VERSION} is the local floor"),
     ],
-    "PostgreSQL in production": [
+    "PostgreSQL in production and CI": [
         Text("deploy/postgres/Dockerfile", r"FROM postgres:(\d+\.\d+)-"),
+        Text("scripts/start_postgres.py", r'"postgres:(\d+\.\d+)-alpine'),
+        Text("scripts/start_postgres.py", r'^THROWAWAY_ARCHIVE_VERSION = "(\d+\.\d+)"$'),
         Text("docs/DEPLOYMENT.md", r"PostgreSQL (\d+\.\d+) on Alpine"),
-        Text("docs/STACK.md", r"PostgreSQL (\d+\.\d+) \(production image\)"),
+        Text("docs/STACK.md", r"PostgreSQL (\d+\.\d+) \(production image and CI tests\)"),
+        Text("docs/ARCHITECTURE.md", r"CI tests run production's (\d+\.\d+)"),
     ],
-    "PostgreSQL in development and CI": [
+    "PostgreSQL in development": [
         Text("scripts/start_postgres.py", r'"postgres:(\d+\.\d+)@'),
+        Text("scripts/start_postgres.py", r'^ARCHIVE_VERSION = "(\d+\.\d+)"$'),
         Text("docs/ARCHITECTURE.md", r"PostgreSQL (\d+\.\d+) is the verified"),
-        Text("docs/STACK.md", r"and (\d+\.\d+) \(development, CI tests\)"),
+        Text("docs/STACK.md", r"and (\d+\.\d+) \(development cluster\)"),
     ],
     "RabbitMQ": [
         Text("deploy/rabbitmq/Dockerfile", rf"^FROM rabbitmq:{VERSION}@"),
@@ -221,10 +233,10 @@ def test_the_local_node_floor_admits_the_pinned_node_of_the_same_major() -> None
 
 
 def test_development_postgresql_runs_the_major_version_production_runs() -> None:
-    major = single("PostgreSQL in production").split(".")[0]
+    major = single("PostgreSQL in production and CI").split(".")[0]
     start_postgres = (ROOT / "scripts/start_postgres.py").read_text(encoding="utf-8")
 
-    assert single("PostgreSQL in development and CI").split(".")[0] == major
+    assert single("PostgreSQL in development").split(".")[0] == major
     assert f'"/var/lib/postgresql/{major}/docker"' in start_postgres
 
 
@@ -248,6 +260,34 @@ def test_the_postgresql_image_adds_packages_uncached_at_a_quoted_minimum_version
         ), command
 
 
+def test_ci_clusters_run_the_production_postgresql_image() -> None:
+    dockerfile = (ROOT / "deploy/postgres/Dockerfile").read_text(encoding="utf-8")
+    start_postgres = (ROOT / "scripts/start_postgres.py").read_text(encoding="utf-8")
+    production = re.search(r"^FROM (postgres:\S+)$", dockerfile, re.M)
+
+    assert production
+    assert f'THROWAWAY_POSTGRES_IMAGE = "{production[1]}"' in start_postgres
+
+
+def test_the_one_remaining_postgresql_difference_is_the_shared_development_cluster() -> None:
+    # Running work shares the development cluster; it moves to production's minor deliberately.
+    production = single("PostgreSQL in production and CI")
+    development = single("PostgreSQL in development")
+    development_locations = {location.path for location in PINS["PostgreSQL in development"]}
+
+    assert {
+        path
+        for path in (*IMAGE_SOURCES, "docs/ARCHITECTURE.md", "docs/STACK.md")
+        for found in ROOT.glob(path)
+        if re.search(
+            rf"postgres(?:ql)?:? ?{re.escape(development)}\b",
+            found.read_text(encoding="utf-8"),
+            re.I,
+        )
+    } <= development_locations
+    assert release(development)[0] == release(production)[0]
+
+
 def test_the_build_backend_range_admits_the_pinned_uv() -> None:
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     match = re.search(r'"uv_build>=(\d+\.\d+\.\d+),<(\d+\.\d+)"', pyproject)
@@ -267,9 +307,10 @@ def pinned_images() -> list[tuple[str, str, str, str]]:
     ]
 
 
-def image_references(image: str, path: str) -> set[str]:
+def image_references(image: str, path: str, tag: str | None = None) -> set[str]:
     text = (ROOT / path).read_text(encoding="utf-8")
-    pattern = rf"(?<![\w./-]){re.escape(image)}(?::[A-Za-z0-9][\w.-]*)?(?:@[\w:]+)?"
+    tagged = rf"(?::{tag}(?![\w.-]))" if tag else r"(?::[A-Za-z0-9][\w.-]*)?"
+    pattern = rf"(?<![\w./-]){re.escape(image)}{tagged}(?:@[\w:]+)?"
     return set(re.findall(pattern, text)) - {image}
 
 
@@ -290,7 +331,7 @@ def test_the_image_table_lists_every_location_of_a_pinned_image() -> None:
 @pytest.mark.parametrize("name", sorted(IMAGES))
 def test_every_location_of_an_image_names_the_same_tag_and_digest(name: str) -> None:
     image, paths = IMAGES[name]
-    found = {path: image_references(image, path) for path in paths}
+    found = {path: image_references(image, path, TAGS.get(name)) for path in paths}
     references = set[str]().union(*found.values())
 
     assert all(found.values()), found

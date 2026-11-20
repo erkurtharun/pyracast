@@ -451,3 +451,41 @@ def test_durable_container_requires_data_inside_the_named_volume(
         start_postgres.provision_docker("docker", "55432", (), volume="data")
 
     assert commands == []
+
+
+def test_a_throwaway_docker_cluster_runs_the_production_postgresql_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands = fake_docker(monkeypatch, {})
+
+    assert start_postgres.provision_docker("docker", "55432", (), volume=None) == "created"
+    assert start_postgres.provision_docker("docker", "55432", (), volume="data") == "created"
+
+    throwaway, durable = commands
+    assert start_postgres.THROWAWAY_POSTGRES_IMAGE in throwaway
+    assert start_postgres.POSTGRES_IMAGE not in throwaway
+    assert start_postgres.POSTGRES_IMAGE in durable
+
+
+def test_a_throwaway_windows_cluster_installs_the_production_minor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fetched: list[str] = []
+    content = tmp_path / "content.zip"
+    with zipfile.ZipFile(content, "w") as target:
+        target.writestr("pgsql/bin/README", "")
+
+    def retrieve(url: str, path: Path) -> None:
+        fetched.append(url)
+        shutil.copyfile(content, path)
+
+    monkeypatch.delenv("PYRACAST_POSTGRES_ARCHIVE", raising=False)
+    monkeypatch.setattr(start_postgres.urllib.request, "urlretrieve", retrieve)
+    digest = hashlib.sha256(content.read_bytes()).hexdigest()
+    monkeypatch.setattr(start_postgres, "THROWAWAY_ARCHIVE_SHA256", digest)
+
+    start_postgres.install_binaries(tmp_path / "throwaway", throwaway=True)
+
+    assert fetched == [start_postgres.THROWAWAY_ARCHIVE_URL]
+    assert start_postgres.THROWAWAY_ARCHIVE_URL != start_postgres.ARCHIVE_URL
+    assert (tmp_path / "throwaway" / "pgsql" / "bin" / "README").is_file()

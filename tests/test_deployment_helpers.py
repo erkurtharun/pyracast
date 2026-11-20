@@ -11,7 +11,10 @@ import pytest
     [
         "backup.py",
         "bootstrap_database.py",
+        "edge_gate.py",
         "host.py",
+        "host_contract.py",
+        "image_rescan.py",
         "operations_log.py",
         "pin_release_images.py",
         "rehearsal.py",
