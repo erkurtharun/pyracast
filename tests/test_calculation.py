@@ -11,6 +11,7 @@ from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.intervals import NormalizedInterval
 from pyracast.plants.forecasting import power_intervals
 from pyracast.plants.models import PlantConfiguration
+from pyracast.plants.numerics import MODEL_VERSION
 from pyracast.providers import FixtureProvider, normalize_payload
 
 TARGET = date(2026, 11, 10)
@@ -111,7 +112,9 @@ def test_reference_capacity_scales_power_without_changing_irradiation(
         ]
     )
     plant_configuration = PlantConfiguration(binding=site, dc_capacity_mw=130)
-    assert power_intervals(snapshot, plant_configuration)[0].power_mw == pytest.approx(78)
+    assert power_intervals(snapshot, plant_configuration, model_version=MODEL_VERSION)[
+        0
+    ].power_mw == pytest.approx(78)
 
 
 def test_live_like_missing_daytime_and_issue_timestamp_are_preserved() -> None:

@@ -16,7 +16,7 @@ from pyracast.plants.models import (
     PlantConfiguration,
     PlantEvent,
 )
-from pyracast.plants.tracking import MODEL_VERSION as TRACKING_MODEL_VERSION
+from pyracast.plants.tracking import DEFAULT_MODEL as TRACKING_MODEL_VERSION
 from tests.support.calibration_automation import declare_native_sources, evaluated_run, promote
 from tests.support.domain import NOW, System
 from tests.support.incident_calibration import incident

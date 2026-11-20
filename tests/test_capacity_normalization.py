@@ -13,6 +13,7 @@ from pyracast.forecasts.history import select_actual_snapshot
 from pyracast.forecasts.models import ForecastSnapshot, ReferenceCapacityNormalization
 from pyracast.plants.availability import actual_power_intervals
 from pyracast.plants.models import PlantConfiguration
+from pyracast.plants.numerics import MODEL_VERSION
 from tests.support.capacity_normalization import normalize, scaled_system
 from tests.support.domain import NOW
 from tests.support.invariants import stored_again
@@ -65,8 +66,8 @@ def test_old_hobby_history_becomes_available_at_the_new_scale_without_rewriting_
     old_configuration = PlantConfiguration.objects.get(binding=system.binding)
     target_configuration = deepcopy(old_configuration)
     target_configuration.binding = target
-    old_power = actual_power_intervals(original, old_configuration)
-    new_power = actual_power_intervals(selected, target_configuration)
+    old_power = actual_power_intervals(original, old_configuration, model_version=MODEL_VERSION)
+    new_power = actual_power_intervals(selected, target_configuration, model_version=MODEL_VERSION)
     assert [row.power_mw for row in new_power] == pytest.approx([row.power_mw for row in old_power])
     assert normalize(system, target) == ids
     assert ReferenceCapacityNormalization.objects.count() == 1

@@ -21,6 +21,7 @@ from pyracast.plants.incident_forecasts import incident_scenario
 from pyracast.plants.measurements import production_identity_at
 from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.numerics import PowerInterval
+from pyracast.plants.transfer import transfer_model
 from pyracast.solar import daylight_window
 
 ARCHIVE_SELECTION_POLICY = "latest-published-pre-daylight-issuance-v1"
@@ -115,7 +116,14 @@ def _prepare_for_configuration(
     if calibration is not None and not production_identity_at(calibration, snapshot.collected_at):
         calibration = None
     factor = float(calibration.factor) if calibration and calibration.factor is not None else 1.0
-    native = tuple(sorted(power_intervals(snapshot, configuration), key=lambda row: row.start))
+    native = tuple(
+        sorted(
+            power_intervals(
+                snapshot, configuration, model_version=transfer_model(configuration, calibration)
+            ),
+            key=lambda row: row.start,
+        )
+    )
     binding = configuration.binding
     first = snapshot.collected_at.astimezone(ZoneInfo(binding.timezone)).date()
     prepared = []

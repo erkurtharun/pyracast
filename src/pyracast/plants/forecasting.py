@@ -48,8 +48,8 @@ def power_intervals(
     snapshot: ForecastSnapshot,
     configuration: PlantConfiguration,
     *,
+    model_version: str,
     source_intervals: tuple[dict[str, Any], ...] | None = None,
-    model_version: str | None = None,
 ) -> tuple[PowerInterval, ...]:
     result = []
     capacity = configuration.binding.capacity_kw
@@ -175,7 +175,10 @@ def forecast_payload(
     source_intervals: tuple[dict[str, Any], ...] | None = None,
 ) -> dict[str, object]:
     start, end = local_day_bounds(target_date, configuration.binding.timezone)
-    intervals = power_intervals(snapshot, configuration, source_intervals=source_intervals)
+    model = transfer_model(configuration, calibration)
+    intervals = power_intervals(
+        snapshot, configuration, model_version=model, source_intervals=source_intervals
+    )
     daylight, energy_windows = forecast_daylight(
         configuration,
         target_date,
@@ -194,7 +197,7 @@ def forecast_payload(
         energy_windows=energy_windows,
     )
     flags = list(result["quality_flags"]) if isinstance(result["quality_flags"], list) else []
-    result["model_version"] = transfer_model(configuration)
+    result["model_version"] = model
     flags.extend(
         (
             "unvalidated_reference_transfer",

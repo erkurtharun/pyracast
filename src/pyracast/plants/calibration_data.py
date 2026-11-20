@@ -30,7 +30,7 @@ from pyracast.plants.numerics import (
     RequiredWindows,
     evaluate_samples,
 )
-from pyracast.plants.transfer import calibration_matches_transfer
+from pyracast.plants.transfer import recorded_transfer, transfer_model
 from pyracast.solar import DAYLIGHT_POLICY, daylight_window
 
 NATIVE_COHORT_DAYS = 30
@@ -44,6 +44,7 @@ class CalibrationDataset:
     required_windows: RequiredWindows
     incumbent_factor: float
     incumbent_is_active: bool
+    transfer_model: str
 
 
 def _daylight_windows(
@@ -325,7 +326,8 @@ def build_calibration_dataset(
     run: CalibrationRun, configuration: PlantConfiguration
 ) -> CalibrationDataset:
     required_windows = _daylight_windows(run, configuration)
-    comparison = _comparison_calibration(run)
+    model = transfer_model(configuration)
+    comparison = _comparison_calibration(run, model)
     incumbent_factor = comparison.factor if comparison is not None else 1.0
     if incumbent_factor is None:
         raise ValueError("The comparison calibration has no factor.")
@@ -380,7 +382,10 @@ def build_calibration_dataset(
                 ()
                 if reference is None
                 else actual_power_intervals(
-                    reference.snapshot, configuration, source_intervals=reference.intervals
+                    reference.snapshot,
+                    configuration,
+                    model_version=model,
+                    source_intervals=reference.intervals,
                 )
             )
         pieces = tuple(
@@ -462,18 +467,19 @@ def build_calibration_dataset(
         ),
     }
     return CalibrationDataset(
-        fit_samples, manifest, report, fit_windows, incumbent_factor, comparison is not None
+        fit_samples, manifest, report, fit_windows, incumbent_factor, comparison is not None, model
     )
 
 
-def _comparison_calibration(run: CalibrationRun) -> CalibrationRun | None:
+def _comparison_calibration(run: CalibrationRun, model: str) -> CalibrationRun | None:
+    """The incumbent, when its factor scales the same transfer model as the new fit."""
     activation = run.comparison_activation
     if activation is None or activation.calibration is None:
         return None
     if (
         not incidents_unchanged(activation.calibration, run.cutoff_at)
         or not production_identity_current(activation.calibration)
-        or not calibration_matches_transfer(activation.calibration, run.configuration)
+        or recorded_transfer(activation.calibration) != model
     ):
         return None
     return activation.calibration

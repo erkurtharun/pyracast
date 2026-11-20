@@ -255,7 +255,7 @@ def test_fixed_plants_are_identical_under_both_default_versions(
     assert results[0] == results[1]
 
 
-def test_production_diagnostic_needs_evidence_fitted_under_the_forecast_version(
+def test_a_v1_calibrated_plant_keeps_its_production_diagnostic_under_the_v2_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant, _ = _tracking_plant(monkeypatch)
@@ -264,20 +264,17 @@ def test_production_diagnostic_needs_evidence_fitted_under_the_forecast_version(
     first = _calibration(system, plant, MODEL_V1)
     _activate(system, plant, first)
     publish_snapshot(snapshot_for(system, NOW.date(), collected_at=NOW))
-    evidence = {
+    first.result["derating"] = {
         "policy": DERATING_POLICY,
         "status": "suspected",
         "baseline_factor": 0.5,
         "latest_matched_day": "2026-11-08",
     }
-    first.result["derating"] = evidence
     first.save(update_fields=("result",))
-    diagnostic = _outlook(system, plant, NOW.date())["production_diagnostic"]
-    assert cast(dict[str, Any], diagnostic)["calibration_id"] == first.pk
-    other = _calibration(system, plant, MODEL_V2)
-    other.result["derating"] = evidence
-    other.save(update_fields=("result",))
-    assert _outlook(system, plant, NOW.date())["production_diagnostic"] is None
+    _default(monkeypatch, MODEL_V2)
+    outlook = _outlook(system, plant, NOW.date())
+    assert cast(dict[str, Any], outlook["result"])["model_version"] == MODEL_V1
+    assert cast(dict[str, Any], outlook["production_diagnostic"])["calibration_id"] == first.pk
 
 
 @pytest.mark.parametrize("calibrated", VERSIONS)

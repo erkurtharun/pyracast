@@ -21,6 +21,7 @@ from psycopg.types.json import Jsonb
 
 from pyracast.connections.models import SiteBinding
 from pyracast.plants.models import PlantConfiguration
+from pyracast.plants.numerics import fit_calibration
 from pyracast.plants.tracking import MODEL_V1, MODEL_V2
 from pyracast.plants.transfer import reference_power_mw
 from scripts import evaluate_tracker_geometry as evaluation
@@ -289,7 +290,7 @@ def _half_hours(day: date) -> list[tuple[datetime, datetime]]:
 def _reference_kw(start: datetime, day_index: int) -> float:
     zenith = sun.zenith(Observer(LATITUDE, LONGITUDE, 0.0), start + timedelta(minutes=15))
     clearness = 0.55 + 0.4 * ((day_index * 7) % 11) / 10
-    return round(850 * clearness * max(0.0, cos(radians(zenith))) ** 1.2, 6)
+    return round(float(850 * clearness * max(0.0, cos(radians(zenith))) ** 1.2), 6)
 
 
 def _reading(start: datetime, energy: str | None) -> dict[str, object]:
@@ -459,7 +460,7 @@ class Run:
 def run(archive: str) -> Run:
     network: list[object] = []
     fits: list[tuple[tuple[object, ...], tuple[object, ...]]] = []
-    original = evaluation.fit_calibration
+    original = fit_calibration
 
     def refuse(*args: object, **kwargs: object) -> None:
         network.append(args)
@@ -484,7 +485,7 @@ def run(archive: str) -> Run:
     with pytest.MonkeyPatch.context() as patch, redirect_stdout(output):
         patch.setattr(socket.socket, "connect", refuse)
         patch.setattr(socket, "create_connection", refuse)
-        patch.setattr(evaluation, "fit_calibration", recorded)
+        patch.setattr("scripts.evaluate_tracker_geometry.fit_calibration", recorded)
         code = evaluation.main(environment(archive))
     return Run(code, output.getvalue(), network, fits, _digest(archive) == before)
 
@@ -514,6 +515,15 @@ def _skipped(section: str) -> dict[str, int]:
     }
 
 
+def _interval(section: str) -> tuple[float, float, float]:
+    match = re.search(
+        r"^  RMSE v2 - v1: (\S+) MWh, 95 % interval \[(\S+), (\S+)\]$", section, re.MULTILINE
+    )
+    assert match, section
+    difference, low, high = (float(value) for value in match.groups())
+    return difference, low, high
+
+
 def test_the_evaluation_prefers_the_version_that_generated_production(run: Run) -> None:
     assert run.code == 0
     generated_by_v1, generated_by_v2 = _section(run.output, 1), _section(run.output, 2)
@@ -521,19 +531,22 @@ def test_the_evaluation_prefers_the_version_that_generated_production(run: Run) 
         _version(generated_by_v1, "v1"),
         _version(generated_by_v1, "v2"),
     )
-    assert v1_error < 0.2 * v2_error
+    assert v1_error < v2_error
     assert v1_factor == pytest.approx(FACTOR, abs=0.005)
+    difference, low, _ = _interval(generated_by_v1)
+    assert difference > 0
+    assert low > 0
     (v1_error, _), (v2_error, v2_factor) = (
         _version(generated_by_v2, "v1"),
         _version(generated_by_v2, "v2"),
     )
-    assert v2_error < 0.2 * v1_error
+    assert v2_error < v1_error
     assert v2_factor == pytest.approx(FACTOR, abs=0.005)
+    difference, _, high = _interval(generated_by_v2)
+    assert difference < 0
+    assert high < 0
     assert "  decision: no" in generated_by_v1
     assert "  decision: yes" in generated_by_v2
-    assert re.search(
-        r"^  RMSE v2 - v1: \S+ MWh, 95 % interval \[\S+, \S+\]$", generated_by_v2, re.M
-    )
     assert re.search(
         r"^  days: complete \d+, evaluated \d+; weeks: scored \d+, skipped 0$",
         generated_by_v1,
@@ -567,7 +580,7 @@ def test_the_evaluation_counts_malformed_rows_without_showing_them(run: Run) -> 
     assert skipped["incomplete day"] > 0
     assert skipped["outside daylight"] > 0
     assert skipped["fit-only first week"] > 0
-    assert "malformed" not in _skipped(_section(run.output, 1))
+    assert set(_skipped(_section(run.output, 1))) == {"fit-only first week", "outside daylight"}
     assert "Traceback" not in run.output
 
 

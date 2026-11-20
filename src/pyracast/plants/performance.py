@@ -28,6 +28,7 @@ from pyracast.plants.numerics import (
     RequiredWindows,
     evaluate_samples,
 )
+from pyracast.plants.transfer import transfer_model
 from pyracast.solar import DAYLIGHT_POLICY, daylight_window
 
 
@@ -190,6 +191,7 @@ def _day(
             intervals = power_intervals(
                 snapshot,
                 configuration,
+                model_version=transfer_model(configuration, calibration),
                 source_intervals=actual_source.composition.intervals
                 if actual_source is not None and actual_source.composition is not None
                 else None,
