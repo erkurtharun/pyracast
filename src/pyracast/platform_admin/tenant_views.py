@@ -51,7 +51,9 @@ def _workspace_section(tenant_id: int, section: str) -> HttpResponse:
 @require_GET
 def workspaces(request: HttpRequest, *, site: PlatformAdminSite) -> HttpResponse:
     context = tenant_list_context(
-        request.GET.get("q", "").strip()[:200], request.GET.get("page", "1")
+        request.GET.get("q", "").strip()[:200],
+        request.GET.get("page", "1"),
+        needs_administrator=request.GET.get("needs_administrator") == "1",
     )
     return site.workspace_response(request, "tenants", _("Workspaces"), context)
 
