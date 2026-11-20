@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { createQueryClient, QueryOwner } from "@/lib/api/query";
 import { loadSession, useSessionState } from "@/lib/session-client";
 import { Brand } from "@/ui/brand";
+import { LiveRegion } from "@/ui/live-region";
 import { useLanguageHandoff } from "./language-handoff";
 import { SessionLanguage } from "./session-language";
 import { Notice } from "@/ui/ui";
@@ -19,17 +20,21 @@ export function AppRoot({ children }: { children: ReactNode }) {
     return (
         <QueryClientProvider client={client}>
             <SessionLanguage language={session?.language}>
-                {session && handoff.status === "ready" ? (
-                    <QueryOwner value={user}>{children}</QueryOwner>
-                ) : (
-                    <Bootstrap
-                        languageFailed={handoff.status === "failed"}
-                        failure={failure}
-                        retry={
-                            handoff.status === "failed" ? handoff.retry : retry
-                        }
-                    />
-                )}
+                <LiveRegion>
+                    {session && handoff.status === "ready" ? (
+                        <QueryOwner value={user}>{children}</QueryOwner>
+                    ) : (
+                        <Bootstrap
+                            languageFailed={handoff.status === "failed"}
+                            failure={failure}
+                            retry={
+                                handoff.status === "failed"
+                                    ? handoff.retry
+                                    : retry
+                            }
+                        />
+                    )}
+                </LiveRegion>
             </SessionLanguage>
         </QueryClientProvider>
     );
@@ -62,7 +67,7 @@ function Bootstrap({
                     <div
                         className="loading-indicator"
                         role="progressbar"
-                        aria-label="Pyracast"
+                        aria-label={t("loadingScreen")}
                     />
                 )}
             </div>

@@ -16,7 +16,7 @@ import {
     type PathFor,
     type RequestOptions,
 } from "./client";
-import { ApiError } from "./errors";
+import { ApiError, displayMessage } from "./errors";
 import { keys } from "./keys";
 import { send } from "./lane";
 
@@ -113,7 +113,9 @@ function useLoaded<T>(
         (query.error.status === 403 || query.error.status === 404);
     return {
         data: denied ? undefined : query.data,
-        error: query.error?.message,
+        error: query.error
+            ? displayMessage(query.error, browserErrors()("unexpected"))
+            : undefined,
         loading: query.isPending,
         updatedAt: query.dataUpdatedAt,
         retry: () => void query.refetch(),
