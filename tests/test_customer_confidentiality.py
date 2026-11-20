@@ -57,7 +57,7 @@ CUSTOMER_FIELDS = {
     "can_edit",
     "can_propose",
     "can_propose_revert",
-    "can_restore",
+    "restore_blocker",
     "can_revert",
     "can_review",
     "can_withdraw",

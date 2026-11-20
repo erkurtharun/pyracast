@@ -6,7 +6,7 @@ Every dispatcher cycle runs the `retention` phase, which hard-deletes regions wh
 
 - Command: `pyracast dispatch --loop` (`pyracast.forecasts.management.commands.dispatch` `Command.handle`) calls `pyracast.trash.purge_expired` as the fourth of five phases (notifications, collection, calibration, retention, metering). `deploy/compose.yaml` polls every 30 s, `scripts/dev.py` uses the 60 s default. Without `--loop` one cycle runs and a failed phase raises `CommandError`.
 - Internals: `purge_expired` calls `_purge_region`, which calls `_purge_plant` for the region's plant. A naive `now` raises `ValidationError`.
-- Screen: none triggers it. `web/src/components/recycle-bin.tsx` `RecycleBin` shows `purge_after` and disables restore when `can_restore` is false (`pyracast.api.trash` `TrashedRegionOutput`); a purged row vanishes on the next list load.
+- Screen: none triggers it. `web/src/components/recycle-bin.tsx` `RecycleBin` shows `purge_after` and disables restore when `restore_blocker` is set (`pyracast.api.trash` `TrashedRegionOutput`); a purged row vanishes on the next list load.
 - Actor: the dispatcher process with the application database role. No user, tenant or queue message is involved.
 
 ## Sequence
@@ -81,5 +81,5 @@ sequenceDiagram
 
 - `tests/test_trash_operations.py`: boundary (microsecond before, exact deadline), region and plant graphs, quota ledger and sibling regions kept, batch size, naive clock, concurrent purge.
 - `tests/test_trash_boundaries.py`: purge racing collection, reminder and calibration candidates before the region lock; purged queue ids ignored; phase order. Child graphs in `test_forecast_archive_core.py`, `test_timeseries_integrity.py`, `test_incidents.py`, `test_change_requests.py`, `test_region_editing.py`, `test_capacity_normalization_boundaries.py`, `test_site_onboarding.py`, `test_calibration_automation.py`; races in `test_notification_group_boundaries.py`, `test_notifications_races.py`, `test_metering.py`.
-- `tests/test_trash_api.py`: expired rows stay listed with `can_restore` false and restore returns 400. Dispatcher tests (`test_dispatch_resilience.py`, `test_dispatch_recovery.py`, `test_runtime.py`, `test_shutdown_process.py`) mock `purge_expired`; `test_delivery_health.py` seeds a failed `retention` row by hand. Playwright `web/tests/workspace.spec.ts` "recycle bin disables expired records" mocks the API.
+- `tests/test_trash_api.py`: expired rows stay listed with a `restore_blocker` and restore returns 400. Dispatcher tests (`test_dispatch_resilience.py`, `test_dispatch_recovery.py`, `test_runtime.py`, `test_shutdown_process.py`) mock `purge_expired`; `test_delivery_health.py` seeds a failed `retention` row by hand. Playwright `web/tests/workspace.spec.ts` "recycle bin disables expired records" mocks the API.
 - Gaps: failing region blocking later ones, `deliver` for a purged job, new foreign keys to `Region` or `Plant`, volume or statement timeouts, and the command purging real rows are untested.
