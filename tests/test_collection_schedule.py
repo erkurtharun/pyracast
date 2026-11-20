@@ -14,7 +14,8 @@ from rest_framework.test import APIClient
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import MAX_DAILY_QUOTA, ProviderAccount, SiteBinding
-from pyracast.forecasts.jobs import Failure, claim, collect, persist_snapshot, retry
+from pyracast.forecasts.jobs.claim import Failure, claim, retry
+from pyracast.forecasts.jobs.collect import persist_snapshot
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionJobError,
@@ -26,12 +27,13 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.schedule import configure_schedule, get_schedule, schedule_payload
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.forecasts.validation import validate_binding
+from pyracast.irradiance import local_day_bounds
 from pyracast.plants.approval import approve_region
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import AuditEvent, Region
 from tests.support.collection_schedule import HistoricalFixture, no_calculation
 from tests.support.domain import NOW, FakeAdapter, make_system
-from tests.support.jobs import calculate
+from tests.support.jobs import calculate, collect
 from tests.support.providers import binding_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -195,8 +197,10 @@ def test_solcast_actuals_requests_only_required_bounded_lookback(days: int, hour
         assert request.headers["Authorization"] == "Bearer test-credential"
         return httpx.Response(200, json={"estimated_actuals": []})
 
-    data = SolcastProvider(httpx.MockTransport(handle), clock=lambda: NOW).fetch_history(
-        binding_for(), NOW.date(), days
+    binding = binding_for()
+    start, _ = local_day_bounds(NOW.date() - timedelta(days=days - 1), binding.timezone)
+    data = SolcastProvider(httpx.MockTransport(handle), clock=lambda: NOW).fetch_history_window(
+        binding, start, NOW, NOW
     )
     assert data.source_kind == "estimated_actuals"
     assert data.issued_at is None

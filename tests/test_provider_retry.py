@@ -4,7 +4,6 @@ from email.utils import format_datetime
 import pytest
 
 from pyracast.connections.contracts import ProviderError
-from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, RequestAttempt, RequestPurpose
 from pyracast.forecasts.quota import (
     RequestDeferredError,
@@ -13,7 +12,7 @@ from pyracast.forecasts.quota import (
 )
 from pyracast.provider_retry import next_retry_at, retry_after_seconds
 from tests.support.domain import NOW, FakeAdapter, make_system
-from tests.support.jobs import calculate
+from tests.support.jobs import calculate, collect
 
 
 def test_retry_after_two_days_is_not_shortened() -> None:

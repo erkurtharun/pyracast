@@ -94,18 +94,6 @@ BACK_EDGES: dict[tuple[str, str], str] = {
     ("forecasts.history", "plants.forecast_sources"): "snapshot replay lives in plants",
     ("forecasts.intraday", "plants.forecast_sources"): "snapshot replay lives in plants",
     (
-        "forecasts.jobs",
-        "plants.forecast_archive",
-    ): "publication archives plant issuances and requests calibration",
-    (
-        "forecasts.jobs",
-        "plants.models",
-    ): "publication archives plant issuances and requests calibration",
-    (
-        "forecasts.jobs",
-        "plants.preparation",
-    ): "publication archives plant issuances and requests calibration",
-    (
         "forecasts.snapshot_restore",
         "plants.preparation",
     ): "a restore prepares calibrations of its plants",
@@ -143,14 +131,6 @@ FUNCTION_IMPORTS: dict[tuple[str, str], str] = {
         "forecasts.historical_import",
         "plants.preparation",
     ): "an import prepares calibrations of its plants",
-    (
-        "forecasts.jobs",
-        "plants.forecast_archive",
-    ): "publication archives plant issuances and requests calibration",
-    (
-        "forecasts.jobs",
-        "plants.preparation",
-    ): "publication archives plant issuances and requests calibration",
     ("metering.jobs", "plants.preparation"): "breaks an import cycle",
     ("metering.operations", "metering.scheduler"): "breaks an import cycle",
     ("plants.current_forecast", "plants.automatic_forecast"): "breaks an import cycle",

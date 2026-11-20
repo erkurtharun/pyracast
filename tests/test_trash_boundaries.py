@@ -8,13 +8,9 @@ from pyracast.accounts.models import Tenant
 from pyracast.background.failures import PhaseOutcome
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.currency import binding_is_current
-from pyracast.forecasts.jobs import (
-    claim,
-    collect,
-    pending_job_ids,
-    persist_snapshot,
-    publish,
-)
+from pyracast.forecasts.jobs.claim import claim
+from pyracast.forecasts.jobs.collect import persist_snapshot
+from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
 from pyracast.forecasts.scheduler import enqueue_due as enqueue_collections
 from pyracast.notifications.jobs import process_notification
@@ -30,7 +26,7 @@ from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region
 from pyracast.trash import purge_expired, restore_region, trash_region
 from tests.support.domain import NOW, FakeAdapter
-from tests.support.jobs import calculate
+from tests.support.jobs import calculate, collect, publish
 from tests.support.kinds import stub_actors
 from tests.support.notifications import SLOT, configured, saved
 from tests.support.plant_operations import make_plant, request_run

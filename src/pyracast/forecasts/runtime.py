@@ -1,5 +1,6 @@
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from django.conf import settings
 from django.db import close_old_connections
@@ -8,7 +9,9 @@ from dramatiq import Actor
 from pyracast.background.actor import fresh_connections
 from pyracast.background.failures import PhaseOutcome, log_failure, queue_full
 from pyracast.calculation import calculate
-from pyracast.forecasts.jobs import collect, pending_job_ids
+from pyracast.forecasts.jobs.collect import collect
+from pyracast.forecasts.jobs.publish import PublicationHooks
+from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import CollectionEndpoint, CollectionJob
 from pyracast.forecasts.scheduler import CollectionSchedulingError, enqueue_due
 from pyracast.providers import adapter_for
@@ -18,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 @fresh_connections
-def deliver(job_id: int) -> None:
+def deliver(job_id: int, *, hooks: PublicationHooks[Any]) -> None:
     job = (
         CollectionJob.objects.select_related("binding__provider_account").filter(pk=job_id).first()
     )
@@ -32,7 +35,12 @@ def deliver(job_id: int) -> None:
         else None
     )
     collect(
-        job_id, adapter_for(job.binding), calculate, datetime.now(UTC), weather_provider=weather
+        job_id,
+        adapter_for(job.binding),
+        calculate,
+        datetime.now(UTC),
+        hooks=hooks,
+        weather_provider=weather,
     )
 
 

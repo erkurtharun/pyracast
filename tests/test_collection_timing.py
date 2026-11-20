@@ -9,7 +9,7 @@ from django.db import close_old_connections, connection
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.budget import remaining_forecast_requests
-from pyracast.forecasts.jobs import collect, pending_job_ids
+from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionJobError,
@@ -30,7 +30,7 @@ from pyracast.regions.models import Region
 from tests.support.budget_reference import reference_forecast_requests
 from tests.support.collection_schedule import HistoricalFixture
 from tests.support.domain import NOW, FakeAdapter, System, make_system
-from tests.support.jobs import calculate
+from tests.support.jobs import calculate, collect
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

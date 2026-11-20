@@ -10,7 +10,8 @@ from django.db import close_old_connections, connection
 
 from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.acquisition import missing_actuals_window
-from pyracast.forecasts.jobs import Lease, claim, collect, fetch_history
+from pyracast.forecasts.jobs.claim import Lease, claim
+from pyracast.forecasts.jobs.collect import fetch_history
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -24,6 +25,7 @@ from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.providers import FixtureProvider, SolcastProvider
 from tests.support.domain import make_system
 from tests.support.invariants import stored_again
+from tests.support.jobs import collect
 from tests.support.providers import binding_for
 
 MORNING = datetime(2026, 11, 15, 5, 45, tzinfo=UTC)
@@ -451,10 +453,11 @@ def test_delayed_delivery_for_an_absent_job_consumes_no_request() -> None:
     assert not RequestAttempt.objects.exists()
 
 
-def test_legacy_history_adapter_retains_seven_calendar_days_without_explicit_window() -> None:
+def test_the_fixture_history_retains_seven_calendar_days_whatever_its_window() -> None:
     binding = binding_for("fixture")
     lease = Lease(1, binding, date(2026, 11, 14), uuid4(), "estimated_actuals")
-    data = fetch_history(lease, FixtureProvider())
+    window = (datetime(2026, 11, 14, tzinfo=UTC), datetime(2026, 11, 15, tzinfo=UTC))
+    data = fetch_history(lease, FixtureProvider(), window=window, now=window[1] + timedelta(days=1))
     assert data.source_kind == "estimated_actuals"
     assert len(data.intervals) == 336
     assert data.intervals[0].start.isoformat() == "2026-11-08T00:00:00+00:00"

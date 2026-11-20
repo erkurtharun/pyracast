@@ -11,7 +11,8 @@ from pyracast.background.failures import ItemsFailedError
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.secrets import encrypt_secret
-from pyracast.forecasts.jobs import claim, persist_snapshot, publish
+from pyracast.forecasts.jobs.claim import claim
+from pyracast.forecasts.jobs.collect import persist_snapshot
 from pyracast.forecasts.models import CollectionJob, HistoricalReferenceImport
 from pyracast.incidents.models import PlantIncident
 from pyracast.intervals import NormalizedInterval
@@ -33,6 +34,7 @@ from tests.support.concurrency import behind_open_transaction
 from tests.support.domain import NOW, System
 from tests.support.historical_reference_import import archive, power_file
 from tests.support.incident_calibration import incident
+from tests.support.jobs import publish
 from tests.support.migrations import forward, leaf_nodes, migrate
 from tests.support.plant_operations import half_hours, make_plant
 from tests.support.plant_training import actual_snapshot_for

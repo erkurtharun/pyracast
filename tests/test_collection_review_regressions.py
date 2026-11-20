@@ -5,13 +5,13 @@ import pytest
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import rotate_secret
-from pyracast.forecasts.jobs import collect, pending_job_ids
+from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.timing import ForecastTiming, forecast_timing
 from pyracast.forecasts.validation import validate_binding
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, FakeAdapter, make_system
-from tests.support.jobs import calculate
+from tests.support.jobs import calculate, collect
 
 
 @pytest.mark.django_db(transaction=True)

@@ -9,8 +9,9 @@ from django.db import DatabaseError, OperationalError
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.secrets import encrypt_secret
-from pyracast.forecasts import jobs, runtime
-from pyracast.forecasts.jobs import claim, collect, pending_job_ids
+from pyracast.forecasts.jobs import collect as jobs
+from pyracast.forecasts.jobs.claim import Lease, claim
+from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import (
     CollectionJob,
     ForecastSnapshot,
@@ -18,11 +19,12 @@ from pyracast.forecasts.models import (
     RequestPurpose,
 )
 from pyracast.forecasts.quota import RequestDeferredError, reserve_request
+from pyracast.orchestration.kinds import COLLECTION
 from pyracast.providers import SolcastProvider
 from pyracast.weather import OpenMeteoProvider
 from pyracast.weather_data import WeatherError
 from tests.support.domain import NOW, FakeAdapter, System, make_system
-from tests.support.jobs import calculate
+from tests.support.jobs import calculate, collect
 from tests.support.providers import TARGET, binding_for
 
 PROVIDER_DAY_RESET = datetime(2026, 11, 10, 0, 2, tzinfo=UTC)
@@ -233,7 +235,7 @@ def test_a_deterministic_failure_after_the_claim_ends_after_three_attempts(
 
 @pytest.mark.django_db(transaction=True)
 def test_delivery_of_a_missing_job_returns_quietly() -> None:
-    runtime.deliver(10**9)
+    COLLECTION.deliver(10**9)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -242,9 +244,9 @@ def test_account_disabled_after_the_claim_records_account_unavailable(
 ) -> None:
     system = make_system(approved=True)
     job = CollectionJob.objects.get()
-    original = jobs.claim
+    original = claim
 
-    def claim_then_disable(job_id: int, now: datetime) -> jobs.Lease | None:
+    def claim_then_disable(job_id: int, now: datetime) -> Lease | None:
         lease = original(job_id, now)
         ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
         return lease

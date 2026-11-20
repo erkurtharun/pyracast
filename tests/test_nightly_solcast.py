@@ -7,11 +7,14 @@ from types import SimpleNamespace
 import pytest
 from django.db import close_old_connections, connection
 
+from pyracast.background import clock as monotonic_clock
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts import jobs, quota
+from pyracast.forecasts import quota
 from pyracast.forecasts.history import select_actual_snapshot
-from pyracast.forecasts.jobs import claim, collect, pending_job_ids
+from pyracast.forecasts.jobs import collect as jobs
+from pyracast.forecasts.jobs.claim import claim
+from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -24,7 +27,7 @@ from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.models import Region
 from tests.support.collection_schedule import HistoricalFixture, no_calculation
 from tests.support.domain import NOW, make_system
-from tests.support.jobs import calculate
+from tests.support.jobs import calculate, collect
 
 pytestmark = pytest.mark.django_db(transaction=True)
 NIGHT = (NOW + timedelta(days=1)).replace(hour=0)
@@ -389,7 +392,7 @@ def test_history_rechecks_morning_deadline_before_request(
             elapsed[0] = 2.0
             return attempt
 
-        monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: elapsed[0]))
+        monkeypatch.setattr(monotonic_clock, "time", SimpleNamespace(monotonic=lambda: elapsed[0]))
         monkeypatch.setattr(jobs, "reserve_request", reserve)
 
     def forbidden() -> None:

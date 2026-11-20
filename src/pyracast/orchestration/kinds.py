@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 
 from dramatiq import Actor, Broker
 
@@ -7,6 +8,7 @@ from pyracast.background.actor import job_actor
 from pyracast.forecasts.runtime import deliver
 from pyracast.metering.runtime import deliver_epias
 from pyracast.notifications.runtime import deliver_notification, deliver_outbound_mail
+from pyracast.plants.publication import PUBLICATION
 from pyracast.plants.runtime import deliver_calibration
 
 
@@ -22,7 +24,7 @@ class JobKind:
 
 
 MAIL_QUEUE = "notifications"
-COLLECTION = JobKind("collect_forecast", "default", deliver)
+COLLECTION = JobKind("collect_forecast", "default", partial(deliver, hooks=PUBLICATION))
 CALIBRATION = JobKind("calibrate_plant", "calibration", deliver_calibration)
 REMINDER = JobKind("send_forecast_reminder", MAIL_QUEUE, deliver_notification)
 OUTBOUND_MAIL = JobKind("send_outbound_mail", MAIL_QUEUE, deliver_outbound_mail)

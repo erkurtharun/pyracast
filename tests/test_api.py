@@ -26,7 +26,6 @@ from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.operations import create_account
-from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import ForecastResult
 from pyracast.forecasts.quota import QuotaExceededError
 from pyracast.forecasts.validation import validate_binding
@@ -37,6 +36,7 @@ from pyracast.providers import FixtureProvider, adapter_for
 from pyracast.regions.models import Region
 from pyracast.regions.operations import configure_binding, submit_region
 from tests.support.api import verified_admin
+from tests.support.jobs import collect
 
 pytestmark = pytest.mark.django_db
 

@@ -10,7 +10,8 @@ from django.db import IntegrityError, models, transaction
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership
 from pyracast.epias import EpiasDay, EpiasError, EpiasPlant
-from pyracast.forecasts.jobs import LEASE_DURATION, claim, collect, pending_job_ids
+from pyracast.forecasts.jobs.claim import LEASE_DURATION, claim
+from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import CollectionJob
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
@@ -26,7 +27,7 @@ from pyracast.regions.models import Region
 from pyracast.trash import trash_region
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.invariants import lease_violations
-from tests.support.jobs import calculate
+from tests.support.jobs import calculate, collect
 from tests.support.metering import connected, day_data
 from tests.support.notification_transmission import replying
 from tests.support.notifications import SLOT, ready

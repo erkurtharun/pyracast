@@ -3,14 +3,14 @@ from datetime import timedelta
 import pytest
 
 from pyracast.connections.operations import rotate_secret
-from pyracast.forecasts.jobs import claim, collect
+from pyracast.forecasts.jobs.claim import claim
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import approve_region
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, FakeAdapter, make_system
-from tests.support.jobs import calculate
+from tests.support.jobs import calculate, collect
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
