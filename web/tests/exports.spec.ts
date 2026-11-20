@@ -102,6 +102,24 @@ test("cells quote text, double quotes and never start a spreadsheet formula", ()
     );
 });
 
+test("a long run of leading invisible characters still ends in the formula check", () => {
+    const padding = " \t200b".repeat(50_000);
+    const [, row] = csvDocument(
+        ["a"],
+        [[`${padding}=1+1`], [`${padding}text`], [padding]],
+    )
+        .replace(/^\uFEFF/, "")
+        .split("\r\n");
+    expect(row).toBe(`"'${padding}=1+1"`);
+});
+
+test("only a formula character after invisible ones is neutralised", () => {
+    const lines = csvDocument(["a"], [[" \u00ad+x"], ["x=1"], ["\u00a0@"]])
+        .replace(/^\ufeff/, "")
+        .split("\r\n");
+    expect(lines.slice(1, 4)).toEqual([`"' \u00ad+x"`, '"x=1"', `"'\u00a0@"`]);
+});
+
 test("the production export holds the import columns and one row per recorded interval in plant time", () => {
     const file = productionExport(plant, "2026-11-10", [
         interval("2026-11-10T05:00:00Z", "2026-11-10T05:30:00Z", 0.5),

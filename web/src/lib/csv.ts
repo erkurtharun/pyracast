@@ -6,8 +6,17 @@ export type CsvExport = {
     rows: readonly (readonly CsvValue[])[];
 };
 
-const FORMULA = /^[\p{White_Space}\p{Cc}\p{Cf}]*[=+\-@]/u;
+const INVISIBLE = /^[\p{White_Space}\p{Cc}\p{Cf}]$/u;
+const FORMULA_START = "=+-@";
 const PLAIN_NUMBER = /^[+-]?\d+(?:\.\d+)?$/;
+
+function startsFormula(value: string): boolean {
+    for (const character of value) {
+        if (!INVISIBLE.test(character))
+            return FORMULA_START.includes(character);
+    }
+    return false;
+}
 
 function cell(value: CsvValue): string {
     if (value === null) return "";
@@ -16,7 +25,7 @@ function cell(value: CsvValue): string {
     if (typeof value === "boolean") return String(value);
     // Quoting alone does not stop a spreadsheet from evaluating a leading formula character.
     const safe =
-        FORMULA.test(value) && !PLAIN_NUMBER.test(value) ? `'${value}` : value;
+        startsFormula(value) && !PLAIN_NUMBER.test(value) ? `'${value}` : value;
     return `"${safe.replaceAll('"', '""')}"`;
 }
 
