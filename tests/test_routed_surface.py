@@ -84,6 +84,7 @@ AUTH_ROUTES = sorted(
         "auth/login",
         "auth/password/request",
         "auth/password/reset",
+        "auth/provider/complete",
         "auth/provider/redirect",
         "auth/provider/signup",
         "auth/reauthenticate",

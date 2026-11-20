@@ -82,7 +82,7 @@ class CommitClient(Client):
 def local_mail() -> Iterator[None]:
     # The authentication cache needs an autocommit connection, which a rolled-back test
     # transaction does not have; the rate limits stay those of ACCOUNT_RATE_LIMITS.
-    caches = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+    caches = {"default": {"BACKEND": "tests.support.account_mail.LocalAuthenticationCache"}}
     with override_settings(**matrix_settings(), CACHES=caches):
         cache.clear()
         yield
@@ -212,8 +212,7 @@ def test_a_signed_in_provider_sign_in_is_refused_and_mails_nothing(
 
     response = through_provider(client, provider, "login")
 
-    assert response.status_code == 302
-    assert "error=permission_denied" in response["Location"]
+    assert response.status_code == 403
     assert mail.outbox == []
 
 

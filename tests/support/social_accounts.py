@@ -80,10 +80,24 @@ def begin(client: Client, provider: str = "google", process: str = "login") -> s
     return query["state"][0]
 
 
-def complete(client: Client, state: str, provider: str = "google") -> Any:
+def callback(client: Client, state: str, provider: str = "google") -> Any:
     return client.get(
         f"/api/accounts/{provider}/login/callback/", {"state": state, "code": "provider-code"}
     )
+
+
+def finish(client: Client) -> Any:
+    token = client.get("/api/session/").json()["csrf_token"]
+    return client.post(
+        AUTH + "auth/provider/complete", {}, content_type="application/json", HTTP_X_CSRFTOKEN=token
+    )
+
+
+def complete(client: Client, state: str, provider: str = "google") -> Any:
+    # The provider's redirect back only verifies the login; the completion signs in or connects.
+    verified = callback(client, state, provider)
+    assert (verified.status_code, verified["Location"]) == (302, CALLBACK)
+    return finish(client)
 
 
 def serve_provider_profile(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:

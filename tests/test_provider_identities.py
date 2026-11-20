@@ -53,7 +53,7 @@ def profile(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 def pending_signup(provider: str) -> Client:
     client = browser()
-    assert complete(client, begin(client, provider), provider)["Location"] == CALLBACK
+    assert complete(client, begin(client, provider), provider).status_code == 401
     return client
 
 
@@ -125,7 +125,7 @@ def test_provider_sign_in_while_signed_in_is_refused_and_keeps_the_session() -> 
 
     response = complete(client, begin(client, "google"), "google")
 
-    assert "error=permission_denied" in response["Location"]
+    assert response.status_code == 403
     assert session_user(client) == user.pk
     assert "socialaccount_sociallogin" not in client.session
     assert not SocialAccount.objects.exists()
@@ -147,7 +147,7 @@ def test_a_password_reset_of_a_never_used_account_unbinds_its_provider_identitie
     returning = browser()
     response = complete(returning, begin(returning, "microsoft"), "microsoft")
 
-    assert response["Location"] == CALLBACK
+    assert response.status_code == 401
     assert session_user(returning) is None
     flows = returning.get(AUTH + "auth/session").json()["data"]["flows"]
     assert any(flow["id"] == "provider_signup" for flow in flows)

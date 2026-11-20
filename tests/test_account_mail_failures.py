@@ -25,7 +25,7 @@ from tests.support.admin_recovery_security import submit as submit_to
 from tests.support.auth_lifecycle import PASSWORD, member, submit
 from tests.support.company_registration import signup
 from tests.support.outbox import deliver_mail
-from tests.support.social_accounts import CALLBACK, PROVIDERS, begin, complete
+from tests.support.social_accounts import PROVIDERS, begin, complete
 
 pytestmark = [
     pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"]),
@@ -238,14 +238,13 @@ def test_password_change_with_failing_mail_completes_and_is_audited(
 
 
 @pytest.mark.usefixtures("social_providers")
-def test_provider_connect_with_failing_mail_redirects_to_callback() -> None:
+def test_provider_connect_with_failing_mail_answers_200() -> None:
     user = member()
     client = signed_in(user, reauthenticated=True)
 
     response = complete(client, begin(client, process="connect"))
 
-    assert response.status_code == 302
-    assert response["Location"] == CALLBACK
+    assert response.status_code == 200
     assert SocialAccount.objects.get().user_id == user.pk
     deliver_mail()
     assert len(FailingBackend.attempted) == 1

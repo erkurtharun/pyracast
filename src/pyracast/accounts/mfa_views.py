@@ -33,7 +33,8 @@ from pyracast.accounts.step_up import StepUpAnswers, StrongestFactor, require_re
 def finish_factor_change(request: HttpRequest, authorized: str, trigger: str, notice: str) -> None:
     # allauth signals and mails an activation and a regeneration only after the commit; the other
     # sessions end and the notice is stored in the write's transaction, so the change never
-    # commits while they stay signed in or without its notice.
+    # commits while they stay signed in or without its notice, and a session signed in after the
+    # commit stays.
     user = cast(User, request.user)
     if account_state(user.pk) != authorized:
         revoke_other_sessions(request, user, trigger)

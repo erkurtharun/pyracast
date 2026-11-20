@@ -260,6 +260,7 @@
         "linkedAccounts": "Bağlı hesaplar",
         "disconnect": "Bağlantıyı kaldır",
         "removed": "Hesap bağlantısı kaldırıldı.",
+        "connected": "Hesap bağlandı.",
         "retry": "Tekrar dene",
         "loadError": "Bağlı hesaplar yüklenemedi.",
         "connectAccount": "Hesap bağla"

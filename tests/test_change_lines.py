@@ -40,7 +40,8 @@ from tests.support.social_accounts import (
     CALLBACK,
     PROVIDERS,
     begin,
-    complete,
+    callback,
+    finish,
     serve_provider_profile,
 )
 
@@ -207,7 +208,8 @@ def company_signup(_monkeypatch: pytest.MonkeyPatch) -> Attempt:
 
 def provider_signup(_monkeypatch: pytest.MonkeyPatch) -> Attempt:
     client = browser()
-    assert complete(client, begin(client))["Location"] == CALLBACK
+    assert callback(client, begin(client))["Location"] == CALLBACK
+    finish(client)
     details = {"email": "typed@example.com", "company_name": "Solar"}
     return Attempt(
         prepared(client, "auth/provider/signup", details),
@@ -311,9 +313,10 @@ def test_a_connection_refused_for_its_reauthentication_writes_its_refusal_as_it_
     events = capture_security_events(caplog, monkeypatch)
     written = len(events())
 
-    response = complete(client, state)
+    assert callback(client, state)["Location"] == CALLBACK
+    response = finish(client)
 
-    assert "error=permission_denied" in response["Location"]
+    assert response.status_code == 401
     assert [(line["event"], line.get("reason")) for line in events()[written:]] == [
         ("social_login_refused", "reauthentication_required")
     ]

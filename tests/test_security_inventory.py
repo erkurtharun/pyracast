@@ -160,7 +160,7 @@ def administrator_without_authenticator_social_sign_in(
     SocialAccount.objects.create(user=user, provider="google", uid="google-identity")
     with social_providers(monkeypatch):
         client = Client()
-        assert "error=permission_denied" in complete(client, begin(client))["Location"]
+        assert complete(client, begin(client)).status_code == 403
     return {"user_id": user.pk, "provider": "google", "reason": "mfa_not_provisioned"}
 
 
@@ -171,7 +171,7 @@ def inactive_account_social_sign_in(monkeypatch: pytest.MonkeyPatch) -> dict[str
     with social_providers(monkeypatch):
         client = Client()
         response = complete(client, begin(client))
-    assert "error=" in response["Location"]
+    assert response.status_code == 401
     assert client.get("/api/session/").json()["user"] is None
     return {"user_id": user.pk, "provider": "google", "reason": "inactive"}
 
