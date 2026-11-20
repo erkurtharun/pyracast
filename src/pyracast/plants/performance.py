@@ -30,7 +30,7 @@ from pyracast.plants.forecasting import (
     power_limit,
 )
 from pyracast.plants.measurement_policy import LEGACY_MEASUREMENT_POLICY, MEASUREMENT_POLICY
-from pyracast.plants.measurements import Measurement, select_measurements
+from pyracast.plants.measurements import Measurement, select_plant_measurements
 from pyracast.plants.models import CalibrationRun, ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.numerics import (
     CalibrationSample,
@@ -441,16 +441,6 @@ def forecast_performance(
     selected: tuple[CalibrationSample, ...] = ()
     baseline: tuple[CalibrationSample, ...] = ()
     if configuration is not None:
-        measurement_cache = {
-            configuration.pk: select_measurements(
-                configuration,
-                start,
-                end,
-                now,
-                policy=measurement_policy,
-                incident_revision_ids=None if historical else [],
-            )[0]
-        }
         cutoffs = {
             target: _selection_cutoff(target, zone, issuance_cutoff)
             if issuance_cutoff is not None
@@ -463,22 +453,24 @@ def forecast_performance(
         actuals = (
             _historical_actuals(configuration, start_date, end_date, now) if historical else None
         )
+        comparable_configurations = {configuration.pk: configuration} | {
+            row.configuration.pk: row.configuration
+            for row in issuances.values()
+            if row.configuration.measurement_basis == configuration.measurement_basis
+            and row.configuration.binding.timezone == zone
+        }
+        measurement_cache = select_plant_measurements(
+            list(comparable_configurations.values()),
+            start,
+            end,
+            now,
+            policy=measurement_policy,
+            incident_revision_ids=None if historical else [],
+        )
         for target, selection_cutoff in cutoffs.items():
             issuance = issuances.get(target)
             selected_configuration = issuance.configuration if issuance else configuration
-            comparable = (
-                selected_configuration.measurement_basis == configuration.measurement_basis
-                and selected_configuration.binding.timezone == zone
-            )
-            if comparable and selected_configuration.pk not in measurement_cache:
-                measurement_cache[selected_configuration.pk] = select_measurements(
-                    selected_configuration,
-                    start,
-                    end,
-                    now,
-                    policy=measurement_policy,
-                    incident_revision_ids=[],
-                )[0]
+            comparable = selected_configuration.pk in comparable_configurations
             if (
                 required_windows is not None
                 and comparable

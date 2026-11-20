@@ -237,6 +237,10 @@ def _archived_actual_source(
 def _valid_actual_intervals(snapshot: ForecastSnapshot) -> tuple[dict[str, Any], ...]:
     intervals = []
     for row in snapshot.normalized_intervals:
+        if not isinstance(row, dict) or not all(
+            isinstance(row.get(key), str) for key in ("start", "end")
+        ):
+            raise ValueError("Saved estimated-actual timestamps must be ISO strings.")
         start, end = (datetime.fromisoformat(row[key]) for key in ("start", "end"))
         if start.utcoffset() is None or end.utcoffset() is None or end <= start:
             continue

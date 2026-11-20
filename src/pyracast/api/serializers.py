@@ -198,17 +198,45 @@ class IrradianceSummaryOutput(serializers.Serializer[dict[str, Any]]):
     quality_flags = _flags()
 
 
+class VintageOutput(serializers.Serializer[dict[str, Any]]):
+    provider = serializers.CharField(required=False)
+    source_kind = serializers.CharField(required=False)
+    scope = serializers.CharField(required=False)
+    collected_at = serializers.DateTimeField(required=False)
+    issued_at = serializers.DateTimeField(allow_null=True, required=False)
+    binding_revision = serializers.CharField(allow_null=True, required=False)
+
+
+class IrradianceConfigurationOutput(serializers.Serializer[dict[str, Any]]):
+    capacity_kw = _optional_number()
+    dc_capacity_kw = _optional_number()
+    power_basis = serializers.CharField(required=False)
+    capacity_basis = serializers.CharField(required=False)
+    capacity_semantics_verified = serializers.BooleanField(required=False)
+    tilt_degrees = _optional_number()
+    azimuth_degrees = _optional_number()
+    efficiency_factor_percent = _optional_number()
+
+
 class IrradianceResultOutput(IrradianceSummaryOutput):
+    region_id = serializers.IntegerField(required=False)
     local_date = serializers.DateField(required=False)
     timezone = serializers.CharField(required=False)
+    surface = serializers.CharField(required=False)
     start = serializers.DateTimeField(required=False)
     end = serializers.DateTimeField(required=False)
     energy_mj_m2 = _optional_number()
     partial_energy_mj_m2 = _optional_number()
+    coverage_seconds = _optional_number()
+    valid_coverage_seconds = _optional_number()
     coverage_fraction = _optional_number()
+    model_version = serializers.CharField(required=False)
     daylight = DaylightOutput(required=False)
     intervals = IrradianceIntervalOutput(many=True, required=False)
+    vintage = VintageOutput(required=False)
+    configuration = IrradianceConfigurationOutput(required=False)
     provenance = ForecastProvenanceOutput(required=False)
+    reference_capacity_normalization = serializers.DictField(allow_null=True, required=False)
     weather_reference = WeatherReferenceOutput(required=False)
 
 

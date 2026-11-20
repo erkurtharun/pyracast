@@ -534,6 +534,15 @@ class PowerIntervalOutput(serializers.Serializer[dict[str, Any]]):
     source_kinds = serializers.ListField(child=serializers.CharField(), required=False)
 
 
+class PlantResultConfigurationOutput(serializers.Serializer[dict[str, Any]]):
+    id = serializers.IntegerField()
+    revision = serializers.IntegerField()
+    dc_capacity_mw = serializers.FloatField(allow_null=True)
+    inverter_capacity_mw = serializers.FloatField(allow_null=True)
+    export_limit_mw = serializers.FloatField(allow_null=True)
+    measurement_basis = serializers.CharField()
+
+
 class PlantForecastResultOutput(serializers.Serializer[dict[str, Any]]):
     """Energy in MWh and mean power in MW on the measurement basis of the plant."""
 
@@ -550,6 +559,7 @@ class PlantForecastResultOutput(serializers.Serializer[dict[str, Any]]):
     quality_flags = serializers.ListField(child=serializers.CharField(), required=False)
     daylight = DaylightOutput(required=False)
     intervals = PowerIntervalOutput(many=True, required=False)
+    configuration = PlantResultConfigurationOutput(required=False)
     provenance = ForecastProvenanceOutput(required=False)
     weather_reference = WeatherReferenceOutput(required=False)
 

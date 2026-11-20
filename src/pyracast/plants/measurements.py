@@ -1,19 +1,20 @@
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from math import isfinite
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from django.db.models import F, Q, QuerySet
+from django.db.models import F, Func, JSONField, Q, QuerySet
 
 from pyracast.epias import TIMEZONE
 from pyracast.forecasts.actuals import ACTUAL_COMPOSITION_POLICY, select_archived_actual_source
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.intraday import completed_actual_intervals
 from pyracast.forecasts.models import CollectionEndpoint
-from pyracast.incidents.evidence import pinned_incidents, select_incidents
+from pyracast.incidents.evidence import IncidentEvidence, pinned_incidents, select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import (
     EpiasCollectionJob,
@@ -70,31 +71,38 @@ class ProductionMeasurements:
     selection: MeasurementSelection
 
 
+# A JSON key lookup compares JSON values, so a column on the right-hand side is converted too.
+def _json(column: str) -> Func:
+    return Func(F(column), function="to_jsonb", output_field=JSONField())
+
+
 def _current_production(
-    configuration: PlantConfiguration, cutoff: datetime, policy: str
+    configurations: Sequence[PlantConfiguration], cutoff: datetime, policy: str
 ) -> QuerySet[EpiasSnapshot]:
-    connection = EpiasConnection.objects.filter(
-        plant_id=configuration.plant_id, enabled=True
-    ).first()
+    """Snapshots of the plant's enabled connection for its current provider identities;
+    the configurations belong to one plant."""
+    net_export = [row for row in configurations if row.measurement_basis == "net_export"]
     query = EpiasSnapshot.objects.filter(
-        configuration=configuration,
+        configuration__in=net_export,
         source_kind__in=_source_kinds(policy),
         available_at__lte=cutoff,
         collected_at__lte=cutoff,
     )
-    if configuration.measurement_basis != "net_export" or connection is None:
+    if not net_export:
         return query.none()
-    identities = Q(
-        source_kind="realtime_generation", provider_plant__id=connection.provider_plant_id
-    )
-    if connection.settlement_plant_id is not None:
-        identities |= Q(
-            source_kind="settlement_injection", provider_plant__id=connection.settlement_plant_id
-        )
     return query.filter(
-        connection=connection,
-        provider_plant__eic=connection.eic,
-    ).filter(identities)
+        Q(
+            source_kind="realtime_generation",
+            provider_plant__id=_json("connection__provider_plant_id"),
+        )
+        | Q(
+            source_kind="settlement_injection",
+            provider_plant__id=_json("connection__settlement_plant_id"),
+        ),
+        connection__plant_id=net_export[0].plant_id,
+        connection__enabled=True,
+        provider_plant__eic=_json("connection__eic"),
+    )
 
 
 def latest_measurement_day(
@@ -123,7 +131,7 @@ def latest_measurement_day(
         else None
     )
     days = (
-        _current_production(configuration, cutoff, policy)
+        _current_production([configuration], cutoff, policy)
         .filter(
             target_date__lte=(completed_before - timedelta(microseconds=1))
             .astimezone(TIMEZONE)
@@ -170,24 +178,38 @@ def select_measurements(
     incident_revision_ids: list[int] | None = None,
     policy: str = MEASUREMENT_POLICY,
 ) -> tuple[list[Measurement], list[int]]:
-    manual = observation_heads(cutoff=cutoff, observation_id_cutoff=observation_id_cutoff).filter(
-        configuration=configuration,
-        starts_at__lt=end,
-        ends_at__gt=start,
-        is_reverted=False,
-        ends_at__lte=cutoff,
-    )
-    selection = _select_measurement_sources(
-        configuration,
+    selection = _select_sources(
+        [configuration],
         start,
         end,
         cutoff,
-        list(manual),
+        observation_id_cutoff=observation_id_cutoff,
         production_snapshot_ids=production_snapshot_ids,
         incident_revision_ids=incident_revision_ids,
         policy=policy,
-    )
+    )[configuration.pk]
     return selection.effective, selection.snapshot_ids
+
+
+def select_plant_measurements(
+    configurations: Sequence[PlantConfiguration],
+    start: datetime,
+    end: datetime,
+    cutoff: datetime,
+    *,
+    incident_revision_ids: list[int] | None,
+    policy: str,
+) -> dict[int, list[Measurement]]:
+    """`select_measurements` for several configurations of one plant, one query per source."""
+    selections = _select_sources(
+        configurations,
+        start,
+        end,
+        cutoff,
+        incident_revision_ids=incident_revision_ids,
+        policy=policy,
+    )
+    return {pk: selection.effective for pk, selection in selections.items()}
 
 
 def select_production_measurements(
@@ -211,47 +233,73 @@ def select_production_measurements(
         and not row.is_reverted
         and row.ends_at <= cutoff
     ]
-    return ProductionMeasurements(
-        heads, _select_measurement_sources(configuration, start, end, cutoff, manual)
-    )
+    providers = _provider_selection([configuration], start, end, cutoff)[configuration.pk]
+    incidents = select_incidents(configuration.plant_id, start, end, cutoff)
+    return ProductionMeasurements(heads, _combine(start, end, manual, providers, incidents))
 
 
-def _select_measurement_sources(
-    configuration: PlantConfiguration,
+def _select_sources(
+    configurations: Sequence[PlantConfiguration],
     start: datetime,
     end: datetime,
     cutoff: datetime,
-    overlapping_manual: list[ProductionObservation],
     *,
+    observation_id_cutoff: int | None = None,
     production_snapshot_ids: list[int] | None = None,
     incident_revision_ids: list[int] | None = None,
     policy: str = MEASUREMENT_POLICY,
-) -> MeasurementSelection:
-    rows = [
-        Measurement(r.starts_at, r.ends_at, r.energy_mwh, r.quality, r.source, r.pk, r.created_at)
-        for r in overlapping_manual
-        if r.starts_at >= start and r.ends_at <= end
-    ]
-    providers, selected_ids = select_provider_measurements(
-        configuration,
+) -> dict[int, MeasurementSelection]:
+    manual: dict[int, list[ProductionObservation]] = {row.pk: [] for row in configurations}
+    for observation in observation_heads(
+        cutoff=cutoff, observation_id_cutoff=observation_id_cutoff
+    ).filter(
+        configuration__in=configurations,
+        starts_at__lt=end,
+        ends_at__gt=start,
+        is_reverted=False,
+        ends_at__lte=cutoff,
+    ):
+        manual[observation.configuration_id].append(observation)
+    providers = _provider_selection(
+        configurations,
         start,
         end,
         cutoff,
         production_snapshot_ids=production_snapshot_ids,
         policy=policy,
     )
+    plant_id = configurations[0].plant_id
+    incidents = (
+        select_incidents(plant_id, start, end, cutoff)
+        if incident_revision_ids is None
+        else pinned_incidents(plant_id, incident_revision_ids)
+    )
+    return {
+        row.pk: _combine(start, end, manual[row.pk], providers[row.pk], incidents)
+        for row in configurations
+    }
+
+
+def _combine(
+    start: datetime,
+    end: datetime,
+    overlapping_manual: list[ProductionObservation],
+    providers: tuple[list[Measurement], list[int]],
+    incidents: tuple[IncidentEvidence, ...],
+) -> MeasurementSelection:
+    provider_rows, selected_ids = providers
+    rows = [
+        Measurement(r.starts_at, r.ends_at, r.energy_mwh, r.quality, r.source, r.pk, r.created_at)
+        for r in overlapping_manual
+        if r.starts_at >= start and r.ends_at <= end
+    ]
     rows.extend(
         row
-        for row in providers
+        for row in provider_rows
         if not any(
             manual.starts_at < row.ends_at and manual.ends_at > row.starts_at
             for manual in overlapping_manual
         )
-    )
-    incidents = (
-        select_incidents(configuration.plant_id, start, end, cutoff)
-        if incident_revision_ids is None
-        else pinned_incidents(configuration.plant_id, incident_revision_ids)
     )
     rows = [
         replace(row, quality="outage")
@@ -267,7 +315,7 @@ def _select_measurement_sources(
     used = {row.snapshot.pk for row in rows if row.snapshot is not None}
     return MeasurementSelection(
         sorted(rows, key=lambda r: (r.starts_at, r.pk or 0)),
-        providers,
+        provider_rows,
         [pk for pk in selected_ids if pk in used],
     )
 
@@ -281,34 +329,72 @@ def select_provider_measurements(
     production_snapshot_ids: list[int] | None = None,
     policy: str = MEASUREMENT_POLICY,
 ) -> tuple[list[Measurement], list[int]]:
+    return _provider_selection(
+        [configuration],
+        start,
+        end,
+        cutoff,
+        production_snapshot_ids=production_snapshot_ids,
+        policy=policy,
+    )[configuration.pk]
+
+
+def _provider_selection(
+    configurations: Sequence[PlantConfiguration],
+    start: datetime,
+    end: datetime,
+    cutoff: datetime,
+    *,
+    production_snapshot_ids: list[int] | None = None,
+    policy: str = MEASUREMENT_POLICY,
+) -> dict[int, tuple[list[Measurement], list[int]]]:
     kinds = _source_kinds(policy)
     if production_snapshot_ids is None:
-        snapshots = _current_production(configuration, cutoff, policy)
+        snapshots = _current_production(configurations, cutoff, policy)
     else:
         snapshots = EpiasSnapshot.objects.filter(
-            configuration=configuration,
+            configuration__in=configurations,
             source_kind__in=kinds,
             available_at__lte=cutoff,
             collected_at__lte=cutoff,
             pk__in=production_snapshot_ids,
         )
-    snapshots = (
+    grouped: dict[int, list[EpiasSnapshot]] = {row.pk: [] for row in configurations}
+    for snapshot in (
         snapshots.filter(
             target_date__gte=start.astimezone(TIMEZONE).date(),
             target_date__lte=(end - timedelta(microseconds=1)).astimezone(TIMEZONE).date(),
         )
-        .order_by("target_date", "source_kind", "-collected_at", "-available_at", "-pk")
-        .distinct("target_date", "source_kind")
-    )
-    selected = sorted(
-        snapshots.select_related("job").defer("raw_payload"),
-        key=lambda item: kinds.index(item.source_kind),
-    )
+        .order_by(
+            "configuration_id",
+            "target_date",
+            "source_kind",
+            "-collected_at",
+            "-available_at",
+            "-pk",
+        )
+        .distinct("configuration_id", "target_date", "source_kind")
+        .select_related("job")
+        .defer("raw_payload")
+    ):
+        grouped[snapshot.configuration_id].append(snapshot)
+    return {pk: _provider_rows(pk, rows, kinds, start, end, cutoff) for pk, rows in grouped.items()}
+
+
+def _provider_rows(
+    configuration_id: int,
+    snapshots: list[EpiasSnapshot],
+    kinds: list[str],
+    start: datetime,
+    end: datetime,
+    cutoff: datetime,
+) -> tuple[list[Measurement], list[int]]:
+    selected = sorted(snapshots, key=lambda item: kinds.index(item.source_kind))
     provider_rows: dict[datetime, Measurement] = {}
     for snapshot in selected:
         if (
             snapshot.job.source_kind != snapshot.source_kind
-            or snapshot.job.configuration_id != configuration.pk
+            or snapshot.job.configuration_id != configuration_id
             or snapshot.normalization_policy != "hour-start-istanbul-v1"
         ):
             continue

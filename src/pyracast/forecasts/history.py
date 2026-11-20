@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 from typing import Literal, cast
 from zoneinfo import ZoneInfo
 
-from django.db.models import Q
+from django.db.models import F, Q
 
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
@@ -213,7 +213,13 @@ def saved_region_forecast(region: Region, target_date: date, now: datetime) -> d
             snapshot__binding_id=binding_id,
             snapshot__collected_at__lt=cutoff,
             published_at__lt=cutoff,
-        ) & (Q(snapshot__issued_at__isnull=True) | Q(snapshot__issued_at__lt=cutoff))
+        ) & (
+            Q(snapshot__issued_at__isnull=True)
+            | Q(
+                snapshot__issued_at__lt=cutoff,
+                snapshot__issued_at__lte=F("snapshot__collected_at"),
+            )
+        )
     saved = (
         ForecastResult.objects.select_related("snapshot__binding")
         .defer("snapshot__raw_payload", "snapshot__weather_payload")

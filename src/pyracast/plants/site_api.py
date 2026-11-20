@@ -21,14 +21,16 @@ class SiteInput(RegionInput, PlantInput):
 
 
 class SiteOutput(serializers.Serializer[Site]):
-    id = serializers.IntegerField(source="region.id")
-    name = serializers.CharField(source="region.name")
-    latitude = serializers.FloatField(source="region.latitude")
-    longitude = serializers.FloatField(source="region.longitude")
-    timezone = serializers.CharField(source="region.timezone")
-    revision = serializers.IntegerField(source="region.revision")
-    status = serializers.ChoiceField(source="region.status", choices=RegionStatus.choices)
-    plant = PlantOutput(allow_null=True)
+    id = serializers.IntegerField(source="region.id", read_only=True)
+    name = serializers.CharField(source="region.name", read_only=True)
+    latitude = serializers.FloatField(source="region.latitude", read_only=True)
+    longitude = serializers.FloatField(source="region.longitude", read_only=True)
+    timezone = serializers.CharField(source="region.timezone", read_only=True)
+    revision = serializers.IntegerField(source="region.revision", read_only=True)
+    status = serializers.ChoiceField(
+        source="region.status", choices=RegionStatus.choices, read_only=True
+    )
+    plant = PlantOutput(allow_null=True, read_only=True)
     reminder = serializers.SerializerMethodField()
 
     @extend_schema_field(ReminderSummaryOutput(allow_null=True))

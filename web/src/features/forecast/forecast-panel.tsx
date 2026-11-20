@@ -17,8 +17,6 @@ import {
     forecastCsvRows,
     scenarioIntervals,
     type ForecastResult,
-    type OutageScenario,
-    type ProductionDiagnostic,
 } from "./panel/model";
 
 export function ForecastPanel({
@@ -39,12 +37,8 @@ export function ForecastPanel({
         return (
             <ForecastUnavailable forecast={forecast} electrical={electrical} />
         );
-    const scenarios = forecast as Forecast & {
-        outage_scenario?: OutageScenario | null;
-        production_diagnostic?: ProductionDiagnostic | null;
-    };
-    const scenario = (electrical ? scenarios.outage_scenario : null) ?? null;
-    const diagnostic = electrical ? scenarios.production_diagnostic : null;
+    const scenario = (electrical ? forecast.outage_scenario : null) ?? null;
+    const diagnostic = electrical ? forecast.production_diagnostic : null;
     const result = forecast.result as ForecastResult;
     const affectedRows = (
         scenario && Array.isArray(scenario.result.intervals)

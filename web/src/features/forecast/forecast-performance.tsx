@@ -195,7 +195,7 @@ function PerformanceResults({
                                         value={data.matched_days}
                                     />
                                 </div>
-                                {data.comparison === "historical_model" && (
+                                {historical && (
                                     <p className="fine">
                                         {t("skill_days", {
                                             count: data.skill_days,
