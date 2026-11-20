@@ -44,7 +44,11 @@
         "tooManyRequests": "Too many requests. Wait a few minutes and try again.",
         "codeRequested": "A new code was requested.",
         "forgotPassword": "Forgot password?",
-        "passwordChanged": "Password saved. Sign in with your new password."
+        "passwordChanged": "Password saved. Sign in with your new password.",
+        "signInFailed": "Sign-in failed",
+        "registrationFailed": "The account was not created",
+        "verificationFailed": "The email address was not verified",
+        "resetFailed": "The password was not reset"
     },
     "Security": {
         "sessionExpired": "Your session has expired. Please sign in again.",

@@ -2,6 +2,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api/errors";
+import { useErrorMessage } from "@/ui/form";
 import { authRequest } from "@/lib/auth-api";
 
 // Matches the confirm_email rate limit of one code per minute.
@@ -16,6 +17,7 @@ export function ResendCode({
     onSent: () => void;
 }) {
     const t = useTranslations("Auth");
+    const errorMessage = useErrorMessage();
     const [availableAt, setAvailableAt] = useState(
         sentAt && sentAt + RESEND_MILLISECONDS,
     );
@@ -67,7 +69,7 @@ export function ResendCode({
                         ? t("resendWait")
                         : status === 409
                           ? t("resendLimit")
-                          : (error as Error).message,
+                          : errorMessage(error),
                 final: status === 409,
             });
         }

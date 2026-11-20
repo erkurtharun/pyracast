@@ -44,7 +44,11 @@
         "tooManyRequests": "Çok fazla istek gönderildi. Birkaç dakika bekleyip tekrar deneyin.",
         "codeRequested": "Yeni bir kod istendi.",
         "forgotPassword": "Şifrenizi mi unuttunuz?",
-        "passwordChanged": "Parolanız kaydedildi. Yeni parolanızla giriş yapın."
+        "passwordChanged": "Parolanız kaydedildi. Yeni parolanızla giriş yapın.",
+        "signInFailed": "Oturum açılamadı",
+        "registrationFailed": "Hesap oluşturulamadı",
+        "verificationFailed": "E-posta adresi doğrulanamadı",
+        "resetFailed": "Parola sıfırlanamadı"
     },
     "Security": {
         "sessionExpired": "Oturumunuzun süresi doldu. Tekrar giriş yapın.",

@@ -8,7 +8,8 @@ import { loadSession, useSessionState } from "@/lib/session-client";
 import { isLanguage } from "@/i18n/language";
 import { publicPath } from "@/lib/public-metadata";
 import { addressWithout, appQuery, callbackParams, routes } from "@/lib/routes";
-import { ActionForm, Notice } from "@/ui/ui";
+import { ActionForm } from "@/ui/form";
+import { Notice } from "@/ui/ui";
 import { SocialProviderButtons } from "./social-provider-buttons";
 import { LanguageSelect } from "@/ui/language-select";
 import { clearWorkspaceInvitation } from "@/features/workspace/workspace-invitation";
@@ -165,7 +166,7 @@ export function Auth({
                     <nav className="auth-mode-nav" aria-label={t("access")}>
                         <button
                             type="button"
-                            aria-pressed={mode === "login"}
+                            aria-current={mode === "login" ? "page" : undefined}
                             onClick={() => {
                                 setMode("login");
                                 setMessage("");
@@ -175,7 +176,9 @@ export function Auth({
                         </button>
                         <button
                             type="button"
-                            aria-pressed={mode === "register"}
+                            aria-current={
+                                mode === "register" ? "page" : undefined
+                            }
                             onClick={() => {
                                 setMode("register");
                                 setMessage("");
@@ -198,6 +201,19 @@ export function Auth({
                     {message && <p role="status">{t(message)}</p>}
                     <ActionForm
                         key={mode}
+                        permitted
+                        success={null}
+                        errorTitle={
+                            {
+                                login: t("signInFailed"),
+                                mfa: t("signInFailed"),
+                                register: t("registrationFailed"),
+                                socialSignup: t("registrationFailed"),
+                                verify: t("verificationFailed"),
+                                forgot: t("resetFailed"),
+                                reset: t("resetFailed"),
+                            }[mode]
+                        }
                         submit={
                             {
                                 login: t("signIn"),

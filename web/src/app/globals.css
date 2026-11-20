@@ -1693,7 +1693,6 @@ pre,
 }
 .auth-mode-nav button.active,
 .auth-mode-nav button[aria-current="page"],
-.auth-mode-nav button[aria-pressed="true"],
 .auth-mode-nav button[aria-selected="true"] {
     background: var(--white);
     color: var(--ink);
