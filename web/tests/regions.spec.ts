@@ -31,14 +31,12 @@ test("renames a plant without changing its location", async ({ page }) => {
     await page.getByLabel("Plant name").fill("New name");
     await page.getByRole("button", { name: "Save configuration" }).click();
     await expect(page.getByRole("heading", { name: "New name" })).toBeVisible();
-    await page
-        .locator("details > summary")
-        .filter({ hasText: /^Location$/ })
-        .click();
+    await page.getByRole("button", { name: "Location", exact: true }).click();
     await expect(
-        page.getByText("36.9\u00b0, 30.7\u00b0 \u00b7 Europe/Istanbul", {
-            exact: true,
-        }),
+        page.getByText(
+            "Current location: 36.9\u00b0, 30.7\u00b0 \u00b7 Europe/Istanbul",
+            { exact: true },
+        ),
     ).toBeVisible();
     await page.getByRole("button", { name: "All plants" }).click();
     await expect(page.getByRole("button", { name: /New name/ })).toBeVisible();
@@ -111,7 +109,7 @@ test("requests a location change and preserves the current location", async ({
     await expect(
         page.getByText("Current location: 36.9°, 30.7° · Europe/Istanbul"),
     ).toBeVisible();
-    await expect(page.getByText("pending", { exact: true })).toBeVisible();
+    await expect(page.getByText("In review", { exact: true })).toBeVisible();
     expect(
         await page.evaluate(
             () => document.documentElement.scrollWidth <= innerWidth,

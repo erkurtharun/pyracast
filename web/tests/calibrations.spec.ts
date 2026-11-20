@@ -143,7 +143,7 @@ test("superseded runs are labelled in Turkish", async ({ page, baseURL }) => {
         .getByRole("button", { name: "Kalibrasyon", exact: true })
         .click();
     const row = page.getByRole("row", { name: /#40/ });
-    await expect(row).toContainText("yerini yenisi aldı");
+    await expect(row).toContainText("Yerini yenisi aldı");
     await expect(row).not.toContainText("superseded");
 });
 

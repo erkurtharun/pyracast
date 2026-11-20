@@ -19,9 +19,17 @@ export function RegionSettings({
     scope: RegionScope;
 }) {
     const t = useTranslations("RegionSettings");
+    const format = useFormat();
     return (
         <section className="panel">
             <h2>{t("plantLocation")}</h2>
+            <p>
+                {t("currentLocation", {
+                    latitude: format.number(region.latitude, 6),
+                    longitude: format.number(region.longitude, 6),
+                    timezone: region.timezone,
+                })}
+            </p>
             <details>
                 <summary>{t("requestLocationChange")}</summary>
                 <LocationRequests region={region} scope={scope} />
@@ -51,12 +59,6 @@ function LocationRequests({
     });
     return (
         <>
-            <p>
-                {t("currentLocation", {
-                    ...place(region),
-                    timezone: region.timezone,
-                })}
-            </p>
             <p>{t("approvalHelp")}</p>
             <Resource resource={requests} loading={t("loadingRequests")}>
                 {() => (

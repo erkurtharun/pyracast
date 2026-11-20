@@ -243,7 +243,6 @@
         "partiallyCollected": "Kısmen toplandı",
         "chooseTimes": "Tahmin verilerinin toplanacağı saatleri santral saatine göre seçin.",
         "collectionTimes": "Veri toplama saatleri",
-        "time": "Saat {index, number}",
         "collectionTime": "Veri toplama saati {index, number}",
         "removeTime": "Veri toplama saatini kaldır: {index, number}",
         "dailyHistory": "Günlük geçmiş: {time}. Duraklatma, geçmiş verilerinin toplanmasını da durdurur.",

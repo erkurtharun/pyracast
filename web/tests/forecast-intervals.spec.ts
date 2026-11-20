@@ -157,7 +157,7 @@ test("Turkish mixed sources stay readable on mobile without empty quality column
     await page.setViewportSize({ width: 390, height: 844 });
     await openForecast(page, { mixed: true, language: "tr" });
     await expect(
-        page.getByText("Gerçekleşen tahmini + öngörü", { exact: true }),
+        page.locator(".tag", { hasText: /^Gerçekleşen tahmini \+ öngörü$/ }),
     ).toBeVisible();
     await page.locator(".interval-details > summary").click();
     const table = page.getByRole("table");
@@ -185,7 +185,7 @@ for (const electrical of [true, false]) {
     }, testInfo) => {
         await openForecast(page, { electrical, mixed: true });
         await expect(
-            page.getByText("Estimated + forecast", { exact: true }),
+            page.locator(".tag", { hasText: /^Estimated \+ forecast$/ }),
         ).toBeVisible();
         await expect(
             page.getByText(

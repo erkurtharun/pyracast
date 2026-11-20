@@ -94,7 +94,7 @@ test("automatic forecast survives midnight until historical estimates arrive", a
     await page.getByText("View interval data (1 interval)").click();
     await expect(
         page.getByRole("table", {
-            name: "Forecast intervals, Europe/Istanbul",
+            name: "Forecast intervals",
         }),
     ).toBeVisible();
 
@@ -106,7 +106,7 @@ test("automatic forecast survives midnight until historical estimates arrive", a
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-11-14");
     await expect(
         page.getByRole("table", {
-            name: "Estimated actual intervals, Europe/Istanbul",
+            name: "Estimated actual intervals",
         }),
     ).toBeVisible();
 });

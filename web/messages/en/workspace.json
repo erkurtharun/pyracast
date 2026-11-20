@@ -243,7 +243,6 @@
         "partiallyCollected": "Partially collected",
         "chooseTimes": "Choose forecast collection times in plant time.",
         "collectionTimes": "Collection times",
-        "time": "Time {index, number}",
         "collectionTime": "Collection time {index, number}",
         "removeTime": "Remove collection time {index, number}",
         "dailyHistory": "Daily history: {time}. Pausing also stops history collection.",

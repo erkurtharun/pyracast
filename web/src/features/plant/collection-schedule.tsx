@@ -124,13 +124,10 @@ function ScheduleEditor({
                         <div className="button-group" key={index}>
                             <label className="field">
                                 <span className="sr-only">
-                                    {t("time", { index: index + 1 })}
+                                    {t("collectionTime", { index: index + 1 })}
                                 </span>
                                 <input
                                     type="time"
-                                    aria-label={t("collectionTime", {
-                                        index: index + 1,
-                                    })}
                                     value={time}
                                     onChange={(event) =>
                                         setTimes(

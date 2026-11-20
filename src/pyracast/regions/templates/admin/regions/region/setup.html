@@ -8,7 +8,7 @@
   <p class="lead"><a href="{% url 'admin:workspace_tenant' region.tenant_id %}">{{ region.tenant.name }}</a>{% if plant_summary.plant_name and plant_summary.plant_name != region.name %} · {{ region.name }}{% endif %}</p>
   <dl class="state-strip">
     <div><dt>{% translate "Review" context "review status" %}</dt><dd><span class="badge badge--{{ region.status|slugify }}">{{ region.get_status_display }}</span></dd></div>
-    <div><dt>{% translate "Connection" %}</dt><dd>{% if plant_summary %}<span class="badge badge--{{ plant_summary.connection|slugify }}">{% translate plant_summary.connection %}</span>{% elif binding %}<span class="badge">{% translate binding.health|capfirst %}</span>{% else %}<span class="badge badge--not-configured">{% translate "Not configured" %}</span>{% endif %}</dd></div>
+    <div><dt>{% translate "Connection" %}</dt><dd>{% if plant_summary %}<span class="badge badge--{{ plant_summary.connection|slugify }}">{% translate plant_summary.connection %}</span>{% elif binding %}<span class="badge">{% translate binding.get_health_display %}</span>{% else %}<span class="badge badge--not-configured">{% translate "Not configured" %}</span>{% endif %}</dd></div>
     <div><dt>{% translate "Last saved forecast" %}</dt><dd>{% if last_collected_at %}<time datetime="{{ last_collected_at|date:'c' }}">{{ last_collected_at|date:"j M Y, H:i T" }}</time>{% else %}<span class="muted">{% translate "None saved yet" %}</span>{% endif %}</dd></div>
   </dl>
 {% endblock %}

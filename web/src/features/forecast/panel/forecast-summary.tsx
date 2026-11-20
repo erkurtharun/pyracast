@@ -3,6 +3,7 @@ import { useTranslations } from "next-intl";
 import type { Forecast } from "@/lib/api";
 import { CsvDownload } from "@/ui/csv-download";
 import { Notice, Stat, Tag } from "@/ui/ui";
+import { StatusTag } from "@/ui/vocabulary";
 import type { ForecastInterval as Interval } from "../forecast-intervals";
 import { WeatherReferenceCard } from "../weather-reference";
 import { useFormat } from "@/lib/format/use-format";
@@ -63,9 +64,7 @@ export function ForecastSummary({
                             ? t("electrical_generation")
                             : t("irradiance")}
                     </h2>
-                    <p className="fine">
-                        {forecast.date} · {forecast.timezone}
-                    </p>
+                    <p className="fine">{forecast.date}</p>
                     {forecast.source_kind === "estimated_actuals" && (
                         <p className="fine">
                             {t("satellitemodel_estimates_not_meter_readings")}
@@ -112,7 +111,7 @@ export function ForecastSummary({
                                 : {}),
                         }}
                     />
-                    <Tag>{forecast.freshness}</Tag>
+                    <StatusTag group="Freshness" value={forecast.freshness} />
                     {forecast.source_kind === "mixed" && (
                         <Tag>{t("updated_estimates_and_forecast")}</Tag>
                     )}

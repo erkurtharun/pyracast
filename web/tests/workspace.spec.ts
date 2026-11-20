@@ -965,14 +965,14 @@ test("region collection schedule validates and saves distinct local times", asyn
     await expect(
         page.getByText("Enter a valid time in every row."),
     ).toBeVisible();
-    await page.getByLabel("Collection time 2").fill("09:00");
+    await page.getByLabel("Collection time 2", { exact: true }).fill("09:00");
     await page
         .getByRole("button", { name: "Save collection schedule" })
         .click();
     await expect(
         page.getByText("Each collection time must be unique."),
     ).toBeVisible();
-    await page.getByLabel("Collection time 2").fill("11:00");
+    await page.getByLabel("Collection time 2", { exact: true }).fill("11:00");
     schedule.last_success_at = "2026-01-01T06:00:00Z";
     schedule.effective_from = "2026-01-01T00:00:30Z";
     const refreshed = page.waitForResponse(
@@ -982,23 +982,31 @@ test("region collection schedule validates and saves distinct local times", asyn
     );
     await page.clock.fastForward(30_000);
     await refreshed;
-    await expect(page.getByLabel("Collection time 2")).toHaveValue("11:00");
+    await expect(
+        page.getByLabel("Collection time 2", { exact: true }),
+    ).toHaveValue("11:00");
     await expect(
         page.getByText("Last successful collection").locator(".."),
     ).toContainText("Jan 1, 2026, 9:00 AM");
     expect(reads).toBe(2);
     await page.getByRole("button", { name: "+ Add time" }).click();
-    await page.getByLabel("Collection time 3").fill("10:00");
+    await page.getByLabel("Collection time 3", { exact: true }).fill("10:00");
     await page
         .getByRole("button", { name: "Save collection schedule" })
         .click();
-    await expect(page.getByLabel("Collection time 2")).toHaveValue("10:00");
-    await expect(page.getByLabel("Collection time 3")).toHaveValue("11:00");
+    await expect(
+        page.getByLabel("Collection time 2", { exact: true }),
+    ).toHaveValue("10:00");
+    await expect(
+        page.getByLabel("Collection time 3", { exact: true }),
+    ).toHaveValue("11:00");
     expect(saves).toBe(1);
     await page
         .getByRole("button", { name: "Remove collection time 3" })
         .click();
-    await expect(page.getByLabel("Collection time 3")).toHaveCount(0);
+    await expect(
+        page.getByLabel("Collection time 3", { exact: true }),
+    ).toHaveCount(0);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Email reminders" }).click();
     await page.getByText("Reminder details", { exact: true }).click();
