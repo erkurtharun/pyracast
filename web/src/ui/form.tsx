@@ -202,35 +202,27 @@ export function ControlField(
 
 export function CheckboxField({
     label,
-    name,
-    checked,
-    required,
-    disabled,
     onChange,
+    ...input
 }: {
     label: string;
     name?: string;
     checked?: boolean;
+    defaultChecked?: boolean;
     required?: boolean;
     disabled?: boolean;
     onChange?: (checked: boolean) => void;
 }) {
     return (
-        <label className="field">
-            <span>
-                <input
-                    type="checkbox"
-                    name={name}
-                    checked={checked}
-                    required={required}
-                    disabled={disabled}
-                    onChange={
-                        onChange &&
-                        ((event) => onChange(event.target.checked))
-                    }
-                />{" "}
-                {label}
-            </span>
+        <label className="check-field">
+            <input
+                {...input}
+                type="checkbox"
+                onChange={
+                    onChange && ((event) => onChange(event.target.checked))
+                }
+            />{" "}
+            {label}
         </label>
     );
 }
@@ -368,7 +360,8 @@ export function ActionForm({
                     await onSubmit(data);
                     setState({ status: "success" });
                 } catch (error) {
-                    const fields = error instanceof ApiError ? error.fields : {};
+                    const fields =
+                        error instanceof ApiError ? error.fields : {};
                     setState({
                         status: "error",
                         message: errorMessage(error),

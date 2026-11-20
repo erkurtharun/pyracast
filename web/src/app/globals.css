@@ -1149,7 +1149,8 @@ pre,
     width: 100%;
     min-width: 0;
 }
-.production-controls .field {
+.production-controls .field,
+.production-controls .check-field {
     margin: 0;
 }
 .production-refresh {
