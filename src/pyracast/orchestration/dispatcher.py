@@ -10,7 +10,6 @@ from django.db import close_old_connections
 from django.utils import timezone
 from dramatiq import Actor
 
-from pyracast.accounts.retention import sweep_accounts
 from pyracast.background.broker import make_broker
 from pyracast.background.failures import (
     ItemsFailedError,
@@ -21,7 +20,6 @@ from pyracast.background.failures import (
 from pyracast.forecasts.models import DispatcherStatus
 from pyracast.forecasts.runtime import dispatch_collections
 from pyracast.metering.runtime import dispatch_epias
-from pyracast.notifications.outbox import purge_finished_mail
 from pyracast.notifications.runtime import dispatch_notifications, publish_outbound_mail
 from pyracast.orchestration.kinds import (
     CALIBRATION,
@@ -33,6 +31,7 @@ from pyracast.orchestration.kinds import (
 )
 from pyracast.plants.runtime import dispatch_calibrations
 from pyracast.purge_warning import warn_before_purge
+from pyracast.retention import RETENTION
 from pyracast.shutdown import ShutdownRequest
 from pyracast.trash import purge_expired
 
@@ -70,7 +69,8 @@ def _retention() -> PhaseOutcome:
     # them because its items are already logged one by one.
     now = timezone.now()
     failed = 0
-    for step in (purge_expired, warn_before_purge, sweep_accounts, purge_finished_mail):
+    steps: list[Callable[[datetime], object]] = [purge_expired, warn_before_purge]
+    for step in (*steps, *(entry.run for entry in RETENTION)):
         try:
             step(now)
         except ItemsFailedError as error:
