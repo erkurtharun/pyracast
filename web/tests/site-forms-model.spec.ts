@@ -3,6 +3,8 @@ import {
     binnedAt,
     canonicalCoordinate,
     coordinatePair,
+    coordinatePattern,
+    coordinateValue,
     sameLocation,
     supportedZones,
     zoneChoices,
@@ -37,6 +39,76 @@ test("a single number with a decimal comma is never split into a pair", () => {
         "41,0082.5",
     ])
         expect(coordinatePair(text)).toBeNull();
+});
+
+test("a single coordinate with one decimal comma or point is that number", () => {
+    const accepted = [
+        ["latitude", "41,0082", 41.0082],
+        ["latitude", "41.0082", 41.0082],
+        ["longitude", "17,5", 17.5],
+        ["longitude", "17.5", 17.5],
+        ["latitude", "-36,9", -36.9],
+        ["latitude", "1,234", 1.234],
+        ["latitude", "0", 0],
+        ["latitude", "90", 90],
+        ["latitude", "-90,000", -90],
+        ["longitude", "-180", -180],
+        ["longitude", "179,999999", 179.999999],
+        ["longitude", "180,0", 180],
+    ] as const;
+    for (const [axis, text, value] of accepted)
+        expect(coordinateValue(axis, text), text).toBe(value);
+});
+
+const refusedCoordinates = [
+    ["latitude", ""],
+    ["latitude", "41,00,82"],
+    ["latitude", "41,0082.5"],
+    ["latitude", "41.0082,5"],
+    ["latitude", "1.234,5"],
+    ["latitude", "1,234.5"],
+    ["latitude", "1 234"],
+    ["latitude", "41, 0082"],
+    ["latitude", " 41,0082"],
+    ["latitude", "41,0082 "],
+    ["latitude", "+41,0082"],
+    ["latitude", "--41"],
+    ["latitude", "41-"],
+    ["latitude", "−41"],
+    ["latitude", "41,"],
+    ["latitude", ",5"],
+    ["latitude", "041,5"],
+    ["latitude", "4e1"],
+    ["latitude", "NaN"],
+    ["latitude", "Infinity"],
+    ["latitude", "90,1"],
+    ["latitude", "-90.000001"],
+    ["latitude", "410082"],
+    ["longitude", "180,5"],
+    ["longitude", "-181"],
+    ["longitude", "175,0,1"],
+] as const;
+
+test("a coordinate that is not one plain number in range is refused", () => {
+    for (const [axis, text] of refusedCoordinates)
+        expect(coordinateValue(axis, text), text).toBeNaN();
+});
+
+test("the coordinate field's pattern accepts exactly the values the rule accepts", () => {
+    const samples = [
+        ...refusedCoordinates,
+        ["latitude", "41,0082"],
+        ["latitude", "-90"],
+        ["longitude", "17,5"],
+        ["longitude", "-179.5"],
+    ] as const;
+    for (const [axis, text] of samples) {
+        // Browsers compile a pattern attribute whole, with the v flag.
+        const field = new RegExp(`^(?:${coordinatePattern(axis)})$`, "v");
+        expect(field.test(text), text).toBe(
+            !Number.isNaN(coordinateValue(axis, text)),
+        );
+    }
 });
 
 test("the zone list adds UTC and the current zone to the browser's list, once and sorted", () => {

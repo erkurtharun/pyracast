@@ -123,3 +123,58 @@ test("a form its own script sends is never blocked by the console guard", async 
         await close(server);
     }
 });
+
+test("a console latitude splits a pasted pair only at a separator a decimal comma cannot be", async ({
+    page,
+}) => {
+    const { server, answerPosts, origin } =
+        await serveConsolePage(`<!doctype html><html lang="en"><title>Location</title>
+          <form method="post">
+            <label>Latitude <input name="latitude" data-coordinate-pair="longitude"></label>
+            <label>Longitude <input name="longitude"></label>
+          </form><script src="/admin-workspace.js" defer></script></html>`);
+    try {
+        await page.goto(`${origin}/admin/plants/7/details/`);
+        const latitude = page.getByLabel("Latitude");
+        const longitude = page.getByLabel("Longitude");
+        const paste = (text: string) =>
+            latitude.evaluate((element, text) => {
+                const data = new DataTransfer();
+                data.setData("text/plain", text);
+                const event = new ClipboardEvent("paste", {
+                    clipboardData: data,
+                    bubbles: true,
+                    cancelable: true,
+                });
+                element.dispatchEvent(event);
+                return event.defaultPrevented;
+            }, text);
+        for (const [text, first, second] of [
+            ["41.0082, 28.9784", "41.0082", "28.9784"],
+            ["41.0082,28.9784", "41.0082", "28.9784"],
+            [" -41.5 ; 28.9 ", "-41.5", "28.9"],
+            ["41\t-28.9", "41", "-28.9"],
+        ]) {
+            await latitude.fill("");
+            await longitude.fill("");
+            expect(await paste(text), text).toBe(true);
+            await expect(latitude).toHaveValue(first);
+            await expect(longitude).toHaveValue(second);
+        }
+        for (const text of [
+            "41,0082",
+            "-41,-28",
+            "41,5;28,9",
+            "41,0082, 28.9",
+            "41.5, 0082",
+        ]) {
+            await latitude.fill("");
+            await longitude.fill("");
+            expect(await paste(text), text).toBe(false);
+            await expect(longitude).toHaveValue("");
+        }
+    } finally {
+        answerPosts();
+        await close(server);
+    }
+});

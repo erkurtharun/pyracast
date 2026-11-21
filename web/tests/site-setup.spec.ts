@@ -1,3 +1,4 @@
+import type { Locator } from "@playwright/test";
 import { test, expect, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
 import { mockApi, paged, plant, region, tenantRow } from "./support/workspace";
@@ -692,4 +693,205 @@ test("an approved plant whose connection stopped says so where the portfolio ope
     await expect(
         page.getByRole("status").filter({ hasText: marker }),
     ).toBeVisible();
+});
+
+type Entry = "typed" | "pasted";
+
+// A synthetic paste runs the page's paste handlers but has no default action, so the text is
+// then inserted as the browser's own paste inserts it.
+async function enter(field: Locator, text: string, entry: Entry) {
+    await field.fill("");
+    if (entry === "typed") {
+        await field.pressSequentially(text);
+        return;
+    }
+    await field.focus();
+    const prevented = await field.evaluate((element, text) => {
+        const data = new DataTransfer();
+        data.setData("text/plain", text);
+        const event = new ClipboardEvent("paste", {
+            clipboardData: data,
+            bubbles: true,
+            cancelable: true,
+        });
+        element.dispatchEvent(event);
+        return event.defaultPrevented;
+    }, text);
+    expect(prevented).toBe(false);
+    await field.page().keyboard.insertText(text);
+}
+
+const labels = {
+    en: {
+        addPlant: "Add a plant",
+        name: "Plant name",
+        latitude: "Latitude (°)",
+        longitude: "Longitude (°)",
+        continue: "Continue",
+        capacity: "DC nameplate capacity (MW)",
+        submit: "Submit plant for approval",
+        review: "41.0082°, 17.5°",
+        requestChange: "Request location change",
+        submitRequest: "Submit location request",
+    },
+    tr: {
+        addPlant: "Santral ekle",
+        name: "Santral adı",
+        latitude: "Enlem (°)",
+        longitude: "Boylam (°)",
+        continue: "Devam et",
+        capacity: "DC kurulu güç (MW)",
+        submit: "Santrali onaya gönder",
+        review: "41,0082°, 17,5°",
+        requestChange: "Konum değişikliği iste",
+        submitRequest: "Konum talebini gönder",
+    },
+} as const;
+
+for (const language of ["en", "tr"] as const)
+    for (const locale of ["en-US", "tr-TR"])
+        test.describe(`a ${language} session in a ${locale} browser`, () => {
+            test.use({ locale });
+            const text = labels[language];
+            for (const entry of ["typed", "pasted"] as const) {
+                test(`decimal commas ${entry} into the wizard's coordinates are sent as those numbers`, async ({
+                    page,
+                    baseURL,
+                }) => {
+                    await mockApi(page, { empty: true });
+                    await page.context().addCookies([
+                        {
+                            name: "pyracast_language",
+                            value: language,
+                            url: baseURL!,
+                        },
+                    ]);
+                    const sent: unknown[] = [];
+                    await page.route("**/api/tenants/1/sites/", (route) => {
+                        if (route.request().method() === "POST")
+                            sent.push(route.request().postDataJSON());
+                        return route.fallback();
+                    });
+                    await page.goto("/app/");
+                    await page
+                        .getByRole("button", { name: text.addPlant })
+                        .click();
+                    await page
+                        .getByLabel(text.name, { exact: true })
+                        .fill("West plant");
+                    const latitude = page.getByLabel(text.latitude);
+                    const longitude = page.getByLabel(text.longitude);
+                    await expect(latitude).toHaveAttribute(
+                        "inputmode",
+                        "decimal",
+                    );
+                    await expect(longitude).toHaveAttribute(
+                        "inputmode",
+                        "decimal",
+                    );
+                    await enter(latitude, "41,0082", entry);
+                    await enter(longitude, "17,5", entry);
+                    await expect(latitude).toHaveValue("41,0082");
+                    await expect(longitude).toHaveValue("17,5");
+                    await page
+                        .getByRole("button", {
+                            name: text.continue,
+                            exact: true,
+                        })
+                        .click();
+                    await page.getByLabel(text.capacity).fill("5");
+                    await page
+                        .getByRole("button", {
+                            name: text.continue,
+                            exact: true,
+                        })
+                        .click();
+                    await expect(
+                        page.getByText(text.review, { exact: true }),
+                    ).toBeVisible();
+                    await page
+                        .getByRole("button", { name: text.submit })
+                        .click();
+                    await expect.poll(() => sent.length).toBe(1);
+                    expect(sent[0]).toMatchObject({
+                        latitude: 41.0082,
+                        longitude: 17.5,
+                    });
+                });
+
+                test(`decimal commas ${entry} into a location request are sent as those numbers`, async ({
+                    page,
+                    baseURL,
+                }) => {
+                    await mockApi(page);
+                    await page.context().addCookies([
+                        {
+                            name: "pyracast_language",
+                            value: language,
+                            url: baseURL!,
+                        },
+                    ]);
+                    const sent: unknown[] = [];
+                    await page.route(
+                        "**/location-change-requests/",
+                        (route) => {
+                            if (route.request().method() !== "POST")
+                                return route.fallback();
+                            sent.push(route.request().postDataJSON());
+                            return route.fulfill({
+                                status: 400,
+                                json: errorBody(
+                                    "invalid_request",
+                                    "Please try again.",
+                                ),
+                            });
+                        },
+                    );
+                    await page.goto(
+                        "/app/w/1/plants/11/settings/?view=location",
+                    );
+                    await page.getByText(text.requestChange).click();
+                    const latitude = page.getByLabel(text.latitude);
+                    const longitude = page.getByLabel(text.longitude);
+                    await expect(latitude).toHaveAttribute(
+                        "inputmode",
+                        "decimal",
+                    );
+                    await expect(longitude).toHaveAttribute(
+                        "inputmode",
+                        "decimal",
+                    );
+                    await enter(latitude, "41,0082", entry);
+                    await enter(longitude, "17,5", entry);
+                    await page
+                        .getByRole("button", { name: text.submitRequest })
+                        .click();
+                    await expect.poll(() => sent.length).toBe(1);
+                    expect(sent[0]).toMatchObject({
+                        latitude: 41.0082,
+                        longitude: 17.5,
+                    });
+                });
+            }
+        });
+
+test("a coordinate with both a comma and a point stays on the location step and says which numbers it takes", async ({
+    page,
+}) => {
+    await mockApi(page, { empty: true });
+    await openWizard(page);
+    const latitude = page.getByLabel("Latitude (°)");
+    await enter(latitude, "1.234,5", "typed");
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(latitude).toBeFocused();
+    expect(
+        await latitude.evaluate(
+            (element: HTMLInputElement) => element.validity.patternMismatch,
+        ),
+    ).toBe(true);
+    await expect(latitude).toHaveAttribute(
+        "title",
+        "A latitude from -90 to 90, such as 41.0082 or 41,0082.",
+    );
+    await expect(page.getByLabel("DC nameplate capacity (MW)")).toBeHidden();
 });
