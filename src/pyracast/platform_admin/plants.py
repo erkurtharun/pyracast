@@ -7,7 +7,7 @@ from django import forms
 from django.contrib import messages
 from django.contrib.auth.models import User
 from django.db import models, transaction
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
@@ -267,9 +267,12 @@ def plant_details_page(
     )
 
     def save() -> HttpResponse:
-        parameters_changed, location_changed = save_plant_details(
-            cast(User, request.user), region.pk, form
-        )
+        try:
+            parameters_changed, location_changed = save_plant_details(
+                cast(User, request.user), region.pk, form
+            )
+        except (Region.DoesNotExist, Plant.DoesNotExist) as missing:
+            raise Http404 from missing
         if location_changed:
             messages.success(
                 request,
