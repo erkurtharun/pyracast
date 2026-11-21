@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { mockApi, paged, tenantRow, user } from "./support/workspace";
+import { answer, mockApi, paged, tenantRow, user } from "./support/workspace";
 import { nativeProductionHistory } from "./support/native-production";
 import { errorBody } from "./support/errors";
 
@@ -1151,12 +1151,15 @@ test("a member marks every decided request read at once", async ({ page }) => {
     let unread = 2;
     await page.route("**/api/tenants/", (route) =>
         route.fulfill({
-            json: paged([
-                tenantRow(
-                    { id: 1, name: "Sunfield Energy", role: "viewer" },
-                    { unread_outcome_count: unread },
-                ),
-            ]),
+            json: answer(
+                "PaginatedTenantOutputList",
+                paged([
+                    tenantRow(
+                        { id: 1, name: "Sunfield Energy", role: "viewer" },
+                        { unread_outcome_count: unread },
+                    ),
+                ]),
+            ),
         }),
     );
     await page.route(
@@ -1164,7 +1167,9 @@ test("a member marks every decided request read at once", async ({ page }) => {
         async (route) => {
             expect(route.request().method()).toBe("POST");
             unread = 0;
-            await route.fulfill({ json: { marked: 2 } });
+            await route.fulfill({
+                json: answer("SeenAllOutput", { marked: 2 }),
+            });
         },
     );
     await page.goto("/app/w/1/inbox/");
