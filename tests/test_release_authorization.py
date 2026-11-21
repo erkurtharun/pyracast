@@ -1347,17 +1347,34 @@ def test_the_release_decision_refuses_any_deployment_records_but_the_runner_temp
     assert not (tmp_path / "output").exists()
 
 
+@pytest.mark.parametrize("runner_temp", [{}, {"RUNNER_TEMP": ""}])
 @pytest.mark.parametrize(
-    "arguments",
+    ("arguments", "name", "content"),
     [
-        ["authorize", "facts.json"],
-        ["current", MAIN, MAIN, "--deployments", "records.json", "--since", STARTED],
+        (["authorize", "release-facts.json"], "release-facts.json", facts()),
+        (
+            ["current", MAIN, MAIN, "--deployments", DEPLOYMENTS, "--since", STARTED],
+            DEPLOYMENTS,
+            [deployment()],
+        ),
     ],
 )
 def test_a_command_reading_a_file_refuses_to_run_without_the_runner_temp_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    runner_temp: dict[str, str],
     arguments: list[str],
+    name: str,
+    content: object,
 ) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / name).write_text(json.dumps(content), encoding="utf-8")
+    environ = {**runner_temp, "GITHUB_OUTPUT": str(tmp_path / "output")}
+
     with pytest.raises(SystemExit) as exit_info:
-        release_authorization.main(arguments, {})
+        release_authorization.main(arguments, environ)
 
     assert exit_info.value.code == 2
+    assert "RUNNER_TEMP is required" in capsys.readouterr().err
+    assert not (tmp_path / "output").exists()
