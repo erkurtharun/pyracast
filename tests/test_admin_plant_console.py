@@ -1,12 +1,18 @@
 import re
+from types import SimpleNamespace
 
 import pytest
+from django.db.models import QuerySet
 from django.test import Client
+from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
+from pyracast.forecasts.validation import validate_binding
+from pyracast.plants.approval import approve_region
 from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
 from pyracast.plants.operations import create_plant
 from pyracast.plants.parameters import PlantParameters
+from pyracast.platform_admin.plants import PlantDetailsForm, save_plant_details
 from pyracast.regions.models import (
     AuditAction,
     AuditEvent,
@@ -17,7 +23,7 @@ from pyracast.regions.models import (
 )
 from pyracast.regions.operations import request_location_change
 from tests.support.api import verified_admin
-from tests.support.domain import System, make_system
+from tests.support.domain import NOW, FakeAdapter, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -351,3 +357,46 @@ def test_a_stale_details_page_asks_for_a_reload_and_a_plant_in_review_updates_it
         tenant=system.tenant, name="Empty", latitude=1, longitude=1, timezone="UTC"
     )
     assert client.get(f"/admin/plants/{empty.pk}/details/").status_code == 404
+
+
+def test_a_details_save_does_not_find_a_location_moved_to_the_trash_while_it_waited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _ = approved_plant()
+    client, operator = verified_admin()
+    form = PlantDetailsForm(details(client, system.region))
+    assert form.is_valid(), form.errors
+    tenants = Tenant.objects
+
+    class TrashedWhileWaiting:
+        @staticmethod
+        def select_for_update() -> QuerySet[Tenant]:
+            Region.objects.filter(pk=system.region.pk).update(deleted_at=timezone.now())
+            return tenants.select_for_update()
+
+    monkeypatch.setattr(
+        "pyracast.platform_admin.plants.Tenant", SimpleNamespace(objects=TrashedWhileWaiting)
+    )
+    with pytest.raises(Region.DoesNotExist):
+        save_plant_details(operator, system.region.pk, form)
+
+
+def test_a_details_page_opened_before_an_approval_cannot_save_onto_the_approved_plant() -> None:
+    system = make_system()
+    plant = create_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=130, export_limit_mw=100),
+    )
+    client, _ = verified_admin()
+    opened = details(client, system.region, dc_capacity_mw="140")
+    validate_binding(system.admin, system.binding.pk, FakeAdapter(), NOW)
+    approve_region(system.admin, system.region.pk, system.binding.pk, NOW)
+
+    refused = client.post(f"/admin/plants/{system.region.pk}/details/", opened)
+
+    assert refused.status_code == 400
+    assert "This plant changed after you opened this page." in refused.content.decode()
+    configuration = PlantConfiguration.objects.get(plant=plant)
+    assert (configuration.revision, configuration.dc_capacity_mw) == (1, 130)

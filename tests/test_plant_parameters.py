@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from io import StringIO
 from threading import Barrier
 from typing import Any
 
@@ -7,12 +8,13 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import IntegrityError, close_old_connections, connection, transaction
+from django.db import DataError, IntegrityError, close_old_connections, connection, transaction
 from django.test import Client
 
 from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import approve_region, decide_review, resubmit_region
+from pyracast.plants.management.commands.configure_plant import Command as ConfigurePlant
 from pyracast.plants.models import Plant, PlantConfiguration, PlantEvent, PlantSubmission
 from pyracast.plants.operations import create_plant, revise_plant
 from pyracast.plants.parameters import PlantParameters
@@ -205,6 +207,7 @@ def test_a_plant_rejected_after_returning_to_review_keeps_an_edit_for_its_next_a
 FIELD_ERRORS: list[tuple[dict[str, Any], str]] = [
     ({"name": " "}, "name"),
     ({"name": "x" * 201}, "name"),
+    ({"name": "Plant\x00A"}, "name"),
     ({"dc_capacity_mw": 0}, "dc_capacity_mw"),
     ({"dc_capacity_mw": True}, "dc_capacity_mw"),
     ({"dc_capacity_mw": NAN}, "dc_capacity_mw"),
@@ -242,6 +245,64 @@ def test_the_plant_command_reports_why_a_value_was_refused() -> None:
             name="Plant",
             dc_capacity_mw=0.0,
         )
+
+
+def test_the_plant_command_help_says_a_revision_replaces_every_value_without_a_check() -> None:
+    parser = ConfigurePlant().create_parser("manage.py", "configure_plant")
+    text = " ".join(parser.format_help().split())
+    assert "replaces every value" in text
+    assert "Without --expected-revision it overwrites" in text
+
+
+def revise_by_command(system: System, plant: Plant, **options: Any) -> str:
+    out = StringIO()
+    call_command(
+        "configure_plant",
+        username="member",
+        region_id=system.region.pk,
+        plant_id=plant.pk,
+        name="Plant",
+        dc_capacity_mw=140.0,
+        export_limit_mw=100.0,
+        stdout=out,
+        **options,
+    )
+    return out.getvalue().strip()
+
+
+def test_the_plant_command_refuses_a_revision_other_than_the_expected_one() -> None:
+    system, plant = declared_plant(approved=True)
+    revise_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        PlantParameters(**{**VALUES, "export_limit_mw": 90}),
+    )
+    written = declarations(plant)
+
+    with pytest.raises(CommandError, match="The technical details changed after you opened them"):
+        revise_by_command(system, plant, expected_revision=1)
+
+    plant.refresh_from_db()
+    assert plant.parameters_revision == 2
+    assert declarations(plant) == written
+    assert plant.current_configuration is not None
+    assert plant.current_configuration.export_limit_mw == 90
+
+
+@pytest.mark.parametrize("expected", [{"expected_revision": 1}, {}], ids=["checked", "unchecked"])
+def test_the_plant_command_prints_the_revision_before_and_after(expected: dict[str, int]) -> None:
+    system, plant = declared_plant(approved=True)
+
+    printed = revise_by_command(system, plant, **expected)
+
+    plant.refresh_from_db()
+    assert plant.parameters_revision == 2
+    assert printed == (
+        f"Plant {plant.pk}, configuration {plant.current_configuration_id}, "
+        "parameters revision 1 to 2."
+    )
 
 
 DECLARED = {
@@ -322,6 +383,34 @@ def test_stored_checks_the_input_and_the_operation_accept_the_same_plant_values(
         ),
         "input": PlantInput(data={"name": "P", **values}).is_valid(),
         "operation": _accepted_by_the_operation(system, plant, values),
+    }
+    assert len(set(accepted.values())) == 1, accepted
+
+
+def _refused_field(name: str) -> str | None:
+    try:
+        PlantParameters(name=name, dc_capacity_mw=1)
+    except DomainError as error:
+        return error.field
+    return None
+
+
+def _stored_name(region: Region, name: str) -> bool:
+    try:
+        return _stored(lambda: Plant.objects.create(region=region, name=name))
+    except DataError, ValueError:
+        return False
+
+
+@pytest.mark.parametrize("name", ["P", "  P  ", "x" * 200, "x" * 201, "Plant\x00A"], ids=repr)
+def test_the_typed_value_the_input_and_the_database_accept_the_same_plant_names(name: str) -> None:
+    system = make_system()
+    refused = _refused_field(name)
+    assert refused in (None, "name")
+    accepted = {
+        "typed": refused is None,
+        "input": PlantInput(data={"name": name, **DECLARED}).is_valid(),
+        "database": _stored_name(system.region, name),
     }
     assert len(set(accepted.values())) == 1, accepted
 
