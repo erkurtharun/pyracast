@@ -152,7 +152,9 @@ def plant_details(region: Region, plant: Plant) -> dict[str, Any]:
 
 
 def details_version(region: Region, details: dict[str, Any]) -> str:
-    state = json.dumps([region.revision, details], sort_keys=True, default=str)
+    """The review status is part of the version: an approval keeps the revision and the
+    values but turns an edit of the submission into a live configuration."""
+    state = json.dumps([region.revision, region.status, details], sort_keys=True, default=str)
     return hashlib.sha256(state.encode()).hexdigest()
 
 
@@ -162,9 +164,11 @@ def save_plant_details(actor: User, region_id: int, form: PlantDetailsForm) -> t
     with transaction.atomic():
         tenant_id = Region.objects.active().values_list("tenant_id", flat=True).get(pk=region_id)
         Tenant.objects.select_for_update().get(pk=tenant_id)
-        region = Region.objects.get(pk=region_id)
-        plant = Plant.objects.select_related("current_configuration", "submission").get(
-            region=region
+        region = Region.objects.active().select_for_update().get(pk=region_id)
+        plant = (
+            Plant.objects.select_for_update(of=("self",))
+            .select_related("current_configuration", "submission")
+            .get(region=region)
         )
         if (
             details_version(region, plant_details(region, plant))
