@@ -47,10 +47,13 @@ def require_platform_admin(actor: User) -> None:
         raise ForbiddenError(ErrorCode.PLATFORM_ADMIN_REQUIRED)
 
 
-def authorize_workspace_admin(actor: User, tenant_id: int, *, platform: bool = False) -> None:
+def authorize_workspace_admin(
+    actor: User, tenant_id: int, *, platform: bool = False, lock: bool = True
+) -> None:
     # Only the console passes `platform`; tenant API routes always require the membership.
     if not platform:
-        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=lock)
         return
     require_platform_admin(actor)
-    Tenant.objects.select_for_update().get(pk=tenant_id)
+    if lock:
+        Tenant.objects.select_for_update().get(pk=tenant_id)

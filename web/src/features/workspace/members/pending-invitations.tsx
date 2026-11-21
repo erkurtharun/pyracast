@@ -1,5 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 import { api } from "@/lib/api/client";
 import { useApiQuery, useRefresh } from "@/lib/api/query";
 import { useFormat } from "@/lib/format/use-format";
@@ -15,17 +16,24 @@ export function PendingInvitations({ tenantId }: { tenantId: number }) {
     const format = useFormat();
     const label = useLabel();
     const refresh = useRefresh();
+    const [acting, setActing] = useState(false);
     const invitations = useApiQuery("/api/tenants/{tenant_id}/invitations/", {
         path: { tenant_id: tenantId },
     });
     const path = (invitation: Invitation) => ({
         path: { tenant_id: tenantId, invitation_id: invitation.id },
     });
+    // One action of the list at a time: sending again and cancelling the same row both close it.
     async function act(send: () => Promise<unknown>) {
+        setActing(true);
         try {
             await send();
         } finally {
-            await refresh.workspace(tenantId);
+            try {
+                await refresh.workspace(tenantId);
+            } finally {
+                setActing(false);
+            }
         }
     }
     return (
@@ -85,6 +93,7 @@ export function PendingInvitations({ tenantId }: { tenantId: number }) {
                                     <div className="button-group">
                                         <AsyncButton
                                             variant="secondary"
+                                            disabled={acting}
                                             label={t("resendNamed", {
                                                 email: invitation.email,
                                             })}
@@ -105,6 +114,7 @@ export function PendingInvitations({ tenantId }: { tenantId: number }) {
                                         </AsyncButton>
                                         <AsyncButton
                                             variant="secondary"
+                                            disabled={acting}
                                             label={t("cancelNamed", {
                                                 email: invitation.email,
                                             })}

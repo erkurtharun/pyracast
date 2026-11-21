@@ -1,6 +1,7 @@
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.db import transaction
+from django.db.models import Q
 from django.db.models.functions import Lower
 from django.utils import timezone
 
@@ -31,10 +32,11 @@ def register_account(user: User, *, language: str, workspace_name: str | None) -
 def remove_workspace_member(
     actor: User, tenant_id: int, user_id: int, *, platform: bool = False
 ) -> None:
-    if Membership.objects.filter(tenant_id=tenant_id, user_id=user_id).exists():
-        # The member's account rows before the workspace, the order of the account processes:
-        # an address verified meanwhile is among the addresses read below.
-        lock_account(user_id)
+    # A refused caller locks nothing. Then the member's account rows before the workspace, the
+    # order of the account processes: an acceptance or an address verified meanwhile is among
+    # what is read below.
+    authorize_workspace_admin(actor, tenant_id, platform=platform, lock=False)
+    lock_account(user_id)
     authorize_workspace_admin(actor, tenant_id, platform=platform)
     membership = (
         Membership.objects.filter(tenant_id=tenant_id, user_id=user_id)
@@ -101,9 +103,10 @@ def reassign_workspace_admin(
     membership.role = WorkspaceRole.ADMIN
     membership.save(update_fields=["role"])
     now = timezone.now()
-    WorkspaceInvitation.objects.filter(tenant_id=tenant_id).pending(now).revoke(
-        now, InvitationRevocation.ADMINISTRATOR_CHANGED
-    )
+    # An expired administrator invitation closes too: no one may send it again.
+    WorkspaceInvitation.objects.filter(
+        Q(expires_at__gt=now) | Q(role=WorkspaceRole.ADMIN), tenant_id=tenant_id
+    ).revoke(now, InvitationRevocation.ADMINISTRATOR_CHANGED)
     WorkspaceAdminChange.objects.create(
         tenant_id=tenant_id,
         actor=actor,

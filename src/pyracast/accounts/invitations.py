@@ -11,7 +11,7 @@ from django.contrib.auth.models import AnonymousUser, User
 from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
 from django.db import connection, transaction
-from django.db.models import Q, QuerySet
+from django.db.models import BooleanField, Exists, OuterRef, Q, QuerySet, Value
 from django.template.loader import render_to_string
 from django.utils import timezone, translation
 from django.utils.translation import gettext as _
@@ -86,7 +86,9 @@ def workspace_invitations(tenant_id: int) -> QuerySet[WorkspaceInvitation]:
     )
 
 
-def _usable_by(invitation: WorkspaceInvitation, viewer: User | AnonymousUser) -> bool:
+def _usable_by(
+    invitation: WorkspaceInvitation, viewer: User | AnonymousUser, *, viewer_is_member: bool
+) -> bool:
     state = invitation.state_at(timezone.now())
     if state == InvitationState.PENDING:
         return True
@@ -94,19 +96,28 @@ def _usable_by(invitation: WorkspaceInvitation, viewer: User | AnonymousUser) ->
         state == InvitationState.ACCEPTED
         and viewer.is_authenticated
         and invitation.accepted_by_id == viewer.pk
-        and Membership.objects.filter(tenant_id=invitation.tenant_id, user_id=viewer.pk).exists()
+        and viewer_is_member
     )
 
 
 def preview_workspace_invitation(token: str, viewer: User | AnonymousUser) -> InvitationPreview:
     # One lookup decides every refusal, so neither the answer nor the work done tells an
-    # unknown token from a closed invitation or from one accepted by another account.
+    # unknown token from a closed invitation, from one accepted by another account or from one
+    # whose acceptor has left.
+    viewer_is_member = (
+        Exists(Membership.objects.filter(tenant_id=OuterRef("tenant_id"), user=viewer))
+        if isinstance(viewer, User)
+        else Value(False, output_field=BooleanField())
+    )
     invitation = (
         WorkspaceInvitation.objects.select_related("tenant", "created_by")
+        .annotate(viewer_is_member=viewer_is_member)
         .filter(token_hash=invitation_digest(token))
         .first()
     )
-    if invitation is None or not _usable_by(invitation, viewer):
+    if invitation is None or not _usable_by(
+        invitation, viewer, viewer_is_member=invitation.viewer_is_member
+    ):
         raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
     inviter = invitation.created_by
     named = Membership.objects.filter(
