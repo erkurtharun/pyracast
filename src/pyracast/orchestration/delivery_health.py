@@ -446,8 +446,8 @@ class BrokerState:
 
 
 def read_broker() -> BrokerState:
-    """The queue counts are a diagnostic; a broker that does not answer or a work queue nobody
-    declared fails the report."""
+    """The queue counts are a diagnostic; a broker that does not answer or a work queue the broker
+    has not declared fails the report."""
     try:
         return BrokerState(True, queue_states(QUEUES))
     except Exception as error:

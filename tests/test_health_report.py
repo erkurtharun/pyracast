@@ -409,7 +409,7 @@ def fake_broker_report(
     return report, failed, rabbitmq.attempts
 
 
-def test_a_work_queue_no_worker_declared_fails_the_report_and_keeps_the_other_counts(
+def test_a_work_queue_the_broker_has_not_declared_fails_the_report_and_keeps_the_other_counts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     declared = [queue for queue in QUEUES if queue != "notifications"]

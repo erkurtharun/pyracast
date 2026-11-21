@@ -329,8 +329,9 @@ forecast in 26 hours are unhealthy unless their first collection is still open. 
 saved-forecast fallback, queued and running calibrations, provider requests per binding and UTC
 day and the broker's queue counts are informational. A broker that does not answer, read through
 the dispatcher's reconnecting read, fails the check: the dispatcher stops renewing its heartbeat then.
-A work queue no worker has declared is reported missing and fails it too (nothing consumes it); a
-missing dead-letter queue is only reported.
+A work queue the broker has not declared is reported missing and fails it too (nothing consumes it);
+the dispatcher's depth read declares every work queue each cycle, so this lasts only until its first
+cycle or after a queue was deleted. A missing dead-letter queue is only reported.
 This check needs a working database; monitoring
 must also treat failure to execute it as unhealthy. Run the mailer with
 `worker --queues notifications --threads 2`, separately from the default collection,

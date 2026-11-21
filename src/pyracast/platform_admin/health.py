@@ -262,7 +262,7 @@ def summarize_health(report: HealthReport) -> HealthSummary:
                 label=_("Missing message queues"),
                 count=len(missing),
                 help=_(
-                    "No worker has declared %(queues)s, so nothing consumes its messages. "
+                    "The broker has not declared %(queues)s, so nothing consumes its messages. "
                     "Check that its worker runs."
                 )
                 % {"queues": ", ".join(missing)},

@@ -189,7 +189,7 @@ def test_the_workers_panel_shows_phase_timing_queues_and_provider_requests(
 
 
 @pytest.mark.parametrize("language", ["en", "tr"])
-def test_a_queue_no_worker_declared_is_named_while_the_other_queues_show_their_counts(
+def test_a_queue_the_broker_has_not_declared_is_named_while_the_other_queues_show_their_counts(
     monkeypatch: pytest.MonkeyPatch, language: str
 ) -> None:
     monkeypatch.setattr(timezone, "now", lambda: NOW)
