@@ -308,3 +308,19 @@ def test_a_recursion_error_while_writing_reaches_the_caller() -> None:
 
     with pytest.raises(RecursionError):
         deployed.handle(warning("unwritten"))
+
+
+class Recursing:
+    def __str__(self) -> str:
+        raise RecursionError
+
+
+def test_a_recursion_error_while_formatting_reaches_the_caller() -> None:
+    deployed = configured_handler(settings.LOGGING, "console")
+    assert isinstance(deployed, logging.StreamHandler)
+    deployed.setStream(io.StringIO())
+    record = warning("unformatted")
+    record.msg = Recursing()
+
+    with pytest.raises(RecursionError):
+        deployed.handle(record)

@@ -1,8 +1,10 @@
 import logging
 import logging.config
 import re
+import threading
+import weakref
 from collections.abc import Iterator
-from typing import Any, TextIO
+from typing import Any, TextIO, override
 
 # Every record of the application and of Gunicorn starts with this; the security log filter in
 # infra/terraform/monitoring.tf matches the start of its first line.
@@ -16,6 +18,10 @@ CONTINUATION = "    "
 PIPE_BUF = 4096
 PIECE_BYTES = PIPE_BUF - len("\r\n") - len(CONTINUATION)
 LINE_BREAK = re.compile(r"\r\n|\r|\n")
+# Handlers writing to one stream share one lock, so the lines of two threads never wait in its
+# buffer together. It is each handler's own lock, which logging renews in a forked child.
+STREAM_LOCKS: weakref.WeakKeyDictionary[TextIO, threading.RLock] = weakref.WeakKeyDictionary()
+PLAIN = logging.Formatter(LINE_FORMAT)
 
 
 def physical_lines(text: str) -> Iterator[str]:
@@ -40,10 +46,35 @@ class LineFormatter(logging.Formatter):
         return one_record(super().format(record))
 
 
+def unformattable(record: logging.LogRecord, error: Exception) -> str:
+    """One line in the shape of every record, without the text that could not be formatted."""
+    stand_in = logging.makeLogRecord(
+        {
+            "name": record.name,
+            "levelno": record.levelno,
+            "levelname": record.levelname,
+            "created": record.created,
+            "msecs": record.msecs,
+            "msg": "unformattable_record error_type=%s origin=%s:%s",
+            "args": (type(error).__name__, record.pathname, record.lineno),
+        }
+    )
+    return next(physical_lines(PLAIN.format(stand_in)))
+
+
+def formatted(handler: logging.Handler, record: logging.LogRecord) -> str:
+    try:
+        return handler.format(record)
+    except RecursionError:
+        raise
+    except Exception as error:
+        return unformattable(record, error)
+
+
 def write_lines(handler: logging.StreamHandler[Any], record: logging.LogRecord) -> None:
     """Each line in a write call of its own, after any text already waiting on the stream."""
     try:
-        text = handler.format(record)
+        text = formatted(handler, record)
         stream = handler.stream
         stream.flush()
         for line in text.split("\n"):
@@ -56,6 +87,16 @@ def write_lines(handler: logging.StreamHandler[Any], record: logging.LogRecord) 
 
 
 class LineHandler(logging.StreamHandler[TextIO]):
+    def __init__(self, stream: TextIO | None = None) -> None:
+        super().__init__(stream)
+        self.lock = STREAM_LOCKS.setdefault(self.stream, threading.RLock())
+
+    @override
+    def setStream(self, stream: TextIO) -> TextIO | None:
+        previous = super().setStream(stream)
+        self.lock = STREAM_LOCKS.setdefault(self.stream, threading.RLock())
+        return previous
+
     def emit(self, record: logging.LogRecord) -> None:
         write_lines(self, record)
 
