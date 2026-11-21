@@ -32,6 +32,8 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
     const [automationPending, setAutomationPending] = useState(false);
     const [detail, setDetail] = useState<DetailState>({ status: "idle" });
     const [action, setAction] = useState<Action>({ status: "idle" });
+    // Actions whose reload of the runs is still running; no export is built from runs being reloaded.
+    const [performing, setPerforming] = useState(0);
     const detailSequence = useRef(0);
     useEffect(() => {
         const sequence = detailSequence;
@@ -81,6 +83,7 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
     ) {
         if (!canManage) return;
         setAction({ status: "pending", kind });
+        setPerforming((count) => count + 1);
         try {
             await request();
             setAction({ status: kind === "request" ? "requested" : "done" });
@@ -88,6 +91,8 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
             if (reload !== undefined) await loadDetails(reload);
         } catch (error) {
             setAction({ status: "failed", error: errorMessage(error) });
+        } finally {
+            setPerforming((count) => count - 1);
         }
     }
     const pending = action.status === "pending" || automationPending;
@@ -116,6 +121,7 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
                         {runs.data && (
                             <CsvDownload
                                 label={t("download_calibration_csv")}
+                                pending={performing > 0}
                                 build={() =>
                                     calibrationsExport(
                                         plant,
@@ -203,6 +209,7 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
                         action={action}
                         automation={automation.data}
                         canManage={canManage}
+                        exportPending={performing > 0}
                         canRequest={
                             configurationId !== null &&
                             canRequestAgain(selected, runs.data?.results ?? [])

@@ -60,6 +60,7 @@ export function CalibrationRunDetail({
     automation,
     canManage,
     canRequest,
+    exportPending,
     onAction,
     onActivate,
     onRequest,
@@ -69,6 +70,7 @@ export function CalibrationRunDetail({
     automation: AutomationStatus | undefined;
     canManage: boolean;
     canRequest: boolean;
+    exportPending: boolean;
     onAction: (action: Action) => void;
     onActivate: (run: Calibration) => void;
     onRequest: (run: Calibration) => void;
@@ -172,6 +174,7 @@ export function CalibrationRunDetail({
             <CalibrationAssessment run={run} />
             <CsvDownload
                 label={t("download_calibration_details_csv")}
+                pending={exportPending}
                 build={() => calibrationExport(plant, run)}
             />
             <JsonDetails

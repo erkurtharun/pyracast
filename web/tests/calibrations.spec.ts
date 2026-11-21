@@ -274,6 +274,49 @@ for (const change of selectionChanges)
         ]);
     });
 
+for (const failing of ["activation", "reload"] as const)
+    test(`the calibration export comes back when the ${failing} fails`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        let activated = false;
+        await page.route("**/plants/21/calibrations/", (route) =>
+            activated && failing === "reload"
+                ? route.fulfill({
+                      status: 503,
+                      json: errorBody("busy", "Runs reload failed"),
+                  })
+                : route.fulfill({ json: paged([run(40)]) }),
+        );
+        await page.route("**/plants/21/calibrations/40/", (route) =>
+            route.fulfill({ json: run(40) }),
+        );
+        await page.route("**/plants/21/calibrations/40/activate/", (route) => {
+            activated = true;
+            return failing === "activation"
+                ? route.fulfill({
+                      status: 503,
+                      json: errorBody("busy", "Activation failed"),
+                  })
+                : route.fulfill({ json: {} });
+        });
+        await openCalibration(page);
+        await activate(page, 40);
+        await expect(
+            page.getByText(
+                failing === "activation"
+                    ? "Activation failed"
+                    : "Runs reload failed",
+            ),
+        ).toBeVisible();
+        await expect(
+            page.getByRole("button", { name: "Download calibration CSV" }),
+        ).toBeEnabled();
+        await expect(
+            page.getByRole("button", { name: "Working…" }),
+        ).toHaveCount(0);
+    });
+
 test("superseded runs are labelled in Turkish", async ({ page, baseURL }) => {
     await mockApi(page);
     await page
