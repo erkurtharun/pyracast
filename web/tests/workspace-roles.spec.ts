@@ -233,7 +233,7 @@ test("workspace administrator invites, sends again and cancels with the server's
     );
     await page
         .getByRole("button", {
-            name: "Send the invitation to late@example.test again",
+            name: "Send again: late@example.test",
             exact: true,
         })
         .click();
@@ -254,7 +254,7 @@ test("workspace administrator invites, sends again and cancels with the server's
     ).toBe(true);
     await page
         .getByRole("button", {
-            name: "Cancel the invitation for viewer@example.test",
+            name: "Cancel invitation: viewer@example.test",
             exact: true,
         })
         .click();

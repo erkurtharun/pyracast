@@ -113,10 +113,12 @@ UNUSABLE = (
     "superseded",
     "replaced_link",
     "accepted",
+    "removed_acceptor",
 )
 
 
-def unusable_body(kind: str, tenant: Tenant, administrator: User) -> object:
+def unusable_body(kind: str, tenant: Tenant, administrator: User) -> tuple[object, User]:
+    someone = verified_account("someone", "someone@example.com")
     shapes: dict[str, object] = {
         "unknown": {"token": "x" * 43},
         "empty": {"token": ""},
@@ -125,7 +127,7 @@ def unusable_body(kind: str, tenant: Tenant, administrator: User) -> object:
         "missing": {},
     }
     if kind in shapes:
-        return shapes[kind]
+        return shapes[kind], someone
     invitation = invite_workspace_member(administrator, tenant.pk, GUEST)
     token = invitation_token()
     closing: dict[str, Callable[[], object]] = {
@@ -141,9 +143,17 @@ def unusable_body(kind: str, tenant: Tenant, administrator: User) -> object:
         ),
         "replaced_link": lambda: _mint_again(invitation.pk),
         "accepted": lambda: accept_workspace_invitation(verified_account("guest", GUEST), token),
+        "removed_acceptor": lambda: _accept_and_remove(tenant, administrator, token),
     }
-    closing[kind]()
-    return {"token": token}
+    closed = closing[kind]()
+    return {"token": token}, closed if isinstance(closed, User) else someone
+
+
+def _accept_and_remove(tenant: Tenant, administrator: User, token: str) -> User:
+    guest = verified_account("guest", GUEST)
+    accept_workspace_invitation(guest, token)
+    remove_workspace_member(administrator, tenant.pk, guest.pk)
+    return guest
 
 
 def _mint_again(invitation_id: int) -> None:
@@ -160,20 +170,24 @@ def test_every_unusable_token_gets_one_identical_answer(
     workspace: tuple[Tenant, User], kind: str
 ) -> None:
     tenant, administrator = workspace
-    body = unusable_body(kind, tenant, administrator)
-    signed = signed_in(verified_account("someone", "someone@example.com"))
+    body, previewer = unusable_body(kind, tenant, administrator)
+    signed = signed_in(previewer)
+    preview({"token": "y" * 43}, signed)
     with CaptureQueriesContext(connection) as unknown_queries:
         reference = preview({"token": "y" * 43})
-    signed_reference = preview({"token": "y" * 43}, signed)
+    with CaptureQueriesContext(connection) as signed_unknown_queries:
+        signed_reference = preview({"token": "y" * 43}, signed)
 
     with CaptureQueriesContext(connection) as queries:
         anonymous = preview(body)
-    by_someone_else = preview(body, signed)
+    with CaptureQueriesContext(connection) as signed_queries:
+        signed_answer = preview(body, signed)
 
     assert (anonymous.status_code, anonymous.json()) == (400, UNAVAILABLE)
     assert shape(anonymous) == shape(reference)
-    assert shape(by_someone_else) == shape(signed_reference)
+    assert shape(signed_answer) == shape(signed_reference)
     assert len(queries) == len(unknown_queries)
+    assert len(signed_queries) == len(signed_unknown_queries)
 
 
 def test_the_acceptor_previews_an_invitation_they_accepted_until_removed(

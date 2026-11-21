@@ -351,7 +351,7 @@ test("the shell announces action outcomes through one live region that exists be
     await expect(region).toHaveText("");
     await page.getByRole("button", { name: "Members", exact: true }).click();
     const cancel = page.getByRole("button", {
-        name: "Cancel the invitation for new@example.test",
+        name: "Cancel invitation: new@example.test",
         exact: true,
     });
     await expect(cancel).toHaveClass(/secondary/);
@@ -395,7 +395,7 @@ test("the shell speaks a repeated outcome again", async ({ page }) => {
     await page.getByRole("button", { name: "Members", exact: true }).click();
     const region = page.locator("[data-live-region]");
     const cancel = page.getByRole("button", {
-        name: /^Cancel the invitation for invitee\d+@example\.test$/,
+        name: /^Cancel invitation: invitee\d+@example\.test$/,
     });
     await cancel.first().click();
     await expect(region).toHaveText("Invitation cancelled.");

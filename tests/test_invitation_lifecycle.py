@@ -5,10 +5,15 @@ import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.core import mail
+from django.core.exceptions import ValidationError
 from django.test import Client
 from django.utils import timezone
 
-from pyracast.accounts.invitations import accept_workspace_invitation, invite_workspace_member
+from pyracast.accounts.invitations import (
+    accept_workspace_invitation,
+    invite_workspace_member,
+    reissue_workspace_invitation,
+)
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin, remove_workspace_member
 from tests.support.api import verified_admin
@@ -172,6 +177,33 @@ def test_removal_and_an_administrator_change_close_open_invitations_with_their_r
     assert closed.expires_at == invitation.expires_at
     assert closed.revoked_at is not None
     assert (closed.revoked_reason, closed.state_at(timezone.now())) == (change, "revoked")
+
+
+def test_an_administrator_change_also_closes_an_expired_administrator_invitation() -> None:
+    tenant = Tenant.objects.create(name="Unattended workspace")
+    member = verified_account("member", "member@example.com")
+    Membership.objects.create(tenant=tenant, user=member)
+    platform = User.objects.create_superuser(username="platform", email="platform@example.com")
+    invitation = invite_workspace_member(
+        platform, tenant.pk, "chief@example.com", role=WorkspaceRole.ADMIN, platform=True
+    )
+    WorkspaceInvitation.objects.filter(pk=invitation.pk).update(
+        expires_at=timezone.now() - timedelta(minutes=1)
+    )
+
+    reassign_workspace_admin(platform, tenant.pk, member.pk, expected_admin_id=None)
+
+    closed = WorkspaceInvitation.objects.get(pk=invitation.pk)
+    assert (closed.revoked_reason, closed.state_at(timezone.now())) == (
+        "administrator_changed",
+        "revoked",
+    )
+    resent = signed_in(member).post(f"{invitation_url(tenant, invitation.pk)}resend/")
+    assert (resent.status_code, resent.json()) == (400, UNAVAILABLE)
+    with pytest.raises(ValidationError) as refused:
+        reissue_workspace_invitation(platform, tenant.pk, invitation.pk, platform=True)
+    assert refused.value.code == "invitation_unavailable"
+    assert not WorkspaceInvitation.objects.filter(tenant=tenant).open().exists()
 
 
 def test_a_cancelled_invitation_stays_unusable_everywhere_while_its_deadline_lies_ahead(
