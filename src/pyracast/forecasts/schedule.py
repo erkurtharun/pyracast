@@ -31,11 +31,17 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.forecasts.quota import deferral
-from pyracast.forecasts.scheduler import Collecting, collection_gate, open_night_window
+from pyracast.forecasts.scheduler import (
+    SLOT_FINAL_ERRORS,
+    Collecting,
+    collection_gate,
+    open_night_window,
+)
 from pyracast.forecasts.timing import (
     HISTORY_REQUESTS_PER_DAY,
     default_times,
     forecast_time_limit,
+    latest_forecast_slot,
     next_forecast_slot,
 )
 from pyracast.local_time import CLOCK_PATTERN
@@ -136,8 +142,11 @@ class CollectionStatus:
 
 
 def _next_collection_at(collecting: Collecting, timezone: str, now: datetime) -> datetime | None:
-    """The scheduler's next act: a due nightly history job, a queued job claim takes, a slot."""
+    """The scheduler's next act: a due nightly history job, the latest slot's job it opens again,
+    a queued job claim takes, a slot."""
     night = open_night_window(now, timezone)
+    timing = collecting.timing
+    slot = latest_forecast_slot(now, timezone, timing.times, timing.effective_from)
     jobs = CollectionJob.objects.filter(binding=collecting.binding).aggregate(
         queued=Min(claimable_from(now), filter=Q(status__in=WAITING) & open_at_claim(now)),
         **(
@@ -148,9 +157,25 @@ def _next_collection_at(collecting: Collecting, timezone: str, now: datetime) ->
             if night is not None
             else {}
         ),
+        **(
+            {
+                "reopened": Count(
+                    "pk",
+                    filter=Q(
+                        endpoint=CollectionEndpoint.FORECASTS,
+                        scheduled_for=slot,
+                        status=CollectionJobStatus.STALE,
+                    )
+                    & ~Q(last_error__in=SLOT_FINAL_ERRORS),
+                )
+            }
+            if slot is not None
+            else {}
+        ),
     )
-    due_now = night is not None and (not jobs["history"] or jobs["revivable"])
-    timing = collecting.timing
+    due_now = (night is not None and (not jobs["history"] or jobs["revivable"])) or (
+        slot is not None and bool(jobs["reopened"])
+    )
     moments = (
         now if due_now else None,
         jobs["queued"],

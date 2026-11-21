@@ -211,6 +211,35 @@ def test_a_throttled_job_whose_cooldown_was_cleared_is_due_now(available_at: dat
     assert claim(history.pk, moment) is not None
 
 
+@pytest.mark.parametrize("error", ["quota_exhausted", "schedule_disabled"])
+def test_a_forecast_ended_for_its_slot_is_not_collected_again_before_the_next_moment(
+    error: str,
+) -> None:
+    system = make_system(approved=True)
+    CollectionJob.objects.filter(binding=system.binding).update(status="stale", last_error=error)
+    latest = CollectionJob.objects.get(binding=system.binding)
+
+    assert at(read(system, EVENING)["next_collection_at"]) == WINDOW_START
+    assert created_jobs(EVENING) == set()
+    latest.refresh_from_db()
+    assert (latest.status, latest.last_error) == ("stale", error)
+    assert at(read(system, EVENING)["next_collection_at"]) == WINDOW_START
+
+
+def test_a_forecast_ended_for_a_passing_reason_is_collected_again_now() -> None:
+    system = make_system(approved=True)
+    CollectionJob.objects.filter(binding=system.binding).update(
+        status="stale", last_error="binding_not_current"
+    )
+    latest = CollectionJob.objects.get(binding=system.binding)
+
+    assert at(read(system, EVENING)["next_collection_at"]) == EVENING
+    enqueue_due(EVENING)
+    latest.refresh_from_db()
+    assert (latest.status, latest.available_at) == ("pending", EVENING)
+    assert claim(latest.pk, EVENING) is not None
+
+
 def test_usage_counts_only_the_plants_own_requests_of_the_utc_day() -> None:
     system = collected(make_system(approved=True))
     other_region = submit_region(
