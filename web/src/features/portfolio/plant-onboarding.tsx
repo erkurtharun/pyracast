@@ -21,7 +21,13 @@ import {
     PlantConfigurationFields,
     configurationInput,
 } from "./plant-configuration-fields";
-import { binnedAt, coordinatePair } from "./site-location";
+import { CoordinateField } from "./coordinate-field";
+import {
+    binnedAt,
+    coordinatePair,
+    coordinateValue,
+    type CoordinateAxis,
+} from "./site-location";
 import { TimezoneField } from "./timezone-field";
 
 type Trashed = components["schemas"]["TrashedRegionOutput"];
@@ -129,6 +135,12 @@ function Wizard({
     const last = steps.length - 1;
     const [step, setStep] = useState(0);
     const [review, setReview] = useState<Record<string, string>>({});
+    const reviewCoordinate = (axis: CoordinateAxis) => {
+        const typed = review[axis];
+        return reviewNumber(
+            typed ? coordinateValue(axis, typed) : existing?.[axis],
+        );
+    };
     const [status, setStatus] = useState<Submission>({ kind: "idle" });
     const [offer, setOffer] = useState<Offer>({ kind: "none" });
     // React disables the form only once it commits; these refs act before that and after an unmount.
@@ -176,8 +188,14 @@ function Wizard({
     const binned = (data: FormData) =>
         step === at("location")
             ? binnedAt(trashed, {
-                  latitude: Number(data.get("latitude")),
-                  longitude: Number(data.get("longitude")),
+                  latitude: coordinateValue(
+                      "latitude",
+                      formText(data, "latitude"),
+                  ),
+                  longitude: coordinateValue(
+                      "longitude",
+                      formText(data, "longitude"),
+                  ),
               })
             : null;
     async function restore(found: Found) {
@@ -228,8 +246,14 @@ function Wizard({
                       path: { tenant_id: tenant },
                       body: {
                           ...body,
-                          latitude: Number(data.get("latitude")),
-                          longitude: Number(data.get("longitude")),
+                          latitude: coordinateValue(
+                              "latitude",
+                              formText(data, "latitude"),
+                          ),
+                          longitude: coordinateValue(
+                              "longitude",
+                              formText(data, "longitude"),
+                          ),
                           timezone: formText(data, "timezone"),
                       },
                   });
@@ -360,24 +384,14 @@ function Wizard({
                                         label={t("timezone")}
                                         defaultValue={deviceZone()}
                                     />
-                                    <Field
+                                    <CoordinateField
+                                        axis="latitude"
                                         label={t("latitude")}
-                                        name="latitude"
-                                        type="number"
-                                        min={-90}
-                                        max={90}
-                                        step="any"
                                         hint={t("pasteHint")}
-                                        required
                                     />
-                                    <Field
+                                    <CoordinateField
+                                        axis="longitude"
                                         label={t("longitude")}
-                                        name="longitude"
-                                        type="number"
-                                        min={-180}
-                                        max={180}
-                                        step="any"
-                                        required
                                     />
                                 </div>
                                 <p className="fine">{t("locationHelp")}</p>
@@ -464,14 +478,10 @@ function Wizard({
                                     <dt>{t("location")}</dt>
                                     <dd>
                                         {t("coordinates", {
-                                            latitude: reviewNumber(
-                                                review.latitude ??
-                                                    existing?.latitude,
-                                            ),
-                                            longitude: reviewNumber(
-                                                review.longitude ??
-                                                    existing?.longitude,
-                                            ),
+                                            latitude:
+                                                reviewCoordinate("latitude"),
+                                            longitude:
+                                                reviewCoordinate("longitude"),
                                         })}
                                     </dd>
                                 </div>

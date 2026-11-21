@@ -8,6 +8,8 @@ import type { components } from "@/lib/schema";
 import { ActionForm, AsyncButton, Field, formText } from "@/ui/form";
 import { Resource } from "@/ui/resource";
 import { StatusTag } from "@/ui/vocabulary";
+import { CoordinateField } from "@/features/portfolio/coordinate-field";
+import { coordinateValue } from "@/features/portfolio/site-location";
 import { TimezoneField } from "@/features/portfolio/timezone-field";
 
 type LocationRequest = components["schemas"]["LocationChangeOutput"];
@@ -89,11 +91,13 @@ function LocationRequests({
                                         {
                                             path: scope,
                                             body: {
-                                                latitude: Number(
-                                                    data.get("latitude"),
+                                                latitude: coordinateValue(
+                                                    "latitude",
+                                                    formText(data, "latitude"),
                                                 ),
-                                                longitude: Number(
-                                                    data.get("longitude"),
+                                                longitude: coordinateValue(
+                                                    "longitude",
+                                                    formText(data, "longitude"),
                                                 ),
                                                 timezone: formText(
                                                     data,
@@ -112,25 +116,15 @@ function LocationRequests({
                                 }}
                             >
                                 <div className="form-grid">
-                                    <Field
+                                    <CoordinateField
+                                        axis="latitude"
                                         label={t("latitude")}
-                                        name="latitude"
-                                        type="number"
-                                        min={-90}
-                                        max={90}
-                                        step="any"
                                         defaultValue={region.latitude}
-                                        required
                                     />
-                                    <Field
+                                    <CoordinateField
+                                        axis="longitude"
                                         label={t("longitude")}
-                                        name="longitude"
-                                        type="number"
-                                        min={-180}
-                                        max={180}
-                                        step="any"
                                         defaultValue={region.longitude}
-                                        required
                                     />
                                     <TimezoneField
                                         label={t("timezone")}

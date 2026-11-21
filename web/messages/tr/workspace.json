@@ -430,5 +430,9 @@
         "withdrawHelp": "Başvuruyu değiştirmek için geri çekip yeniden gönderin.",
         "intervals": "{count, plural, other {# aralık}}",
         "unread": "Okunmamış sonuç"
+    },
+    "CoordinateField": {
+        "latitude": "-90 ile 90 arasında bir enlem; örneğin 41,0082 veya 41.0082.",
+        "longitude": "-180 ile 180 arasında bir boylam; örneğin 28,9784 veya 28.9784."
     }
 }

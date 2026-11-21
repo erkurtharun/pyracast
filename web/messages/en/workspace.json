@@ -430,5 +430,9 @@
         "withdrawHelp": "To revise a submission, withdraw it and send a new one.",
         "unread": "Unread outcome",
         "intervals": "{count, plural, one {# interval} other {# intervals}}"
+    },
+    "CoordinateField": {
+        "latitude": "A latitude from -90 to 90, such as 41.0082 or 41,0082.",
+        "longitude": "A longitude from -180 to 180, such as 28.9784 or 28,9784."
     }
 }

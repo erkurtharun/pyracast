@@ -154,7 +154,7 @@ test("a console latitude splits a pasted pair only at a separator a decimal comm
             ["41.0082,28.9784", "41.0082", "28.9784"],
             [" -41.5 ; 28.9 ", "-41.5", "28.9"],
             ["41\t-28.9", "41", "-28.9"],
-        ]) {
+        ] as const) {
             await latitude.fill("");
             await longitude.fill("");
             expect(await paste(text), text).toBe(true);

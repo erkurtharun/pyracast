@@ -13,6 +13,26 @@ function pairParts(input: string): string[] {
     return parts.some((part) => part.includes(".")) ? parts : [input];
 }
 
+export type CoordinateAxis = "latitude" | "longitude";
+
+// HTML pattern syntax, which browsers compile whole with the v flag: an optional leading minus,
+// no leading zero, at most one decimal comma or point, and the axis's range in degrees.
+const coordinatePatterns: Record<CoordinateAxis, string> = {
+    latitude: String.raw`-?(?:90(?:[.,]0+)?|[1-8]?\d(?:[.,]\d+)?)`,
+    longitude: String.raw`-?(?:180(?:[.,]0+)?|(?:1[0-7]\d|[1-9]?\d)(?:[.,]\d+)?)`,
+};
+
+export function coordinatePattern(axis: CoordinateAxis) {
+    return coordinatePatterns[axis];
+}
+
+// NaN when the field's pattern refuses the text, as Number() of any other non-number.
+export function coordinateValue(axis: CoordinateAxis, text: string): number {
+    return new RegExp(`^(?:${coordinatePatterns[axis]})$`, "u").test(text)
+        ? Number(text.replace(",", "."))
+        : Number.NaN;
+}
+
 export function coordinatePair(text: string): [string, string] | null {
     const [latitude, longitude, ...rest] = pairParts(text.trim());
     return latitude !== undefined &&

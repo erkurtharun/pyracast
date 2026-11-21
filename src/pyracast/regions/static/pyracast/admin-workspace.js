@@ -62,11 +62,18 @@ if (setupForm instanceof HTMLFormElement) {
   }
 }
 
-const coordinateNumber = /^-?\d+(?:\.\d+)?$/;
+const coordinateNumber = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
+// The workspace wizard's rule: a pair needs a separator that a decimal comma cannot be, so
+// "41,0082" stays one number.
+function pairParts(input) {
+  if (input.includes(";")) return input.split(/\s*;\s*/);
+  if (/,\s/.test(input)) return input.split(/\s*,\s+/);
+  if (/\s/.test(input)) return input.split(/\s+/);
+  const parts = input.split(",");
+  return parts.some((part) => part.includes(".")) ? parts : [input];
+}
 function parseCoordinatePair(text) {
-  const input = text.trim();
-  const separated = input.split(/[,;]/);
-  const pair = separated.length === 1 ? input.split(/\s+/) : separated.map((value) => value.trim());
+  const pair = pairParts(text.trim());
   return pair.length === 2 && pair.every((value) => coordinateNumber.test(value)) ? pair : null;
 }
 
