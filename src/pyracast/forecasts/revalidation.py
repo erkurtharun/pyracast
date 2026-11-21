@@ -75,7 +75,8 @@ def _take_lease(account_id: int, claim: datetime, now: datetime) -> ProviderAcco
         )
         if account is None:
             return None
-        account.revalidation_due_at = now + LEASE
+        # Strictly later than the claim, so a duplicate message with the same claim never matches.
+        account.revalidation_due_at = max(now + LEASE, claim + timedelta(microseconds=1))
         account.save(update_fields=("revalidation_due_at",))
     return account
 
@@ -92,6 +93,17 @@ def _replacing_operator(account: ProviderAccount) -> User | None:
         .first()
     )
     return event.actor if event else None
+
+
+def _lost(account: ProviderAccount) -> RevalidationOutcome | None:
+    revision, lease = ProviderAccount.objects.values_list(
+        "credential_revision", "revalidation_due_at"
+    ).get(pk=account.pk)
+    if revision != account.credential_revision:
+        return RevalidationOutcome.STOPPED
+    if lease != account.revalidation_due_at:
+        return RevalidationOutcome.LEASE_LOST
+    return None
 
 
 def _key_replaced(account: ProviderAccount) -> bool:
@@ -135,6 +147,8 @@ def revalidate_account(
     bindings = list(stale_bindings(account))
     operator = _replacing_operator(account) if bindings else None
     for index, binding in enumerate(bindings):
+        if lost := _lost(account):
+            return lost
         moment = clock.now()
         if index and clock.elapsed() >= LAST_REQUEST_START.total_seconds():
             # The next dispatch claims the account again; the actor's time limit is never met.

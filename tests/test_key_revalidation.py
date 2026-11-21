@@ -447,6 +447,7 @@ def test_a_key_replaced_between_two_plants_ends_the_run() -> None:
 def test_the_worker_takes_the_lease_when_it_starts() -> None:
     system = make_system(approved=True)
     replaced(system)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(revalidation_due_at=NOW)
     during: list[datetime | None] = []
 
     outcome = revalidate(system, adapters(FakeAdapter(lambda: during.append(due(system)))))
@@ -631,6 +632,7 @@ def test_a_run_whose_lease_the_dispatcher_took_again_starts_no_further_plant() -
     second = second_plant(system)
     replaced(system)
     asked: list[int] = []
+    leases: list[datetime] = []
 
     def adapter(binding: SiteBinding) -> ProviderAdapter:
         def validate() -> None:
@@ -638,6 +640,7 @@ def test_a_run_whose_lease_the_dispatcher_took_again_starts_no_further_plant() -
             if len(asked) == 1:
                 lease_end = due(system)
                 assert lease_end is not None
+                leases.append(lease_end)
                 from_another_client(lambda: claim_due_revalidations(lease_end))
 
         return FakeAdapter(validate)
@@ -646,7 +649,37 @@ def test_a_run_whose_lease_the_dispatcher_took_again_starts_no_further_plant() -
 
     assert outcome == RevalidationOutcome.LEASE_LOST
     assert len(asked) == 1
-    assert due(system) == NOW + 2 * revalidation.LEASE
+    assert due(system) == leases[0] + revalidation.LEASE
     later = next(b for b in (system.binding, second) if b.pk != asked[0])
     later.refresh_from_db()
     assert later.validated_credential_revision == 1
+
+
+def test_a_key_replaced_while_a_site_was_refused_starts_no_further_plant() -> None:
+    system = make_system(approved=True)
+    second = second_plant(system)
+    replaced(system)
+    attempts = {binding.pk: validation_attempts(binding) for binding in (system.binding, second)}
+    asked: list[int] = []
+
+    def adapter(binding: SiteBinding) -> ProviderAdapter:
+        def refused_while_replaced() -> None:
+            asked.append(binding.pk)
+            from_another_client(
+                lambda: replace_key(system.admin, system.account.pk, provider_key("NEWER"))
+            )
+            raise ProviderError("provider_request_failed", retryable=False, status_code=404)
+
+        return FakeAdapter(refused_while_replaced)
+
+    outcome = revalidate(system, adapter)
+
+    assert outcome == RevalidationOutcome.STOPPED
+    assert len(asked) == 1
+    first, later = (
+        SiteBinding.objects.get(pk=pk)
+        for pk in (asked[0], ({system.binding.pk, second.pk} - set(asked)).pop())
+    )
+    assert first.health != "error"
+    assert validation_attempts(later) == attempts[later.pk]
+    assert ProviderAccount.objects.get(pk=system.account.pk).revalidation_due_at is not None
