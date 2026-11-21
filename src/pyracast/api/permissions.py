@@ -30,6 +30,7 @@ class Throttle(StrEnum):
     CALIBRATION = "calibration"
     PRODUCTION_IMPORT = "production_import"
     SUBMISSION = "submission"
+    INVITATION = "invitation"
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ ROUTE_POLICIES: Mapping[str, Mapping[str, Policy]] = {
     "api/session/language/": {"POST": PUBLIC},
     "api/tenants/": {"GET": ACCOUNT},
     "api/invitations/accept/": {"POST": Policy(Access.ACCOUNT, Throttle.SUBMISSION)},
+    "api/invitations/preview/": {"POST": Policy(Access.PUBLIC, Throttle.INVITATION)},
     TENANT + "change-requests/": {"GET": MEMBER},
     TENANT + "change-requests/<int:request_id>/": {"GET": MEMBER},
     TENANT + "change-requests/<int:request_id>/approve/": {"POST": ADMIN},
@@ -61,6 +63,7 @@ ROUTE_POLICIES: Mapping[str, Mapping[str, Policy]] = {
     TENANT + "change-requests/<int:request_id>/withdraw/": {"POST": MEMBER},
     TENANT + "invitations/": {"GET": ADMIN, "POST": ADMIN},
     TENANT + "invitations/<int:invitation_id>/": {"DELETE": ADMIN},
+    TENANT + "invitations/<int:invitation_id>/resend/": {"POST": ADMIN},
     TENANT + "members/": {"GET": ADMIN},
     TENANT + "members/<int:user_id>/": {"DELETE": ADMIN},
     TENANT + "sites/": {"GET": MEMBER, "POST": Policy(Access.ADMIN, Throttle.SUBMISSION)},

@@ -115,8 +115,10 @@ ADMINISTRATOR_CHANGE_RULE = (
     "previous_administrator_id IS NULL OR previous_administrator_id <> administrator_id"
 )
 INVITATION_STATE_RULE = (
-    "revoked_at IS NULL OR (accepted_at IS NULL AND NOT expires_at > revoked_at)"
+    "(revoked_at IS NULL AND revoked_reason = '')"
+    " OR (revoked_at IS NOT NULL AND accepted_at IS NULL)"
 )
+INVITATION_ACCEPTOR_RULE = "accepted_by_id IS NULL OR accepted_at IS NOT NULL"
 OPEN_INVITATION_RULE = """
 accepted_at IS NOT NULL OR revoked_at IS NOT NULL OR NOT EXISTS (
     SELECT 1 FROM accounts_workspaceinvitation AS other
@@ -173,6 +175,7 @@ STORED_RULES: tuple[tuple[str, str], ...] = (
     ("accounts_workspaceadminchange", ADMINISTRATOR_CHANGE_RULE),
     ("accounts_workspaceinvitation", INVITATION_STATE_RULE),
     ("accounts_workspaceinvitation", OPEN_INVITATION_RULE),
+    ("accounts_workspaceinvitation", INVITATION_ACCEPTOR_RULE),
     ("change_requests_changerequest", REJECTION_REASON_RULE),
     ("change_requests_incidentchange", INCIDENT_INTERVAL_RULE),
     ("notifications_reminderschedule", REMINDER_TIMES_RULE),

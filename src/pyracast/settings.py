@@ -225,12 +225,14 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["pyracast.api.authentication.SessionAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["pyracast.api.permissions.RoutePolicy"],
     "DEFAULT_THROTTLE_CLASSES": ["pyracast.api.throttling.RouteThrottle"],
-    # Per signed-in user and scope; generous until the logged refusals show the real need.
+    # Per scope and signed-in user, or client address when signed out; generous until the logged
+    # refusals show the real need.
     "DEFAULT_THROTTLE_RATES": {
         "forecast": "60/min",
         "calibration": "20/hour",
         "production_import": "120/hour",
         "submission": "30/hour",
+        "invitation": "60/hour",
     },
     "DEFAULT_SCHEMA_CLASS": "pyracast.api.schema.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
@@ -253,6 +255,7 @@ SPECTACULAR_SETTINGS = {
         "LanguageEnum": "pyracast.accounts.models.Language",
         "WorkspaceRoleEnum": "pyracast.accounts.models.WorkspaceRole",
         "InvitationDeliveryStatusEnum": "pyracast.accounts.models.InvitationDeliveryStatus",
+        "InvitationStateEnum": "pyracast.accounts.models.InvitationState",
         "RegionStatusEnum": "pyracast.regions.models.RegionStatus",
         "LocationChangeStatusEnum": "pyracast.regions.models.LocationChangeStatus",
         "AuditActionEnum": "pyracast.regions.models.AuditAction",

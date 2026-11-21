@@ -15,6 +15,8 @@ from pyracast.api.views import (
 )
 from pyracast.api.workspaces import (
     InvitationAcceptanceView,
+    InvitationPreviewView,
+    WorkspaceInvitationResendView,
     WorkspaceInvitationsView,
     WorkspaceInvitationView,
     WorkspaceMembersView,
@@ -59,7 +61,12 @@ urlpatterns = [
         "api/tenants/<int:tenant_id>/invitations/<int:invitation_id>/",
         WorkspaceInvitationView.as_view(),
     ),
+    path(
+        "api/tenants/<int:tenant_id>/invitations/<int:invitation_id>/resend/",
+        WorkspaceInvitationResendView.as_view(),
+    ),
     path("api/invitations/accept/", InvitationAcceptanceView.as_view()),
+    path("api/invitations/preview/", InvitationPreviewView.as_view()),
     path("api/tenants/<int:tenant_id>/sites/", SitesView.as_view()),
     path("api/tenants/<int:tenant_id>/trash/regions/", TrashedRegionsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/<int:region_id>/", RegionView.as_view()),

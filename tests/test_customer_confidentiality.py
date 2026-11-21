@@ -179,6 +179,7 @@ CUSTOMER_FIELDS = {
     "inverter_capacity_mw",
     "invitation_id",
     "invitations",
+    "inviter",
     "is_reverted",
     "issuance_cutoff",
     "issuance_id",
@@ -353,6 +354,7 @@ CUSTOMER_FIELDS = {
     "window_end",
     "window_start",
     "windows",
+    "workspace",
     "workspace_member_count",
     "workspace_recipients",
 }

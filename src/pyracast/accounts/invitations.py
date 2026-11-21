@@ -3,15 +3,15 @@ import math
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import NoReturn
 
 from allauth.account.models import EmailAddress
 from django.conf import settings
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AnonymousUser, User
 from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
 from django.db import connection, transaction
-from django.db.models import Q, QuerySet, Value
-from django.db.models.functions import Least
+from django.db.models import BooleanField, Exists, OuterRef, Q, QuerySet, Value
 from django.template.loader import render_to_string
 from django.utils import timezone, translation
 from django.utils.translation import gettext as _
@@ -22,12 +22,15 @@ from pyracast.accounts.authorization import authorize_workspace_admin
 from pyracast.accounts.language import user_language
 from pyracast.accounts.models import (
     InvitationDeliveryStatus,
+    InvitationRevocation,
+    InvitationState,
     Membership,
     Tenant,
     WorkspaceAdminChange,
     WorkspaceInvitation,
     WorkspaceRole,
 )
+from pyracast.accounts.processes import lock_account
 from pyracast.errors import ConflictError, DomainError, ErrorCode, ForbiddenError
 from pyracast.notifications.intents import enqueue_mail
 from pyracast.notifications.models import OutboundMailError, OutboundMailKind
@@ -51,20 +54,82 @@ RECIPIENT_DAILY = InvitationBudget("recipient", timedelta(days=1), 3)
 RECIPIENT_WORKSPACES = InvitationBudget("recipient_workspace", timedelta(days=1), 1)
 
 
+@dataclass(frozen=True)
+class InvitationPreview:
+    workspace: str
+    role: str
+    inviter: str | None
+    email: str
+    expires_at: datetime
+
+
 def invitation_digest(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
 def pending_invitation(token: str, email: str) -> WorkspaceInvitation:
-    invitation = WorkspaceInvitation.objects.filter(
-        token_hash=invitation_digest(token),
-        email=email.strip().lower(),
-        accepted_at__isnull=True,
-        expires_at__gt=timezone.now(),
-    ).first()
+    invitation = (
+        WorkspaceInvitation.objects.pending(timezone.now())
+        .filter(token_hash=invitation_digest(token), email=email.strip().lower())
+        .first()
+    )
     if invitation is None:
         raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
     return invitation
+
+
+def workspace_invitations(tenant_id: int) -> QuerySet[WorkspaceInvitation]:
+    return (
+        WorkspaceInvitation.objects.filter(tenant_id=tenant_id)
+        .open()
+        .order_by("-created_at", "-pk")
+    )
+
+
+def _usable_by(
+    invitation: WorkspaceInvitation, viewer: User | AnonymousUser, *, viewer_is_member: bool
+) -> bool:
+    state = invitation.state_at(timezone.now())
+    if state == InvitationState.PENDING:
+        return True
+    return (
+        state == InvitationState.ACCEPTED
+        and viewer.is_authenticated
+        and invitation.accepted_by_id == viewer.pk
+        and viewer_is_member
+    )
+
+
+def preview_workspace_invitation(token: str, viewer: User | AnonymousUser) -> InvitationPreview:
+    # One lookup decides every refusal, so neither the answer nor the work done tells an
+    # unknown token from a closed invitation, from one accepted by another account or from one
+    # whose acceptor has left.
+    viewer_is_member = (
+        Exists(Membership.objects.filter(tenant_id=OuterRef("tenant_id"), user=viewer))
+        if isinstance(viewer, User)
+        else Value(False, output_field=BooleanField())
+    )
+    invitation = (
+        WorkspaceInvitation.objects.select_related("tenant", "created_by")
+        .annotate(viewer_is_member=viewer_is_member)
+        .filter(token_hash=invitation_digest(token))
+        .first()
+    )
+    if invitation is None or not _usable_by(
+        invitation, viewer, viewer_is_member=invitation.viewer_is_member
+    ):
+        raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
+    inviter = invitation.created_by
+    named = Membership.objects.filter(
+        tenant_id=invitation.tenant_id, user=inviter, user__is_active=True
+    ).exists()
+    return InvitationPreview(
+        workspace=invitation.tenant.name,
+        role=invitation.role,
+        inviter=(inviter.email or None) if named else None,
+        email=invitation.email,
+        expires_at=invitation.expires_at,
+    )
 
 
 def _seconds_until_free(
@@ -152,10 +217,10 @@ def invite_workspace_member(
     now = timezone.now()
     _check_budgets(actor, tenant_id, email, now)
     replaced = Q(email=email) | Q(role=WorkspaceRole.ADMIN) if admin_role else Q(email=email)
-    # Expired invitations are revoked too: one invitation per address stays unrevoked.
-    WorkspaceInvitation.objects.filter(
-        replaced, tenant_id=tenant_id, accepted_at__isnull=True, revoked_at__isnull=True
-    ).update(revoked_at=now, expires_at=Least("expires_at", Value(now)))
+    # Expired invitations are superseded too: one invitation per address stays open.
+    WorkspaceInvitation.objects.filter(replaced, tenant_id=tenant_id).revoke(
+        now, InvitationRevocation.SUPERSEDED
+    )
     invitation = WorkspaceInvitation.objects.create(
         tenant_id=tenant_id,
         email=email,
@@ -190,10 +255,11 @@ def compose_invitation(
     invitation = (
         WorkspaceInvitation.objects.select_for_update(of=("self",))
         .select_related("tenant")
-        .filter(pk=invitation_id, accepted_at__isnull=True, revoked_at__isnull=True)
+        .filter(pk=invitation_id)
+        .pending(now)
         .first()
     )
-    if invitation is None or invitation.expires_at <= now:
+    if invitation is None:
         return OutboundMailError.INVITATION_UNAVAILABLE
     token = secrets.token_urlsafe(32)
     invitation.token_hash = invitation_digest(token)
@@ -229,52 +295,80 @@ def _record_refused_acceptance(actor: User, invitation: WorkspaceInvitation, rea
         )
 
 
+def _refuse_acceptance(actor: User, invitation: WorkspaceInvitation, reason: str) -> NoReturn:
+    _record_refused_acceptance(actor, invitation, reason)
+    raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
+
+
+def _accepted_before(actor: User, invitation: WorkspaceInvitation) -> Membership:
+    # A retry after a lost response gets the first answer: only the accepting account, and
+    # only while it is still a member.
+    membership = (
+        Membership.objects.filter(tenant_id=invitation.tenant_id, user=actor).first()
+        if invitation.accepted_by_id == actor.pk
+        else None
+    )
+    if membership is None:
+        _refuse_acceptance(actor, invitation, InvitationState.ACCEPTED)
+    return membership
+
+
+def _holds_invited_address(actor: User, email: str) -> bool:
+    return (
+        User.objects.filter(pk=actor.pk, is_active=True).exists()
+        and EmailAddress.objects.filter(user=actor, email__iexact=email, verified=True).exists()
+    )
+
+
 @transaction.atomic
 def accept_workspace_invitation(actor: User, token: str) -> Membership:
-    invitation = WorkspaceInvitation.objects.filter(token_hash=invitation_digest(token)).first()
-    if invitation is None:
+    # The account's rows before the workspace, the order of the account processes: the invited
+    # address is checked against the addresses this acceptance commits with.
+    lock_account(actor.pk)
+    found = (
+        WorkspaceInvitation.objects.filter(token_hash=invitation_digest(token))
+        .values_list("pk", "tenant_id")
+        .first()
+    )
+    if found is None:
         raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
-    Tenant.objects.select_for_update().get(pk=invitation.tenant_id)
-    invitation = WorkspaceInvitation.objects.select_for_update().get(pk=invitation.pk)
+    invitation_id, tenant_id = found
+    Tenant.objects.select_for_update().get(pk=tenant_id)
+    invitation = WorkspaceInvitation.objects.select_for_update().get(pk=invitation_id)
+    if invitation.accepted_at is not None:
+        return _accepted_before(actor, invitation)
+    if (state := invitation.state_at(timezone.now())) != InvitationState.PENDING:
+        _refuse_acceptance(actor, invitation, state)
     admin_role = invitation.role == WorkspaceRole.ADMIN
-    if invitation.accepted_at is not None or invitation.expires_at <= timezone.now():
-        reason = "accepted" if invitation.accepted_at is not None else "expired"
-        _record_refused_acceptance(actor, invitation, reason)
-        raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
-    if admin_role and has_workspace_admin(invitation.tenant_id):
-        _record_refused_acceptance(actor, invitation, "administrator_exists")
-        raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
-    if (
-        not User.objects.filter(pk=actor.pk, is_active=True).exists()
-        or not EmailAddress.objects.filter(
-            user=actor, email__iexact=invitation.email, verified=True
-        ).exists()
-    ):
+    if admin_role and has_workspace_admin(tenant_id):
+        _refuse_acceptance(actor, invitation, "administrator_exists")
+    if not _holds_invited_address(actor, invitation.email):
         _record_refused_acceptance(actor, invitation, "email_unverified")
         raise ForbiddenError(ErrorCode.INVITATION_EMAIL_UNVERIFIED)
     membership, _created = Membership.objects.get_or_create(
-        tenant_id=invitation.tenant_id, user=actor, defaults={"role": invitation.role}
+        tenant_id=tenant_id, user=actor, defaults={"role": invitation.role}
     )
     if admin_role:
         membership.role = WorkspaceRole.ADMIN
         membership.save(update_fields=["role"])
         WorkspaceAdminChange.objects.create(
-            tenant_id=invitation.tenant_id,
+            tenant_id=tenant_id,
             actor_id=invitation.created_by_id,
             administrator=actor,
         )
         record_security_event(
             SecurityEvent.WORKSPACE_ADMIN_REASSIGNED,
             user_id=invitation.created_by_id,
-            tenant_id=invitation.tenant_id,
+            tenant_id=tenant_id,
             target_id=actor.pk,
         )
     invitation.accepted_at = timezone.now()
-    invitation.save(update_fields=["accepted_at"])
+    invitation.accepted_by = actor
+    invitation.save(update_fields=["accepted_at", "accepted_by"])
     record_security_event(
         SecurityEvent.INVITATION_ACCEPTED,
         user_id=actor.pk,
-        tenant_id=invitation.tenant_id,
+        tenant_id=tenant_id,
         target_id=invitation.pk,
     )
     return membership
@@ -283,41 +377,50 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
 @transaction.atomic
 def revoke_workspace_invitation(
     actor: User, tenant_id: int, invitation_id: int, *, platform: bool = False
-) -> None:
+) -> bool:
+    """False when the invitation was already closed."""
     authorize_workspace_admin(actor, tenant_id, platform=platform)
     invitation = (
         WorkspaceInvitation.objects.select_for_update()
         .filter(tenant_id=tenant_id, pk=invitation_id)
         .first()
     )
-    if invitation is None:
+    if invitation is None or invitation.accepted_at is not None:
         raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
-    now = timezone.now()
-    invitation.expires_at = min(invitation.expires_at, now)
-    if invitation.accepted_at is None and invitation.revoked_at is None:
-        invitation.revoked_at = now
-    invitation.save(update_fields=["expires_at", "revoked_at"])
+    if invitation.revoked_at is not None:
+        return False
+    invitation.revoked_at = timezone.now()
+    invitation.revoked_reason = InvitationRevocation.CANCELLED
+    invitation.save(update_fields=["revoked_at", "revoked_reason"])
     record_security_event(
         SecurityEvent.INVITATION_REVOKED,
         user_id=actor.pk,
         tenant_id=tenant_id,
         target_id=invitation.pk,
     )
+    return True
 
 
 @transaction.atomic
 def reissue_workspace_invitation(
-    actor: User, tenant_id: int, invitation_id: int, *, language: str | None = None
+    actor: User,
+    tenant_id: int,
+    invitation_id: int,
+    *,
+    platform: bool = False,
+    language: str | None = None,
 ) -> WorkspaceInvitation:
-    authorize_workspace_admin(actor, tenant_id, platform=True)
-    invitation = WorkspaceInvitation.objects.filter(
-        tenant_id=tenant_id,
-        pk=invitation_id,
-        accepted_at__isnull=True,
-        expires_at__gt=timezone.now(),
-    ).first()
+    authorize_workspace_admin(actor, tenant_id, platform=platform)
+    invitation = (
+        WorkspaceInvitation.objects.filter(tenant_id=tenant_id, pk=invitation_id).open().first()
+    )
     if invitation is None:
         raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
     return invite_workspace_member(
-        actor, tenant_id, invitation.email, role=invitation.role, language=language, platform=True
+        actor,
+        tenant_id,
+        invitation.email,
+        role=invitation.role,
+        language=language,
+        platform=platform,
     )

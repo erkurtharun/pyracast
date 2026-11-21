@@ -2428,8 +2428,14 @@ msgstr "Çalışma alanının adı %(name)s olarak değiştirildi."
 msgid "Invitation to %(email)s revoked."
 msgstr "%(email)s adresine gönderilen davet iptal edildi."
 
+msgid "The invitation to %(email)s is already closed."
+msgstr "%(email)s adresine gönderilen davet zaten kapalı."
+
 msgid "%(member)s was removed from the workspace."
 msgstr "%(member)s çalışma alanından çıkarıldı."
+
+msgid "%(member)s is not a member of the workspace."
+msgstr "%(member)s çalışma alanının üyesi değil."
 
 msgid "Plant name"
 msgstr "Santral adı"

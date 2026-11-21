@@ -1,13 +1,14 @@
 from collections.abc import Iterator
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from django.contrib.auth.models import User
-from django.db import connection
+from django.db import connection, models
 from django.db.migrations.executor import MigrationExecutor
 from django.utils import timezone
 
-from pyracast.accounts.models import Tenant, WorkspaceInvitation
+from pyracast.accounts.models import Tenant
 from tests.support.migrations import forward, migrate
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -26,14 +27,20 @@ def at_previous_state() -> Iterator[None]:
         forward()
 
 
+def invitations_at(state: tuple[str, str]) -> models.Manager[Any]:
+    apps = MigrationExecutor(connection).loader.project_state(state).apps
+    model: type[models.Model] = apps.get_model("accounts", "WorkspaceInvitation")
+    return model._default_manager
+
+
 def _invitation(
     tenant: Tenant, sender: User, email: str, expires_in: timedelta, **fields: object
-) -> WorkspaceInvitation:
-    return WorkspaceInvitation.objects.create(
-        tenant=tenant,
+) -> Any:
+    return invitations_at(PREVIOUS).create(
+        tenant_id=tenant.pk,
         email=email,
         token_hash=email.ljust(64, "0")[:64],
-        created_by=sender,
+        created_by_id=sender.pk,
         expires_at=timezone.now() + expires_in,
         **fields,
     )
@@ -61,15 +68,16 @@ def test_the_link_migration_expires_only_the_invitations_still_open() -> None:
     migrate(EXPIRING)
 
     after = timezone.now()
+    invitations = invitations_at(EXPIRING)
     for row in (open_viewer, open_admin):
-        expired = WorkspaceInvitation.objects.get(pk=row.pk)
+        expired = invitations.get(pk=row.pk)
         assert now <= expired.expires_at <= after
         assert expired.accepted_at is None
         assert expired.revoked_at is None
     for pk, fields in untouched.items():
-        row = WorkspaceInvitation.objects.get(pk=pk)
+        row = invitations.get(pk=pk)
         assert (row.expires_at, row.accepted_at, row.revoked_at) == fields
-    assert not WorkspaceInvitation.objects.filter(
+    assert not invitations.filter(
         accepted_at__isnull=True, revoked_at__isnull=True, expires_at__gt=after
     ).exists()
 
@@ -83,7 +91,7 @@ def test_the_link_expiry_runs_before_the_token_is_minted_at_send_and_keeps_every
     accepted = _invitation(
         tenant, sender, "accepted@example.com", timedelta(days=5), accepted_at=now
     )
-    hashes = dict(WorkspaceInvitation.objects.values_list("pk", "token_hash"))
+    hashes = dict(invitations_at(PREVIOUS).values_list("pk", "token_hash"))
     plan = MigrationExecutor(connection).migration_plan([MINTED_AT_SEND])
 
     assert [
@@ -94,10 +102,11 @@ def test_the_link_expiry_runs_before_the_token_is_minted_at_send_and_keeps_every
 
     migrate(MINTED_AT_SEND)
 
-    assert WorkspaceInvitation.objects.get(pk=open_row.pk).expires_at <= timezone.now()
-    assert WorkspaceInvitation.objects.get(pk=accepted.pk).expires_at == accepted.expires_at
-    assert dict(WorkspaceInvitation.objects.values_list("pk", "token_hash")) == hashes
-    unsent = WorkspaceInvitation.objects.create(
-        tenant=tenant, email="unsent@example.com", created_by=sender, expires_at=now
+    invitations = invitations_at(MINTED_AT_SEND)
+    assert invitations.get(pk=open_row.pk).expires_at <= timezone.now()
+    assert invitations.get(pk=accepted.pk).expires_at == accepted.expires_at
+    assert dict(invitations.values_list("pk", "token_hash")) == hashes
+    unsent = invitations.create(
+        tenant_id=tenant.pk, email="unsent@example.com", created_by_id=sender.pk, expires_at=now
     )
-    assert WorkspaceInvitation.objects.get(pk=unsent.pk).token_hash is None
+    assert invitations.get(pk=unsent.pk).token_hash is None

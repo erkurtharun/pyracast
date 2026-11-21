@@ -3,6 +3,7 @@ from __future__ import annotations
 from threading import Lock
 from typing import TYPE_CHECKING, cast
 
+from allauth.account.adapter import get_adapter
 from django.conf import settings
 from django.core.cache import caches
 from rest_framework.request import Request
@@ -43,4 +44,9 @@ class RouteThrottle(SimpleRateThrottle):
         return False
 
     def get_cache_key(self, request: Request, view: APIView) -> str:
-        return self.cache_format % {"scope": self.scope, "ident": request.user.pk}
+        ident = (
+            request.user.pk
+            if request.user.is_authenticated
+            else get_adapter().get_client_ip(request._request)
+        )
+        return self.cache_format % {"scope": self.scope, "ident": ident}

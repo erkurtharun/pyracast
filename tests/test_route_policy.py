@@ -27,11 +27,12 @@ TENANT = "api/tenants/<int:tenant_id>/"
 REGION = TENANT + "regions/<int:region_id>/"
 PLANT = REGION + "plants/<int:plant_id>/"
 PUBLIC, ACCOUNT, MEMBER, ADMIN = "public", "account", "member", "admin"
-FORECAST, CALIBRATION, IMPORT, SUBMISSION = (
+FORECAST, CALIBRATION, IMPORT, SUBMISSION, INVITATION = (
     "forecast",
     "calibration",
     "production_import",
     "submission",
+    "invitation",
 )
 POLICIES: dict[str, dict[str, tuple[str, str | None]]] = {
     "api/csp-reports/": {"POST": (PUBLIC, None)},
@@ -39,6 +40,7 @@ POLICIES: dict[str, dict[str, tuple[str, str | None]]] = {
     "api/session/language/": {"POST": (PUBLIC, None)},
     "api/tenants/": {"GET": (ACCOUNT, None)},
     "api/invitations/accept/": {"POST": (ACCOUNT, SUBMISSION)},
+    "api/invitations/preview/": {"POST": (PUBLIC, INVITATION)},
     TENANT + "change-requests/": {"GET": (MEMBER, None)},
     TENANT + "change-requests/<int:request_id>/": {"GET": (MEMBER, None)},
     TENANT + "change-requests/<int:request_id>/approve/": {"POST": (ADMIN, None)},
@@ -47,6 +49,7 @@ POLICIES: dict[str, dict[str, tuple[str, str | None]]] = {
     TENANT + "change-requests/<int:request_id>/withdraw/": {"POST": (MEMBER, None)},
     TENANT + "invitations/": {"GET": (ADMIN, None), "POST": (ADMIN, None)},
     TENANT + "invitations/<int:invitation_id>/": {"DELETE": (ADMIN, None)},
+    TENANT + "invitations/<int:invitation_id>/resend/": {"POST": (ADMIN, None)},
     TENANT + "members/": {"GET": (ADMIN, None)},
     TENANT + "members/<int:user_id>/": {"DELETE": (ADMIN, None)},
     TENANT + "sites/": {"GET": (MEMBER, None), "POST": (ADMIN, SUBMISSION)},
@@ -104,6 +107,7 @@ ANSWERS: dict[str, dict[str, tuple[int, str | None]]] = {
     "api/session/language/": {"POST": INVALID},
     "api/tenants/": {"GET": OK},
     "api/invitations/accept/": {"POST": INVALID},
+    "api/invitations/preview/": {"POST": (400, "invitation_unavailable")},
     TENANT + "change-requests/": {"GET": OK},
     TENANT + "change-requests/<int:request_id>/": {"GET": NOT_FOUND},
     TENANT + "change-requests/<int:request_id>/approve/": {"POST": INVALID},
@@ -112,6 +116,7 @@ ANSWERS: dict[str, dict[str, tuple[int, str | None]]] = {
     TENANT + "change-requests/<int:request_id>/withdraw/": {"POST": NOT_FOUND},
     TENANT + "invitations/": {"GET": OK, "POST": INVALID},
     TENANT + "invitations/<int:invitation_id>/": {"DELETE": (400, "invitation_unavailable")},
+    TENANT + "invitations/<int:invitation_id>/resend/": {"POST": (400, "invitation_unavailable")},
     TENANT + "members/": {"GET": OK},
     TENANT + "members/<int:user_id>/": {"DELETE": NO_CONTENT},
     TENANT + "sites/": {"GET": OK, "POST": INVALID},

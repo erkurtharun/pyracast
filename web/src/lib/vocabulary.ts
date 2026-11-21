@@ -21,6 +21,7 @@ export const vocabulary = {
     PreparedMessageKind: "PreparedMessageKindEnum",
     ReminderState: "ReminderStateEnum",
     WorkspaceRole: "WorkspaceRoleEnum",
+    InvitationState: "InvitationStateEnum",
 } as const satisfies Record<string, keyof Schemas>;
 
 export type Vocabulary = {

@@ -1,12 +1,19 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Barrier, Event
+from typing import Any
 
 import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import close_old_connections, connection, connections, transaction
+from django.db import (
+    OperationalError,
+    close_old_connections,
+    connection,
+    connections,
+    transaction,
+)
 from django.test import Client, override_settings
 from django.utils import timezone
 
@@ -26,13 +33,30 @@ from pyracast.accounts.models import (
     WorkspaceRole,
 )
 from pyracast.accounts.operations import reassign_workspace_admin, remove_workspace_member
+from pyracast.accounts.processes import lock_account
+from pyracast.notifications import recipients
+from pyracast.notifications.models import ReminderRecipientTie, ReminderSchedule
+from pyracast.notifications.recipients import recipient_key
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant
 from pyracast.regions.models import AuditEvent, Region
+from tests.support.concurrency import (
+    behind_open_transaction,
+    row_locked_elsewhere,
+    short_lock_timeout,
+)
 from tests.support.domain import make_system
-from tests.support.workspaces import invitation_token
+from tests.support.notifications import store
+from tests.support.workspaces import (
+    administered_workspace,
+    invitation_token,
+    signed_in,
+    verified_account,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+ALIAS = "alias@example.com"
 
 
 @pytest.fixture(name="workspace")
@@ -145,7 +169,10 @@ def test_removal_expires_known_email_invitations_but_allows_intentional_new_invi
     remove_workspace_member(administrator, tenant.pk, viewer.pk)
     for index, invitation in enumerate(invitations):
         invitation.refresh_from_db()
-        assert invitation.expires_at <= timezone.now()
+        assert (invitation.state_at(timezone.now()), invitation.revoked_reason) == (
+            "revoked",
+            "member_removed",
+        )
         with pytest.raises(ValidationError, match="invalid or expired"):
             accept_workspace_invitation(viewer, f"old-{index}")
     unrelated.refresh_from_db()
@@ -172,7 +199,7 @@ def test_removal_rolls_back_when_audit_cannot_be_saved(
     with pytest.raises(RuntimeError, match="audit unavailable"):
         remove_workspace_member(administrator, tenant.pk, viewer.pk)
     invitation.refresh_from_db()
-    assert invitation.expires_at > timezone.now()
+    assert invitation.revoked_at is None
     assert Membership.objects.filter(tenant=tenant, user=viewer).exists()
 
 
@@ -259,3 +286,180 @@ def test_removal_serializes_with_transfer_and_invitation_acceptance(
         assert not Membership.objects.filter(tenant=tenant, user=viewer).exists()
         assert WorkspaceMemberRemoval.objects.count() == 1
         assert Membership.objects.get(tenant=tenant, user=administrator).role == "admin"
+
+
+def administrators(tenant: Tenant) -> list[int]:
+    return list(
+        Membership.objects.filter(tenant=tenant, role=WorkspaceRole.ADMIN).values_list(
+            "user_id", flat=True
+        )
+    )
+
+
+def refusal(response: Any) -> tuple[int, str]:
+    return response.status_code, response.json()["code"] if response.status_code >= 400 else ""
+
+
+@pytest.mark.parametrize("first", ["transfer", "removal"])
+def test_the_outgoing_and_the_incoming_administrator_removing_each_other_leave_one_administrator(
+    workspace: tuple[Tenant, User, User], first: str
+) -> None:
+    tenant, administrator, viewer = workspace
+    platform = User.objects.create_superuser(username="platform")
+    outgoing, incoming = signed_in(administrator), signed_in(viewer)
+    members = f"/api/tenants/{tenant.pk}/members/"
+
+    def transfer() -> str:
+        try:
+            reassign_workspace_admin(
+                platform, tenant.pk, viewer.pk, expected_admin_id=administrator.pk
+            )
+        except ValidationError as refused:
+            return str(refused.code)
+        return "done"
+
+    def remove_the_incoming() -> object:
+        return outgoing.delete(f"{members}{viewer.pk}/")
+
+    if first == "transfer":
+        moved, removed = behind_open_transaction(transfer, remove_the_incoming)
+        assert (moved, refusal(removed)) == ("done", (403, "workspace_admin_required"))
+        counter = incoming.delete(f"{members}{administrator.pk}/")
+        assert counter.status_code == 204
+        assert administrators(tenant) == [viewer.pk]
+        assert not Membership.objects.filter(tenant=tenant, user=administrator).exists()
+    else:
+        removed, moved = behind_open_transaction(remove_the_incoming, transfer)
+        assert (refusal(removed), moved) == ((204, ""), "member_unavailable")
+        counter = incoming.delete(f"{members}{administrator.pk}/")
+        assert refusal(counter) == (403, "membership_required")
+        assert administrators(tenant) == [administrator.pk]
+        assert not Membership.objects.filter(tenant=tenant, user=viewer).exists()
+    assert WorkspaceMemberRemoval.objects.count() == 1
+
+
+def test_an_address_the_member_verifies_while_being_removed_is_covered_by_the_removal(
+    workspace: tuple[Tenant, User, User],
+) -> None:
+    tenant, administrator, viewer = workspace
+    late = outstanding_invitation(tenant, administrator, "late@example.com", "late")
+    client = signed_in(administrator)
+
+    def verify_a_new_address() -> None:
+        lock_account(viewer.pk)
+        EmailAddress.objects.create(user=viewer, email="late@example.com", verified=True)
+
+    _, removed = behind_open_transaction(
+        verify_a_new_address,
+        lambda: client.delete(f"/api/tenants/{tenant.pk}/members/{viewer.pk}/"),
+    )
+
+    assert removed.status_code == 204
+    late.refresh_from_db()
+    assert (late.revoked_at is not None, late.revoked_reason) == (True, "member_removed")
+    assert not Membership.objects.filter(tenant=tenant, user=viewer).exists()
+
+
+def test_a_refused_removal_does_not_wait_for_the_members_account(
+    workspace: tuple[Tenant, User, User],
+) -> None:
+    tenant, administrator, viewer = workspace
+    other = User.objects.create_user(username="other-viewer")
+    Membership.objects.create(tenant=tenant, user=other)
+    outsider = User.objects.create_user(username="outsider")
+
+    with row_locked_elsewhere(User, viewer.pk), short_lock_timeout():
+        for actor, platform in ((other, False), (outsider, False), (administrator, True)):
+            with pytest.raises(PermissionDenied):
+                remove_workspace_member(actor, tenant.pk, viewer.pk, platform=platform)
+
+    assert Membership.objects.filter(tenant=tenant, user=viewer).exists()
+
+
+def test_a_member_who_joins_while_being_removed_verifies_no_address_until_the_removal_ends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant, administrator = administered_workspace()
+    guest = verified_account("guest", "guest@example.com")
+    EmailAddress.objects.create(user=guest, email=ALIAS, verified=False)
+    outstanding_invitation(tenant, administrator, guest.email, "joining")
+    alias = outstanding_invitation(tenant, administrator, ALIAS, "alias")
+    verification: list[str] = []
+    remove_recipients = recipients.remove_member_recipients
+
+    def verify_the_alias() -> str:
+        try:
+            with short_lock_timeout(), transaction.atomic():
+                lock_account(guest.pk)
+                EmailAddress.objects.filter(user=guest, email=ALIAS).update(verified=True)
+        except OperationalError:
+            return "waited"
+        finally:
+            connections.close_all()
+        return "verified"
+
+    def while_removing(*args: Any) -> None:
+        with ThreadPoolExecutor(1) as pool:
+            verification.append(pool.submit(verify_the_alias).result(timeout=10))
+        remove_recipients(*args)
+
+    monkeypatch.setattr(recipients, "remove_member_recipients", while_removing)
+    behind_open_transaction(
+        lambda: accept_workspace_invitation(guest, "joining"),
+        lambda: remove_workspace_member(administrator, tenant.pk, guest.pk),
+    )
+
+    assert verification == ["waited"]
+    assert not Membership.objects.filter(tenant=tenant, user=guest).exists()
+    alias.refresh_from_db()
+    assert alias.revoked_reason == "member_removed"
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [("accept", "remove"), ("remove", "accept"), ("verify", "remove"), ("remove", "verify")],
+)
+def test_a_removal_racing_the_members_acceptance_or_verification_leaves_nothing_of_theirs_open(
+    first: str, second: str
+) -> None:
+    system = make_system()
+    viewer = verified_account("viewer", "viewer@example.com")
+    membership = Membership.objects.create(tenant=system.tenant, user=viewer)
+    EmailAddress.objects.create(user=viewer, email=ALIAS, verified="accept" in (first, second))
+    invitation = outstanding_invitation(system.tenant, system.member, ALIAS, "alias")
+    schedule = ReminderSchedule.objects.create(region=system.region, effective_from=timezone.now())
+    store(
+        schedule,
+        [viewer.email, ALIAS],
+        {recipient_key(address): [membership.pk] for address in (viewer.email, ALIAS)},
+    )
+
+    def operation(name: str) -> str:
+        if name == "remove":
+            remove_workspace_member(system.member, system.tenant.pk, viewer.pk)
+            return "removed"
+        if name == "verify":
+            with transaction.atomic():
+                lock_account(viewer.pk)
+                EmailAddress.objects.filter(user=viewer, email=ALIAS).update(verified=True)
+            return "verified"
+        try:
+            accept_workspace_invitation(viewer, "alias")
+        except ValidationError as refused:
+            return str(refused.code)
+        return "accepted"
+
+    outcomes = behind_open_transaction(lambda: operation(first), lambda: operation(second))
+
+    expected = {
+        ("accept", "remove"): ("accepted", "removed"),
+        ("remove", "accept"): ("removed", "invitation_unavailable"),
+        ("verify", "remove"): ("verified", "removed"),
+        ("remove", "verify"): ("removed", "verified"),
+    }
+    assert outcomes == expected[first, second]
+    invitation.refresh_from_db()
+    assert invitation.state_at(timezone.now()) == ("accepted" if first == "accept" else "revoked")
+    assert not WorkspaceInvitation.objects.filter(tenant=system.tenant).open().exists()
+    assert not ReminderRecipientTie.objects.filter(membership_id=membership.pk).exists()
+    assert not Membership.objects.filter(pk=membership.pk).exists()

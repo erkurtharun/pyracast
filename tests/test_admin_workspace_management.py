@@ -1,3 +1,5 @@
+import json
+import logging
 import re
 from collections.abc import Callable
 from datetime import timedelta
@@ -9,10 +11,12 @@ from django.core import mail
 from django.test import Client
 from django.utils import timezone
 
+from pyracast.accounts.audit import logger as security_logger
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import (
     Membership,
     Tenant,
+    WorkspaceAdminChange,
     WorkspaceInvitation,
     WorkspaceMemberRemoval,
     WorkspaceRole,
@@ -113,7 +117,7 @@ def test_workspace_console_routes_require_a_verified_platform_administrator(
     assert list(Tenant.objects.values_list("name", flat=True)) == ["Solar workspace"]
     assert Membership.objects.get(user=owner).role == WorkspaceRole.ADMIN
     assert Membership.objects.filter(user=viewer).exists()
-    assert WorkspaceInvitation.objects.get().expires_at > timezone.now()
+    assert WorkspaceInvitation.objects.get().state_at(timezone.now()) == "pending"
     deliver_mail()
     assert len(mail.outbox) == sent
     assert Region.objects.get().name == "Console site"
@@ -152,7 +156,7 @@ def test_workspace_console_routes_guard_methods_csrf_and_unknown_records() -> No
     ):
         assert client.post(path, HTTP_X_CSRFTOKEN=token).status_code == 404, path
     assert tenant.name == Tenant.objects.get(pk=tenant.pk).name
-    assert WorkspaceInvitation.objects.get().expires_at > timezone.now()
+    assert WorkspaceInvitation.objects.get().state_at(timezone.now()) == "pending"
 
 
 def test_workspace_list_offers_creation_and_shows_each_administrator_state() -> None:
@@ -439,7 +443,7 @@ def test_pending_invitations_are_reissued_and_revoked_from_the_workspace_page() 
     reissued = client.post(f"{base}invitations/{invitation.pk}/reissue/")
     assert reissued["Location"] == f"{base}#invitations-title"
     invitation.refresh_from_db()
-    assert invitation.expires_at <= timezone.now()
+    assert invitation.state_at(timezone.now()) == "superseded"
     replacement = WorkspaceInvitation.objects.latest("pk")
     assert (replacement.email, replacement.role) == ("guest@example.com", WorkspaceRole.VIEWER)
     deliver_mail()
@@ -449,7 +453,7 @@ def test_pending_invitations_are_reissued_and_revoked_from_the_workspace_page() 
     revoked = client.post(f"{base}invitations/{replacement.pk}/revocation/")
     assert revoked["Location"] == f"{base}#invitations-title"
     replacement.refresh_from_db()
-    assert replacement.expires_at <= timezone.now()
+    assert replacement.state_at(timezone.now()) == "revoked"
     html = client.get(base).content.decode()
     assert "Invitation to guest@example.com revoked." in html
     assert "No pending invitations." in html
@@ -477,7 +481,7 @@ def test_a_resend_waiting_for_an_administrator_change_does_not_revive_the_invita
     assert resent["Location"] == f"{base}#invitations-title"
     assert Membership.objects.get(user=viewer).role == WorkspaceRole.ADMIN
     assert list(WorkspaceInvitation.objects.values_list("pk", flat=True)) == [invitation.pk]
-    assert WorkspaceInvitation.objects.get().expires_at <= timezone.now()
+    assert WorkspaceInvitation.objects.get().state_at(timezone.now()) == "revoked"
     deliver_mail()
     assert len(mail.outbox) == sent
     assert "The invitation is invalid or expired." in client.get(base).content.decode()
@@ -516,6 +520,111 @@ def test_member_removal_states_its_consequences_and_keeps_the_administrator() ->
     assert refused.status_code == 400
     assert "The workspace administrator cannot be removed." in refused.content.decode()
     assert Membership.objects.get(user=owner).role == WorkspaceRole.ADMIN
+
+
+def notices(client: Client, url: str, data: dict[str, object] | None = None) -> list[str]:
+    response = client.post(url, data or {}, follow=True)
+    return [str(message) for message in response.context["messages"]]
+
+
+def security_events(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        json.loads(record.getMessage())["event"]
+        for record in caplog.records
+        if record.name == "pyracast.security"
+    ]
+
+
+def test_a_double_submitted_cancellation_reports_it_once(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant, _, _ = workspace()
+    client, operator = verified_admin()
+    invitation = invite_workspace_member(operator, tenant.pk, "guest@example.com", platform=True)
+    url = f"/admin/workspaces/{tenant.pk}/invitations/{invitation.pk}/revocation/"
+    monkeypatch.setattr(security_logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(security_logger, "propagate", False)
+    caplog.set_level(logging.INFO, logger="pyracast.security")
+    caplog.clear()
+
+    assert notices(client, url) == ["Invitation to guest@example.com revoked."]
+    assert notices(client, url) == ["The invitation to guest@example.com is already closed."]
+    assert security_events(caplog) == ["invitation_revoked"]
+
+
+def test_a_double_submitted_member_removal_reports_it_once() -> None:
+    tenant, _, viewer = workspace()
+    client, _ = verified_admin()
+    url = f"/admin/workspaces/{tenant.pk}/members/{viewer.pk}/removal/"
+
+    assert notices(client, url) == ["viewer@example.com was removed from the workspace."]
+    assert notices(client, url) == ["viewer@example.com is not a member of the workspace."]
+    assert WorkspaceMemberRemoval.objects.count() == 1
+    assert client.post(f"/admin/workspaces/{tenant.pk}/members/999999/removal/").status_code == 404
+
+
+def test_only_an_account_this_workspace_removed_gets_the_repeat_removal_notice() -> None:
+    tenant, _, viewer = workspace()
+    other = Tenant.objects.create(name="Other workspace")
+    neighbour = User.objects.create_user(username="neighbour", email="neighbour@example.com")
+    Membership.objects.create(tenant=other, user=neighbour)
+    loner = User.objects.create_user(username="loner", email="loner@example.com")
+    client, operator = verified_admin()
+    WorkspaceMemberRemoval.objects.create(tenant=other, actor=operator, user=loner)
+
+    def removal(user: User) -> str:
+        return f"/admin/workspaces/{tenant.pk}/members/{user.pk}/removal/"
+
+    def page_notices() -> list[str]:
+        response = client.get(f"/admin/workspaces/{tenant.pk}/")
+        return [str(message) for message in response.context["messages"]]
+
+    for stranger in (neighbour, loner):
+        assert client.post(removal(stranger)).status_code == 404
+        assert client.get(removal(stranger)).status_code == 404
+    assert page_notices() == []
+
+    removed_once = notices(client, removal(viewer))
+    Membership.objects.create(tenant=tenant, user=viewer)
+    removed_twice = notices(client, removal(viewer))
+
+    assert removed_once == removed_twice == ["viewer@example.com was removed from the workspace."]
+    assert notices(client, removal(viewer)) == [
+        "viewer@example.com is not a member of the workspace."
+    ]
+    assert client.get(removal(viewer)).status_code == 404
+    assert WorkspaceMemberRemoval.objects.filter(tenant=tenant, user=viewer).count() == 2
+
+
+def test_only_a_console_administrator_change_that_changes_something_closes_invitations(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant, owner, viewer = workspace()
+    client, operator = verified_admin()
+    invitation = invite_workspace_member(operator, tenant.pk, "guest@example.com", platform=True)
+    url = f"/admin/workspaces/{tenant.pk}/administrator/"
+    monkeypatch.setattr(security_logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(security_logger, "propagate", False)
+    caplog.set_level(logging.INFO, logger="pyracast.security")
+    caplog.clear()
+
+    kept = notices(client, url, {"administrator": owner.pk, "expected_admin_id": owner.pk})
+
+    assert kept == ["owner@example.com is already the workspace administrator."]
+    assert WorkspaceInvitation.objects.get().state_at(timezone.now()) == "pending"
+    assert not WorkspaceAdminChange.objects.exists()
+    assert security_events(caplog) == []
+
+    changed = notices(client, url, {"administrator": viewer.pk, "expected_admin_id": owner.pk})
+
+    assert changed == ["viewer@example.com is now the workspace administrator."]
+    closed = WorkspaceInvitation.objects.get(pk=invitation.pk)
+    assert (closed.revoked_reason, closed.state_at(timezone.now())) == (
+        "administrator_changed",
+        "revoked",
+    )
+    assert WorkspaceAdminChange.objects.count() == 1
+    assert security_events(caplog) == ["workspace_admin_reassigned"]
 
 
 def settings_section(html: str) -> str:

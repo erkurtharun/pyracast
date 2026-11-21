@@ -1,7 +1,10 @@
 import { expect, test, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import { errorBody } from "./support/errors";
-import { mockApi, user } from "./support/workspace";
+import { answer, mockApi, user } from "./support/workspace";
+import type { components } from "../src/lib/schema";
+
+type Invitation = components["schemas"]["InvitationOutput"];
 
 async function scan(page: Page, selector: string) {
     const violations = await accessibilityViolations(page, selector);
@@ -318,11 +321,14 @@ test("the member list keeps its rows with a retry when a refresh fails", async (
 test("the shell announces action outcomes through one live region that exists before it speaks", async ({
     page,
 }) => {
-    let invitations = [
+    let invitations: Invitation[] = [
         {
             id: 7,
             email: "new@example.test",
             role: "viewer",
+            state: "pending",
+            created_at: "2026-11-20T09:00:00Z",
+            expires_at: "2026-11-27T09:00:00Z",
             delivery_status: "sent",
         },
     ];
@@ -339,7 +345,9 @@ test("the shell announces action outcomes through one live region that exists be
             invitations = [];
             return route.fulfill({ status: 204 });
         }
-        return route.fulfill({ json: { invitations } });
+        return route.fulfill({
+            json: answer("WorkspaceInvitationsOutput", { invitations }),
+        });
     });
     await page.goto("/app/");
     const region = page.locator("[data-live-region]");
@@ -348,7 +356,7 @@ test("the shell announces action outcomes through one live region that exists be
     await expect(region).toHaveText("");
     await page.getByRole("button", { name: "Members", exact: true }).click();
     const cancel = page.getByRole("button", {
-        name: "Cancel invitation",
+        name: "Cancel invitation: new@example.test",
         exact: true,
     });
     await expect(cancel).toHaveClass(/secondary/);
@@ -361,10 +369,13 @@ test("the shell announces action outcomes through one live region that exists be
 });
 
 test("the shell speaks a repeated outcome again", async ({ page }) => {
-    let invitations = [7, 8].map((id) => ({
+    let invitations = [7, 8].map((id): Invitation => ({
         id,
         email: `invitee${id}@example.test`,
         role: "viewer",
+        state: "pending",
+        created_at: "2026-11-20T09:00:00Z",
+        expires_at: "2026-11-27T09:00:00Z",
         delivery_status: "sent",
     }));
     await mockApi(page);
@@ -383,14 +394,15 @@ test("the shell speaks a repeated outcome again", async ({ page }) => {
             );
             return route.fulfill({ status: 204 });
         }
-        return route.fulfill({ json: { invitations } });
+        return route.fulfill({
+            json: answer("WorkspaceInvitationsOutput", { invitations }),
+        });
     });
     await page.goto("/app/");
     await page.getByRole("button", { name: "Members", exact: true }).click();
     const region = page.locator("[data-live-region]");
     const cancel = page.getByRole("button", {
-        name: "Cancel invitation",
-        exact: true,
+        name: /^Cancel invitation: invitee\d+@example\.test$/,
     });
     await cancel.first().click();
     await expect(region).toHaveText("Invitation cancelled.");

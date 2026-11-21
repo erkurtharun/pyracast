@@ -139,8 +139,7 @@ def test_invitation_requires_admin_and_verified_matching_email_and_is_single_use
     assert membership.role == "viewer"
     assert membership.tenant == tenant
     assert WorkspaceInvitation.objects.get().accepted_at is not None
-    with pytest.raises(ValidationError, match="invalid or expired"):
-        accept_workspace_invitation(invited, token)
+    assert accept_workspace_invitation(invited, token) == membership
     address.delete()
 
 
@@ -193,7 +192,7 @@ def test_concurrent_invitation_acceptance_creates_one_viewer(
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(lambda _: accept(), range(2)))
-    assert sorted(results) == ["used", "viewer"]
+    assert results == ["viewer", "viewer"]
     assert Membership.objects.filter(tenant=tenant, user=invited).count() == 1
 
 
@@ -301,7 +300,15 @@ def test_workspace_invitation_api_is_scoped_and_never_returns_secrets(
         HTTP_X_CSRFTOKEN=csrf,
     )
     assert invited.status_code == 201
-    assert set(invited.json()) == {"id", "email", "expires_at", "delivery_status"}
+    assert set(invited.json()) == {
+        "id",
+        "email",
+        "role",
+        "state",
+        "created_at",
+        "expires_at",
+        "delivery_status",
+    }
     assert invited.json()["delivery_status"] == "pending"
     token = invitation_token()
     assert token not in invited.content.decode()
@@ -372,7 +379,7 @@ def test_transferring_admin_revokes_pending_grants_and_idempotent_assignment_pre
         platform, tenant.pk, administrator.pk, expected_admin_id=administrator.pk
     )
     assert not WorkspaceAdminChange.objects.exists()
-    assert WorkspaceInvitation.objects.get().expires_at > timezone.now()
+    assert WorkspaceInvitation.objects.get().state_at(timezone.now()) == "pending"
     reassign_workspace_admin(platform, tenant.pk, viewer.pk, expected_admin_id=administrator.pk)
     new = User.objects.create_user(username="new", email="new@example.com")
     EmailAddress.objects.create(user=new, email=new.email, verified=True)

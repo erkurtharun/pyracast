@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, cast
 from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils.translation import gettext as _
@@ -14,7 +14,13 @@ from pyracast.accounts.invitations import (
     reissue_workspace_invitation,
     revoke_workspace_invitation,
 )
-from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
+from pyracast.accounts.models import (
+    Membership,
+    Tenant,
+    WorkspaceInvitation,
+    WorkspaceMemberRemoval,
+    WorkspaceRole,
+)
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.plants.models import Plant
 from pyracast.platform_admin.forms import form_data, form_page, submitted
@@ -168,7 +174,11 @@ def invitation_reissue(request: HttpRequest, tenant_id: int, invitation_id: int)
     get_object_or_404(WorkspaceInvitation, pk=invitation_id, tenant_id=tenant_id)
     try:
         replacement = reissue_workspace_invitation(
-            _actor(request), tenant_id, invitation_id, language=request.LANGUAGE_CODE
+            _actor(request),
+            tenant_id,
+            invitation_id,
+            platform=True,
+            language=request.LANGUAGE_CODE,
         )
     except ValidationError as refusal:
         messages.error(request, " ".join(refusal.messages))
@@ -180,33 +190,64 @@ def invitation_reissue(request: HttpRequest, tenant_id: int, invitation_id: int)
 @require_POST
 def invitation_revocation(request: HttpRequest, tenant_id: int, invitation_id: int) -> HttpResponse:
     invitation = get_object_or_404(WorkspaceInvitation, pk=invitation_id, tenant_id=tenant_id)
-    revoke_workspace_invitation(_actor(request), tenant_id, invitation.pk, platform=True)
-    messages.success(request, _("Invitation to %(email)s revoked.") % {"email": invitation.email})
+    email = {"email": invitation.email}
+    try:
+        revoked = revoke_workspace_invitation(
+            _actor(request), tenant_id, invitation.pk, platform=True
+        )
+    except ValidationError as refusal:
+        messages.error(request, " ".join(refusal.messages))
+    else:
+        if revoked:
+            messages.success(request, _("Invitation to %(email)s revoked.") % email)
+        else:
+            messages.info(request, _("The invitation to %(email)s is already closed.") % email)
     return _workspace_section(tenant_id, "invitations-title")
+
+
+def _report_removal(
+    request: HttpRequest, tenant_id: int, label: str, *, removed: bool
+) -> HttpResponse:
+    member = {"member": label}
+    if removed:
+        messages.success(request, _("%(member)s was removed from the workspace.") % member)
+    else:
+        messages.info(request, _("%(member)s is not a member of the workspace.") % member)
+    return _workspace_section(tenant_id, "members-title")
 
 
 @require_http_methods(["GET", "POST"])
 def member_removal(
     request: HttpRequest, tenant_id: int, user_id: int, *, site: PlatformAdminSite
 ) -> HttpResponse:
-    membership = get_object_or_404(
-        Membership.objects.select_related("tenant", "user"), tenant_id=tenant_id, user_id=user_id
+    membership = (
+        Membership.objects.select_related("tenant", "user")
+        .filter(tenant_id=tenant_id, user_id=user_id)
+        .first()
     )
+    if membership is None:
+        if request.method != "POST":
+            raise Http404
+        removal = (
+            WorkspaceMemberRemoval.objects.select_related("user")
+            .filter(tenant_id=tenant_id, user_id=user_id)
+            .first()
+        )
+        if removal is None:
+            raise Http404
+        return _report_removal(request, tenant_id, member_label(removal.user), removed=False)
     label = member_label(membership.user)
     is_self = membership.user_id == _actor(request).pk
     errors: list[str] = []
     if request.method == "POST":
         try:
-            remove_workspace_member(_actor(request), tenant_id, user_id, platform=True)
+            removed = remove_workspace_member(_actor(request), tenant_id, user_id, platform=True)
         except ValidationError as refusal:
             errors = refusal.messages
             if is_self and membership.role != WorkspaceRole.ADMIN:
                 errors = [_("You cannot remove your own membership from this console.")]
         else:
-            messages.success(
-                request, _("%(member)s was removed from the workspace.") % {"member": label}
-            )
-            return _workspace_section(tenant_id, "members-title")
+            return _report_removal(request, tenant_id, label, removed=removed)
     return site.workspace_response(
         request,
         "tenant",

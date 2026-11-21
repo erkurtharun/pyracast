@@ -118,7 +118,7 @@ def test_an_address_whose_removal_commits_while_the_claim_waits_is_not_mailed() 
     assert [message.bcc for message in mail.outbox] == [["staying@example.com"]]
 
 
-def remove(system: System, user: User) -> Callable[[], None]:
+def remove(system: System, user: User) -> Callable[[], object]:
     return lambda: remove_workspace_member(system.member, system.tenant.pk, user.pk)
 
 
@@ -151,7 +151,7 @@ def opening_backend() -> Iterator[None]:
         OpeningBackend.action = None
 
 
-def transmit_while(change: Callable[[], None], delivery_id: int) -> bool:
+def transmit_while(change: Callable[[], object], delivery_id: int) -> bool:
     """Commits `change` only once the transmit marker of the delivery waits for its locks."""
     held, commit = Event(), Event()
     pids: list[int] = []

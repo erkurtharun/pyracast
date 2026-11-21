@@ -20,6 +20,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/invitations/preview/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["invitations_preview_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session/": {
         parameters: {
             query?: never;
@@ -191,6 +207,22 @@ export interface paths {
         put?: never;
         post?: never;
         delete: operations["tenants_invitations_destroy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/invitations/{invitation_id}/resend/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_invitations_resend_create"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1683,9 +1715,6 @@ export interface components {
             available_export_mw?: number | null;
             expected_revision: number;
         };
-        InvitationAcceptanceInput: {
-            token: string;
-        };
         InvitationAcceptanceOutput: {
             tenant_id: number;
             role: components["schemas"]["WorkspaceRoleEnum"];
@@ -1707,9 +1736,36 @@ export interface components {
             readonly id: number;
             /** Format: email */
             readonly email: string;
+            readonly role: components["schemas"]["WorkspaceRoleEnum"];
+            readonly state: components["schemas"]["InvitationStateEnum"];
+            /** Format: date-time */
+            readonly created_at: string;
             /** Format: date-time */
             readonly expires_at: string;
             readonly delivery_status: components["schemas"]["InvitationDeliveryStatusEnum"];
+        };
+        InvitationPreviewOutput: {
+            workspace: string;
+            role: components["schemas"]["WorkspaceRoleEnum"];
+            /** Format: email */
+            inviter: string | null;
+            /** Format: email */
+            email: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        /**
+         * @description * `pending` - Pending
+         *     * `accepted` - Accepted
+         *     * `revoked` - Revoked
+         *     * `expired` - Expired
+         *     * `superseded` - Superseded
+         * @enum {string}
+         */
+        InvitationStateEnum:
+            "pending" | "accepted" | "revoked" | "expired" | "superseded";
+        InvitationTokenInput: {
+            token: string;
         };
         IrradianceConfigurationOutput: {
             /** Format: double */
@@ -3010,7 +3066,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["InvitationAcceptanceInput"];
+                "application/json": components["schemas"]["InvitationTokenInput"];
             };
         };
         responses: {
@@ -3033,6 +3089,74 @@ export interface operations {
             };
             /** @description Sign-in is required. */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Access was refused. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Send the request as JSON. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests; Retry-After gives the seconds to wait. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    invitations_preview_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationTokenInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationPreviewOutput"];
+                };
+            };
+            /** @description The request input was refused. */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3778,6 +3902,73 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Sign-in is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Access was refused. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The addressed item or page does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    tenants_invitations_resend_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invitation_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationOutput"];
+                };
+            };
+            /** @description The request input was refused. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             /** @description Sign-in is required. */
             401: {

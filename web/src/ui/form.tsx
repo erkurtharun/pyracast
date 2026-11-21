@@ -440,6 +440,8 @@ export function AsyncButton({
     variant = "primary",
     errorTitle,
     success,
+    label,
+    disabled = false,
 }: {
     children: string;
     onClick: () => Promise<void>;
@@ -447,6 +449,8 @@ export function AsyncButton({
     variant?: Variant;
     errorTitle?: string;
     success?: string;
+    label?: string;
+    disabled?: boolean;
 }) {
     const t = useTranslations("Common");
     const errorMessage = useErrorMessage();
@@ -473,7 +477,8 @@ export function AsyncButton({
             <button
                 type="button"
                 className={buttonClass(variant)}
-                disabled={state.status === "pending"}
+                aria-label={label}
+                disabled={disabled || state.status === "pending"}
                 onClick={() =>
                     void (async () => {
                         if (running.current) return;

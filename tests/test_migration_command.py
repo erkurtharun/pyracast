@@ -65,6 +65,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0005_schema_naming_convention",
             "0006_expire_invitations_with_the_previous_link",
             "0007_invitation_token_minted_at_send",
+            "0008_invitation_revocation_reason_and_acceptor",
         ),
         "change_requests": (
             "0002_change_vocabulary_checks",
