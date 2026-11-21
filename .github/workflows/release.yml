@@ -6,6 +6,15 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: Leave empty. CI names its own run here once its images have passed.
+        required: false
+        type: string
+      ci_run_attempt:
+        description: Leave empty. The attempt of that CI run.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -22,12 +31,15 @@ jobs:
       contents: read
       actions: read
       deployments: read
+      pull-requests: read
     outputs:
       authorized: ${{ steps.decision.outputs.authorized }}
       sha: ${{ steps.decision.outputs.sha }}
       ci_run_id: ${{ steps.decision.outputs.ci_run_id }}
       ci_run_attempt: ${{ steps.decision.outputs.ci_run_attempt }}
       artifact_id: ${{ steps.decision.outputs.artifact_id }}
+      ci_started_at: ${{ steps.decision.outputs.ci_started_at }}
+      proven: ${{ steps.decision.outputs.proven }}
       release: ${{ steps.classify.outputs.release }}
     steps:
       # The default ref is main (workflow_run, or a dispatch on main), never a fork's code. A main
@@ -48,12 +60,19 @@ jobs:
               ...repository, workflow_id: 'ci.yml',
             });
             const { data: main } = await github.rest.repos.getBranch({ ...repository, branch: 'main' });
-            let run = null;
+            const inputs = context.payload.inputs ?? {};
+            // CI's early start names its run; an operator's dispatch names none and keeps today's rule.
+            const requested = context.eventName === 'workflow_dispatch' && inputs.ci_run_id
+              ? { id: inputs.ci_run_id, run_attempt: inputs.ci_run_attempt ?? '' } : null;
             // A re-run keeps the original event payload, so it judges the same CI attempt.
-            if (context.eventName === 'workflow_run') {
+            const source = requested ?? (context.eventName === 'workflow_run' ? context.payload.workflow_run : null);
+            let run = null;
+            if (source) {
+              if (![source.id, source.run_attempt].every(value => /^[1-9][0-9]*$/.test(String(value)))) {
+                throw new Error('The requested CI run is not a run id and attempt.');
+              }
               ({ data: run } = await github.rest.actions.getWorkflowRunAttempt({
-                ...repository, run_id: context.payload.workflow_run.id,
-                attempt_number: context.payload.workflow_run.run_attempt,
+                ...repository, run_id: Number(source.id), attempt_number: Number(source.run_attempt),
               }));
             } else {
               const { data } = await github.rest.actions.listWorkflowRuns({
@@ -62,29 +81,85 @@ jobs:
               run = data.workflow_runs.find(candidate =>
                 ['push', 'workflow_dispatch'].includes(candidate.event) && candidate.conclusion === 'success') ?? null;
             }
-            const jobs = run ? await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
-              ...repository, run_id: run.id, attempt_number: run.run_attempt, per_page: 100,
-            }) : [];
-            const artifacts = run ? await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
-              ...repository, run_id: run.id, per_page: 100,
-            }) : [];
+            const described = candidate => candidate && {
+              id: candidate.id, run_attempt: candidate.run_attempt, workflow_id: candidate.workflow_id,
+              path: candidate.path, repository: candidate.repository.full_name,
+              head_repository: candidate.head_repository?.full_name ?? null, event: candidate.event,
+              head_branch: candidate.head_branch, head_sha: candidate.head_sha, status: candidate.status,
+              conclusion: candidate.conclusion, created_at: candidate.created_at,
+              run_started_at: candidate.run_started_at,
+            };
+            const jobsOf = async candidate => (await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
+              ...repository, run_id: candidate.id, attempt_number: candidate.run_attempt, per_page: 100,
+            })).map(job => ({ name: job.name, conclusion: job.conclusion }));
+            const artifactsOf = async candidate => (await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              ...repository, run_id: candidate.id, per_page: 100,
+            })).map(artifact => ({
+              id: artifact.id, name: artifact.name, expired: artifact.expired,
+              head_sha: artifact.workflow_run?.head_sha ?? null,
+            }));
+            // Unreadable deployments leave the release as it was before early starts existed.
+            let deployments = null;
+            try {
+              const records = [];
+              for (const deployment of await github.paginate(github.rest.repos.listDeployments, {
+                ...repository, environment: 'production', sha: main.commit.sha, per_page: 100,
+              })) {
+                const statuses = await github.paginate(github.rest.repos.listDeploymentStatuses, {
+                  ...repository, deployment_id: deployment.id, per_page: 100,
+                });
+                const newest = statuses.reduce((latest, status) =>
+                  latest && Date.parse(latest.created_at) >= Date.parse(status.created_at) ? latest : status, null);
+                records.push({ sha: deployment.sha, created_at: deployment.created_at, state: newest?.state ?? null });
+              }
+              deployments = records;
+            } catch (error) {
+              core.warning(`Production deployments unavailable: ${error.message}`);
+            }
+            // Any failure here leaves the early start unproven; the release after the whole run decides.
+            let proof = null;
+            if (requested) {
+              try {
+                const pulls = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+                  ...repository, commit_sha: main.commit.sha, per_page: 100,
+                });
+                const merged = pulls.filter(pull => pull.merged_at && pull.merge_commit_sha === main.commit.sha);
+                proof = {
+                  pull_requests: merged.map(pull => ({
+                    number: pull.number, merge_commit_sha: pull.merge_commit_sha, base_ref: pull.base.ref,
+                    base_repository: pull.base.repo.full_name, head_repository: pull.head.repo?.full_name ?? null,
+                    head_sha: pull.head.sha,
+                  })),
+                  run: null, jobs: [], artifacts: [],
+                };
+                if (merged.length === 1) {
+                  const { data } = await github.rest.actions.listWorkflowRuns({
+                    ...repository, workflow_id: workflow.id, event: 'pull_request', head_sha: merged[0].head.sha, per_page: 100,
+                  });
+                  const tested = data.workflow_runs.reduce((newest, candidate) =>
+                    newest && newest.id > candidate.id ? newest : candidate, null);
+                  if (tested) {
+                    proof.run = described(tested);
+                    proof.jobs = await jobsOf(tested);
+                    proof.artifacts = await artifactsOf(tested);
+                  }
+                }
+              } catch (error) {
+                proof = { error: error.message };
+              }
+            }
             const facts = {
               event: context.eventName,
               event_sha: context.sha,
               main_sha: main.commit.sha,
               repository: `${repository.owner}/${repository.repo}`,
               workflow_id: workflow.id,
-              run: run && {
-                id: run.id, run_attempt: run.run_attempt, workflow_id: run.workflow_id, path: run.path,
-                repository: run.repository.full_name, head_repository: run.head_repository?.full_name ?? null,
-                event: run.event, head_branch: run.head_branch, head_sha: run.head_sha,
-                status: run.status, conclusion: run.conclusion,
-              },
-              jobs: jobs.map(job => ({ name: job.name, conclusion: job.conclusion })),
-              artifacts: artifacts.map(artifact => ({
-                id: artifact.id, name: artifact.name, expired: artifact.expired,
-                head_sha: artifact.workflow_run?.head_sha ?? null,
-              })),
+              requested_run: requested && { id: Number(requested.id), attempt: Number(requested.run_attempt) },
+              run: described(run),
+              jobs: run ? await jobsOf(run) : [],
+              artifacts: run ? await artifactsOf(run) : [],
+              deployments,
+              proof,
             };
             fs.writeFileSync(`${process.env.RUNNER_TEMP}/release-facts.json`, JSON.stringify(facts));
       - name: Authorize the current main commit against its exact CI run
@@ -132,7 +207,8 @@ jobs:
         env:
           DEPLOYED_SHA: ${{ steps.deployed.outputs.sha }}
           RELEASE_SHA: ${{ steps.decision.outputs.sha }}
-        run: python3 deploy/release_scope.py "$GITHUB_EVENT_NAME" "$DEPLOYED_SHA" "$RELEASE_SHA"
+          RELEASE_EVENT: ${{ steps.decision.outputs.proven == 'true' && 'workflow_run' || github.event_name }}
+        run: python3 deploy/release_scope.py "$RELEASE_EVENT" "$DEPLOYED_SHA" "$RELEASE_SHA"
 
   scan:
     needs: authorize
@@ -205,6 +281,7 @@ jobs:
       contents: read
       actions: write
       id-token: write
+      deployments: read
     env:
       RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
@@ -277,6 +354,29 @@ jobs:
         env:
           REGISTRY_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
         run: bash deploy/oci-images.sh publish "$RUNNER_TEMP/release-images" "$RELEASE_SHA" "$GCP_ARTIFACT_REPOSITORY"
+      # An automatic release runs both early and after the whole CI run; this job's own deployment
+      # is still in progress, so a successful one belongs to the other release. A failed lookup
+      # writes nothing and the release goes on.
+      - name: Find the production deployments of this commit
+        if: github.event_name == 'workflow_run' || needs.authorize.outputs.proven == 'true'
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const records = [];
+            for (const deployment of await github.paginate(github.rest.repos.listDeployments, {
+              ...context.repo, environment: 'production', sha: process.env.RELEASE_SHA, per_page: 100,
+            })) {
+              const statuses = await github.paginate(github.rest.repos.listDeploymentStatuses, {
+                ...context.repo, deployment_id: deployment.id, per_page: 100,
+              });
+              const newest = statuses.reduce((latest, status) =>
+                latest && Date.parse(latest.created_at) >= Date.parse(status.created_at) ? latest : status, null);
+              records.push({ sha: deployment.sha, created_at: deployment.created_at, state: newest?.state ?? null });
+            }
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/release-deployments.json`, JSON.stringify(records));
       - name: Read the current main commit
         id: main
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -288,7 +388,8 @@ jobs:
         id: current
         env:
           MAIN_SHA: ${{ steps.main.outputs.sha }}
-        run: python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA"
+          CI_STARTED_AT: ${{ needs.authorize.outputs.ci_started_at }}
+        run: python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA" --deployments "$RUNNER_TEMP/release-deployments.json" --since "$CI_STARTED_AT"
       # A successful job here records a production deployment that the next release classifies its
       # changes against, so a release that installs nothing ends cancelled, never successful.
       - name: Cancel a release that main has moved past

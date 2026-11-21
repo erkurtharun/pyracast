@@ -675,6 +675,7 @@ def test_the_commit_facts_name_the_tree_the_single_parent_and_every_changed_path
     repository: Path,
 ) -> None:
     parent = commit(repository, "deploy/release.sh", "src/a.py")
+    (repository / "scripts").mkdir()
     git(repository, "mv", "deploy/release.sh", "scripts/release.sh")
     head = commit(repository, "src/a.py")
 
@@ -682,7 +683,7 @@ def test_the_commit_facts_name_the_tree_the_single_parent_and_every_changed_path
         "tree": git(repository, "rev-parse", f"{head}^{{tree}}"),
         "parents": [parent],
         "paths": ["deploy/release.sh", "scripts/release.sh", "src/a.py"],
-        "parent_committed_at": "2026-11-21T04:00:00+00:00",
+        "parent_committed_at": git(repository, "log", "-1", "--format=%cI", parent),
     }
 
 
@@ -711,7 +712,7 @@ def test_the_commit_facts_are_absent_when_git_cannot_read_the_commit(
 
     assert commit_facts(repository, OTHER) is None
     assert commit_facts(repository, "HEAD") is None
-    monkeypatch.setattr(release_authorization.shutil, "which", lambda _: None)
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
     assert commit_facts(repository, head) is None
 
 

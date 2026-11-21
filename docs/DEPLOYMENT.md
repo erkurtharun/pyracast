@@ -348,7 +348,9 @@ In GitHub, create **Settings → Environments → production**. Restrict deploym
 branches to `main`; enable required reviewers if you want a human release gate.
 Protect `main` with the `CI result` check, which passes only when every other CI job
 passed or, for Sonar alone, was skipped. The workflow independently requires that check of the exact current `main`
-commit's CI run; a failed test, stale commit, fork or pull-request run cannot deploy.
+commit's CI run, or, while that run goes on, its passed image job and the passed CI run of
+its one squash-merged pull request on the same tree and base; a pipeline change, a failed
+test, stale commit, fork or pull-request run cannot deploy.
 
 Use `terraform -chdir=infra/terraform output -json github_environment_variables`
 to obtain the nonsecret values. Add the `GCP_*` values as **production environment
@@ -363,10 +365,11 @@ it once a request from a GitHub runner reaches the site without a challenge.
 Add **`GCP_DEPLOY_ENABLED=true` as a repository variable**, because the initial
 authorization job runs before entering the production environment.
 
-Run **Actions → Release → Run workflow → main** after CI is green. Subsequent
-successful `main` CI runs trigger it automatically. The workflow:
+Run **Actions → Release → Run workflow → main** after CI is green. Subsequent `main`
+CI runs start it once their images pass, and again when they succeed; it deploys a commit
+once, at the first start that the rule above admits. The workflow:
 
-1. Verifies the image artifact from that exact successful CI run, whose CI already
+1. Verifies the image artifact from that exact CI run and attempt, whose CI already
    tested these exact images, and scans it again before any cloud credential exists,
    rejecting HIGH/CRITICAL vulnerabilities. A run whose commit `main` has moved past
    ends as a skip; only the deploy job waits for another release, and it checks `main`
