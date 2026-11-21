@@ -1,4 +1,6 @@
 import json
+import runpy
+import sys
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -147,3 +149,32 @@ def test_an_output_named_by_a_relative_path_is_staged_beside_it(
     assert [path.parent for path in staged] == [tmp_path.resolve()]
     assert staged[0].name.startswith(".work-")
     assert (work / "model.json").is_file()
+
+
+def test_inputs_that_cannot_be_calibrated_are_refused_without_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    arguments = inputs(tmp_path)
+    (tmp_path / "power.json").write_text('{"estimated_actuals": []}', encoding="utf-8")
+
+    with pytest.raises(SystemExit) as refused:
+        main([*arguments, "--capacity-kw", "1000", "--output", "out"])
+
+    assert refused.value.code == 2
+    assert "error:" in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
+
+
+def test_the_script_runs_as_a_program(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    script = Path(__file__).parents[1] / "scripts" / "calibrate_irradiance.py"
+    monkeypatch.setattr(
+        sys, "argv", [str(script), *inputs(tmp_path), "--capacity-kw", "1000", "--output", "out"]
+    )
+
+    with pytest.raises(SystemExit) as finished:
+        runpy.run_path(str(script), run_name="__main__")
+
+    assert finished.value.code == 0
+    assert (tmp_path / "out" / "model.json").is_file()
