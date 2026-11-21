@@ -29,7 +29,7 @@ sections and a row here.
 | Flow | Covers |
 | --- | --- |
 | [workspace-switching](workspace-switching.md) | Workspace list, inbox counters and switching |
-| [member-invitation](member-invitation.md) | Invite a member by email, list and cancel pending invitations |
+| [member-invitation](member-invitation.md) | Invite a member by email, list, resend and cancel invitations |
 | [invitation-acceptance](invitation-acceptance.md) | Accept a workspace invitation |
 | [member-removal](member-removal.md) | List workspace members and remove a viewer |
 | [change-request-submission](change-request-submission.md) | Viewer proposes a production or outage change and follows its outcome |
@@ -40,20 +40,21 @@ sections and a row here.
 | Flow | Covers |
 | --- | --- |
 | [plant-portfolio](plant-portfolio.md) | Browse the plant portfolio, open a plant and move between its tabs |
-| [site-onboarding](site-onboarding.md) | Onboard a site: location plus plant submitted for approval |
+| [site-onboarding](site-onboarding.md) | Onboard a site: location plus plant submitted for approval, by the workspace administrator or in the console |
 | [provider-connection-setup](provider-connection-setup.md) | Configure and validate a plant's provider account and site binding |
-| [plant-approval](plant-approval.md) | Approve, reject or suspend a plant |
+| [plant-approval](plant-approval.md) | Approve, reject or suspend a plant, and resubmit a rejected one |
 
 ## Forecast collection
 
 | Flow | Covers |
 | --- | --- |
-| [collection-schedule](collection-schedule.md) | Configure forecast collection times for a site |
+| [collection-schedule](collection-schedule.md) | Configure forecast collection times for a site and read its collection status |
 | [forecast-collection-scheduling](forecast-collection-scheduling.md) | Forecast collection scheduling and publishing of due jobs |
 | [forecast-collection-execution](forecast-collection-execution.md) | Run a collection job: fetch the provider, store the snapshot and publish the result |
 | [provider-quota-and-backoff](provider-quota-and-backoff.md) | Provider quota ledger, forecast budget, cooldown and credential blocks |
 | [historical-reference-import](historical-reference-import.md) | Import a historical provider export as reference data |
 | [reference-capacity-normalization](reference-capacity-normalization.md) | Rescale reference snapshots to another binding capacity |
+| [provider-snapshot-restore](provider-snapshot-restore.md) | Restore live provider snapshots from a reset export |
 
 ## Forecast reading
 
@@ -70,7 +71,7 @@ sections and a row here.
 | --- | --- |
 | [production-history](production-history.md) | View a production day and correct intervals |
 | [production-csv-import](production-csv-import.md) | Import production from a CSV file |
-| [epias-connection](epias-connection.md) | Connect or disconnect a plant's EPIAS reported-production feed |
+| [epias-connection](epias-connection.md) | Connect or disconnect a plant's EPIAS reported-production feed in the admin console, and read its status |
 | [epias-collection](epias-collection.md) | Collect EPIAS reported production and settlement injection |
 
 ## Calibration
@@ -92,14 +93,14 @@ sections and a row here.
 | Flow | Covers |
 | --- | --- |
 | [reminder-configuration](reminder-configuration.md) | Configure forecast email reminders for a site |
-| [reminder-delivery](reminder-delivery.md) | Reminder delivery |
+| [reminder-delivery](reminder-delivery.md) | Schedule, prepare and send forecast reminder emails |
 
 ## Configuration and lifecycle
 
 | Flow | Covers |
 | --- | --- |
 | [plant-configuration-revision](plant-configuration-revision.md) | Edit a plant's name and technical configuration |
-| [location-change](location-change.md) | Request a site location change and review it |
+| [location-change](location-change.md) | Request a site location change, withdraw or review it, and correct a location from the console |
 | [plant-trash-and-restore](plant-trash-and-restore.md) | Move a site to the recycle bin and restore it |
 | [trash-retention-purge](trash-retention-purge.md) | Purge trashed sites after 30 days |
 
@@ -107,12 +108,13 @@ sections and a row here.
 
 | Flow | Covers |
 | --- | --- |
-| [platform-admin-bootstrap](platform-admin-bootstrap.md) | Create the first platform administrator and provision TOTP by CLI |
-| [admin-console-access](admin-console-access.md) | Platform console access: MFA gate, SPA hand-off, shared shell and logout |
+| [platform-admin-bootstrap](platform-admin-bootstrap.md) | Create a platform administrator and reset an authenticator by CLI |
+| [admin-console-access](admin-console-access.md) | Platform console access: MFA gate, SPA hand-off, confirmation, shared shell and logout |
 | [admin-overview-and-operations](admin-overview-and-operations.md) | Console overview, plant list and operations health |
-| [admin-record-browser](admin-record-browser.md) | Browse platform records in the stock Django admin |
-| [workspace-admin-reassignment](workspace-admin-reassignment.md) | List workspaces and reassign the workspace administrator |
-| [platform-settings](platform-settings.md) | Set the global recipients-per-plant limit |
+| [admin-record-browser](admin-record-browser.md) | Browse platform records in the read-only console lists |
+| [admin-workspace-management](admin-workspace-management.md) | Create and manage workspaces from the console: creation, rename, invitations, member removal |
+| [workspace-admin-reassignment](workspace-admin-reassignment.md) | Reassign the workspace administrator from the console: impact list, transfer, automation shutdown, invitation revocation and role mail |
+| [platform-settings](platform-settings.md) | Set the global recipients-per-plant limit and review the plants it pauses |
 | [provider-credential-recovery](provider-credential-recovery.md) | Rotate a provider API key or clear a provider cooldown |
 
 ## Operations and delivery
@@ -121,36 +123,36 @@ sections and a row here.
 | --- | --- |
 | [dispatcher-cycle](dispatcher-cycle.md) | Dispatcher scheduling and publishing cycle |
 | [worker-runtime](worker-runtime.md) | Worker processes, RabbitMQ broker and graceful shutdown |
-| [delivery-health-check](delivery-health-check.md) | Collection and delivery health report |
+| [delivery-health-check](delivery-health-check.md) | Collection, delivery, outbound mail, calibration and broker health report |
 | [host-supervision-and-alerting](host-supervision-and-alerting.md) | Host watchdog, health probes and alerts |
-| [backup-and-restore-rehearsal](backup-and-restore-rehearsal.md) | Hourly and pre-release database backups and restore rehearsal |
-| [database-reset-and-restore](database-reset-and-restore.md) | Reset the production database or restore it from a verified archive |
-| [database-migration](database-migration.md) | Database service, role bootstrap and locked schema migrations |
-| [release-pipeline](release-pipeline.md) | CI image build, verification and production release |
+| [backup-and-restore-rehearsal](backup-and-restore-rehearsal.md) | Hourly and pre-release database backups and the weekly restore rehearsal |
+| [database-reset-and-restore](database-reset-and-restore.md) | Reset the production database or restore it from a verified archive, with its Solcast export |
+| [database-migration](database-migration.md) | Database service, role convergence and locked schema migrations |
+| [release-pipeline](release-pipeline.md) | CI image build and scan, release authorization (including the early release of a proven squash merge) and the production release |
 | [infrastructure-provisioning](infrastructure-provisioning.md) | Provision the Google Cloud environment with Terraform |
 | [secret-provisioning](secret-provisioning.md) | Generate, upload and materialise production secrets |
-| [encryption-key-rotation](encryption-key-rotation.md) | Rotate the application key and re-encrypt stored secrets |
+| [encryption-key-rotation](encryption-key-rotation.md) | Rotate the application key, check and re-encrypt stored secrets |
 | [gmail-sender-authorization](gmail-sender-authorization.md) | Authorise the send-only Gmail sender |
-| [edge-gateway-and-tls](edge-gateway-and-tls.md) | Edge gateway, TLS and the API process entry |
+| [edge-gateway-and-tls](edge-gateway-and-tls.md) | Edge gateway, TLS, per-client limits, maintenance notice and the API process entry |
 | [local-dev-stack](local-dev-stack.md) | Start, stop and inspect the local development stack |
 | [developer-quality-gate](developer-quality-gate.md) | Run the backend and frontend quality gate locally and in CI |
-| [dependency-and-code-scanning](dependency-and-code-scanning.md) | Scan code, dependencies and images |
+| [dependency-and-code-scanning](dependency-and-code-scanning.md) | Scan code, dependencies and images, including the daily image rescan |
 | [offline-irradiance-calibration](offline-irradiance-calibration.md) | Calibrate the irradiance inverse model offline from exported files |
-| [fixture-demo](fixture-demo.md) | Create a synthetic demo plant locally |
+| [fixture-demo](fixture-demo.md) | Create or resume a synthetic demo plant and its first forecast locally |
 
 ## Cross-cutting mechanisms
 
 | Flow | Covers |
 | --- | --- |
-| [tenant-authorization](tenant-authorization.md) | Tenant, role and platform-administrator authorization |
-| [session-and-csrf](session-and-csrf.md) | Session lifetime, request serialisation, CSRF and session revocation |
-| [rate-limiting](rate-limiting.md) | Rate limiting and the database-backed authentication cache |
-| [audit-trail](audit-trail.md) | Audit trail: region, plant, security and administration events |
-| [api-error-contract](api-error-contract.md) | API response contract: errors, conflicts and pagination |
-| [api-schema-and-client-types](api-schema-and-client-types.md) | OpenAPI schema and generated client types |
+| [tenant-authorization](tenant-authorization.md) | Route access policy, tenant roles and platform-administrator authorization |
+| [session-and-csrf](session-and-csrf.md) | Session lifetime, request serialisation, session tag, CSRF, signed-in devices and session revocation |
+| [rate-limiting](rate-limiting.md) | Rate limiting: allauth limits in the database-backed authentication cache, route throttles, invitation budgets and gateway client limits |
+| [audit-trail](audit-trail.md) | Audit trail: region, plant, ledger and security-line events |
+| [api-error-contract](api-error-contract.md) | API response contract: error body and codes, conflicts and pagination |
+| [api-schema-and-client-types](api-schema-and-client-types.md) | OpenAPI schema and generated client types (build-time only, no schema route) |
 | [provider-detail-redaction](provider-detail-redaction.md) | Hide provider details from customer API responses |
 | [i18n-and-language](i18n-and-language.md) | Language selection, persistence and rendering |
 | [security-headers-and-proxy-trust](security-headers-and-proxy-trust.md) | Security headers, CSP and trusted proxy chain |
-| [email-transport](email-transport.md) | Email transport: SMTP and Gmail backends |
-| [account-mail-notifications](account-mail-notifications.md) | Account mails: codes, security notifications and anti-enumeration notices |
-| [frontend-data-layer](frontend-data-layer.md) | Frontend shared layer: HTTP clients, hooks, polling, forms and UI primitives |
+| [email-transport](email-transport.md) | Email transport: SMTP and Gmail backends, the outbound mail outbox and retries |
+| [account-mail-notifications](account-mail-notifications.md) | Account mails: stored intents, codes, security notifications and anti-enumeration notices |
+| [frontend-data-layer](frontend-data-layer.md) | Frontend shared layer: HTTP client, queries, polling, forms and UI primitives |
