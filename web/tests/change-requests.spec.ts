@@ -93,6 +93,17 @@ async function openPlant(page: Page, tab: string) {
     await page.getByRole("button", { name: tab, exact: true }).click();
 }
 
+function outagePage(
+    results: Record<string, unknown>[],
+    reason: string | null = null,
+) {
+    return {
+        ...paged(results),
+        can_propose: reason === null,
+        proposal_unavailable_reason: reason,
+    };
+}
+
 function draft(page: Page) {
     return page.getByRole("region", {
         name: "Correction request",
@@ -355,7 +366,7 @@ test("member outage reports remain proposals and use explicit action envelopes",
     };
     await page.route("**/api/**/outages/", (route) => {
         expect(route.request().method()).toBe("GET");
-        return route.fulfill({ json: paged([outage]) });
+        return route.fulfill({ json: outagePage([outage]) });
     });
     await page.route("**/change-requests/incidents/", (route) => {
         submissions.push(route.request().postDataJSON());
@@ -586,7 +597,7 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
     ).toBeVisible();
 });
 
-test("Turkish member can withdraw and explicitly mark an outcome read at 320px", async ({
+test("Turkish member can withdraw and an opened outcome is marked read at 320px", async ({
     page,
 }, testInfo) => {
     await member(page, "tr");
@@ -691,13 +702,110 @@ test("Turkish member can withdraw and explicitly mark an outcome read at 320px",
         .filter({ hasText: "Onaylandı" })
         .getByRole("button", { name: "Ayrıntıları incele", exact: true })
         .click();
-    await page
-        .getByRole("button", { name: "Okundu olarak işaretle", exact: true })
-        .click();
     await expect(
         page.getByRole("button", { name: "Gelen kutusu", exact: true }),
     ).toBeVisible();
     expect(seen).toBe(1);
+});
+
+function decidedOwnRequest() {
+    return {
+        ...proposal(2),
+        proposed_by: { id: 1, name: "solar.user" },
+        status: "rejected",
+        decision_reason: "Meter reading differs",
+        can_review: false,
+        can_withdraw: false,
+        unread: true,
+    };
+}
+
+async function memberWithOutcome(page: Page, seen: () => Promise<number>) {
+    await member(page);
+    let outcome = decidedOwnRequest();
+    let unread = 1;
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([
+                tenantRow(
+                    { id: 1, name: "Workspace", role: "viewer" },
+                    { unread_outcome_count: unread },
+                ),
+            ]),
+        }),
+    );
+    await page.route("**/change-requests/?*", (route) =>
+        route.fulfill({ json: paged([outcome]) }),
+    );
+    await page.route("**/change-requests/2/", (route) =>
+        route.fulfill({ json: outcome }),
+    );
+    await page.route("**/change-requests/2/seen/", async (route) => {
+        expect(route.request().method()).toBe("POST");
+        const status = await seen();
+        if (status === 200) {
+            outcome = { ...outcome, unread: false };
+            unread = 0;
+            return route.fulfill({ json: outcome });
+        }
+        return route.fulfill({
+            status,
+            json: errorBody("server_error", "Server error."),
+        });
+    });
+}
+
+test("opening one's own decided request marks it read once", async ({
+    page,
+}) => {
+    let posts = 0;
+    await memberWithOutcome(page, async () => {
+        posts++;
+        return 200;
+    });
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: "Inbox, 1 update", exact: true })
+        .click();
+    const card = page.locator(".inbox-card").filter({ hasText: "Rejected" });
+    await card.getByRole("button", { name: "Review details" }).click();
+
+    await expect(
+        page.getByRole("button", { name: "Inbox", exact: true }),
+    ).toBeVisible();
+    await expect(card.getByText("Meter reading differs")).toBeVisible();
+    await expect(
+        card.getByRole("heading", { name: "Review details" }),
+    ).toBeFocused();
+    await expect(card.getByText("Unread outcome")).toHaveCount(0);
+    await card
+        .getByRole("button", { name: "Close details", exact: true })
+        .click();
+    await card.getByRole("button", { name: "Review details" }).click();
+    await expect(card.getByText("Meter reading differs")).toBeVisible();
+    expect(posts).toBe(1);
+});
+
+test("a failed read receipt keeps the decided request readable", async ({
+    page,
+}) => {
+    let posts = 0;
+    await memberWithOutcome(page, async () => {
+        posts++;
+        return 500;
+    });
+    await page.goto("/app/w/1/inbox/");
+    const card = page.locator(".inbox-card").filter({ hasText: "Rejected" });
+    await card.getByRole("button", { name: "Review details" }).click();
+
+    await expect(card.getByText("Meter reading differs")).toBeVisible();
+    await expect(
+        card.getByRole("button", { name: "Mark as read", exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Inbox, 1 update", exact: true }),
+    ).toBeVisible();
+    expect(posts).toBe(1);
 });
 
 test("inbox loads bounded pages and requires an explicit rejection reason", async ({
@@ -1486,23 +1594,7 @@ test("a member sees which outages wait for approval", async ({ page }) => {
     await member(page);
     await page.route("**/api/**/outages/", (route) =>
         route.fulfill({
-            json: paged([
-                {
-                    id: 4,
-                    revision: 2,
-                    kind: "inverter",
-                    title: "Inverter offline",
-                    notes: "",
-                    starts_at: "2026-11-09T08:00:00Z",
-                    ends_at: null,
-                    available_dc_mw: null,
-                    available_inverter_mw: null,
-                    available_export_mw: null,
-                    status: "active",
-                    declared_configuration_id: 31,
-                    pending_request_id: 9,
-                },
-            ]),
+            json: outagePage([{ ...activeOutage(), pending_request_id: 9 }]),
         }),
     );
     await openPlant(page, "Outages");
@@ -1511,6 +1603,79 @@ test("a member sees which outages wait for approval", async ({ page }) => {
             name: "Waiting for approval: view the request for Inverter offline",
         }),
     ).toHaveAttribute("href", "/app/w/1/inbox/?request=9");
+});
+
+function activeOutage() {
+    return {
+        id: 4,
+        revision: 2,
+        kind: "inverter",
+        title: "Inverter offline",
+        notes: "",
+        starts_at: "2026-11-09T08:00:00Z",
+        ends_at: null,
+        available_dc_mw: null,
+        available_inverter_mw: null,
+        available_export_mw: null,
+        status: "active",
+        declared_configuration_id: 31,
+        pending_request_id: null,
+    };
+}
+
+for (const [reason, explanation] of [
+    [
+        "configuration_unavailable",
+        "Outages can be reported once the plant configuration is approved.",
+    ],
+    [
+        "pending_request_limit",
+        "Too many of your requests for this plant await approval. Withdraw one or wait for a decision before submitting another outage.",
+    ],
+] as const) {
+    test(`a member sees why a new outage cannot be submitted: ${reason}`, async ({
+        page,
+    }) => {
+        await member(page);
+        await page.route("**/api/**/outages/", (route) =>
+            route.fulfill({ json: outagePage([activeOutage()], reason) }),
+        );
+        await openPlant(page, "Outages");
+        await expect(page.getByText(explanation)).toBeVisible();
+        await expect(
+            page.getByRole("button", { name: "Submit outage", exact: true }),
+        ).toHaveCount(0);
+        await expect(
+            page.getByRole("heading", { name: "Inverter offline" }),
+        ).toBeVisible();
+    });
+}
+
+test("the sent notice of an outage proposal clears on the next action", async ({
+    page,
+}) => {
+    await member(page);
+    await page.route("**/api/**/outages/", (route) =>
+        route.fulfill({ json: outagePage([activeOutage()]) }),
+    );
+    await page.route("**/change-requests/incidents/", (route) =>
+        route.fulfill({ status: 201, json: proposal() }),
+    );
+    await openPlant(page, "Outages");
+    await page
+        .getByRole("button", { name: "Suggest changes", exact: true })
+        .click();
+    await page.getByLabel("Incident title").fill("Corrected title");
+    await page
+        .getByRole("button", { name: "Send for approval", exact: true })
+        .click();
+    const sent = page.getByText(/^Sent for approval\./);
+    await expect(sent).toBeVisible();
+
+    await page
+        .getByRole("button", { name: "Submit resolution", exact: true })
+        .click();
+    await expect(sent).toHaveCount(0);
 });
 
 test("an administrator who edits directly sees no proposal draft", async ({
