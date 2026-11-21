@@ -210,6 +210,7 @@ resource "google_monitoring_alert_policy" "runtime_restarts" {
   notification_channels = [google_monitoring_notification_channel.operator.name]
   user_labels           = local.labels
 
+  # The window is the named period plus the minute the condition must hold (duration).
   conditions {
     display_name = "Three watchdog restarts within one hour"
     condition_threshold {
@@ -223,7 +224,7 @@ resource "google_monitoring_alert_policy" "runtime_restarts" {
       evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE"
 
       aggregations {
-        alignment_period     = "3600s"
+        alignment_period     = "3660s"
         per_series_aligner   = "ALIGN_SUM"
         cross_series_reducer = "REDUCE_SUM"
       }
@@ -237,7 +238,7 @@ resource "google_monitoring_alert_policy" "runtime_restarts" {
   # An empty window closes the incident (evaluation_missing_data); this backs that up, never
   # sooner than the longest window could still hold the lines that opened it.
   alert_strategy {
-    auto_close = "3600s"
+    auto_close = "3660s"
   }
 
   documentation {
@@ -319,6 +320,7 @@ resource "google_monitoring_alert_policy" "security" {
   notification_channels = [google_monitoring_notification_channel.operator.name]
   user_labels           = local.labels
 
+  # The window is the named period plus the minute the condition must hold (duration).
   conditions {
     display_name = "${each.value.signal} above ${each.value.threshold} in ten minutes"
     condition_threshold {
@@ -333,7 +335,7 @@ resource "google_monitoring_alert_policy" "security" {
       evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE"
 
       aggregations {
-        alignment_period     = "600s"
+        alignment_period     = "660s"
         per_series_aligner   = "ALIGN_SUM"
         cross_series_reducer = "REDUCE_SUM"
       }
@@ -347,7 +349,7 @@ resource "google_monitoring_alert_policy" "security" {
   # An empty window closes the incident (evaluation_missing_data); this backs that up, never
   # sooner than the longest window could still hold the lines that opened it.
   alert_strategy {
-    auto_close = "3600s"
+    auto_close = "3660s"
   }
 
   documentation {

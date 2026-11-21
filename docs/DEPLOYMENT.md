@@ -629,7 +629,9 @@ Every alerted event has its own log-match policy, with its own hourly notificati
 pointing to its row below. Once Google charges for alerting (no sooner than 2027-09-01), each
 log-based policy costs 0.35 USD a month. Repeated restarts alert on a count instead: see
 `pyracast_runtime_restarted`. An alert on a count of lines (repeated restarts, each security
-alert) closes by itself once its window holds no line, so a later burst alerts again. The
+alert) closes by itself once its window holds no line, so a later burst alerts again. Its window
+is a minute longer than it says (an hour, ten minutes), because the condition must hold for the
+minute Monitoring retests it; so the lines of the full hour or ten minutes count. The
 policies on counters (repeated restarts, the heartbeat, each security alert) then cost 0.35 USD a
 month each for their metric reference plus 0.50 USD per million points their condition returns,
 far below one cent a day for their one series; a log-match condition returns no points. A test alert of an event with its own policy opens an incident on
