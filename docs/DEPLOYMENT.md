@@ -507,7 +507,9 @@ fixtures do not establish provider access or inbox delivery.
   --account ID` is a dry run that lists the rows erasure would change; take a backup
   (`sudo systemctl start pyracast-backup.service`, then check the upload), then add
   `--execute`. It anonymizes the account in place and refuses while the account
-  administers a workspace. Backups keep the erased data until they expire.
+  administers a workspace or is the last active platform administrator. The dry run
+  briefly takes the same locks as the erasure; a run that meets a held lock changes
+  nothing and says to run it again. Backups keep the erased data until they expire.
 - **Rollback:** prefer a reviewed Git revert on `main`, successful CI and Release.
   This deploys the former behavior with the current database. Only do this after
   confirming schema compatibility. An incompatible schema change needs a forward
