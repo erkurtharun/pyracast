@@ -51,7 +51,7 @@ async function openCollection(
 ) {
     await mockApi(page);
     await page.route(
-        (url) => url.pathname === "/api/tenants/1/regions/",
+        (url) => url.pathname === "/api/tenants/1/sites/",
         (route) =>
             route.fulfill({
                 json: answer(
@@ -192,8 +192,6 @@ for (const item of inactive)
         ).toContainText(item.next);
     });
 
-const contact = (status: string) =>
-    `Plant status: ${status}. Contact Pyracast support at info@pyracast.app to resume collection.`;
 const plantStates = [
     {
         status: "pending",
@@ -202,20 +200,24 @@ const plantStates = [
         label: "Waiting for approval",
         sentence:
             "Awaiting administrator approval. Your plant details are saved; forecasts become available after the data connection is approved and collection succeeds.",
+        resubmit: false,
     },
     {
         status: "suspended",
         state: "paused",
         reason: "not_approved",
         label: "Paused",
-        sentence: contact("Suspended"),
+        sentence:
+            "Plant status: Suspended. Contact Pyracast support at info@pyracast.app to resume collection.",
+        resubmit: false,
     },
     {
         status: "rejected",
         state: "paused",
         reason: "not_approved",
         label: "Paused",
-        sentence: contact("Rejected"),
+        sentence: "Pyracast support did not approve this plant.",
+        resubmit: true,
     },
     {
         status: "approved",
@@ -224,6 +226,7 @@ const plantStates = [
         label: "Paused",
         sentence:
             "Collection starts once the provider connection is validated.",
+        resubmit: false,
     },
     {
         status: "approved",
@@ -231,6 +234,7 @@ const plantStates = [
         reason: null,
         label: "Collecting",
         sentence: null,
+        resubmit: false,
     },
 ] as const;
 
@@ -249,6 +253,15 @@ for (const item of plantStates)
             status.getByText(item.label, { exact: true }),
         ).toBeVisible();
         const notices = page.locator(".notice");
-        if (item.sentence) await expect(notices).toHaveText([item.sentence]);
-        else await expect(notices).toHaveCount(0);
+        if (!item.sentence) {
+            await expect(notices).toHaveCount(0);
+            return;
+        }
+        await expect(notices).toHaveCount(1);
+        await expect(
+            notices.getByText(item.sentence, { exact: true }),
+        ).toBeVisible();
+        await expect(
+            notices.getByRole("button", { name: "Resubmit for review" }),
+        ).toHaveCount(item.resubmit ? 1 : 0);
     });
