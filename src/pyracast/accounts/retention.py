@@ -19,7 +19,13 @@ from django.db.models import (
 )
 from django.db.models.functions import Coalesce
 
-from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
+from pyracast.accounts.models import (
+    Membership,
+    OutboundMail,
+    Tenant,
+    WorkspaceInvitation,
+    WorkspaceRole,
+)
 from pyracast.background.failures import ItemsFailedError, isolate
 
 logger = logging.getLogger(__name__)
@@ -40,6 +46,12 @@ def end_expired_sessions(cutoff: datetime, limit: int) -> int:
     return removed + UserSession.objects.filter(pk__in=orphans).delete()[0]
 
 
+def _skip_locked[M: Model](rows: QuerySet[M]) -> list[Any]:
+    return list(
+        rows.select_for_update(skip_locked=True).order_by("pk").values_list("pk", flat=True)
+    )
+
+
 def purge_closed_invitations(cutoff: datetime, limit: int) -> int:
     # Acceptance and revocation exclude each other; an open invitation closes at its deadline.
     closed = (
@@ -48,11 +60,19 @@ def purge_closed_invitations(cutoff: datetime, limit: int) -> int:
         | Q(accepted_at__isnull=True, revoked_at__isnull=True, expires_at__lt=cutoff)
     )
     with transaction.atomic():
-        ids = list(
+        candidates = list(
             WorkspaceInvitation.objects.filter(closed)
-            .select_for_update(skip_locked=True)
             .order_by(Coalesce("accepted_at", "revoked_at", "expires_at").asc(), "pk")
             .values_list("pk", flat=True)[:limit]
+        )
+        # Mail before its invitation, each in id order: the order of the mail worker. An
+        # invitation whose mail another transaction holds waits for a later run.
+        mail = OutboundMail.objects.filter(invitation_id__in=candidates)
+        held = _skip_locked(mail)
+        busy = mail.exclude(pk__in=held).values("invitation_id")
+        OutboundMail.objects.filter(pk__in=held).delete()
+        ids = _skip_locked(
+            WorkspaceInvitation.objects.filter(closed, pk__in=candidates).exclude(pk__in=busy)
         )
         deleted = WorkspaceInvitation.objects.filter(pk__in=ids).delete()[1]
     return deleted.get(WorkspaceInvitation._meta.label, 0)
