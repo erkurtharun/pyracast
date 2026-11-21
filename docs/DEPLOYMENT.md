@@ -348,9 +348,9 @@ In GitHub, create **Settings → Environments → production**. Restrict deploym
 branches to `main`; enable required reviewers if you want a human release gate.
 Protect `main` with the `CI result` check, which passes only when every other CI job
 passed or, for Sonar alone, was skipped. The workflow independently requires that check of the exact current `main`
-commit's CI run, or, while that run goes on, its passed image job and the passed CI run of
-its one squash-merged pull request on the same tree and base; a pipeline change, a failed
-test, stale commit, fork or pull-request run cannot deploy.
+commit's CI run, or, while that run goes on with no job failed yet, its passed image job and
+the passed CI run of its one squash-merged pull request on the same tree and base; a change
+to what CI runs or reads, a failed test, stale commit, fork or pull-request run cannot deploy.
 
 Use `terraform -chdir=infra/terraform output -json github_environment_variables`
 to obtain the nonsecret values. Add the `GCP_*` values as **production environment
@@ -371,9 +371,10 @@ once, at the first start that the rule above admits. The workflow:
 
 1. Verifies the image artifact from that exact CI run and attempt, whose CI already
    tested these exact images, and scans it again before any cloud credential exists,
-   rejecting HIGH/CRITICAL vulnerabilities. A run whose commit `main` has moved past
-   ends as a skip; only the deploy job waits for another release, and it checks `main`
-   again just before the transfer. A run that `main` passes after the scan's check
+   rejecting HIGH/CRITICAL vulnerabilities. A run whose commit `main` has moved past,
+   or that another release has already deployed, ends as a skip before it downloads
+   anything; only the deploy job waits for another release, and it checks again before its
+   download and just before the transfer. A run that `main` passes after the scan's check
    therefore ends cancelled, not skipped, and transfers nothing.
 2. Publishes the backend, web, gateway, PostgreSQL and RabbitMQ images without
    rebuilding. OCI digests, SBOM and provenance are preserved; all five release
@@ -409,6 +410,8 @@ Image artifacts expire after one day and are deleted after successful deployment
 Retry a failed Release while its artifact remains available; otherwise run
 **Actions → CI → Run workflow → main**. A successful CI run on `main` triggers
 Release automatically, so nothing else is needed after a failed deployment.
+A re-run of an early Release whose CI run has ended deploys only when that whole run
+succeeded and fails visibly otherwise.
 To redeploy `main`:
 
 1. Run CI on `main`. Its automatic Release deploys unless the classification

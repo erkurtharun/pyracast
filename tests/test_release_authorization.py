@@ -438,11 +438,12 @@ def proven() -> Authorized:
     return authorized(ci_run_attempt=1, pull_request=82, pull_request_run=6001)
 
 
-def deferred(value: dict[str, Any], reason: str) -> None:
+def deferred(value: dict[str, Any], reason: str) -> Deferred:
     decision = decide(value)
 
     assert isinstance(decision, Deferred), decision
     assert reason in decision.reason, decision.reason
+    return decision
 
 
 def test_a_squash_merge_whose_pull_request_run_tested_the_same_tree_is_released_early() -> None:
@@ -757,8 +758,9 @@ def test_an_early_start_without_the_facts_of_its_run_waits_for_the_whole_run(
     if not found:
         value["run"] = None
 
-    deferred(value, reason)
-    assert decide(value).reason.endswith("the release after the whole CI run 7001 decides.")
+    assert deferred(value, reason).reason.endswith(
+        "the release after the whole CI run 7001 decides."
+    )
 
 
 def ended(conclusion: str = "success", **changes: Any) -> dict[str, Any]:

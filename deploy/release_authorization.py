@@ -14,17 +14,44 @@ from typing import Any
 REQUIRED_CI_JOB = "CI result"
 IMAGE_JOB = "Deployment configuration and containers"
 RELEASE_START_JOB = "Start the release of a proven merge"
-# Jobs a passing pull-request run may skip: CI result judges Sonar, and the start runs on main only.
-SKIPPABLE_PULL_REQUEST_JOBS = frozenset({"Sonar quality gate", RELEASE_START_JOB})
+TESTED_TREE_JOB = "Record the tested tree"
+SONAR_JOB = "Sonar quality gate"
 CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
 RELEASED_EVENTS = frozenset({"push", "workflow_dispatch"})
-PIPELINE_PATHS = (".github/workflows/", "deploy/", "infra/")
+# What the workflows execute or read to reach a verdict, beyond product and test code.
+PIPELINE_DIRECTORIES = (".github/", "deploy/", "infra/", "scripts/", "web/testing/")
+PIPELINE_FILES = frozenset(
+    {
+        ".dockerignore",
+        ".editorconfig",
+        ".gitattributes",
+        ".gitignore",
+        ".python-version",
+        "Dockerfile",
+        "pyproject.toml",
+        "sonar-project.properties",
+        "uv.lock",
+        "web/.dockerignore",
+        "web/.gitignore",
+        "web/.prettierignore",
+        "web/Dockerfile",
+        "web/audit-exceptions.json",
+        "web/bundle-budget.json",
+        "web/coverage-floor.json",
+        "web/eslint.config.mjs",
+        "web/package-lock.json",
+        "web/package.json",
+        "web/playwright.config.ts",
+        "web/playwright.integration.config.ts",
+        "web/tsconfig.json",
+    }
+)
 SHA = re.compile(r"[0-9a-f]{40}")
 IMAGE_ARTIFACT = re.compile(r"release-images-(?P<sha>[0-9a-f]{40})-(?P<attempt>[1-9][0-9]*)")
 TESTED_TREE_ARTIFACT = re.compile(
-    r"pr-tested-(?P<base>[0-9a-f]{40})-(?P<tree>[0-9a-f]{40})-(?P<attempt>[1-9][0-9]*)"
+    r"pr-tested-(?P<number>[1-9][0-9]*)-(?P<base>[0-9a-f]{40})-(?P<tree>[0-9a-f]{40})"
+    r"-(?P<attempt>[1-9][0-9]*)"
 )
-RELEASING_STATES = frozenset({"success", "in_progress", "queued", "pending"})
 GIT_TIMEOUT_SECONDS = 25
 
 
@@ -73,6 +100,18 @@ def _instant(value: object) -> datetime:
     return datetime.fromisoformat(value)
 
 
+def changes_pipeline(path: str) -> bool:
+    return path.startswith(PIPELINE_DIRECTORIES) or path in PIPELINE_FILES
+
+
+def _newest_state(statuses: Sequence[Mapping[str, Any]]) -> object:
+    # Statuses can share a one-second creation time; GitHub numbers them in creation order.
+    if not statuses:
+        return None
+    newest = max(statuses, key=lambda status: (_instant(status["created_at"]), int(status["id"])))
+    return newest["state"]
+
+
 def released_since(records: object, sha: str, since: object, states: Collection[str]) -> bool:
     if not isinstance(records, list):
         return False
@@ -80,8 +119,8 @@ def released_since(records: object, sha: str, since: object, states: Collection[
         start = _instant(since)
         return any(
             record["sha"] == sha
-            and record["state"] in states
             and _instant(record["created_at"]) >= start
+            and _newest_state(record["statuses"]) in states
             for record in records
         )
     except (KeyError, TypeError, ValueError):
@@ -118,7 +157,17 @@ def decide(facts: Mapping[str, Any]) -> Authorized | Superseded | Deferred:
         if candidate and candidate != main:
             return _superseded(str(candidate), main)
     if facts["event"] == "workflow_dispatch" and facts.get("requested_run") is not None:
+        # A start judged after its run ended, such as a re-run of a failed early release, takes
+        # the rule of the whole run: it releases or it is refused, never deferred.
+        if facts.get("run_error") is None and run is not None and run.get("status") == "completed":
+            return _decide_whole_run(facts, main, run, automatic=True)
         return _decide_early(facts, main, run)
+    return _decide_whole_run(facts, main, run, automatic=facts["event"] == "workflow_run")
+
+
+def _decide_whole_run(
+    facts: Mapping[str, Any], main: str, run: Mapping[str, Any] | None, *, automatic: bool
+) -> Authorized | Superseded:
     if run is None or not _successful_repository_ci(run, facts):
         raise RefusedError(
             "Only the current main SHA with successful repository CI may be released"
@@ -126,16 +175,31 @@ def decide(facts: Mapping[str, Any]) -> Authorized | Superseded | Deferred:
     results = [job["conclusion"] for job in facts["jobs"] if job["name"] == REQUIRED_CI_JOB]
     if results != ["success"]:
         raise RefusedError(f"The {REQUIRED_CI_JOB} job of CI run {run['id']} did not pass")
-    started = run.get("run_started_at")
-    if facts["event"] == "workflow_run" and released_since(
-        facts.get("deployments"), main, started, RELEASING_STATES
-    ):
+    since = _release_baseline(run, facts["artifacts"], main)
+    # Only a release that succeeded counts: one still running holds the serialized deploy job,
+    # whose own check decides after it, and one that failed leaves this release to deploy.
+    if automatic and released_since(facts.get("deployments"), main, since, {"success"}):
         return Superseded(
-            f"{main} is already released, or being released, from the images of CI run "
-            f"{run['id']} before its repeated jobs ended."
+            f"{main} is already released from the images of CI run {run['id']} before its "
+            "repeated jobs ended."
         )
     attempt, artifact = _newest_images(facts["artifacts"], main, int(run["run_attempt"]))
-    return Authorized(main, int(run["id"]), attempt, artifact, str(started or ""))
+    return Authorized(main, int(run["id"]), attempt, artifact, since)
+
+
+def _release_baseline(
+    run: Mapping[str, Any], artifacts: Sequence[Mapping[str, Any]], sha: str
+) -> str:
+    # An attempt that rebuilt its images is judged on its own; one that reuses an earlier
+    # attempt's images (a re-run of failed jobs) is measured from the creation of the run.
+    attempt = int(run["run_attempt"])
+    rebuilt = any(
+        (match := IMAGE_ARTIFACT.fullmatch(artifact["name"]))
+        and match["sha"] == sha
+        and int(match["attempt"]) == attempt
+        for artifact in artifacts
+    )
+    return str(run.get("run_started_at" if rebuilt else "created_at") or "")
 
 
 def _decide_early(
@@ -153,16 +217,22 @@ def _decide_early(
 
 
 def _prove_early(facts: Mapping[str, Any], main: str, run: Mapping[str, Any] | None) -> Authorized:
+    if facts.get("run_error") is not None:
+        raise _UnprovenError(f"The CI run facts are unavailable: {facts['run_error']}")
     if run is None or not (
         _repository_ci(run, facts) and run["event"] == "push" and run["head_branch"] == "main"
     ):
         raise _UnprovenError("The requested run is not this repository's CI of a push to main")
-    if run["status"] == "completed":
-        raise _UnprovenError(f"CI run {run['id']} has ended")
-    pull_request, pull_request_run = _proof(facts, main)
     built = [job["conclusion"] for job in facts["jobs"] if job["name"] == IMAGE_JOB]
     if built != ["success"]:
         raise _UnprovenError(f"The image job of CI run {run['id']} has not passed")
+    skippable = _skippable(facts, TESTED_TREE_JOB)
+    for job in facts["jobs"]:
+        if job["conclusion"] not in {None, "success"} and not (
+            job["conclusion"] == "skipped" and job["name"] in skippable
+        ):
+            raise _UnprovenError(f"{job['name']} of CI run {run['id']} ended {job['conclusion']}")
+    pull_request, pull_request_run = _proof(facts, main)
     attempt = int(run["run_attempt"])
     try:
         built_in, artifact = _newest_images(facts["artifacts"], main, attempt)
@@ -175,17 +245,25 @@ def _prove_early(facts: Mapping[str, Any], main: str, run: Mapping[str, Any] | N
         int(run["id"]),
         attempt,
         artifact,
-        str(run.get("run_started_at") or ""),
+        _release_baseline(run, facts["artifacts"], main),
         pull_request,
         pull_request_run,
     )
 
 
-def _passed_every_job(jobs: Sequence[Mapping[str, Any]]) -> bool:
+def _skippable(facts: Mapping[str, Any], other_event_job: str) -> frozenset[str]:
+    # A job that gates the release may be skipped only while it is switched off for the
+    # repository; the other job never runs for this event.
+    if facts.get("sonar_enabled") is False:
+        return frozenset({other_event_job, SONAR_JOB})
+    return frozenset({other_event_job})
+
+
+def _passed_every_job(jobs: Sequence[Mapping[str, Any]], skippable: Collection[str]) -> bool:
     results = [job["conclusion"] for job in jobs if job["name"] == REQUIRED_CI_JOB]
     return results == ["success"] and all(
         job["conclusion"] == "success"
-        or (job["conclusion"] == "skipped" and job["name"] in SKIPPABLE_PULL_REQUEST_JOBS)
+        or (job["conclusion"] == "skipped" and job["name"] in skippable)
         for job in jobs
     )
 
@@ -201,7 +279,7 @@ def _proof(facts: Mapping[str, Any], main: str) -> tuple[int, int]:
     parents = list(commit["parents"])
     if len(parents) != 1:
         raise _UnprovenError(f"The main commit {main} is not a squash merge")
-    changed = [path for path in commit["paths"] if path.startswith(PIPELINE_PATHS)]
+    changed = [path for path in commit["paths"] if changes_pipeline(path)]
     if changed:
         raise _UnprovenError(f"The main commit {main} changes the pipeline ({changed[0]})")
     pulls = [pull for pull in proof["pull_requests"] if pull["merge_commit_sha"] == main]
@@ -233,7 +311,7 @@ def _proof(facts: Mapping[str, Any], main: str) -> tuple[int, int]:
         )
     identifier = int(tested["id"])
     if (tested["status"], tested["conclusion"]) != ("completed", "success") or (
-        not _passed_every_job(proof["jobs"])
+        not _passed_every_job(proof["jobs"], _skippable(facts, RELEASE_START_JOB))
     ):
         raise _UnprovenError(
             f"CI run {identifier} of pull request #{number} did not pass every job"
@@ -250,6 +328,10 @@ def _proof(facts: Mapping[str, Any], main: str) -> tuple[int, int]:
             f"CI run {identifier} recorded no single tested tree for attempt {attempt}"
         )
     ((match, artifact),) = evidence
+    if int(match["number"]) != number:
+        raise _UnprovenError(
+            f"The tested tree of CI run {identifier} names pull request #{match['number']}"
+        )
     if artifact["expired"] or artifact["head_sha"] != pull["head_sha"]:
         raise _UnprovenError(
             f"The tested tree of CI run {identifier} has expired or belongs to another head"
@@ -321,19 +403,19 @@ def _git(root: Path, *arguments: str) -> str:
     )
     if result.returncode != 0:
         raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout)
-    return result.stdout.decode("utf-8").strip()
+    return result.stdout.decode("utf-8")
 
 
 def commit_facts(root: Path, sha: str) -> dict[str, Any] | None:
     if SHA.fullmatch(sha) is None:
         return None
     try:
-        tree = _git(root, "rev-parse", "--verify", f"{sha}^{{tree}}")
+        tree = _git(root, "rev-parse", "--verify", f"{sha}^{{tree}}").strip()
         parents = _git(root, "rev-list", "--parents", "--max-count=1", sha).split()[1:]
         if len(parents) != 1:
             return {"tree": tree, "parents": parents, "paths": [], "parent_committed_at": None}
         changed = _git(root, "diff", "--name-only", "--no-renames", "-z", parents[0], sha)
-        committed = _git(root, "log", "--max-count=1", "--format=%cI", parents[0])
+        committed = _git(root, "log", "--max-count=1", "--format=%cI", parents[0]).strip()
     except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
         return None
     paths = [path for path in changed.split("\0") if path]

@@ -176,11 +176,7 @@ def test_every_image_is_scanned_before_any_cloud_credential_exists() -> None:
     assert step(scan, SCAN)["run"].splitlines() == SCANNED
     assert current["env"] == CURRENT_ENVIRONMENT
     assert current["run"] == CURRENT_WITH_RECORDS
-    assert scan["outputs"] == {
-        "current": (
-            "${{ steps.download.outcome == 'success' && steps.current.outputs.current || 'false' }}"
-        )
-    }
+    assert scan["outputs"] == {"current": "${{ steps.current.outputs.current }}"}
     assert "aquasecurity/trivy-action" not in release_text()
     assert "deploy/smoke.sh" not in release_text()
     assert "scan-images.sh" not in commands(jobs["deploy"])
