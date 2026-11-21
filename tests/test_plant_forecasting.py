@@ -422,7 +422,9 @@ def test_pure_projection_claims_archive_selection_only_after_publication(
     configuration = plant.current_configuration
     assert configuration is not None
     source = snapshot_for(system, DAY)
-    projected = forecasting.forecast_payload(configuration, source, None, DAY, 60)
+    projected = forecasting.forecast_payload(
+        configuration, source, None, DAY, 60, model_version=MODEL_VERSION
+    )
     provenance = cast(dict[str, Any], projected["provenance"])
     assert provenance["selection_policy"] == "single-snapshot-forecast-projection-v1"
     assert "published_at" not in provenance

@@ -116,11 +116,10 @@ def _prepare_for_configuration(
     if calibration is not None and not production_identity_at(calibration, snapshot.collected_at):
         calibration = None
     factor = float(calibration.factor) if calibration and calibration.factor is not None else 1.0
+    model = transfer_model(configuration, calibration)
     native = tuple(
         sorted(
-            power_intervals(
-                snapshot, configuration, model_version=transfer_model(configuration, calibration)
-            ),
+            power_intervals(snapshot, configuration, model_version=model),
             key=lambda row: row.start,
         )
     )
@@ -138,7 +137,9 @@ def _prepare_for_configuration(
         ):
             continue
         payloads = {
-            str(resolution): forecast_payload(configuration, snapshot, calibration, day, resolution)
+            str(resolution): forecast_payload(
+                configuration, snapshot, calibration, day, resolution, model_version=model
+            )
             for resolution in (30, 60)
         }
         scenarios = {

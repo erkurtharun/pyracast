@@ -4,6 +4,8 @@ from typing import Any, cast
 import pytest
 
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
 from pyracast.plants import tracking
 from pyracast.plants.activation import activate_calibration
@@ -16,7 +18,7 @@ from pyracast.plants.numerics import DERATING_POLICY, MODEL_VERSION
 from pyracast.plants.performance import forecast_performance
 from pyracast.plants.tracking import MODEL_V1, MODEL_V2
 from pyracast.plants.training import run_calibration
-from pyracast.plants.transfer import reference_power_mw
+from pyracast.plants.transfer import reference_power_mw, transfer_model
 from tests.support.domain import NOW, System
 from tests.support.forecast_performance import selected_factor
 from tests.support.incident_calibration import incident
@@ -72,6 +74,23 @@ def _outlook(system: System, plant: Plant, target_date: date, **options: Any) ->
         target_date=target_date,
         resolution_minutes=60,
         **options,
+    )
+
+
+def _new_payload(
+    configuration: PlantConfiguration,
+    snapshot: ForecastSnapshot,
+    calibration: CalibrationRun | None,
+    day: date,
+    resolution: int,
+) -> dict[str, object]:
+    return forecast_payload(
+        configuration,
+        snapshot,
+        calibration,
+        day,
+        resolution,
+        model_version=transfer_model(configuration, calibration),
     )
 
 
@@ -135,7 +154,7 @@ def test_the_two_versions_give_tracking_plants_different_numbers(
     payloads = {}
     for default in VERSIONS:
         _default(monkeypatch, default)
-        payloads[default] = forecast_payload(configuration, snapshot, None, DAY, 30)
+        payloads[default] = _new_payload(configuration, snapshot, None, DAY, 30)
     assert _powers(payloads[MODEL_V1]) != _powers(payloads[MODEL_V2])
     assert payloads[MODEL_V1]["model_version"] == MODEL_V1
     assert payloads[MODEL_V2]["model_version"] == MODEL_V2
@@ -172,7 +191,7 @@ def test_an_outage_scenario_replays_the_version_recorded_in_its_forecast(
             "plant_id": plant.pk,
             "configuration_id": configuration.pk,
             "calibration_id": first.pk,
-            "result": forecast_payload(configuration, snapshot, first, DAY, 60),
+            "result": _new_payload(configuration, snapshot, first, DAY, 60),
         }
         return cast(dict[str, Any], incident_scenario(outlook, DAY, 60, NOW).scenario)
 
@@ -183,6 +202,36 @@ def test_an_outage_scenario_replays_the_version_recorded_in_its_forecast(
     assert under_v1["status"] == "estimated"
 
 
+def test_a_forecast_whose_calibration_an_outage_invalidated_is_replaced_under_its_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, configuration = _tracking_plant(monkeypatch)
+    _default(monkeypatch, MODEL_V1)
+    first = _calibration(system, plant, MODEL_V1)
+    _activate(system, plant, first)
+    snapshot = snapshot_for(system, DAY, collected_at=NOW)
+    outlook = {
+        "plant_id": plant.pk,
+        "configuration_id": configuration.pk,
+        "calibration_id": first.pk,
+        "result": _new_payload(configuration, snapshot, first, DAY, 60),
+    }
+    window, _ = local_day_bounds(first.window_end, system.binding.timezone)
+    incident(system, plant, window + timedelta(hours=9), window + timedelta(hours=10))
+    incident(system, plant, NOW - timedelta(hours=1), None)
+    under_v1 = incident_scenario(outlook, DAY, 60, NOW)
+    replacement = cast(dict[str, Any], under_v1.replacement_result)
+    scenario = cast(dict[str, Any], under_v1.scenario)
+    assert "calibration_invalidated_by_outage_history" in replacement["quality_flags"]
+    assert replacement["model_version"] == scenario["result"]["model_version"] == MODEL_V1
+    assert replacement["factor"] == scenario["result"]["factor"] == 1
+    uncalibrated_v1 = _new_payload(configuration, snapshot, None, DAY, 60)
+    assert _powers(replacement) == _powers(uncalibrated_v1)
+    _default(monkeypatch, MODEL_V2)
+    assert _powers(_new_payload(configuration, snapshot, None, DAY, 60)) != _powers(uncalibrated_v1)
+    assert incident_scenario(outlook, DAY, 60, NOW) == under_v1
+
+
 def test_a_v1_calibration_keeps_its_plant_on_v1_until_a_refit_under_v2_is_activated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -191,7 +240,7 @@ def test_a_v1_calibration_keeps_its_plant_on_v1_until_a_refit_under_v2_is_activa
     first = _calibration(system, plant, MODEL_V1)
     _activate(system, plant, first)
     snapshot = publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
-    under_v1 = forecast_payload(configuration, snapshot, first, DAY, 30)
+    under_v1 = _new_payload(configuration, snapshot, first, DAY, 30)
     issuance = ForecastIssuance.objects.get()
     assert (issuance.calibration_id, issuance.model_version, issuance.factor) == (
         first.pk,
@@ -199,14 +248,14 @@ def test_a_v1_calibration_keeps_its_plant_on_v1_until_a_refit_under_v2_is_activa
         0.5,
     )
     _default(monkeypatch, MODEL_V2)
-    assert forecast_payload(configuration, snapshot, first, DAY, 30) == under_v1
+    assert _new_payload(configuration, snapshot, first, DAY, 30) == under_v1
     assert under_v1["model_version"] == MODEL_V1
-    assert forecast_payload(configuration, snapshot, None, DAY, 30)["model_version"] == MODEL_V2
+    assert _new_payload(configuration, snapshot, None, DAY, 30)["model_version"] == MODEL_V2
     second = _calibration(system, plant, MODEL_V2)
     _activate(system, plant, second)
-    refit = forecast_payload(configuration, snapshot, second, DAY, 30)
+    refit = _new_payload(configuration, snapshot, second, DAY, 30)
     _default(monkeypatch, MODEL_V1)
-    assert forecast_payload(configuration, snapshot, second, DAY, 30) == refit
+    assert _new_payload(configuration, snapshot, second, DAY, 30) == refit
     assert refit["model_version"] == MODEL_V2
     assert _powers(refit) != _powers(under_v1)
 
@@ -240,7 +289,7 @@ def test_fixed_plants_are_identical_under_both_default_versions(
         run = request_run(system, plant)
         assert run_calibration(run.pk, NOW)
         run.refresh_from_db()
-        payload = forecast_payload(configuration, snapshot, None, DAY, 30)
+        payload = _new_payload(configuration, snapshot, None, DAY, 30)
         assert payload["model_version"] == run.result["transfer_model"] == MODEL_VERSION
         results.append(
             (

@@ -326,7 +326,7 @@ def build_calibration_dataset(
     run: CalibrationRun, configuration: PlantConfiguration
 ) -> CalibrationDataset:
     required_windows = _daylight_windows(run, configuration)
-    model = transfer_model(configuration)
+    model = transfer_model(configuration, None)
     comparison = _comparison_calibration(run, model)
     incumbent_factor = comparison.factor if comparison is not None else 1.0
     if incumbent_factor is None:

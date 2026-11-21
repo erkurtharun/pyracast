@@ -25,9 +25,7 @@ def _tracker_model(value: object) -> str | None:
     return next((model for model in tracking.MODELS if model == value), None)
 
 
-def transfer_model(
-    configuration: PlantConfiguration, calibration: CalibrationRun | None = None
-) -> str:
+def transfer_model(configuration: PlantConfiguration, calibration: CalibrationRun | None) -> str:
     """The model a new result is computed under: a tracker plant keeps the geometry version
     its calibration was fitted under and takes the default without one."""
     if not tracking_modeled(configuration):

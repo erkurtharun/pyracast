@@ -22,7 +22,7 @@ def reference_intervals(
     return actual_power_intervals(
         source.snapshot,
         configuration,
-        model_version=transfer_model(configuration),
+        model_version=transfer_model(configuration, None),
         source_intervals=source.intervals,
     )
 

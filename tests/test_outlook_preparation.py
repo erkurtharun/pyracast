@@ -18,6 +18,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants import incident_forecasts
 from pyracast.plants.forecasting import forecast_payload
 from pyracast.plants.history import plant_outlook
+from pyracast.plants.transfer import transfer_model
 from tests.support.domain import NOW
 from tests.support.errors import raises_code
 from tests.support.invariants import stored_again
@@ -236,7 +237,9 @@ def test_ended_incident_still_produces_completed_day_scenario(
     )
     configuration = plant.current_configuration
     assert configuration is not None
-    normal = forecast_payload(configuration, snapshot, None, day, 60)
+    normal = forecast_payload(
+        configuration, snapshot, None, day, 60, model_version=transfer_model(configuration, None)
+    )
     outlook: dict[str, Any] = {
         "result": normal,
         "configuration_id": configuration.pk,

@@ -289,7 +289,7 @@ def test_geometry_requires_known_dc_capacity_and_bounded_losses(
     configuration = _configuration(**binding)
     start = datetime(2026, 6, 21, 5, 0, tzinfo=UTC)
     assert not tracking_modeled(configuration)
-    assert transfer_model(configuration) == MODEL_VERSION
+    assert transfer_model(configuration, None) == MODEL_VERSION
     for model in (MODEL_V1, MODEL_V2):
         assert reference_power_mw(
             configuration, start, start + timedelta(minutes=30), 473.8, model_version=model
@@ -300,7 +300,7 @@ def test_non_tracking_configurations_keep_the_direct_reference_transfer() -> Non
     configuration = _configuration()
     configuration.mounting_type = "fixed"
     start = datetime(2026, 6, 21, 5, 0, tzinfo=UTC)
-    assert transfer_model(configuration) == MODEL_VERSION
+    assert transfer_model(configuration, None) == MODEL_VERSION
     assert reference_power_mw(
         configuration, start, start + timedelta(minutes=30), 473.8, model_version=MODEL_VERSION
     ) == pytest.approx(0.4738 * 130)
@@ -330,7 +330,7 @@ def test_tracking_transfer_applies_the_default_gain_to_loss_free_reference_power
     end = start + timedelta(minutes=30)
     configuration = _configuration()
     assert tracking_modeled(configuration)
-    model = transfer_model(configuration)
+    model = transfer_model(configuration, None)
     assert model == default
     power = reference_power_mw(configuration, start, end, 473.8, model_version=model)
     assert power == pytest.approx(0.4738 * 130 * 1.7547, rel=0.01)
