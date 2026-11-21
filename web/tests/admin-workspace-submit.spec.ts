@@ -10,6 +10,8 @@ async function serveConsolePage(page: string) {
         ),
     );
     const posts: string[] = [];
+    const firstPost = Promise.withResolvers<void>();
+    const answers = Promise.withResolvers<void>();
     const server = createServer(
         (request, response) =>
             void (async () => {
@@ -17,7 +19,8 @@ async function serveConsolePage(page: string) {
                     let body = "";
                     for await (const chunk of request) body += chunk.toString();
                     posts.push(body);
-                    await new Promise((resolve) => setTimeout(resolve, 500));
+                    firstPost.resolve();
+                    await answers.promise;
                     response.writeHead(303, { Location: "/admin/plants/7/" });
                     response.end();
                     return;
@@ -39,7 +42,13 @@ async function serveConsolePage(page: string) {
     );
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("No port");
-    return { server, posts, origin: `http://127.0.0.1:${address.port}` };
+    return {
+        server,
+        posts,
+        firstPost: firstPost.promise,
+        answerPosts: answers.resolve,
+        origin: `http://127.0.0.1:${address.port}`,
+    };
 }
 
 function close(server: Server) {
@@ -49,7 +58,7 @@ function close(server: Server) {
 test("a console form is sent once and keeps the pressed action", async ({
     page,
 }) => {
-    const { server, posts, origin } =
+    const { server, posts, firstPost, answerPosts, origin } =
         await serveConsolePage(`<!doctype html><html lang="en"><title>Plant</title>
           <form method="post" action="/admin/plants/7/">
             <input type="hidden" name="binding_id" value="3">
@@ -60,12 +69,19 @@ test("a console form is sent once and keeps the pressed action", async ({
         const validate = page.getByRole("button", {
             name: "Validate connection",
         });
-        await validate.click();
-        await validate.click({ force: true, noWaitAfter: true });
-        await page.waitForURL(`${origin}/admin/plants/7/`);
-        await page.waitForLoadState("load");
+        const box = await validate.boundingBox();
+        if (!box) throw new Error("No button box");
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        await page.mouse.click(x, y);
+        await firstPost;
+        await page.mouse.click(x, y);
+        const redirected = page.waitForEvent("load");
+        answerPosts();
+        await redirected;
         expect(posts).toEqual(["binding_id=3&action=validate"]);
     } finally {
+        answerPosts();
         await close(server);
     }
 });
@@ -73,7 +89,7 @@ test("a console form is sent once and keeps the pressed action", async ({
 test("a form its own script sends is never blocked by the console guard", async ({
     page,
 }) => {
-    const { server, origin } =
+    const { server, answerPosts, origin } =
         await serveConsolePage(`<!doctype html><html lang="en"><title>Upload</title>
           <form method="post" data-own><button type="submit">Preview</button></form>
           <output></output>
@@ -91,6 +107,7 @@ test("a form its own script sends is never blocked by the console guard", async 
         await preview.click();
         await expect(page.locator("output")).toHaveText("2");
     } finally {
+        answerPosts();
         await close(server);
     }
 });
