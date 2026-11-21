@@ -1,18 +1,25 @@
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from pyracast.connections.models import SiteBinding
+from pyracast.connections.contracts import ProviderAdapter, ProviderError
+from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.forecasts import revalidation
 from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.quota import ForecastBudgetReservedError
-from pyracast.forecasts.revalidation import RETRY_DELAY, RevalidationOutcome
+from pyracast.forecasts.revalidation import RETRY_DELAY, RevalidationOutcome, revalidate_account
+from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.forecasts.validation import validate_binding
 from pyracast.platform_admin.provider_accounts import account_context
-from tests.support.domain import NOW, FakeAdapter
+from tests.support.domain import NOW, FakeAdapter, provider_key
+from tests.support.jobs import calculate, collect
+from tests.support.providers import replace_key
 from tests.support.revalidation import (
     Run,
     account,
+    assert_current_plants_keep_their_forecasts,
     collecting_account,
     run_revalidations,
     slots_of,
@@ -157,3 +164,149 @@ def test_a_refused_revalidation_retries_after_the_next_slot_of_a_plant_that_coll
     runs = run_revalidations(system, [], utc(D1, 11), utc(D1, 12))
 
     assert runs == [Run(utc(D1, 11), WAITING, utc(D1, 13) + RETRY_DELAY, 1)]
+
+
+def rejected() -> None:
+    raise ProviderError("provider_request_failed", status_code=401, retryable=False)
+
+
+def refused_for_the_key(binding: SiteBinding, slot: datetime) -> CollectionJob:
+    enqueue_due(slot)
+    job = CollectionJob.objects.get(binding=binding, endpoint="forecasts", scheduled_for=slot)
+    assert not collect(job.pk, FakeAdapter(rejected), calculate, slot)
+    job.refresh_from_db()
+    assert (job.status, job.last_error) == ("failed", "provider_authentication_failed")
+    return job
+
+
+def assert_the_due_slot_was_collected_once_and_the_older_job_stays_ended(
+    binding: SiteBinding, refused: CollectionJob, due: datetime
+) -> None:
+    refused.refresh_from_db()
+    assert (refused.status, refused.last_error) == ("failed", "provider_authentication_failed")
+    collected = CollectionJob.objects.get(binding=binding, endpoint="forecasts", scheduled_for=due)
+    assert collected.status == "succeeded"
+    assert RequestAttempt.objects.filter(job=collected).count() == 1
+    assert not RequestAttempt.objects.filter(job=refused, created_at__gte=due).exists()
+
+
+def test_a_plant_refused_for_the_old_key_before_a_passed_slot_is_revalidated_on_quota_two() -> None:
+    system, (plant,) = collecting_account([["16:00"]], replaced=False)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=2)
+    refused = refused_for_the_key(plant, utc(D1, 13))
+    spend_until(system, utc(D2, 12), 1)
+    replace_key(system.admin, system.account.pk, provider_key("NEW"))
+
+    runs = run_revalidations(system, slots_of([D2, D3], [13]), utc(D2, 12), utc(D4, 0))
+
+    # D2 12:00: 1 + 1 + 2 > 2, the refused job is the due slot's and comes back; after D2 13:00
+    # 1 + 1 + 1 > 2 with only the due slot of D2 13:00; D3 00:00: 0 + 1 + 1 = 2.
+    assert [(run.outcome, run.current) for run in runs] == [(WAITING, 0), (WAITING, 0), (DONE, 1)]
+    assert runs[-1].at == utc(D3, 0)
+    assert_the_due_slot_was_collected_once_and_the_older_job_stays_ended(
+        plant, refused, utc(D2, 13)
+    )
+
+
+def test_nine_clocks_on_quota_ten_revalidate_a_plant_refused_for_the_old_key() -> None:
+    system, plants = collecting_account([["06:00", "16:00"]] * 4 + [["16:00"]], replaced=False)
+    *current, plant = plants
+    refused = refused_for_the_key(plant, utc(D1, 13))
+    replace_key(system.admin, system.account.pk, provider_key("NEW"))
+    for binding in current:
+        validate_binding(system.admin, binding.pk, FakeAdapter(), utc(D1, 22))
+
+    runs = run_revalidations(system, slots_of([D2, D3], [3, 13]), utc(D2, 13, 15), utc(D4, 0))
+
+    # 8 used by the current plants, which need nothing more today; the plant needs its due slot
+    # of D2 13:00 only: 8 + 1 + 0 + 1 = 10.
+    assert runs == [Run(utc(D2, 13, 15), DONE, None, 5)]
+    assert_the_due_slot_was_collected_once_and_the_older_job_stays_ended(
+        plant, refused, utc(D2, 13)
+    )
+
+
+def recording(asked: list[int]) -> Callable[[SiteBinding], ProviderAdapter]:
+    def adapter_for(binding: SiteBinding) -> ProviderAdapter:
+        asked.append(binding.pk)
+        return FakeAdapter()
+
+    return adapter_for
+
+
+def test_a_plant_refused_for_the_reserve_leaves_the_later_waiting_plants_their_turn() -> None:
+    system, plants = collecting_account(
+        [["16:00"]] * 8 + [["06:00", "16:00"], ["16:00"], ["16:00"]]
+    )
+    *current, refused, first, second = plants
+    SiteBinding.objects.filter(pk__in=[binding.pk for binding in current]).update(
+        validated_credential_revision=2
+    )
+    CollectionSchedule.objects.filter(region_id__in=[first.region_id, second.region_id]).update(
+        enabled=False
+    )
+    claim = account(system).revalidation_due_at
+    assert claim is not None
+    asked: list[int] = []
+
+    # 8 needed by the current plants: the two-clock plant at 0 + 1 + 8 + 2 = 11 > 10, then the
+    # plants with collection off at 0 + 1 + 8 + 0 = 9 and 1 + 1 + 8 + 0 = 10.
+    outcome = revalidate_account(
+        system.account.pk, utc(D1, 0), claim=claim, adapter_for=recording(asked)
+    )
+
+    assert outcome == WAITING
+    due = account(system).revalidation_due_at
+    assert due is not None
+    assert utc(D1, 3) < due <= utc(D1, 3) + RETRY_DELAY
+    assert asked == [refused.pk, first.pk, second.pk]
+    assert [revision(refused), revision(first), revision(second)] == [1, 2, 2]
+    assert used(system, utc(D1, 0)) == 2
+    assert_current_plants_keep_their_forecasts(system, utc(D1, 0))
+
+
+def test_a_run_whose_every_plant_is_refused_for_the_reserve_waits_for_the_next_slot() -> None:
+    system, plants = collecting_account([["16:00"]] * 11)
+    *current, first, second = plants
+    SiteBinding.objects.filter(pk__in=[binding.pk for binding in current]).update(
+        validated_credential_revision=2
+    )
+    claim = account(system).revalidation_due_at
+    assert claim is not None
+    asked: list[int] = []
+
+    # 9 needed by the current plants: each waiting plant at 0 + 1 + 9 + 1 = 11 > 10.
+    outcome = revalidate_account(
+        system.account.pk, utc(D1, 0), claim=claim, adapter_for=recording(asked)
+    )
+
+    assert outcome == WAITING
+    due = account(system).revalidation_due_at
+    assert due is not None
+    assert utc(D1, 13) < due <= utc(D1, 13) + RETRY_DELAY
+    assert asked == [first.pk, second.pk]
+    assert [revision(first), revision(second)] == [1, 1]
+    assert used(system, utc(D1, 0)) == 0
+
+
+def test_plants_with_a_clock_late_in_the_utc_day_are_revalidated_right_after_it() -> None:
+    system, plants = collecting_account([["06:00", "18:45"]] * 5, timezone="America/New_York")
+    slots = [utc(day, hour, minute) for day in (D1, D2, D3) for hour, minute in ((11, 0), (23, 45))]
+
+    runs = run_revalidations(system, slots, utc(D1, 0, 30), utc(D4, 0))
+
+    for run in runs:
+        assert run.due is None or run.at < run.due <= utc(run.at.date() + timedelta(days=1), 0)
+    after = revalidation.AFTER_THE_SLOT
+    assert runs == [
+        Run(utc(D1, 0, 30), WAITING, utc(D1, 11) + after, 3),
+        Run(utc(D1, 11) + after, WAITING, utc(D1, 23, 45) + after, 3),
+        Run(utc(D1, 23, 45) + after, WAITING, utc(D2, 0), 3),
+        Run(utc(D2, 0), WAITING, utc(D2, 11) + after, 4),
+        Run(utc(D2, 11) + after, WAITING, utc(D2, 23, 45) + after, 4),
+        Run(utc(D2, 23, 45) + after, WAITING, utc(D3, 0), 4),
+        Run(utc(D3, 0), WAITING, utc(D3, 11) + after, 4),
+        Run(utc(D3, 11) + after, WAITING, utc(D3, 23, 45) + after, 4),
+        Run(utc(D3, 23, 45) + after, DONE, None, 5),
+    ]
+    assert [revision(plant) for plant in plants] == [2] * 5

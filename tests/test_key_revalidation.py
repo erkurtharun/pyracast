@@ -31,6 +31,7 @@ from pyracast.forecasts.validation import VALIDATION_IN_FLIGHT, validate_binding
 from pyracast.orchestration import dispatcher as command
 from pyracast.orchestration.kinds import REVALIDATION
 from pyracast.regions.models import AuditEvent, Region
+from pyracast.trash import restore_region, trash_region
 from tests.support.domain import NOW, FakeAdapter, System, make_system, provider_key
 from tests.support.providers import replace_key
 
@@ -38,22 +39,22 @@ pytestmark = pytest.mark.django_db(transaction=True)
 NEXT_UTC_DAY = datetime.combine(NOW.date() + timedelta(days=1), datetime.min.time(), UTC)
 
 
-def second_plant(system: System) -> SiteBinding:
+def second_plant(system: System, name: str = "Second site", longitude: int = 30) -> SiteBinding:
     region = Region.objects.create(
         tenant=system.tenant,
-        name="Second site",
+        name=name,
         latitude=41,
-        longitude=30,
+        longitude=longitude,
         timezone="Europe/Istanbul",
     )
     binding = SiteBinding.objects.create(
         region=region,
         provider_account=system.account,
         region_revision=1,
-        site_id="second-site",
+        site_id=name.lower().replace(" ", "-"),
         capacity_kw=1,
         latitude=41,
-        longitude=30,
+        longitude=longitude,
         timezone=region.timezone,
         validated_at=NOW - timedelta(days=1),
         validated_credential_revision=1,
@@ -683,3 +684,59 @@ def test_a_key_replaced_while_a_site_was_refused_starts_no_further_plant() -> No
     assert first.health != "error"
     assert validation_attempts(later) == attempts[later.pk]
     assert ProviderAccount.objects.get(pk=system.account.pk).revalidation_due_at is not None
+
+
+def trashed_plant(system: System) -> SiteBinding:
+    binding = second_plant(system, "Trashed site", 31)
+    trash_region(system.member, system.tenant.pk, binding.region_id)
+    return binding
+
+
+def restore(system: System, binding: SiteBinding) -> None:
+    restore_region(system.member, system.tenant.pk, binding.region_id)
+
+
+def revision(binding: SiteBinding) -> int:
+    binding.refresh_from_db()
+    return binding.validated_credential_revision or 0
+
+
+def test_a_plant_restored_after_its_accounts_revalidation_is_revalidated_by_the_next_run() -> None:
+    system = make_system(approved=True)
+    trashed = trashed_plant(system)
+    replaced(system)
+    assert revalidate(system, adapters(FakeAdapter())) == RevalidationOutcome.DONE
+    assert due(system) is None
+
+    restore(system, trashed)
+
+    assert claim_due_revalidations(timezone.now()) == [system.account.pk]
+    assert revalidate(system, adapters(FakeAdapter())) == RevalidationOutcome.DONE
+    assert [revision(system.binding), revision(trashed)] == [2, 2]
+    assert due(system) is None
+
+
+def test_a_plant_restored_while_a_run_holds_the_lease_is_taken_by_the_next_dispatch() -> None:
+    system = make_system(approved=True)
+    second = second_plant(system)
+    trashed = trashed_plant(system)
+    replaced(system)
+    claim = due(system)
+    assert claim is not None
+
+    def restored_meanwhile() -> None:
+        if Region.objects.trashed().filter(pk=trashed.region_id).exists():
+            from_another_client(lambda: restore(system, trashed))
+
+    outcome = revalidate_account(
+        system.account.pk,
+        timezone.now(),
+        claim=claim,
+        adapter_for=adapters(FakeAdapter(restored_meanwhile)),
+    )
+
+    assert outcome == RevalidationOutcome.LEASE_LOST
+    assert [revision(second), revision(system.binding), revision(trashed)] == [2, 1, 1]
+    assert claim_due_revalidations(timezone.now()) == [system.account.pk]
+    assert revalidate(system, adapters(FakeAdapter())) == RevalidationOutcome.DONE
+    assert [revision(system.binding), revision(trashed)] == [2, 2]

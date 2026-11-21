@@ -13,7 +13,8 @@ REOPENS_NOT = {"quota_exhausted", "schedule_disabled"}
 
 def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
     """The forecast budget as computed before collection timing had one function, with the due
-    slot the scheduler opens again and the starts per UTC day claim admits."""
+    slot the scheduler opens again, the starts per UTC day claim admits, and no job older than
+    the due slot that claim ends unsent."""
     day_start = datetime.combine(now.astimezone(UTC).date(), datetime.min.time(), UTC)
     day_end = day_start + timedelta(days=1)
     attempted = set(
@@ -52,15 +53,24 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
             for job in jobs
             if job.pk in attempted or job.status in {"succeeded", "failed", "stale"}
         }
+        zone = ZoneInfo(binding.region.timezone)
+        local_today = now.astimezone(zone).date()
+        passed = [
+            slot
+            for day in (local_today - timedelta(days=1), local_today)
+            for clock in clocks
+            if (slot := local_slot(day, clock, zone)) is not None and effective <= slot <= now
+        ]
+        due = max(passed, default=None)
         needed: dict[datetime, CollectionJob | None] = {}
         for job in jobs:
+            superseded = due is not None and job.scheduled_for < due
             if (
-                job.status in {"pending", "retry", "running"}
+                (job.status == "running" or (job.status in {"pending", "retry"} and not superseded))
                 and job.pk not in attempted
                 and job.available_at < day_end
             ):
                 needed[job.scheduled_for] = job
-        zone = ZoneInfo(binding.region.timezone)
         day = day_start.astimezone(zone).date()
         last = (day_end - timedelta(microseconds=1)).astimezone(zone).date()
         while day <= last:
@@ -73,29 +83,23 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
                 ):
                     needed.setdefault(slot, None)
             day += timedelta(days=1)
-        local_today = now.astimezone(zone).date()
-        passed = [
-            slot
-            for day in (local_today - timedelta(days=1), local_today)
-            for clock in clocks
-            if (slot := local_slot(day, clock, zone)) is not None and effective <= slot <= now
-        ]
-        if passed:
-            due_job = by_slot.get(max(passed))
+        if due is not None:
+            due_job = by_slot.get(due)
             if due_job is None or (
                 due_job.status == "stale"
                 and due_job.last_error not in REOPENS_NOT
                 and due_job.pk not in attempted
             ):
-                needed.setdefault(max(passed), due_job)
+                needed.setdefault(due, due_job)
         latest = max(
             (job for job in jobs if job.scheduled_for <= now),
             key=lambda job: (job.scheduled_for, job.pk),
             default=None,
         )
-        if latest is not None and (latest.status, latest.last_error) == (
-            "failed",
-            "provider_authentication_failed",
+        if (
+            latest is not None
+            and (latest.status, latest.last_error) == ("failed", "provider_authentication_failed")
+            and (due is None or latest.scheduled_for >= due)
         ):
             needed[latest.scheduled_for] = latest
         ever_sent = set(

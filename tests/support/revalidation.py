@@ -10,6 +10,7 @@ from pyracast.forecasts.revalidation import RevalidationOutcome, revalidate_acco
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import approve_region
+from pyracast.regions.models import Region
 from pyracast.regions.operations import configure_binding, submit_region
 from tests.support.collection_schedule import HistoricalFixture
 from tests.support.domain import NOW, FakeAdapter, System, make_system, provider_key
@@ -25,7 +26,14 @@ def utc(day: date, hour: int, minute: int = 0) -> datetime:
     return datetime.combine(day, time(hour, minute), UTC)
 
 
-def plant(system: System, index: int, times: list[str], *, validated: datetime) -> SiteBinding:
+def plant(
+    system: System,
+    index: int,
+    times: list[str],
+    *,
+    validated: datetime,
+    timezone: str = "Europe/Istanbul",
+) -> SiteBinding:
     name = f"site-{index}"
     region = submit_region(
         system.member,
@@ -33,7 +41,7 @@ def plant(system: System, index: int, times: list[str], *, validated: datetime) 
         name=name,
         latitude=41,
         longitude=30 + index / 100,
-        timezone="Europe/Istanbul",
+        timezone=timezone,
     )
     binding = configure_binding(
         system.admin,
@@ -52,10 +60,14 @@ def plant(system: System, index: int, times: list[str], *, validated: datetime) 
 
 
 def collecting_account(
-    clocks: Iterable[list[str]], *, replaced: bool = True
+    clocks: Iterable[list[str]], *, replaced: bool = True, timezone: str = "Europe/Istanbul"
 ) -> tuple[System, list[SiteBinding]]:
     """Plants approved and collected at NOW, the first of them the system's own."""
     system = make_system(approved=True)
+    Region.objects.filter(pk=system.region.pk).update(timezone=timezone)
+    SiteBinding.objects.filter(pk=system.binding.pk).update(timezone=timezone)
+    system.region.refresh_from_db()
+    system.binding.refresh_from_db()
     schedules = list(clocks)
     CollectionSchedule.objects.create(
         region=system.region, times=schedules[0], effective_from=NOW - timedelta(days=1)
@@ -63,7 +75,7 @@ def collecting_account(
     plants = [system.binding]
     for index, times in enumerate(schedules[1:], start=2):
         validated = NOW - timedelta(hours=1) - (timedelta(days=1) if index > 5 else timedelta(0))
-        plants.append(plant(system, index, times, validated=validated))
+        plants.append(plant(system, index, times, validated=validated, timezone=timezone))
     CollectionJob.objects.update(status="succeeded")
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=QUOTA)
     if replaced:
@@ -103,8 +115,9 @@ def current_plants(system: System) -> list[SiteBinding]:
 
 
 def assert_current_plants_keep_their_forecasts(system: System, moment: datetime) -> None:
-    need = sum(budget.forecast_need(binding, moment, QUOTA) for binding in current_plants(system))
-    assert used(system, moment) + need <= QUOTA, moment
+    quota = account(system).daily_quota
+    need = sum(budget.forecast_need(binding, moment, quota) for binding in current_plants(system))
+    assert used(system, moment) + need <= quota, moment
 
 
 def dispatch_round(moment: datetime) -> None:
