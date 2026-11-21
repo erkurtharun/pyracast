@@ -1,4 +1,7 @@
+import ast
+import json
 import re
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -160,7 +163,7 @@ def test_every_image_is_scanned_before_any_cloud_credential_exists() -> None:
     current = step(scan, "Skip a release that main has moved past")
 
     assert "environment" not in scan
-    assert scan["permissions"] == {"contents": "read", "actions": "read"}
+    assert scan["permissions"] == {"contents": "read", "actions": "read", "deployments": "read"}
     assert (
         step_index(scan, "deploy/ci_images.py verify")
         < step_index(scan, "deploy/oci-images.sh load")
@@ -239,6 +242,27 @@ def test_a_later_scan_ends_without_failing_when_a_finished_release_removed_its_i
     )
     assert refuse["run"].splitlines()[-1] == "exit 1"
     assert steps.index(refuse) == len(steps) - 1
+
+
+def test_a_failed_download_after_an_unreadable_deployment_lookup_says_so_and_fails() -> None:
+    jobs = release_jobs()
+    refuse = step(jobs["scan"], "Refuse images that vanished without a release of this commit")
+    deploy = jobs["deploy"]
+    download = deploy["steps"][first_download(deploy)]
+    explain = step(deploy, "Explain a failed download while the deployments are unknown")
+
+    assert refuse["env"] == {"DEPLOYMENTS": "${{ steps.current.outputs.deployments }}"}
+    assert refuse["run"].splitlines()[0] == 'if [[ "$DEPLOYMENTS" == unknown ]]; then'
+    assert "could not be read" in refuse["run"]
+    assert "no release of this commit has succeeded" in refuse["run"]
+    assert download["id"] == "download"
+    assert "continue-on-error" not in download
+    assert explain["if"] == (
+        "failure() && steps.download.outcome == 'failure' && "
+        "steps.before.outputs.deployments == 'unknown'"
+    )
+    assert "could not be read" in explain["run"]
+    assert deploy["steps"].index(explain) == deploy["steps"].index(download) + 1
 
 
 def test_ci_scans_all_five_images_before_merge() -> None:
@@ -490,10 +514,11 @@ def test_scan_checks_out_the_authorized_commit() -> None:
 
 def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() -> None:
     deploy = release_jobs()["deploy"]
-    checkout, move = deploy["steps"][:2]
+    attempt, checkout, move = deploy["steps"][:3]
 
-    assert step_index(deploy, "actions/checkout") == 0
-    assert step_index(deploy, "git checkout") == 1
+    assert attempt["name"] == ATTEMPT_CHECK
+    assert step_index(deploy, "actions/checkout") == 1
+    assert step_index(deploy, "git checkout") == 2
     assert checkout["with"] == {
         "repository": "erkurtharun/pyracast",
         "ref": "refs/heads/main",
@@ -507,7 +532,7 @@ def test_deploy_runs_the_authorized_commit_only_after_proving_it_is_on_main() ->
         'git checkout --detach "$RELEASE_SHA"',
     ]
     assert deploy["env"]["RELEASE_SHA"] == "${{ needs.authorize.outputs.sha }}"
-    assert "refs/heads/main" not in str(deploy["steps"][1:])
+    assert "refs/heads/main" not in str(deploy["steps"][2:])
 
 
 def test_only_the_first_windows_shard_repeats_the_static_stages() -> None:
@@ -666,6 +691,7 @@ def test_the_release_judges_a_ci_run_its_dispatch_names_through_the_same_gate() 
     assert "sonar_enabled: process.env.SONAR_ENABLED === 'true'," in script
     assert "if (!requested) throw error; runError = error.message;" in script
     assert "run_error: runError," in script
+    assert "release_attempt: Number(process.env.GITHUB_RUN_ATTEMPT)," in script
     assert authorize["permissions"] == {
         "contents": "read",
         "actions": "read",
@@ -674,6 +700,33 @@ def test_the_release_judges_a_ci_run_its_dispatch_names_through_the_same_gate() 
     }
     assert authorize["outputs"]["ci_started_at"] == "${{ steps.decision.outputs.ci_started_at }}"
     assert authorize["outputs"]["proven"] == "${{ steps.decision.outputs.proven }}"
+
+
+ATTEMPT_CHECK = "Refuse an early release authorized in an earlier attempt of this run"
+
+
+def test_an_early_release_scans_and_deploys_only_on_an_authorization_of_its_own_attempt() -> None:
+    jobs = release_jobs()
+
+    assert jobs["authorize"]["outputs"]["release_attempt"] == (
+        "${{ steps.decision.outputs.release_attempt }}"
+    )
+    for identifier in ("scan", "deploy"):
+        job = jobs[identifier]
+        check = job["steps"][0]
+        lines = check["run"].splitlines()
+
+        assert check["name"] == ATTEMPT_CHECK, identifier
+        assert check["if"] == "inputs.ci_run_id != ''", identifier
+        assert check["env"] == {
+            "AUTHORIZED_IN": "${{ needs.authorize.outputs.release_attempt }}"
+        }, identifier
+        assert "continue-on-error" not in check, identifier
+        assert lines[0] == 'if [[ "$AUTHORIZED_IN" != "$GITHUB_RUN_ATTEMPT" ]]; then', identifier
+        assert lines[-2:] == ["  exit 1", "fi"], identifier
+        assert "re-run all jobs" in check["run"], identifier
+        assert [candidate.get("name") for candidate in job["steps"]].count(ATTEMPT_CHECK) == 1
+        assert job["steps"].index(check) < first_download(job), identifier
 
 
 def test_an_early_start_is_classified_like_the_release_after_the_whole_run() -> None:
@@ -751,22 +804,94 @@ def test_an_automatic_release_transfers_nothing_for_a_commit_released_since_its_
     }
 
 
-NAMED_FILE = re.compile(
-    r"(?<![\w$}./-])(?:[\w.-]+/)*[\w.-]+\.(?:py|sh|mjs|ts|json|toml|lock|properties|tf|hcl|ya?ml)\b"
-)
+# Any word of a step, with or without an extension; a word with a wildcard is read as a glob.
+NAMED_WORD = re.compile(r"(?<![\w$}/-])[\w.*-]+(?:/[\w.*-]+)*")
+PYTHON_MODULE = re.compile(r"\bpython3? -m ([\w.]+)")
+NPM_SCRIPT = re.compile(r"\bnpm (?:run ([\w:-]+)|(test)\b)")
+RELATIVE_NAME = re.compile(r"""["'](\.\.?/[^"'\s]*)["']""")
+SCRIPT_SUFFIXES = (".mjs", ".cjs", ".js", ".mts", ".cts", ".ts", ".tsx")
+
+
+def tracked_files() -> frozenset[str]:
+    return frozenset(release_authorization._git(ROOT, "ls-files", "-z").split("\0")) - {""}
+
+
+def repository_name(path: Path) -> str | None:
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return None
+
+
+def module_file(module: str, bases: Sequence[Path], files: frozenset[str]) -> str | None:
+    parts = module.split(".")
+    for base in bases:
+        for candidate in (
+            base.joinpath(*parts[:-1], f"{parts[-1]}.py"),
+            base.joinpath(*parts, "__init__.py"),
+        ):
+            if (name := repository_name(candidate)) in files:
+                return name
+    return None
+
+
+def named_in(text: str, bases: Sequence[Path], files: frozenset[str]) -> set[str]:
+    named: set[str] = set()
+    for word in NAMED_WORD.findall(text):
+        for base in bases:
+            if "*" not in word:
+                candidates: Iterable[Path] = [base / word]
+            elif "/" in word and not word.startswith("*"):
+                candidates = base.glob(word)
+            else:
+                candidates = []
+            named.update(name for path in candidates if (name := repository_name(path)) in files)
+    for module in PYTHON_MODULE.findall(text):
+        if (name := module_file(module, bases, files)) is not None:
+            named.add(name)
+    return named
+
+
+def workflow_steps() -> Iterator[tuple[dict[str, Any], str | None]]:
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for job in workflow(path.name)["jobs"].values():
+            default = job.get("defaults", {}).get("run", {}).get("working-directory")
+            for candidate in job["steps"]:
+                yield candidate, candidate.get("working-directory", default)
+
+
+def npm_scripts_run_by_workflows() -> list[str]:
+    scripts: dict[str, str] = json.loads((ROOT / "web" / "package.json").read_text("utf-8"))[
+        "scripts"
+    ]
+    pending = [
+        run or test
+        for candidate, directory in workflow_steps()
+        if directory == "web"
+        for run, test in NPM_SCRIPT.findall(str(candidate.get("run", "")))
+    ]
+    reached: dict[str, str] = {}
+    while pending:
+        name = pending.pop()
+        if name not in reached:
+            reached[name] = scripts[name]
+            pending.extend(run or test for run, test in NPM_SCRIPT.findall(scripts[name]))
+    return [reached[name] for name in sorted(reached)]
+
+
+def files_named_by_workflow_steps(files: frozenset[str]) -> set[str]:
+    named: set[str] = set()
+    for candidate, directory in workflow_steps():
+        text = f"{candidate.get('run', '')}\n{candidate.get('with', {})}"
+        bases = (ROOT,) if directory is None else (ROOT, ROOT / directory)
+        named |= named_in(text, bases, files)
+    for script in npm_scripts_run_by_workflows():
+        named |= named_in(script, (ROOT / "web",), files)
+    return named
 
 
 def test_every_repository_file_a_workflow_step_names_is_a_pipeline_path() -> None:
-    named: set[str] = set()
-    for path in sorted(WORKFLOWS.glob("*.yml")):
-        for job in workflow(path.name)["jobs"].values():
-            for candidate in job["steps"]:
-                options = candidate.get("with", {})
-                text = f"{candidate.get('run', '')}\n{options}"
-                named.update(NAMED_FILE.findall(text))
-                if "file" in options:
-                    named.add(options["file"])
-    tracked = {name for name in named if (ROOT / name).is_file()}
+    named = files_named_by_workflow_steps(tracked_files())
 
     assert {
         "Dockerfile",
@@ -775,11 +900,161 @@ def test_every_repository_file_a_workflow_step_names_is_a_pipeline_path() -> Non
         "scripts/check.py",
         "scripts/ci_result.py",
         "scripts/check_scientific.py",
+        "scripts/start_postgres.py",
+        "scripts/start_rabbitmq.py",
         "deploy/release_authorization.py",
         "deploy/scan-images.sh",
-    } <= tracked
-    for name in sorted(tracked):
+        "deploy/systemd/pyracast-backup.timer",
+        "web/testing/run-coverage.mjs",
+        "web/testing/check-bundle-budget.mjs",
+    } <= named
+    for name in sorted(named):
         assert release_authorization.changes_pipeline(name), name
+
+
+def python_imports(source: str, directory: Path, files: frozenset[str]) -> set[str]:
+    modules: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            modules.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            modules.extend([node.module, *(f"{node.module}.{alias.name}" for alias in node.names)])
+    return {
+        name
+        for module in modules
+        if (name := module_file(module, (ROOT, directory), files)) is not None
+    }
+
+
+def test_every_local_module_a_workflow_python_entry_imports_is_a_pipeline_path() -> None:
+    files = tracked_files()
+    pending = [name for name in files_named_by_workflow_steps(files) if name.endswith(".py")]
+    reached: set[str] = set()
+    for candidate, _ in workflow_steps():
+        if candidate.get("shell") == "python":
+            pending.extend(python_imports(candidate["run"], ROOT, files))
+    while pending:
+        name = pending.pop()
+        if name not in reached:
+            reached.add(name)
+            path = ROOT / name
+            pending.extend(python_imports(path.read_text("utf-8"), path.parent, files))
+
+    assert {"scripts/pytest_shard.py", "scripts/start_postgres.py"} <= reached
+    for name in sorted(reached):
+        assert release_authorization.changes_pipeline(name), name
+
+
+def script_file(path: Path, files: frozenset[str]) -> str | None:
+    for candidate in (
+        path,
+        *(path.with_name(path.name + suffix) for suffix in (*SCRIPT_SUFFIXES, ".json")),
+        *(path / f"index{suffix}" for suffix in SCRIPT_SUFFIXES),
+    ):
+        if (name := repository_name(candidate)) in files:
+            return name
+    return None
+
+
+def test_every_local_file_a_web_tool_configuration_imports_is_a_pipeline_path() -> None:
+    files = tracked_files()
+    pending = [
+        name
+        for name in files
+        if name.startswith("web/")
+        and name.endswith(SCRIPT_SUFFIXES)
+        and release_authorization.changes_pipeline(name)
+    ]
+    reached: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name not in reached:
+            reached.add(name)
+            path = ROOT / name
+            for specifier in RELATIVE_NAME.findall(path.read_text("utf-8")):
+                if (found := script_file(path.parent / specifier, files)) is not None:
+                    pending.append(found)
+    typescript = (ROOT / "web" / "tsconfig.json").read_text("utf-8")
+
+    assert {
+        "web/eslint.config.mjs",
+        "web/eslint/design-tokens.mjs",
+        "web/playwright.config.ts",
+        "web/tests/support/server.ts",
+        "web/testing/coverage-reporter.ts",
+        "web/testing/coverage-floor.ts",
+    } <= reached
+    assert '"extends"' not in typescript
+    assert '"references"' not in typescript
+    for name in sorted(reached):
+        assert release_authorization.changes_pipeline(name), name
+
+
+def permitted(job: dict[str, Any], document: dict[str, Any], scope: str) -> str:
+    permissions = job.get("permissions", document.get("permissions", {}))
+    return str(permissions.get(scope, "none"))
+
+
+# The GITHUB_TOKEN scope each call needs (docs.github.com, "Permissions required for GitHub Apps").
+API_SCOPES = {
+    "actions.cancelWorkflowRun": ("actions", "write"),
+    "actions.createWorkflowDispatch": ("actions", "write"),
+    "actions.deleteArtifact": ("actions", "write"),
+    "actions.getWorkflow": ("actions", "read"),
+    "actions.getWorkflowRunAttempt": ("actions", "read"),
+    "actions.listJobsForWorkflowRunAttempt": ("actions", "read"),
+    "actions.listWorkflowRunArtifacts": ("actions", "read"),
+    "actions.listWorkflowRuns": ("actions", "read"),
+    "repos.getBranch": ("contents", "read"),
+    "repos.listDeploymentStatuses": ("deployments", "read"),
+    "repos.listDeployments": ("deployments", "read"),
+    "repos.listPullRequestsAssociatedWithCommit": ("pull-requests", "read"),
+}
+ACTION_SCOPES = {
+    "actions/checkout@": ("contents", "read"),
+    "google-github-actions/auth@": ("id-token", "write"),
+}
+LEVELS = {"none": 0, "read": 1, "write": 2}
+GITHUB_CALL = re.compile(r"github\.rest\.(\w+\.\w+)")
+
+
+def needed_scopes(candidate: dict[str, Any]) -> list[tuple[str, tuple[str, str]]]:
+    uses = str(candidate.get("uses", ""))
+    options = candidate.get("with", {})
+    needed = [(uses, scope) for prefix, scope in ACTION_SCOPES.items() if uses.startswith(prefix)]
+    if uses.startswith("actions/download-artifact@") and "github-token" in options:
+        needed.append((uses, ("actions", "read")))
+    if uses.startswith("actions/github-script@"):
+        needed.extend(
+            (call, API_SCOPES[call]) for call in GITHUB_CALL.findall(str(options["script"]))
+        )
+    return needed
+
+
+def test_every_github_call_of_a_workflow_step_is_within_the_permissions_of_its_job() -> None:
+    calls = 0
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        document = workflow(path.name)
+        for identifier, job in document["jobs"].items():
+            for candidate in job["steps"]:
+                for call, (scope, level) in needed_scopes(candidate):
+                    calls += 1
+                    granted = permitted(job, document, scope)
+                    assert LEVELS[granted] >= LEVELS[level], (path.name, identifier, call)
+
+    assert calls > len(API_SCOPES)
+
+
+def test_every_release_job_that_lists_deployments_may_read_them() -> None:
+    listing = [
+        identifier
+        for identifier, job in release_jobs().items()
+        if "listDeployments" in str(job["steps"])
+    ]
+
+    assert listing == ["authorize", "scan", "deploy"]
+    for identifier in listing:
+        assert release_jobs()[identifier]["permissions"]["deployments"] == "read", identifier
 
 
 def test_no_workflow_runs_for_pull_request_targets_and_every_action_is_pinned_by_commit() -> None:

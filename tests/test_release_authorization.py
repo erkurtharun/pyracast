@@ -73,6 +73,7 @@ def facts(run_changes: dict[str, Any] | None = None, **changes: Any) -> dict[str
         ],
         "deployments": [],
         "sonar_enabled": True,
+        "release_attempt": 1,
     }
     value.update(changes)
     return value
@@ -652,6 +653,8 @@ PIPELINE = [
     "web/playwright.integration.config.ts",
     "web/testing/run-coverage.mjs",
     "web/testing/coverage-floor.ts",
+    "web/eslint/design-tokens.mjs",
+    "web/tests/support/server.ts",
 ]
 
 
@@ -815,6 +818,43 @@ def test_an_early_start_without_the_facts_of_its_run_waits_for_the_whole_run(
     )
 
 
+@pytest.mark.parametrize(
+    ("run", "attempt", "failure"),
+    [
+        ({"status": "completed", "conclusion": "success"}, 1, {"run_error": "Server Error"}),
+        ({"status": "completed", "conclusion": "failure"}, 1, {"run_error": "Server Error"}),
+        (None, 2, {"run_error": "Request timed out"}),
+        ({}, 2, {"run_error": "Server Error"}),
+        ({}, 2, {"proof": {"error": "Request timed out"}}),
+        (None, None, {"run_error": "Request timed out"}),
+        ({}, "1", {"proof": {"error": "Request timed out"}}),
+    ],
+)
+def test_a_failed_lookup_with_no_later_release_to_come_fails_the_release_visibly(
+    tmp_path: Path, run: dict[str, Any] | None, attempt: object, failure: dict[str, Any]
+) -> None:
+    value = early(release_attempt=attempt, **failure)
+    if run is None:
+        value["run"] = None
+    else:
+        value["run"].update(run)
+
+    with pytest.raises(RefusedError, match="re-run all jobs of this release"):
+        decide(value)
+    status, outputs, summary = run_main(tmp_path, value)
+
+    assert (status, outputs) == (1, {"authorized": "false"})
+    assert summary.startswith("Refused: A lookup of CI run 7001 failed")
+
+
+def test_a_later_attempt_of_an_early_release_is_still_judged_on_its_facts() -> None:
+    assert decide(early(release_attempt=2)) == proven()
+    deferred(early(release_attempt=2, evidence=[]), "no single tested tree")
+    assert decide(ended(proof={"error": "Request timed out"}, release_attempt=2)) == (
+        authorized(ci_run_attempt=1)
+    )
+
+
 def ended(conclusion: str = "success", **changes: Any) -> dict[str, Any]:
     value = early(run={"status": "completed", "conclusion": conclusion}, **changes)
     value["jobs"] = [
@@ -910,8 +950,16 @@ def test_main_writes_the_authorized_release_for_the_next_jobs(tmp_path: Path) ->
         "artifact_id": "91",
         "ci_started_at": STARTED,
         "proven": "false",
+        "release_attempt": "1",
     }
     assert summary == f"Authorized main commit {MAIN} using CI run 7001.\n"
+
+
+@pytest.mark.parametrize("attempt", [None, "1", True, 0])
+def test_main_hands_out_no_release_attempt_it_cannot_read(tmp_path: Path, attempt: object) -> None:
+    status, outputs, _ = run_main(tmp_path, facts(release_attempt=attempt))
+
+    assert (status, outputs["authorized"], outputs["release_attempt"]) == (0, "true", "")
 
 
 def test_main_ends_a_superseded_run_as_a_skip(tmp_path: Path) -> None:
@@ -1145,21 +1193,42 @@ def test_the_serialized_deploy_skips_a_commit_another_release_deployed_since_its
 
 
 @pytest.mark.parametrize(
-    ("records", "since"),
+    "records",
     [
-        ([], STARTED),
-        ([deployment(state="in_progress")], STARTED),
-        ([deployment(state="failure")], STARTED),
-        ([deployment(created_at=BEFORE_RUN)], STARTED),
-        ([deployment(sha=OLDER)], STARTED),
-        ([deployment()], ""),
-        ({"unexpected": "shape"}, STARTED),
+        [],
+        [deployment(state="in_progress")],
+        [deployment(state="failure")],
+        [deployment(created_at=BEFORE_RUN)],
+        [deployment(sha=OLDER)],
     ],
 )
 def test_the_serialized_deploy_goes_on_without_a_successful_release_since_the_ci_run(
+    tmp_path: Path, records: object
+) -> None:
+    assert current_after(tmp_path, records) == (
+        0,
+        {"current": "true", "deployments": "read"},
+        "",
+    )
+
+
+@pytest.mark.parametrize(
+    ("records", "since"),
+    [
+        ([deployment()], ""),
+        ({"unexpected": "shape"}, STARTED),
+        ([{"sha": MAIN}], STARTED),
+        ([deployment(statuses=[{"state": "success"}])], STARTED),
+    ],
+)
+def test_the_serialized_deploy_goes_on_and_says_the_deployments_are_unknown_when_unreadable(
     tmp_path: Path, records: object, since: str
 ) -> None:
-    assert current_after(tmp_path, records, since) == (0, {"current": "true"}, "")
+    assert current_after(tmp_path, records, since) == (
+        0,
+        {"current": "true", "deployments": "unknown"},
+        "",
+    )
 
 
 def test_the_serialized_deploy_goes_on_when_the_deployment_lookup_wrote_nothing(
@@ -1173,7 +1242,7 @@ def test_the_serialized_deploy_goes_on_when_the_deployment_lookup_wrote_nothing(
         status = run_command(
             tmp_path, "current", MAIN, MAIN, "--deployments", str(path), "--since", STARTED
         )
-        assert status[:2] == (0, {"current": "true"})
+        assert status[:2] == (0, {"current": "true", "deployments": "unknown"})
         (tmp_path / "output").unlink()
 
 
