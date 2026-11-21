@@ -28,6 +28,14 @@ logger = logging.getLogger(__name__)
 # A stale forecast job at the latest slot is opened again unless it was refused for a reason that
 # holds for its slot: the binding's day bound, or a schedule disabled after the claim.
 SLOT_FINAL_ERRORS = (CollectionJobError.QUOTA_EXHAUSTED, CollectionJobError.SCHEDULE_DISABLED)
+# A stale nightly history job ended by these refusals was skipped as planned: the provider day or
+# the binding's day bound outlived its window (claim.retry), so nothing can change before it ends.
+NIGHT_FINAL_ERRORS = (
+    CollectionJobError.QUOTA_EXHAUSTED,
+    CollectionJobError.HISTORY_BUDGET_RESERVED,
+    CollectionJobError.ACCOUNT_UNAVAILABLE,
+    CollectionJobError.PROVIDER_ALLOWANCE_EXHAUSTED,
+)
 
 
 class CollectionSchedulingError(RuntimeError):
@@ -66,15 +74,17 @@ class NightWindow:
         )
 
     def revivable(self) -> Q:
-        """A stale history job of the window that saved nothing; the scheduler revives it."""
+        """A stale history job of the window that saved nothing, was not skipped for the day and
+        can still be claimed before the window ends; the scheduler revives it."""
         return Q(
             endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
             target_date=self.target,
             scheduled_for__gte=self.start,
             retry_until=self.end,
+            available_at__lt=self.end,
             status=CollectionJobStatus.STALE,
             forecastsnapshot__isnull=True,
-        )
+        ) & ~Q(last_error__in=NIGHT_FINAL_ERRORS)
 
 
 def open_night_window(now: datetime, timezone_name: str) -> NightWindow | None:
