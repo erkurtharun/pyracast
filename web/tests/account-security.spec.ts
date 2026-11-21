@@ -545,3 +545,66 @@ test("using another address after the change ended starts the change again", asy
     ).toHaveCount(0);
     expect(removed).toEqual([{ email: "pending@example.test" }]);
 });
+
+test("a refused removal keeps its failure when the session ends before the addresses are read again", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let refused = false;
+    let rereads = 0;
+    await page.route("**/api/auth/browser/v1/account/email", (route) => {
+        const method = route.request().method();
+        if (method === "GET") {
+            if (refused) {
+                rereads += 1;
+                return route.fulfill({
+                    status: 401,
+                    json: {
+                        status: 401,
+                        meta: { is_authenticated: false },
+                        data: { flows: [{ id: "login" }] },
+                    },
+                });
+            }
+            return route.fulfill({
+                json: {
+                    status: 200,
+                    data: [
+                        { email: user.email, primary: true, verified: true },
+                        {
+                            email: "pending@example.test",
+                            primary: false,
+                            verified: false,
+                        },
+                    ],
+                },
+            });
+        }
+        if (method !== "DELETE") return route.fallback();
+        refused = true;
+        return route.fulfill({
+            status: 400,
+            json: allauthErrorBody(400, "invalid_request", [
+                {
+                    message: "The address is not assigned to this account.",
+                    code: "unknown_email",
+                    param: "email",
+                },
+            ]),
+        });
+    });
+    await page.goto("/app/account/");
+    const change = emailChange(page);
+    await change.getByText("Change email", { exact: true }).click();
+    await expect(change.getByText(/pending@example\.test/)).toBeVisible();
+    await change.getByRole("button", { name: "Use another address" }).click();
+    await expect(
+        change.getByText("The address is not assigned to this account."),
+    ).toBeVisible();
+    expect(rereads).toBe(1);
+    await expect(change.getByText(/pending@example\.test/)).toBeVisible();
+    await expect(
+        change.getByText("The code is no longer valid. Request a new one."),
+    ).toHaveCount(0);
+    await expect(change.getByText(/Something went wrong/)).toHaveCount(0);
+});
