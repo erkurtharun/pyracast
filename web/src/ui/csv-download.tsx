@@ -6,15 +6,19 @@ import { csvDocument, type CsvExport } from "@/lib/csv";
 export function CsvDownload({
     build,
     label,
+    pending = false,
 }: {
     build: () => CsvExport;
     label?: string;
+    pending?: boolean;
 }) {
     const t = useTranslations("CsvDownload");
+    const common = useTranslations("Common");
     return (
         <button
             type="button"
             className="button secondary"
+            disabled={pending}
             onClick={() => {
                 const file = build();
                 const url = URL.createObjectURL(
@@ -31,7 +35,7 @@ export function CsvDownload({
                 setTimeout(() => URL.revokeObjectURL(url), 1000);
             }}
         >
-            {label ?? t("download_csv")}
+            {pending ? common("working") : (label ?? t("download_csv"))}
         </button>
     );
 }

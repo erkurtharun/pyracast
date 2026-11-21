@@ -69,6 +69,8 @@ export function ProductionHistory({
     const [showFullDay, setShowFullDay] = useState(false);
     const [editor, setEditor] = useState<Editor>({ status: "closed" });
     const [message, setMessage] = useState("");
+    // Saves whose reload of these rows is still running; no export is built from rows being reloaded.
+    const [reloads, setReloads] = useState(0);
     const editButtons = useRef(new Map<string, HTMLButtonElement>());
     const pendingFocus = useRef<string | null>(null);
     const summaryRef = useRef<HTMLDivElement>(null);
@@ -122,6 +124,14 @@ export function ProductionHistory({
         editor.status === "reloading" ||
         (editor.status === "orphaned" && editor.pendingWrite === true);
 
+    async function reloadAfterSave() {
+        setReloads((count) => count + 1);
+        try {
+            await onSaved();
+        } finally {
+            setReloads((count) => count - 1);
+        }
+    }
     function selectDate(value: string) {
         if (!value || value > yesterday || saving) return;
         onDay(value);
@@ -269,7 +279,7 @@ export function ProductionHistory({
                         : t("saved")
                     : proposals("submitted"),
             );
-            await onSaved();
+            await reloadAfterSave();
         } catch (error) {
             setEditor((current) =>
                 current.status === "orphaned" && current.key === attempt.key
@@ -457,6 +467,7 @@ export function ProductionHistory({
                     )}
                     <CsvDownload
                         label={t("download_csv")}
+                        pending={saving || reloads > 0}
                         build={() =>
                             productionExport(
                                 { ...plant, timezone: history.timezone },
@@ -477,7 +488,7 @@ export function ProductionHistory({
                         scope={scope}
                         configuration={configuration}
                         timezone={timezone}
-                        onSaved={() => void onSaved()}
+                        onSaved={() => void reloadAfterSave()}
                     />
                 </details>
             )}

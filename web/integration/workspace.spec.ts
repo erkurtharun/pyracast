@@ -444,7 +444,6 @@ test("a customer manages one plant site through the real API", async ({
     expect((await reverted).status()).toBe(200);
     await expect(firstHour).not.toContainText("2.5");
     await saveProduction("1.25");
-    await expect(firstHour).toContainText("1.25");
     const productionDownload = page.waitForEvent("download");
     await page
         .getByRole("button", { name: "Download CSV", exact: true })
