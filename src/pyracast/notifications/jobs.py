@@ -37,6 +37,7 @@ from pyracast.notifications.scheduler import MAX_LATENESS, slot_recipients
 from pyracast.regions.models import Region, active_region
 
 LEASE_DURATION = ACTORS["send_forecast_reminder"].lease
+WAITING = (NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY)
 logger = logging.getLogger(__name__)
 
 
@@ -252,10 +253,7 @@ def pending_notification_ids(now: datetime, limit: int = 100) -> list[int]:
         NotificationDelivery.objects.filter(
             active_region("schedule__region__"), available_at__lte=now
         )
-        .filter(
-            Q(status__in=(NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY))
-            | claimable(NotificationDeliveryStatus.SENDING, now)
-        )
+        .filter(Q(status__in=WAITING) | claimable(NotificationDeliveryStatus.SENDING, now))
         .order_by("available_at", "pk")
         .values_list("pk", flat=True)[:limit]
     )

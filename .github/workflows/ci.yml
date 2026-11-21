@@ -542,3 +542,58 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: python3 scripts/ci_result.py
+
+  # Outside CI result, and no repository code runs here: the release compares this record of the
+  # tested base and tree with the squash merge on main. Without it the merge takes the full path.
+  pr_tested:
+    name: Record the tested tree
+    needs: [deployment, verify_ubuntu, verify_windows_shards, verify_windows, web_ubuntu, web_windows, scientific, audit, sonar, ci_result]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.ci_result.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the tree this pull request run tested
+        id: tested
+        env:
+          PULL_REQUEST_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mapfile -t parents < <(git cat-file commit HEAD | sed -n '/^$/q; s/^parent //p')
+          if [[ ${#parents[@]} -eq 2 && "${parents[1]}" == "$PULL_REQUEST_HEAD" ]]; then
+            git rev-parse 'HEAD^{tree}' > "$RUNNER_TEMP/pr-tested.txt"
+            echo "base=${parents[0]}" >> "$GITHUB_OUTPUT"
+            echo "tree=$(cat "$RUNNER_TEMP/pr-tested.txt")" >> "$GITHUB_OUTPUT"
+          else
+            echo '::warning::HEAD is not the merge of this pull request; no tested tree is recorded.'
+          fi
+      - name: Record the tested tree for an early release of its squash merge
+        if: steps.tested.outputs.tree != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pr-tested-${{ github.event.pull_request.number }}-${{ steps.tested.outputs.base }}-${{ steps.tested.outputs.tree }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pr-tested.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  # Outside CI result: a failed start leaves the release to the end of this run.
+  release_start:
+    name: Start the release of a proven merge
+    needs: deployment
+    if: vars.GCP_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      actions: write
+    steps:
+      - name: Ask Release to judge these images before the repeated jobs end
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo, workflow_id: 'release.yml', ref: 'main',
+              inputs: { ci_run_id: String(context.runId), ci_run_attempt: process.env.GITHUB_RUN_ATTEMPT },
+            });

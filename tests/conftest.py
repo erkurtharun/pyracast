@@ -90,6 +90,7 @@ SUBPROCESS = frozenset(
         "test_package",
         "test_postgres_workspace",
         "test_pytest_shard",
+        "test_release_authorization",
         "test_release_images",
         "test_release_scope",
         "test_shutdown_process",

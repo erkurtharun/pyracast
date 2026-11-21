@@ -2,9 +2,14 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
+from functools import reduce
+from operator import or_
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
+from django.db.models import Case, DateTimeField, F, Q, Value, When
+from django.db.models.functions import ExtractHour, ExtractMinute, Greatest, TruncDate
+from django.db.models.lookups import Exact
 
 from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS
@@ -13,6 +18,7 @@ from pyracast.background.retry_policy import PROVIDER_JOB
 from pyracast.collection_window import INTRADAY_HISTORY_WINDOW, NIGHT_RETRY_DELAY
 from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.jobs.ready import cleared_cooldown
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
@@ -20,7 +26,7 @@ from pyracast.forecasts.models import (
     CollectionJobStatus,
     CollectionSchedule,
 )
-from pyracast.forecasts.timing import forecast_timing, latest_forecast_slot
+from pyracast.forecasts.timing import ForecastTiming, forecast_timing, latest_forecast_slot
 from pyracast.provider_retry import next_provider_day, next_retry_at
 from pyracast.regions.models import Region
 
@@ -117,6 +123,61 @@ def _stale_reason(
     return None
 
 
+def ended_at_claim(
+    binding: SiteBinding,
+    region_timezone: str,
+    schedule: CollectionSchedule | None,
+    timing: ForecastTiming,
+    now: datetime,
+) -> Q:
+    """Jobs claim ends without collecting while their binding is current and their schedule
+    enabled: _stale_reason's superseded forecast and unconfigured slot, and used-up attempts."""
+    ended = Q(retry_until__isnull=True, attempts__gte=PROVIDER_JOB.max_attempts)
+    latest_slot = latest_forecast_slot(now, binding.timezone, timing.times, timing.effective_from)
+    if latest_slot is not None:
+        ended |= Q(endpoint=CollectionEndpoint.FORECASTS, scheduled_for__lt=latest_slot)
+    if schedule is None:
+        return ended
+    slot_bound = Q(endpoint=CollectionEndpoint.FORECASTS) | Q(
+        endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
+        target_date=TruncDate("scheduled_for", tzinfo=ZoneInfo(binding.timezone)),
+    )
+    zone = ZoneInfo(region_timezone)
+    configured = [
+        Q(
+            Exact(ExtractHour("scheduled_for", tzinfo=zone), int(clock[:2])),
+            Exact(ExtractMinute("scheduled_for", tzinfo=zone), int(clock[3:])),
+        )
+        for clock in timing.times
+    ]
+    approval_acquisition = Q(
+        endpoint=CollectionEndpoint.FORECASTS,
+        scheduled_for__gte=schedule.effective_from,
+        pk=timing.first_job_id,
+    )
+    unconfigured = ~reduce(or_, configured) if configured else Q()
+    return ended | (slot_bound & unconfigured & ~approval_acquisition)
+
+
+def window_closed(job: CollectionJob, now: datetime) -> bool:
+    return job.retry_until is not None and now >= job.retry_until
+
+
+def claimable_from(now: datetime) -> Case:
+    """The moment from which claim takes a waiting job."""
+    return Case(
+        When(cleared_cooldown(), then=Value(now, output_field=DateTimeField())),
+        default=F("available_at"),
+    )
+
+
+def open_at_claim(now: datetime) -> Q:
+    """Waiting jobs whose window is still open when they can first be claimed (window_closed)."""
+    return Q(retry_until__isnull=True) | Q(
+        retry_until__gt=Greatest(claimable_from(now), Value(now, output_field=DateTimeField()))
+    )
+
+
 def claim(job_id: int, now: datetime) -> Lease | None:
     clock = Clock(now)
     with transaction.atomic():
@@ -131,20 +192,18 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         if job is None:
             return None
         now = clock.now()
-        cleared_cooldown = (
+        ready_early = (
             job.status == CollectionJobStatus.RETRY
             and job.last_error == CollectionJobError.PROVIDER_THROTTLED
-            and CollectionJob.objects.filter(
-                pk=job.pk, binding__provider_account__request_blocked_until__isnull=True
-            ).exists()
+            and CollectionJob.objects.filter(cleared_cooldown(), pk=job.pk).exists()
         )
         if job.status in {
             CollectionJobStatus.SUCCEEDED,
             CollectionJobStatus.STALE,
             CollectionJobStatus.FAILED,
-        } or (job.available_at > now and not cleared_cooldown):
+        } or (job.available_at > now and not ready_early):
             return None
-        if job.retry_until is not None and now >= job.retry_until:
+        if window_closed(job, now):
             _end_unclaimed(
                 job, CollectionJobStatus.FAILED, CollectionJobError.HISTORY_WINDOW_CLOSED
             )
@@ -176,7 +235,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             _end_unclaimed(job, CollectionJobStatus.STALE, reason)
             return None
         token = take(job, CollectionJobStatus.RUNNING, now, LEASE_DURATION)
-        if cleared_cooldown:
+        if ready_early:
             job.available_at = now
         if job.retry_until is not None:
             job.available_at = now + (LEASE_DURATION if _is_intraday(job) else NIGHT_RETRY_DELAY)

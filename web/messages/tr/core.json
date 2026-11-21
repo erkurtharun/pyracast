@@ -476,6 +476,20 @@
             "reset": "kalibrasyonsuz modele dönüşle kapatıldı",
             "configuration_revised": "santral yapılandırması değiştiği için kapatıldı",
             "workspace_disabled": "Pyracast desteği bu çalışma alanı için kapattı"
+        },
+        "CollectionState": {
+            "collecting": "Veri toplanıyor",
+            "waiting_for_approval": "Onay bekleniyor",
+            "paused": "Duraklatıldı",
+            "provider_attention": "Sağlayıcı bekleniyor"
+        },
+        "CollectionInactiveReason": {
+            "not_approved": "Santral onaylandığında veri toplama başlar.",
+            "not_validated": "Sağlayıcı bağlantısı doğrulandığında veri toplama başlar.",
+            "binding_not_current": "Sağlayıcı bağlantısı yeniden doğrulandığında veri toplama sürer.",
+            "schedule_disabled": "Bu santral için veri toplama kapalı.",
+            "quota_too_low": "Sağlayıcı kullanım hakkı tahminlere istek bırakmıyor; yalnızca günlük geçmiş veriler toplanıyor.",
+            "provider_unavailable": "Sağlayıcı şu anda istek kabul etmiyor; veri toplama kendiliğinden sürecek."
         }
     }
 }

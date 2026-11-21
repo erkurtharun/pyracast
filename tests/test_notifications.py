@@ -21,7 +21,6 @@ from pyracast.forecasts.models import (
     ForecastResult,
     RequestAttempt,
 )
-from pyracast.forecasts.monitoring import delivery_health
 from pyracast.local_time import local_slot
 from pyracast.mail.errors import NotSentError, PermanentlyNotSentError
 from pyracast.mail.send import send
@@ -38,7 +37,7 @@ from pyracast.notifications.models import (
 from pyracast.notifications.operations import configure_reminders, get_reminder_schedule
 from pyracast.notifications.recipients import effective_recipients
 from pyracast.notifications.scheduler import enqueue_due
-from pyracast.platform_admin.health_queries import notification_deliveries_for_issue
+from pyracast.orchestration.delivery_health import Window, check, delivery_health, listed
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System, make_system
 from tests.support.invariants import stored_again
@@ -824,8 +823,10 @@ def test_queued_delivery_records_recipient_problem_found_by_the_worker(
     assert not process_notification(key, SLOT + timedelta(seconds=2))
     delivery = NotificationDelivery.objects.get(pk=key)
     assert (delivery.status, delivery.last_error) == ("skipped", code)
-    assert delivery_health(SLOT, timedelta(minutes=5))["paused_notifications"] == 1
-    assert set(notification_deliveries_for_issue("paused_notifications", SLOT)) == {delivery}
+    assert delivery_health(SLOT, timedelta(minutes=5)).counts["paused_notifications"] == 1
+    assert set(listed(check("paused_notifications"), Window(SLOT, timedelta(minutes=5)))) == {
+        delivery
+    }
     assert not mail.outbox
 
 

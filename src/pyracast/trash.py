@@ -119,6 +119,7 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
         now = timezone.now()
         region.deleted_at = now
         region.save(update_fields=("deleted_at",))
+        # Without its earlier refusal, a job ended here is never taken for a planned skip.
         CollectionJob.objects.filter(
             binding__region=region,
             status__in=(
@@ -126,7 +127,9 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
                 CollectionJobStatus.RETRY,
                 CollectionJobStatus.RUNNING,
             ),
-        ).update(status=CollectionJobStatus.STALE, lease_token=None, lease_expires_at=None)
+        ).update(
+            status=CollectionJobStatus.STALE, last_error="", lease_token=None, lease_expires_at=None
+        )
         _cancel_calibrations([plant.pk for plant in plants], now)
         deliveries = NotificationDelivery.objects.filter(schedule__region=region)
         deliveries.filter(

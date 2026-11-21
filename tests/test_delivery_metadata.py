@@ -4,7 +4,6 @@ import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
-from pyracast.forecasts.monitoring import delivery_health
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import (
     NotificationDelivery,
@@ -12,12 +11,17 @@ from pyracast.notifications.models import (
     PreparedMessageKind,
     ReminderSchedule,
 )
-from pyracast.platform_admin.health_queries import notification_deliveries_for_issue
+from pyracast.orchestration.delivery_health import Window, check, delivery_health, listed
 from pyracast.platform_admin.read_models import recent_work_context
 from tests.support.domain import NOW
 from tests.support.notifications import SLOT, configured, ready, reminder_schedule_payload, saved
 
 pytestmark = pytest.mark.django_db(transaction=True)
+LAG = timedelta(minutes=5)
+
+
+def listed_for(issue: str) -> list[NotificationDelivery]:
+    return list(listed(check(issue), Window(NOW, LAG)))
 
 
 def trimmed_history() -> tuple[ReminderSchedule, NotificationDelivery, NotificationDelivery]:
@@ -48,17 +52,17 @@ def trimmed_history() -> tuple[ReminderSchedule, NotificationDelivery, Notificat
 def test_monitoring_and_history_read_the_typed_metadata_of_trimmed_deliveries() -> None:
     schedule, partial, unavailable = trimmed_history()
 
-    report = delivery_health(NOW, timedelta(minutes=5))
+    report = delivery_health(NOW, LAG)
     history = reminder_schedule_payload(schedule, NOW)["deliveries"]
     console = recent_work_context(now=NOW)["deliveries"]
 
     assert (
-        report["partial_forecasts"],
-        report["unavailable_forecasts"],
-        report["saved_forecast_notifications"],
+        report.counts["partial_forecasts"],
+        report.counts["unavailable_forecasts"],
+        report.counts["saved_forecast_notifications"],
     ) == (1, 1, 1)
-    assert list(notification_deliveries_for_issue("partial_forecasts", NOW)) == [partial]
-    assert list(notification_deliveries_for_issue("unavailable_forecasts", NOW)) == [unavailable]
+    assert listed_for("partial_forecasts") == [partial]
+    assert listed_for("unavailable_forecasts") == [unavailable]
     assert [
         (row["forecast_status"], row["forecast_complete"], row["source_age_seconds"])
         for row in history
@@ -76,8 +80,8 @@ def test_no_monitoring_or_history_query_reads_the_rendered_mail() -> None:
     schedule, _partial, _unavailable = trimmed_history()
 
     with CaptureQueriesContext(connection) as queries:
-        delivery_health(NOW, timedelta(minutes=5))
-        list(notification_deliveries_for_issue("partial_forecasts", NOW))
+        delivery_health(NOW, LAG)
+        listed_for("partial_forecasts")
         reminder_schedule_payload(schedule, NOW)
         recent_work_context(now=NOW)
 

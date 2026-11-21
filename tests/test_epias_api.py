@@ -112,5 +112,5 @@ def test_connection_status_reports_archived_settlement_dates() -> None:
     archive_source(connection, "realtime_generation", {8: "20"})
     archive_source(connection, "settlement_injection", {8: "19"})
     status = operations.get_epias_status(connection.plant_id, actor=connection.connected_by)
-    assert status["first_settlement_date"] == date(2020, 1, 1)
-    assert status["last_settlement_date"] == date(2020, 1, 1)
+    assert status.first_settlement_date == date(2020, 1, 1)
+    assert status.last_settlement_date == date(2020, 1, 1)

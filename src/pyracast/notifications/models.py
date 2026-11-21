@@ -3,6 +3,7 @@ import uuid
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.models import Language
 from pyracast.connections.models import SiteBinding
@@ -94,29 +95,44 @@ class ReminderRecipientTie(models.Model):
 
 
 class NotificationDeliveryError(models.TextChoices):
-    MISSED_SCHEDULE = "missed_schedule", "Missed schedule"
-    DELIVERY_DEADLINE_EXCEEDED = "delivery_deadline_exceeded", "Delivery deadline exceeded"
-    CANCELLED_BY_SETTINGS_CHANGE = "cancelled_by_settings_change", "Cancelled by settings change"
+    MISSED_SCHEDULE = "missed_schedule", gettext_lazy("Missed schedule")
+    DELIVERY_DEADLINE_EXCEEDED = (
+        "delivery_deadline_exceeded",
+        gettext_lazy("Delivery deadline exceeded"),
+    )
+    CANCELLED_BY_SETTINGS_CHANGE = (
+        "cancelled_by_settings_change",
+        gettext_lazy("Cancelled by settings change"),
+    )
     SCHEDULE_OR_AUTHORITY_CHANGED = (
         "schedule_or_authority_changed",
-        "Schedule or authority changed",
+        gettext_lazy("Schedule or authority changed"),
     )
-    NO_RECIPIENTS = "no_recipients", "No recipients"
-    INVALID_RECIPIENT = "invalid_recipient", "Invalid recipient"
-    RECIPIENT_LIMIT_EXCEEDED = "recipient_limit_exceeded", "Recipient limit exceeded"
-    DEFINITION_TRASHED = "definition_trashed", "Definition trashed"
-    INTERRUPTED_SEND = "interrupted_send", "Interrupted during sending"
-    INTERRUPTED_CONNECTION = "interrupted_connection", "Interrupted before sending"
+    NO_RECIPIENTS = "no_recipients", gettext_lazy("No recipients")
+    INVALID_RECIPIENT = "invalid_recipient", gettext_lazy("Invalid recipient")
+    RECIPIENT_LIMIT_EXCEEDED = "recipient_limit_exceeded", gettext_lazy("Recipient limit exceeded")
+    DEFINITION_TRASHED = "definition_trashed", gettext_lazy("Definition trashed")
+    INTERRUPTED_SEND = "interrupted_send", gettext_lazy("Interrupted during sending")
+    INTERRUPTED_CONNECTION = "interrupted_connection", gettext_lazy("Interrupted before sending")
     # Every MailFailure code is a member: send failures store error.code here.
-    MAIL_NOT_SENT = "mail_not_sent", "Mail not sent"
-    MAIL_CONFIGURATION_INVALID = "mail_configuration_invalid", "Mail configuration invalid"
-    MAIL_CREDENTIALS_REJECTED = "mail_credentials_rejected", "Mail credentials rejected"
-    MAIL_AUTHORIZATION_REVOKED = "mail_authorization_revoked", "Mail authorization revoked"
-    MAIL_RATE_LIMITED = "mail_rate_limited", "Mail rate limited"
-    MAIL_REJECTED = "mail_rejected", "Mail rejected"
-    MAIL_SENDER_FORBIDDEN = "mail_sender_forbidden", "Mail sender forbidden"
-    MAIL_PREPARATION_FAILED = "mail_preparation_failed", "Mail preparation failed"
-    MAIL_OUTCOME_UNCERTAIN = "mail_outcome_uncertain", "Mail outcome uncertain"
+    MAIL_NOT_SENT = "mail_not_sent", gettext_lazy("Mail not sent")
+    MAIL_CONFIGURATION_INVALID = (
+        "mail_configuration_invalid",
+        gettext_lazy("Mail configuration invalid"),
+    )
+    MAIL_CREDENTIALS_REJECTED = (
+        "mail_credentials_rejected",
+        gettext_lazy("Mail credentials rejected"),
+    )
+    MAIL_AUTHORIZATION_REVOKED = (
+        "mail_authorization_revoked",
+        gettext_lazy("Mail authorization revoked"),
+    )
+    MAIL_RATE_LIMITED = "mail_rate_limited", gettext_lazy("Mail rate limited")
+    MAIL_REJECTED = "mail_rejected", gettext_lazy("Mail rejected")
+    MAIL_SENDER_FORBIDDEN = "mail_sender_forbidden", gettext_lazy("Mail sender forbidden")
+    MAIL_PREPARATION_FAILED = "mail_preparation_failed", gettext_lazy("Mail preparation failed")
+    MAIL_OUTCOME_UNCERTAIN = "mail_outcome_uncertain", gettext_lazy("Mail outcome uncertain")
 
 
 PAUSED_DELIVERY_ERRORS = (
@@ -139,14 +155,14 @@ class PreparedMessageKind(models.TextChoices):
 
 
 class NotificationDeliveryStatus(models.TextChoices):
-    PENDING = "pending", "Pending"
-    RETRY = "retry", "Retry"
-    SENDING = "sending", "Sending"
-    SENT = "sent", "Sent"
-    FAILED = "failed", "Failed"
-    UNCERTAIN = "uncertain", "Uncertain"
-    SKIPPED = "skipped", "Skipped"
-    CANCELLED = "cancelled", "Cancelled"
+    PENDING = "pending", gettext_lazy("Pending")
+    RETRY = "retry", gettext_lazy("Retry")
+    SENDING = "sending", gettext_lazy("Sending")
+    SENT = "sent", gettext_lazy("Sent")
+    FAILED = "failed", gettext_lazy("Failed")
+    UNCERTAIN = "uncertain", gettext_lazy("Uncertain")
+    SKIPPED = "skipped", gettext_lazy("Skipped")
+    CANCELLED = "cancelled", gettext_lazy("Cancelled")
 
 
 class NotificationDelivery(models.Model):

@@ -477,6 +477,11 @@ def test_no_release_input_names_an_allowlisted_path() -> None:
         if release_input and path != "deploy/release_scope.py":
             inputs[path] = (ROOT / path).read_text(encoding="utf-8", errors="replace")
     assert "deploy/install-release.sh" in inputs
+    # The early release compares changed paths with these names; it reads none of those files.
+    pipeline = re.compile(r"^PIPELINE_DIRECTORIES = .*?^\)\n", flags=re.DOTALL | re.MULTILINE)
+    gate = inputs["deploy/release_authorization.py"]
+    inputs["deploy/release_authorization.py"] = pipeline.sub("", gate, count=1)
+    assert inputs["deploy/release_authorization.py"] != gate
     for source, text in inputs.items():
         assert _named_entries(text) == [], source
 
