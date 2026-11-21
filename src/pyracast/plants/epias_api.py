@@ -7,12 +7,17 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from pyracast.metering import operations
-from pyracast.metering.models import EpiasConnection, EpiasJobError
+from pyracast.metering.models import EpiasConnection, EpiasHealth, EpiasJobError, EpiasState
 from pyracast.plants.api import ScopedView
 
 
 class EpiasConnectionOutput(serializers.Serializer[Any]):
+    state = serializers.ChoiceField(choices=EpiasState.choices)
     connected = serializers.BooleanField()
+    disconnected_at = serializers.DateTimeField(allow_null=True)
+    health = serializers.ChoiceField(choices=EpiasHealth.choices, allow_null=True)
+    complete_through = serializers.DateField(allow_null=True)
+    failed_days = serializers.IntegerField()
     provider_plant_id = serializers.IntegerField(allow_null=True)
     settlement_plant_id = serializers.IntegerField(allow_null=True)
     first_settlement_date = serializers.DateField(allow_null=True)

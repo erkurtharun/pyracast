@@ -4,10 +4,10 @@ import pytest
 from django.utils import timezone
 
 from pyracast.forecasts.models import DispatcherPhase
-from pyracast.forecasts.monitoring import record_dispatch_phase
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.scheduler import PREPARATION_GRACE
+from pyracast.orchestration.dispatcher import record_dispatch_phase
 from pyracast.platform_admin.read_models import (
     operations_context,
     plant_list_context,
@@ -62,7 +62,7 @@ def test_historical_health_reasons_are_visible_and_link_to_the_matching_records(
     summary = overview.context["health_summary"]
     assert summary.tone == "review"
     assert {check.key for check in summary.checks} == {"failed_metering", "partial_forecasts"}
-    assert overview.context["health"]["healthy"] is False
+    assert overview.context["health"].healthy is False
     text = overview.content.decode()
     assert "Recent outcomes need review" in text
     assert "Failed production collection" in text

@@ -20,6 +20,8 @@ export const vocabulary = {
     CollectionEndpoint: "CollectionEndpointEnum",
     CollectionJobStatus: "CollectionJobStatusEnum",
     CollectionJobError: "CollectionJobErrorEnum",
+    CollectionState: "CollectionStateEnum",
+    CollectionInactiveReason: "CollectionInactiveReasonEnum",
     NotificationDeliveryStatus: "NotificationDeliveryStatusEnum",
     NotificationDeliveryError: "NotificationDeliveryErrorEnum",
     PreparedMessageKind: "PreparedMessageKindEnum",

@@ -1,54 +1,68 @@
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Max, Min
+from django.db.models import Count, DateTimeField, F, Max, Min, Q, Value
+from django.db.models.functions import Greatest
 from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
+from pyracast.background.lease import claimable
 from pyracast.collection_window import (
     HISTORY_CLOCK,
     HISTORY_END_CLOCK,
     NIGHT_RETRY_DELAY,
     next_nightly_start,
 )
-from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import MAX_DAILY_QUOTA
+from pyracast.forecasts.jobs.claim import claimable_from, ended_at_claim, open_at_claim
+from pyracast.forecasts.jobs.ready import WAITING
 from pyracast.forecasts.models import (
     CollectionEndpoint,
+    CollectionInactiveReason,
     CollectionJob,
     CollectionJobError,
     CollectionJobStatus,
     CollectionSchedule,
+    CollectionState,
     ForecastSnapshot,
+    RequestAttempt,
+)
+from pyracast.forecasts.quota import deferral
+from pyracast.forecasts.scheduler import (
+    SLOT_FINAL_ERRORS,
+    Collecting,
+    collection_gate,
+    open_night_window,
 )
 from pyracast.forecasts.timing import (
     HISTORY_REQUESTS_PER_DAY,
     default_times,
     forecast_time_limit,
-    forecast_timing,
+    latest_forecast_slot,
     next_forecast_slot,
 )
 from pyracast.local_time import CLOCK_PATTERN
 from pyracast.regions.audit import record_audit
-from pyracast.regions.models import AuditAction, Region
+from pyracast.regions.models import AuditAction, Region, RegionStatus
 
 
 def get_schedule(tenant_id: int, region_id: int, now: datetime) -> CollectionSchedule:
     region = (
         Region.objects.active()
-        .select_related("approved_binding__provider_account")
+        .select_related("approved_binding__provider_account", "collectionschedule")
         .get(pk=region_id, tenant_id=tenant_id)
     )
-    return CollectionSchedule.objects.filter(region=region).first() or CollectionSchedule(
-        region=region,
-        enabled=True,
-        times=default_times(),
-        effective_from=now,
-    )
+    try:
+        return region.collectionschedule
+    except CollectionSchedule.DoesNotExist:
+        return CollectionSchedule(
+            region=region, enabled=True, times=default_times(), effective_from=now
+        )
 
 
 def configure_schedule(
@@ -91,7 +105,7 @@ def configure_schedule(
         )
         unclaimed = CollectionJob.objects.filter(
             binding__region=region,
-            status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY),
+            status__in=WAITING,
         )
         if enabled:
             zone = ZoneInfo(region.timezone)
@@ -122,35 +136,106 @@ def configure_schedule(
         return schedule
 
 
-def _next_collection_at(schedule: CollectionSchedule, now: datetime) -> datetime | None:
-    binding = schedule.region.approved_binding
-    if (
-        binding is None
-        or binding.validated_at is None
-        or not binding_is_current(binding, schedule.region)
-    ):
-        return None
-    timing = forecast_timing(binding, schedule)
-    if timing is None:
-        return None
-    queued = CollectionJob.objects.filter(
-        binding=binding, status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY)
-    ).aggregate(next=Min("available_at"))
-    zone = schedule.region.timezone
-    planned = next_forecast_slot(now, zone, timing.times, timing.effective_from)
-    moments = (queued["next"], planned, next_nightly_start(now, zone))
+@dataclass(frozen=True)
+class CollectionStatus:
+    state: CollectionState
+    inactive_reason: CollectionInactiveReason | None
+    next_collection_at: datetime | None
+
+
+def _next_collection_at(
+    collecting: Collecting, schedule: CollectionSchedule | None, timezone: str, now: datetime
+) -> datetime | None:
+    """The scheduler's next act: a missing nightly history job, one it revives, the latest slot's
+    job it opens again, a queued or interrupted job claim takes, a slot."""
+    night = open_night_window(now, timezone)
+    timing = collecting.timing
+    slot = latest_forecast_slot(now, timezone, timing.times, timing.effective_from)
+    moment = Value(now, output_field=DateTimeField())
+    jobs = CollectionJob.objects.filter(binding=collecting.binding).aggregate(
+        queued=Min(claimable_from(now), filter=Q(status__in=WAITING) & open_at_claim(now)),
+        # A running job whose lease ended: the ready query hands it to claim again from then.
+        interrupted=Min(
+            Greatest(F("available_at"), moment),
+            filter=claimable(CollectionJobStatus.RUNNING, now)
+            & open_at_claim(now)
+            & ~ended_at_claim(collecting.binding, timezone, schedule, timing, now),
+        ),
+        **(
+            {
+                "history": Count("pk", filter=night.history()),
+                # The scheduler revives it at Greatest(available_at, now).
+                "revived": Min(Greatest(F("available_at"), moment), filter=night.revivable()),
+            }
+            if night is not None
+            else {}
+        ),
+        **(
+            {
+                "reopened": Count(
+                    "pk",
+                    filter=Q(
+                        endpoint=CollectionEndpoint.FORECASTS,
+                        scheduled_for=slot,
+                        status=CollectionJobStatus.STALE,
+                    )
+                    & ~Q(last_error__in=SLOT_FINAL_ERRORS),
+                )
+            }
+            if slot is not None
+            else {}
+        ),
+    )
+    due_now = (night is not None and not jobs["history"]) or (
+        slot is not None and bool(jobs["reopened"])
+    )
+    moments = (
+        now if due_now else None,
+        jobs.get("revived"),
+        jobs["queued"],
+        jobs["interrupted"],
+        next_forecast_slot(now, timezone, timing.times, timing.effective_from),
+        next_nightly_start(now, timezone),
+    )
     return min((moment for moment in moments if moment is not None), default=None)
+
+
+def collection_status(schedule: CollectionSchedule, now: datetime) -> CollectionStatus:
+    region = schedule.region
+    saved = schedule if schedule.pk is not None else None
+    gate = collection_gate(region, saved)
+    if not isinstance(gate, Collecting):
+        pending = region.status == RegionStatus.PENDING
+        state = CollectionState.WAITING_FOR_APPROVAL if pending else CollectionState.PAUSED
+        return CollectionStatus(state, gate, None)
+    next_at = _next_collection_at(gate, saved, region.timezone, now)
+    if deferral(gate.binding.provider_account, now) is not None:
+        return CollectionStatus(
+            CollectionState.PROVIDER_ATTENTION,
+            CollectionInactiveReason.PROVIDER_UNAVAILABLE,
+            next_at,
+        )
+    reason = None if gate.timing.times else CollectionInactiveReason.QUOTA_TOO_LOW
+    return CollectionStatus(CollectionState.COLLECTING, reason, next_at)
 
 
 def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, object]:
     binding = schedule.region.approved_binding
     limit = binding.provider_account.daily_quota if binding else MAX_DAILY_QUOTA
     jobs = CollectionJob.objects.filter(binding=binding)
+    status = collection_status(schedule, now)
     return {
         "enabled": schedule.enabled,
         "times": schedule.times,
         "timezone": schedule.region.timezone,
         "effective_from": schedule.effective_from,
+        "state": status.state,
+        "inactive_reason": status.inactive_reason,
+        "requests_today": RequestAttempt.objects.filter(
+            binding=binding, utc_day=now.astimezone(UTC).date()
+        ).count()
+        if binding
+        else 0,
         "last_success_at": ForecastSnapshot.objects.filter(
             binding=binding,
             job__endpoint__in=(CollectionEndpoint.FORECASTS, CollectionEndpoint.ESTIMATED_ACTUALS),
@@ -159,7 +244,7 @@ def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, o
         ).aggregate(last=Max("collected_at"))["last"]
         if binding
         else None,
-        "next_collection_at": _next_collection_at(schedule, now),
+        "next_collection_at": status.next_collection_at,
         "recent_jobs": list(
             jobs.order_by("-scheduled_for", "-pk").values(
                 "id",

@@ -314,9 +314,9 @@
         <h3>{% translate "Data collection" %}</h3>
         {% if recent_collections %}<ul class="rows rows--tight">
           {% for job in recent_collections %}<li class="row row--block">
-            <p><span class="badge badge--{{ job.status|slugify }}">{% translate job.status_label %}</span> <time class="row-meta" datetime="{{ job.scheduled_for|date:'c' }}">{{ job.scheduled_for|date:"j M Y, H:i T" }}</time></p>
+            <p><span class="badge badge--{{ job.status|slugify }}">{{ job.status_label }}</span> <time class="row-meta" datetime="{{ job.scheduled_for|date:'c' }}">{{ job.scheduled_for|date:"j M Y, H:i T" }}</time></p>
             <p class="row-meta">{{ job.kind }} · {{ job.target_date|date:"j M Y" }}</p>
-            {% if job.error_label %}<p class="row-meta">{% translate job.error_label %}</p>{% endif %}
+            {% if job.error_label %}<p class="row-meta">{{ job.error_label }}</p>{% endif %}
           </li>{% endfor %}
         </ul>{% else %}<p class="empty">{% translate "No collection jobs yet." %}</p>{% endif %}
       </div>
@@ -324,9 +324,9 @@
         <h3>{% translate "Email delivery" %}</h3>
         {% if recent_deliveries %}<ul class="rows rows--tight">
           {% for delivery in recent_deliveries %}<li class="row row--block">
-            <p><span class="badge badge--{{ delivery.status|slugify }}">{% translate delivery.status_label %}</span> <time class="row-meta" datetime="{{ delivery.scheduled_for|date:'c' }}">{{ delivery.scheduled_for|date:"j M Y, H:i T" }}</time></p>
+            <p><span class="badge badge--{{ delivery.status|slugify }}">{{ delivery.status_label }}</span> <time class="row-meta" datetime="{{ delivery.scheduled_for|date:'c' }}">{{ delivery.scheduled_for|date:"j M Y, H:i T" }}</time></p>
             <p class="row-meta">{{ delivery.recipient }}</p>
-            {% if delivery.status == "uncertain" %}<p class="row-meta">{% translate "The mail server's acceptance is unknown. Confirm with the mail provider before a manual resend." %}</p>{% elif delivery.error_label %}<p class="row-meta">{% translate delivery.error_label %}</p>{% endif %}
+            {% if delivery.status == "uncertain" %}<p class="row-meta">{% translate "The mail server's acceptance is unknown. Confirm with the mail provider before a manual resend." %}</p>{% elif delivery.error_label %}<p class="row-meta">{{ delivery.error_label }}</p>{% endif %}
           </li>{% endfor %}
         </ul>{% else %}<p class="empty">{% translate "No email deliveries yet." %}</p>{% endif %}
       </div>
