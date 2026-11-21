@@ -1,5 +1,5 @@
 from collections import Counter
-from collections.abc import Collection, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
 from dataclasses import dataclass
 from functools import reduce
 from operator import or_
@@ -14,7 +14,7 @@ from django.contrib.auth.models import User
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
 from django.db import OperationalError, connection, models, transaction
-from django.db.models import Exists, F, OuterRef, Q
+from django.db.models import Exists, F, Func, OuterRef, Q
 from django.db.models.expressions import RawSQL
 from django.db.models.fields.json import KT
 from django.db.models.functions import Collate, Lower
@@ -47,9 +47,9 @@ from pyracast.regions.models import Region
 
 # Mail that names an address the account changed away from or removed, beside its current one.
 ADDRESS_HISTORY_MAIL = (OutboundMailKind.EMAIL_CHANGED, OutboundMailKind.EMAIL_DELETED)
-# PostgreSQL's built-in full Unicode case mapping. In every database locale it lower-cases a
-# letter as Python's `str.lower` does, for every letter of Unicode 16; the authentication cache
-# match below names it in its SQL.
+# PostgreSQL's built-in full Unicode case mapping. In every database locale it lower-cases and
+# case-folds a letter as Python's `str.lower` and `str.casefold` do, for every letter of
+# Unicode 16; the authentication cache match below names it in its SQL.
 CASE_MAPPING = "pg_unicode_fast"
 MAIL_NAMES = ("named_recipient", *(f"named_{key}" for key in MAIL_ADDRESS_KEYS))
 # Rows of unexpired sessions read per round trip while looking for pending flows.
@@ -139,6 +139,11 @@ def _folded(expression: Any) -> Lower:
     return Lower(Collate(expression, CASE_MAPPING))
 
 
+def _keyed(expression: Any) -> Func:
+    # `recipient_key` of a stored account address, which carries no surrounding space.
+    return Func(Collate(expression, CASE_MAPPING), function="casefold")
+
+
 def _normalized(values: Collection[object]) -> set[str]:
     # The same rule as `_folded`, on the Python side.
     return {value.strip().lower() for value in values if isinstance(value, str) and value.strip()}
@@ -152,10 +157,10 @@ def _holders(account_id: int) -> models.QuerySet[EmailAddress]:
     return EmailAddress.objects.filter(verified=True).exclude(user_id=account_id)
 
 
-def _unheld(account_id: int, folded: str) -> Q:
+def _unheld(account_id: int, folded: str, fold: Callable[[Any], Func] = _folded) -> Q:
     # Evaluated by the statement that locks or deletes the row: an address another account
     # verified while erasure waited for a lock counts as held there.
-    held = _holders(account_id).annotate(address=_folded("email")).filter(address=OuterRef(folded))
+    held = _holders(account_id).annotate(address=fold("email")).filter(address=OuterRef(folded))
     return Q(~Exists(held))
 
 
@@ -193,19 +198,22 @@ def _ties(account_id: int) -> models.QuerySet[ReminderRecipientTie]:
 
 def _entries(account_id: int, addresses: Collection[str]) -> models.QuerySet[ReminderRecipient]:
     """Reminder entries of the addresses no other account holds verified, and the entries tied
-    only to the account's memberships, whatever address they hold."""
+    only to the account's memberships, whatever address they hold. An entry keeps the address
+    as an administrator typed it, so it is matched and checked for a holder by its key."""
     ties = ReminderRecipientTie.objects.filter(recipient=OuterRef("pk"))
     ours = _memberships(account_id)
-    return ReminderRecipient.objects.alias(folded=_folded("address")).filter(
-        Q(key__in={recipient_key(address) for address in addresses}) & _unheld(account_id, "folded")
+    return ReminderRecipient.objects.filter(
+        Q(key__in={recipient_key(address) for address in addresses})
+        & _unheld(account_id, "key", _keyed)
         | Q(Exists(ties.filter(membership_id__in=ours)))
         & ~Exists(ties.exclude(membership_id__in=ours))
     )
 
 
 def _delivered(account_id: int, addresses: Collection[str]) -> models.QuerySet[DeliveryRecipient]:
-    return DeliveryRecipient.objects.alias(folded=_folded("address")).filter(
-        Q(key__in={recipient_key(address) for address in addresses}) & _unheld(account_id, "folded")
+    return DeliveryRecipient.objects.filter(
+        Q(key__in={recipient_key(address) for address in addresses})
+        & _unheld(account_id, "key", _keyed)
     )
 
 
