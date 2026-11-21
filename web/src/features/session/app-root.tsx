@@ -82,7 +82,7 @@ function Bootstrap({
         | { kind: "session"; message: string };
     retry: () => void;
 }) {
-    const t = useTranslations("Dashboard");
+    const t = useTranslations("Bootstrap");
     const language = useTranslations("Language");
     const page = useTranslations("AppError");
     const error =
@@ -106,7 +106,7 @@ function Bootstrap({
                     <div
                         className="loading-indicator"
                         role="progressbar"
-                        aria-label={t("loadingScreen")}
+                        aria-label={t("loading")}
                     />
                 )}
             </div>
