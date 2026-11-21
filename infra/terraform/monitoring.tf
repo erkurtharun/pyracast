@@ -81,7 +81,7 @@ resource "google_monitoring_alert_policy" "operations" {
     runtime     = { event = "pyracast_runtime_unhealthy", description = "A required container remains unhealthy after supervision; inspect workers and release-blocked before restarting." }
     host        = { event = "pyracast_host_capacity", description = "The VM has less than 15 percent disk space or 10 percent available memory; inspect capacity before jobs are interrupted." }
     certificate = { event = "pyracast_certificate_expiring", description = "The origin certificate has less than a quarter of its lifetime left, so its renewal is failing; inspect the gateway logs and port 80 reachability for the ACME challenge." }
-    secrets     = { event = "pyracast_secrets_failed", description = "The runtime secret helper could not prepare a release's environment files; its category names the cause (configuration, identity, permission, version, unavailable, format, write). Inspect journalctl -u pyracast.service or the release log." }
+    secrets     = { event = "pyracast_secrets_failed", description = "The runtime secret helper could not prepare a release's environment files; its category names the cause (configuration, identity, permission, version, unavailable, format, write, unexpected). Inspect journalctl -u pyracast.service or the release log." }
     origin_pull = { event = "pyracast_origin_pull_unenforced", description = "Origin pulls are required, but port 443 on the host no longer refuses a handshake without the edge's certificate. Inspect the gateway logs and its edge TLS option." }
   }
   display_name          = "${var.name} ${each.key} failure"

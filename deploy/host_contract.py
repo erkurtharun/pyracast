@@ -110,13 +110,17 @@ def parse(values: object) -> HostConfig:
         raise HostConfigError("Host configuration must be a JSON object of settings.")
     unknown = sorted(set(values) - KEYS)
     if unknown:
+        name = unknown[0] if unknown[0].isprintable() else repr(unknown[0])
         raise HostConfigError(
-            f"Host setting {unknown[0]} is unknown; remove it or add it to deploy/host_contract.py."
+            f"Host setting {name} is unknown; remove it or add it to deploy/host_contract.py."
         )
     parsed: dict[str, str] = {}
     for setting in SETTINGS:
-        value = values.get(setting.key, setting.default)
-        if value is None:
+        if setting.key in values:
+            value = values[setting.key]
+        elif setting.default is not None:
+            value = setting.default
+        else:
             raise HostConfigError(f"Host setting {setting.key} is missing; it is required.")
         result = setting.parse(value)
         if result is None:

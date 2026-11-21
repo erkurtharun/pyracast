@@ -4,13 +4,13 @@ export DEBIAN_FRONTEND=noninteractive
 trap 'echo "Pyracast boot configuration stopped at line $LINENO; every step after it is unchanged." >&2' ERR
 
 # Runs at every boot: each step changes the host only when what it would write differs.
+ID='' VERSION_ID=''
 . /etc/os-release
 if [[ $ID != ubuntu || $VERSION_ID != 24.04 || $(dpkg --print-architecture) != amd64 ]]; then
   echo 'This boot script supports Ubuntu 24.04 on amd64 only; nothing was changed.' >&2
   exit 1
 fi
 
-# Writes stdin to $1 with mode $2 only when its content differs; sets changed=1 when it wrote.
 write_if_changed() {
   local content staged
   content=$(cat)
@@ -67,6 +67,10 @@ install -d -m 0755 /var/lib/pyracast
 mountpoint --quiet /var/lib/pyracast || mount /var/lib/pyracast
 # Holds the release lock and marker: only root may create or replace entries in it.
 install -d -o root -g root -m 0755 /var/lib/pyracast
+release_lock=/var/lib/pyracast/release.lock
+# Only root may open the release lock: flock needs nothing but read access to it.
+(umask 077 && : >>"$release_lock")
+chmod 0600 "$release_lock"
 install -d -o 999 -g 999 -m 0750 /var/lib/pyracast/rabbitmq
 install -d -o 70 -g 70 -m 0700 /var/lib/pyracast/postgres
 install -d -o 10001 -g 10001 -m 0750 /var/lib/pyracast/gateway
@@ -74,7 +78,8 @@ install -d -m 0755 /opt/pyracast/releases
 
 guard=$(printf '%s' '${network_guard_base64}' | base64 --decode)
 write_if_changed /usr/local/sbin/pyracast-network-guard 0755 <<<"$guard"
-if (( changed )); then /usr/local/sbin/pyracast-network-guard; fi
+# The guard needs iptables: it runs after the packages, and the marker keeps it due after a stop.
+if (( changed )); then touch /etc/pyracast/network-guard-pending; fi
 
 docker_changed=0
 install -d -m 0755 /etc/docker
@@ -109,7 +114,7 @@ After=network-online.target docker.service
 RequiresMountsFor=/var/lib/pyracast
 ConditionPathExists=/opt/pyracast/current/deploy/compose.yaml
 ConditionPathExists=!/var/lib/pyracast/release-blocked
-StartLimitIntervalSec=900
+StartLimitIntervalSec=1800
 StartLimitBurst=5
 
 [Service]
@@ -151,18 +156,28 @@ pinned_packages_installed() {
   done
 }
 if ! pinned_packages_installed; then
+  # A Docker package upgrade restarts Docker and with it the application.
+  if ! flock --nonblock "$release_lock" true; then
+    echo 'The pinned packages changed while the release lock was held; run this script again.' >&2
+    exit 1
+  fi
   apt-get update
   apt-get install --yes --no-install-recommends ca-certificates curl gnupg iptables python3
   install -d -m 0755 /etc/apt/keyrings
   key=$(mktemp)
+  trap 'rm -f -- "$key"' EXIT
   curl --fail --silent --show-error --location https://download.docker.com/linux/ubuntu/gpg -o "$key"
-  fingerprint=$(gpg --show-keys --with-colons "$key" | awk -F: '$1 == "fpr" { print $10; exit }')
-  if [[ $fingerprint != 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 ]]; then
+  # APT trusts every key in the file, so it must hold exactly the published primary key.
+  primary=$(gpg --show-keys --with-colons "$key" | awk -F: '
+    $1 == "pub" || $1 == "sec" { keys++; after_primary=1; next }
+    $1 == "fpr" && after_primary { primary=$10 }
+    { after_primary=0 }
+    END { if (keys == 1) print primary }')
+  if [[ $primary != 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 ]]; then
     echo 'The Docker repository key does not have its published fingerprint; nothing was installed.' >&2
     exit 1
   fi
   install -m 0644 "$key" /etc/apt/keyrings/docker.asc
-  rm -f -- "$key"
   write_if_changed /etc/apt/sources.list.d/docker.sources 0644 <<'EOF'
 Types: deb
 URIs: https://download.docker.com/linux/ubuntu
@@ -175,6 +190,10 @@ EOF
   apt-get install --yes --no-install-recommends --allow-change-held-packages $docker_pins
   apt-mark hold docker-ce docker-ce-cli containerd.io docker-compose-plugin
 fi
+if [[ -e /etc/pyracast/network-guard-pending ]]; then
+  /usr/local/sbin/pyracast-network-guard
+  rm -f /etc/pyracast/network-guard-pending
+fi
 
 systemctl enable docker.service pyracast.service
 if test -f /opt/pyracast/current/deploy/install-units.sh; then
@@ -185,7 +204,7 @@ fi
 # marker keeps a deferred restart due when the next run finds the configuration unchanged.
 if (( docker_changed )); then touch /etc/docker/pyracast-restart-pending; fi
 if [[ -e /etc/docker/pyracast-restart-pending ]]; then
-  if flock --nonblock /var/lib/pyracast/release.lock true; then
+  if flock --nonblock "$release_lock" true; then
     systemctl restart docker.service
     rm -f /etc/docker/pyracast-restart-pending
   else

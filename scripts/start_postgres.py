@@ -19,7 +19,7 @@ from typing import Any
 from uuid import uuid4
 
 # The development cluster that running work shares keeps its minor until it is upgraded on
-# purpose; throwaway clusters (CI) run production's minor and, on Linux, its image.
+# purpose; throwaway clusters (CI) run production's minor and, on Linux, its base image.
 ARCHIVE_VERSION = "18.6"
 ARCHIVE_URL = "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260609"
 ARCHIVE_SHA256 = "e2246ba91d22345bc3d017586c09ede52d9df180b1eeb480f050445f1cad84e2"

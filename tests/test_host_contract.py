@@ -229,6 +229,22 @@ def test_an_edge_authority_that_is_not_only_x509_certificates_is_refused(value: 
             "authority.",
             id="authority-type",
         ),
+        pytest.param(
+            {**HOST, "origin_pull_ca": None},
+            "Host setting origin_pull_ca must hold only PEM X.509 certificates of the edge's "
+            "authority.",
+            id="authority-null",
+        ),
+        pytest.param(
+            {**HOST, "domain": None},
+            "Host setting domain must be a lowercase DNS hostname.",
+            id="null",
+        ),
+        pytest.param(
+            {**HOST, "region\nX": "europe-west1"},
+            "Host setting 'region\\nX' is unknown; remove it or add it to deploy/host_contract.py.",
+            id="unknown-control-character",
+        ),
     ],
 )
 def test_an_unknown_ill_typed_or_missing_setting_is_refused_in_one_line(

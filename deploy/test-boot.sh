@@ -13,7 +13,15 @@ host_json='{"domain":"example.com","acme_email":"ops@example.com"}'
 pins=(docker-ce=5:29.9.3-1~ubuntu.24.04~noble docker-ce-cli=5:29.9.3-1~ubuntu.24.04~noble
   containerd.io=2.4.2-2~ubuntu.24.04~noble docker-compose-plugin=5.7.1-1~ubuntu.24.04~noble)
 grep -Fq "docker_pins='${pins[*]}'" /templates/startup.sh.tftpl
-guard=$(printf '#!/bin/bash\necho network-guard >>/calls\n' | base64 -w0)
+guard_script=$'#!/bin/bash\n[[ -f /state/packages/iptables ]] || exit 1\necho network-guard >>/calls'
+guard=$(printf '%s\n' "$guard_script" | base64 -w0)
+pinned_key='pub:-:4096:1:8D81803C0EBFCD88:1487788586:::-:::scESA::::::23::0:
+fpr:::::::::9DC858229FC7DD38854AE2D88D81803C0EBFCD88:
+uid:-::::1487788586::0::Docker Release (CE deb) <docker@docker.com>::::::::::0:
+sub:-:4096:1:7EA0A9C3F273FCD8:1487792064::::::s::::::23:
+fpr:::::::::D3306A018370199E527AE7997EA0A9C3F273FCD8:'
+other_key='pub:-:4096:1:0123456789ABCDEF:1700000000:::-:::scESA::::::23::0:
+fpr:::::::::AAAAAAAAAAAAAAAAAAAAAAAA0123456789ABCDEF:'
 render() {
   sed -e "s|[\$]{host_config_base64}|$(printf '%s' "$1" | base64 -w0)|" \
     -e "s|[\$]{network_guard_base64}|$guard|" \
@@ -33,6 +41,7 @@ SH
 cat >/stub-bin/apt-get <<'SH'
 #!/bin/bash
 echo "apt-get $*" >>/calls
+[[ ! -e /state/apt-fails ]] || exit 100
 [[ $1 == install ]] || exit 0
 for pin in "$@"; do
   if [[ $pin == -* || $pin == install ]]; then continue; fi
@@ -55,7 +64,7 @@ done
 SH
 cat >/stub-bin/gpg <<'SH'
 #!/bin/bash
-echo 'fpr:::::::::9DC858229FC7DD38854AE2D88D81803C0EBFCD88:'
+cat /state/keyring
 SH
 cat >/stub-bin/blkid <<'SH'
 #!/bin/bash
@@ -106,6 +115,7 @@ new_host() {
   printf 'NAME="Ubuntu"\nID=ubuntu\nVERSION_ID=24.04\n' >/etc/os-release
   printf 'LABEL=cloudimg-rootfs / ext4 discard,errors=remount-ro 0 1\n' >/etc/fstab
   echo zero >/state/head
+  printf '%s\n' "$pinned_key" >/state/keyring
 }
 installed_host() {
   new_host
@@ -128,18 +138,21 @@ absent() {
 inodes() {
   stat -c '%n %i' /etc/pyracast/host.json /etc/docker/daemon.json \
     /etc/systemd/system/docker.service.d/pyracast-data.conf /etc/systemd/system/pyracast.service \
-    /usr/local/sbin/pyracast-network-guard /etc/fstab
+    /usr/local/sbin/pyracast-network-guard /etc/fstab /var/lib/pyracast/release.lock
+}
+no_downloaded_key() {
+  [[ -z $(find /tmp -maxdepth 1 -name 'tmp.*' -print -quit) ]]
 }
 template_file() {
   sed -n "\|^write_if_changed $1 0644 <<'EOF'\$|,/^EOF\$/p" /templates/startup.sh.tftpl \
     | sed -e 1d | head -n -1
 }
 
-# A new VM: the disk is formatted once, everything is written and Docker is installed.
 new_host
 render "$host_json"
 boot
 [[ $status == 0 ]]
+[[ $(stat -c %a /var/lib/pyracast/release.lock) == 600 ]]
 grep -Fxq "mkfs.ext4 -F $device" /calls
 grep -Fxq "$host_json" /etc/pyracast/host.json
 [[ $(stat -c %a /etc/pyracast/host.json) == 600 ]]
@@ -151,10 +164,13 @@ reloaded=$(grep -n '^systemctl daemon-reload$' /calls | cut -d: -f1)
 [[ $reloaded -lt $(grep -n '^apt-get install' /calls | head -n 1 | cut -d: -f1) ]]
 grep -Fxq 'systemctl restart docker.service' /calls
 absent 'start pyracast'
-grep -Fxq network-guard /calls
+[[ $(grep -c '^network-guard$' /calls) == 1 ]]
+guarded=$(grep -n '^network-guard$' /calls | cut -d: -f1)
+[[ $guarded -gt $(grep -n '^apt-get install' /calls | tail -n 1 | cut -d: -f1) ]]
+[[ ! -e /etc/pyracast/network-guard-pending ]]
+no_downloaded_key
 echo 'Boot regression passed: first boot'
 
-# The next boot finds everything in place and changes nothing.
 mkdir -p /opt/pyracast/current/deploy
 touch /opt/pyracast/current/deploy/compose.yaml
 before=$(inodes)
@@ -170,7 +186,6 @@ absent network-guard
 [[ $(tail -n 1 /calls) == 'systemctl start pyracast.service' ]]
 echo 'Boot regression passed: unchanged boot'
 
-# A changed host configuration is written, and nothing restarts.
 render '{"domain":"example.com","acme_email":"ops@example.com","origin_pull_ca":""}'
 boot
 [[ $status == 0 ]]
@@ -179,7 +194,6 @@ absent daemon-reload
 absent 'systemctl restart'
 echo 'Boot regression passed: changed host configuration'
 
-# A host the earlier script set up: its mount line gains nofail once, its unit is replaced.
 installed_host
 render "$host_json"
 mkdir -p /etc/pyracast /etc/docker /etc/systemd/system/docker.service.d /usr/local/sbin /var/lib/pyracast
@@ -188,12 +202,16 @@ daemon_json=$(template_file /etc/docker/daemon.json)
 data_conf=$(template_file /etc/systemd/system/docker.service.d/pyracast-data.conf)
 printf '%s\n' "$daemon_json" >/etc/docker/daemon.json
 printf '%s\n' "$data_conf" >/etc/systemd/system/docker.service.d/pyracast-data.conf
-printf '#!/bin/bash\necho network-guard >>/calls\n' >/usr/local/sbin/pyracast-network-guard
+printf '%s\n' "$guard_script" >/usr/local/sbin/pyracast-network-guard
 printf '[Unit]\nDescription=Pyracast application containers\n' >/etc/systemd/system/pyracast.service
 echo 'UUID=1111-2222 /var/lib/pyracast ext4 defaults,nodev,nosuid 0 2' >>/etc/fstab
+(umask 022 && : >/var/lib/pyracast/release.lock)
+chmod 0644 /var/lib/pyracast/release.lock
 host_inode=$(stat -c %i /etc/pyracast/host.json)
+lock_inode=$(stat -c %i /var/lib/pyracast/release.lock)
 boot
 [[ $status == 0 ]]
+[[ $(stat -c '%a %i' /var/lib/pyracast/release.lock) == "600 $lock_inode" ]]
 [[ $(grep -c ' /var/lib/pyracast ' /etc/fstab) == 1 ]]
 grep -Fxq 'UUID=1111-2222 /var/lib/pyracast ext4 defaults,nodev,nosuid,nofail 0 2' /etc/fstab
 grep -Fxq 'LABEL=cloudimg-rootfs / ext4 discard,errors=remount-ro 0 1' /etc/fstab
@@ -224,7 +242,46 @@ boot
 absent 'systemctl restart'
 echo 'Boot regression passed: Docker restart under the release lock'
 
-# A disk without a filesystem that is not empty is never formatted.
+echo '5:29.9.2-1~ubuntu.24.04~noble' >/state/packages/docker-ce
+flock 8
+boot
+[[ $status == 1 ]]
+grep -Fq 'The pinned packages changed while the release lock was held' /result
+absent apt-get
+absent 'systemctl restart'
+flock -u 8
+boot
+[[ $status == 0 ]]
+grep -q '^apt-get install --yes --no-install-recommends --allow-change-held-packages docker-ce=' /calls
+[[ $(cat /state/packages/docker-ce) == "${pins[0]#*=}" ]]
+echo 'Boot regression passed: a package change waits for the release lock'
+
+new_host
+touch /state/apt-fails
+boot
+[[ $status != 0 ]]
+absent network-guard
+[[ -e /etc/pyracast/network-guard-pending ]]
+rm /state/apt-fails
+boot
+[[ $status == 0 ]]
+[[ $(grep -c '^network-guard$' /calls) == 1 ]]
+[[ ! -e /etc/pyracast/network-guard-pending ]]
+echo 'Boot regression passed: a stopped boot applies the network guard on its retry'
+
+for keyring in "$other_key" "$pinned_key
+$other_key"; do
+  new_host
+  printf '%s\n' "$keyring" >/state/keyring
+  boot
+  [[ $status == 1 ]]
+  grep -Fq 'The Docker repository key does not have its published fingerprint' /result
+  [[ ! -e /etc/apt/keyrings/docker.asc ]]
+  absent 'docker-ce='
+  no_downloaded_key
+done
+echo 'Boot regression passed: a repository keyring without exactly the published key is refused'
+
 new_host
 echo data >/state/head
 boot
@@ -233,11 +290,13 @@ grep -Fq 'has no ext4 filesystem but is not empty' /result
 absent mkfs
 echo 'Boot regression passed: a used disk is refused'
 
-# Another release of the operating system is refused before anything is written.
-new_host
-printf 'NAME="Ubuntu"\nID=ubuntu\nVERSION_ID=22.04\n' >/etc/os-release
-boot
-[[ $status == 1 ]]
-[[ ! -e /etc/pyracast/host.json ]]
-[[ ! -s /calls ]]
+for release in 'ID=ubuntu\nVERSION_ID=22.04' 'ID=ubuntu'; do
+  new_host
+  printf 'NAME="Ubuntu"\n%b\n' "$release" >/etc/os-release
+  boot
+  [[ $status == 1 ]]
+  grep -Fxq 'This boot script supports Ubuntu 24.04 on amd64 only; nothing was changed.' /result
+  [[ ! -e /etc/pyracast/host.json ]]
+  [[ ! -s /calls ]]
+done
 echo 'Boot regression passed: an unsupported host is refused'

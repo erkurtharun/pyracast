@@ -222,8 +222,8 @@ authentication, API or administration responses.
 SSH is accessible only through IAP. Terraform enables OS Login and grants the
 named operators access to this VM. The startup script runs at every boot and changes
 only what differs from Terraform's version: it installs the pinned Docker packages only
-when they are missing, restarts Docker only when its own configuration changed and no
-release holds the lock, and never restarts the application. After a `terraform apply`
+when they differ and restarts Docker only when its own configuration changed, both only
+while no release holds the lock, and never restarts the application. After a `terraform apply`
 that changes it, run it with `sudo google_metadata_script_runner startup`. Wait for it
 to finish:
 
@@ -240,10 +240,12 @@ authenticated Google Cloud CLI and a browser. `deploy/host_secrets.py` keeps the
 the repository's ignored `secrets/` directory and never prints a value. `create`
 generates application encryption, broker and database keys and asks for the mail
 backend and sender; it refuses to overwrite existing files. `check` names, by file and
-key, every problem the release would refuse. `set KEY` stores one runtime setting typed
+key, problems of the file shape, required and known keys, role names, incomplete sign-in
+pairs and shared database passwords; the release still applies the settings' own checks
+(mail, ports, times). `set KEY` stores one runtime setting typed
 without echo (provider or EPIAS credentials). `rotate secret-key|runtime-password|owner-password`
 replaces a generated value; broker and database superuser passwords are not rotated this
-way. Weather is initially disabled.
+way. `drop-fallbacks` finishes a secret-key rotation. Weather is initially disabled.
 
 ```bash
 uv run --locked python deploy/host_secrets.py create
@@ -563,7 +565,8 @@ fixtures do not establish provider access or inbox delivery.
   Django encryption rotation keeps the old key in `PYRACAST_SECRET_KEY_FALLBACKS`;
   after that release, run `pyracast reencrypt_secrets --verify` in the `api`
   container and remove the old key only once `pyracast check_secrets
-  --require-primary` exits 0. Every release refuses, before maintenance, a key set
+  --require-primary` exits 0: `deploy/host_secrets.py drop-fallbacks`, then add and
+  release that runtime secret version as above. Every release refuses, before maintenance, a key set
   that cannot read a stored secret. `check_secrets` exits 1 when a secret is
   unreadable or malformed (it names the rows, never values) and 2 under
   `--require-primary` when one still needs a fallback key; `reencrypt_secrets` exits
@@ -580,7 +583,7 @@ fixtures do not establish provider access or inbox delivery.
   exact image digests do not update themselves. The daily `Image rescan` workflow
   rebuilds the release images from `main` and scans them; with
   `image_rescan_reader = true` applied and the repository variable `GCP_IMAGE_RESCAN`
-  set to `terraform output -raw image_rescan_setting`, it scans the deployed
+  set to `terraform -chdir=infra/terraform output -raw image_rescan_setting`, it scans the deployed
   `production` digests instead. A failed run needs an image update. Review Ubuntu security updates and
   pinned Docker/Compose/PostgreSQL versions during planned maintenance. PostgreSQL
   major upgrades need a separately rehearsed dump/restore or `pg_upgrade` procedure.

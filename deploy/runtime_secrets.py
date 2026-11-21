@@ -236,7 +236,7 @@ def prepare(arguments: argparse.Namespace, directory: Path) -> None:
     if arguments.migration is not None:
         files, secret = migration_secret(arguments.migration), "migration"
     else:
-        files, secret = host_secrets(arguments.host_config), "runtime"
+        files, secret = host_secrets(arguments.host_config), "host"
     try:
         write_files(directory, files)
     except OSError as error:

@@ -48,8 +48,11 @@ def write_new(path: Path, values: dict[str, str]) -> None:
 def replace(path: Path, values: dict[str, str]) -> None:
     staged = path.with_name(f".{path.name}.next")
     staged.unlink(missing_ok=True)
-    write_new(staged, values)
-    os.replace(staged, path)
+    try:
+        write_new(staged, values)
+        os.replace(staged, path)
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 def read(path: Path) -> dict[str, object]:
@@ -60,6 +63,13 @@ def read(path: Path) -> dict[str, object]:
     if not isinstance(values, dict):
         raise RefusedError(f"{path.name} is missing or not a JSON object.")
     return values
+
+
+def environment(directory: Path, name: str) -> dict[str, str]:
+    try:
+        return environment_values(read(directory / name))
+    except ValueError as error:
+        raise RefusedError(f"{name}: {error}") from None
 
 
 def mail_configuration() -> dict[str, str]:
@@ -134,7 +144,7 @@ def runtime_problems(payload: dict[str, object]) -> list[str]:
     problems += [
         f"{RUNTIME}: set {first} and {second} together or neither."
         for first, second in PAIRS
-        if bool(values.get(first)) != bool(values.get(second))
+        if bool(values.get(first, "").strip()) != bool(values.get(second, "").strip())
     ]
     return problems
 
@@ -181,18 +191,20 @@ def rotate(directory: Path, target: str) -> None:
             "a new value to the running service. Change it in a planned maintenance instead."
         )
     name = MIGRATION if target == "owner-password" else RUNTIME
-    values = {key: str(value) for key, value in read(directory / name).items()}
+    values = environment(directory, name)
     if target == "secret-key":
+        if not values.get("PYRACAST_SECRET_KEY", "").strip():
+            raise RefusedError(f"{RUNTIME}: PYRACAST_SECRET_KEY is missing.")
         previous = [
-            values.get("PYRACAST_SECRET_KEY", ""),
+            values["PYRACAST_SECRET_KEY"],
             values.get("PYRACAST_SECRET_KEY_FALLBACKS", ""),
         ]
         values["PYRACAST_SECRET_KEY_FALLBACKS"] = " ".join(" ".join(previous).split())
         values["PYRACAST_SECRET_KEY"] = secrets.token_urlsafe(64)
         advice = (
             "The previous key is the first of PYRACAST_SECRET_KEY_FALLBACKS. After the release, "
-            "run pyracast reencrypt_secrets --verify and remove the fallback once pyracast "
-            "check_secrets --require-primary exits 0."
+            "run pyracast reencrypt_secrets --verify; once pyracast check_secrets "
+            "--require-primary exits 0, run drop-fallbacks and release that version."
         )
     else:
         values["PGPASSWORD"] = secrets.token_urlsafe(32)
@@ -201,12 +213,23 @@ def rotate(directory: Path, target: str) -> None:
     print(f"Rotated {target} in {name}. {advice}")
 
 
+def drop_fallbacks(directory: Path) -> None:
+    values = environment(directory, RUNTIME)
+    if not values.pop("PYRACAST_SECRET_KEY_FALLBACKS", "").strip():
+        raise RefusedError(f"{RUNTIME} has no PYRACAST_SECRET_KEY_FALLBACKS to remove.")
+    replace(directory / RUNTIME, values)
+    print(
+        f"Removed PYRACAST_SECRET_KEY_FALLBACKS from {RUNTIME}. A release refuses, before "
+        "maintenance, a key set that cannot read a stored secret."
+    )
+
+
 def store(directory: Path, key: str) -> None:
     if key in MANAGED:
         raise RefusedError(f"{key} is managed by rotate.")
     if key not in host_contract.RUNTIME_SETTINGS:
         raise RefusedError(f"{key} is not a setting the application reads.")
-    values = {name: str(value) for name, value in read(directory / RUNTIME).items()}
+    values = environment(directory, RUNTIME)
     value = getpass.getpass(f"{key} (not shown): ")
     if not value or any(character in value for character in "\r\n\x00"):
         raise RefusedError("Enter a value of one line.")
@@ -227,6 +250,10 @@ def main(arguments: Sequence[str] | None = None) -> int:
         "target",
         choices=("secret-key", "runtime-password", "owner-password", *UNROTATED),
     )
+    commands.add_parser(
+        "drop-fallbacks",
+        help="finish a secret-key rotation once check_secrets --require-primary exits 0",
+    )
     setting = commands.add_parser("set", help="store one runtime setting typed without echo")
     setting.add_argument("key")
     options = parser.parse_args(arguments)
@@ -242,6 +269,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
             print(f"{', '.join(FILES[:2])} and {FILES[2]} are complete.")
         elif options.command == "rotate":
             rotate(options.directory, options.target)
+        elif options.command == "drop-fallbacks":
+            drop_fallbacks(options.directory)
         else:
             store(options.directory, options.key)
     except RefusedError as refused:

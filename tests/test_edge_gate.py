@@ -69,8 +69,16 @@ def test_an_edge_that_never_reaches_the_origin_fails_after_every_attempt(
     assert len(sleeps) == edge_gate.ATTEMPTS - 1
 
 
-def test_a_challenge_of_the_host_ends_the_gate_at_once() -> None:
-    fetch, asked = edge(CHALLENGE, ORIGIN)
+@pytest.mark.parametrize(
+    "challenge",
+    [
+        CHALLENGE,
+        (403, {"cf-mitigated": "Challenge"}, b""),
+        (403, {"cf-mitigated": " challenge "}, b""),
+    ],
+)
+def test_a_challenge_of_the_host_ends_the_gate_at_once(challenge: Answer) -> None:
+    fetch, asked = edge(challenge, ORIGIN)
     sleeps: list[float] = []
 
     assert edge_gate.gate(DOMAIN, RELEASE, fetch, sleeps.append) == edge_gate.CHALLENGE

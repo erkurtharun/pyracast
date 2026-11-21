@@ -617,7 +617,6 @@ PY
           origin-pull-challenge) [[ "$result" == 3 ]] ;;
         esac
         if [[ $MODE == origin-pull-* ]]; then
-          # One request through the edge, before migrate, while the previous release answers it.
           gated=$(grep -n "^python3 $new_release/deploy/edge_gate.py example.com ${new_release##*/}$" /calls | cut -d: -f1)
           edge=$(grep -n "$new_release/deploy/compose.yaml up -d --no-deps --wait --wait-timeout 180 maintenance gateway$" /calls | head -n 1 | cut -d: -f1)
           [[ "$gated" -gt "$edge" ]]
@@ -660,7 +659,6 @@ PY
           first-backup|resume-failed|maintenance-backup|retry-backup) [[ "$result" == 45 ]] ;;
           first-origin-pull-edge)
             [[ "$result" == 1 ]]
-            # Without a previous release to answer, the edge is tried once the new release runs.
             gated=$(grep -n "^python3 $new_release/deploy/edge_gate.py example.com ${new_release##*/}$" /calls | cut -d: -f1)
             [[ "$gated" -gt "$(grep -n '^curl ' /calls | tail -n 1 | cut -d: -f1)" ]]
             ;;

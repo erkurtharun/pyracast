@@ -91,6 +91,46 @@ def test_the_docker_repository_key_is_trusted_only_with_its_published_fingerprin
     assert verified < install.index("/etc/apt/keyrings/docker.asc")
 
 
+def test_the_repository_keyring_must_hold_exactly_one_primary_key_and_leaves_no_copy() -> None:
+    install = block("if ! pinned_packages_installed; then")
+    downloaded = install.index("key=$(mktemp)\n  trap 'rm -f -- \"$key\"' EXIT\n")
+
+    assert '$1 == "pub" || $1 == "sec" { keys++' in install
+    assert "END { if (keys == 1) print primary }" in install
+    assert downloaded < install.index("curl --fail")
+    assert install.index("curl --fail") < install.index("gpg --show-keys")
+
+
+def test_the_network_guard_runs_once_its_packages_are_installed_and_until_it_succeeded() -> None:
+    pending = "/etc/pyracast/network-guard-pending"
+    guard = "/usr/local/sbin/pyracast-network-guard"
+    written = TEMPLATE.index(f'write_if_changed {guard} 0755 <<<"$guard"\n')
+    run = block(f"if [[ -e {pending} ]]; then")
+    packages = TEMPLATE.index(block("if ! pinned_packages_installed; then"))
+
+    assert f"if (( changed )); then touch {pending}; fi\n" in TEMPLATE[written:packages]
+    assert TEMPLATE.index(run) > packages
+    assert run.index(f"  {guard}\n") < run.index(f"rm -f {pending}")
+    assert not re.search(rf"^\s*(if .*then )?{re.escape(guard)}", TEMPLATE[:packages], re.M)
+
+
+def test_the_release_lock_is_private_to_root_whoever_creates_it_first() -> None:
+    lock = host.RELEASE_LOCK.as_posix()
+    created = TEMPLATE.index(f"release_lock={lock}\n")
+    narrowed = TEMPLATE.index('(umask 077 && : >>"$release_lock")\nchmod 0600 "$release_lock"\n')
+
+    assert created < narrowed < TEMPLATE.index("flock --nonblock")
+    assert TEMPLATE.index("mountpoint --quiet") < created
+
+
+def test_the_pinned_packages_change_only_while_no_release_runs() -> None:
+    install = block("if ! pinned_packages_installed; then")
+    probe = install.index('if ! flock --nonblock "$release_lock" true; then')
+
+    assert probe < install.index("apt-get")
+    assert "The pinned packages changed while the release lock was held" in install
+
+
 def test_docker_restarts_only_for_its_own_changed_configuration_while_no_release_runs() -> None:
     pending = "/etc/docker/pyracast-restart-pending"
     restart = block(f"if [[ -e {pending} ]]; then")
@@ -99,7 +139,10 @@ def test_docker_restarts_only_for_its_own_changed_configuration_while_no_release
     assert f"if (( docker_changed )); then touch {pending}; fi\n" in TEMPLATE
     assert TEMPLATE.count("systemctl restart") == 1
     assert "systemctl restart docker.service" in restart
-    assert restart.index(f"flock --nonblock {lock} true") < restart.index("systemctl restart")
+    assert f"release_lock={lock}\n" in TEMPLATE
+    assert restart.index('flock --nonblock "$release_lock" true') < restart.index(
+        "systemctl restart"
+    )
     assert restart.index("systemctl restart") < restart.index(f"rm -f {pending}")
     assert "restart pyracast" not in TEMPLATE
 
@@ -135,9 +178,20 @@ def test_the_application_unit_retries_a_failed_start_within_a_start_limit() -> N
 
     assert application["Restart"] == ["on-failure"]
     assert application["RestartSec"] == ["30s"]
-    assert application["StartLimitIntervalSec"] == ["900"]
+    assert application["StartLimitIntervalSec"] == ["1800"]
     assert application["StartLimitBurst"] == ["5"]
     assert int(application["TimeoutStartSec"][0]) >= runtime_secrets.RETRY_SECONDS + 180 + 30
+
+
+def test_the_start_limit_window_covers_its_whole_burst_of_slow_starts() -> None:
+    application = unit("/etc/systemd/system/pyracast.service")
+    (window,) = application["StartLimitIntervalSec"]
+    (burst,) = application["StartLimitBurst"]
+    (start,) = application["TimeoutStartSec"]
+    (pause,) = application["RestartSec"]
+
+    # Each counted start may last the whole start timeout and then waits the restart pause.
+    assert int(window) >= int(burst) * (int(start) + int(pause.removesuffix("s")))
 
 
 def test_a_failure_names_the_line_it_stopped_at() -> None:

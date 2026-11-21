@@ -40,7 +40,7 @@ def observe(get: Fetch, address: str) -> str | None:
     except (OSError, http.client.HTTPException) as error:
         return f"could not be fetched ({error})"
     # Cloudflare marks its challenge pages with this header; the origin never sends it.
-    if headers.get("cf-mitigated") == CHALLENGE:
+    if headers.get("cf-mitigated", "").strip().lower() == CHALLENGE:
         return CHALLENGE
     if status != 200:
         return f"answered {status}"

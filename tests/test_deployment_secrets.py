@@ -47,7 +47,8 @@ DATABASE = {"POSTGRES_PASSWORD": "admin"}
 def test_secret_rejects_invalid_environment_without_disclosing_payload(payload: object) -> None:
     with pytest.raises(ValueError, match="Secret") as error:
         environment_values(payload)
-    assert "secret\n" not in str(error.value)
+    assert "secret" not in str(error.value)
+    assert "PGUSER=admin" not in str(error.value)
 
 
 def test_runtime_separates_broker_credentials_and_preserves_literals(tmp_path: Path) -> None:
@@ -469,6 +470,34 @@ def test_files_that_cannot_be_written_are_a_write_failure(
 
     assert_refused(
         capsys, reports, "write", "migration", "the environment files of the release could not"
+    )
+
+
+@pytest.mark.usefixtures("clock")
+def test_host_files_that_cannot_be_written_are_a_write_failure_of_the_host_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    host: Path,
+    reports: list[tuple[str, str, dict[str, object]]],
+) -> None:
+    serve(
+        monkeypatch,
+        {
+            IDENTITY: [{"access_token": "instance-token"}],
+            RUNTIME_RESOURCE: [secret_answer(RUNTIME)],
+            DATABASE_RESOURCE: [secret_answer(DATABASE)],
+        },
+    )
+
+    def refuse(_directory: Path, _files: object) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(runtime_secrets, "write_files", refuse)
+
+    assert runtime_secrets.main([str(host)]) == 1
+
+    assert_refused(
+        capsys, reports, "write", "host", "the environment files of the release could not"
     )
 
 

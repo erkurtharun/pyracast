@@ -153,6 +153,11 @@ def test_check_accepts_a_complete_set_without_printing_a_value(
             {"PYRACAST_GOOGLE_CLIENT_ID": "client"},
             "runtime.json: set PYRACAST_GOOGLE_CLIENT_ID and PYRACAST_GOOGLE_CLIENT_SECRET",
         ),
+        (
+            "runtime.json",
+            {"PYRACAST_GOOGLE_CLIENT_ID": "   ", "PYRACAST_GOOGLE_CLIENT_SECRET": "secret"},
+            "runtime.json: set PYRACAST_GOOGLE_CLIENT_ID and PYRACAST_GOOGLE_CLIENT_SECRET",
+        ),
         ("runtime.json", {"PYRACAST_FROM_EMAIL": "a\nb"}, "runtime.json: Secret contains"),
         ("migration.json", {"PGUSER": "pyracast_app"}, "migration.json: PGUSER must be"),
         ("migration.json", {"PYRACAST_DEBUG": "1"}, "migration.json: Migration secret must"),
@@ -301,6 +306,118 @@ def test_set_and_rotate_need_the_files_create_wrote(
     assert run(tmp_path, "set", "EPIAS_USERNAME") == 2
 
     assert printed(capsys).count("runtime.json is missing or not a JSON object.") == 2
+
+
+@pytest.mark.parametrize(
+    ("arguments", "name", "changes", "refusal"),
+    [
+        (
+            ("rotate", "secret-key"),
+            "runtime.json",
+            {"PYRACAST_SECRET_KEY": None},
+            "runtime.json: Secret contains an invalid environment entry.",
+        ),
+        (
+            ("rotate", "secret-key"),
+            "runtime.json",
+            {"PYRACAST_SECRET_KEY": ""},
+            "runtime.json: PYRACAST_SECRET_KEY is missing.",
+        ),
+        (
+            ("rotate", "owner-password"),
+            "migration.json",
+            {"PGPASSWORD": 1},
+            "migration.json: Secret contains an invalid environment entry.",
+        ),
+        (
+            ("set", "EPIAS_USERNAME"),
+            "runtime.json",
+            {"PYRACAST_WEATHER_ENABLED": 0},
+            "runtime.json: Secret contains an invalid environment entry.",
+        ),
+    ],
+)
+def test_rotate_and_set_refuse_a_file_that_is_not_environment_strings(
+    created: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    arguments: tuple[str, ...],
+    name: str,
+    changes: dict[str, object],
+    refusal: str,
+) -> None:
+    content = json.dumps({**read(created, name), **changes})
+    (created / name).write_text(content, encoding="utf-8")
+    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "typed")
+    capsys.readouterr()
+
+    assert run(created, *arguments) == 2
+
+    assert printed(capsys) == refusal + "\n"
+    assert (created / name).read_text(encoding="utf-8") == content
+
+
+def test_rotate_secret_key_refuses_a_runtime_file_without_a_key(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "runtime.json").write_text(json.dumps({"PGUSER": "pyracast_app"}))
+
+    assert run(tmp_path, "rotate", "secret-key") == 2
+
+    assert printed(capsys) == "runtime.json: PYRACAST_SECRET_KEY is missing.\n"
+    assert read(tmp_path, "runtime.json") == {"PGUSER": "pyracast_app"}
+
+
+def test_a_replacement_that_fails_leaves_the_file_and_no_staged_copy(
+    created: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = (created / "runtime.json").read_text(encoding="utf-8")
+
+    def failing(path: Path, _values: dict[str, str]) -> None:
+        path.write_text("{", encoding="utf-8")
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(host_secrets, "write_new", failing)
+
+    with pytest.raises(OSError, match="No space"):
+        run(created, "rotate", "runtime-password")
+    assert sorted(path.name for path in created.iterdir()) == sorted(FILES)
+    assert (created / "runtime.json").read_text(encoding="utf-8") == before
+
+
+def test_dropping_the_fallbacks_keeps_the_key_and_removes_only_the_fallbacks(
+    created: Path, capsys: pytest.CaptureFixture[str], generated: list[str]
+) -> None:
+    assert run(created, "rotate", "secret-key") == 0
+    rotated = read(created, "runtime.json")
+    capsys.readouterr()
+
+    assert run(created, "drop-fallbacks") == 0
+
+    after = read(created, "runtime.json")
+    assert after == {
+        key: value for key, value in rotated.items() if key != "PYRACAST_SECRET_KEY_FALLBACKS"
+    }
+    output = printed(capsys)
+    assert output.startswith("Removed PYRACAST_SECRET_KEY_FALLBACKS from runtime.json.")
+    assert not any(value in output for value in generated)
+
+
+@pytest.mark.parametrize("fallbacks", [None, "", "  "])
+def test_dropping_the_fallbacks_is_refused_while_no_rotation_left_one(
+    created: Path, capsys: pytest.CaptureFixture[str], fallbacks: str | None
+) -> None:
+    values = read(created, "runtime.json")
+    if fallbacks is not None:
+        values["PYRACAST_SECRET_KEY_FALLBACKS"] = fallbacks
+    content = json.dumps(values)
+    (created / "runtime.json").write_text(content, encoding="utf-8")
+    capsys.readouterr()
+
+    assert run(created, "drop-fallbacks") == 2
+
+    assert printed(capsys) == "runtime.json has no PYRACAST_SECRET_KEY_FALLBACKS to remove.\n"
+    assert (created / "runtime.json").read_text(encoding="utf-8") == content
 
 
 def test_check_names_a_missing_runtime_file_without_reading_further(

@@ -160,6 +160,9 @@ def test_ci_runs_the_boot_script_twice_and_more_on_a_stubbed_host() -> None:
         "changed host configuration",
         "upgrade of a host the earlier script set up",
         "Docker restart under the release lock",
+        "a package change waits for the release lock",
+        "a stopped boot applies the network guard on its retry",
+        "a repository keyring without exactly the published key is refused",
         "a used disk is refused",
         "an unsupported host is refused",
     ]

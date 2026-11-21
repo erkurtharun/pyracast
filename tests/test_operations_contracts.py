@@ -677,7 +677,8 @@ def test_host_paths_agree_between_scripts_units_and_helpers() -> None:
     assert installer.count(lock) == 1
     assert f"exec 9>>{lock}\n" in installer
     assert template.count(lock) == 2
-    assert f"flock --nonblock {lock} true" in template
+    assert f"release_lock={lock}\n" in template
+    assert 'flock --nonblock "$release_lock" true' in template
     assert application["ExecStop"].startswith(f"/usr/bin/flock {lock} ")
     assert application["UMask"] == "0077"
     assert f"['/usr/bin/flock', '{lock}', " in harness
