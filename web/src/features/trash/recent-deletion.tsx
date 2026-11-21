@@ -17,8 +17,20 @@ const RecentDeletion = createContext<Recent>({
     set: () => {},
 });
 
-export function RecentDeletionProvider({ children }: { children: ReactNode }) {
+// Forgets the outcome once the person leaves the workspace it happened in.
+export function RecentDeletionProvider({
+    tenant,
+    children,
+}: {
+    tenant: number | undefined;
+    children: ReactNode;
+}) {
     const [outcome, set] = useState<Outcome>({ kind: "none" });
+    const [shown, setShown] = useState(tenant);
+    if (shown !== tenant) {
+        setShown(tenant);
+        set({ kind: "none" });
+    }
     return <RecentDeletion value={{ outcome, set }}>{children}</RecentDeletion>;
 }
 

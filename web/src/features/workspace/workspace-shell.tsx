@@ -270,7 +270,7 @@ export function WorkspaceShell({
                     <RefreshFailed resource={tenants} />
                     <WorkspaceAccess value={screen === "account" || canManage}>
                         <Workspace value={{ tenant, user }}>
-                            <RecentDeletionProvider>
+                            <RecentDeletionProvider tenant={tenant?.id}>
                                 {screen === "account" ? (
                                     children
                                 ) : tenants.loading ? (
