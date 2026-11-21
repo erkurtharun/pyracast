@@ -9,7 +9,22 @@ import { useExportPlant } from "@/ui/export-plant";
 import { ScrollRegion } from "@/ui/scroll-region";
 import { JsonDetails, Notice, Stat, Tag } from "@/ui/ui";
 import { StatusTag, useCodeLabel, useLabel } from "@/ui/vocabulary";
-import { provisional, type Action, type AutomationStatus } from "./model";
+import {
+    provisional,
+    type Action,
+    type AutomationStatus,
+    type RequestState,
+} from "./model";
+
+const REQUEST_REFUSALS = {
+    configuration: "await_configuration",
+    window: "window_outside",
+    incomplete_days: "days_incomplete",
+    open_run: "run_open",
+} as const satisfies Record<
+    Exclude<RequestState, "available" | "unknown">,
+    string
+>;
 
 function useValueLabel() {
     const t = useTranslations("Calibrations");
@@ -59,7 +74,7 @@ export function CalibrationRunDetail({
     action,
     automation,
     canManage,
-    canRequest,
+    request,
     exportPending,
     onAction,
     onActivate,
@@ -69,7 +84,7 @@ export function CalibrationRunDetail({
     action: Action;
     automation: AutomationStatus | undefined;
     canManage: boolean;
-    canRequest: boolean;
+    request: RequestState;
     exportPending: boolean;
     onAction: (action: Action) => void;
     onActivate: (run: Calibration) => void;
@@ -120,7 +135,7 @@ export function CalibrationRunDetail({
                         {t(`blockers.${blocker}`)}
                     </p>
                     {canManage &&
-                        (canRequest ? (
+                        (request === "available" ? (
                             <button
                                 className="button secondary"
                                 type="button"
@@ -133,11 +148,11 @@ export function CalibrationRunDetail({
                                 })}
                             </button>
                         ) : (
-                            <p className="fine">
-                                {automation?.configuration_current === false
-                                    ? t("await_configuration")
-                                    : t("run_open")}
-                            </p>
+                            request !== "unknown" && (
+                                <p className="fine">
+                                    {t(REQUEST_REFUSALS[request])}
+                                </p>
+                            )
                         ))}
                 </Notice>
             )}

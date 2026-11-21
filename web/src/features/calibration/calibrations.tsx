@@ -5,6 +5,7 @@ import type { Calibration, PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { cadence, useApiList, useApiQuery, useRefresh } from "@/lib/api/query";
 import { calibrationsExport } from "@/lib/exports";
+import { plantDay } from "@/lib/format/time";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
 import { useErrorMessage } from "@/ui/form";
@@ -15,7 +16,7 @@ import { CalibrationAutomationPanel } from "./calibration-automation";
 import { CalibrationRunDetail } from "./calibration-run-detail";
 import { CalibrationRunList } from "./calibration-runs";
 import { CalibrationSelection } from "./calibration-selection";
-import { canRequestAgain, type Action, type Run } from "./model";
+import { requestState, type Action, type Run } from "./model";
 
 type DetailState =
     | { status: "idle" | "loading" }
@@ -35,6 +36,7 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
     // Actions whose reload of the runs is still running; no export is built from runs being reloaded.
     const [performing, setPerforming] = useState(0);
     const detailSequence = useRef(0);
+    const opened = useRef<number | null>(null);
     useEffect(() => {
         const sequence = detailSequence;
         return () => {
@@ -53,6 +55,7 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
     );
     async function loadDetails(runId: number, review = false) {
         const sequence = ++detailSequence.current;
+        opened.current = runId;
         setDetail({ status: "loading" });
         try {
             const data = await api.get(
@@ -79,7 +82,6 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
     async function perform(
         kind: "reset" | "activate" | "request",
         request: () => Promise<unknown>,
-        reload?: number,
     ) {
         if (!canManage) return;
         setAction({ status: "pending", kind });
@@ -88,7 +90,7 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
             await request();
             setAction({ status: kind === "request" ? "requested" : "done" });
             await changed();
-            if (reload !== undefined) await loadDetails(reload);
+            if (opened.current !== null) await loadDetails(opened.current);
         } catch (error) {
             setAction({ status: "failed", error: errorMessage(error) });
         } finally {
@@ -210,25 +212,24 @@ export function Calibrations({ scope }: { scope: PlantScope }) {
                         automation={automation.data}
                         canManage={canManage}
                         exportPending={performing > 0}
-                        canRequest={
-                            configurationId !== null &&
-                            canRequestAgain(selected, runs.data?.results ?? [])
-                        }
+                        request={requestState(
+                            selected,
+                            runs.data?.results,
+                            automation.data,
+                            plantDay(plant.timezone),
+                        )}
                         onAction={setAction}
                         onActivate={(run) =>
-                            void perform(
-                                "activate",
-                                () =>
-                                    api.post(
-                                        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/{calibration_id}/activate/",
-                                        {
-                                            path: {
-                                                ...scope,
-                                                calibration_id: run.id,
-                                            },
+                            void perform("activate", () =>
+                                api.post(
+                                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/{calibration_id}/activate/",
+                                    {
+                                        path: {
+                                            ...scope,
+                                            calibration_id: run.id,
                                         },
-                                    ),
-                                run.id,
+                                    },
+                                ),
                             )
                         }
                         onRequest={(run) => {

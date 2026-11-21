@@ -507,8 +507,9 @@ measurements. Numerical views offer UTF-8 CSV downloads with one explicit column
 list per export (`web/src/lib/exports.ts`): the plant, its time zone, plant-time
 timestamps with their offset, units in the column names and one row per interval,
 including hidden edge intervals; an empty list gives the header only. The production
-export imports again unchanged. CSV cells preserve missingness, precision and quoting,
-and neutralize spreadsheet formulas in text fields.
+export imports again unchanged, except an aggregated interval of mixed qualities (`mixed`),
+which the import refuses: correct its intervals at the stored resolution. CSV cells preserve
+missingness, precision and quoting, and neutralize spreadsheet formulas in text fields.
 
 Route only what the customer interface calls: plant submission and listing, dated forecast retrieval and the workspace operations; provider setup, validation and approval live in the operator console. The customer DRF endpoints accept JSON bodies only. Generate OpenAPI; use explicit units, bounded date ranges and pagination. Every `/api/` failure answers one localized body, `{code, message, fields?, retry_after?, request_id?}`, whose codes are a closed vocabulary exported to OpenAPI; a stale outage edit also carries `current`, the version it lost to. The adopted allauth sign-in views keep allauth's own keys and carry the same contract keys beside them, the code taken from the HTTP status and the message from allauth's first error. A CSRF failure redirects back to the app only on the provider sign-in redirect and callback routes, which a browser reaches by form navigation. User text says "outage"; `incident` stays the internal name. Approval transitions are operations, not writable status fields.
 

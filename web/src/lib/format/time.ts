@@ -75,7 +75,6 @@ export function plantTimestamp(
     );
 }
 
-// The value of a datetime-local input that shows the instant on the plant's wall clock.
 export function toPlantInput(value: Instant, timeZone: string): string {
     return plantTimestamp(value, timeZone)?.slice(0, 16) ?? "";
 }

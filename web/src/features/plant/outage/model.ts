@@ -100,7 +100,6 @@ function isOutage(value: unknown): value is Outage {
     );
 }
 
-// The version a stale write lost to, or null for any other failure.
 export function staleVersion(error: unknown, id: number): Outage | null {
     if (
         !(error instanceof ApiError) ||

@@ -317,6 +317,8 @@
         "request_new": "{start} – {end} için yeni kalibrasyon iste",
         "request_sent": "Yeni kalibrasyon istendi. Başladığında listede görünür.",
         "run_open": "Bekleyen ya da çalışan bir kalibrasyon var; o bittiğinde yenisini isteyin.",
+        "window_outside": "Yeni kalibrasyon 7 ile 90 gün arası bir aralık gerektirir; bu aralık yeniden istenemez.",
+        "days_incomplete": "Bu aralığın son günü santral saatine göre bittiğinde yeni kalibrasyon isteyin.",
         "await_configuration": "Santral yapılandırması yeniden onaylandığında yeni kalibrasyon isteyin."
     },
     "CalibrationAutomation": {

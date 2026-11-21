@@ -16,20 +16,40 @@ export type Action =
 
 const DAY_MS = 86_400_000;
 
-// The request route refuses a window outside 7 to 90 days and any request while a run is open.
-export function canRequestAgain(
+export type RequestState =
+    | "unknown"
+    | "available"
+    | "configuration"
+    | "window"
+    | "incomplete_days"
+    | "open_run";
+
+// request_calibration's refusals in its order; `today` is the plant's local date, the binding's zone.
+export function requestState(
     run: Pick<Run, "window_start" | "window_end">,
-    runs: readonly Pick<Run, "status">[],
-) {
+    runs: readonly Pick<Run, "status">[] | undefined,
+    automation: Pick<AutomationStatus, "configuration_current"> | undefined,
+    today: string,
+): RequestState {
+    if (!runs || !automation) return "unknown";
+    if (!automation.configuration_current) return "configuration";
     const days =
         (Date.parse(run.window_end) - Date.parse(run.window_start)) / DAY_MS +
         1;
+    if (days < 7 || days > 90) return "window";
+    if (run.window_end >= today) return "incomplete_days";
+    if (
+        runs.some((row) => row.status === "pending" || row.status === "running")
+    )
+        return "open_run";
+    return "available";
+}
+
+export function canReset(status: AutomationStatus) {
     return (
-        days >= 7 &&
-        days <= 90 &&
-        !runs.some(
-            (row) => row.status === "pending" || row.status === "running",
-        )
+        status.configuration_current &&
+        (status.enabled ||
+            (status.current_calibration?.calibration_id ?? null) !== null)
     );
 }
 

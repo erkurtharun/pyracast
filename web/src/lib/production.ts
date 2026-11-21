@@ -83,6 +83,9 @@ export function parseProduction(text: string, language = "en"): ProductionFile {
             throw new DisplayError(t("future", { row: index + 2 }));
         if (!rawEnergy || !Number.isFinite(energy) || energy < 0)
             throw new DisplayError(t("energy", { row: index + 2 }));
+        // The production export writes "mixed" for an aggregated slot whose stored intervals differ in quality.
+        if (quality === "mixed")
+            throw new DisplayError(t("mixed", { row: index + 2 }));
         const known = QUALITIES.find((value) => value === quality);
         if (!known || !source || source.length > 200)
             throw new DisplayError(t("quality", { row: index + 2 }));

@@ -2059,8 +2059,8 @@ msgstr "Tahmin sağlayıcısının günlük kotası doldu. Yarın tekrar deneyin
 msgid "The forecast sources changed while loading. Try again."
 msgstr "Tahmin kaynakları yüklenirken değişti. Tekrar deneyin."
 
-msgid "The outage changed. Reload the list and try again."
-msgstr "Kesinti kaydı değişti. Listeyi yeniden yükleyip tekrar deneyin."
+msgid "The outage changed. Review its current values and save again."
+msgstr "Kesinti kaydı değişti. Güncel değerleri inceleyip yeniden kaydedin."
 
 msgid "The outage end must be after its start."
 msgstr "Kesinti bitişi başlangıcından sonra olmalıdır."

@@ -243,6 +243,7 @@
         "future": "Row {row}: production intervals must be completed.",
         "energy": "Row {row}: energy must be a non-negative number.",
         "quality": "Row {row}: include a valid quality and source (up to 200 characters).",
+        "mixed": "Row {row}: this interval combines stored intervals of different qualities; correct those intervals at their stored resolution instead.",
         "overlap": "The CSV contains overlapping intervals."
     },
     "SocialAuth": {

@@ -317,6 +317,8 @@
         "request_new": "Request a new calibration for {start} – {end}",
         "request_sent": "A new calibration was requested. It appears in the list when it starts.",
         "run_open": "A calibration is already pending or running; request another one when it has finished.",
+        "window_outside": "A new calibration needs a window of 7 to 90 days; this window cannot be requested again.",
+        "days_incomplete": "Request a new calibration for this window once its last day has ended in plant time.",
         "await_configuration": "Request a new calibration when the plant configuration is approved again."
     },
     "CalibrationAutomation": {

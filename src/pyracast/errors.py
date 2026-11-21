@@ -182,7 +182,9 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.LOCATION_CHANGE_ALREADY_REVIEWED: _(
         "This location request has already been reviewed. Refresh the page."
     ),
-    ErrorCode.INCIDENT_REVISION_CHANGED: _("The outage changed. Reload the list and try again."),
+    ErrorCode.INCIDENT_REVISION_CHANGED: _(
+        "The outage changed. Review its current values and save again."
+    ),
     ErrorCode.IDEMPOTENCY_KEY_REUSED: _("Use a new request key for changed input."),
     ErrorCode.PENDING_REQUEST_LIMIT: _(
         "Resolve or withdraw pending requests before submitting more."

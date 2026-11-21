@@ -3,7 +3,7 @@ import { useTranslations } from "next-intl";
 import { useFormat } from "@/lib/format/use-format";
 import { ConfirmAction } from "@/ui/action";
 import { Notice } from "@/ui/ui";
-import type { Action, AutomationStatus } from "./model";
+import { canReset, type Action, type AutomationStatus } from "./model";
 
 export function CalibrationSelection({
     status,
@@ -51,6 +51,8 @@ export function CalibrationSelection({
                 </>
             )}
             {canManage &&
+                (canReset(status) ||
+                    (action.status === "pending" && action.kind === "reset")) &&
                 (resetting ? (
                     <ConfirmAction
                         label={t("reset_title")}

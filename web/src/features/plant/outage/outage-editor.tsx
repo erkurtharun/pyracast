@@ -33,7 +33,6 @@ const IMPACTS = ["total", "reduced", "unknown"] as const;
 
 type Translate = ReturnType<typeof useTranslations<"Outages">>;
 
-// An entered wall-clock time read in the plant zone; empty gives null.
 export function plantInstant(
     data: FormData,
     key: string,
@@ -60,7 +59,6 @@ export function ProposalReason() {
     );
 }
 
-// A form that keeps what the person typed when the outage changed meanwhile and saves it against the version shown.
 export function useStaleRecovery(outage: Outage | undefined) {
     const t = useTranslations("Outages");
     const [base, setBase] = useState(outage);

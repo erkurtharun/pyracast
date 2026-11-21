@@ -41,10 +41,19 @@ export function Outages({
     const [submitted, setSubmitted] = useState(false);
     const [editor, setEditor] = useState<Editor>({ status: "closed" });
     const [resolving, setResolving] = useState<number | null>(null);
+    const [reloads, setReloads] = useState(0);
     const resource = useApiList(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/",
         { path: scope },
     );
+    async function reload() {
+        setReloads((count) => count + 1);
+        try {
+            await onChanged();
+        } finally {
+            setReloads((count) => count - 1);
+        }
+    }
     async function submit(change: OutageChange) {
         try {
             await submitOutageChange(scope, change, { proposalKey, direct });
@@ -54,11 +63,11 @@ export function Outages({
                 change.action !== "create" &&
                 staleVersion(error, change.outage.id)
             )
-                void onChanged();
+                void reload();
             throw error;
         }
         if (!direct) setSubmitted(true);
-        await onChanged();
+        await reload();
     }
     const ceilings = (outage?: Outage): Ceilings | undefined =>
         configuration &&
@@ -134,6 +143,7 @@ export function Outages({
                             <div className="toolbar">
                                 <CsvDownload
                                     label={t("downloadOutagesCSV")}
+                                    pending={reloads > 0}
                                     build={() =>
                                         outagesExport(plant, list.results)
                                     }
