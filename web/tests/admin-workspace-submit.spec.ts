@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
+import { coordinatePastes } from "./support/coordinate-pastes";
 
 async function serveConsolePage(page: string) {
     const script = await readFile(
@@ -124,7 +125,7 @@ test("a form its own script sends is never blocked by the console guard", async 
     }
 });
 
-test("a console latitude splits a pasted pair only at a separator a decimal comma cannot be", async ({
+test("a console latitude fills both fields from a pasted text only when it is a pair", async ({
     page,
 }) => {
     const { server, answerPosts, origin } =
@@ -149,29 +150,16 @@ test("a console latitude splits a pasted pair only at a separator a decimal comm
                 element.dispatchEvent(event);
                 return event.defaultPrevented;
             }, text);
-        for (const [text, first, second] of [
-            ["41.0082, 28.9784", "41.0082", "28.9784"],
-            ["41.0082,28.9784", "41.0082", "28.9784"],
-            [" -41.5 ; 28.9 ", "-41.5", "28.9"],
-            ["41\t-28.9", "41", "-28.9"],
-        ] as const) {
+        for (const entry of coordinatePastes) {
             await latitude.fill("");
             await longitude.fill("");
-            expect(await paste(text), text).toBe(true);
-            await expect(latitude).toHaveValue(first);
-            await expect(longitude).toHaveValue(second);
-        }
-        for (const text of [
-            "41,0082",
-            "-41,-28",
-            "41,5;28,9",
-            "41,0082, 28.9",
-            "41.5, 0082",
-        ]) {
-            await latitude.fill("");
-            await longitude.fill("");
-            expect(await paste(text), text).toBe(false);
-            await expect(longitude).toHaveValue("");
+            expect(await paste(entry.text), entry.text).toBe("pair" in entry);
+            await expect(latitude).toHaveValue(
+                "pair" in entry ? entry.pair[0] : "",
+            );
+            await expect(longitude).toHaveValue(
+                "pair" in entry ? entry.pair[1] : "",
+            );
         }
     } finally {
         answerPosts();

@@ -1816,6 +1816,8 @@ test("recycle bin disables expired records", async ({ page }) => {
                     id: 91,
                     name: "Expired region",
                     plant_name: "Expired region",
+                    latitude: 37,
+                    longitude: 31,
                     deleted_at: "2026-01-01T00:00:00Z",
                     purge_after: "2026-01-31T00:00:00Z",
                     restore_blocker: "trash_retention_expired",
@@ -1856,6 +1858,8 @@ test("a failed reload after a restore keeps the remaining plants until a retry l
         id,
         name: `Deleted plant ${id}`,
         plant_name: `Deleted plant ${id}`,
+        latitude: 37,
+        longitude: 31,
         deleted_at: "2026-11-10T12:00:00Z",
         purge_after: "2026-12-10T12:00:00Z",
         restore_blocker: null,
@@ -1948,6 +1952,8 @@ test("recycle bin ignores a prior workspace response and restores only in the se
                     plant_name: first
                         ? "First workspace deleted region"
                         : "Second workspace deleted region",
+                    latitude: 37,
+                    longitude: 31,
                     deleted_at: "2026-11-10T00:00:00Z",
                     purge_after: "2026-12-10T00:00:00Z",
                     restore_blocker: null,

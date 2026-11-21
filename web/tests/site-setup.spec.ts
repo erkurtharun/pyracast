@@ -2,6 +2,7 @@ import type { Locator } from "@playwright/test";
 import { test, expect, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
 import { mockApi, paged, plant, region, tenantRow } from "./support/workspace";
+import { coordinatePastes } from "./support/coordinate-pastes";
 
 const site = { ...region, plant, reminder: null };
 const location = {
@@ -864,6 +865,197 @@ for (const language of ["en", "tr"] as const)
                 });
             }
         });
+
+async function paste(field: Locator, text: string) {
+    return field.evaluate((element, text) => {
+        const data = new DataTransfer();
+        data.setData("text/plain", text);
+        const event = new ClipboardEvent("paste", {
+            clipboardData: data,
+            bubbles: true,
+            cancelable: true,
+        });
+        element.dispatchEvent(event);
+        return event.defaultPrevented;
+    }, text);
+}
+
+async function expectPastedCoordinates(page: Page) {
+    const latitude = page.getByLabel("Latitude (°)");
+    const longitude = page.getByLabel("Longitude (°)");
+    for (const entry of coordinatePastes) {
+        await latitude.fill("");
+        await longitude.fill("");
+        await latitude.focus();
+        const filled = await paste(latitude, entry.text);
+        if ("pair" in entry) {
+            expect(filled, entry.text).toBe(true);
+            await expect(latitude).toHaveValue(entry.pair[0]);
+            await expect(longitude).toHaveValue(entry.pair[1]);
+            continue;
+        }
+        expect(filled, entry.text).toBe(false);
+        await page.keyboard.insertText(entry.text);
+        await expect(latitude).toHaveValue(entry.text);
+        await expect(longitude).toHaveValue("");
+        expect(
+            await latitude.evaluate(
+                (element: HTMLInputElement) => element.validity.patternMismatch,
+            ),
+            entry.text,
+        ).toBe(entry.single === "refused");
+    }
+}
+
+test("a text pasted into the wizard's latitude fills both fields only when it is a pair", async ({
+    page,
+}) => {
+    await mockApi(page, { empty: true });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: "Add a plant" }).click();
+    await expectPastedCoordinates(page);
+});
+
+test("a text pasted into a location request's latitude fills both fields only when it is a pair", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.goto("/app/w/1/plants/11/settings/?view=location");
+    await page.getByText("Request location change").click();
+    await expectPastedCoordinates(page);
+});
+
+test("a pasted thousands-formatted number stays in latitude and is refused there", async ({
+    page,
+}) => {
+    await mockApi(page, { empty: true });
+    await openWizard(page);
+    const latitude = page.getByLabel("Latitude (°)");
+    await latitude.fill("");
+    await latitude.focus();
+    expect(await paste(latitude, "1,234.5")).toBe(false);
+    await page.keyboard.insertText("1,234.5");
+    await expect(page.getByLabel("Longitude (°)")).toHaveValue("31");
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(latitude).toBeFocused();
+    await expect(latitude).toHaveValue("1,234.5");
+    await expect(page.getByLabel("DC nameplate capacity (MW)")).toBeHidden();
+});
+
+test("a submit refused without a field to go to moves focus to its message", async ({
+    page,
+}) => {
+    await mockApi(page, { empty: true });
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.request().method() === "POST"
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody(
+                      "busy",
+                      "The workspace is busy. Try again in a moment.",
+                  ),
+              })
+            : route.fallback(),
+    );
+    await openWizard(page);
+    await toReview(page);
+    await page
+        .getByRole("button", { name: "Submit plant for approval" })
+        .click();
+    await expect(
+        page.getByRole("alert").filter({ hasText: "The workspace is busy." }),
+    ).toBeFocused();
+});
+
+test("a refused field whose message repeats the general message shows it once", async ({
+    page,
+}) => {
+    await mockApi(page, { empty: true });
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.request().method() === "POST"
+            ? route.fulfill({
+                  status: 400,
+                  json: errorBody(
+                      "invalid_request",
+                      "The serial number is unknown.",
+                      {
+                          fields: {
+                              "plant.serial": "The serial number is unknown.",
+                          },
+                      },
+                  ),
+              })
+            : route.fallback(),
+    );
+    await openWizard(page);
+    await toReview(page);
+    await page
+        .getByRole("button", { name: "Submit plant for approval" })
+        .click();
+    const alert = page
+        .getByRole("alert")
+        .filter({ hasText: "The serial number is unknown." });
+    await expect(alert).toBeFocused();
+    await expect(alert.getByText("The serial number is unknown.")).toHaveCount(
+        1,
+    );
+});
+
+test("a failed restore in the wizard returns focus to the restore button", async ({
+    page,
+}) => {
+    await mockApi(page, { empty: true });
+    await page.route("**/api/tenants/1/trash/regions/", (route) =>
+        route.fulfill({
+            json: paged([binned(15, "Old plant", "2026-11-10T12:00:00Z")]),
+        }),
+    );
+    await page.route("**/api/tenants/1/regions/15/restore/", (route) =>
+        route.fulfill({
+            status: 503,
+            json: errorBody(
+                "busy",
+                "The workspace is busy. Try again in a moment.",
+            ),
+        }),
+    );
+    await openWizard(page);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    const offer = page.getByRole("group", {
+        name: "Old plant is in the recycle bin",
+    });
+    const restore = offer.getByRole("button", { name: "Restore Old plant" });
+    await restore.click();
+    await expect(offer.getByRole("alert")).toContainText(
+        "The workspace is busy.",
+    );
+    await expect(restore).toBeFocused();
+});
+
+test("a viewer opening a blocked location without a plant sees why it cannot be set up", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await asViewer(page);
+    await sites(page, [
+        {
+            ...location,
+            status: "suspended",
+            attention: "suspended",
+            edit_blocked_reason: "suspended",
+        },
+    ]);
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /North location/ }).click();
+    await expect(
+        page.getByText(
+            "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
+        ),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Waiting for an administrator to finish setup"),
+    ).toHaveCount(0);
+});
 
 test("a coordinate with both a comma and a point stays on the location step and says which numbers it takes", async ({
     page,

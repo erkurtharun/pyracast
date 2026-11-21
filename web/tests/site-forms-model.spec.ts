@@ -15,30 +15,22 @@ import {
     unplacedFields,
 } from "../src/features/portfolio/onboarding-steps";
 import { matchesSearch } from "../src/features/portfolio/portfolio-search";
+import { coordinatePastes } from "./support/coordinate-pastes";
 
-test("a pasted coordinate pair splits into latitude and longitude", () => {
-    expect(coordinatePair(" -41.5 ; 28.9 ")).toEqual(["-41.5", "28.9"]);
-    expect(coordinatePair("41.5\t-28.9")).toEqual(["41.5", "-28.9"]);
-    expect(coordinatePair("41.0082, 28.9784")).toEqual(["41.0082", "28.9784"]);
-    expect(coordinatePair("41.0082,28.9784")).toEqual(["41.0082", "28.9784"]);
-    expect(coordinatePair("-41.5,-28")).toEqual(["-41.5", "-28"]);
-    expect(coordinatePair("41 , 29")).toEqual(["41", "29"]);
-    expect(coordinatePair("-41; -29")).toEqual(["-41", "-29"]);
-    for (const text of ["41,,29", "41 29 30", "41. 29", "NaN,29", "41"])
-        expect(coordinatePair(text)).toBeNull();
+test("a pasted text fills both coordinates only when it is a pair of coordinates in range", () => {
+    for (const paste of coordinatePastes)
+        expect(coordinatePair(paste.text), paste.text).toEqual(
+            "pair" in paste ? paste.pair : null,
+        );
 });
 
-test("a single number with a decimal comma is never split into a pair", () => {
-    for (const text of [
-        "41,0082",
-        "36,9",
-        "-36,9",
-        "-41,-28",
-        "41,5;28,9",
-        "41,5 28,9",
-        "41,0082.5",
-    ])
-        expect(coordinatePair(text)).toBeNull();
+test("a pasted text that is no pair is one latitude or refused by the latitude field", () => {
+    for (const paste of coordinatePastes)
+        if ("single" in paste)
+            expect(
+                Number.isNaN(coordinateValue("latitude", paste.text)),
+                paste.text,
+            ).toBe(paste.single === "refused");
 });
 
 test("a single coordinate with one decimal comma or point is that number", () => {
@@ -233,12 +225,39 @@ test("a refused field no step holds is left for the general message", () => {
         unplacedFields(
             { "plant.serial": "Unknown serial.", timezone: "Choose a zone." },
             false,
+            "Check the values.",
         ),
-    ).toEqual(["Unknown serial."]);
-    expect(unplacedFields({ latitude: "Out of range." }, true)).toEqual([
-        "Out of range.",
+    ).toEqual([["plant.serial", "Unknown serial."]]);
+    expect(
+        unplacedFields(
+            { latitude: "Out of range." },
+            true,
+            "Check the values.",
+        ),
+    ).toEqual([["latitude", "Out of range."]]);
+    expect(
+        unplacedFields({ timezone: "Choose a zone." }, false, "Check."),
+    ).toEqual([]);
+});
+
+test("a refused field's message that repeats the general message is left out, others keep their field", () => {
+    expect(
+        unplacedFields(
+            { "plant.serial": "Unknown serial." },
+            false,
+            "Unknown serial.",
+        ),
+    ).toEqual([]);
+    expect(
+        unplacedFields(
+            { "plant.serial": "Unknown.", "plant.model": "Unknown." },
+            false,
+            "Check the values.",
+        ),
+    ).toEqual([
+        ["plant.serial", "Unknown."],
+        ["plant.model", "Unknown."],
     ]);
-    expect(unplacedFields({ timezone: "Choose a zone." }, false)).toEqual([]);
 });
 
 test("the portfolio search reads only what a card shows", () => {

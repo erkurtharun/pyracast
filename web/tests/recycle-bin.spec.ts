@@ -104,7 +104,7 @@ test("undo after a delete restores the plant on the portfolio", async ({
     });
     await expect(notice).toBeVisible();
     await expect(page.locator(".region-card")).toHaveCount(0);
-    await notice.getByRole("button", { name: "Undo" }).click();
+    await page.getByRole("button", { name: "Undo" }).click();
     await expect(page.locator(".region-card")).toHaveCount(1);
     await expect(
         page.getByRole("status").filter({ hasText: `${plant.name} restored.` }),
@@ -126,6 +126,30 @@ const deletionNotice = (page: Page) =>
     page.getByRole("status").filter({
         hasText: `${plant.name} is in the recycle bin.`,
     });
+
+test("a failed undo shows its alert outside the deletion's status", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await bin(page, { deleted: false });
+    await page.route("**/api/tenants/1/regions/11/restore/", (route) =>
+        route.fulfill({
+            status: 503,
+            json: errorBody(
+                "busy",
+                "The workspace is busy. Try again in a moment.",
+            ),
+        }),
+    );
+    await deleteFromSettings(page);
+    await expect(deletionNotice(page)).toBeVisible();
+    await page.getByRole("button", { name: "Undo" }).click();
+    await expect(
+        page.getByRole("alert").filter({ hasText: "The workspace is busy." }),
+    ).toBeVisible();
+    await expect(page.getByRole("status").getByRole("alert")).toHaveCount(0);
+    await expect(deletionNotice(page)).toBeVisible();
+});
 
 test("a plant restored through the add-plant wizard no longer offers its undo", async ({
     page,
