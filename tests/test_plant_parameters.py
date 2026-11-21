@@ -337,9 +337,7 @@ def test_the_plant_command_prints_the_revision_it_started_from_under_the_plant_l
             system.tenant.pk,
             system.region.pk,
             plant.pk,
-            PlantParameters(
-                name="Plant", dc_capacity_mw=140, export_limit_mw=export_limit_mw
-            ),
+            PlantParameters(name="Plant", dc_capacity_mw=140, export_limit_mw=export_limit_mw),
         )
 
     _, output = behind_open_transaction(save_meanwhile, lambda: revise_by_command(system, plant))
@@ -392,12 +390,13 @@ def test_the_plant_command_refuses_an_unusable_expected_revision_before_writing(
 
 @pytest.mark.parametrize("field", ["surface_tilt_degrees", "surface_azimuth_degrees"])
 def test_a_negative_zero_angle_is_the_same_value_as_zero(field: str) -> None:
-    signed = PlantParameters(name="P", dc_capacity_mw=1, mounting_type="fixed", **{field: -0.0})
+    fixed: dict[str, Any] = {"name": "P", "dc_capacity_mw": 1, "mounting_type": "fixed"}
+    negative: dict[str, Any] = {**fixed, field: -0.0}
+    positive: dict[str, Any] = {**fixed, field: 0.0}
+    signed = PlantParameters(**negative)
 
     assert copysign(1, getattr(signed, field)) == 1
-    assert signed == PlantParameters(
-        name="P", dc_capacity_mw=1, mounting_type="fixed", **{field: 0.0}
-    )
+    assert signed == PlantParameters(**positive)
 
 
 DECLARED = {
