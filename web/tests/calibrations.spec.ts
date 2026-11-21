@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import Papa from "papaparse";
 import { test, expect, type Page } from "./support/test";
 import { answer, mockApi, paged, type Mock } from "./support/workspace";
 import { errorBody } from "./support/errors";
@@ -176,6 +178,101 @@ test("refresh during activation still reloads the completed selection", async ({
     release();
     await expect(page.getByRole("row", { name: /#41/ })).toBeVisible();
 });
+
+const selectionChanges = [
+    {
+        kind: "an activation",
+        before: "candidate",
+        after: "active",
+        tag: "Active",
+        exports: 2,
+        endpoint: "**/plants/21/calibrations/40/activate/",
+        act: (page: Page) => activate(page, 40),
+    },
+    {
+        kind: "a reset",
+        before: "active",
+        after: "candidate",
+        tag: "Candidate",
+        exports: 1,
+        endpoint: "**/plants/21/calibration/reset/",
+        act: async (page: Page) => {
+            await page
+                .getByRole("button", { name: "Reset to baseline" })
+                .click();
+            await page
+                .getByRole("button", { name: "Reset to baseline" })
+                .click();
+        },
+    },
+] as const;
+
+for (const change of selectionChanges)
+    test(`the calibration export waits for the runs reloaded after ${change.kind}`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        let changed = false;
+        let holding = false;
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        let reloading!: () => void;
+        const reload = new Promise<void>((resolve) => {
+            reloading = resolve;
+        });
+        const current = () =>
+            run(40, {
+                selection_state: changed ? change.after : change.before,
+            });
+        await page.route("**/plants/21/calibrations/", async (route) => {
+            if (holding) {
+                reloading();
+                await gate;
+            }
+            return route.fulfill({ json: paged([current()]) });
+        });
+        await page.route("**/plants/21/calibrations/40/", (route) =>
+            route.fulfill({ json: current() }),
+        );
+        await page.route(change.endpoint, (route) => {
+            changed = true;
+            holding = true;
+            return route.fulfill({ json: {} });
+        });
+        await openCalibration(page);
+        await change.act(page);
+        await reload;
+        await expect(
+            page.getByText(
+                "Calibration selection updated. Refresh the forecast to see the current result.",
+            ),
+        ).toBeVisible();
+        const working = page.getByRole("button", { name: "Working…" });
+        await expect(working).toHaveCount(change.exports);
+        for (const button of await working.all())
+            await expect(button).toBeDisabled();
+        await expect(
+            page.getByRole("button", { name: /^Download calibration/ }),
+        ).toHaveCount(0);
+        holding = false;
+        release();
+        await expect(page.getByRole("row", { name: /#40/ })).toContainText(
+            change.tag,
+        );
+        const download = page.waitForEvent("download");
+        await page
+            .getByRole("button", { name: "Download calibration CSV" })
+            .click();
+        const records = Papa.parse<Record<string, string>>(
+            await readFile(await (await download).path(), "utf8"),
+            { header: true, skipEmptyLines: true },
+        ).data;
+        expect(records.map((record) => record.selection_state)).toEqual([
+            change.after,
+        ]);
+    });
 
 test("superseded runs are labelled in Turkish", async ({ page, baseURL }) => {
     await mockApi(page);
