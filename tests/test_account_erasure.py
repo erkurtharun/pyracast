@@ -1087,8 +1087,8 @@ def test_erasure_compares_addresses_by_one_case_rule_beyond_ascii_letters() -> N
     assert erased.addresses_left_out == 1
 
 
-# A capital Python 3.15 lower-cases (Unicode 17) and PostgreSQL 18 does not (Unicode 16).
-NEWER_CAPITAL = "\N{LATIN CAPITAL LETTER PHARYNGEAL VOICED FRICATIVE}"
+# U+A7CE, a capital Python 3.15 lower-cases (Unicode 17) and PostgreSQL 18 does not (Unicode 16).
+NEWER_CAPITAL = chr(0xA7CE)
 
 
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
