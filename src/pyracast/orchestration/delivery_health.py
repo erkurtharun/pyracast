@@ -106,7 +106,9 @@ def _plants() -> QuerySet[Region]:
 TABLES: Mapping[Scope, Callable[[], QuerySet[Any]]] = {
     "plants": _plants,
     "collections": lambda: CollectionJob.objects.filter(active_region("binding__region__")),
-    "deliveries": lambda: NotificationDelivery.objects.filter(active_region("schedule__region__")),
+    "deliveries": lambda: NotificationDelivery.objects.defer("prepared_message").filter(
+        active_region("schedule__region__")
+    ),
     "mail": OutboundMail.objects.all,
     "metering": lambda: EpiasCollectionJob.objects.filter(active_plant("plant__")),
     "calibrations": lambda: CalibrationRun.objects.filter(active_plant("plant__")),
@@ -221,12 +223,12 @@ CHECKS: tuple[Check, ...] = (
     Check(
         "unavailable_forecasts",
         "deliveries",
-        lambda window: _recent(window, prepared_message__kind=PreparedMessageKind.UNAVAILABLE),
+        lambda window: _recent(window, forecast_kind=PreparedMessageKind.UNAVAILABLE),
     ),
     Check(
         "partial_forecasts",
         "deliveries",
-        lambda window: _recent(window, prepared_message__tomorrow_complete=False),
+        lambda window: _recent(window, forecast_complete=False),
     ),
     Check(
         "mail_authentication_failures",
@@ -238,7 +240,7 @@ CHECKS: tuple[Check, ...] = (
         "deliveries",
         lambda window: _recent(
             window,
-            prepared_message__kind__in=(
+            forecast_kind__in=(
                 PreparedMessageKind.SAVED_COMPLETE,
                 PreparedMessageKind.SAVED_PARTIAL,
             ),

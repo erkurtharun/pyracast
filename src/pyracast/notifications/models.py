@@ -181,7 +181,14 @@ class NotificationDelivery(models.Model):
     snapshot = models.ForeignKey(ForecastSnapshot, on_delete=models.PROTECT, null=True)
     binding = models.ForeignKey(SiteBinding, on_delete=models.PROTECT)
     preparation_deadline = models.DateTimeField()
+    # The rendered mail; the retention sweep clears it on ended deliveries, the columns below stay.
     prepared_message = models.JSONField(null=True)
+    forecast_kind = models.CharField(
+        max_length=14, choices=PreparedMessageKind, blank=True, default=""
+    )
+    # Whether tomorrow's energy was complete; unknown for an unavailable forecast.
+    forecast_complete = models.BooleanField(null=True)
+    prepared_at = models.DateTimeField(null=True)
     transmit_started_at = models.DateTimeField(null=True)
     sent_at = models.DateTimeField(null=True)
     last_error = models.CharField(
@@ -203,10 +210,13 @@ class NotificationDelivery(models.Model):
                 PreparedMessageFormat,
                 name="notificationdelivery_prepared_format_chk",
             ),
-            choices_check(
-                "prepared_message__kind",
-                PreparedMessageKind,
-                name="notificationdelivery_prepared_kind_chk",
+            choices_check("forecast_kind", PreparedMessageKind, blank=True),
+            models.CheckConstraint(
+                condition=models.Q(
+                    forecast_kind="", forecast_complete__isnull=True, prepared_at__isnull=True
+                )
+                | (~models.Q(forecast_kind="") & models.Q(prepared_at__isnull=False)),
+                name="%(class)s_prepared_at_chk",
             ),
             models.CheckConstraint(
                 condition=~models.Q(status=NotificationDeliveryStatus.SENDING)

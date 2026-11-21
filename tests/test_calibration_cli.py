@@ -96,7 +96,7 @@ def test_existing_outputs_are_kept_unless_overwrite_is_given(
     assert (tmp_path / "out" / "model.json").read_text(encoding="utf-8") == "kept"
     assert main([*arguments, "--overwrite"]) == 0
     assert json.loads((tmp_path / "out" / "model.json").read_text(encoding="utf-8"))
-    assert not [path for path in tmp_path.iterdir() if path.name.startswith(".out")]
+    assert not [path for path in tmp_path.iterdir() if path.name.startswith(".calibration-")]
 
 
 @pytest.mark.parametrize(
@@ -147,7 +147,7 @@ def test_an_output_named_by_a_relative_path_is_staged_beside_it(
     assert main([*inputs(work), "--capacity-kw", "1000", "--output", "."]) == 0
 
     assert [path.parent for path in staged] == [tmp_path.resolve()]
-    assert staged[0].name.startswith(".work-")
+    assert staged[0].name.startswith(".calibration-")
     assert (work / "model.json").is_file()
 
 

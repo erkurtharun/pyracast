@@ -7,11 +7,7 @@ from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.utils import translation
 
-from pyracast.notifications.models import (
-    NotificationDelivery,
-    PreparedMessageFormat,
-    PreparedMessageKind,
-)
+from pyracast.notifications.models import NotificationDelivery, PreparedMessageFormat
 from pyracast.notifications.reminder_notice import (
     reminder_footer,
     unavailable_text,
@@ -40,7 +36,7 @@ def build_message(
 ) -> EmailMultiAlternatives:
     if delivery.prepared_message is not None:
         if delivery.prepared_message.get("format") == PreparedMessageFormat.PLAIN:
-            return build_unavailable_message(delivery, prepared_at or delivery.scheduled_for)[0]
+            return build_unavailable_message(delivery)[0]
         return _restore_message(delivery, cast(dict[str, str], delivery.prepared_message))
     with translation.override(delivery.language):
         return _restore_message(
@@ -56,7 +52,7 @@ def build_message(
 
 
 def build_unavailable_message(
-    delivery: NotificationDelivery, prepared_at: datetime
+    delivery: NotificationDelivery,
 ) -> tuple[EmailMultiAlternatives, dict[str, str]]:
     existing = delivery.prepared_message
     if isinstance(existing, dict) and existing.get("format") == PreparedMessageFormat.PLAIN:
@@ -64,13 +60,7 @@ def build_unavailable_message(
     else:
         with translation.override(delivery.language):
             subject, body = unavailable_text(delivery)
-        payload = {
-            "format": PreparedMessageFormat.PLAIN,
-            "subject": subject,
-            "body": body,
-            "kind": PreparedMessageKind.UNAVAILABLE,
-            "prepared_at": prepared_at.isoformat(),
-        }
+        payload = {"format": PreparedMessageFormat.PLAIN, "subject": subject, "body": body}
     return EmailMultiAlternatives(
         subject=payload["subject"],
         body=payload["body"],

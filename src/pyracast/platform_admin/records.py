@@ -161,7 +161,12 @@ class NotificationDeliveryAdmin(ReadOnlyAdmin):
     )
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[NotificationDelivery]:
-        return super().get_queryset(request).prefetch_related("recipient_rows")
+        return (
+            super()
+            .get_queryset(request)
+            .defer("prepared_message")
+            .prefetch_related("recipient_rows")
+        )
 
     @admin.display(description=gettext_lazy("Recipients"))
     def recipients(self, obj: NotificationDelivery) -> str:
