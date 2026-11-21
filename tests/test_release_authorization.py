@@ -1246,6 +1246,56 @@ def test_the_serialized_deploy_goes_on_when_the_deployment_lookup_wrote_nothing(
         (tmp_path / "output").unlink()
 
 
+def current_with_lookup(
+    tmp_path: Path, path: Path, lookup: str, main: str = MAIN
+) -> tuple[int, dict[str, str], str]:
+    arguments = ("--deployments", str(path), "--since", STARTED, "--deployment-lookup", lookup)
+    return run_command(tmp_path, "current", main, MAIN, *arguments)
+
+
+def test_a_decision_without_a_deployment_lookup_reports_no_deployment_state(
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "absent.json"
+    released = tmp_path / "released.json"
+    released.write_text(json.dumps([deployment()]), encoding="utf-8")
+
+    for path in (missing, released):
+        assert current_with_lookup(tmp_path, path, "false") == (0, {"current": "true"}, "")
+        (tmp_path / "output").unlink()
+    status, outputs, summary = current_with_lookup(tmp_path, missing, "false", main=OLDER)
+    assert (status, outputs) == (0, {"current": "false"})
+    assert summary.startswith("Superseded: ")
+
+
+def test_a_decision_after_an_asked_deployment_lookup_reports_what_it_read(
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "absent.json"
+    empty = tmp_path / "empty.json"
+    empty.write_text("[]", encoding="utf-8")
+
+    assert current_with_lookup(tmp_path, missing, "true")[:2] == (
+        0,
+        {"current": "true", "deployments": "unknown"},
+    )
+    (tmp_path / "output").unlink()
+    assert current_with_lookup(tmp_path, empty, "true")[:2] == (
+        0,
+        {"current": "true", "deployments": "read"},
+    )
+
+
+@pytest.mark.parametrize("lookup", ["", "unknown", "True"])
+def test_a_decision_refuses_an_unreadable_deployment_lookup_flag(
+    tmp_path: Path, lookup: str
+) -> None:
+    with pytest.raises(SystemExit) as refused:
+        current_with_lookup(tmp_path, tmp_path / "absent.json", lookup)
+
+    assert refused.value.code == 2
+
+
 def test_outside_a_workflow_the_decision_needs_no_step_output_files() -> None:
     assert release_authorization.main(["current", MAIN, OLDER], {}) == 0
     assert release_authorization.main(["current", "HEAD", MAIN], {}) == 1

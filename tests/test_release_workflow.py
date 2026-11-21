@@ -145,7 +145,8 @@ READ_BEFORE_DOWNLOAD = "Read the current main commit before the download"
 DECIDE_BEFORE_DOWNLOAD = "Decide before the download whether this release is still needed"
 CURRENT_WITH_RECORDS = (
     'python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA" '
-    '--deployments "$RUNNER_TEMP/release-deployments.json" --since "$CI_STARTED_AT"'
+    '--deployments "$RUNNER_TEMP/release-deployments.json" --since "$CI_STARTED_AT" '
+    '--deployment-lookup "$DEPLOYMENT_LOOKUP"'
 )
 CURRENT_ENVIRONMENT = {
     "MAIN_SHA": "${{ steps.main.outputs.sha }}",
@@ -226,7 +227,7 @@ def test_a_later_scan_ends_without_failing_when_a_finished_release_removed_its_i
     refuse = step(scan, "Refuse images that vanished without a release of this commit")
 
     assert download["id"] == "download"
-    assert download["continue-on-error"] is True
+    assert download["continue-on-error"] == f"${{{{ {AUTOMATIC} }}}}"
     assert (
         step(scan, FIND_DEPLOYMENTS)["if"]
         == f"steps.before.outputs.current == 'true' && ({AUTOMATIC})"
@@ -263,6 +264,45 @@ def test_a_failed_download_after_an_unreadable_deployment_lookup_says_so_and_fai
     )
     assert "could not be read" in explain["run"]
     assert deploy["steps"].index(explain) == deploy["steps"].index(download) + 1
+
+
+def test_an_operator_dispatch_asks_for_no_deployment_lookup_and_fails_at_a_failed_download() -> (
+    None
+):
+    jobs = release_jobs()
+    for identifier in ("scan", "deploy"):
+        job = jobs[identifier]
+        decisions = [
+            candidate
+            for candidate in job["steps"]
+            if "release_authorization.py current" in str(candidate.get("run", ""))
+        ]
+        finds = [
+            candidate
+            for candidate in job["steps"]
+            if str(candidate.get("name", "")).startswith(FIND_DEPLOYMENTS)
+        ]
+
+        assert job["env"]["DEPLOYMENT_LOOKUP"] == f"${{{{ {AUTOMATIC} }}}}", identifier
+        assert len(decisions) == 2, identifier
+        for decision in decisions:
+            assert decision["run"] == CURRENT_WITH_RECORDS, identifier
+        assert len(finds) == 2, identifier
+        for find in finds:
+            assert str(find["if"]).endswith(AUTOMATIC) or str(find["if"]).endswith(
+                f"({AUTOMATIC})"
+            ), identifier
+    scan, deploy = jobs["scan"], jobs["deploy"]
+    refuse = step(scan, "Refuse images that vanished without a release of this commit")
+
+    assert scan["steps"][first_download(scan)]["continue-on-error"] == f"${{{{ {AUTOMATIC} }}}}"
+    assert "failure()" not in refuse["if"]
+    assert "always()" not in refuse["if"]
+    assert "continue-on-error" not in deploy["steps"][first_download(deploy)]
+    assert (
+        "steps.before.outputs.deployments == 'unknown'"
+        in step(deploy, "Explain a failed download while the deployments are unknown")["if"]
+    )
 
 
 def test_ci_scans_all_five_images_before_merge() -> None:
@@ -427,10 +467,7 @@ def test_the_serialized_deploy_cancels_a_release_main_moved_past_just_before_the
         "MAIN_SHA": "${{ steps.main.outputs.sha }}",
         "CI_STARTED_AT": "${{ needs.authorize.outputs.ci_started_at }}",
     }
-    assert current["run"] == (
-        'python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA" '
-        '--deployments "$RUNNER_TEMP/release-deployments.json" --since "$CI_STARTED_AT"'
-    )
+    assert current["run"] == CURRENT_WITH_RECORDS
     assert cancel["if"] == "steps.current.outputs.current != 'true'"
     assert "cancelWorkflowRun" in cancel["with"]["script"]
     assert "core.setFailed" in cancel["with"]["script"]
@@ -818,21 +855,23 @@ def tracked_files() -> frozenset[str]:
     return frozenset(release_authorization._git(ROOT, "ls-files", "-z").split("\0")) - {""}
 
 
-def repository_name(path: Path) -> str | None:
+def repository_name(path: Path, root: Path = ROOT) -> str | None:
     try:
-        return path.resolve().relative_to(ROOT).as_posix()
+        return path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError:
         return None
 
 
-def module_file(module: str, bases: Sequence[Path], files: frozenset[str]) -> str | None:
+def module_file(
+    module: str, bases: Sequence[Path], files: frozenset[str], root: Path = ROOT
+) -> str | None:
     parts = module.split(".")
     for base in bases:
         for candidate in (
             base.joinpath(*parts[:-1], f"{parts[-1]}.py"),
             base.joinpath(*parts, "__init__.py"),
         ):
-            if (name := repository_name(candidate)) in files:
+            if (name := repository_name(candidate, root)) in files:
                 return name
     return None
 
@@ -914,7 +953,9 @@ def test_every_repository_file_a_workflow_step_names_is_a_pipeline_path() -> Non
         assert release_authorization.changes_pipeline(name), name
 
 
-def python_imports(source: str, directory: Path, files: frozenset[str]) -> set[str]:
+def python_imports(
+    source: str, directory: Path, files: frozenset[str], root: Path = ROOT
+) -> set[str]:
     modules: list[str] = []
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
@@ -924,7 +965,46 @@ def python_imports(source: str, directory: Path, files: frozenset[str]) -> set[s
     return {
         name
         for module in modules
-        if (name := module_file(module, (ROOT, directory), files)) is not None
+        if (name := module_file(module, (root, directory), files, root)) is not None
+    }
+
+
+def test_the_python_import_walk_follows_absolute_and_relative_imports(tmp_path: Path) -> None:
+    sources = {
+        "top.py": "",
+        "absolute.py": "",
+        "outside/helper.py": "",
+        "pkg/__init__.py": "",
+        "pkg/other.py": "",
+        "pkg/sibling.py": "",
+        "pkg/sub/__init__.py": "",
+        "pkg/sub/leaf.py": "",
+        "pkg/sub/deeper.py": "",
+    }
+    for name, text in sources.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    entry = (
+        "import absolute, json\n"
+        "from pkg.other import thing\n"
+        "from . import sibling\n"
+        "from .sub import leaf\n"
+        "from ..outside import helper\n"
+        "from .. import top\n"
+        "from .missing import nothing\n"
+        "def later():\n"
+        "    from .sub.deeper import value\n"
+    )
+
+    assert python_imports(entry, tmp_path / "pkg", frozenset(sources), tmp_path) == {
+        "absolute.py",
+        "pkg/other.py",
+        "pkg/sibling.py",
+        "pkg/sub/__init__.py",
+        "pkg/sub/leaf.py",
+        "pkg/sub/deeper.py",
+        "outside/helper.py",
+        "top.py",
     }
 
 
