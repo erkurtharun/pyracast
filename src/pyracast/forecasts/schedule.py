@@ -19,7 +19,7 @@ from pyracast.collection_window import (
     next_nightly_start,
 )
 from pyracast.connections.models import MAX_DAILY_QUOTA
-from pyracast.forecasts.jobs.claim import claimable_from, open_at_claim
+from pyracast.forecasts.jobs.claim import claimable_from, ended_at_claim, open_at_claim
 from pyracast.forecasts.jobs.ready import WAITING
 from pyracast.forecasts.models import (
     CollectionEndpoint,
@@ -143,7 +143,9 @@ class CollectionStatus:
     next_collection_at: datetime | None
 
 
-def _next_collection_at(collecting: Collecting, timezone: str, now: datetime) -> datetime | None:
+def _next_collection_at(
+    collecting: Collecting, schedule: CollectionSchedule | None, timezone: str, now: datetime
+) -> datetime | None:
     """The scheduler's next act: a missing nightly history job, one it revives, the latest slot's
     job it opens again, a queued or interrupted job claim takes, a slot."""
     night = open_night_window(now, timezone)
@@ -155,7 +157,9 @@ def _next_collection_at(collecting: Collecting, timezone: str, now: datetime) ->
         # A running job whose lease ended: the ready query hands it to claim again from then.
         interrupted=Min(
             Greatest(F("available_at"), moment),
-            filter=claimable(CollectionJobStatus.RUNNING, now) & open_at_claim(now),
+            filter=claimable(CollectionJobStatus.RUNNING, now)
+            & open_at_claim(now)
+            & ~ended_at_claim(collecting.binding, timezone, schedule, timing, now),
         ),
         **(
             {
@@ -198,12 +202,13 @@ def _next_collection_at(collecting: Collecting, timezone: str, now: datetime) ->
 
 def collection_status(schedule: CollectionSchedule, now: datetime) -> CollectionStatus:
     region = schedule.region
-    gate = collection_gate(region, schedule if schedule.pk is not None else None)
+    saved = schedule if schedule.pk is not None else None
+    gate = collection_gate(region, saved)
     if not isinstance(gate, Collecting):
         pending = region.status == RegionStatus.PENDING
         state = CollectionState.WAITING_FOR_APPROVAL if pending else CollectionState.PAUSED
         return CollectionStatus(state, gate, None)
-    next_at = _next_collection_at(gate, region.timezone, now)
+    next_at = _next_collection_at(gate, saved, region.timezone, now)
     if deferral(gate.binding.provider_account, now) is not None:
         return CollectionStatus(
             CollectionState.PROVIDER_ATTENTION,

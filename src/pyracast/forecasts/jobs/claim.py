@@ -2,11 +2,14 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
+from functools import reduce
+from operator import or_
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.db.models import Case, DateTimeField, F, Q, Value, When
-from django.db.models.functions import Greatest
+from django.db.models.functions import ExtractHour, ExtractMinute, Greatest, TruncDate
+from django.db.models.lookups import Exact
 
 from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS
@@ -23,7 +26,7 @@ from pyracast.forecasts.models import (
     CollectionJobStatus,
     CollectionSchedule,
 )
-from pyracast.forecasts.timing import forecast_timing, latest_forecast_slot
+from pyracast.forecasts.timing import ForecastTiming, forecast_timing, latest_forecast_slot
 from pyracast.provider_retry import next_provider_day, next_retry_at
 from pyracast.regions.models import Region
 
@@ -118,6 +121,42 @@ def _stale_reason(
     ):
         return CollectionJobError.SLOT_NOT_CONFIGURED
     return None
+
+
+def ended_at_claim(
+    binding: SiteBinding,
+    region_timezone: str,
+    schedule: CollectionSchedule | None,
+    timing: ForecastTiming,
+    now: datetime,
+) -> Q:
+    """Jobs claim ends without collecting while their binding is current and their schedule
+    enabled: _stale_reason's superseded forecast and unconfigured slot, and used-up attempts."""
+    ended = Q(retry_until__isnull=True, attempts__gte=PROVIDER_JOB.max_attempts)
+    latest_slot = latest_forecast_slot(now, binding.timezone, timing.times, timing.effective_from)
+    if latest_slot is not None:
+        ended |= Q(endpoint=CollectionEndpoint.FORECASTS, scheduled_for__lt=latest_slot)
+    if schedule is None:
+        return ended
+    slot_bound = Q(endpoint=CollectionEndpoint.FORECASTS) | Q(
+        endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
+        target_date=TruncDate("scheduled_for", tzinfo=ZoneInfo(binding.timezone)),
+    )
+    zone = ZoneInfo(region_timezone)
+    configured = [
+        Q(
+            Exact(ExtractHour("scheduled_for", tzinfo=zone), int(clock[:2])),
+            Exact(ExtractMinute("scheduled_for", tzinfo=zone), int(clock[3:])),
+        )
+        for clock in timing.times
+    ]
+    approval_acquisition = Q(
+        endpoint=CollectionEndpoint.FORECASTS,
+        scheduled_for__gte=schedule.effective_from,
+        pk=timing.first_job_id,
+    )
+    unconfigured = ~reduce(or_, configured) if configured else Q()
+    return ended | (slot_bound & unconfigured & ~approval_acquisition)
 
 
 def window_closed(job: CollectionJob, now: datetime) -> bool:
