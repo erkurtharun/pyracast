@@ -63,7 +63,6 @@ elif [[ ${1:-} == */bootstrap_database.py || ${1:-} == */backup.py ]]; then
     if [[ $MODE == *record-invalid ]]; then
       object='postgres/x.dump; touch /record-injected'
     else
-      # backup.py keeps the pre-release dump where the recovery helper looks for its archive.
       mkdir -p /var/lib/pyracast/reset
       printf 'archive of run %s\n' "$RUN" >"/var/lib/pyracast/reset/fixture-prerelease-$RUN.dump"
     fi
@@ -229,7 +228,6 @@ case "$*" in
     ;;
   *' up -d --wait --wait-timeout 180') connects "$RELEASE_SECRETS"; touch /app-running ;;
   *' run --rm --no-deps api python -c import django'*) connects "$RELEASE_SECRETS" ;;
-  # The throwaway restores of the record step and the recovery helper's database queries.
   *' config --format json') printf '{"services": {"postgres": {"image": "postgres@sha256:fixture"}}}\n' ;;
   *query_to_xml*) printf 'django_migrations 40\nplants_plant 3\n' ;;
   *'FROM pg_roles WHERE rolname IN'*) printf '2\n' ;;
@@ -353,16 +351,18 @@ units_installed() {
   grep -Fxq 'systemctl enable --now pyracast-backup.timer pyracast-rehearsal.timer pyracast-watchdog.timer' /calls
 }
 
-# The kept pre-release archives, their records and the session are gone; a reset's archive stays.
-maintenance_ended() {
+no_prerelease_files() {
   if compgen -G '/var/lib/pyracast/reset/*-prerelease-*' >/dev/null; then
     ls -l /var/lib/pyracast/reset >&2
     return 1
   fi
+}
+
+maintenance_ended() {
+  no_prerelease_files
   [[ ! -e /var/lib/pyracast/reset/session.json ]]
 }
 
-# The record kept this run's dump as the recovery point: its archive and the counted record.
 recovery_point_kept() {
   [[ -f /var/lib/pyracast/reset/fixture-prerelease-$1.dump ]]
   grep -Fq '"django_migrations": 40' "/var/lib/pyracast/reset/fixture-prerelease-$1.json"
@@ -380,7 +380,6 @@ next_run() {
   fi
 }
 
-# Runs the recovery command the failed release printed, through the previous release's helper.
 recover() {
   local command
   command=$(sed -n "s/^.*[Rr]ecover with: \(python3 \/opt\/pyracast\/current\/deploy\/reset_database.py .*\)$/\1/p" /result)
@@ -508,13 +507,11 @@ PY
     recover 'restore --confirm postgres/fixture-prerelease-1.dump'
     grep -Fq 'postgres/fixture-prerelease-1.dump is restored and the previous release serves again' /recovered
     recovery_point_kept 1
-    # A release fails before its record and cannot resume; the printed abort serves again.
     next_run 2
     [[ "$result" == 45 ]]
-    [[ ! -e /var/lib/pyracast/reset/fixture-prerelease-2.dump ]]
+    no_prerelease_files
     recover abort
     grep -Fq 'The previous release serves again and the marker is removed.' /recovered
-    # The next successful release removes the kept pre-release files and leaves a reset's archive.
     printf 'reset archive\n' >/var/lib/pyracast/reset/20261118T090000Z-prereset-kept.dump
     next_run 3
     [[ -f /var/lib/pyracast/reset/20261118T090000Z-prereset-kept.dump ]]
@@ -643,6 +640,7 @@ PY
         absent ' run --rm --no-deps migrate$'
         absent 'release_state.py'
         [[ ! -e "$session" ]]
+        no_prerelease_files
         [[ ! -e /record-injected ]]
         if grep -Fq 'record-injected' /result; then exit 1; fi
         units_untouched
@@ -674,8 +672,7 @@ PY
           maintenance-replaced|maintenance-prepared)
             session_names postgres/reset-archive.dump
             grep -Fxq "Release a forward fix, or recover with: $tool restore --confirm postgres/reset-archive.dump" /result
-            # The reset's archive is the recovery point; this run's dump is not kept.
-            [[ ! -e /var/lib/pyracast/reset/fixture-prerelease-1.dump ]]
+            no_prerelease_files
             ;;
           migration|maintenance-migration|legacy-migration|health|tls|response|retry-*)
             session_names postgres/fixture-prerelease-1.dump
@@ -686,6 +683,7 @@ PY
           *)
             [[ ! -e "$session" ]]
             grep -Fxq "The database is unchanged in this maintenance. Recover with: $tool abort" /result
+            no_prerelease_files
             ;;
         esac
         if [[ $MODE != first-* ]]; then [[ "$(grep -c 'reset_database.py' /result)" == 1 ]]; fi
@@ -796,7 +794,8 @@ PY
         grep -Fxq 'PGUSER=new-runtime' "$RELEASE_SECRETS/runtime.env"
         cmp /role "$RELEASE_SECRETS/runtime.env"
         [[ ! -e "$RELEASE_SECRETS/migration.env" ]]
-        # A resumed earlier run of the mode recovered rendered the previous release's files anew.
+        # In mode recovered the second run's failed resume and the printed abort rendered the
+        # previous release's files from host.json.
         if [[ -n $live && $MODE != recovered ]]; then grep -Fxq 'PGUSER=old-runtime' "$PREVIOUS_SECRETS/runtime.env"; fi
         kept=$live
         /usr/local/bin/python3 - "$new_release" "$kept" <<'PY'

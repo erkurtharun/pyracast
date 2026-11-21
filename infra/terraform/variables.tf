@@ -82,7 +82,7 @@ variable "data_disk_gb" {
 }
 
 variable "backup_retention_days" {
-  description = "Days an object in the backup bucket can be neither deleted nor replaced, by an unlocked retention policy; 0 sets none. Costs nothing extra; at most the seven days the lifecycle keeps a backup."
+  description = "Days each backup generation cannot be permanently deleted, by an unlocked retention policy; an overwrite or a delete still makes the live object noncurrent. No extra storage cost: the lifecycle keeps every generation seven days anyway. 0 sets none."
   type        = number
   default     = 0
 

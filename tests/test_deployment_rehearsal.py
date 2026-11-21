@@ -1,7 +1,14 @@
+import base64
+import hashlib
+import importlib
+import io
 import json
+import os
 import shutil
 import signal
 import subprocess
+import time
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from types import FrameType, SimpleNamespace
@@ -10,6 +17,10 @@ from typing import IO, Any, NamedTuple
 import pytest
 
 from deploy import backup, host, rehearsal, reset_database
+from tests.support.processes import interpreter
+
+BOUNDED_RUN = backup.bounded_run
+POPEN = subprocess.Popen
 
 OBJECT = "postgres/2026/11/20/20261120T030000Z-hourly-0123456789abcdef.dump"
 COUNTS = {"django_migrations": 40, "plants_plant": 3}
@@ -28,8 +39,6 @@ class Usage(NamedTuple):
 
 
 class Docker:
-    """A Docker host modelled at the command boundary the rehearsal uses."""
-
     def __init__(self, root: Path) -> None:
         self.root = root
         self.commands: list[list[str]] = []
@@ -58,6 +67,8 @@ class Docker:
             raise subprocess.CalledProcessError(3, command)
         if self.failing == "migrations" and "migrate" in command:
             raise subprocess.CalledProcessError(1, command)
+        if self.failing == "probe-timeout" and "migrate" in command:
+            raise subprocess.TimeoutExpired(command, timeout)
         if self.failing == "secrets-error" and command[-1] == "check_secrets":
             raise subprocess.CalledProcessError(1, command)
         if command[:2] == ["docker", "info"]:
@@ -91,11 +102,11 @@ class Docker:
         if self.failing == "restore":
             raise subprocess.CalledProcessError(1, command)
 
-    def download(self, helper: reset_database.Host, name: str) -> Path:
-        self.downloads.append((name, helper.state))
+    def download(self, _throwaway: rehearsal.Throwaway, directory: Path, name: str) -> Path:
+        self.downloads.append((name, directory))
         if self.failing == "download":
             raise reset_database.RefusedError("checksum")
-        archive = reset_database.archive_path(helper, name)
+        archive = directory / name.rsplit("/", 1)[-1]
         archive.write_bytes(b"PGDMP-archive")
         return archive
 
@@ -106,6 +117,14 @@ class Docker:
     def container(self) -> str:
         start = self.started()
         return start[start.index("--name") + 1]
+
+    def removed(self) -> bool:
+        container = self.container()
+        return self.commands[-3:] == [
+            ["docker", "rm", "--force", f"{container}-probe"],
+            ["docker", "rm", "--force", container],
+            ["docker", "volume", "rm", f"{container}-data"],
+        ]
 
 
 class Rehearsed:
@@ -176,7 +195,7 @@ def rehearsed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Rehearsed:
     monkeypatch.setattr(shutil, "disk_usage", fake.usage)
     monkeypatch.setattr(reset_database, "load_host", fake.helper)
     monkeypatch.setattr(reset_database, "capture", fake.docker.capture)
-    monkeypatch.setattr(reset_database, "download_archive", fake.docker.download)
+    monkeypatch.setattr(rehearsal, "download", fake.docker.download)
     monkeypatch.setattr(reset_database, "wait_until_ready", lambda _container: None)
     monkeypatch.setattr(backup, "bounded_run", fake.docker.bounded_run)
     monkeypatch.setattr(signal, "signal", fake.handlers.__setitem__)
@@ -247,10 +266,7 @@ def test_the_rehearsal_restores_the_latest_backup_with_its_roles_and_records_the
     migrated = index(docker.commands, lambda c: c[-2:] == ["migrate", "--check"])
     decrypted = index(docker.commands, lambda c: c[-1] == "check_secrets")
     assert bootstraps[1] < roles < counted < migrated < decrypted
-    assert docker.commands[-2:] == [
-        ["docker", "rm", "--force", container],
-        ["docker", "volume", "rm", f"{container}-data"],
-    ]
+    assert docker.removed()
 
 
 def test_the_throwaway_database_has_no_network_bounded_resources_and_its_own_volume(
@@ -277,7 +293,14 @@ def test_the_throwaway_database_has_no_network_bounded_resources_and_its_own_vol
         assert "/var/lib/pyracast" not in joined
         if "compose" in command:
             action = command[command.index("compose") + 5 :]
-            assert action[:1] == ["config"] or action[2:6] == ["run", "--rm", "--no-deps", "api"]
+            assert action[:1] == ["config"] or action[2:8] == [
+                "run",
+                "--rm",
+                "--no-deps",
+                "--name",
+                f"{container}-probe",
+                "api",
+            ]
 
 
 def test_the_probe_reaches_only_the_throwaway_and_takes_its_secrets_from_the_release(
@@ -295,6 +318,13 @@ def test_the_probe_reaches_only_the_throwaway_and_takes_its_secrets_from_the_rel
     ]
     for command in probes:
         assert not {"-e", "--env", "--env-file"} & set(command[command.index("run") :])
+        assert command[command.index("run") :][:5] == [
+            "run",
+            "--rm",
+            "--no-deps",
+            "--name",
+            f"{container}-probe",
+        ]
     assert (
         rehearsed.docker.overrides
         == [
@@ -302,6 +332,8 @@ def test_the_probe_reaches_only_the_throwaway_and_takes_its_secrets_from_the_rel
             "  api:\n"
             f"    network_mode: container:{container}\n"
             "    networks: !reset []\n"
+            "    labels:\n"
+            f'      {rehearsal.LABEL}: "true"\n'
             "    environment:\n"
             "      PGHOST: 127.0.0.1\n"
             '      PGPORT: "5432"\n'
@@ -330,6 +362,7 @@ def test_a_pre_release_backup_is_checked_for_a_migration_plan_the_release_can_ap
         ("roles", "roles", "CalledProcessError"),
         ("counts", "counts", "RuntimeError"),
         ("migrations", "migrations", "CalledProcessError"),
+        ("probe-timeout", "migrations", "TimeoutExpired"),
         ("secrets-error", "secrets", "CalledProcessError"),
         ("secrets-none", "secrets", "RuntimeError"),
     ],
@@ -355,11 +388,7 @@ def test_a_failed_step_is_recorded_and_reported_and_the_throwaway_is_removed(
         ("pyracast_rehearsal_failed", "WARNING", {"step": step, "error": error})
     ]
     if failure != "download":
-        container = docker.container()
-        assert docker.commands[-2:] == [
-            ["docker", "rm", "--force", container],
-            ["docker", "volume", "rm", f"{container}-data"],
-        ]
+        assert docker.removed()
 
 
 @pytest.mark.parametrize(
@@ -429,6 +458,10 @@ def test_nothing_is_removed_when_no_rehearsal_left_anything(rehearsed: Rehearsed
         json.dumps({"object": OBJECT, "kind": "weekly", "size": 1, "counts": {}}),
         json.dumps({"object": OBJECT, "kind": "hourly", "size": 1}),
         json.dumps({"object": OBJECT, "completed_at": 0}),
+        *(
+            json.dumps({"object": OBJECT, "kind": "hourly", "size": size, "counts": COUNTS})
+            for size in (0, -(10**12), True, "1000", 1000.5, None)
+        ),
     ],
 )
 def test_a_pointer_that_names_no_rehearsable_backup_fails_before_any_container_starts(
@@ -470,11 +503,7 @@ def test_a_rehearsal_stopped_by_systemd_removes_its_throwaway_and_records_the_st
         rehearsed.run()
 
     assert stop.value.code == 143
-    container = rehearsed.docker.container()
-    assert rehearsed.docker.commands[-2:] == [
-        ["docker", "rm", "--force", container],
-        ["docker", "volume", "rm", f"{container}-data"],
-    ]
+    assert rehearsed.docker.removed()
     assert rehearsed.recorded()["step"] == "terminated"
     assert rehearsed.events == [
         ("pyracast_rehearsal_failed", "WARNING", {"step": "terminated", "error": "SystemExit"})
@@ -497,11 +526,7 @@ def test_every_command_gets_only_the_time_left_and_none_starts_after_the_deadlin
     assert rehearsed.recorded()["step"] == "restore"
     assert rehearsed.events[0][2] == {"step": "restore", "error": "TimeoutExpired"}
     assert all(0 < timeout <= rehearsal.DEADLINE_SECONDS for timeout in rehearsed.docker.timeouts)
-    container = rehearsed.docker.container()
-    assert rehearsed.docker.commands[-2:] == [
-        ["docker", "rm", "--force", container],
-        ["docker", "volume", "rm", f"{container}-data"],
-    ]
+    assert rehearsed.docker.removed()
 
 
 def test_a_cleanup_that_fails_does_not_change_the_outcome(
@@ -518,3 +543,241 @@ def test_a_cleanup_that_fails_does_not_change_the_outcome(
 
     assert rehearsed.run() == 0
     assert rehearsed.recorded()["status"] == "passed"
+
+
+@pytest.mark.parametrize(
+    ("interruption", "step", "error"),
+    [("stop", "terminated", "SystemExit"), ("disk", "restore", "OSError")],
+)
+def test_a_restore_left_early_ends_its_process_at_once_and_removes_the_throwaway(
+    rehearsed: Rehearsed,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption: str,
+    step: str,
+    error: str,
+) -> None:
+    usage = shutil.disk_usage
+    checks: list[Path] = []
+    started: list[subprocess.Popen[bytes]] = []
+
+    class Recorded(POPEN[bytes]):
+        def __init__(self, *arguments: Any, **options: Any) -> None:
+            super().__init__(*arguments, **options)
+            started.append(self)
+
+    def bounded(_command: list[str], **options: Any) -> None:
+        checks.clear()
+        sleeper = [interpreter(), "-c", "import time; time.sleep(20)"]
+        BOUNDED_RUN(sleeper, **options)
+
+    def checked(path: Path) -> object:
+        checks.append(path)
+        if len(checks) == 2 and started:
+            if interruption == "stop":
+                rehearsed.handlers[signal.SIGTERM](signal.SIGTERM, None)
+            raise OSError("the disk cannot be read")
+        return usage(path)
+
+    monkeypatch.setattr(subprocess, "Popen", Recorded)
+    monkeypatch.setattr(backup, "bounded_run", bounded)
+    monkeypatch.setattr(shutil, "disk_usage", checked)
+    began = time.monotonic()
+
+    if interruption == "stop":
+        with pytest.raises(SystemExit) as stop:
+            rehearsed.run()
+        assert stop.value.code == 143
+    else:
+        assert rehearsed.run() == 1
+
+    assert time.monotonic() - began < 10
+    (child,) = started
+    assert child.returncode is not None
+    assert rehearsed.docker.removed()
+    assert rehearsed.recorded()["step"] == step
+    assert rehearsed.events == [
+        ("pyracast_rehearsal_failed", "WARNING", {"step": step, "error": error})
+    ]
+
+
+def test_a_probe_stopped_at_its_deadline_is_labelled_and_removed_by_name(
+    rehearsed: Rehearsed,
+) -> None:
+    rehearsed.docker.fail("probe-timeout")
+
+    assert rehearsed.run() == 1
+
+    container = rehearsed.docker.container()
+    (probe,) = [command for command in rehearsed.docker.commands if "migrate" in command]
+    assert probe[probe.index("--name") + 1] == f"{container}-probe"
+    assert f'{rehearsal.LABEL}: "true"' in rehearsed.docker.overrides[0]
+    assert rehearsed.docker.removed()
+
+
+def link(target: Path, at: Path) -> None:
+    try:
+        at.symlink_to(target, target_is_directory=True)
+    except OSError:
+        if os.name != "nt":
+            raise
+        importlib.import_module("_winapi").CreateJunction(str(target), str(at))
+
+
+def unlink(at: Path) -> None:
+    if at.is_junction():
+        os.rmdir(at)
+    else:
+        at.unlink()
+
+
+def test_one_rehearsal_reads_one_release_while_another_is_promoted(rehearsed: Rehearsed) -> None:
+    releases = rehearsed.root / "releases"
+    for name, script in (("first", BOOTSTRAP), ("second", "-- second release\n")):
+        (releases / name / "deploy").mkdir(parents=True)
+        (releases / name / "deploy/bootstrap.sql").write_text(script, encoding="utf-8")
+    current = rehearsed.root / "current"
+    link(releases / "first", current)
+    rehearsed.release = current
+
+    def promote() -> None:
+        unlink(current)
+        link(releases / "second", current)
+
+    rehearsed.docker.on_restore = promote
+
+    assert rehearsed.run() == 0
+
+    first = (releases / "first").resolve()
+    composed = [
+        command for command in rehearsed.docker.commands if command[:2] == ["docker", "compose"]
+    ]
+    assert len(composed) == 3
+    assert all(command[3] == str(first / "deploy/release.env") for command in composed)
+    assert [script for script in rehearsed.docker.scripts.values() if script.startswith("--")] == [
+        BOOTSTRAP,
+        BOOTSTRAP,
+    ]
+
+
+def test_a_failure_is_reported_before_its_record_is_written(
+    rehearsed: Rehearsed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rehearsed.docker.fail("download")
+    monkeypatch.setattr(host, "LAST_REHEARSAL", rehearsed.root / "missing" / "last-rehearsal.json")
+
+    with pytest.raises(FileNotFoundError):
+        rehearsed.run()
+
+    assert rehearsed.events == [
+        ("pyracast_rehearsal_failed", "WARNING", {"step": "download", "error": "RefusedError"})
+    ]
+
+
+def test_a_host_configuration_that_cannot_be_loaded_is_recorded_and_reported(
+    rehearsed: Rehearsed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unreadable(_config: Path) -> reset_database.Host:
+        raise KeyError("backup_bucket")
+
+    monkeypatch.setattr(reset_database, "load_host", unreadable)
+
+    assert rehearsed.run() == 1
+
+    assert rehearsed.recorded()["step"] == "configuration"
+    assert rehearsed.events == [
+        ("pyracast_rehearsal_failed", "WARNING", {"step": "configuration", "error": "KeyError"})
+    ]
+    assert rehearsed.docker.commands == []
+
+
+CONTENT = b"PGDMP" + bytes(range(256)) * 40
+
+
+class Media:
+    def __init__(self, blocks: list[bytes], on_read: Callable[[int], None]) -> None:
+        self.blocks = blocks
+        self.on_read = on_read
+        self.reads = 0
+
+    def __enter__(self) -> Media:
+        return self
+
+    def __exit__(self, *_exception: object) -> None:
+        return None
+
+    def read(self, _size: int) -> bytes:
+        self.reads += 1
+        self.on_read(self.reads)
+        return self.blocks.pop(0) if self.blocks else b""
+
+
+@pytest.mark.parametrize(
+    "case", ["complete", "longer", "shorter", "checksum", "room", "floor", "deadline"]
+)
+def test_the_download_is_bounded_by_the_objects_size_the_free_space_floor_and_the_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    now = [0.0]
+    free = [10**12]
+    requests: list[tuple[str, float]] = []
+    digest = base64.b64encode(hashlib.md5(CONTENT, usedforsecurity=False).digest()).decode()
+    size = {"longer": len(CONTENT) - 1, "shorter": len(CONTENT) + 1}.get(case, len(CONTENT))
+    if case == "room":
+        free[0] = FLOOR + size - 1
+
+    def on_read(reads: int) -> None:
+        if reads == 2 and case == "floor":
+            free[0] = FLOOR - 1
+        if reads == 2 and case == "deadline":
+            now[0] = rehearsal.DEADLINE_SECONDS + 1
+
+    def urlopen(request: urllib.request.Request, timeout: float) -> object:
+        requests.append((request.full_url, timeout))
+        assert request.get_header("Authorization") == "Bearer private-token"
+        if request.full_url.endswith("?alt=media"):
+            half = len(CONTENT) // 2
+            return Media([CONTENT[:half], CONTENT[half:]], on_read)
+        checksum = "other" if case == "checksum" else digest
+        return io.BytesIO(json.dumps({"md5Hash": checksum, "size": str(size)}).encode())
+
+    monkeypatch.setattr(rehearsal, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(rehearsal, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(
+        shutil, "disk_usage", lambda _path: Usage(10**12, 10**12 - free[0], free[0])
+    )
+    helper = reset_database.Host(
+        config=tmp_path / "host.json",
+        release=tmp_path,
+        bucket="private-backups",
+        runtime_version="1",
+    )
+    throwaway = rehearsal.Throwaway(helper)
+    directory = tmp_path / "download"
+    directory.mkdir()
+
+    if case == "complete":
+        archive = rehearsal.download(throwaway, directory, OBJECT)
+        assert archive.read_bytes() == CONTENT
+        assert [path.name for path in directory.iterdir()] == [archive.name]
+    else:
+        raised = {
+            "room": backup.CapacityError,
+            "floor": backup.CapacityError,
+            "deadline": subprocess.TimeoutExpired,
+        }.get(case, reset_database.RefusedError)
+        with pytest.raises(raised):
+            rehearsal.download(throwaway, directory, OBJECT)
+        assert list(directory.iterdir()) == []
+
+    metadata = "https://storage.googleapis.com/storage/v1/b/private-backups/o/" + OBJECT.replace(
+        "/", "%2F"
+    )
+    assert requests[0][0] == metadata
+    if case == "room":
+        assert len(requests) == 1
+    else:
+        media, timeout = requests[1]
+        assert media == metadata + "?alt=media"
+        assert 0 < timeout <= rehearsal.DEADLINE_SECONDS

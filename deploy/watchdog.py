@@ -1,12 +1,14 @@
 # ruff: noqa: S603 -- Fixed Docker and systemd executables with argument lists; no shell interpolation.
 import argparse
 import json
+import os
 import shutil
 import socket
 import ssl
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -133,13 +135,29 @@ def check_backup_age() -> None:
         )
 
 
+def schedule_rehearsal() -> None:
+    # A host without a record starts the rehearsal's window at the first check after the units
+    # are installed; linking never replaces a record the rehearsal wrote meanwhile.
+    temporary = host.LAST_REHEARSAL.with_name(f"{host.LAST_REHEARSAL.name}.{uuid.uuid4().hex}")
+    temporary.write_text(json.dumps({"status": "scheduled", "mark": host.clock_mark()}))
+    try:
+        os.link(temporary, host.LAST_REHEARSAL)
+    except FileExistsError:
+        pass
+    finally:
+        temporary.unlink()
+
+
 def check_rehearsal() -> None:
+    if not host.LAST_REHEARSAL.exists():
+        schedule_rehearsal()
+        return
     status = recorded(host.LAST_REHEARSAL)
     if status.get("status") == "failed":
         step = str(status.get("step"))
         report("pyracast_rehearsal_unhealthy", "WARNING", state="failed", step=step)
         return
-    mark = status.get("mark") if status.get("status") == "passed" else None
+    mark = status.get("mark") if status.get("status") in ("passed", "scheduled") else None
     if host.minimum_age(mark) > host.REHEARSAL_MAX_AGE_SECONDS:
         report("pyracast_rehearsal_unhealthy", "WARNING", state="overdue")
 

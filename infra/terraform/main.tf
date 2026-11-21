@@ -196,7 +196,7 @@ resource "google_storage_bucket" "backup" {
     }
   }
 
-  # Unlocked: it guards against an accidental deletion, and its owner can still remove it.
+  # Unlocked: it guards against an accidental permanent deletion, and its owner can still remove it.
   dynamic "retention_policy" {
     for_each = var.backup_retention_days > 0 ? [var.backup_retention_days] : []
     content {

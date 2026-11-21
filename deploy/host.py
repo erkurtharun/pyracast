@@ -74,7 +74,7 @@ def minimum_age(mark: object) -> float:
     boot, uptime = boot_clock()
     if isinstance(mark, dict) and mark.get("boot_id") == boot:
         then = mark.get("uptime_seconds")
-        if isinstance(then, int | float) and 0 <= then <= uptime:
+        if isinstance(then, int | float) and not isinstance(then, bool) and 0 <= then <= uptime:
             return uptime - then
     return uptime
 

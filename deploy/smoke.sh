@@ -446,7 +446,6 @@ errors = json.load(sys.stdin)["errors"]
 assert [error["code"] for error in errors] == ["email_password_mismatch"], errors
 ' < "$temporary/sign-in.json"
 [[ $("${secure_curl[@]}" https://localhost:18443/app/) == *'<title>Pyracast workspace'* ]]
-# The hourly backup and the weekly rehearsal against this database; the bucket is a directory.
 "${compose[@]}" exec -T api python - <<'PY'
 import django
 django.setup()
@@ -471,13 +470,13 @@ def upload(_bucket, name, archive):
     (bucket / name).parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(archive, bucket / name)
 
-def download(helper, name):
-    archive = reset_database.archive_path(helper, name)
+def download(_throwaway, directory, name):
+    archive = directory / name.rsplit('/', 1)[-1]
     shutil.copyfile(bucket / name, archive)
     return archive
 
 backup.upload_backup = upload
-reset_database.download_archive = download
+rehearsal.download = download
 host.LAST_BACKUP = temporary / 'last-backup.json'
 host.LAST_REHEARSAL = temporary / 'last-rehearsal.json'
 rehearsal.LOCK = temporary / 'rehearsal.lock'

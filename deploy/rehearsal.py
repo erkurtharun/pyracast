@@ -1,5 +1,7 @@
 import argparse
+import base64
 import dataclasses
+import hashlib
 import json
 import re
 import shutil
@@ -7,17 +9,19 @@ import signal
 import sys
 import tempfile
 import time
+import urllib.request
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from subprocess import DEVNULL, CalledProcessError, TimeoutExpired
+from urllib.parse import quote
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from deploy import backup, host, reset_database
-from deploy.operations_log import report
+from deploy.operations_log import access_token, report
 
 LOCK = Path("/var/lib/pyracast/rehearsal.lock")
 MEMINFO = Path("/proc/meminfo")
@@ -30,11 +34,15 @@ MEMORY_RESERVE_MB = 256
 # compressed archive besides the archive itself.
 DISK_FACTOR = 4
 SECRETS = re.compile(r"^\S+: (\d+) primary, (\d+) fallback, \d+ unreadable$", re.M)
+DOWNLOAD_BLOCK = 1024 * 1024
+DOWNLOAD_READ_TIMEOUT_SECONDS = 300
 # The probe shares the throwaway's network namespace, which has no route to the live database.
 OVERRIDE = """services:
   api:
     network_mode: container:{container}
     networks: !reset []
+    labels:
+      {label}: "true"
     environment:
       PGHOST: 127.0.0.1
       PGPORT: "5432"
@@ -69,13 +77,17 @@ class Pointer:
 def load_pointer() -> Pointer:
     data = json.loads(host.LAST_BACKUP.read_text())
     name = str(data["object"])
-    if not reset_database.OBJECT_PATTERN.fullmatch(name) or data["kind"] not in (
-        "hourly",
-        "prerelease",
+    size = data["size"]
+    if (
+        not reset_database.OBJECT_PATTERN.fullmatch(name)
+        or data["kind"] not in ("hourly", "prerelease")
+        or not isinstance(size, int)
+        or isinstance(size, bool)
+        or size <= 0
     ):
         raise ValueError("The backup pointer names no archive to rehearse.")
     counts = {str(table): int(count) for table, count in data["counts"].items()}
-    return Pointer(object=name, kind=str(data["kind"]), size=int(data["size"]), counts=counts)
+    return Pointer(object=name, kind=str(data["kind"]), size=size, counts=counts)
 
 
 class Throwaway:
@@ -83,6 +95,7 @@ class Throwaway:
         self.helper = helper
         self.expires = time.monotonic() + DEADLINE_SECONDS
         self.container = f"pyracast-rehearsal-{uuid.uuid4().hex}"
+        self.probe = f"{self.container}-probe"
         self.volume = f"{self.container}-data"
         self.docker_root = Path("/var/lib/docker")
 
@@ -123,6 +136,39 @@ def require_room(path: Path, needed: int) -> None:
     usage = shutil.disk_usage(path)
     if usage.free - usage.total * backup.FREE_FLOOR_FRACTION < needed:
         raise backup.CapacityError(f"{path} lacks {needed} bytes above its free-space floor.")
+
+
+def download(throwaway: Throwaway, directory: Path, name: str) -> Path:
+    bucket = throwaway.helper.bucket
+    metadata = backup.object_metadata(bucket, name)
+    size = int(metadata["size"])
+    require_room(directory, size)
+    request = urllib.request.Request(
+        f"https://storage.googleapis.com/storage/v1/b/{bucket}/o/{quote(name, safe='')}?alt=media",
+        headers={"Authorization": f"Bearer {access_token()}"},
+    )
+    archive = directory / name.rsplit("/", 1)[-1]
+    digest = hashlib.md5(usedforsecurity=False)
+    written = 0
+    timeout = min(DOWNLOAD_READ_TIMEOUT_SECONDS, throwaway.remaining())
+    try:
+        with backup.storage_response(request, timeout) as reply, archive.open("wb") as stream:
+            while block := reply.read(DOWNLOAD_BLOCK):
+                written += len(block)
+                if written > size:
+                    raise reset_database.RefusedError(f"The download of {name} exceeds its size.")
+                throwaway.remaining()
+                stream.write(block)
+                digest.update(block)
+                require_room(directory, 0)
+        if written != size or metadata.get("md5Hash") != base64.b64encode(digest.digest()).decode():
+            raise reset_database.RefusedError(
+                f"The download of {name} does not match the bucket's checksum."
+            )
+    except BaseException:
+        archive.unlink(missing_ok=True)
+        raise
+    return archive
 
 
 def require_capacity(throwaway: Throwaway, pointer: Pointer, directory: Path) -> None:
@@ -218,9 +264,13 @@ def restore(throwaway: Throwaway, archive: Path) -> None:
 
 def probe(throwaway: Throwaway, directory: Path, *command: str) -> str:
     override = directory / "rehearsal.yaml"
-    override.write_text(OVERRIDE.format(container=throwaway.container, memory=PROBE_MEMORY_MB))
-    run = ["-f", str(override), "run", "--rm", "--no-deps", "api", "pyracast", *command]
-    return throwaway.capture([*reset_database.compose(throwaway.helper), *run])
+    override.write_text(
+        OVERRIDE.format(container=throwaway.container, label=LABEL, memory=PROBE_MEMORY_MB)
+    )
+    run = ["-f", str(override), "run", "--rm", "--no-deps", "--name", throwaway.probe, "api"]
+    return throwaway.capture(
+        [*reset_database.compose(throwaway.helper), *run, "pyracast", *command]
+    )
 
 
 def decrypted(output: str) -> int:
@@ -232,6 +282,7 @@ def decrypted(output: str) -> int:
 
 def remove(throwaway: Throwaway) -> None:
     for command in (
+        ["docker", "rm", "--force", throwaway.probe],
         ["docker", "rm", "--force", throwaway.container],
         ["docker", "volume", "rm", throwaway.volume],
     ):
@@ -251,8 +302,7 @@ def rehearse(helper: reset_database.Host, directory: Path) -> dict[str, object]:
     try:
         with stage("download"):
             reset_database.step(f"Downloading gs://{helper.bucket}/{pointer.object}")
-            downloads = dataclasses.replace(helper, state=directory)
-            archive = reset_database.download_archive(downloads, pointer.object)
+            archive = download(throwaway, directory, pointer.object)
         with stage("restore"):
             reset_database.step("Restoring it with its roles into a throwaway PostgreSQL")
             start(throwaway)
@@ -289,21 +339,29 @@ def terminate(_signal: int, _frame: object) -> None:
     raise SystemExit(143)
 
 
-def run_rehearsal(helper: reset_database.Host) -> int:
+def configured(config: Path) -> reset_database.Host:
+    helper = reset_database.load_host(config)
+    # One rehearsal reads one release, also while a release promotes another.
+    return dataclasses.replace(helper, release=helper.release.resolve(strict=True))
+
+
+def run_rehearsal(config: Path) -> int:
     with tempfile.TemporaryDirectory(prefix="pyracast-rehearsal-") as temporary:
         try:
+            with stage("configuration"):
+                helper = configured(config)
             passed = rehearse(helper, Path(temporary))
         except StepFailedError as failure:
-            record({"status": "failed", "step": failure.step})
             report("pyracast_rehearsal_failed", "WARNING", step=failure.step, error=failure.error)
             print(f"The rehearsal failed in step {failure.step}: {failure.error}.", file=sys.stderr)
+            record({"status": "failed", "step": failure.step})
             return 1
         except SystemExit:
-            record({"status": "failed", "step": "terminated"})
             report("pyracast_rehearsal_failed", "WARNING", step="terminated", error="SystemExit")
+            record({"status": "failed", "step": "terminated"})
             raise
-    record({"status": "passed", **passed})
     report("pyracast_rehearsal_passed", "INFO", **passed)
+    record({"status": "passed", **passed})
     return 0
 
 
@@ -314,14 +372,13 @@ def main(arguments: list[str] | None = None) -> int:
     )
     parser.add_argument("host_config", type=Path)
     options = parser.parse_args(arguments)
-    helper = reset_database.load_host(options.host_config)
     # systemd stops a unit with SIGTERM; unwinding removes the throwaway database.
     signal.signal(signal.SIGTERM, terminate)
     with host.open_lock(LOCK) as lock:
         if not host.try_lock(lock):
             print("Another restore rehearsal holds its lock; nothing was changed.", file=sys.stderr)
             return 2
-        return run_rehearsal(helper)
+        return run_rehearsal(options.host_config)
 
 
 if __name__ == "__main__":

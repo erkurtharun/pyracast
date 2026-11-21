@@ -434,11 +434,76 @@ def test_the_rehearsal_status_is_reported_unless_a_recent_rehearsal_passed(
     assert rehearsal_events(watched) == expected
 
 
+@pytest.mark.parametrize("uptime", [DAY, 9 * DAY])
+def test_a_host_without_a_rehearsal_record_ages_it_from_the_first_check_that_finds_none(
+    watched: Host, uptime: float
+) -> None:
+    watched.uptime.write_text(f"{uptime:.2f} 0.00\n")
+    watched.last_rehearsal.unlink()
+
+    watchdog.main()
+
+    assert rehearsal_events(watched) == []
+    assert json.loads(watched.last_rehearsal.read_text()) == {
+        "status": "scheduled",
+        "mark": {"boot_id": "boot-a", "uptime_seconds": uptime},
+    }
+    assert [
+        path.name
+        for path in watched.last_rehearsal.parent.iterdir()
+        if path.name.startswith(watched.last_rehearsal.name)
+    ] == [watched.last_rehearsal.name]
+
+
+def test_a_rehearsal_record_written_meanwhile_is_never_replaced_by_the_schedule(
+    watched: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    watched.last_rehearsal.unlink()
+    mark = host.clock_mark
+
+    def rehearsed_meanwhile() -> dict[str, object]:
+        watched.rehearsed("failed", age=60)
+        return mark()
+
+    monkeypatch.setattr(host, "clock_mark", rehearsed_meanwhile)
+
+    watchdog.main()
+
+    assert json.loads(watched.last_rehearsal.read_text())["status"] == "failed"
+    assert [
+        path.name
+        for path in watched.last_rehearsal.parent.iterdir()
+        if path.name.startswith(watched.last_rehearsal.name)
+    ] == [watched.last_rehearsal.name]
+
+
+@pytest.mark.parametrize(
+    ("age", "boot", "overdue"),
+    [
+        (DAY, "boot-a", False),
+        (7 * DAY, "boot-a", False),
+        (9 * DAY, "boot-a", True),
+        (DAY, "boot-z", True),
+    ],
+)
+def test_a_scheduled_rehearsal_is_overdue_once_its_first_run_could_have_passed_long_ago(
+    watched: Host, age: float, boot: str, overdue: bool
+) -> None:
+    watched.uptime.write_text(f"{9 * DAY + 60:.2f} 0.00\n")
+    mark = {"boot_id": boot, "uptime_seconds": 9 * DAY + 60 - age}
+    watched.last_rehearsal.write_text(json.dumps({"status": "scheduled", "mark": mark}))
+    recorded = watched.last_rehearsal.read_bytes()
+
+    watchdog.main()
+
+    assert rehearsal_events(watched) == ([("WARNING", {"state": "overdue"})] if overdue else [])
+    assert watched.last_rehearsal.read_bytes() == recorded
+
+
 @pytest.mark.parametrize(("uptime", "overdue"), [(DAY, False), (9 * DAY, True)])
 @pytest.mark.parametrize(
     "status",
     [
-        None,
         "not json",
         json.dumps(["passed"]),
         json.dumps({"status": "passed", "mark": {"boot_id": "boot-z", "uptime_seconds": 1}}),
@@ -446,13 +511,10 @@ def test_the_rehearsal_status_is_reported_unless_a_recent_rehearsal_passed(
     ],
 )
 def test_without_a_rehearsal_of_this_boot_it_is_overdue_once_the_boot_outlasts_the_bound(
-    watched: Host, status: str | None, uptime: float, overdue: bool
+    watched: Host, status: str, uptime: float, overdue: bool
 ) -> None:
     watched.uptime.write_text(f"{uptime:.2f} 0.00\n")
-    if status is None:
-        watched.last_rehearsal.unlink()
-    else:
-        watched.last_rehearsal.write_text(status)
+    watched.last_rehearsal.write_text(status)
 
     watchdog.main()
     assert rehearsal_events(watched) == ([("WARNING", {"state": "overdue"})] if overdue else [])

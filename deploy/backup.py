@@ -14,6 +14,8 @@ import tempfile
 import time
 import urllib.request
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from http.client import HTTPException
 from pathlib import Path
 from typing import IO, Any
@@ -82,8 +84,14 @@ def retryable(status: int) -> bool:
     return status in (408, 429) or status >= 500
 
 
-def storage_json(request: urllib.request.Request, timeout: float) -> Any:
+@contextmanager
+def storage_response(request: urllib.request.Request, timeout: float) -> Iterator[IO[bytes]]:
     with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+        yield response
+
+
+def storage_json(request: urllib.request.Request, timeout: float) -> Any:
+    with storage_response(request, timeout) as response:
         return json.load(response)
 
 
@@ -144,6 +152,24 @@ def upload_backup(bucket: str, name: str, archive: Path) -> None:
         attempt += 1
 
 
+def wait_within(
+    process: subprocess.Popen[bytes],
+    command: list[str],
+    timeout: float,
+    deadline: float,
+    disk: Path,
+    floor: float,
+) -> int:
+    while True:
+        try:
+            return process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            if shutil.disk_usage(disk).free < floor:
+                raise CapacityError(f"{disk} fell below {FREE_FLOOR_FRACTION:.0%} free.") from None
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(command, timeout) from None
+
+
 def bounded_run(
     command: list[str],
     *,
@@ -159,19 +185,12 @@ def bounded_run(
     if usage.free < floor:
         raise CapacityError(f"{disk} has less than {FREE_FLOOR_FRACTION:.0%} free.")
     with subprocess.Popen(command, stdin=stdin, stdout=stdout, stderr=stderr) as process:
-        while True:
-            try:
-                status = process.wait(timeout=1)
-                break
-            except subprocess.TimeoutExpired:
-                if shutil.disk_usage(disk).free < floor:
-                    process.kill()
-                    raise CapacityError(
-                        f"{disk} fell below {FREE_FLOOR_FRACTION:.0%} free."
-                    ) from None
-                if time.monotonic() >= deadline:
-                    process.kill()
-                    raise subprocess.TimeoutExpired(command, timeout) from None
+        try:
+            status = wait_within(process, command, timeout, deadline, disk, floor)
+        except BaseException:
+            # Popen.__exit__ kills only on KeyboardInterrupt and otherwise waits for the child.
+            process.kill()
+            raise
     if status:
         raise subprocess.CalledProcessError(status, command)
 
@@ -223,7 +242,9 @@ def dump_database(release: Path, archive: Path) -> dict[str, int]:
                 timeout=DUMP_TIMEOUT_SECONDS,
                 disk=archive.parent,
             )
-        except (subprocess.TimeoutExpired, CapacityError):
+        except subprocess.CalledProcessError:
+            raise
+        except BaseException:
             # Killing the Compose client leaves pg_dump and its snapshot running in the container.
             subprocess.run(
                 [
@@ -272,21 +293,21 @@ def store_backup(release: Path, bucket: str, kind: str, directory: Path) -> tupl
         counts = dump_database(release, partial)
         partial.replace(archive)
         upload_backup(bucket, name, archive)
+        if kind == "prerelease":
+            record = {"object": name, "counts": counts}
+            write_atomically(release / host.PRERELEASE_RECORD, json.dumps(record))
+        pointer = {
+            "object": name,
+            "kind": kind,
+            "size": archive.stat().st_size,
+            "counts": counts,
+            "mark": host.clock_mark(),
+        }
+        write_atomically(host.LAST_BACKUP, json.dumps(pointer))
     except BaseException:
         partial.unlink(missing_ok=True)
         archive.unlink(missing_ok=True)
         raise
-    if kind == "prerelease":
-        record = {"object": name, "counts": counts}
-        write_atomically(release / host.PRERELEASE_RECORD, json.dumps(record))
-    pointer = {
-        "object": name,
-        "kind": kind,
-        "size": archive.stat().st_size,
-        "counts": counts,
-        "mark": host.clock_mark(),
-    }
-    write_atomically(host.LAST_BACKUP, json.dumps(pointer))
     return name, archive
 
 

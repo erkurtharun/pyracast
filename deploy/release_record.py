@@ -48,6 +48,40 @@ def discard(host: Host, name: str) -> None:
         path.unlink(missing_ok=True)
 
 
+def named_by_session(host: Host, name: str) -> bool:
+    # A session that cannot be read may still name the dump, so it keeps it.
+    try:
+        session = held_session(host)
+    except (OSError, ValueError, TypeError):
+        return True
+    return session is not None and session.object == name
+
+
+def discard_unnamed(host: Host) -> int:
+    try:
+        session = held_session(host)
+    except (OSError, ValueError, TypeError) as error:
+        print(
+            f"The maintenance session {host.session} cannot be read ({error}); "
+            "no pre-release file was removed.",
+            file=sys.stderr,
+        )
+        return 1
+    named = (
+        set()
+        if session is None
+        else {
+            reset_database.archive_path(host, session.object),
+            reset_database.record_path(host, session.object),
+        }
+    )
+    removed = [path for path in sorted(host.state.glob(f"*{PRERELEASE}*")) if path not in named]
+    for path in removed:
+        path.unlink()
+    print(f"Removed {len(removed)} pre-release files no session names from {host.state}.")
+    return 0
+
+
 def counted_record(host: Host, name: str, dumped: dict[str, int]) -> Record:
     archive = reset_database.archive_path(host, name)
     counts = reset_database.verify_archive(host, archive)
@@ -78,23 +112,22 @@ def record_session(host: Host, record: Path) -> Session:
         raise ValueError(f"{record} names no valid pre-release object")
     name, counts = dumped
     try:
-        kept = counted_record(host, name, counts)
+        reset_database.save_record(host, counted_record(host, name, counts))
+        recorded = Session(
+            marker=reset_database.marker_identity(host),
+            object=name,
+            release=host.release.resolve().name,
+            replaced=True,
+        )
+        reset_database.save_session(host, recorded)
     except BaseException:
-        discard(host, name)
+        if not named_by_session(host, name):
+            discard(host, name)
         raise
-    reset_database.save_record(host, kept)
-    recorded = Session(
-        marker=reset_database.marker_identity(host),
-        object=name,
-        release=host.release.resolve().name,
-        replaced=True,
-    )
-    reset_database.save_session(host, recorded)
     return recorded
 
 
 def end(host: Host) -> int:
-    """After a successful release no maintenance is open: its session and pre-release dumps go."""
     if host.marker.exists():
         print(f"{host.marker} exists: a maintenance is open; nothing was removed.", file=sys.stderr)
         return 1
@@ -107,7 +140,6 @@ def end(host: Host) -> int:
 
 
 def recovery(host: Host) -> str:
-    """The recovery the helper accepts from this maintenance's session, as its guards read it."""
     try:
         session = held_session(host)
     except (OSError, ValueError, TypeError) as error:
@@ -135,6 +167,8 @@ def main(arguments: list[str] | None = None) -> int:
             action, record = "recovery", ""
         case [config, "end"]:
             action, record = "end", ""
+        case [config, "discard"]:
+            action, record = "discard", ""
         case _:
             return 2
     try:
@@ -147,6 +181,8 @@ def main(arguments: list[str] | None = None) -> int:
         return 0
     if action == "end":
         return end(host)
+    if action == "discard":
+        return discard_unnamed(host)
     try:
         session = record_session(host, Path(record))
     except Exception as error:

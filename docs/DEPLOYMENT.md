@@ -381,7 +381,7 @@ successful `main` CI runs trigger it automatically. The workflow:
    running release keeps serving until the database is reset.
 5. Promotes `current` only after container readiness checks and a local HTTPS request
    verify the public certificate, routing and database health, then installs the
-   release's watchdog and backup units. Each build has its own release directory;
+   release's watchdog, backup and restore rehearsal units. Each build has its own release directory;
    a redeploy never edits the live one. It records the serving and the previous
    release in `/var/lib/pyracast/release-state.json` and removes every other release
    directory, its staged secrets and the images no kept release uses.
@@ -526,15 +526,21 @@ fixtures do not establish provider access or inbox delivery.
   `migrate --check` (`--plan` for a pre-release dump) and requires a stored secret to
   decrypt. The outcome, with the recovery time or the failed step, goes to
   `/var/lib/pyracast/last-rehearsal.json` and the operations log; the watchdog reports
-  a failed rehearsal, or none passed within eight days of uptime. Run one at once with
+  a failed rehearsal, or none passed within eight days of uptime. A host without that
+  file starts the eight days at the watchdog's first check after the units are installed.
+  One rehearsal reads one release directory from start to end; everything it starts
+  carries the `pyracast.rehearsal` label. Run one at once with
   `systemctl start pyracast-rehearsal.service`.
-- **Paid backup protection** is off until set in `terraform.tfvars` and applied:
-  `backup_retention_days` (up to 7) adds an unlocked bucket retention policy,
-  `data_disk_snapshot_days` (up to 7) a daily data-disk snapshot, and
+- **Optional backup protection** is off until set in `terraform.tfvars` and applied.
+  `backup_retention_days` (up to 7): days each backup generation cannot be permanently
+  deleted, by an unlocked retention policy; an overwrite or a delete still makes the live
+  object noncurrent. No extra storage cost: the lifecycle keeps every generation seven
+  days anyway. `data_disk_snapshot_days` (up to 7) takes a daily data-disk snapshot and
   `backup_daily_tier = true` keeps the first hourly backup of each UTC day for 30 days
-  under `daily/` once the startup script has run again. That breaks the published
-  seven-day statement: change `web/src/features/public-site/legal-copy.ts` first. To
-  restore a `daily/` object with the helper, copy it to a `postgres/` name.
+  under `daily/` once the startup script has run again; both cost storage. The daily tier
+  breaks the published seven-day statement: change
+  `web/src/features/public-site/legal-copy.ts` first. To restore a `daily/` object with
+  the helper, copy it to a `postgres/` name.
 - **Key rotation:** add a numeric runtime secret version, update Terraform's
   `runtime_secret_version`, apply it, and run the VM startup script through a
   controlled maintenance session to refresh `/etc/pyracast/host.json`, then
@@ -765,8 +771,10 @@ unchanged in this maintenance and the session names this run's pre-release dump,
 PostgreSQL, compares with the dump's row counts and records for the helper. A dump
 without an applied migration is refused. A failure to record, or to keep the dump,
 exits before `migrate`. Every later run of the maintenance keeps that session and
-drops its own dump. A successful release deletes the kept pre-release dumps, their
-records and the session file; after `abort` or `restore` they stay until then. The
+drops its own dump. Each run starts by deleting every pre-release file the held session
+does not name, and a run that fails before its record deletes its own dump again; while
+the session cannot be read, nothing is deleted. A successful release deletes the kept
+pre-release dumps, their records and the session file. The
 log names the state and prints its recovery, read from the session:
 
 | State | Marker | `current` | Runtime password | Running | Recovery |
@@ -850,8 +858,9 @@ failed stop, that the printed password command works after `/run` is emptied, th
 reset session keeps its marker and is recovered with its own archive, that a second
 release in the same maintenance and a kill during `migrate` keep the first recovery
 point, that the previous release's helper runs the printed `restore` from the kept
-archive without the bucket and the printed `abort`, and that the next successful
-release deletes the kept pre-release files, that pruning keeps the previous release, that a release whose job is
+archive without the bucket and the printed `abort`, that a failed run leaves no
+pre-release dump the session does not name, that the next successful release deletes
+the kept pre-release files and pruning keeps the previous release, that a release whose job is
 cancelled during `migrate` still completes and can be followed again, and that a
 release whose public port does not enforce required origin pulls resumes the previous
 release.

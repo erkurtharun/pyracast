@@ -198,6 +198,7 @@ def test_a_mark_of_an_earlier_boot_is_at_least_as_old_as_this_boot(boot: Boot) -
         {"boot_id": "boot-a", "uptime_seconds": "900"},
         {"boot_id": "boot-a", "uptime_seconds": 2000.0},
         {"boot_id": "boot-a", "uptime_seconds": -1.0},
+        {"boot_id": "boot-a", "uptime_seconds": True},
     ],
 )
 def test_an_unreadable_or_impossible_mark_counts_as_old_as_this_boot(

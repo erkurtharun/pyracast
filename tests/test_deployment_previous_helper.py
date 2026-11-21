@@ -20,8 +20,8 @@ DEPLOY = ROOT / "deploy"
 # The helper that recovers the first upgrade to this installer: deploy/reset_database.py on main
 # at 7c7c272. Its application services are every service of its drain order.
 FIRST_UPGRADE = "7c7c272"
-# The helper of the release production serves when this one is installed: main at ad999328.
-PREVIOUS_RELEASE = "ad999328"
+# The helper of the release production serves when this one is installed: main at 4d94243c.
+PREVIOUS_RELEASE = "4d94243c"
 FIRST_UPGRADE_STOP_ORDER = (
     ("660", ("dispatcher",)),
     ("660", ("worker", "notifications")),
@@ -770,6 +770,105 @@ def test_the_end_step_on_a_host_without_kept_files_changes_nothing(
 
     assert release_record.main(["/etc/pyracast/host.json", "end"]) == 0
     assert not maintenance.host.state.exists()
+
+
+def prerelease_files(maintenance: Maintenance) -> list[str]:
+    return [name for name in maintenance.kept() if "-prerelease-" in name]
+
+
+def test_discarding_without_a_held_session_removes_every_pre_release_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maintenance = state_after_maintenances(tmp_path)
+    monkeypatch.setattr(reset_database, "load_host", lambda config: maintenance.host)
+    maintenance.host.marker.unlink()
+    maintenance.release(migrates=False)
+    session = maintenance.host.session.read_bytes()
+
+    assert release_record.main(["/etc/pyracast/host.json", "discard"]) == 0
+
+    assert prerelease_files(maintenance) == []
+    assert reset_database.archive_path(maintenance.host, ARCHIVE).name in maintenance.kept()
+    assert maintenance.host.session.read_bytes() == session
+    assert str(maintenance.host.state) in capsys.readouterr().out
+
+
+def test_discarding_keeps_the_dump_the_held_session_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maintenance = cli_host(tmp_path, monkeypatch)
+    first = maintenance.release(migrates=True)
+    kept = maintenance.kept()
+    maintenance.release(migrates=False)
+    reset_database.archive_path(maintenance.host, first).with_suffix(".partial").write_bytes(b"")
+
+    assert release_record.main(["/etc/pyracast/host.json", "discard"]) == 0
+
+    assert maintenance.kept() == kept
+    assert reset_database.archive_path(maintenance.host, first).name in kept
+
+
+def test_discarding_beside_an_unreadable_session_removes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maintenance = cli_host(tmp_path, monkeypatch)
+    maintenance.release(migrates=False)
+    maintenance.host.marker.write_text("m", encoding="utf-8")
+    maintenance.host.session.write_text("not json", encoding="utf-8")
+    files = maintenance.kept()
+
+    assert release_record.main(["/etc/pyracast/host.json", "discard"]) == 1
+
+    assert maintenance.kept() == files
+    assert str(maintenance.host.session) in capsys.readouterr().err
+
+
+def written_then_failed(path: Path) -> None:
+    if path.name == "session.json":
+        raise subprocess.CalledProcessError(1, ["sync", "-f", str(path)], stderr="disk failed")
+
+
+@pytest.mark.parametrize(
+    "failure", ["record", "marker", "session", "session synced", "session unreadable"]
+)
+def test_a_recovery_point_that_cannot_be_recorded_keeps_only_a_dump_the_session_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    maintenance = Maintenance(tmp_path / "host")
+    name = maintenance.release(migrates=False)
+
+    def failed(*_arguments: object) -> None:
+        raise OSError("No space left on device")
+
+    match failure:
+        case "record":
+            monkeypatch.setattr(reset_database, "save_record", failed)
+        case "marker":
+            monkeypatch.setattr(reset_database, "marker_identity", failed)
+        case "session":
+            monkeypatch.setattr(reset_database, "save_session", failed)
+        case "session unreadable":
+
+            def torn(host: reset_database.Host, _session: reset_database.Session) -> None:
+                host.session.write_text("not json", encoding="utf-8")
+                raise OSError("No space left on device")
+
+            monkeypatch.setattr(reset_database, "save_session", torn)
+        case _:
+            monkeypatch.setattr(reset_database, "sync", written_then_failed)
+
+    with pytest.raises((OSError, subprocess.CalledProcessError)):
+        release_record.record_session(maintenance.host, maintenance.record)
+
+    if failure == "session unreadable":
+        assert reset_database.archive_path(maintenance.host, name).name in maintenance.kept()
+    elif failure == "session synced":
+        archive = reset_database.archive_path(maintenance.host, name)
+        assert maintenance.kept() == sorted(
+            [archive.name, archive.with_suffix(".json").name, "session.json"]
+        )
+    else:
+        assert prerelease_files(maintenance) == []
 
 
 def cli_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Maintenance:

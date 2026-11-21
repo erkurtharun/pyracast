@@ -849,11 +849,30 @@ def test_an_upgrade_records_the_maintenance_recovery_point_right_before_migrate(
 
     assert script.index("--kind prerelease") < script.index('"${compose[@]}" up -d rabbitmq')
     assert script.index('"${compose[@]}" up -d rabbitmq') < record
-    assert script.count("release_record.py") == 3
+    assert script.count("release_record.py") == 5
     assert script.count(host.PRERELEASE_RECORD) == 2
     assert (
         f'rm -f "$release/{host.PRERELEASE_RECORD}"' in script[: script.index("--kind prerelease")]
     )
+
+
+def test_a_release_keeps_no_pre_release_dump_the_held_session_does_not_name() -> None:
+    script = text(DEPLOY / "install-release.sh")
+    discard = 'python3 "$release/deploy/release_record.py" /etc/pyracast/host.json discard'
+    path = failure_path()
+
+    assert script.count(discard) == 2
+    before = script.rindex(discard)
+    assert script.index("if [[ ! -L /opt/pyracast/current ]]; then") < before
+    assert before < script.index("\nbegin_maintenance\nif [[ -L /opt/pyracast/current")
+    assert (
+        "      if (( recorded == 0 )); then\n"
+        f"        {discard} >&2 \\\n"
+        "          || echo 'WARNING: pre-release files in /var/lib/pyracast/reset were not "
+        "removed; see the line above.' >&2\n"
+        "      fi\n"
+    ) in path
+    assert path.index(discard) < path.index("stop_application")
 
 
 def test_a_successful_release_ends_the_maintenance_session_without_risking_the_release() -> None:

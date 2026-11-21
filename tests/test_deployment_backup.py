@@ -6,6 +6,7 @@ import re
 import shutil
 import signal
 import subprocess
+import tempfile
 import time
 import urllib.request
 from collections.abc import Callable, Iterator
@@ -14,13 +15,14 @@ from email.message import Message
 from http.client import HTTPException
 from pathlib import Path
 from types import SimpleNamespace
-from typing import BinaryIO, NamedTuple, cast
+from typing import Any, BinaryIO, NamedTuple, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
 from deploy import backup, host, operations_log
+from tests.support.processes import interpreter
 
 
 @pytest.mark.parametrize("valid_checksum", [True, False])
@@ -516,6 +518,165 @@ def test_a_bounded_command_that_fails_raises_its_status(
         )
 
     assert failed.value.returncode == 3
+
+
+SLEEPER = "import sys, time; sys.stdout.buffer.write(b'PGDMP'); sys.stdout.flush(); time.sleep(20)"
+
+
+def stopped_by_systemd() -> None:
+    backup.terminate(signal.SIGTERM, None)
+
+
+def failing_disk() -> None:
+    raise OSError("the disk cannot be read")
+
+
+def interrupted(
+    monkeypatch: pytest.MonkeyPatch, interruption: Callable[[], None]
+) -> list[subprocess.Popen[bytes]]:
+    started: list[subprocess.Popen[bytes]] = []
+    calls = [0]
+    usage = shutil.disk_usage
+
+    class Recorded(subprocess.Popen[bytes]):
+        def __init__(self, *arguments: Any, **options: Any) -> None:
+            super().__init__(*arguments, **options)
+            started.append(self)
+
+    def checked(path: Path) -> object:
+        calls[0] += 1
+        if calls[0] == 2:
+            interruption()
+        return usage(path)
+
+    monkeypatch.setattr(subprocess, "Popen", Recorded)
+    monkeypatch.setattr(shutil, "disk_usage", checked)
+    return started
+
+
+@pytest.mark.parametrize(
+    ("interruption", "raised"), [(stopped_by_systemd, SystemExit), (failing_disk, OSError)]
+)
+def test_a_bounded_command_left_early_is_killed_and_reaped_at_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption: Callable[[], None],
+    raised: type[BaseException],
+) -> None:
+    started = interrupted(monkeypatch, interruption)
+    began = time.monotonic()
+
+    with pytest.raises(raised):
+        backup.bounded_run(
+            [interpreter(), "-c", SLEEPER],
+            stdin=None,
+            stdout=subprocess.DEVNULL,
+            stderr=None,
+            timeout=600,
+            disk=tmp_path,
+        )
+
+    assert time.monotonic() - began < 10
+    (child,) = started
+    assert child.returncode is not None
+
+
+@pytest.mark.parametrize(
+    ("kind", "interruption", "exit_code"),
+    [
+        ("prerelease", stopped_by_systemd, 143),
+        ("hourly", stopped_by_systemd, 143),
+        ("prerelease", failing_disk, 1),
+        ("hourly", failing_disk, 1),
+    ],
+)
+def test_a_dump_left_early_removes_its_files_ends_its_backends_and_reports_the_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    interruption: Callable[[], None],
+    exit_code: int,
+) -> None:
+    started = interrupted(monkeypatch, interruption)
+    terminated: list[list[str]] = []
+    reports: list[tuple[str, str, dict[str, object]]] = []
+    temporary = tmp_path / "tmp"
+    temporary.mkdir()
+    recovery = tmp_path / "reset"
+    recovery.mkdir()
+
+    @contextmanager
+    def release_lock(_wait: float) -> Iterator[bool]:
+        yield True
+
+    def run(command: list[str], **_options: object) -> subprocess.CompletedProcess[str]:
+        terminated.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(backup, "compose_command", lambda _release: [interpreter(), "-c", SLEEPER])
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(tempfile, "tempdir", str(temporary))
+    monkeypatch.setattr(host, "release_lock", release_lock)
+    monkeypatch.setattr(host, "holds_release_lock", lambda descriptor: descriptor == 9)
+    monkeypatch.setattr(host, "RELEASE_BLOCKED", tmp_path / "release-blocked")
+    monkeypatch.setattr(host, "RECOVERY_STATE", recovery)
+    monkeypatch.setattr(host, "LAST_BACKUP", tmp_path / "last-backup.json")
+    monkeypatch.setattr(backup, "upload_backup", forbidden)
+    monkeypatch.setattr(
+        backup,
+        "report",
+        lambda event, severity, **details: reports.append((event, severity, details)),
+    )
+    arguments = [str(host_configuration(tmp_path, "private-backups")), "--kind", kind]
+    began = time.monotonic()
+
+    if exit_code == 143:
+        with pytest.raises(SystemExit) as stopped:
+            backup.run([*arguments, "--lock-fd", "9"])
+        assert stopped.value.code == 143
+    else:
+        assert backup.run([*arguments, "--lock-fd", "9"]) == 1
+
+    assert time.monotonic() - began < 10
+    assert started[0].returncode is not None
+    assert list(temporary.iterdir()) == []
+    assert list(recovery.iterdir()) == []
+    assert not (tmp_path / "last-backup.json").exists()
+    ((command,),) = [terminated]
+    assert "pg_terminate_backend(pid)" in command[-1]
+    assert "application_name = 'pyracast-backup'" in command[-1]
+    expected = {"reason": "terminated"} if exit_code == 143 else {}
+    assert reports == [("pyracast_backup_failed", "ERROR", expected)]
+
+
+@pytest.mark.parametrize("unwritable", [host.PRERELEASE_RECORD, "last-backup.json"])
+def test_a_pre_release_dump_whose_records_cannot_be_written_is_not_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unwritable: str
+) -> None:
+    write = backup.write_atomically
+
+    def dump(_release: Path, archive: Path) -> dict[str, int]:
+        archive.write_bytes(b"PGDMP")
+        return {"django_migrations": 40}
+
+    def written(path: Path, content: str) -> None:
+        if path.name == unwritable:
+            raise OSError("No space left on device")
+        write(path, content)
+
+    monkeypatch.setattr(backup, "dump_database", dump)
+    monkeypatch.setattr(backup, "upload_backup", lambda _bucket, _name, _archive: None)
+    monkeypatch.setattr(backup, "write_atomically", written)
+    monkeypatch.setattr(host, "LAST_BACKUP", tmp_path / "last-backup.json")
+    monkeypatch.setattr(host, "clock_mark", lambda: {"boot_id": "b", "uptime_seconds": 1.0})
+    recovery = tmp_path / "reset"
+    recovery.mkdir()
+
+    with pytest.raises(OSError, match="No space"):
+        backup.store_backup(tmp_path, "private-backups", "prerelease", recovery)
+
+    assert list(recovery.iterdir()) == []
 
 
 def test_the_dump_counts_every_table_in_the_snapshot_it_exports_to_pg_dump(
