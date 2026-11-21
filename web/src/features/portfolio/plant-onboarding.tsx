@@ -8,22 +8,24 @@ import { useApiList, useRefresh } from "@/lib/api/query";
 import { deviceZone } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
-import { Field, FieldErrors, Select, formText } from "@/ui/form";
+import { Field, FieldErrors, formText } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
-import { onboardingSteps, stepOfField } from "./onboarding-steps";
+import { useForgetDeletion } from "@/features/trash/recent-deletion";
+import {
+    onboardingSteps,
+    refusalTarget,
+    unplacedFields,
+} from "./onboarding-steps";
 import {
     PlantConfigurationFields,
     configurationInput,
 } from "./plant-configuration-fields";
-import {
-    coordinatePair,
-    sameLocation,
-    supportedZones,
-    zoneChoices,
-} from "./site-location";
+import { binnedAt, coordinatePair } from "./site-location";
+import { TimezoneField } from "./timezone-field";
 
 type Trashed = components["schemas"]["TrashedRegionOutput"];
+type LocationRefusal = components["schemas"]["LocationRefusal"];
 type Submission =
     | { kind: "idle" }
     | { kind: "saving" }
@@ -33,11 +35,11 @@ type Submission =
           fields: Record<string, string>;
           holder: number | null;
       };
+type Found = { row: Trashed; others: number };
 type Offer =
     | { kind: "none" }
-    | { kind: "offered"; row: Trashed }
-    | { kind: "restoring"; row: Trashed }
-    | { kind: "failed"; row: Trashed; message: string };
+    | ({ kind: "offered" | "restoring" } & Found)
+    | ({ kind: "failed"; message: string } & Found);
 
 const stepLabels = {
     location: "location",
@@ -51,13 +53,11 @@ function holderOf(error: unknown): number | null {
         !(error instanceof ApiError) ||
         error.code !== "location_already_exists" ||
         !error.body ||
-        typeof error.body !== "object" ||
-        !("region_id" in error.body)
+        typeof error.body !== "object"
     )
         return null;
-    return typeof error.body.region_id === "number"
-        ? error.body.region_id
-        : null;
+    const { region_id } = error.body as Partial<LocationRefusal>;
+    return typeof region_id === "number" ? region_id : null;
 }
 
 export function PlantOnboarding({
@@ -122,6 +122,7 @@ function Wizard({
     const t = useTranslations("PlantOnboarding");
     const format = useFormat();
     const refresh = useRefresh();
+    const forget = useForgetDeletion();
     const reviewNumber = (value: unknown) =>
         value == null || value === "" ? "" : format.number(Number(value), 6);
     const steps = onboardingSteps(!!existing);
@@ -130,7 +131,15 @@ function Wizard({
     const [review, setReview] = useState<Record<string, string>>({});
     const [status, setStatus] = useState<Submission>({ kind: "idle" });
     const [offer, setOffer] = useState<Offer>({ kind: "none" });
-    const [zones] = useState(() => zoneChoices(supportedZones(), deviceZone()));
+    // React disables the form only once it commits; these refs act before that and after an unmount.
+    const running = useRef(false);
+    const open = useRef(true);
+    useEffect(() => {
+        open.current = true;
+        return () => {
+            open.current = false;
+        };
+    }, []);
     const title = useRef<HTMLHeadingElement>(null);
     const form = useRef<HTMLFormElement>(null);
     const restoreButton = useRef<HTMLButtonElement>(null);
@@ -139,6 +148,7 @@ function Wizard({
         if (offered) restoreButton.current?.focus();
     }, [offered]);
     const saving = status.kind === "saving";
+    const busy = saving || offer.kind === "restoring";
     const fields = status.kind === "error" ? status.fields : {};
     const holder = status.kind === "error" ? status.holder : null;
     const at = (name: (typeof steps)[number]) => steps.indexOf(name);
@@ -146,9 +156,10 @@ function Wizard({
         setStep(next);
         requestAnimationFrame(() => {
             const field = focus
-                ? form.current?.querySelector<HTMLElement>(`[name="${focus}"]`)
+                ? form.current?.elements.namedItem(focus)
                 : null;
-            (field ?? title.current)?.focus();
+            const control = field instanceof RadioNodeList ? field[0] : field;
+            (control instanceof HTMLElement ? control : title.current)?.focus();
         });
     };
     const advance = () => {
@@ -164,34 +175,37 @@ function Wizard({
     };
     const binned = (data: FormData) =>
         step === at("location")
-            ? trashed.find(
-                  (row) =>
-                      row.restore_blocker === null &&
-                      sameLocation(row, {
-                          latitude: Number(data.get("latitude")),
-                          longitude: Number(data.get("longitude")),
-                      }),
-              )
-            : undefined;
-    async function restore(row: Trashed) {
-        setOffer({ kind: "restoring", row });
+            ? binnedAt(trashed, {
+                  latitude: Number(data.get("latitude")),
+                  longitude: Number(data.get("longitude")),
+              })
+            : null;
+    async function restore(found: Found) {
+        if (running.current) return;
+        running.current = true;
+        setOffer({ kind: "restoring", ...found });
         try {
             await api.post(
                 "/api/tenants/{tenant_id}/regions/{region_id}/restore/",
-                { path: { tenant_id: tenant, region_id: row.id } },
+                { path: { tenant_id: tenant, region_id: found.row.id } },
             );
         } catch (error) {
+            running.current = false;
             setOffer({
                 kind: "failed",
-                row,
+                ...found,
                 message: displayMessage(error, t("unableToRestore")),
             });
             return;
         }
+        forget(found.row.id);
         await refresh.workspace(tenant);
-        onOpen(row.id);
+        running.current = false;
+        if (open.current) onOpen(found.row.id);
     }
     async function submit(data: FormData) {
+        if (running.current) return;
+        running.current = true;
         setStatus({ kind: "saving" });
         try {
             const body = configurationInput(data);
@@ -219,8 +233,10 @@ function Wizard({
                           timezone: formText(data, "timezone"),
                       },
                   });
-            onCreated(site);
+            running.current = false;
+            if (open.current) onCreated(site);
         } catch (error) {
+            running.current = false;
             const refused = error instanceof ApiError ? error.fields : {};
             setStatus({
                 kind: "error",
@@ -228,8 +244,8 @@ function Wizard({
                 fields: refused,
                 holder: holderOf(error),
             });
-            const target = stepOfField(Object.keys(refused), !!existing);
-            if (target !== null) move(target, Object.keys(refused)[0]);
+            const target = refusalTarget(Object.keys(refused), !!existing);
+            if (target) move(target.step, target.field);
         }
     }
     return (
@@ -258,7 +274,7 @@ function Wizard({
                 </div>
                 <button
                     className="button secondary"
-                    disabled={saving}
+                    disabled={busy}
                     onClick={onCancel}
                 >
                     {t("cancel")}
@@ -282,6 +298,7 @@ function Wizard({
                 noValidate
                 onSubmit={(event) => {
                     event.preventDefault();
+                    if (running.current) return;
                     const section = event.currentTarget.querySelector(
                         `[data-step="${step}"]`,
                     );
@@ -295,14 +312,14 @@ function Wizard({
                         return;
                     }
                     const data = new FormData(event.currentTarget);
-                    const row = binned(data);
-                    if (row) setOffer({ kind: "offered", row });
+                    const found = binned(data);
+                    if (found) setOffer({ kind: "offered", ...found });
                     else if (step < last) advance();
                     else void submit(data);
                 }}
             >
                 <FieldErrors value={fields}>
-                    <fieldset disabled={saving}>
+                    <fieldset disabled={busy}>
                         {!existing && (
                             <div
                                 data-step={at("location")}
@@ -339,18 +356,10 @@ function Wizard({
                                         maxLength={200}
                                         required
                                     />
-                                    <Select
+                                    <TimezoneField
                                         label={t("timezone")}
-                                        name="timezone"
                                         defaultValue={deviceZone()}
-                                        required
-                                    >
-                                        {zones.map((zone) => (
-                                            <option key={zone} value={zone}>
-                                                {zone}
-                                            </option>
-                                        ))}
-                                    </Select>
+                                    />
                                     <Field
                                         label={t("latitude")}
                                         name="latitude"
@@ -384,6 +393,13 @@ function Wizard({
                                             })}
                                         </h3>
                                         <p>{t("inBinHelp")}</p>
+                                        {offer.others > 0 && (
+                                            <p>
+                                                {t("inBinMore", {
+                                                    count: offer.others,
+                                                })}
+                                            </p>
+                                        )}
                                         {offer.kind === "failed" && (
                                             <Notice error>
                                                 {offer.message}
@@ -398,7 +414,7 @@ function Wizard({
                                                     offer.kind === "restoring"
                                                 }
                                                 onClick={() =>
-                                                    void restore(offer.row)
+                                                    void restore(offer)
                                                 }
                                             >
                                                 {offer.kind === "restoring"
@@ -559,6 +575,9 @@ function Wizard({
                 {status.kind === "error" && (
                     <Notice error>
                         <p>{status.message}</p>
+                        {unplacedFields(fields, !!existing).map((message) => (
+                            <p key={message}>{message}</p>
+                        ))}
                         {holder !== null && (
                             <button
                                 className="button secondary"

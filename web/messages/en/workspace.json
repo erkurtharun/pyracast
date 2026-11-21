@@ -42,6 +42,7 @@
         "keptLocation": "Location: {latitude}°, {longitude}° · {timezone}",
         "inBin": "{name} is in the recycle bin",
         "inBinHelp": "Restore it to keep its saved data and history, or add a new plant at this location.",
+        "inBinMore": "{count, plural, one {# more plant from this location is} other {# more plants from this location are}} in the recycle bin.",
         "restore": "Restore {name}",
         "restoring": "Restoring…",
         "addNewPlant": "Add a new plant",

@@ -42,6 +42,7 @@
         "keptLocation": "Konum: {latitude}°, {longitude}° · {timezone}",
         "inBin": "{name} geri dönüşüm kutusunda",
         "inBinHelp": "Kayıtlı verilerini ve geçmişini korumak için geri yükleyin ya da bu konuma yeni bir santral ekleyin.",
+        "inBinMore": "Bu konumdan {count} santral daha geri dönüşüm kutusunda.",
         "restore": "Geri yükle: {name}",
         "restoring": "Geri yükleniyor…",
         "addNewPlant": "Yeni santral ekle",

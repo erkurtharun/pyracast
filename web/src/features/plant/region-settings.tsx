@@ -5,13 +5,10 @@ import { api } from "@/lib/api/client";
 import { useApiQuery, useRefresh } from "@/lib/api/query";
 import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
-import { ActionForm, AsyncButton, Field, Select, formText } from "@/ui/form";
+import { ActionForm, AsyncButton, Field, formText } from "@/ui/form";
 import { Resource } from "@/ui/resource";
 import { StatusTag } from "@/ui/vocabulary";
-import {
-    supportedZones,
-    zoneChoices,
-} from "@/features/portfolio/site-location";
+import { TimezoneField } from "@/features/portfolio/timezone-field";
 
 type LocationRequest = components["schemas"]["LocationChangeOutput"];
 
@@ -135,21 +132,10 @@ function LocationRequests({
                                         defaultValue={region.longitude}
                                         required
                                     />
-                                    <Select
+                                    <TimezoneField
                                         label={t("timezone")}
-                                        name="timezone"
                                         defaultValue={region.timezone}
-                                        required
-                                    >
-                                        {zoneChoices(
-                                            supportedZones(),
-                                            region.timezone,
-                                        ).map((zone) => (
-                                            <option key={zone} value={zone}>
-                                                {zone}
-                                            </option>
-                                        ))}
-                                    </Select>
+                                    />
                                     <Field
                                         label={t("reasonOptional")}
                                         name="reason"
