@@ -941,7 +941,11 @@ def provider_signup(first_name: str, last_name: str) -> dict[str, Any]:
         (("Quill", "Quill"), lambda _other: provider_signup("Quill", "Quill"), True),
         ((FIRST_NAME, LAST_NAME), lambda _other: provider_signup(FIRST_NAME, LAST_NAME), True),
         ((FIRST_NAME, LAST_NAME), lambda _other: provider_signup(LAST_NAME, FIRST_NAME), False),
-        ((FIRST_NAME, LAST_NAME), lambda _other: {"note": FIRST_NAME, "flow": [LAST_NAME]}, False),
+        (
+            (FIRST_NAME, LAST_NAME),
+            lambda _other: {"note": FIRST_NAME, "flow": [LAST_NAME, 3, None]},
+            False,
+        ),
         (
             (FIRST_NAME, LAST_NAME),
             lambda _other: {
