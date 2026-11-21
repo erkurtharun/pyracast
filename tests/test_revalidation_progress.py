@@ -5,11 +5,15 @@ import pytest
 
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts import revalidation
 from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.quota import ForecastBudgetReservedError
-from pyracast.forecasts.revalidation import RETRY_DELAY, RevalidationOutcome, revalidate_account
+from pyracast.forecasts.revalidation import (
+    AFTER_THE_SLOT,
+    RETRY_DELAY,
+    RevalidationOutcome,
+    revalidate_account,
+)
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.forecasts.validation import validate_binding
 from pyracast.platform_admin.provider_accounts import account_context
@@ -77,15 +81,15 @@ def test_plants_booking_the_quota_are_revalidated_as_slots_pass_without_losing_a
     runs = run_revalidations(system, slots_of([D1, D2, D3], [3, 13]), utc(D1, 0, 30), utc(D4, 0))
 
     assert runs == [
-        Run(utc(D1, 0, 30), WAITING, utc(D1, 3) + RETRY_DELAY, 3),
-        Run(utc(D1, 3) + RETRY_DELAY, WAITING, utc(D1, 13) + RETRY_DELAY, 3),
-        Run(utc(D1, 13) + RETRY_DELAY, WAITING, utc(D2, 0), 3),
-        Run(utc(D2, 0), WAITING, utc(D2, 3) + RETRY_DELAY, 4),
-        Run(utc(D2, 3) + RETRY_DELAY, WAITING, utc(D2, 13) + RETRY_DELAY, 4),
-        Run(utc(D2, 13) + RETRY_DELAY, WAITING, utc(D3, 0), 4),
-        Run(utc(D3, 0), WAITING, utc(D3, 3) + RETRY_DELAY, 4),
-        Run(utc(D3, 3) + RETRY_DELAY, WAITING, utc(D3, 13) + RETRY_DELAY, 4),
-        Run(utc(D3, 13) + RETRY_DELAY, DONE, None, 5),
+        Run(utc(D1, 0, 30), WAITING, utc(D1, 3) + AFTER_THE_SLOT, 3),
+        Run(utc(D1, 3) + AFTER_THE_SLOT, WAITING, utc(D1, 13) + AFTER_THE_SLOT, 3),
+        Run(utc(D1, 13) + AFTER_THE_SLOT, WAITING, utc(D2, 0), 3),
+        Run(utc(D2, 0), WAITING, utc(D2, 3) + AFTER_THE_SLOT, 4),
+        Run(utc(D2, 3) + AFTER_THE_SLOT, WAITING, utc(D2, 13) + AFTER_THE_SLOT, 4),
+        Run(utc(D2, 13) + AFTER_THE_SLOT, WAITING, utc(D3, 0), 4),
+        Run(utc(D3, 0), WAITING, utc(D3, 3) + AFTER_THE_SLOT, 4),
+        Run(utc(D3, 3) + AFTER_THE_SLOT, WAITING, utc(D3, 13) + AFTER_THE_SLOT, 4),
+        Run(utc(D3, 13) + AFTER_THE_SLOT, DONE, None, 5),
     ]
     assert [revision(plant) for plant in plants] == [2] * 5
     assert unsucceeded_forecasts(plants, utc(D1, 0)) == {(3, utc(D2, 13))}
@@ -100,8 +104,8 @@ def test_a_single_waiting_plant_whose_forecast_is_due_waits_for_the_next_provide
     runs = run_revalidations(system, slots_of([D1, D2], [13]), utc(D1, 12), utc(D3, 0))
 
     assert runs == [
-        Run(utc(D1, 12), WAITING, utc(D1, 13) + RETRY_DELAY, 0),
-        Run(utc(D1, 13) + RETRY_DELAY, WAITING, utc(D2, 0), 0),
+        Run(utc(D1, 12), WAITING, utc(D1, 13) + AFTER_THE_SLOT, 0),
+        Run(utc(D1, 13) + AFTER_THE_SLOT, WAITING, utc(D2, 0), 0),
         Run(utc(D2, 0), DONE, None, 1),
     ]
     assert used(system, utc(D1, 12)) == 9
@@ -143,10 +147,10 @@ def test_a_plant_whose_need_completes_the_quota_waits_without_costing_a_current_
     runs = run_revalidations(system, slots_of([D1, D2], [13]), utc(D1, 0), utc(D3, 0))
 
     assert runs == [
-        Run(utc(D1, 0), WAITING, utc(D1, 13) + RETRY_DELAY, 9),
-        Run(utc(D1, 13) + RETRY_DELAY, WAITING, utc(D2, 0), 9),
-        Run(utc(D2, 0), WAITING, utc(D2, 13) + RETRY_DELAY, 9),
-        Run(utc(D2, 13) + RETRY_DELAY, WAITING, utc(D3, 0), 9),
+        Run(utc(D1, 0), WAITING, utc(D1, 13) + AFTER_THE_SLOT, 9),
+        Run(utc(D1, 13) + AFTER_THE_SLOT, WAITING, utc(D2, 0), 9),
+        Run(utc(D2, 0), WAITING, utc(D2, 13) + AFTER_THE_SLOT, 9),
+        Run(utc(D2, 13) + AFTER_THE_SLOT, WAITING, utc(D3, 0), 9),
     ]
     assert revision(waiting) == 1
     assert validation_requests(waiting, utc(D1, 0)) == 0
@@ -163,7 +167,7 @@ def test_a_refused_revalidation_retries_after_the_next_slot_of_a_plant_that_coll
 
     runs = run_revalidations(system, [], utc(D1, 11), utc(D1, 12))
 
-    assert runs == [Run(utc(D1, 11), WAITING, utc(D1, 13) + RETRY_DELAY, 1)]
+    assert runs == [Run(utc(D1, 11), WAITING, utc(D1, 13) + AFTER_THE_SLOT, 1)]
 
 
 def rejected() -> None:
@@ -297,7 +301,7 @@ def test_plants_with_a_clock_late_in_the_utc_day_are_revalidated_right_after_it(
 
     for run in runs:
         assert run.due is None or run.at < run.due <= utc(run.at.date() + timedelta(days=1), 0)
-    after = revalidation.AFTER_THE_SLOT
+    after = AFTER_THE_SLOT
     assert runs == [
         Run(utc(D1, 0, 30), WAITING, utc(D1, 11) + after, 3),
         Run(utc(D1, 11) + after, WAITING, utc(D1, 23, 45) + after, 3),

@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 ACTOR = "revalidate_provider_account"
 LEASE = ACTORS[ACTOR].lease
 RETRY_DELAY = timedelta(minutes=15)
+# Slots sit on whole minutes, so a run due this long after a slot stays in the slot's UTC day.
+AFTER_THE_SLOT = timedelta(seconds=30)
 
 
 class RevalidationOutcome(StrEnum):
@@ -54,8 +56,9 @@ def stale_bindings(account: ProviderAccount) -> QuerySet[SiteBinding]:
 
 
 def _after_the_next_slot(account: ProviderAccount, moment: datetime) -> datetime:
-    """A reserve refused now may fit once the account's next slot is collected, whose jobs
-    reserve their requests within RETRY_DELAY of it; at the latest on the next UTC day."""
+    """A reserve refused now may fit right after the account's next slot: a waiting plant's own
+    need falls there when its earlier due slot is superseded, and what a collecting plant used
+    and still needs stays the same across its slot. At the latest on the next UTC day."""
     due = _next_utc_day(moment)
     for binding in approved_bindings(account).select_related("region", "provider_account"):
         timing = forecast_timing(
@@ -69,7 +72,7 @@ def _after_the_next_slot(account: ProviderAccount, moment: datetime) -> datetime
             )
         )
         if slot is not None:
-            due = min(due, slot + RETRY_DELAY)
+            due = min(due, slot + AFTER_THE_SLOT)
     return due
 
 
@@ -167,6 +170,7 @@ def revalidate_account(
         return RevalidationOutcome.LEASE_LOST
     bindings = list(stale_bindings(account))
     operator = _replacing_operator(account) if bindings else None
+    reserved = False
     for index, binding in enumerate(bindings):
         if lost := _lost(account):
             return lost
@@ -191,9 +195,8 @@ def revalidate_account(
                 return _finish(account, RevalidationOutcome.KEY_REJECTED)
             return _finish(account, RevalidationOutcome.WAITING, deferred.available_at)
         except ForecastBudgetReservedError:
-            return _finish(
-                account, RevalidationOutcome.WAITING, _after_the_next_slot(account, moment)
-            )
+            # A later plant may need less than this one; the run tries it in the same order.
+            reserved = True
         except QuotaExceededError:
             return _finish(account, RevalidationOutcome.WAITING, _next_utc_day(moment))
         except ProviderError as error:
@@ -205,6 +208,10 @@ def revalidate_account(
             # The newer key is revalidated by the run its replacement queued.
             if _key_replaced(account):
                 return RevalidationOutcome.STOPPED
+    if reserved:
+        return _finish(
+            account, RevalidationOutcome.WAITING, _after_the_next_slot(account, clock.now())
+        )
     return _finish(account, RevalidationOutcome.DONE)
 
 
