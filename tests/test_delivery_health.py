@@ -51,7 +51,9 @@ def test_health_report_keeps_a_bounded_query_budget(delivery_count: int) -> None
             preparation_deadline=NOW,
             available_at=NOW,
             status="sent",
-            prepared_message={"kind": "saved_complete", "tomorrow_complete": True},
+            forecast_kind="saved_complete",
+            forecast_complete=True,
+            prepared_at=NOW,
         )
     with CaptureQueriesContext(connection) as queries:
         report = delivery_health(NOW, timedelta(minutes=5))
@@ -137,19 +139,22 @@ def test_incomplete_and_interrupted_deliveries_remain_visible_to_monitoring() ->
         preparation_deadline=NOW,
         available_at=NOW,
         status="sending",
-        prepared_message={"kind": "current", "tomorrow_complete": True},
+        prepared_message={},
+        forecast_kind="current",
+        forecast_complete=True,
+        prepared_at=NOW,
         lease_token=uuid.uuid4(),
         lease_expires_at=NOW,
     )
     assert delivery_health(NOW, timedelta(minutes=5)).counts["interrupted_notifications"] == 1
     delivery.status = "sent"
     delivery.lease_token = delivery.lease_expires_at = None
-    delivery.prepared_message = {"kind": "saved_partial", "tomorrow_complete": False}
+    delivery.forecast_kind, delivery.forecast_complete = "saved_partial", False
     delivery.save()
     report = delivery_health(NOW, timedelta(minutes=5))
     assert report.healthy is False
     assert report.counts["partial_forecasts"] == report.counts["saved_forecast_notifications"] == 1
-    delivery.prepared_message = {"kind": "saved_complete", "tomorrow_complete": True}
+    delivery.forecast_kind, delivery.forecast_complete = "saved_complete", True
     delivery.save()
     assert delivery_health(NOW, timedelta(minutes=5)).healthy is True
     delivery.status = "retry"
