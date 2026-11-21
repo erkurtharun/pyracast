@@ -23,7 +23,7 @@ from pyracast.plants.models import (
     PlantSubmission,
 )
 from pyracast.plants.operations import activate_submitted_plants
-from pyracast.plants.parameters import declaration
+from pyracast.plants.parameters import declaration, without_negative_zero
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus
 from pyracast.regions.review import SETUP_CHANGED, require_seen_status, set_review_status
@@ -125,7 +125,10 @@ def fingerprint_of(rows: Declarations) -> str:
         [
             plant.pk,
             plant.name,
-            *(getattr(record, field, None) for field in sorted(DECLARED_FIELDS)),
+            *(
+                without_negative_zero(getattr(record, field, None))
+                for field in sorted(DECLARED_FIELDS)
+            ),
         ]
         for plant, record in rows
     ]
