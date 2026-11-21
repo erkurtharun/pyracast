@@ -11,14 +11,13 @@ from django.test import Client, RequestFactory
 
 from pyracast import proxy
 from pyracast import settings as project_settings
-from pyracast.accounts.checks import check_authentication_origin
+from pyracast.accounts.checks import Network, check_authentication_origin, parse_networks
 from pyracast.proxy import (
     CLIENT_IP_HEADER,
     ForwardedIdentity,
     InvalidPeerError,
     TrustedProxyHeaders,
     UnverifiedProxyHeadersError,
-    parse_networks,
     resolve_forwarded_identity,
 )
 
@@ -113,8 +112,8 @@ def meta(peer: str = GATEWAY, **headers: str) -> dict[str, str]:
 )
 def test_the_resolver_decides_the_identity_from_the_trusted_chain(
     request_meta: dict[str, str],
-    gateways: tuple[proxy.Network, ...],
-    edges: tuple[proxy.Network, ...],
+    gateways: tuple[Network, ...],
+    edges: tuple[Network, ...],
     identity: ForwardedIdentity,
 ) -> None:
     assert resolve_forwarded_identity(request_meta, gateways, edges) == identity
@@ -147,7 +146,7 @@ def test_an_unreadable_socket_peer_is_refused(peer: str) -> None:
     ],
 )
 def test_a_trusted_gateway_with_unverifiable_headers_is_refused(
-    headers: dict[str, str], edges: tuple[proxy.Network, ...]
+    headers: dict[str, str], edges: tuple[Network, ...]
 ) -> None:
     with pytest.raises(UnverifiedProxyHeadersError) as refused:
         resolve_forwarded_identity(meta(**headers), GATEWAYS, edges)
@@ -166,7 +165,7 @@ def test_a_trusted_gateway_with_unverifiable_headers_is_refused(
     ],
 )
 def test_network_settings_accept_comma_or_whitespace_separated_cidrs(
-    values: list[str], networks: tuple[proxy.Network, ...]
+    values: list[str], networks: tuple[Network, ...]
 ) -> None:
     assert parse_networks("PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS", values) == networks
 

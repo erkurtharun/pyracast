@@ -235,7 +235,12 @@ def image_builds(job: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def test_the_release_images_are_rescanned_daily_without_cloud_credentials() -> None:
+DEPLOYED_SCAN = "Scan the deployed images; block every high or critical vulnerability"
+WITHOUT_READER = "env.IMAGE_RESCAN == ''"
+WITH_READER = "env.IMAGE_RESCAN != ''"
+
+
+def test_without_its_reader_setting_the_image_rescan_rebuilds_and_scans_main_daily() -> None:
     document = workflow("image-rescan.yml")
     (job,) = document["jobs"].values()
     built = [(build["context"], build.get("file"), build["tags"]) for build in image_builds(job)]
@@ -243,17 +248,61 @@ def test_the_release_images_are_rescanned_daily_without_cloud_credentials() -> N
         (build["context"], build.get("file"), build["tags"])
         for build in image_builds(ci_jobs()["deployment"])
     ]
+    builds = [
+        candidate
+        for candidate in job["steps"]
+        if str(candidate.get("uses", "")).startswith("docker/build-push-action@")
+    ]
 
     assert re.fullmatch(r"\d+ \d+ \* \* \*", triggers("image-rescan.yml")["schedule"][0]["cron"])
     assert "workflow_dispatch" in triggers("image-rescan.yml")
     assert document["permissions"] == {"contents": "read"}
-    assert "permissions" not in job
+    assert job["name"] == "Rescan the release images"
+    assert job["env"]["IMAGE_RESCAN"] == "${{ vars.GCP_IMAGE_RESCAN }}"
     assert "environment" not in job
     assert built == released
-    assert all(build["load"] is True for build in image_builds(job))
+    assert all(build["with"]["load"] is True for build in builds)
+    assert {candidate["if"] for candidate in builds} == {WITHOUT_READER}
+    assert step(job, SCAN)["if"] == WITHOUT_READER
     assert step(job, SCAN)["run"].splitlines() == SCANNED
     assert triggers("release.yml")["workflow_run"]["workflows"] == ["CI"]
     assert document["name"] != "CI"
+
+
+def test_with_its_reader_setting_the_image_rescan_scans_the_deployed_digests() -> None:
+    (job,) = workflow("image-rescan.yml")["jobs"].values()
+    reader = step(job, "Read the registry reader of the deployed images")
+    (authenticate,) = [
+        candidate
+        for candidate in job["steps"]
+        if str(candidate.get("uses", "")).startswith("google-github-actions/auth@")
+    ]
+    deployed = step(job, DEPLOYED_SCAN)
+    images = " ".join(f'"$REPOSITORY/{name}:production"' for name in RELEASE_IMAGES)
+
+    assert job["permissions"] == {"contents": "read", "id-token": "write"}
+    assert reader["if"] == authenticate["if"] == deployed["if"] == WITH_READER
+    assert reader["run"] == 'python3 deploy/image_rescan.py "$IMAGE_RESCAN" >> "$GITHUB_OUTPUT"'
+    assert authenticate["with"] == {
+        "workload_identity_provider": "${{ steps.reader.outputs.provider }}",
+        "service_account": "${{ steps.reader.outputs.service_account }}",
+        "token_format": "access_token",
+    }
+    assert deployed["env"] == {
+        "REGISTRY_ACCESS_TOKEN": "${{ steps.google-auth.outputs.access_token }}",
+        "REPOSITORY": "${{ steps.reader.outputs.repository }}",
+    }
+    assert deployed["run"].splitlines() == [
+        "printf '%s' \"$REGISTRY_ACCESS_TOKEN\" | docker login -u oauth2accesstoken "
+        '--password-stdin "https://${REPOSITORY%%/*}"',
+        f"for image in {' '.join(RELEASE_IMAGES)}; do",
+        '  docker pull --quiet --platform linux/amd64 "$REPOSITORY/$image:production"',
+        "done",
+        f"bash deploy/scan-images.sh {images}",
+    ]
+    assert (
+        job["steps"].index(reader) < job["steps"].index(authenticate) < job["steps"].index(deployed)
+    )
 
 
 def test_the_serialized_deploy_cancels_a_release_main_moved_past_just_before_the_transfer() -> None:

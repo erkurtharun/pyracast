@@ -1,30 +1,89 @@
 #!/bin/bash
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+trap 'echo "Pyracast boot configuration stopped at line $LINENO; every step after it is unchanged." >&2' ERR
 
-apt-get update
-apt-get install --yes --no-install-recommends ca-certificates curl iptables python3
-install -d -m 0755 /etc/apt/keyrings
-curl --fail --silent --show-error --location https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-chmod 0644 /etc/apt/keyrings/docker.asc
-cat >/etc/apt/sources.list.d/docker.sources <<'EOF'
-Types: deb
-URIs: https://download.docker.com/linux/ubuntu
-Suites: noble
-Components: stable
-Architectures: amd64
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
-apt-get update
-apt-get install --yes --no-install-recommends --allow-change-held-packages \
-  docker-ce=5:29.9.3-1~ubuntu.24.04~noble \
-  docker-ce-cli=5:29.9.3-1~ubuntu.24.04~noble \
-  containerd.io=2.4.2-2~ubuntu.24.04~noble \
-  docker-compose-plugin=5.7.1-1~ubuntu.24.04~noble
-apt-mark hold docker-ce docker-ce-cli containerd.io docker-compose-plugin
+# Runs at every boot: each step changes the host only when what it would write differs.
+ID='' VERSION_ID=''
+. /etc/os-release
+if [[ $ID != ubuntu || $VERSION_ID != 24.04 || $(dpkg --print-architecture) != amd64 ]]; then
+  echo 'This boot script supports Ubuntu 24.04 on amd64 only; nothing was changed.' >&2
+  exit 1
+fi
 
+write_if_changed() {
+  local content staged
+  content=$(cat)
+  changed=0
+  if [[ -f $1 && $(cat "$1") == "$content" ]]; then
+    chmod "$2" "$1"
+    return 0
+  fi
+  staged=$(mktemp "$1.XXXXXX")
+  printf '%s\n' "$content" >"$staged"
+  chmod "$2" "$staged"
+  mv -f "$staged" "$1"
+  changed=1
+}
+
+host_json=$(printf '%s' '${host_config_base64}' | base64 --decode)
+install -d -m 0700 /etc/pyracast
+write_if_changed /etc/pyracast/host.json 0600 <<<"$host_json"
+
+data_device=/dev/disk/by-id/google-${data_device_name}
+for attempt in $(seq 1 90); do
+  test ! -b "$data_device" || break
+  sleep 1
+done
+test -b "$data_device"
+filesystem=$(blkid -s TYPE -o value "$data_device" || true)
+if [[ -z $filesystem ]]; then
+  # Only a new disk is formatted: no signature anywhere and a zeroed first MiB.
+  if [[ -n $(wipefs --no-act --noheadings --output TYPE "$data_device") ]] \
+    || ! cmp --silent --bytes=1048576 "$data_device" /dev/zero; then
+    echo 'The data disk has no ext4 filesystem but is not empty; inspect it before continuing.' >&2
+    exit 1
+  fi
+  mkfs.ext4 -F "$data_device"
+elif [[ $filesystem != ext4 ]]; then
+  echo 'The application data disk must use ext4.' >&2
+  exit 1
+fi
+data_uuid=$(blkid -s UUID -o value "$data_device")
+# nofail keeps the VM reachable without the disk; RequiresMountsFor still holds the services.
+entry="UUID=$data_uuid /var/lib/pyracast ext4 defaults,nodev,nosuid,nofail 0 2"
+mounts_changed=0
+if ! grep --quiet --line-regexp --fixed-strings "$entry" /etc/fstab; then
+  if awk -v uuid="UUID=$data_uuid" '$2 == "/var/lib/pyracast" && $1 != uuid { found=1 } END { exit !found }' /etc/fstab; then
+    echo 'A different data disk is already configured; inspect fstab before continuing.' >&2
+    exit 1
+  fi
+  fstab=$(awk -v uuid="UUID=$data_uuid" '!($1 == uuid && $2 == "/var/lib/pyracast")' /etc/fstab)
+  write_if_changed /etc/fstab 0644 <<<"$fstab
+$entry"
+  mounts_changed=1
+fi
+install -d -m 0755 /var/lib/pyracast
+mountpoint --quiet /var/lib/pyracast || mount /var/lib/pyracast
+# Holds the release lock and marker: only root may create or replace entries in it.
+install -d -o root -g root -m 0755 /var/lib/pyracast
+release_lock=/var/lib/pyracast/release.lock
+# Only root may open the release lock: flock needs nothing but read access to it.
+(umask 077 && : >>"$release_lock")
+chmod 0600 "$release_lock"
+install -d -o 999 -g 999 -m 0750 /var/lib/pyracast/rabbitmq
+install -d -o 70 -g 70 -m 0700 /var/lib/pyracast/postgres
+install -d -o 10001 -g 10001 -m 0750 /var/lib/pyracast/gateway
+install -d -m 0755 /opt/pyracast/releases
+
+guard=$(printf '%s' '${network_guard_base64}' | base64 --decode)
+write_if_changed /usr/local/sbin/pyracast-network-guard 0755 <<<"$guard"
+# The guard needs iptables: it runs after the packages, and the marker keeps it due after a stop.
+if (( changed )); then touch /etc/pyracast/network-guard-pending; fi
+
+docker_changed=0
 install -d -m 0755 /etc/docker
-cat >/etc/docker/daemon.json <<'EOF'
+write_if_changed /etc/docker/daemon.json 0644 <<'EOF'
 {
   "log-driver": "local",
   "log-opts": {"max-size": "10m", "max-file": "5"},
@@ -33,46 +92,10 @@ cat >/etc/docker/daemon.json <<'EOF'
   "live-restore": true
 }
 EOF
-
-data_device=/dev/disk/by-id/google-pyracast-data
-for attempt in $(seq 1 90); do
-  test ! -b "$data_device" || break
-  sleep 1
-done
-test -b "$data_device"
-filesystem=$(blkid -s TYPE -o value "$data_device" || true)
-if test -z "$filesystem"; then
-  # Refuse to format a disk containing any existing partition or filesystem signature.
-  test -z "$(wipefs --no-act --noheadings --output TYPE "$data_device")"
-  mkfs.ext4 -F "$data_device"
-elif test "$filesystem" != ext4; then
-  echo 'The application data disk must use ext4.' >&2
-  exit 1
-fi
-data_uuid=$(blkid -s UUID -o value "$data_device")
-install -d -m 0755 /var/lib/pyracast
-if ! grep --quiet --fixed-strings "UUID=$data_uuid /var/lib/pyracast " /etc/fstab; then
-  if awk '$2 == "/var/lib/pyracast" { found=1 } END { exit !found }' /etc/fstab; then
-    echo 'A different data disk is already configured; inspect fstab before continuing.' >&2
-    exit 1
-  fi
-  echo "UUID=$data_uuid /var/lib/pyracast ext4 defaults,nodev,nosuid 0 2" >>/etc/fstab
-fi
-mountpoint --quiet /var/lib/pyracast || mount /var/lib/pyracast
-# Holds the release lock and marker: only root may create or replace entries in it.
-install -d -o root -g root -m 0755 /var/lib/pyracast
-install -d -o 999 -g 999 -m 0750 /var/lib/pyracast/rabbitmq
-install -d -o 70 -g 70 -m 0700 /var/lib/pyracast/postgres
-install -d -o 10001 -g 10001 -m 0750 /var/lib/pyracast/gateway
-install -d -m 0755 /opt/pyracast/releases
-install -d -m 0700 /etc/pyracast
-echo '${host_config_base64}' | base64 --decode >/etc/pyracast/host.json
-chmod 0600 /etc/pyracast/host.json
-echo '${network_guard_base64}' | base64 --decode >/usr/local/sbin/pyracast-network-guard
-chmod 0755 /usr/local/sbin/pyracast-network-guard
+docker_changed=$((docker_changed | changed))
 
 install -d -m 0755 /etc/systemd/system/docker.service.d
-cat >/etc/systemd/system/docker.service.d/pyracast-data.conf <<'EOF'
+write_if_changed /etc/systemd/system/docker.service.d/pyracast-data.conf 0644 <<'EOF'
 [Unit]
 RequiresMountsFor=/var/lib/pyracast
 
@@ -80,8 +103,9 @@ RequiresMountsFor=/var/lib/pyracast
 ExecStartPre=/usr/local/sbin/pyracast-network-guard
 ExecStartPost=/usr/local/sbin/pyracast-network-guard
 EOF
+docker_changed=$((docker_changed | changed))
 
-cat >/etc/systemd/system/pyracast.service <<'EOF'
+write_if_changed /etc/systemd/system/pyracast.service 0644 <<'EOF'
 [Unit]
 Description=Pyracast application containers
 Wants=network-online.target
@@ -90,10 +114,14 @@ After=network-online.target docker.service
 RequiresMountsFor=/var/lib/pyracast
 ConditionPathExists=/opt/pyracast/current/deploy/compose.yaml
 ConditionPathExists=!/var/lib/pyracast/release-blocked
+StartLimitIntervalSec=1800
+StartLimitBurst=5
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+Restart=on-failure
+RestartSec=30s
 WorkingDirectory=/opt/pyracast/current
 RuntimeDirectory=pyracast
 RuntimeDirectoryMode=0700
@@ -108,14 +136,82 @@ TimeoutStopSec=960
 [Install]
 WantedBy=multi-user.target
 EOF
+units_changed=$changed
 
-systemctl daemon-reload
+if (( units_changed || docker_changed || mounts_changed )); then systemctl daemon-reload; fi
+
+# Installed once at their pinned versions; a boot that finds them needs no package mirror.
+docker_pins='docker-ce=5:29.9.3-1~ubuntu.24.04~noble docker-ce-cli=5:29.9.3-1~ubuntu.24.04~noble containerd.io=2.4.2-2~ubuntu.24.04~noble docker-compose-plugin=5.7.1-1~ubuntu.24.04~noble'
+installed_version() {
+  dpkg-query --status "$1" 2>/dev/null \
+    | awk '/^Status: [a-z]+ ok installed$/ { installed=1 } /^Version: / { version=$2 } END { if (installed) print version }'
+}
+pinned_packages_installed() {
+  local pin
+  for pin in $docker_pins; do
+    [[ $(installed_version "$(echo "$pin" | cut -d= -f1)") == "$(echo "$pin" | cut -d= -f2-)" ]] || return 1
+  done
+  for pin in ca-certificates curl iptables python3; do
+    [[ -n $(installed_version "$pin") ]] || return 1
+  done
+}
+if ! pinned_packages_installed; then
+  # A Docker package upgrade restarts Docker and with it the application.
+  if ! flock --nonblock "$release_lock" true; then
+    echo 'The pinned packages changed while the release lock was held; run this script again.' >&2
+    exit 1
+  fi
+  apt-get update
+  apt-get install --yes --no-install-recommends ca-certificates curl gnupg iptables python3
+  install -d -m 0755 /etc/apt/keyrings
+  key=$(mktemp)
+  trap 'rm -f -- "$key"' EXIT
+  curl --fail --silent --show-error --location https://download.docker.com/linux/ubuntu/gpg -o "$key"
+  # APT trusts every key in the file, so it must hold exactly the published primary key.
+  primary=$(gpg --show-keys --with-colons "$key" | awk -F: '
+    $1 == "pub" || $1 == "sec" { keys++; after_primary=1; next }
+    $1 == "fpr" && after_primary { primary=$10 }
+    { after_primary=0 }
+    END { if (keys == 1) print primary }')
+  if [[ $primary != 9DC858229FC7DD38854AE2D88D81803C0EBFCD88 ]]; then
+    echo 'The Docker repository key does not have its published fingerprint; nothing was installed.' >&2
+    exit 1
+  fi
+  install -m 0644 "$key" /etc/apt/keyrings/docker.asc
+  write_if_changed /etc/apt/sources.list.d/docker.sources 0644 <<'EOF'
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: noble
+Components: stable
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+  apt-get update
+  apt-get install --yes --no-install-recommends --allow-change-held-packages $docker_pins
+  apt-mark hold docker-ce docker-ce-cli containerd.io docker-compose-plugin
+fi
+if [[ -e /etc/pyracast/network-guard-pending ]]; then
+  /usr/local/sbin/pyracast-network-guard
+  rm -f /etc/pyracast/network-guard-pending
+fi
+
 systemctl enable docker.service pyracast.service
 if test -f /opt/pyracast/current/deploy/install-units.sh; then
   bash /opt/pyracast/current/deploy/install-units.sh install /opt/pyracast/current \
     || echo 'The release units were not installed; the previous units stay in place.' >&2
 fi
-systemctl restart docker.service
+# A Docker restart restarts the application through Requires=; never while a release runs. The
+# marker keeps a deferred restart due when the next run finds the configuration unchanged.
+if (( docker_changed )); then touch /etc/docker/pyracast-restart-pending; fi
+if [[ -e /etc/docker/pyracast-restart-pending ]]; then
+  if flock --nonblock "$release_lock" true; then
+    systemctl restart docker.service
+    rm -f /etc/docker/pyracast-restart-pending
+  else
+    echo 'The Docker configuration changed while the release lock was held; run this script again.' >&2
+    exit 1
+  fi
+fi
 if test -f /opt/pyracast/current/deploy/compose.yaml; then
   systemctl start pyracast.service
 fi

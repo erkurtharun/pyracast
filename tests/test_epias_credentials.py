@@ -2,6 +2,7 @@ from collections.abc import Callable, Iterator
 
 import httpx
 import pytest
+from django.conf import LazySettings
 
 from pyracast.epias import AUTH_URL, EpiasClient, EpiasError
 from pyracast.metering import client
@@ -10,6 +11,8 @@ from pyracast.metering.models import EpiasCollectionJob
 from tests.support.domain import NOW
 from tests.support.epias import PASSWORD, PLANT, TICKET, USERNAME
 from tests.support.metering import connected
+
+CREDENTIAL = "fixture-value"
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
@@ -60,11 +63,11 @@ def test_an_unavailable_sign_in_service_is_an_outage_tried_again(status: int) ->
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.usefixtures("no_cached_client")
 def test_missing_credentials_keep_the_attempt_and_name_their_cause(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, settings: LazySettings
 ) -> None:
     connected(monkeypatch)
-    monkeypatch.delenv("EPIAS_USERNAME", raising=False)
-    monkeypatch.delenv("EPIAS_PASSWORD", raising=False)
+    settings.PYRACAST_EPIAS_USERNAME = ""
+    settings.PYRACAST_EPIAS_PASSWORD = ""
     job = EpiasCollectionJob.objects.order_by("pk").first()
     assert job is not None
 
@@ -134,9 +137,9 @@ def test_a_night_that_ends_without_usable_credentials_keeps_their_cause(
 
 
 @pytest.mark.usefixtures("no_cached_client")
-def test_the_process_client_names_missing_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("EPIAS_USERNAME", raising=False)
-    monkeypatch.setenv("EPIAS_PASSWORD", "fixture-value")
+def test_the_process_client_names_missing_credentials(settings: LazySettings) -> None:
+    settings.PYRACAST_EPIAS_USERNAME = ""
+    settings.PYRACAST_EPIAS_PASSWORD = CREDENTIAL
 
     with pytest.raises(EpiasError, match="epias_credentials_missing"):
         client.get_epias_client()

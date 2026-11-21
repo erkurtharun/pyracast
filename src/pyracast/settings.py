@@ -23,6 +23,8 @@ if not CLOCK_PATTERN.fullmatch(_cutoff):
 PYRACAST_CUTOFF_LOCAL = time(int(_cutoff[:2]), int(_cutoff[3:]))
 PYRACAST_WEATHER_ENABLED = os.environ.get("PYRACAST_WEATHER_ENABLED", "1") == "1"
 PYRACAST_OPEN_METEO_API_KEY = os.environ.get("PYRACAST_OPEN_METEO_API_KEY", "")
+PYRACAST_EPIAS_USERNAME = os.environ.get("EPIAS_USERNAME", "")
+PYRACAST_EPIAS_PASSWORD = os.environ.get("EPIAS_PASSWORD", "")
 PYRACAST_RABBITMQ_URL = os.environ.get("PYRACAST_RABBITMQ_URL", "")
 
 SECRET_KEY = os.environ.get("PYRACAST_SECRET_KEY", "")

@@ -1,6 +1,6 @@
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address, ip_network
+from ipaddress import IPv4Address, IPv6Address, ip_address
 from typing import NoReturn
 
 from django.conf import settings
@@ -8,11 +8,10 @@ from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.http import HttpRequest, HttpResponse
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
-from pyracast.accounts.checks import validate_public_origin
+from pyracast.accounts.checks import Network, parse_networks, validate_public_origin
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.errors import ErrorCode, ForbiddenError
 
-Network = IPv4Network | IPv6Network
 # Allauth reads the client from this header (ALLAUTH_TRUSTED_CLIENT_IP_HEADER); only the
 # middleware writes it, the gateway deletes it from every request.
 CLIENT_IP_HEADER = "X-Pyracast-Client-IP"
@@ -46,14 +45,6 @@ class UnverifiedProxyHeadersError(ValueError):
     def __init__(self, peer: str) -> None:
         super().__init__(peer)
         self.peer = peer
-
-
-def parse_networks(name: str, values: Iterable[str]) -> tuple[Network, ...]:
-    entries = [entry for value in values for entry in value.replace(",", " ").split()]
-    try:
-        return tuple(ip_network(entry) for entry in entries)
-    except ValueError as error:
-        raise ImproperlyConfigured(f"{name} holds an invalid network: {error}") from None
 
 
 def _address(value: object) -> IPv4Address | IPv6Address:

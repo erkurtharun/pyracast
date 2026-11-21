@@ -9,6 +9,7 @@ from typing import cast
 
 import dramatiq
 import pytest
+from django.conf import LazySettings
 from dramatiq import Worker
 from dramatiq.brokers.stub import StubBroker
 
@@ -20,17 +21,19 @@ from pyracast.metering.runtime import dispatch_epias, make_epias_actor
 from tests.support.domain import NOW
 from tests.support.metering import FixtureClient, connected
 
+CREDENTIAL = "fixture-value"
+
 
 def test_runtime_factory_requires_credentials_and_caches_once(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, settings: LazySettings
 ) -> None:
     client._cached_client.cache_clear()
-    monkeypatch.delenv("EPIAS_USERNAME", raising=False)
-    monkeypatch.delenv("EPIAS_PASSWORD", raising=False)
+    settings.PYRACAST_EPIAS_USERNAME = ""
+    settings.PYRACAST_EPIAS_PASSWORD = ""
     with pytest.raises(EpiasError, match="epias_credentials_missing"):
         client.get_epias_client()
-    monkeypatch.setenv("EPIAS_USERNAME", "fixture-user")
-    monkeypatch.setenv("EPIAS_PASSWORD", "fixture-value")
+    settings.PYRACAST_EPIAS_USERNAME = "fixture-user"
+    settings.PYRACAST_EPIAS_PASSWORD = CREDENTIAL
     calls = []
 
     def create(*args: object, **kwargs: object) -> EpiasClient:

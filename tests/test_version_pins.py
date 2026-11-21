@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 import yaml
 
+from scripts import start_postgres
 from tests.support.workflows import WORKFLOWS
 
 ROOT = WORKFLOWS.parents[1]
@@ -38,8 +39,8 @@ IMAGES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "Go": ("golang", ("deploy/gateway/Dockerfile",)),
     "Node.js": ("node", ("web/Dockerfile",)),
-    "PostgreSQL in development and CI": ("postgres", ("scripts/start_postgres.py",)),
-    "PostgreSQL in production": ("postgres", ("deploy/postgres/Dockerfile",)),
+    "PostgreSQL in development": ("postgres", ("scripts/start_postgres.py",)),
+    "PostgreSQL in production and CI": ("postgres", ("deploy/postgres/Dockerfile",)),
     "Python": ("python", ("Dockerfile", ".github/workflows/ci.yml", "deploy/scan-images.sh")),
     "RabbitMQ": (
         "rabbitmq",
@@ -146,15 +147,18 @@ PINS: dict[str, list[Text | ActionInput]] = {
         Text("README.md", rf"Node\.js \*\*{VERSION}\+\*\*"),
         Text("docs/STACK.md", rf"; {VERSION} is the local floor"),
     ],
-    "PostgreSQL in production": [
+    "PostgreSQL in production and CI": [
         Text("deploy/postgres/Dockerfile", r"FROM postgres:(\d+\.\d+)-"),
+        Text("scripts/start_postgres.py", r'^THROWAWAY_ARCHIVE_VERSION = "(\d+\.\d+)"$'),
         Text("docs/DEPLOYMENT.md", r"PostgreSQL (\d+\.\d+) on Alpine"),
-        Text("docs/STACK.md", r"PostgreSQL (\d+\.\d+) \(production image\)"),
+        Text("docs/STACK.md", r"PostgreSQL (\d+\.\d+) \(production image and CI tests\)"),
+        Text("docs/ARCHITECTURE.md", r"CI tests run production's (\d+\.\d+)"),
     ],
-    "PostgreSQL in development and CI": [
+    "PostgreSQL in development": [
         Text("scripts/start_postgres.py", r'"postgres:(\d+\.\d+)@'),
+        Text("scripts/start_postgres.py", r'^ARCHIVE_VERSION = "(\d+\.\d+)"$'),
         Text("docs/ARCHITECTURE.md", r"PostgreSQL (\d+\.\d+) is the verified"),
-        Text("docs/STACK.md", r"and (\d+\.\d+) \(development, CI tests\)"),
+        Text("docs/STACK.md", r"and (\d+\.\d+) \(development cluster\)"),
     ],
     "RabbitMQ": [
         Text("deploy/rabbitmq/Dockerfile", rf"^FROM rabbitmq:{VERSION}@"),
@@ -221,10 +225,10 @@ def test_the_local_node_floor_admits_the_pinned_node_of_the_same_major() -> None
 
 
 def test_development_postgresql_runs_the_major_version_production_runs() -> None:
-    major = single("PostgreSQL in production").split(".")[0]
+    major = single("PostgreSQL in production and CI").split(".")[0]
     start_postgres = (ROOT / "scripts/start_postgres.py").read_text(encoding="utf-8")
 
-    assert single("PostgreSQL in development and CI").split(".")[0] == major
+    assert single("PostgreSQL in development").split(".")[0] == major
     assert f'"/var/lib/postgresql/{major}/docker"' in start_postgres
 
 
@@ -246,6 +250,34 @@ def test_the_postgresql_image_adds_packages_uncached_at_a_quoted_minimum_version
         assert all(
             re.fullmatch(r"[a-z0-9][\w.+-]*>=\d[\w.]*-r\d+", package) for package in packages
         ), command
+
+
+def test_ci_clusters_run_the_production_postgresql_image() -> None:
+    dockerfile = (ROOT / "deploy/postgres/Dockerfile").read_text(encoding="utf-8")
+    production = re.search(r"^FROM (postgres:\S+)$", dockerfile, re.M)
+
+    assert production
+    assert start_postgres.production_image() == production[1]
+    assert start_postgres.PRODUCTION_DOCKERFILE == ROOT / "deploy/postgres/Dockerfile"
+
+
+def test_the_one_remaining_postgresql_difference_is_the_shared_development_cluster() -> None:
+    # Running work shares the development cluster; it moves to production's minor deliberately.
+    production = single("PostgreSQL in production and CI")
+    development = single("PostgreSQL in development")
+    development_locations = {location.path for location in PINS["PostgreSQL in development"]}
+
+    assert {
+        found.relative_to(ROOT).as_posix()
+        for path in (*IMAGE_SOURCES, "docs/ARCHITECTURE.md", "docs/STACK.md")
+        for found in ROOT.glob(path)
+        if re.search(
+            rf"postgres(?:ql)?:? ?{re.escape(development)}\b",
+            found.read_text(encoding="utf-8"),
+            re.I,
+        )
+    } <= development_locations
+    assert release(development)[0] == release(production)[0]
 
 
 def test_the_build_backend_range_admits_the_pinned_uv() -> None:

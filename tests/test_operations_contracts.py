@@ -24,6 +24,7 @@ from deploy import (
     authorize_gmail,
     backup,
     host,
+    host_contract,
     probe_origin_pull,
     rehearsal,
     release_state,
@@ -112,7 +113,9 @@ def stop_groups(script: str, *, cleanup: bool) -> list[tuple[int, tuple[str, ...
 def systemd_unit(name: str) -> dict[str, str]:
     template = text(TERRAFORM / "templates" / "startup.sh.tftpl")
     match = re.search(
-        rf"cat >/etc/systemd/system/{re.escape(name)} <<'EOF'\n(.*?)\nEOF", template, re.S
+        rf"write_if_changed /etc/systemd/system/{re.escape(name)} 0644 <<'EOF'\n(.*?)\nEOF",
+        template,
+        re.S,
     )
     assert match, name
     return dict(
@@ -518,24 +521,6 @@ def test_gmail_authorization_helper_matches_the_backend_configuration() -> None:
     assert read_by_settings == authorize_gmail.GMAIL_KEYS
 
 
-def test_host_configuration_provides_every_key_the_host_scripts_read() -> None:
-    written = re.search(
-        r"host_config_base64 = base64encode\(jsonencode\(merge\(\{(.*?)\}, \{",
-        text(TERRAFORM / "main.tf"),
-        re.S,
-    )
-    assert written
-    provided = set(re.findall(r"^\s*([a-z_]+)\s*=", written[1], re.M))
-    read = {
-        key
-        for path in [*DEPLOY.glob("*.py"), DEPLOY / "install-release.sh"]
-        for key in re.findall(r"config\[[\"']([a-z_]+)[\"']\]", text(path))
-    }
-
-    assert read
-    assert read <= provided
-
-
 def shipped_unit(name: str) -> dict[str, list[str]]:
     values: dict[str, list[str]] = {}
     for line in text(DEPLOY / "systemd" / name).splitlines():
@@ -565,7 +550,7 @@ def test_release_ships_the_watchdog_backup_and_rehearsal_units_and_the_host_keep
     assert enabled
     assert set(enabled[1].split()) == {name for name in shipped if name.endswith(".timer")}
     assert not any(f"/etc/systemd/system/{name}" in template for name in shipped)
-    assert "cat >/etc/systemd/system/pyracast.service" in template
+    assert "write_if_changed /etc/systemd/system/pyracast.service 0644 <<'EOF'" in template
     assert "deploy/install-units.sh install /opt/pyracast/current" in template
 
 
@@ -691,7 +676,9 @@ def test_host_paths_agree_between_scripts_units_and_helpers() -> None:
     assert helper["lock"] == host.RELEASE_LOCK
     assert installer.count(lock) == 1
     assert f"exec 9>>{lock}\n" in installer
-    assert template.count(lock) == 1
+    assert template.count(lock) == 2
+    assert f"release_lock={lock}\n" in template
+    assert 'flock --nonblock "$release_lock" true' in template
     assert application["ExecStop"].startswith(f"/usr/bin/flock {lock} ")
     assert application["UMask"] == "0077"
     assert f"['/usr/bin/flock', '{lock}', " in harness
@@ -993,12 +980,11 @@ def test_each_release_reads_the_secrets_staged_for_it() -> None:
     compose = text(DEPLOY / "compose.yaml")
     script = installer()
     variables = set(re.findall(r"\$\{([A-Z]+_ENV_FILE):-", compose))
-    written = set(
-        re.findall(
-            r'"([A-Z]+_ENV_FILE)": f"\{secrets\}/[a-z]+\.env"',
-            text(DEPLOY / "release_environment.py"),
-        )
-    )
+    written = {
+        key
+        for key, name in host_contract.SECRET_FILES.items()
+        if name == key.removesuffix("_ENV_FILE").lower() + ".env"
+    }
 
     assert variables == {
         "RUNTIME_ENV_FILE",
@@ -1443,36 +1429,58 @@ def shell_function(script: str, name: str) -> str:
     return script[start : script.index("\n}\n", start)]
 
 
-def test_with_origin_pulls_required_readiness_needs_an_enforcing_public_entrypoint() -> None:
+def test_with_origin_pulls_required_the_site_answers_through_the_edge_before_it_is_current() -> (
+    None
+):
     script = installer()
     gateway = '"${compose[@]}" up -d --no-deps --wait --wait-timeout 180 maintenance gateway\n'
-
-    enforced = shell_function(script, "edge_enforced")
-    assert "if grep -qsx 'ORIGIN_PULL=required' \"$1/deploy/release.env\"; then" in enforced
-    assert 'python3 "$release/deploy/probe_origin_pull.py" "$site_address"' in enforced
-    assert '[[ $response == ok ]] && edge_enforced "$1"' in shell_function(script, "ready")
-    assert f'  {gateway}  edge_enforced "$release"\n  "${{compose[@]}}" stop -t 100 api web\n' in (
-        script
+    gate = shell_function(script, "edge_answers")
+    upgrade = (
+        f"  {gateway}"
+        "  if (( resumable == 1 )); then\n"
+        "    edge_answers\n"
+        "    gated=1\n"
+        "  fi\n"
+        '  "${compose[@]}" stop -t 100 api web\n'
     )
-    assert script.index('edge_enforced "$release"\n') < script.index("recorded=1\n")
-    assert script.index('edge_enforced "$release"\n') < script.index(
-        '"${compose[@]}" run --rm --no-deps migrate\n'
-    )
+    final = '\nready "$release"\nif (( gated == 0 )); then edge_answers; fi\n'
+
+    assert "if grep -qsx 'ORIGIN_PULL=required' \"$release/deploy/release.env\"; then" in gate
+    assert 'python3 "$release/deploy/edge_gate.py" "$site_address" "${release##*/}"' in gate
+    assert "edge" not in shell_function(script, "ready")
+    assert "probe_origin_pull" not in script
+    assert upgrade in script
+    assert script.index(upgrade) < script.index("recorded=1\n")
+    assert script.index(upgrade) < script.index('"${compose[@]}" run --rm --no-deps migrate\n')
+    assert final in script
+    assert script.index(final) < script.index('ln -sfn "$release" /opt/pyracast/current.next')
+    assert re.findall(r"gated=\d", script) == ["gated=0", "gated=1"]
 
 
-def test_the_harness_resumes_the_previous_release_when_origin_pulls_are_not_enforced() -> None:
+def test_the_harness_proves_each_outcome_of_the_edge_gate_and_the_first_install() -> None:
     harness = text(DEPLOY / "test-release.sh")
     modes = re.search(r"^for MODE in (.*); do$", harness, re.M)
     resumed = re.search(r"^      (drain\|backup\|[^)]*)\)$", harness, re.M)
     released = re.search(r"^      (success\|[^)]*)\)$", harness, re.M)
+    stopped = re.search(r"^      (first-backup\|[^)]*)\)$", harness, re.M)
+    gate_modes = {
+        "origin-pull",
+        "origin-pull-edge",
+        "origin-pull-challenge",
+        "first-origin-pull",
+        "first-origin-pull-edge",
+    }
 
     assert modes
     assert resumed
     assert released
-    assert {"origin-pull", "origin-pull-open"} <= set(modes[1].split())
-    assert "origin-pull-open" in resumed[1].split("|")
-    assert "origin-pull" in released[1].split("|")
-    assert "*/probe_origin_pull.py" in harness
+    assert stopped
+    assert gate_modes <= set(modes[1].split())
+    assert {"origin-pull-edge", "origin-pull-challenge"} <= set(resumed[1].split("|"))
+    assert {"origin-pull", "first-origin-pull"} <= set(released[1].split("|"))
+    assert "first-origin-pull-edge" in stopped[1].split("|")
+    assert "*/edge_gate.py" in harness
+    assert "probe_origin_pull" not in harness
     assert "/source/origin-pull-off.pem" in harness
 
 

@@ -1,22 +1,44 @@
 import base64
-import getpass
 import io
 import json
-import secrets
+import urllib.error
 import urllib.request
-from collections.abc import Callable
+from email.message import Message
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
 
-from deploy import create_secrets, runtime_secrets
+from deploy import runtime_secrets
 from deploy.runtime_secrets import (
+    database_files,
     environment_values,
-    prepare_database,
-    prepare_migration,
-    prepare_runtime,
+    migration_files,
+    runtime_files,
+    write_files,
 )
+from tests.support.runtime_environment import RUNTIME_ENV, RUNTIME_SECRET
+
+RUNTIME_VERSION = "projects/pyracast-example/secrets/pyracast-runtime/versions/3"
+DATABASE_VERSION = "projects/pyracast-example/secrets/pyracast-database/versions/1"
+HOST = {
+    "project_id": "pyracast-example",
+    "runtime_secret_id": "projects/pyracast-example/secrets/pyracast-runtime",
+    "runtime_secret_version": RUNTIME_VERSION,
+    "database_secret_version": DATABASE_VERSION,
+    "backup_bucket": "pyracast-example-pyracast-backups",
+    "domain": "pyracast.example",
+    "acme_email": "ops@pyracast.example",
+}
+VALUE = "s3cr3t-value-never-printed"
+RUNTIME = {
+    "PYRACAST_SECRET_KEY": VALUE,
+    "PGUSER": "pyracast_app",
+    "PGPASSWORD": "app",
+    "RABBITMQ_DEFAULT_PASS": "broker",
+}
+DATABASE = {"POSTGRES_PASSWORD": "admin"}
 
 
 @pytest.mark.parametrize(
@@ -26,17 +48,20 @@ def test_secret_rejects_invalid_environment_without_disclosing_payload(payload: 
     with pytest.raises(ValueError, match="Secret") as error:
         environment_values(payload)
     assert "secret" not in str(error.value)
+    assert "PGUSER=admin" not in str(error.value)
 
 
 def test_runtime_separates_broker_credentials_and_preserves_literals(tmp_path: Path) -> None:
-    prepare_runtime(
-        {
-            "PYRACAST_SECRET_KEY": "literal$VALUE#'value",
-            "PGUSER": "runtime",
-            "PGPASSWORD": "password",
-            "RABBITMQ_DEFAULT_PASS": "broker@pass/$",
-        },
+    write_files(
         tmp_path,
+        runtime_files(
+            {
+                "PYRACAST_SECRET_KEY": "literal$VALUE#'value",
+                "PGUSER": "runtime",
+                "PGPASSWORD": "password",
+                "RABBITMQ_DEFAULT_PASS": "broker@pass/$",
+            }
+        ),
     )
     runtime = (tmp_path / "runtime.env").read_text()
     broker = (tmp_path / "broker.env").read_text()
@@ -47,16 +72,19 @@ def test_runtime_separates_broker_credentials_and_preserves_literals(tmp_path: P
     assert "PYRACAST_SECRET_KEY" not in broker
 
 
-def test_runtime_rejects_missing_credentials(tmp_path: Path) -> None:
+def test_the_deployment_check_proof_reads_the_runtime_environment_this_helper_writes() -> None:
+    assert runtime_files(RUNTIME_SECRET)["runtime.env"] == RUNTIME_ENV
+
+
+def test_runtime_rejects_missing_credentials() -> None:
     with pytest.raises(ValueError, match="missing required"):
-        prepare_runtime({"PGUSER": "runtime"}, tmp_path)
-    assert not list(tmp_path.iterdir())
+        runtime_files({"PGUSER": "runtime"})
 
 
 def test_migration_secret_cannot_override_application_configuration(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="only PGUSER and PGPASSWORD"):
-        prepare_migration({"PGUSER": "owner", "PGPASSWORD": "pw", "PYRACAST_DEBUG": "1"}, tmp_path)
-    prepare_migration({"PGUSER": "owner", "PGPASSWORD": "pw"}, tmp_path)
+        migration_files({"PGUSER": "owner", "PGPASSWORD": "pw", "PYRACAST_DEBUG": "1"})
+    write_files(tmp_path, migration_files({"PGUSER": "owner", "PGPASSWORD": "pw"}))
     assert (tmp_path / "migration.env").read_text() == "PGPASSWORD=pw\nPGUSER=owner\n"
 
 
@@ -68,59 +96,15 @@ def test_migration_secret_cannot_override_application_configuration(tmp_path: Pa
         {"POSTGRES_PASSWORD": "admin", "PGPASSWORD": "owner"},
     ],
 )
-def test_database_secret_rejects_application_or_migration_credentials(
-    tmp_path: Path,
-    payload: object,
-) -> None:
+def test_database_secret_rejects_application_or_migration_credentials(payload: object) -> None:
     with pytest.raises(ValueError, match=r"Secret|Database secret"):
-        prepare_database(payload, tmp_path)
-    assert not list(tmp_path.iterdir())
+        database_files(payload)
 
 
 def test_database_secret_is_separate_from_runtime(tmp_path: Path) -> None:
-    prepare_database({"POSTGRES_PASSWORD": "bootstrap$secret"}, tmp_path)
+    write_files(tmp_path, database_files({"POSTGRES_PASSWORD": "bootstrap$secret"}))
     assert (tmp_path / "database.env").read_text() == "POSTGRES_PASSWORD=bootstrap$secret\n"
     assert sorted(path.name for path in tmp_path.iterdir()) == ["database.env"]
-
-
-def test_secrets_are_staged_for_the_release_whose_helper_runs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    secrets = {
-        "projects/p/secrets/runtime/versions/3": {
-            "PYRACAST_SECRET_KEY": "key",
-            "PGUSER": "pyracast_app",
-            "PGPASSWORD": "app",
-            "RABBITMQ_DEFAULT_PASS": "broker",
-        },
-        "projects/p/secrets/database/versions/1": {"POSTGRES_PASSWORD": "admin"},
-    }
-    monkeypatch.setattr(runtime_secrets, "SECRETS", tmp_path / "secrets")
-    monkeypatch.setattr(runtime_secrets, "access_secret", secrets.__getitem__)
-    config = tmp_path / "host.json"
-    config.write_text(
-        json.dumps(
-            {
-                "runtime_secret_version": "projects/p/secrets/runtime/versions/3",
-                "database_secret_version": "projects/p/secrets/database/versions/1",
-            }
-        )
-    )
-    migration = tmp_path / "migration.json"
-    migration.write_text(json.dumps({"PGUSER": "pyracast_owner", "PGPASSWORD": "owner"}))
-
-    runtime_secrets.main([str(config)])
-    runtime_secrets.main([str(config), "--migration", str(migration)])
-
-    release = Path(runtime_secrets.__file__).resolve().parents[1].name
-    staged = tmp_path / "secrets" / release
-    assert sorted(path.name for path in staged.iterdir()) == [
-        "broker.env",
-        "database.env",
-        "migration.env",
-        "runtime.env",
-    ]
-    assert sorted(path.name for path in (tmp_path / "secrets").iterdir()) == [release]
 
 
 def test_staged_directory_belongs_to_the_resolved_release() -> None:
@@ -131,114 +115,404 @@ def test_staged_directory_belongs_to_the_resolved_release() -> None:
     )
 
 
-def test_a_secret_is_read_with_the_instance_identity_from_its_pinned_version(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    requests: list[tuple[str, dict[str, str], float]] = []
-    payload = base64.b64encode(json.dumps({"POSTGRES_PASSWORD": "admin"}).encode()).decode()
-    answers = {
-        "metadata.google.internal": {"access_token": "instance-token"},
-        "secretmanager.googleapis.com": {"payload": {"data": payload}},
-    }
+class Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+# An int answers with that HTTP error status.
+Answer = dict[str, Any] | bytes | int | BaseException
+
+
+def secret_answer(payload: object) -> dict[str, Any]:
+    data = base64.b64encode(json.dumps(payload).encode()).decode()
+    return {"payload": {"data": data}}
+
+
+def http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("https://example.invalid", code, "refused", Message(), None)
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
+    fake = Clock()
+    monkeypatch.setattr(runtime_secrets, "time", fake)
+    return fake
+
+
+@pytest.fixture
+def reports(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, dict[str, object]]]:
+    recorded: list[tuple[str, str, dict[str, object]]] = []
+
+    def report(event: str, severity: str, **details: object) -> None:
+        recorded.append((event, severity, details))
+
+    monkeypatch.setattr(runtime_secrets, "report", report)
+    return recorded
+
+
+def serve(
+    monkeypatch: pytest.MonkeyPatch, answers: dict[str, list[Answer]]
+) -> list[tuple[str, float]]:
+    requests: list[tuple[str, float]] = []
 
     def urlopen(request: urllib.request.Request, *, timeout: float) -> io.BytesIO:
-        requests.append((request.full_url, dict(request.header_items()), timeout))
-        host = urlsplit(request.full_url).hostname
-        return io.BytesIO(json.dumps(answers[str(host)]).encode())
+        requests.append((request.full_url, timeout))
+        url = urlsplit(request.full_url)
+        queue = answers[str(url.hostname) + url.path.rsplit(":", 1)[0].rsplit("/versions", 1)[0]]
+        answer = queue.pop(0) if len(queue) > 1 else queue[0]
+        if isinstance(answer, int):
+            raise http_error(answer)
+        if isinstance(answer, BaseException):
+            raise answer
+        if isinstance(answer, bytes):
+            return io.BytesIO(answer)
+        return io.BytesIO(json.dumps(answer).encode())
 
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    return requests
 
-    assert runtime_secrets.access_secret("projects/p/secrets/database/versions/2") == {
-        "POSTGRES_PASSWORD": "admin"
-    }
-    assert [(url, timeout) for url, _, timeout in requests] == [
-        (
-            "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/"
-            "default/token",
-            10,
-        ),
-        (
-            "https://secretmanager.googleapis.com/v1/projects/p/secrets/database/versions/2:access",
-            15,
-        ),
+
+IDENTITY = "metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+RUNTIME_RESOURCE = (
+    "secretmanager.googleapis.com/v1/projects/pyracast-example/secrets/pyracast-runtime"
+)
+DATABASE_RESOURCE = (
+    "secretmanager.googleapis.com/v1/projects/pyracast-example/secrets/pyracast-database"
+)
+
+
+@pytest.fixture
+def host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(runtime_secrets, "SECRETS", tmp_path / "secrets")
+    path = tmp_path / "host.json"
+    path.write_text(json.dumps(HOST), encoding="utf-8")
+    return path
+
+
+def staged(tmp_path: Path) -> Path:
+    return tmp_path / "secrets" / Path(runtime_secrets.__file__).resolve().parents[1].name
+
+
+@pytest.mark.usefixtures("clock", "reports")
+def test_secrets_are_staged_for_the_release_whose_helper_runs_with_one_identity_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: Path
+) -> None:
+    requests = serve(
+        monkeypatch,
+        {
+            IDENTITY: [{"access_token": "instance-token"}],
+            RUNTIME_RESOURCE: [secret_answer(RUNTIME)],
+            DATABASE_RESOURCE: [secret_answer(DATABASE)],
+        },
+    )
+    migration = tmp_path / "migration.json"
+    migration.write_text(json.dumps({"PGUSER": "pyracast_owner", "PGPASSWORD": "owner"}))
+
+    assert runtime_secrets.main([str(host)]) == 0
+    assert runtime_secrets.main([str(host), "--migration", str(migration)]) == 0
+
+    assert sorted(path.name for path in staged(tmp_path).iterdir()) == [
+        "broker.env",
+        "database.env",
+        "migration.env",
+        "runtime.env",
     ]
-    assert requests[0][1] == {"Metadata-flavor": "Google"}
-    assert requests[1][1] == {"Authorization": "Bearer instance-token"}
+    assert [url for url, _ in requests] == [
+        f"http://{IDENTITY}",
+        f"https://{RUNTIME_RESOURCE}/versions/3:access",
+        f"https://{DATABASE_RESOURCE}/versions/1:access",
+    ]
+
+
+def test_a_secret_is_read_with_the_instance_identity_from_its_pinned_version(
+    monkeypatch: pytest.MonkeyPatch, clock: Clock
+) -> None:
+    seen: list[tuple[str, dict[str, str]]] = []
+
+    def urlopen(request: urllib.request.Request, *, timeout: float) -> io.BytesIO:
+        seen.append((request.full_url, dict(request.header_items())))
+        if "metadata" in request.full_url:
+            return io.BytesIO(json.dumps({"access_token": "instance-token"}).encode())
+        return io.BytesIO(json.dumps(secret_answer(DATABASE)).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    deadline = runtime_secrets.Deadline(clock.monotonic() + runtime_secrets.RETRY_SECONDS)
+
+    token = runtime_secrets.instance_token(deadline)
+
+    assert runtime_secrets.access_secret(DATABASE_VERSION, token, "database", deadline) == DATABASE
+    assert seen[0][1] == {"Metadata-flavor": "Google"}
+    assert seen[1][1] == {"Authorization": "Bearer instance-token"}
+
+
+@pytest.mark.usefixtures("reports")
+def test_a_transient_answer_is_retried_with_backoff_until_it_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: Path, clock: Clock
+) -> None:
+    serve(
+        monkeypatch,
+        {
+            IDENTITY: [urllib.error.URLError("unreachable"), {"access_token": "instance-token"}],
+            RUNTIME_RESOURCE: [
+                503,
+                429,
+                TimeoutError(),
+                secret_answer(RUNTIME),
+            ],
+            DATABASE_RESOURCE: [secret_answer(DATABASE)],
+        },
+    )
+
+    assert runtime_secrets.main([str(host)]) == 0
+
+    assert clock.sleeps == [1.0, 1.0, 2.0, 4.0]
+    assert (staged(tmp_path) / "runtime.env").exists()
+
+
+def assert_refused(
+    capsys: pytest.CaptureFixture[str],
+    reports: list[tuple[str, str, dict[str, object]]],
+    category: str,
+    secret: str,
+    message: str,
+) -> None:
+    error = capsys.readouterr().err
+    assert error.startswith(f"Secret preparation failed ({category}): {message}")
+    assert error.count("\n") == 1
+    assert VALUE not in error
+    assert reports == [
+        ("pyracast_secrets_failed", "ERROR", {"category": category, "secret": secret})
+    ]
 
 
 @pytest.mark.parametrize(
-    "resource",
+    ("answers", "category", "secret", "message"),
     [
-        "projects/p/secrets/runtime/versions/latest",
-        "projects/p/secrets/runtime",
-        "projects/P/secrets/runtime/versions/1",
+        pytest.param(
+            {IDENTITY: [404]},
+            "identity",
+            "host",
+            "the metadata server gave no access token",
+            id="identity",
+        ),
+        pytest.param(
+            {IDENTITY: [{"token": "no access token"}]},
+            "identity",
+            "host",
+            "the metadata server gave no access token",
+            id="identity-answer",
+        ),
+        pytest.param(
+            {IDENTITY: [{"access_token": ""}]},
+            "identity",
+            "host",
+            "the metadata server gave no access token",
+            id="identity-empty",
+        ),
+        pytest.param(
+            {IDENTITY: [{"access_token": "t"}], RUNTIME_RESOURCE: [b"<html>proxy</html>"]},
+            "format",
+            "runtime",
+            "the runtime secret is not a JSON object of environment strings",
+            id="format-answer",
+        ),
+        pytest.param(
+            {IDENTITY: [{"access_token": "t"}], RUNTIME_RESOURCE: [403]},
+            "permission",
+            "runtime",
+            "Secret Manager refused the runtime secret to the VM's service account",
+            id="permission",
+        ),
+        pytest.param(
+            {IDENTITY: [{"access_token": "t"}], RUNTIME_RESOURCE: [404]},
+            "version",
+            "runtime",
+            "the pinned runtime secret version does not exist or is disabled",
+            id="version",
+        ),
+        pytest.param(
+            {IDENTITY: [{"access_token": "t"}], RUNTIME_RESOURCE: [urllib.error.URLError("down")]},
+            "unavailable",
+            "runtime",
+            "Secret Manager did not answer for the runtime secret within 60 s",
+            id="unavailable",
+        ),
+        pytest.param(
+            {IDENTITY: [urllib.error.URLError("down")]},
+            "unavailable",
+            "host",
+            "the metadata server did not answer within 60 s",
+            id="metadata-unavailable",
+        ),
+        pytest.param(
+            {
+                IDENTITY: [{"access_token": "t"}],
+                RUNTIME_RESOURCE: [secret_answer({**RUNTIME, "PGPASSWORD": ""})],
+            },
+            "format",
+            "runtime",
+            "the runtime secret is not a JSON object of environment strings",
+            id="format-keys",
+        ),
+        pytest.param(
+            {IDENTITY: [{"access_token": "t"}], RUNTIME_RESOURCE: [{"payload": {"data": VALUE}}]},
+            "format",
+            "runtime",
+            "the runtime secret is not a JSON object of environment strings",
+            id="format-payload",
+        ),
+        pytest.param(
+            {
+                IDENTITY: [{"access_token": "t"}],
+                RUNTIME_RESOURCE: [secret_answer(RUNTIME)],
+                DATABASE_RESOURCE: [secret_answer({"POSTGRES_PASSWORD": VALUE, "PGUSER": "x"})],
+            },
+            "format",
+            "database",
+            "the database secret is not a JSON object of environment strings",
+            id="format-database",
+        ),
     ],
 )
-def test_a_secret_must_name_a_numeric_version(
-    monkeypatch: pytest.MonkeyPatch, resource: str
+@pytest.mark.usefixtures("clock")
+def test_each_failure_is_reported_by_category_in_one_line_without_a_value(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    host: Path,
+    reports: list[tuple[str, str, dict[str, object]]],
+    answers: dict[str, list[Answer]],
+    category: str,
+    secret: str,
+    message: str,
 ) -> None:
-    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+    serve(monkeypatch, answers)
 
-    with pytest.raises(ValueError, match="numeric Secret Manager version"):
-        runtime_secrets.access_secret(resource)
+    assert runtime_secrets.main([str(host)]) == 1
 
-
-def forbidden(*_args: object, **_kwargs: object) -> None:
-    raise AssertionError("This step must not run.")
+    assert_refused(capsys, reports, category, secret, message)
 
 
-def answer(*replies: str) -> Callable[[str], str]:
-    queue = list(replies)
-    return lambda _prompt: queue.pop(0)
-
-
-@pytest.mark.parametrize("backend", ["gmail", "smtp"])
-def test_secret_creation_writes_three_private_files_once(
+@pytest.mark.usefixtures("clock")
+def test_a_refused_host_configuration_is_a_configuration_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    backend: str,
+    reports: list[tuple[str, str, dict[str, object]]],
 ) -> None:
-    replies = [backend, ""] + (["smtp.example", "mailer"] if backend == "smtp" else [])
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("builtins.input", answer(*replies))
-    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "smtp-password")
+    path = tmp_path / "host.json"
+    path.write_text(json.dumps({**HOST, "runtime_secret_version": "latest"}), encoding="utf-8")
+    serve(monkeypatch, {})
 
-    create_secrets.main()
+    assert runtime_secrets.main([str(path)]) == 1
 
-    secrets = tmp_path / "secrets"
-    runtime = json.loads((secrets / "runtime.json").read_text(encoding="utf-8"))
-    migration = json.loads((secrets / "migration.json").read_text(encoding="utf-8"))
-    database = json.loads((secrets / "database.json").read_text(encoding="utf-8"))
-    assert runtime["PYRACAST_EMAIL_BACKEND"] == backend
-    assert runtime["PYRACAST_FROM_EMAIL"] == "info@pyracast.app"
-    assert ("PYRACAST_EMAIL_PASSWORD" in runtime) is (backend == "smtp")
-    assert runtime["PGUSER"] == "pyracast_app"
-    assert migration["PGUSER"] == "pyracast_owner"
-    assert len({runtime["PGPASSWORD"], migration["PGPASSWORD"], database["POSTGRES_PASSWORD"]}) == 3
-    assert ("authorize_gmail.py" in capsys.readouterr().out) is (backend == "gmail")
-    with pytest.raises(SystemExit, match="already exist"):
-        create_secrets.main()
+    assert_refused(
+        capsys,
+        reports,
+        "configuration",
+        "host",
+        "Host setting runtime_secret_version must be a numeric version of runtime_secret_id.",
+    )
 
 
-def test_secret_creation_offers_only_the_supported_mail_backends(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("content", "category", "message"),
+    [
+        (None, "configuration", "the migration secret file cannot be read"),
+        (json.dumps({"PGUSER": VALUE}), "format", "the migration secret is not a JSON object"),
+        ("{", "format", "the migration secret is not a JSON object"),
+    ],
+)
+@pytest.mark.usefixtures("clock")
+def test_a_migration_secret_that_cannot_be_read_or_is_malformed_is_refused_by_category(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    host: Path,
+    reports: list[tuple[str, str, dict[str, object]]],
+    content: str | None,
+    category: str,
+    message: str,
 ) -> None:
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("builtins.input", answer("sendmail"))
+    migration = tmp_path / "migration.json"
+    if content is not None:
+        migration.write_text(content, encoding="utf-8")
 
-    with pytest.raises(SystemExit, match="Choose gmail or smtp"):
-        create_secrets.main()
-    assert list((tmp_path / "secrets").iterdir()) == []
+    assert runtime_secrets.main([str(host), "--migration", str(migration)]) == 1
+
+    assert_refused(capsys, reports, category, "migration", message)
 
 
-def test_secret_creation_refuses_an_empty_database_password(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.usefixtures("clock")
+def test_files_that_cannot_be_written_are_a_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    host: Path,
+    reports: list[tuple[str, str, dict[str, object]]],
 ) -> None:
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("builtins.input", answer("", ""))
-    monkeypatch.setattr(secrets, "token_urlsafe", lambda _size: "")
+    migration = tmp_path / "migration.json"
+    migration.write_text(json.dumps({"PGUSER": "pyracast_owner", "PGPASSWORD": VALUE}))
 
-    with pytest.raises(SystemExit, match="cannot be empty"):
-        create_secrets.main()
-    assert list((tmp_path / "secrets").iterdir()) == []
+    def refuse(_directory: Path, _files: object) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(runtime_secrets, "write_files", refuse)
+
+    assert runtime_secrets.main([str(host), "--migration", str(migration)]) == 1
+
+    assert_refused(
+        capsys, reports, "write", "migration", "the environment files of the release could not"
+    )
+
+
+@pytest.mark.usefixtures("clock")
+def test_host_files_that_cannot_be_written_are_a_write_failure_of_the_host_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    host: Path,
+    reports: list[tuple[str, str, dict[str, object]]],
+) -> None:
+    serve(
+        monkeypatch,
+        {
+            IDENTITY: [{"access_token": "instance-token"}],
+            RUNTIME_RESOURCE: [secret_answer(RUNTIME)],
+            DATABASE_RESOURCE: [secret_answer(DATABASE)],
+        },
+    )
+
+    def refuse(_directory: Path, _files: object) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(runtime_secrets, "write_files", refuse)
+
+    assert runtime_secrets.main([str(host)]) == 1
+
+    assert_refused(
+        capsys, reports, "write", "host", "the environment files of the release could not"
+    )
+
+
+@pytest.mark.usefixtures("clock")
+def test_an_unexpected_error_names_only_its_type(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    host: Path,
+    reports: list[tuple[str, str, dict[str, object]]],
+) -> None:
+    def broken(_deadline: object) -> str:
+        raise RuntimeError(VALUE)
+
+    monkeypatch.setattr(runtime_secrets, "instance_token", broken)
+
+    assert runtime_secrets.main([str(host)]) == 1
+
+    assert_refused(capsys, reports, "unexpected", "host", "RuntimeError while preparing")

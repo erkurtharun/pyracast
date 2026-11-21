@@ -347,9 +347,9 @@ migrations, while `migrate --check` checks unapplied migrations; neither is a
 physical-schema drift detector or a migration checksum. Do not make unrecorded manual
 DDL changes.
 
-PostgreSQL 18.6 is the verified, pinned development/CI version. Keep time in
-`timestamptz`, quantities in explicitly named units, unknown measurements nullable,
-and immutable acquisition payloads separate from typed relational identities.
+PostgreSQL 18.6 is the verified, pinned development version; CI tests run production's 18.7.
+Keep time in `timestamptz`, quantities in explicitly named units, unknown measurements
+nullable, and immutable acquisition payloads separate from typed relational identities.
 Retain bigint identity keys: replacing them with UUIDv7 has no demonstrated need.
 JSONB holds provider payloads and versioned numerical artifacts; foreign keys,
 scheduling selectors and quantities needing database rules remain typed columns.

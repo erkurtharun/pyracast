@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-from deploy import host, watchdog
+from deploy import host, probe_origin_pull, watchdog
 
 HEALTHY = dict.fromkeys(watchdog.SERVICES, "running")
 DAY = 86400
@@ -719,3 +719,36 @@ def test_containers_of_services_the_watchdog_does_not_supervise_are_ignored() ->
         "api": "healthy",
     }
     assert listing.commands[-1] == ["docker", "inspect", "one", "two"]
+
+
+@pytest.mark.parametrize(
+    ("origin_pull", "observation", "reported"),
+    [
+        ("required", probe_origin_pull.ENFORCED, []),
+        ("required", probe_origin_pull.CLOSED, [{"observation": probe_origin_pull.CLOSED}]),
+        ("off", probe_origin_pull.CLOSED, []),
+    ],
+)
+def test_origin_pull_enforcement_is_checked_between_releases(
+    watched: Host,
+    monkeypatch: pytest.MonkeyPatch,
+    origin_pull: str,
+    observation: str,
+    reported: list[dict[str, object]],
+) -> None:
+    (watched.release / "deploy/release.env").write_text(
+        f"SITE_ADDRESS=example.com\nORIGIN_PULL={origin_pull}\n"
+    )
+    probes: list[tuple[object, ...]] = []
+
+    def observe(address: str, port: int, server_name: str, cafile: str | None, wait: float) -> str:
+        probes.append((address, port, server_name, cafile, wait))
+        return observation
+
+    monkeypatch.setattr(probe_origin_pull, "observe", observe)
+
+    assert watchdog.main() == 0
+    assert watched.details("pyracast_origin_pull_unenforced") == reported
+    expected = [("127.0.0.1", host.PUBLIC_HTTPS_PORT, "example.com", None, 5.0)]
+    assert probes == (expected if origin_pull == "required" else [])
+    assert watched.heartbeat() == {"state": "ok"}

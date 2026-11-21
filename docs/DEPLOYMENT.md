@@ -78,23 +78,23 @@ client certificate. To enable them: create a CA and a client certificate it sign
 upload the certificate to Cloudflare as a zone-level Authenticated Origin Pulls
 certificate and turn the feature on (the edge then presents it; nothing changes yet),
 then set `origin_pull_ca` in `terraform.tfvars` to the CA's PEM, apply, run the startup
-script to refresh `/etc/pyracast/host.json` and release. Before maintenance the installer
-refuses a value with no certificate or with any PEM block that does not load as an
-X.509 certificate. Host-local probes (release readiness, watchdog, reset tool) use the
-loopback-only port 8443, which never asks for the edge's certificate, so a release that
-requires origin pulls is ready only when `deploy/probe_origin_pull.py` also sees port
-443 refuse a TLS 1.3 handshake without a client certificate (alert
-`certificate_required`). Traefik closes that handshake instead when it rejects the TLS
-option and completes it when its routers are missing. The probe first runs right after
-the new gateway starts, so either outcome fails the release as a failure before
-`migrate` does: the previous release serves again. The probe proves that the origin
-asks for a certificate, not that the edge's certificate is signed by this authority: a
-valid but wrong authority gives a successful release that Cloudflare cannot reach. So
-check at once that the site still answers through Cloudflare, and go back if it does
-not; on the VM,
-`python3 /opt/pyracast/current/deploy/probe_origin_pull.py DOMAIN` reports the refusal.
-To go back, set `origin_pull_ca = ""`, apply, refresh `host.json` and release; the
-edge certificate can stay.
+script to refresh `/etc/pyracast/host.json` and release. First check from the VM that
+`curl https://DOMAIN/health/live/` answers `ok` through Cloudflare without a challenge.
+Before maintenance the installer refuses a value with no certificate or with any PEM
+block that does not load as an X.509 certificate. With origin pulls required, one
+request from the VM through Cloudflare (`deploy/edge_gate.py`, `/health/live/` for up to
+a minute) must reach the origin's answer: in an upgrade right after the new gateway
+starts, while the previous release still answers, so a failure resumes it before
+`migrate`; on a first installation, or when maintenance was already on, after the new
+release starts and before it becomes current, so a failure leaves maintenance on. A
+Cloudflare challenge of the VM fails at once and names the remedies: an edge rule that
+lets the host's health request through, or no origin pulls. Readiness, the resume of the
+previous release, the watchdog and the reset tool use the loopback-only port 8443, which
+never asks for the edge's certificate; between releases the watchdog reports
+`pyracast_origin_pull_unenforced` when port 443 stops refusing a handshake without one
+(`python3 /opt/pyracast/current/deploy/probe_origin_pull.py DOMAIN`). To go back, set
+`origin_pull_ca = ""`, apply, refresh `host.json` and release; the edge certificate can
+stay.
 
 `deploy/gateway/` builds upstream Traefik as a pinned Go tool, verifying module
 checksums. Review dependency updates with the container build and HTTPS smoke
@@ -220,7 +220,12 @@ proxy without reviewing the trust chain. Do not configure cache rules that cache
 authentication, API or administration responses.
 
 SSH is accessible only through IAP. Terraform enables OS Login and grants the
-named operators access to this VM. Wait for its startup script to finish:
+named operators access to this VM. The startup script runs at every boot and changes
+only what differs from Terraform's version: it installs the pinned Docker packages only
+when they differ and restarts Docker only when its own configuration changed, both only
+while no release holds the lock, and never restarts the application. After a `terraform apply`
+that changes it, run it with `sudo google_metadata_script_runner startup`. Wait for it
+to finish:
 
 ```bash
 gcloud compute ssh pyracast --project="$PROJECT_ID" --zone=europe-west1-b --tunnel-through-iap
@@ -230,14 +235,21 @@ sudo docker compose version
 
 ### 2. Add secrets
 
-Run secret setup from the repository root on your local Windows or Ubuntu
-workstation, with uv, an authenticated Google Cloud CLI and a browser. The helper
+Run secret setup on your local Windows or Ubuntu workstation, with uv, an
+authenticated Google Cloud CLI and a browser. `deploy/host_secrets.py` keeps the files in
+the repository's ignored `secrets/` directory and never prints a value. `create`
 generates application encryption, broker and database keys and asks for the mail
-backend and sender. It refuses to overwrite existing files; preserve existing
-secrets when adding Gmail to an existing deployment. Weather is initially disabled.
+backend and sender; it refuses to overwrite existing files. `check` names, by file and
+key, problems of the file shape, required and known keys, role names, incomplete sign-in
+pairs and shared database passwords; the release still applies the settings' own checks
+(mail, ports, times). `set KEY` stores one runtime setting typed
+without echo (provider or EPIAS credentials). `rotate secret-key|runtime-password|owner-password`
+replaces a generated value; broker and database superuser passwords are not rotated this
+way. `drop-fallbacks` finishes a secret-key rotation. Weather is initially disabled.
 
 ```bash
-uv run --locked python deploy/create_secrets.py
+uv run --locked python deploy/host_secrets.py create
+uv run --locked python deploy/host_secrets.py check
 ```
 
 For the Workspace sender, choose `gmail` and `info@pyracast.app`. Enable the Gmail
@@ -466,7 +478,8 @@ fixtures do not establish provider access or inbox delivery.
   Do not automatically resend an email marked `uncertain`.
 - **Host supervision:** `pyracast-watchdog.timer` runs independent checks (capacity,
   backup age, restore rehearsal, containers, delivery at most every five minutes, origin
-  certificate) within one deadline and ends each run with a `pyracast_watchdog_heartbeat` whose
+  certificate, origin-pull enforcement when required) within one deadline and ends each run
+  with a `pyracast_watchdog_heartbeat` whose
   `state` is `ok`, `blocked`, `unit_failed` or `lock_busy`; a missing heartbeat
   alerts. It restarts application containers only under the release lock and never
   restarts or starts a stopped PostgreSQL or RabbitMQ; it only recreates missing
@@ -542,16 +555,18 @@ fixtures do not establish provider access or inbox delivery.
   breaks the published seven-day statement: change
   `web/src/features/public-site/legal-copy.ts` first. To restore a `daily/` object with
   the helper, copy it to a `postgres/` name.
-- **Key rotation:** add a numeric runtime secret version, update Terraform's
-  `runtime_secret_version`, apply it, and run the VM startup script through a
-  controlled maintenance session to refresh `/etc/pyracast/host.json`, then
+- **Key rotation:** `deploy/host_secrets.py rotate` changes the local file (the
+  secret key keeps the previous one as its first fallback); add it as a numeric runtime
+  secret version, update Terraform's `runtime_secret_version`, apply it, and run the VM
+  startup script (it restarts nothing) to refresh `/etc/pyracast/host.json`, then
   redeploy `main`: run CI on `main`; if its automatic Release skipped the
   deployment ("Nothing to release"), dispatch Release while that run's image
   artifact is unexpired (see the redeploy steps under the release procedure).
   Django encryption rotation keeps the old key in `PYRACAST_SECRET_KEY_FALLBACKS`;
   after that release, run `pyracast reencrypt_secrets --verify` in the `api`
   container and remove the old key only once `pyracast check_secrets
-  --require-primary` exits 0. Every release refuses, before maintenance, a key set
+  --require-primary` exits 0: `deploy/host_secrets.py drop-fallbacks`, then add and
+  release that runtime secret version as above. Every release refuses, before maintenance, a key set
   that cannot read a stored secret. `check_secrets` exits 1 when a secret is
   unreadable or malformed (it names the rows, never values) and 2 under
   `--require-primary` when one still needs a fallback key; `reencrypt_secrets` exits
@@ -566,8 +581,10 @@ fixtures do not establish provider access or inbox delivery.
   previous release with that secret too.
 - **Patching and storage:** review weekly Dependabot PRs, rebuild and test images;
   exact image digests do not update themselves. The daily `Image rescan` workflow
-  rebuilds the release images from `main` and scans them; a failed run needs an
-  image update. Review Ubuntu security updates and
+  rebuilds the release images from `main` and scans them; with
+  `image_rescan_reader = true` applied and the repository variable `GCP_IMAGE_RESCAN`
+  set to `terraform -chdir=infra/terraform output -raw image_rescan_setting`, it scans the deployed
+  `production` digests instead. A failed run needs an image update. Review Ubuntu security updates and
   pinned Docker/Compose/PostgreSQL versions during planned maintenance. PostgreSQL
   major upgrades need a separately rehearsed dump/restore or `pg_upgrade` procedure.
   Each release keeps the serving and the previous release with their images and
@@ -863,9 +880,10 @@ point, that the previous release's helper runs the printed `restore` from the ke
 archive without the bucket and the printed `abort`, that a failed run leaves no
 pre-release dump the session does not name, that the next successful release deletes
 the kept pre-release files and pruning keeps the previous release, that a release whose job is
-cancelled during `migrate` still completes and can be followed again, and that a
-release whose public port does not enforce required origin pulls resumes the previous
-release.
+cancelled during `migrate` still completes and can be followed again, and that with
+origin pulls required an upgrade whose edge request fails or is challenged resumes the
+previous release, while a first installation whose edge request fails stays in
+maintenance.
 `deploy/test-broker-rollback.sh BACKEND_IMAGE RABBITMQ_IMAGE` starts the public broker of
 the releases before the built one, the built broker and that public broker again on one
 data volume, and each keeps the queued work and accepts more: a failed release returns to
@@ -880,8 +898,11 @@ again.
 watchdog and drain service lists, the shipped units and host paths, stop grace
 periods, alert event names,
 Cloudflare ranges, the gateway trust anchor, router prefixes, limits and header
-owners, timeouts, the CI result job, Gmail constants and `host.json` keys. Change
-those values together with that test.
+owners, timeouts, the CI result job and Gmail constants, and
+`tests/test_host_contract.py` holds `deploy/host_contract.py` to the `host.json` keys
+Terraform writes and the host scripts read, the variables `compose.yaml` reads and the
+settings the runtime secret carries. Change those values together with these tests; `tests/test_deployment_checks.py`
+runs every deployment check against the shipped Compose environment.
 It does not prove GCP IAM, backup upload/restore, the metadata firewall itself (each
 release probes it before maintenance), public
 DNS, ACME, Cloud Logging or live Gmail/SMTP/provider behavior. `compose.smoke.yaml` is test

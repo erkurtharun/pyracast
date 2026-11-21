@@ -8,7 +8,7 @@ fi
 trap 'cat /result /calls >&2' ERR
 mkdir -p /mock-bin /fixture/deploy /etc/pyracast /etc/systemd/system /var/lib/pyracast /opt/pyracast/releases /units
 cat >/host.json <<'JSON'
-{"domain":"example.com","acme_email":"ops@example.com","backup_bucket":"pyracast-backups","runtime_secret_version":"1"}
+{"project_id":"pyracast-example","runtime_secret_id":"projects/pyracast-example/secrets/pyracast-runtime","runtime_secret_version":"projects/pyracast-example/secrets/pyracast-runtime/versions/1","database_secret_version":"projects/pyracast-example/secrets/pyracast-database/versions/1","backup_bucket":"pyracast-backups","domain":"example.com","acme_email":"ops@example.com"}
 JSON
 # A modelled Compose file names the variables the real one requires; the docker mock refuses a call
 # whose environment file lacks one. The release before the broker image ran the public broker.
@@ -22,8 +22,8 @@ touch /fixture/deploy/runtime_secrets.py /fixture/deploy/bootstrap_database.py
 # python3 mock still answers every backup.py call.
 cp /source/__init__.py /source/backup.py /source/host.py /source/operations_log.py \
   /source/reset_database.py /source/install-units.sh /source/release_record.py \
-  /source/release_state.py /source/release_environment.py /source/probe_origin_pull.py \
-  /fixture/deploy/
+  /source/release_state.py /source/release_environment.py /source/host_contract.py \
+  /source/edge_gate.py /fixture/deploy/
 cp -R /source/systemd /fixture/deploy/
 units=(pyracast-backup.service pyracast-backup.timer pyracast-rehearsal.service pyracast-rehearsal.timer pyracast-watchdog.service pyracast-watchdog.timer)
 # State model: host.json names the runtime secret "new-runtime"; the serving release staged the
@@ -69,13 +69,21 @@ elif [[ ${1:-} == */bootstrap_database.py || ${1:-} == */backup.py ]]; then
     printf '{"object": "%s", "counts": {"django_migrations": 40, "plants_plant": 3}}\n' "$object" \
       >"$release_dir/prerelease-backup.json"
   fi
-elif [[ ${1:-} == */probe_origin_pull.py ]]; then
+elif [[ ${1:-} == */edge_gate.py ]]; then
   printf 'python3 %s\n' "$*" >>/calls
   test -f /var/lib/pyracast/release-blocked || exit 90
-  if [[ $MODE == origin-pull-open ]]; then
-    echo 'The public entrypoint 127.0.0.1:443 (example.com) does not enforce origin pulls: it closed the connection during the handshake.' >&2
-    exit 1
-  fi
+  # The edge reaches the origin's answer only while an application serves it.
+  test -e /app-running || exit 95
+  case "$MODE" in
+    origin-pull-edge|first-origin-pull-edge)
+      echo 'https://example.com/health/live/ did not answer through the edge in 12 attempts: it answered 525.' >&2
+      exit 1
+      ;;
+    origin-pull-challenge)
+      echo 'The edge answered https://example.com/health/live/ with a Cloudflare challenge of this host.' >&2
+      exit 3
+      ;;
+  esac
 else
   exec /usr/local/bin/python3 "$@"
 fi
@@ -404,10 +412,10 @@ assert marker, 'The marker holds no identity'
 assert session == {'marker': marker, 'object': sys.argv[3], 'release': 'old', 'replaced': True}, session
 PY
 }
-for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image public-broker live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready stop-failed switch maintenance-backup migration legacy-migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-replaced maintenance-prepared maintenance-record-invalid record-invalid retry-migration retry-backup recovered cancelled origin-pull origin-pull-open; do
+for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image public-broker live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready stop-failed switch maintenance-backup migration legacy-migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-replaced maintenance-prepared maintenance-record-invalid record-invalid retry-migration retry-backup recovered cancelled origin-pull origin-pull-edge origin-pull-challenge first-origin-pull first-origin-pull-edge; do
   export MODE RUN=1
   cp /host.json /etc/pyracast/host.json
-  if [[ $MODE == origin-pull* ]]; then
+  if [[ $MODE == *origin-pull* ]]; then
     /usr/local/bin/python3 - /etc/pyracast/host.json /source/origin-pull-off.pem <<'PY'
 import json
 import sys
@@ -599,19 +607,20 @@ PY
         absent 'switch-runtime'
         units_untouched
         ;;
-      drain|backup|record-invalid|support-postgres|support-rabbit|origin-pull-open)
+      drain|backup|record-invalid|support-postgres|support-rabbit|origin-pull-edge|origin-pull-challenge)
         case "$MODE" in
           drain) [[ "$result" == 47 ]] ;;
           backup) [[ "$result" == 45 ]] ;;
           support-postgres) [[ "$result" == 46 ]] ;;
           support-rabbit) [[ "$result" == 42 ]] ;;
-          record-invalid|origin-pull-open) [[ "$result" == 1 ]] ;;
+          record-invalid|origin-pull-edge) [[ "$result" == 1 ]] ;;
+          origin-pull-challenge) [[ "$result" == 3 ]] ;;
         esac
-        if [[ $MODE == origin-pull-open ]]; then
-          probed=$(grep -n "^python3 $new_release/deploy/probe_origin_pull.py example.com$" /calls | cut -d: -f1)
+        if [[ $MODE == origin-pull-* ]]; then
+          gated=$(grep -n "^python3 $new_release/deploy/edge_gate.py example.com ${new_release##*/}$" /calls | cut -d: -f1)
           edge=$(grep -n "$new_release/deploy/compose.yaml up -d --no-deps --wait --wait-timeout 180 maintenance gateway$" /calls | head -n 1 | cut -d: -f1)
-          [[ "$probed" -gt "$edge" ]]
-          [[ "$probed" -lt "$(grep -n 'switch-runtime' /calls | cut -d: -f1)" ]]
+          [[ "$gated" -gt "$edge" ]]
+          [[ "$gated" -lt "$(grep -n 'switch-runtime' /calls | cut -d: -f1)" ]]
           absent '--kind prerelease'
         fi
         [[ ! -e /var/lib/pyracast/release-blocked ]]
@@ -645,9 +654,14 @@ PY
         if grep -Fq 'record-injected' /result; then exit 1; fi
         units_untouched
         ;;
-      first-backup|resume-failed|resume-unready|stop-failed|switch|maintenance-backup|maintenance-record-invalid|migration|maintenance-migration|maintenance-replaced|maintenance-prepared|legacy-migration|health|tls|response|retry-*)
+      first-backup|resume-failed|resume-unready|stop-failed|switch|maintenance-backup|maintenance-record-invalid|migration|maintenance-migration|maintenance-replaced|maintenance-prepared|legacy-migration|health|tls|response|retry-*|first-origin-pull-edge)
         case "$MODE" in
           first-backup|resume-failed|maintenance-backup|retry-backup) [[ "$result" == 45 ]] ;;
+          first-origin-pull-edge)
+            [[ "$result" == 1 ]]
+            gated=$(grep -n "^python3 $new_release/deploy/edge_gate.py example.com ${new_release##*/}$" /calls | cut -d: -f1)
+            [[ "$gated" -gt "$(grep -n '^curl ' /calls | tail -n 1 | cut -d: -f1)" ]]
+            ;;
           maintenance-record-invalid)
             [[ "$result" == 1 ]]
             [[ ! -e /record-injected ]]
@@ -756,21 +770,25 @@ PY
         grep -Fq "Finish with: bash $new_release/deploy/install-units.sh install $new_release && systemctl start pyracast.service" /result
         units_installed
         ;;
-      success|prune|first-success|redeploy|lock-wait|maintenance-success|recovered|cancelled|origin-pull)
+      success|prune|first-success|redeploy|lock-wait|maintenance-success|recovered|cancelled|origin-pull|first-origin-pull)
         [[ "$result" == 0 ]]
         maintenance_ended
-        if [[ $MODE == origin-pull ]]; then
+        if [[ $MODE == *origin-pull ]]; then
           grep -Fxq 'ORIGIN_PULL=required' "$new_release/deploy/release.env"
           cmp /source/origin-pull-off.pem "$new_release/deploy/origin-pull-ca.pem"
-          mapfile -t probes < <(grep -n "^python3 $new_release/deploy/probe_origin_pull.py example.com$" /calls | cut -d: -f1)
-          [[ "${#probes[@]}" == 2 ]]
-          edge=$(grep -n ' up -d --no-deps --wait --wait-timeout 180 maintenance gateway$' /calls | cut -d: -f1)
-          [[ "${probes[0]}" -gt "$edge" ]]
-          [[ "${probes[0]}" -lt "$(grep -n ' stop -t 100 api web$' /calls | cut -d: -f1)" ]]
+          mapfile -t gates < <(grep -n "^python3 $new_release/deploy/edge_gate.py example.com ${new_release##*/}$" /calls | cut -d: -f1)
+          [[ "${#gates[@]}" == 1 ]]
           readiness=$(grep -n '^curl ' /calls | tail -n 1 | cut -d: -f1)
-          [[ "${probes[1]}" -gt "$readiness" ]]
+          if [[ $MODE == origin-pull ]]; then
+            edge=$(grep -n ' up -d --no-deps --wait --wait-timeout 180 maintenance gateway$' /calls | cut -d: -f1)
+            [[ "${gates[0]}" -gt "$edge" ]]
+            [[ "${gates[0]}" -lt "$(grep -n ' stop -t 100 api web$' /calls | cut -d: -f1)" ]]
+          else
+            [[ "${gates[0]}" -gt "$readiness" ]]
+            [[ "${gates[0]}" -lt "$(grep -n '^systemctl enable --now ' /calls | cut -d: -f1)" ]]
+          fi
         else
-          absent 'probe_origin_pull.py'
+          absent 'edge_gate.py'
         fi
         if [[ $MODE == cancelled ]]; then
           if grep -Fq "Release $revision is healthy." /follow-cancelled; then exit 1; fi
@@ -828,7 +846,7 @@ PY
           grep -Fxq 'systemctl daemon-reload' /calls
         fi
         if [[ $MODE != prune ]]; then [[ "$(tail -n 1 /calls)" == 'systemctl start pyracast.service' ]]; fi
-        awk -v first="$([[ $MODE == first-success ]] && echo 1 || echo 0)" '
+        awk -v first="$([[ $MODE == first-* ]] && echo 1 || echo 0)" '
           /^systemd-analyze verify / { verified=NR }
           /^systemctl enable pyracast.service$/ { enabled=NR }
           /^systemctl reset-failed pyracast.service$/ { if (!enabled) exit 1; reset=NR }
