@@ -272,7 +272,9 @@ def failing_delivery(output: str) -> dict[str, object] | None:
     broker = printed.get("broker")
     if not (isinstance(alarms, dict) and isinstance(phases, list) and isinstance(broker, dict)):
         return None
-    queues = broker.get("queues") or {}
+    queues = broker.get("queues", {})
+    if not (isinstance(queues, dict) and all(isinstance(state, dict) for state in queues.values())):
+        return None
     return {
         "alarms": alarms,
         "dispatch_phases": phases,
