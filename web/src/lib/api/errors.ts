@@ -41,6 +41,7 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     invalid_request: true,
     bad_request: true,
     session_ended: true,
+    session_changed: true,
     not_authenticated: true,
     csrf_failed: true,
     permission_denied: true,

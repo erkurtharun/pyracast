@@ -1379,6 +1379,7 @@ export interface components {
          * @description * `invalid_request` - Invalid Request
          *     * `bad_request` - Bad Request
          *     * `session_ended` - Session Ended
+         *     * `session_changed` - Session Changed
          *     * `not_authenticated` - Not Authenticated
          *     * `csrf_failed` - Csrf Failed
          *     * `permission_denied` - Permission Denied
@@ -1461,6 +1462,7 @@ export interface components {
             | "invalid_request"
             | "bad_request"
             | "session_ended"
+            | "session_changed"
             | "not_authenticated"
             | "csrf_failed"
             | "permission_denied"
@@ -2868,6 +2870,7 @@ export interface components {
             language: components["schemas"]["LanguageEnum"];
             /** Format: date-time */
             expires_at: string | null;
+            session_tag: string | null;
         };
         SessionUserOutput: {
             id: number;

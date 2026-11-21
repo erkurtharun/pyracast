@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 from urllib.parse import urlsplit
 
 ORIGIN = re.compile(r"https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+")
-SESSION_KEYS = {"user", "csrf_token", "language", "expires_at"}
+SESSION_KEYS = {"user", "csrf_token", "language", "expires_at", "session_tag"}
 ATTEMPTS = 6
 RETRY_SECONDS = 10
 Fetch = Callable[[str], tuple[int, bytes]]

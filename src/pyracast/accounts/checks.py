@@ -52,11 +52,13 @@ def parse_networks(name: str, values: Iterable[str]) -> tuple[Network, ...]:
 
 
 # Each entry reads what the one before it established: the session lock, the session, the user,
-# the session's limits, then the pending processes and reauthentications resting on that account.
+# the tag a request was prepared for (refused before anything writes), the session's limits, then
+# the pending processes and reauthentications resting on that account.
 SESSION_MIDDLEWARE = (
     "pyracast.accounts.session_lock.SessionRequestSerialization",
     "pyracast.accounts.session_cookie.SessionCookie",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "pyracast.accounts.session_tag.SessionTagCheck",
     "pyracast.accounts.middleware.SessionLifetime",
     "pyracast.accounts.processes.PendingProcessAuthority",
 )

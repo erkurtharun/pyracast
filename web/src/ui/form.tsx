@@ -477,7 +477,7 @@ export function AsyncButton({
             <button
                 type="button"
                 className={buttonClass(variant)}
-                aria-label={label}
+                aria-label={state.status === "pending" ? undefined : label}
                 disabled={disabled || state.status === "pending"}
                 onClick={() =>
                     void (async () => {

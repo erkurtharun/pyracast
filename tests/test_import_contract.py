@@ -60,6 +60,11 @@ BACK_EDGES: dict[tuple[str, str], str] = {
         "plants.automation",
     ): "member removal and administrator change call notifications and plants explicitly",
     ("accounts.session_lock", "api.errors"): "the busy-session answer reuses the API error body",
+    ("accounts.session_tag", "api.errors"): "the changed-session answer reuses the API error body",
+    (
+        "accounts.social_views",
+        "platform_admin.navigation",
+    ): "a provider sign-in keeps a console return checked by the console's own validator",
     (
         "accounts.stored_secrets",
         "connections.contracts",

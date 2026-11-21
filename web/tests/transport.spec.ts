@@ -74,6 +74,13 @@ const signedIn = (token: string) => ({
     csrf_token: token,
     language: "en" as const,
     expires_at: "2026-11-18T22:00:00Z",
+    session_tag: "member-session",
+});
+const anonymous = (token: string) => ({
+    ...signedIn(token),
+    user: null,
+    expires_at: null,
+    session_tag: null,
 });
 
 test.beforeEach(() => {
@@ -206,18 +213,20 @@ test("a session read started before sign-out is not handed out after it", async 
             return json(signedIn("before"));
         },
         () => json({ status: 401, meta: { is_authenticated: false } }, 401),
-        () => json({ ...signedIn("after"), user: null, expires_at: null }),
+        () => json(anonymous("after")),
+        () => json(anonymous("after")),
     );
     const earlier = loadSession();
     const signOut = authRequest("auth/session", "DELETE");
     const later = loadSession();
     release();
-    expect((await earlier).csrf_token).toBe("before");
+    expect((await earlier).csrf_token).toBe("after");
     expect((await signOut).status).toBe(401);
     expect((await later).csrf_token).toBe("after");
     expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
         "GET /api/session/",
         "DELETE /api/auth/browser/v1/auth/session",
+        "GET /api/session/",
         "GET /api/session/",
     ]);
     expect(sessionState().session?.user).toBeNull();
@@ -228,7 +237,8 @@ test("a not-authenticated answer ends the session once", async () => {
         () => json(signedIn("token")),
         () => json(errorBody("not_authenticated", "Sign in."), 403),
         () => json(errorBody("not_authenticated", "Sign in."), 403),
-        () => json({ ...signedIn("anonymous"), user: null, expires_at: null }),
+        () => json(anonymous("anonymous")),
+        () => json(anonymous("anonymous")),
     );
     await loadSession();
     expect(sessionState().ended).toBe(false);
@@ -243,39 +253,16 @@ test("a not-authenticated answer ends the session once", async () => {
     await expect.poll(() => sessionState().session?.user).toBeNull();
     expect(sessionState().ended).toBe(true);
     expect(calls.filter((call) => call.url === "/api/session/")).toHaveLength(
-        2,
+        3,
     );
 });
 
 const emptyList = { results: [], count: 0, next: null, previous: null };
 const reauthenticated = { status: 200, meta: { is_authenticated: true } };
+const changed = () =>
+    json(errorBody("session_changed", "The session changed."), 409);
 
-test("a not-authenticated answer arriving after a reauthentication is retried once the session read shows the session", async () => {
-    answer(
-        () => json(signedIn("token")),
-        () => json(reauthenticated),
-        () => json(errorBody("not_authenticated", "Sign in."), 401),
-        () => json(signedIn("rotated")),
-        () => json(emptyList),
-    );
-    await loadSession();
-    await authRequest("auth/reauthenticate", "POST", { password: "secret" });
-    const workspaces = await api.get("/api/tenants/");
-    expect(workspaces).toEqual(emptyList);
-    expect(sessionState()).toMatchObject({
-        ended: false,
-        session: { csrf_token: "rotated" },
-    });
-    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
-        "GET /api/session/",
-        "POST /api/auth/browser/v1/auth/reauthenticate",
-        "GET /api/tenants/",
-        "GET /api/session/",
-        "GET /api/tenants/",
-    ]);
-});
-
-test("a not-authenticated answer arriving before a reauthentication's answer waits for a session read sent after it", async () => {
+test("a request refused for a key a confirmation renewed waits for a session read sent after that confirmation", async () => {
     let release!: () => void;
     const held = new Promise<void>((resolve) => {
         release = resolve;
@@ -289,7 +276,7 @@ test("a not-authenticated answer arriving before a reauthentication's answer wai
             reauthenticationAnswered = true;
             return json(reauthenticated);
         },
-        () => json(errorBody("not_authenticated", "Sign in."), 401),
+        changed,
         () => {
             readAfterReauthentication = reauthenticationAnswered;
             return json(signedIn("rotated"));
@@ -302,8 +289,7 @@ test("a not-authenticated answer arriving before a reauthentication's answer wai
     });
     await expect.poll(() => calls.length).toBe(2);
     const workspaces = api.get("/api/tenants/");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(calls).toHaveLength(3);
+    await expect.poll(() => calls.length).toBe(3);
     expect(sessionState()).toMatchObject({
         ended: false,
         session: { csrf_token: "token" },
@@ -322,30 +308,6 @@ test("a not-authenticated answer arriving before a reauthentication's answer wai
         "GET /api/tenants/",
         "GET /api/session/",
         "GET /api/tenants/",
-    ]);
-});
-
-test("a repeated request refused again ends the session after another session read", async () => {
-    answer(
-        () => json(signedIn("token")),
-        () => json(errorBody("not_authenticated", "Sign in."), 401),
-        () => json(signedIn("rotated")),
-        () => json(errorBody("not_authenticated", "Sign in."), 401),
-        () => json({ ...signedIn("anonymous"), user: null, expires_at: null }),
-    );
-    await loadSession();
-    const error = await api.get("/api/tenants/").catch((failure) => failure);
-    expect(error).toMatchObject({ status: 401, code: "not_authenticated" });
-    expect(sessionState()).toMatchObject({
-        ended: true,
-        session: { user: null },
-    });
-    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
-        "GET /api/session/",
-        "GET /api/tenants/",
-        "GET /api/session/",
-        "GET /api/tenants/",
-        "GET /api/session/",
     ]);
 });
 
@@ -431,8 +393,9 @@ test("a URL requires every named path parameter", () => {
 
 test("a session read that discovers expiry records the signed-out transition", async () => {
     adoptSession(signedIn("token"));
-    answer(() =>
-        json({ ...signedIn("anonymous"), user: null, expires_at: null }),
+    answer(
+        () => json(anonymous("anonymous")),
+        () => json(anonymous("anonymous")),
     );
     await loadSession();
     expect(sessionState().session?.user).toBeNull();
@@ -443,7 +406,7 @@ test("an explicit sign-out returns to sign-in without an expiry notice", async (
     adoptSession(signedIn("token"));
     answer(
         () => json({ status: 401, meta: { is_authenticated: false } }, 401),
-        () => json({ ...signedIn("anonymous"), user: null, expires_at: null }),
+        () => json(anonymous("anonymous")),
     );
     await signOut();
     expect(sessionState().session?.user).toBeNull();
@@ -453,13 +416,13 @@ test("an explicit sign-out returns to sign-in without an expiry notice", async (
 const signedOutAnswer = () =>
     json({ status: 401, meta: { is_authenticated: false } }, 401);
 
-test("a sign-out answered for a key another tab replaced signs out the replacing session", async () => {
+test("a sign-out refused for a key another tab renewed signs out the renewed session", async () => {
     adoptSession(signedIn("token"));
     answer(
-        signedOutAnswer,
+        changed,
         () => json(signedIn("rotated")),
         signedOutAnswer,
-        () => json({ ...signedIn("anonymous"), user: null, expires_at: null }),
+        () => json(anonymous("anonymous")),
     );
     const session = await signOut();
     expect(session.user).toBeNull();
@@ -477,10 +440,10 @@ test("a sign-out answered for a key another tab replaced signs out the replacing
     ]);
 });
 
-test("an account read answered as signed out is repeated once the session read shows the session", async () => {
+test("an account read refused for a renewed key is repeated once the session read shows the same session", async () => {
     answer(
         () => json(signedIn("token")),
-        signedOutAnswer,
+        changed,
         () => json(signedIn("rotated")),
         () => json({ status: 200, data: [] }),
     );
@@ -499,20 +462,23 @@ test("an account read answered as signed out is repeated once the session read s
     ]);
 });
 
-test("an account read answered as signed out is not repeated when the session read agrees", async () => {
+test("an account read refused for a session that ended is not repeated", async () => {
     answer(
         () => json(signedIn("token")),
-        signedOutAnswer,
-        () => json({ ...signedIn("anonymous"), user: null, expires_at: null }),
+        changed,
+        () => json(anonymous("anonymous")),
+        () => json(anonymous("anonymous")),
     );
     await loadSession();
-    const result = await authRequest("account/authenticators", "GET");
-    expect(result.status).toBe(401);
+    const error = await authRequest("account/authenticators", "GET").catch(
+        (failure) => failure,
+    );
+    expect(error).toMatchObject({ code: "session_changed" });
     expect(sessionState()).toMatchObject({
         ended: true,
         session: { user: null },
     });
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(4);
 });
 
 test("an account change answered as signed out is not repeated", async () => {
@@ -525,82 +491,19 @@ test("an account change answered as signed out is not repeated", async () => {
     expect(calls).toHaveLength(2);
 });
 
-test("a sign-out that still finds a signed-in session after repeating it is reported", async () => {
+test("a sign-out after which the browser holds another session is reported", async () => {
     adoptSession(signedIn("token"));
-    answer(
-        signedOutAnswer,
-        () => json(signedIn("rotated")),
-        signedOutAnswer,
-        () => json(signedIn("again")),
+    answer(signedOutAnswer, () =>
+        json({ ...signedIn("other"), session_tag: "other-session" }),
     );
     const error = await signOut().catch((failure) => failure);
     expect(error).toBeInstanceOf(ApiError);
-    expect(error.message).toBe("You are still signed in. Sign out again.");
+    expect(error.message).toBe(
+        "The session changed in another tab. The page now shows the current session.",
+    );
     expect(sessionState()).toMatchObject({
         ended: false,
-        session: { csrf_token: "again" },
+        session: { csrf_token: "other" },
     });
-    expect(calls).toHaveLength(4);
-});
-
-const otherAccount = (token: string) => ({
-    ...signedIn(token),
-    user: {
-        ...signedIn(token).user,
-        id: 2,
-        username: "other",
-        email: "other@example.test",
-    },
-});
-
-test("a save refused as signed out is not sent again while another account's session is confirmed", async () => {
-    answer(
-        () => json(signedIn("token")),
-        () => json(errorBody("not_authenticated", "Sign in."), 401),
-        () => json(otherAccount("other-token")),
-    );
-    await loadSession();
-    const error = await api
-        .post("/api/tenants/{tenant_id}/sites/", site)
-        .catch((failure) => failure);
-    expect(error).toMatchObject({ status: 401, code: "not_authenticated" });
-    expect(sessionState().session?.user?.id).toBe(2);
-    expect(
-        calls.map((call) => `${call.method} ${call.url} ${call.token}`),
-    ).toEqual([
-        "GET /api/session/ null",
-        "POST /api/tenants/1/sites/ token",
-        "GET /api/session/ null",
-    ]);
-});
-
-test("an account read answered as signed out is not repeated while another account's session is confirmed", async () => {
-    answer(
-        () => json(signedIn("token")),
-        signedOutAnswer,
-        () => json(otherAccount("other-token")),
-    );
-    await loadSession();
-    const result = await authRequest("account/authenticators", "GET");
-    expect(result.status).toBe(401);
-    expect(sessionState().session?.user?.id).toBe(2);
-    expect(calls).toHaveLength(3);
-});
-
-test("a sign-out is not sent a second time under another account", async () => {
-    adoptSession(signedIn("token"));
-    answer(signedOutAnswer, () => json(otherAccount("other-token")));
-    const error = await signOut().catch((failure) => failure);
-    expect(error).toBeInstanceOf(ApiError);
-    expect(error.message).toBe("You are still signed in. Sign out again.");
-    expect(sessionState()).toMatchObject({
-        ended: false,
-        session: { user: { id: 2 }, csrf_token: "other-token" },
-    });
-    expect(
-        calls.map((call) => `${call.method} ${call.url} ${call.token}`),
-    ).toEqual([
-        "DELETE /api/auth/browser/v1/auth/session token",
-        "GET /api/session/ null",
-    ]);
+    expect(calls).toHaveLength(2);
 });

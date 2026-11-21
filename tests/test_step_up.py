@@ -197,23 +197,22 @@ def test_a_retained_proof_by_a_weaker_factor_ends_and_the_step_up_asks_for_the_s
     assert mailed_to() == []
 
 
-def test_a_password_proof_ends_when_the_account_gains_an_authenticator(now: float) -> None:
+def test_the_session_that_adds_an_authenticator_keeps_its_confirmation_for_the_same_window(
+    now: float,
+) -> None:
     user, _secret = holder("password")
     client = signed_in(user)
     assert reauthenticate(client, user, "password", "") == 200
+    window = [record["at"] for record in proofs(client)]
     secret = client.get(AUTH + "account/authenticators/totp").json()["meta"]["secret"]
     activation = {"code": totp_code(secret, now)}
     assert call(client, "post", "account/authenticators/totp", activation).status_code == 200
-    deliver_mail()
-    mail.outbox.clear()
 
     response = call(client, *ACTIONS["add-address"])
 
-    assert response.status_code == 401
-    assert [flow["id"] for flow in response.json()["data"]["flows"]] == [FLOWS["mfa"]]
-    assert proofs(client) == []
-    assert list(EmailAddress.objects.values_list("email", flat=True)) == [user.email]
-    assert mailed_to() == []
+    assert response.status_code == 200
+    assert {record["at"] for record in proofs(client)} == set(window)
+    assert [record["method"] for record in proofs(client)] == ["password", "mfa"]
 
 
 def test_a_connection_needs_a_proof_by_the_strongest_factor() -> None:
@@ -905,9 +904,11 @@ def test_a_credential_change_attempted_while_a_credential_write_runs_waits_and_e
         assert competitor.applied(user)
     if change == "address-removed" and case.changes_state:
         assert SECOND in addresses(user)
+    # Only the session whose own write left the account's last state keeps its confirmation.
+    last_writer = None if not competitor.routed else client if case.changes_state else other
     for session in (client, other):
-        session_user(session)
-        assert proofs(session) == []
+        still_signed_in = session_user(session) is not None
+        assert bool(proofs(session)) is (still_signed_in and session is last_writer)
 
 
 def test_a_regeneration_after_another_sessions_regeneration_committed_stores_nothing(

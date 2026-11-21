@@ -94,6 +94,7 @@ AUTH_ROUTES = sorted(
         "auth/reauthenticate/code/confirm",
         "auth/reauthenticate/code/request",
         "auth/session",
+        "auth/sessions",
         "auth/signup",
         "config",
     )
@@ -224,7 +225,6 @@ def test_console_routes_equal_the_operator_workspace() -> None:
         ("post", "auth/code/confirm"),
         ("post", "auth/phone/verify"),
         ("post", "auth/phone/verify/resend"),
-        ("get", "auth/sessions"),
         ("post", "auth/reauthenticate/code/resend"),
         ("get", "auth/provider/token"),
         ("post", "auth/provider/token"),

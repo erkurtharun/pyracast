@@ -14,6 +14,7 @@ class ErrorCode(models.TextChoices):
     INVALID_REQUEST = "invalid_request"
     BAD_REQUEST = "bad_request"
     SESSION_ENDED = "session_ended"
+    SESSION_CHANGED = "session_changed"
     NOT_AUTHENTICATED = "not_authenticated"
     CSRF_FAILED = "csrf_failed"
     PERMISSION_DENIED = "permission_denied"
@@ -96,6 +97,9 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.INVALID_REQUEST: _("Check the highlighted values and try again."),
     ErrorCode.BAD_REQUEST: _("The request could not be processed."),
     ErrorCode.SESSION_ENDED: _("Your session ended. Sign in again."),
+    ErrorCode.SESSION_CHANGED: _(
+        "The session changed in another tab. The page now shows the current session."
+    ),
     ErrorCode.NOT_AUTHENTICATED: _("Sign in to continue."),
     ErrorCode.CSRF_FAILED: _("The page expired. Reload it and try again."),
     ErrorCode.PERMISSION_DENIED: _("You do not have permission for this action."),

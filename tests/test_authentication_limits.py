@@ -361,8 +361,8 @@ def test_refused_enrollment_codes_just_before_daily_failures_expire_leave_the_sh
     user = member()
     client = Client(enforce_csrf_checks=True)
     assert login(client, user.email, PASSWORD).status_code == 200
-    secret = client.get(AUTH + "account/authenticators/totp").json()["meta"]["secret"]
     assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+    secret = client.get(AUTH + "account/authenticators/totp").json()["meta"]["secret"]
     refuse_codes_before_the_first_daily_failures_expire(
         client, "account/authenticators/totp", "rate_limited", clock
     )

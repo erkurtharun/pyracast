@@ -2741,3 +2741,6 @@ msgid ""
 msgstr ""
 "Bu bağlantı şu anda doğrulanıyor. Sonucu görmek için sayfayı bir dakika "
 "sonra yeniden yükleyin."
+
+msgid "The session changed in another tab. The page now shows the current session."
+msgstr "Oturum başka bir sekmede değişti. Sayfa artık geçerli oturumu gösteriyor."

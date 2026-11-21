@@ -24,6 +24,7 @@ from pyracast.platform_admin.failures import contained
 from pyracast.platform_admin.forms import ConfirmationForm
 from pyracast.platform_admin.historical import historical_import
 from pyracast.platform_admin.navigation import (
+    CONSOLE_RETURN,
     SAFE_METHODS,
     console_destination,
     console_path,
@@ -33,7 +34,13 @@ from pyracast.platform_admin.plants import new_plant, plant_details_page
 from pyracast.platform_admin.read_models import overview_context
 from pyracast.platform_admin.records import register_records
 
-_REPLACED_SITE_ROUTES = {"autocomplete", "logout", "password_change", "password_change_done"}
+_REPLACED_SITE_ROUTES = {
+    "autocomplete",
+    "index",
+    "logout",
+    "password_change",
+    "password_change_done",
+}
 PLANT = "plants/<int:region_id>/"
 WORKSPACE = "workspaces/<int:tenant_id>/"
 
@@ -145,6 +152,7 @@ class PlatformAdminSite(admin.AdminSite):
             ("password_change/", RedirectView.as_view(url="/app/account/"), "password_change"),
         )
         return [
+            path("", self.admin_view(self.landing), name="index"),
             path("logout/", access.logout, name="logout"),
             path(
                 "confirm/",
@@ -180,6 +188,11 @@ class PlatformAdminSite(admin.AdminSite):
             },
             status=status,
         )
+
+    def landing(self, request: HttpRequest) -> HttpResponse:
+        if target := console_path(request, request.session.pop(CONSOLE_RETURN, None)):
+            return redirect(target)
+        return self.index(request)
 
     @method_decorator(require_safe)
     def index(

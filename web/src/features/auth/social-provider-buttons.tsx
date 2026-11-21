@@ -46,6 +46,12 @@ export function SocialProviderButtons({
     const t = useTranslations("SocialAuth");
     const csrfToken = useSessionState().session?.csrf_token ?? "";
     const providers = useSocialProviders(enabledProviders);
+    // A console link to return to after the sign-in; the server keeps it only when it is a console
+    // path of this site.
+    const next =
+        process === "login" && typeof window !== "undefined"
+            ? new URLSearchParams(window.location.search).get("next")
+            : null;
     if (!providers.length) return null;
     return (
         <div className="social-providers">
@@ -62,6 +68,7 @@ export function SocialProviderButtons({
                     />
                     <input type="hidden" name="provider" value={provider} />
                     <input type="hidden" name="process" value={process} />
+                    {next && <input type="hidden" name="next" value={next} />}
                     <input
                         type="hidden"
                         name="callback_url"

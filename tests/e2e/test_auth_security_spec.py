@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
 from django.contrib.auth.models import User
 
@@ -22,7 +23,12 @@ def test_a_verified_company_account_is_protected_by_a_second_factor_and_recovery
         BROWSER_AUTH_MAILBOX=str(auth_mailbox),
     )
 
-    user = User.objects.get(email=email)
+    changed_email = "security+changed@example.com"
+    user = User.objects.get(email=changed_email)
+    assert not User.objects.filter(email=email).exists()
+    assert list(
+        EmailAddress.objects.filter(user=user).values_list("email", "verified", "primary")
+    ) == [(changed_email, True, True)]
     assert user.check_password(PASSWORD + "-reset")
     assert {authenticator.type for authenticator in Authenticator.objects.filter(user=user)} == {
         Authenticator.Type.TOTP,
