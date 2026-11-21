@@ -12,7 +12,7 @@ from pyracast.accounts.mail_intents import enqueue_mail
 from pyracast.accounts.models import OutboundMailKind, WorkspaceRole
 from pyracast.background.failures import BACK_OFF, Deferrals, isolate
 from pyracast.regions.models import Region
-from pyracast.trash import RETENTION
+from pyracast.trash import RETENTION, trashed_within_retention
 
 PURGE_WARNING_LEAD = timedelta(days=7)
 WARNING_BATCH_SIZE = 100
@@ -24,9 +24,7 @@ _deferrals = Deferrals(BACK_OFF)
 def _warnable(now: datetime) -> Q:
     """Trashed regions inside the week before their purge that were never warned; once the
     purge is due the purge runs, never a late warning."""
-    return Q(
-        deleted_at__lte=now - (RETENTION - PURGE_WARNING_LEAD),
-        deleted_at__gt=now - RETENTION,
+    return trashed_within_retention(now, PURGE_WARNING_LEAD) & Q(
         purge_started_at__isnull=True,
         purge_warning_sent_at__isnull=True,
     )

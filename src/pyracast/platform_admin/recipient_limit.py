@@ -11,6 +11,7 @@ from pyracast.notifications.recipients import (
     workspaces,
 )
 from pyracast.plants.models import Plant
+from pyracast.regions.models import active_region
 
 
 @dataclass(frozen=True)
@@ -28,7 +29,7 @@ def crowded_plants(limit: int) -> list[CrowdedPlant]:
     of queries."""
     names = dict(Plant.objects.values_list("region_id", "name"))
     schedules = list(
-        ReminderSchedule.objects.filter(enabled=True, region__deleted_at__isnull=True)
+        ReminderSchedule.objects.filter(active_region("region__"), enabled=True)
         .select_related("region__tenant")
         .order_by("region__tenant__name", "region_id")
     )

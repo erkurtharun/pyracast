@@ -134,10 +134,10 @@ def _purge_warning(mail: OutboundMail) -> EventMessage | None:
     """A warning outlived by a restore, or by a newer warning after the plant was trashed
     again, is not sent."""
     region = (
-        Region.objects.select_related("tenant")
+        Region.objects.trashed()
+        .select_related("tenant")
         .filter(
             pk=_subject(mail),
-            deleted_at__isnull=False,
             purge_started_at__isnull=True,
             purge_warning_sent_at__lte=mail.created_at,
         )
