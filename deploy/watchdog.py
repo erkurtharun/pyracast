@@ -10,6 +10,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -137,12 +138,26 @@ def check_backup_age() -> None:
         )
 
 
-def check_release_blocked() -> None:
-    # Each release attempt touches the marker, so the age counts from the latest attempt.
+def blocked_since() -> float | None:
+    # The installer records the start in the marker it creates; a marker of the reset helper,
+    # or of an installer before that record, counts from its file time, which no attempt renews.
     try:
-        age = time.time() - host.RELEASE_BLOCKED.stat().st_mtime
+        content = host.RELEASE_BLOCKED.read_text()
+        modified = host.RELEASE_BLOCKED.stat().st_mtime
     except FileNotFoundError:
+        return None
+    try:
+        began = datetime.fromisoformat(json.loads(content)["started_at"])
+    except (ValueError, TypeError, KeyError):
+        return modified
+    return began.timestamp() if began.tzinfo is not None else modified
+
+
+def check_release_blocked() -> None:
+    began = blocked_since()
+    if began is None:
         return
+    age = time.time() - began
     if age > RELEASE_BLOCKED_WARNING_SECONDS:
         report("pyracast_release_blocked", "WARNING", hours=round(age / 3600, 1))
 
