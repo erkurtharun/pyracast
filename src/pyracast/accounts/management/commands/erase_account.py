@@ -3,7 +3,7 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
-from pyracast.accounts.erasure import AdministersWorkspaceError, erase_account
+from pyracast.accounts.erasure import ErasureError, erase_account
 
 
 class Command(BaseCommand):
@@ -22,13 +22,24 @@ class Command(BaseCommand):
             erasure = erase_account(account_id, execute=execute)
         except User.DoesNotExist:
             raise CommandError(f"Account {account_id} does not exist.") from None
-        except AdministersWorkspaceError as error:
+        except ErasureError as error:
             raise CommandError(str(error)) from None
+        if erasure.already_erased:
+            self.stdout.write(f"Account {account_id} is already erased. Nothing was changed.")
+            return
         self.stdout.write(
             f"Erased account {account_id}:"
             if execute
             else f"Dry run: erasing account {account_id} would change:"
         )
+        if erasure.platform_administrator:
+            self.stdout.write(
+                f"Account {account_id} is a platform administrator; erasure removes that access."
+            )
+        elif erasure.staff:
+            self.stdout.write(
+                f"Account {account_id} has staff or superuser access; erasure removes it."
+            )
         for label, count in erasure.changes.items():
             self.stdout.write(f"  {label}: {count}")
         if not execute:
