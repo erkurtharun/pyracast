@@ -95,7 +95,7 @@ def test_the_operations_tables_label_statuses_and_errors_in_turkish(
     client, user = verified_admin()
     UserLanguagePreference.objects.create(user=user, language="tr")
 
-    content = client.get("/admin/operations/?window=all").content.decode()
+    content = client.get("/admin/operations/").content.decode()
 
     for turkish in (
         "Yeniden denenecek",

@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -6,6 +7,8 @@ from typing import Any
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ImproperlyConfigured
+from django.core.paginator import Paginator
+from django.db.models import Model, QuerySet
 from django.test import Client
 from django.utils import timezone
 from dramatiq.brokers.rabbitmq import RabbitmqBroker
@@ -21,12 +24,18 @@ from pyracast.forecasts.models import (
     RequestAttempt,
     RequestPurpose,
 )
+from pyracast.metering.models import EpiasCollectionJob
+from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.scheduler import PREPARATION_GRACE
+from pyracast.orchestration.dispatcher import record_dispatch_phase
 from pyracast.orchestration.kinds import QUEUES
 from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration
+from pyracast.platform_admin import read_models
 from tests.support.api import verified_admin
 from tests.support.budgets import assert_scale_invariant
 from tests.support.delivery_health import NOW, recent_forecast
 from tests.support.domain import System, make_system
+from tests.support.metering import connected
 from tests.support.plant_operations import make_plant
 from tests.support.rabbitmq import install_fake_rabbitmq
 
@@ -51,7 +60,7 @@ TURKISH = {
     "No plants currently match this check.": "Bu kontrole şu anda uyan santral yok.",
     "Showing 1\u20132 of 2": "2 kay\u0131ttan 1\u20132 gösteriliyor",
     "Showing 1\u20135 of 5": "5 kay\u0131ttan 1\u20135 gösteriliyor",
-    "Work of the last 24 hours.": "Son 24 saatin işleri.",
+    "Work of the last 24 hours and all open work.": "Son 24 saatin işleri ve tüm aç\u0131k işler.",
     "All work.": "Tüm işler.",
 }
 
@@ -379,7 +388,7 @@ def test_operations_lists_show_the_last_24_hours_until_all_work_is_asked_for(
     assert recent.context["collections_page"].paginator.count == 2
     content = recent.content.decode()
     assert text(language, "Showing 1\u20132 of 2") in content
-    assert text(language, "Work of the last 24 hours.") in content
+    assert text(language, "Work of the last 24 hours and all open work.") in content
     assert 'href="/admin/operations/?window=all"' in content
 
     everything = client.get("/admin/operations/?window=all&collections_page=1")
@@ -411,7 +420,160 @@ def test_a_selected_check_lists_its_rows_whatever_their_age(
     page = client.get("/admin/operations/?issue=overdue_collections")
 
     assert [row["id"] for row in page.context["collections"]] == [job.pk]
-    assert "Work of the last 24 hours." not in page.content.decode()
+    assert "Work of the last 24 hours and all open work." not in page.content.decode()
+
+
+def old_collections(system: System, _plant: Plant, old: datetime) -> list[int]:
+    jobs = [
+        CollectionJob.objects.create(
+            binding=system.binding,
+            target_date=NOW.date(),
+            scheduled_for=old + timedelta(minutes=index),
+            available_at=old,
+            status=status,
+            lease_token=None,
+        ).pk
+        for index, status in enumerate(("retry", "failed"))
+    ]
+    CollectionJob.objects.filter(pk__in=jobs).update(created_at=old)
+    return jobs
+
+
+def old_deliveries(system: System, _plant: Plant, old: datetime) -> list[int]:
+    schedule = ReminderSchedule.objects.create(
+        region=system.region, effective_from=old - timedelta(days=1)
+    )
+    return [
+        NotificationDelivery.objects.create(
+            schedule=schedule,
+            binding=system.binding,
+            scheduled_for=old + timedelta(minutes=index),
+            preparation_deadline=old + PREPARATION_GRACE,
+            available_at=old,
+            status=status,
+            last_error=error,
+        ).pk
+        for index, (status, error) in enumerate(
+            (("uncertain", ""), ("cancelled", "cancelled_by_settings_change"))
+        )
+    ]
+
+
+def old_metering(_system: System, _plant: Plant, old: datetime) -> list[int]:
+    # A job awaiting publication is never claimed again; a later night's job asks EPİAŞ anew.
+    jobs = list(EpiasCollectionJob.objects.order_by("pk").values_list("pk", flat=True)[:2])
+    for index, (status, error) in enumerate(
+        (("pending", ""), ("awaiting_publication", "unpublished_data"))
+    ):
+        EpiasCollectionJob.objects.filter(pk=jobs[index]).update(
+            status=status, last_error=error, scheduled_for=old + timedelta(minutes=index)
+        )
+    return jobs
+
+
+def old_calibrations(system: System, plant: Plant, old: datetime) -> list[int]:
+    waiting = CalibrationRun.objects.create(
+        plant=plant,
+        configuration=PlantConfiguration.objects.get(plant=plant),
+        binding=system.binding,
+        requested_by=system.member,
+        window_start=NOW.date() - timedelta(days=7),
+        window_end=NOW.date() - timedelta(days=1),
+        cutoff_at=old,
+    )
+    runs = [waiting.pk, failed_calibration(system, plant).pk]
+    CalibrationRun.objects.filter(pk__in=runs).update(created_at=old)
+    return runs
+
+
+@pytest.mark.parametrize(
+    ("scope", "rows"),
+    [
+        ("collections", old_collections),
+        ("deliveries", old_deliveries),
+        ("metering", old_metering),
+        ("calibrations", old_calibrations),
+    ],
+)
+def test_open_work_older_than_a_day_stays_listed_until_it_ends(
+    monkeypatch: pytest.MonkeyPatch,
+    scope: str,
+    rows: Callable[[System, Plant, datetime], list[int]],
+) -> None:
+    system, plant, _ = connected(monkeypatch)
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    broker(monkeypatch, reachable=False)
+    dispatched()
+    open_row, finished = rows(system, plant, NOW - timedelta(hours=48))
+
+    page = console("en").get("/admin/operations/")
+
+    listed = set(page.context[f"{scope}_page"].paginator.object_list.values_list("pk", flat=True))
+    assert open_row in listed
+    assert finished not in listed
+    assert page.context["work_window"] == "recent"
+
+
+def test_a_filtered_operations_page_reads_only_the_list_it_shows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paged: list[type[Model]] = []
+
+    def recorded(object_list: QuerySet[Any], *args: Any) -> Any:
+        paged.append(object_list.model)
+        return Paginator(object_list, *args)
+
+    monkeypatch.setattr(read_models, "Paginator", recorded)
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    broker(monkeypatch, reachable=False)
+    make_system(approved=True)
+    dispatched()
+    client = console("en")
+
+    client.get("/admin/operations/?issue=failed_collections")
+    assert paged == [CollectionJob]
+
+    paged.clear()
+    client.get("/admin/operations/")
+    assert set(paged) == {CollectionJob, NotificationDelivery, EpiasCollectionJob, CalibrationRun}
+
+
+def test_the_dispatch_check_lists_no_work_and_so_offers_no_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    broker(monkeypatch, reachable=False)
+    make_system(approved=True)
+    dispatched()
+    record_dispatch_phase("notifications", NOW, "OperationalError")
+
+    page = console("en").get("/admin/operations/?issue=dispatch")
+
+    content = page.content.decode()
+    assert page.context["show_dispatch"] is True
+    assert page.context["work_window"] == ""
+    assert "Work of the last 24 hours and all open work." not in content
+    assert "Show all work" not in content
+
+
+def test_the_window_links_keep_the_rest_of_the_query_and_start_each_list_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    broker(monkeypatch, reachable=False)
+    make_system(approved=True)
+    dispatched()
+    client = console("en")
+
+    recent = client.get("/admin/operations/?issue=provider_cooldowns&collections_page=2")
+    assert 'href="/admin/operations/?issue=provider_cooldowns&amp;window=all"' in (
+        recent.content.decode()
+    )
+
+    everything = client.get(
+        "/admin/operations/?issue=provider_cooldowns&window=all&calibrations_page=2"
+    )
+    assert 'href="/admin/operations/?issue=provider_cooldowns"' in everything.content.decode()
 
 
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])

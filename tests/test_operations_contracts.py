@@ -664,7 +664,7 @@ def test_host_paths_agree_between_scripts_units_and_helpers() -> None:
     assert application["UMask"] == "0077"
     assert f"['/usr/bin/flock', '{lock}', " in harness
     assert "/run/lock" not in installer + harness + template
-    assert f"touch {blocked}" in installer
+    assert f"mv -T {blocked}.next {blocked}" in installer
     assert application["ConditionPathExists"] == f"!{blocked}"
     for name in (
         "pyracast-backup.service",
@@ -782,6 +782,7 @@ def test_a_silent_watchdog_is_alerted() -> None:
 
     assert metric
     assert r"jsonPayload.event=\"pyracast_watchdog_heartbeat\"" in metric[1]
+    assert '"NOT jsonPayload.test=true"' in metric[1]
     assert policy
     assert "condition_absent" in policy[1]
     assert "google_logging_metric.watchdog_heartbeat.name" in policy[1]
@@ -1085,6 +1086,22 @@ def test_a_failure_before_migrate_resumes_the_previous_release() -> None:
     assert script.rindex("recorded=1", 0, migrate) > script.index('"${compose[@]}" up -d rabbitmq')
     assert re.findall(r"recorded=\d", script) == ["recorded=0", "recorded=1"]
     assert "if [[ -e /var/lib/pyracast/release-blocked ]]; then blocked_before=1; fi" in script
+
+
+def test_only_the_attempt_that_creates_the_marker_records_when_the_block_began() -> None:
+    body = installer().split("begin_maintenance() {\n", 1)[1].split("\n}\n", 1)[0]
+    created = body.index("if [[ ! -e /var/lib/pyracast/release-blocked ]]; then\n")
+    recorded = body.index(
+        """printf '{"revision": "%s", "started_at": "%s"}\\n' "$revision" """
+        '"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'
+    )
+    replaced = body.index(
+        "mv -T /var/lib/pyracast/release-blocked.next /var/lib/pyracast/release-blocked"
+    )
+
+    assert "touch" not in body
+    assert created < recorded < replaced < body.index("  fi\n")
+    assert body.endswith("  sync -f /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast")
 
 
 def test_pruning_runs_after_promotion_and_never_fails_the_release() -> None:

@@ -345,29 +345,110 @@ def test_a_release_blocked_for_longer_than_an_hour_is_reported_with_its_age(
     assert watched.heartbeat() == {"state": "blocked"}
 
 
+@pytest.mark.parametrize(
+    ("began", "events"),
+    [
+        (30 * 60, []),
+        (90 * 60, [{"hours": 1.5}]),
+        (DAY, [{"hours": 24.0}]),
+    ],
+)
+def test_a_block_counts_from_the_attempt_that_began_it_while_later_attempts_follow(
+    watched: Host, began: float, events: list[dict[str, object]]
+) -> None:
+    start = datetime.datetime.fromtimestamp(time.time() - began, datetime.UTC)
+    watched.blocked.write_text(
+        json.dumps({"revision": "a" * 40, "started_at": start.strftime("%Y-%m-%dT%H:%M:%SZ")})
+        + "\n"
+    )
+    # Attempts every half hour; the latest one ten minutes ago.
+    latest = time.time() - 10 * 60
+    os.utime(watched.blocked, (latest, latest))
+
+    assert watchdog.main() == 0
+    assert watched.details("pyracast_release_blocked") == events
+    assert watched.heartbeat() == {"state": "blocked"}
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "",
+        "3f2a9c0d4e5b6a7f8091a2b3c4d5e6f7\n",
+        "1234\n",
+        "[]",
+        '{"revision": "abc"}',
+        '{"started_at": 7}',
+        '{"started_at": "yesterday"}',
+        '{"started_at": "2026-11-20T10:00:00"}',
+    ],
+)
+def test_a_marker_without_a_recorded_start_counts_from_its_file_time(
+    watched: Host, content: str
+) -> None:
+    watched.blocked.write_text(content)
+    stamp = time.time() - 2 * 3600
+    os.utime(watched.blocked, (stamp, stamp))
+
+    assert watchdog.main() == 0
+    assert watched.details("pyracast_release_blocked") == [{"hours": 2.0}]
+
+
 def test_a_block_that_ends_while_it_is_checked_is_not_reported(
     watched: Host, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def ended() -> os.stat_result:
         raise FileNotFoundError(watched.blocked)
 
-    monkeypatch.setattr(host, "RELEASE_BLOCKED", SimpleNamespace(exists=lambda: True, stat=ended))
+    monkeypatch.setattr(
+        host,
+        "RELEASE_BLOCKED",
+        SimpleNamespace(exists=lambda: True, read_text=ended, stat=ended),
+    )
 
     assert watchdog.main() == 0
     assert watched.names() == ["pyracast_watchdog_heartbeat"]
     assert watched.heartbeat() == {"state": "blocked"}
 
 
-@pytest.mark.parametrize("unit", ["inactive", "failed", "activating"])
-def test_inactive_application_unit_is_reported_without_recovery(watched: Host, unit: str) -> None:
+@pytest.mark.parametrize(
+    ("unit", "reported"), [("inactive", True), ("failed", True), ("activating", False)]
+)
+def test_inactive_application_unit_is_reported_without_recovery(
+    watched: Host, unit: str, reported: bool
+) -> None:
     watched.unit = unit
     watched.snapshots = [states(worker="exited")]
     watched.backed_up(age=3 * 3600)
 
     assert watchdog.main() == 0
-    assert [command[0] for command in watched.commands] == ["systemctl"]
-    assert watched.names() == ["pyracast_backup_failed", "pyracast_watchdog_heartbeat"]
+    assert {command[0] for command in watched.commands} == {"systemctl"}
+    assert watched.names() == [
+        "pyracast_backup_failed",
+        *(["pyracast_runtime_unhealthy"] if reported else []),
+        "pyracast_watchdog_heartbeat",
+    ]
+    assert watched.details("pyracast_runtime_unhealthy") == (
+        [{"unit_state": unit}] if reported else []
+    )
     assert watched.heartbeat() == {"state": "unit_failed", "unit_state": unit}
+
+
+@pytest.mark.parametrize("meanwhile", ["release_running", "release_blocked", "unit_started"])
+def test_a_stopped_unit_is_not_reported_while_a_release_holds_or_changes_it(
+    watched: Host, meanwhile: str
+) -> None:
+    watched.unit = "inactive"
+    if meanwhile == "release_running":
+        watched.lock_free = False
+    elif meanwhile == "release_blocked":
+        watched.on_lock = watched.blocked.touch
+    else:
+        watched.on_lock = lambda: setattr(watched, "unit", "active")
+
+    assert watchdog.main() == 0
+    assert "pyracast_runtime_unhealthy" not in watched.names()
+    assert watched.heartbeat() == {"state": "unit_failed", "unit_state": "inactive"}
 
 
 @pytest.mark.parametrize(("age", "runs"), [(60, False), (watchdog.DELIVERY_INTERVAL_SECONDS, True)])
@@ -445,6 +526,9 @@ def test_an_unreachable_broker_is_named_by_the_delivery_alert(watched: Host) -> 
         '{"alarms": [], "unhealthy_dispatch_phases": [], "broker": {"reachable": true}}',
         '{"alarms": {}, "unhealthy_dispatch_phases": "collection", "broker": {}}',
         '{"alarms": {}, "unhealthy_dispatch_phases": [], "broker": "down"}',
+        '{"alarms": {}, "unhealthy_dispatch_phases": [], "broker": {"queues": []}}',
+        '{"alarms": {}, "unhealthy_dispatch_phases": [], "broker": {"queues": null}}',
+        '{"alarms": {}, "unhealthy_dispatch_phases": [], "broker": {"queues": {"default": "x"}}}',
     ],
 )
 def test_a_delivery_check_without_a_readable_report_says_so(watched: Host, output: str) -> None:
