@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import Mock
 
 import pytest
@@ -24,6 +24,7 @@ from pyracast.plants.operations import configuration_is_current
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region
+from pyracast.retention import Retention
 from pyracast.trash import purge_expired, restore_region, trash_region
 from tests.support.domain import NOW, FakeAdapter
 from tests.support.jobs import calculate, collect, publish
@@ -95,8 +96,12 @@ def test_dispatch_prioritizes_notifications_and_continues_all_queues(
     monkeypatch.setattr(dispatcher, "make_broker", lambda: broker)
     stub_actors(monkeypatch)
     monkeypatch.setattr(dispatcher, "purge_expired", lambda now: calls.append("purge"))
-    monkeypatch.setattr(dispatcher, "sweep_accounts", lambda now: calls.append("sweep"))
-    monkeypatch.setattr(dispatcher, "purge_finished_mail", lambda now: None)
+
+    def sweep(_cutoff: datetime, _limit: int) -> int:
+        calls.append("sweep")
+        return 0
+
+    monkeypatch.setattr(dispatcher, "RETENTION", (Retention("rows", timedelta(0), sweep),))
     for name in ("dispatch_calibrations", "dispatch_notifications", "dispatch_epias"):
         monkeypatch.setattr(dispatcher, name, lambda *actors, name=name: calls.append(name))
 

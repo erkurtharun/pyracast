@@ -40,7 +40,6 @@ logger = logging.getLogger(__name__)
 
 LEASE_DURATION = ACTORS["send_outbound_mail"].lease
 REPUBLISH_AFTER = timedelta(minutes=1)
-RETENTION = timedelta(days=7)
 ANONYMOUS_MAIL_PER_HOUR = 20
 # Two-key advisory lock ("PYOB", 1) that serializes the anonymous budget across workers.
 ANONYMOUS_BUDGET_LOCK = (0x50594F42, 1)
@@ -290,10 +289,13 @@ def end_expired_mail(now: datetime, limit: int = 100) -> int:
     return len(expired)
 
 
-def purge_finished_mail(now: datetime) -> int:
-    deleted, _ = (
-        OutboundMail.objects.exclude(status__in=OPEN_MAIL)
-        .filter(finished_at__lt=now - RETENTION)
-        .delete()
-    )
-    return deleted
+def purge_finished_mail(cutoff: datetime, limit: int) -> int:
+    with transaction.atomic():
+        ids = list(
+            OutboundMail.objects.select_for_update(skip_locked=True)
+            .exclude(status__in=OPEN_MAIL)
+            .filter(finished_at__lt=cutoff)
+            .order_by("finished_at", "pk")
+            .values_list("pk", flat=True)[:limit]
+        )
+        return OutboundMail.objects.filter(pk__in=ids).delete()[0]
