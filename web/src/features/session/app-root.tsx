@@ -173,9 +173,10 @@ function useCurrentSession(
         () => true,
     );
     useEffect(() => {
-        if (!enabled || current) return;
-        let active = true;
+        if (!enabled) return;
         clear();
+        if (current) return;
+        let active = true;
         loadSession().catch((error: unknown) => {
             if (active) fail(error);
         });

@@ -40,7 +40,11 @@ async function changeEnded(failure: unknown) {
     const listed = await authRequest<Address[]>("account/email", "GET").catch(
         () => undefined,
     );
-    return listed !== undefined && pendingChange(listed.data).kind === "idle";
+    return (
+        listed?.status === 200 &&
+        Array.isArray(listed.data) &&
+        pendingChange(listed.data).kind === "idle"
+    );
 }
 
 export function EmailChange({ email }: { email: string }) {
