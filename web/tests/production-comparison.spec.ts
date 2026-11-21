@@ -1,6 +1,6 @@
 import { expect, test } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { mockApi } from "./support/workspace";
+import { answer, mockApi } from "./support/workspace";
 import { errorBody } from "./support/errors";
 
 const day = (index: number) =>
@@ -16,7 +16,7 @@ test("available historical model days appear without empty grid rows", async ({
     await page.route("**/plants/21/performance/**", async (route) => {
         query = new URL(route.request().url()).search;
         await route.fulfill({
-            json: {
+            json: answer("PerformanceOutput", {
                 comparison: "historical_model",
                 start_date: "2026-10-12",
                 end_date: "2026-11-10",
@@ -50,7 +50,7 @@ test("available historical model days appear without empty grid rows", async ({
                     provisional_production: index >= 22,
                     historical_configuration_assumed: index >= 22,
                 })),
-            },
+            }),
         });
     });
     await page.goto("/app/");
@@ -150,7 +150,7 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
     await mockApi(page);
     await page.route("**/plants/21/performance/**", async (route) => {
         await route.fulfill({
-            json: {
+            json: answer("PerformanceOutput", {
                 comparison: "archived_forecast",
                 start_date: "2026-10-12",
                 end_date: "2026-11-10",
@@ -169,7 +169,7 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
                     predicted_energy_mwh: null,
                     error_mwh: null,
                 })),
-            },
+            }),
         });
     });
     await page.goto("/app/");
