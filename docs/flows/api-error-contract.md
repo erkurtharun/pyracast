@@ -1,100 +1,101 @@
 # API response contract: errors, conflicts and pagination
 
-Every DRF view under `/api/` answers failures with a machine `code` plus optional `detail`, rendered as JSON except by `GET /api/schema/` (spectacular renderers: YAML unless JSON is requested), and list endpoints as DRF page-number pages of 50. One DRF exception handler maps domain exceptions to codes; four views and one middleware build their own failure bodies; the web client turns bodies into one translated message plus per-field errors. Allauth (`/api/auth/browser/v1/`) keeps its own `{status, data, errors}` envelope, read by a separate client function that falls back to the project body when `errors` is absent. Failures outside DRF under `/api/` (middleware `PermissionDenied`, unknown paths, interrupted sessions, Django client errors such as too many form fields, unhandled errors in allauth views) are answered by project error handlers as private JSON; 500 `server_error` responses include `{code, message, request_id}` and log the traceback with the same request id. A 503 `request_timeout` includes `{code, request_id}` and a corresponding `api_request_timeout` traceback; other mapped failures carry no reference.
+Every failure under `/api/` answers one JSON body `{code, message, fields?, retry_after?, request_id?}`: `code` a closed vocabulary (`pyracast.errors.ErrorCode`), `message` localized under the request language, `fields` the localized text per input path, `retry_after` seconds also sent as `Retry-After`, `request_id` the reference to the server log of a 5xx. A refusal may add its own keys (a stale outage write adds `current`). List endpoints answer DRF page-number pages of 50. One DRF exception handler (`pyracast.api.errors`) renders the failures of views; project error handlers render those outside DRF (middleware refusals, unknown paths, interrupted sessions, unhandled errors in allauth views); `PrivateAPIResponses` completes framework refusals and allauth's answers; the web client maps every body to one `ApiError`. Anything the application cannot answer is answered by the gateway's notice service in the same shape.
 
 ## Entry points
 
-- `pyracast.api.errors.exception_handler`, set as `REST_FRAMEWORK["EXCEPTION_HANDLER"]` in `src/pyracast/settings.py`; the same module holds `VALIDATION_DETAILS` (14 server-side message keys), `log_server_error` and `server_error_body`.
-- `handler400`, `handler403`, `handler404` and `handler500` in `src/pyracast/urls.py` point to `pyracast.api.error_pages`; `server_error` runs inside Django's `except` block and logs the current exception with a new request id.
-- View-built bodies: `RequestView.handle_exception` in `src/pyracast/change_requests/api.py` (409 `RequestConflictError`), `ProductionChangesView.post` in `src/pyracast/plants/api.py` (409 `production_revision_conflict`), `EpiasConnectionView.put` in `src/pyracast/plants/epias_api.py` (502 `epias_unavailable`), `ForecastView.get` in `src/pyracast/api/views.py` (400 `OutlookRequestError`).
-- `SessionRequestSerialization` in `src/pyracast/accounts/session_lock.py` (429 `session_busy`, outside DRF) and `PrivateAPIResponses` in `src/pyracast/api/middleware.py` (no-store headers, auth 429 audit). `PageNumberPagination` with `PAGE_SIZE` 50 (`DEFAULT_PAGINATION_CLASS`), used by 11 list views that call `paginate_queryset` by hand: tenants, regions, location changes, sites, plants, production observations, calibrations, incidents, change-request inbox, two trash lists.
-- Web: `request`, `failureMessage`, `errorMessage`, `validationFields`, `ApiError` in `web/src/lib/api.ts`; `authRequest`, `AuthResponseError` in `web/src/lib/auth-api.ts`; `useCollection`, `useResource`, `ActionForm` in `web/src/components/ui.tsx`; catalog `Errors` in `web/messages/{en,tr}/core.json`.
+- `pyracast.api.errors`: `ApiError` (status, code, message, fields, retry after, request id, details), `exception_handler` (set as `REST_FRAMEWORK["EXCEPTION_HANDLER"]`), `api_error` (the one mapping from exception to `ApiError`, used by every renderer), `error_json`, `with_error_contract`, `refuse_in_place`, `log_server_error`. Domain raise sites use `DomainError`, `ConflictError`, `BusyError` and `ForbiddenError` from `pyracast.errors`, each carrying an `ErrorCode`, a catalogued message, an optional field and details; `tests/test_error_raise_sites.py` scans that no error is raised or answered outside this contract.
+- `handler400`, `handler403`, `handler404` and `handler500` in `src/pyracast/urls.py` point to `pyracast.api.error_pages`, as does `CSRF_FAILURE_VIEW` (`csrf_failure`); `server_error` runs inside Django's `except` block and logs the current exception with a new request id.
+- `pyracast.api.middleware.PrivateAPIResponses`: `private, no-store` on every `/api/` response, the contract body for a body-less 405 or 400 and for a JSON error body that lacks `code` and `message` (allauth), and the audit line of an `/api/auth/` 429. `SessionRequestSerialization` (`session_busy`) and `SessionTagCheck` (`session_changed`) answer through `error_json`. `pyracast.api.permissions.RoutePolicy` and `pyracast.api.throttling.RouteThrottle` refuse through the same handler.
+- `pyracast.maintenance` (the gateway's notice service): 503 `maintenance` with `retry_after: 60` while the application is unreachable, and 413 `request_too_large` for a body over the gateway's limit.
+- `pyracast.errors.retryable_database_code`: the lock, deadlock and statement-timeout mapping shared by the API handler and the console (`pyracast.platform_admin.failures.contained`). List views call `paginate_queryset` by hand: tenants, trashed regions, location change requests, sites, plants, calibrations, outages and the change-request inbox.
+- Web: `web/src/lib/api/errors.ts` (`ApiError`, `errorFromResponse`, `displayMessage`), `lib/api/lane.ts` (`send`, `prepared`), `lib/auth-api.ts` `authRequest`, `fetchList` in `lib/api/query.ts`, `useErrorMessage` and `ActionForm` in `web/src/ui/form.tsx`; catalog `Errors` in `web/messages/{en,tr}/core.json`.
 
 ## Sequence
 
 ```mermaid
 sequenceDiagram
     participant U as Component
-    participant C as api.ts
+    participant C as api lane
     participant M as Middleware
     participant V as DRF view
     participant O as Operation
     participant H as exception_handler
     participant D as PostgreSQL
-    U->>C: request with url, method, body, token
-    C->>M: fetch with X-CSRFToken when a token is given
+    U->>C: request with url, method, body
+    C->>M: fetch with X-CSRFToken and X-Session-Tag
     M->>D: pg_advisory_lock under lock_timeout 5s, only with a 32-character session cookie
     alt session lock not granted
         M-->>C: 429 session_busy with Retry-After 1
+    else session tag of another session
+        M-->>C: 409 session_changed
     end
     M->>V: RequestLanguage activates locale, view dispatch
-    V->>D: permission classes read Membership
+    V->>D: RoutePolicy reads Membership, RouteThrottle counts
     V->>O: validated input
     O->>D: row locks and writes
     O-->>V: raises domain or database exception
-    alt RequestConflictError or ProductionRevisionConflictError or EpiasError or OutlookRequestError
-        V-->>C: 409, 502 or 400 body built by the view
-    else any other exception
-        V->>H: handle_exception passes exc and context
-        alt exception is mapped
-            H-->>V: Response with code and optional detail
-            V-->>C: 400, 403, 404, 409, 429, 502 or 503 JSON
-        else BadRequest or SuspiciousOperation
-            H-->>V: None, exception re-raised to Django
-            V-->>C: handler400 answers session_ended or bad_request JSON
-        else unhandled server exception
-            H->>H: log api_server_error with request id and traceback, roll back
-            H-->>V: 500 server_error with message and request_id
-        end
+    V->>H: handle_exception passes exc and context
+    alt mapped exception
+        H-->>V: Response with the contract body
+        V-->>C: 400, 401, 403, 404, 405, 409, 415, 429 or 503 JSON
+    else BadRequest or SuspiciousOperation
+        H-->>V: None, exception re-raised to Django
+        V-->>C: handler400 answers session_ended or bad_request JSON
+    else unmapped exception
+        H->>H: log api_server_error with request id and traceback, roll back
+        H-->>V: 500 server_error with message and request_id
     end
-    C-->>U: throws ApiError from errorMessage and validationFields
+    C-->>U: throws ApiError built from the body
 ```
 
 ## Data
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `Membership` | R | `WorkspaceWritePermission` and `WorkspaceMemberWritePermission` check role or membership per request |
+| `accounts_membership` | R | `RoutePolicy` checks membership and role per request |
 | PostgreSQL advisory lock | R/W | Per session key, held for the whole request by `serialize_session` (no table) |
-| `pyracast.security` log | W | `authentication_request_throttled` for any 429 under `/api/auth/`; `invalid_proxy_headers` with the proxy peer address when trusted proxy headers are refused (log lines, no table) |
+| `pyracast.security` log | W | `authorization_denied` or `csrf_refused` for a 403 to a signed-in caller (once a minute per actor, view and code), `authentication_request_throttled` for any 429 under `/api/auth/`, `invalid_proxy_headers` with the proxy peer address (log lines, no table) |
 | `pyracast.api` log | W | `api_server_error` and `api_request_timeout` at ERROR with request id, method, path, view and traceback; `api_object_not_found` at WARNING with the model name |
 
 ## Authorization
 
-- Default classes `IsAuthenticated` and `WorkspaceWritePermission` (admin role for non-safe methods under `tenant_id`) in `REST_FRAMEWORK`; `PlatformAdmin` (active superuser with verified MFA) guards the `/api/platform/` views.
-- Operations raise Django `PermissionDenied`; DRF answers 403 `http_403` with the raised text. `SessionAuthentication` has no authenticate header, so anonymous callers also get 403, not 401; a CSRF failure is 403 `CSRF Failed: <reason>`. Rows under a tenant come from tenant-scoped querysets, so missing and foreign rows both end in 404.
+- Access comes from `RoutePolicy` (`docs/flows/tenant-authorization.md`): `not_authenticated` 401 with `WWW-Authenticate: Session`, `membership_required`, `workspace_admin_required`, `admin_edits_directly`, `platform_admin_required`, `csrf_failed`, and `permission_denied` for a route without a policy; a method the route does not list is 405. Rows under a tenant come from tenant-scoped querysets, so missing and foreign rows both end in 404.
 
 ## Failure paths
 
 | Condition | Result |
 | --- | --- |
-| Lock wait over `lock_timeout` 5 s inside a view (database error caused by `LockNotAvailable`) | 503 `workspace_busy`, `Retry-After: 1` |
-| Deadlock (`DeadlockDetected`) | 503 `database_conflict`, `Retry-After: 1` |
-| Database request canceled (`QueryCanceled`, SQLSTATE `57014`), including `statement_timeout` 60 s | 503 `request_timeout` with `request_id`; logged at ERROR with traceback |
-| Session advisory lock not granted in 5 s | 429 `session_busy`, English `detail`, `Retry-After: 1`; under `/api/auth/` also logged as `authentication_request_throttled` |
-| `ObjectDoesNotExist` (model name logged at WARNING) / `Http404` from `get_object_or_404` / invalid `?page` | 404 `not_found` / 404 `http_404`, `detail.detail` "No Plant matches the given query." / 404 `http_404`, `detail.detail` "Invalid page." |
-| Django `ValidationError` from operations / DRF `ValidationError` (serializers, four workspace views that re-wrap Django errors) | 400 `invalid_request`, `VALIDATION_DETAILS` localized / 400 `http_400`; `detail` is a list or per-field dict |
-| `OutlookRequestError` on the regional forecast | 400 `date_out_of_range` or `completed_day_required` (no `detail`) |
-| `RequestDeferredError` without / with `available_at`; `QuotaExceededError`; `ProviderError` (platform validate endpoint only) | 503 `provider_authentication_failed` / 429 `provider_throttled` with `Retry-After` seconds; 429 `quota_exhausted`; 502 `provider_unavailable` |
-| `EpiasError` on EPIAS connect | 502 `epias_unavailable`, English `detail` |
-| `RequestConflictError` | 409 `idempotency_key_reused`, `pending_request_limit`, `request_already_closed`, `review_context_changed`, `request_conflict` or `production_revision_conflict` (stale `expected_revision_id` on a production proposal; nothing is stored), each with localized `detail` |
-| `ProductionRevisionConflictError` on direct production write / incident `RevisionConflict` (`APIException`) | 409 `production_revision_conflict` / 409 `http_409`, `detail.detail` "Incident revision changed." |
-| Other DRF exceptions (403, 405, invitation `Throttled(wait=60)`, parse errors) | `http_<status>`, `detail.detail` text; `Throttled` adds `Retry-After` |
-| `PermissionDenied` raised in middleware (`TrustedProxyHeaders`, `PrivilegedAuthenticatorEnrollment`) | `handler403`: 403 `invalid_proxy_headers` for refused trusted proxy headers (`InvalidProxyHeaders`), otherwise `permission_denied`, JSON with `Cache-Control: private, no-store` under `/api/`; HTML elsewhere |
-| Unknown `/api/` path | `handler404`: 404 `not_found` JSON, no-store |
-| `SessionInterrupted` (session lock lost, session deleted concurrently) / other `BadRequest` or `SuspiciousOperation` (for example `TooManyFieldsSent`), also when raised inside a DRF view | `exception_handler` leaves them to Django; `handler400`: 400 `session_ended` / `bad_request` JSON, no-store; `SuspiciousOperation` is logged on `django.security` |
-| Anything else in a DRF view (`DataError`, other database errors, programming errors) | 500 `server_error` with localized `message` and `request_id`; `api_server_error` logged with the traceback; DRF `set_rollback` |
+| Django or DRF `ValidationError` (serializers, operations, forms) | 400 `invalid_request`; `message` joins the general errors, `fields` keys each input path (list items by index) |
+| `DomainError` | its status (400 unless set) and own code; `field` adds `fields`; `ConflictError` is 409 (`idempotency_key_reused`, `pending_request_limit`, `request_already_closed`, `request_conflict`, `review_context_changed`, `production_revision_changed`, `incident_revision_changed` with `current`, `region_revision_changed`, `workspace_admin_changed`, `configuration_changed`, ...) |
+| `ForbiddenError`; any other `PermissionDenied` | 403 with its code; 403 `permission_denied` |
+| DRF `NotAuthenticated`, `AuthenticationFailed` | 401 `not_authenticated`, `WWW-Authenticate` header |
+| `ObjectDoesNotExist` (model name logged at WARNING), `Http404`, invalid `?page`, unknown `/api/` path | 404 `not_found` |
+| Method, `Accept` or media type refused | 405 `method_not_allowed` (keeps `Allow`), 406 `not_acceptable`, 415 `unsupported_media_type`; a JSON `null` body is `invalid_request` "Send the request body as a JSON object." |
+| DRF `ParseError`; allauth's body-less 400 for malformed or non-object JSON | 400 `bad_request` |
+| `SessionInterrupted` (session lock lost, session deleted concurrently); other `BadRequest` or `SuspiciousOperation` (for example `TooManyFieldsSent`), also inside a DRF view | `exception_handler` leaves them to Django; `handler400`: 400 `session_ended` / `bad_request`; `SuspiciousOperation` is logged on `django.security` |
+| DRF `Throttled` (route throttle) | 429 `throttled` with `Retry-After` |
+| Session advisory lock not granted in 5 s | 429 `session_busy`, `Retry-After: 1` |
+| Invitation budget | 429 `invitation_rate_limited` with the real `retry_after` |
+| `RequestDeferredError` without / with `available_at`; `QuotaExceededError`; `ProviderError` | 503 `provider_authentication_failed` / 429 `provider_throttled` with `Retry-After`; 429 `quota_exhausted`; 503 `provider_unavailable` (502 is the gateway's) |
+| Lock wait over `lock_timeout` 5 s (`LockNotAvailable`) / deadlock / statement canceled (`QueryCanceled`, including `statement_timeout` 60 s) | 503 `busy`, `Retry-After: 1` / 503 `database_conflict`, `Retry-After: 1` / 503 `request_timeout` with `request_id`, logged at ERROR with traceback |
+| Anything else in a DRF view (`DataError`, other database errors, programming errors) | 500 `server_error` with `request_id`; `api_server_error` logged with the traceback; DRF `set_rollback` |
 | Unhandled exception outside DRF under `/api/` (allauth views, middleware) | `handler500`: the same 500 body with the request id it logs as `api_server_error` (path escaped); Django also logs `django.request` at ERROR |
+| `PermissionDenied` in middleware (`TrustedProxyHeaders` refusing unverifiable proxy headers) | `handler403`: 403 `invalid_proxy_headers` or `permission_denied`, JSON under `/api/`, HTML elsewhere |
+| Missing or stale CSRF token | 403 `csrf_failed` on `/api/` (a navigation to the provider redirect or callback returns to the social callback with `error=expired_form`); the HTML failure page elsewhere |
+| allauth failure (400 and above, including 401 and 409 answers) | keeps `status`, `errors`, `data`, `meta` and adds `code` from the status (400 `invalid_request`, 401 `not_authenticated`, 403 `permission_denied`, 404 `not_found`, 409 `conflict`, 410 `session_ended`, 429 `throttled`, 5xx `server_error` with `request_id`), `message` (allauth's first error, else the code's text) and `fields` from `errors[].param` |
+| Application stopped; body over the gateway's limit | gateway: 503 `maintenance` with `retry_after` 60 and `Retry-After: 60`; 413 `request_too_large` |
+| Lock, deadlock or statement timeout in a console write | back to the form's page (validated Referer, else `/admin/`) with a retry message and a `console_write_not_saved` warning; with `Accept: application/json` 503 `{"message": ...}` and `Retry-After: 1`; a busy session answers `/admin/` with the HTML page, not `session_busy` |
 
 ## Rules and invariants
 
-- Client mapping in `failureMessage` (used by `request`, and by `authRequest` when allauth sends no `errors`): top-level `message` and `request_id` are set aside, then in `errorMessage` every entry except `code` is rendered (`detail` and `non_field_errors` bare, other keys as `key: message`); a code-shaped string is looked up in `Errors.codes.*` and dropped if unknown; `code` is looked up only when nothing else yields text. `validationFields` keeps dict `detail` entries except `detail` and `non_field_errors`. An empty, non-JSON or unknown-code failure becomes `Errors.request` with the status. A string `request_id` is appended as `Errors.reference`.
-- Handler bodies never carry stack or database text (`test_stable_errors` asserts a provider secret stays out); tracebacks go only to the log, so database `DETAIL` text can reach the log. Customer error bodies pass through `public_source_data`: private keys are dropped and `code`/`detail` strings that mention Solcast are rewritten. English server text reaches the client from `session_busy`, `epias_unavailable`, untranslated `PermissionDenied` texts (`Tenant membership required.`) and the model name in `http_404`; other details are `gettext`-localized under `RequestLanguage`.
-- `lock_timeout=5s` and `statement_timeout=60s` are connection options in `DATABASES`; lock timeouts, deadlocks and statement timeouts are classified. `Retry-After` is sent but the web client never reads it. Approving a stale request maps `ValidationError`, `RevisionConflict` and `ProductionRevisionConflictError` to 409 `request_conflict` (`_validate`).
-- `page_size_query_param` is unset: size is fixed at 50 and an out-of-range `?page` is 404 `http_404`. `useCollection` follows `next` until null, rejects repeated or non-`/api/` links and re-runs on its poll interval; the inbox pages by number.
-- The client serializes `/api/session/*` calls (one GET in flight, mutations queued), mirroring the server session lock. `authRequest` returns 401 (and 404 for GET of the TOTP authenticator) as results instead of throwing.
+- Every code has a catalogued English message and a distinct Turkish one (`MESSAGES`); the handler translates under `RequestLanguage` and never carries stack or database text. Tracebacks go only to the log, so database `DETAIL` text can reach the log. Customer bodies pass `CustomerJSONRenderer` (`public_source_data`): private keys are dropped and provider names in technical strings are rewritten or become `null`.
+- `with_error_contract` adds the missing keys to a JSON error body of at most 64 KiB and keeps its own keys; a rewritten body drops `ETag`, `Content-Encoding` and `Content-MD5` and resets `Content-Length`. `refuse_in_place` keeps `Allow`, `Vary`, `Content-Language` and cookies.
+- `lock_timeout=5s` and `statement_timeout=60s` are connection options (`background/deadlines.py`, `DATABASES`); the web client retries a `session_busy` answer once and reads no other `Retry-After`. Approving a request that no longer matches the plant answers 409 `request_conflict` (`_validate`).
+- `page_size_query_param` is unset: size is fixed at 50 and an out-of-range `?page` is 404 `not_found`. `fetchList` follows `next` until null, rejects repeated or non-`/api/` links and re-runs on its poll interval; the inbox pages by number.
+- Client mapping: `errorFromResponse` turns a contract body into an `ApiError` (status, known code, fields, `retryAfter`, `requestId`, body) carrying the server message, with "Reference: id" appended for a `request_id`; any other body becomes `Errors.request` with the status. `displayMessage` shows only an `ApiError`'s message and a generic text for anything else; `ActionForm` places `fields` beside the inputs. `authRequest` returns a 401 (and a 404 for GET of the TOTP authenticator) as a result instead of throwing. The client's code set is compile-checked against the generated vocabulary.
 
 ## Tests
 
-- pytest: `tests/test_api.py` (`test_stable_errors`, `test_unknown_error_answers_json_with_reference_and_logs_traceback`), `tests/test_api_contention.py` (real lock timeout and statement timeout to 503, deadlock to `database_conflict`, unclassified database error to a logged 500), `tests/test_error_pages.py` (JSON 400, 403, 404 and 500 outside DRF, client errors raised in views, escaped log path, proxy refusal code and audit, logging configuration), `tests/test_change_requests.py` (stale production proposal 409), `tests/test_api_localization.py` (`http_400` vs `invalid_request`), `tests/test_collection_resilience.py` (deferral statuses), `tests/test_change_request_contracts.py`, `tests/test_incidents.py` and `tests/test_production_changes.py` (409), `tests/test_epias_api.py` (502), `tests/test_session_serialization.py` (429 status and header), `tests/test_security_audit.py` (`session_busy` logged as auth throttle), `tests/test_change_requests.py` (pages, `not_found`).
-- Playwright: `web/tests/change-requests.spec.ts` (503, 409, 500 with its reference), `workspace.spec.ts` and `plant-onboarding.spec.ts` (multi-page `next`), `auth-registration.spec.ts` (non-JSON 403 to generic text, sign-in 500 with its reference, `session_ended`), `epias-production.spec.ts` and `outages.spec.ts` (409 banners). Gaps: no unit test of `errorMessage` or `validationFields` (mocks use a flat `{"detail":...}` the server never sends); no test of `http_404` or `session_busy` bodies; `PAGE_SIZE` 50 not asserted.
+- pytest: `tests/test_error_contract.py` (every code answered as one localized body, field placement, CSRF forms, busy console and API navigation, malformed JSON, replaced framework refusals, every route and error, allauth failures, OpenAPI export), `tests/test_api_error_values.py` (rewritten bodies and headers), `tests/test_error_pages.py` (JSON 400, 403, 404 and 500 outside DRF, escaped log path, proxy refusal), `tests/test_api_contention.py` (real lock timeout and statement timeout to 503, deadlock, unclassified database error to a logged 500), `tests/test_domain_error_codes.py`, `tests/test_workspace_http_failures.py`, `tests/test_api.py` (`test_stable_errors`, `test_unknown_error_answers_json_with_reference_and_logs_traceback`), `tests/test_api_localization.py`, `tests/test_maintenance_notice.py` (gateway bodies), `tests/test_error_raise_sites.py`.
+- Playwright: `web/tests/api-errors.spec.ts` and `transport.spec.ts` (contract bodies, busy retry, unconfirmed changes), `change-requests.spec.ts` (503, 409, 500 with its reference), `workspace.spec.ts` and `plant-onboarding.spec.ts` (multi-page `next`), `auth-registration.spec.ts` (sign-in 500 with its reference, `session_ended`), `epias-production.spec.ts` and `outages.spec.ts` (409 banners).
