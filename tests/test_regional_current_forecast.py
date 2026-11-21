@@ -43,7 +43,7 @@ def test_region_current_forecast_composes_saved_horizon_without_republishing(
     assert payload["intervals"][20]["source_snapshot_ids"] == [old.pk]
     assert payload["intervals"][21]["source_snapshot_ids"] == [latest.pk]
     assert payload["provenance"]["source_snapshot_ids"] == [latest.pk, old.pk]
-    assert payload["vintage"]["scope"] == "primary_forecast_source"
+    assert payload["vintage"]["scope"] == "primary_source"
     assert "mixed_forecast_vintages" in payload["quality_flags"]
     assert counts == (
         ForecastSnapshot.objects.count(),

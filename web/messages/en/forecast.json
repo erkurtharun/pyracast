@@ -201,7 +201,11 @@
         "relative_error": "Relative error",
         "skill_score": "Skill vs uncalibrated model",
         "skill_days": "Skill uses {count, plural, one {# day} other {# days}} outside the calibration's training period.",
-        "reason_dates": "{reason}: {dates}"
+        "reason_dates": "{reason}: {dates}",
+        "daily_error_title": "Daily forecast error",
+        "daily_error_chart": "Absolute daily forecast error for {count, plural, one {# matched day} other {# matched days}}; the table below lists each value.",
+        "daily_error_tooltip": "{date}: {error} MWh",
+        "absolute_daily_error": "Absolute error per day"
     },
     "Calibrations": {
         "calibration_history": "Calibration history",
@@ -218,11 +222,8 @@
         "assessment": "Assessment",
         "factor": "Factor",
         "actions": "Actions",
-        "previous_configuration": "Previous configuration",
         "provisional_production": "Provisional production",
         "view_details": "View details",
-        "only_the_current_configuration_can_be_activated": "Only the current configuration can be activated.",
-        "activate": "Activate",
         "no_calibration_runs": "No calibration runs",
         "save_complete_paired_days_in_the_production": "Save complete paired days in the production journal to prepare a candidate automatically.",
         "loading_calibration_details": "Loading calibration details…",
@@ -285,7 +286,40 @@
             "incumbent_mae_regression": "The candidate increased error compared with the selection at training.",
             "baseline_bias_regression": "The candidate increased bias compared with the baseline.",
             "incumbent_bias_regression": "The candidate increased bias compared with the selection at training."
-        }
+        },
+        "in_force": "Calibration in force",
+        "in_force_run": "Calibration #{id} with factor {factor}, selected {time}.",
+        "in_force_baseline": "The uncalibrated model (factor 1), selected {time}.",
+        "in_force_none": "No calibration is selected for this configuration; forecasts use the uncalibrated model.",
+        "selected_manually": "Selected by a workspace administrator.",
+        "selected_automatically": "Selected by automatic calibration.",
+        "not_effective": "Forecasts do not apply it now because its training data changed; they use the uncalibrated model until another calibration is selected.",
+        "review_activation": "Review activation",
+        "activate_title": "Activate calibration #{id}",
+        "activate_effect": "Factor {factor} applies to new forecasts and to estimated past days from {start}, its first training day. Issued forecasts keep their calibration.",
+        "activation_turns_automation_on": "Automatic calibration will be turned on.",
+        "activation_keeps_automation": "Automatic calibration stays on.",
+        "confirm_activation": "Activate calibration",
+        "reset_title": "Reset to the uncalibrated model",
+        "reset_effect": "New forecasts and estimated past days use the uncalibrated model (factor 1). Issued forecasts keep their calibration. Automatic calibration will be turned off.",
+        "confirm_reset": "Reset to baseline",
+        "cancel": "Cancel",
+        "working": "Working…",
+        "selection_state": "Selection",
+        "blocked": "This calibration cannot be activated: {blocker}.",
+        "blockers": {
+            "configuration_changed": "It was made for another plant configuration, or the current configuration is not approved.",
+            "production_source_changed": "The production source changed after it was trained.",
+            "outage_history_changed": "The outage history inside its window changed after it was trained.",
+            "incumbent_changed": "The active calibration changed after it was compared.",
+            "calibration_not_activatable": "It did not finish with a held-out evaluation that allows activation."
+        },
+        "request_new": "Request a new calibration for {start} – {end}",
+        "request_sent": "A new calibration was requested. It appears in the list when it starts.",
+        "run_open": "A calibration is already pending or running; request another one when it has finished.",
+        "window_outside": "A new calibration needs a window of 7 to 90 days; this window cannot be requested again.",
+        "days_incomplete": "Request a new calibration for this window once its last day has ended in plant time.",
+        "await_configuration": "Request a new calibration when the plant configuration is approved again."
     },
     "CalibrationAutomation": {
         "automatic_calibration": "Automatic calibration",
@@ -318,8 +352,14 @@
             "candidate_failed": "The candidate could not be evaluated.",
             "candidate_superseded": "The candidate was superseded by newer data.",
             "preparation_failed": "The calibration could not be prepared. It will be retried.",
-            "promotion_failed": "The candidate could not be promoted. It will be checked again."
-        }
+            "promotion_failed": "The candidate could not be promoted. It will be checked again.",
+            "production_source_changed": "The production source changed; a new calibration is needed.",
+            "outage_history_changed": "The outage history changed; a new calibration is needed.",
+            "incumbent_changed": "The active calibration changed; a new comparison is needed.",
+            "calibration_not_activatable": "The candidate cannot be activated."
+        },
+        "disabled_because": "Off: {cause}.",
+        "paused_configuration": "Paused until the plant configuration is approved again."
     },
     "ProductionHistory": {
         "actuals": "Actual production",
@@ -352,7 +392,7 @@
         "save": "Save",
         "saving": "Saving…",
         "cancel": "Cancel",
-        "use_provider": "Use provider value",
+        "use_provider": "Use provider value ({energy} MWh)",
         "revert_interval": "Use provider value for {interval}",
         "invalid_energy": "Enter a non-negative energy value in MWh.",
         "saved": "Production saved.",
@@ -387,19 +427,18 @@
         "quality": "Data quality",
         "mixed": "Mixed quality",
         "refresh_failed": "Could not refresh saved production. {error}",
-        "propose_interval": "Suggest correction for {interval}"
+        "propose_interval": "Suggest correction for {interval}",
+        "remove_correction": "Remove correction",
+        "remove_correction_interval": "Remove correction for {interval}"
     },
     "ProductionImport": {
         "choose_a_csv_no_larger_than_2": "Choose a CSV no larger than 2 MiB.",
         "could_not_read_the_production_csv": "Could not read the production CSV.",
         "csv_format_and_import_rules": "CSV format and import rules",
-        "use_a_csv_with_the_exact_header": "Use the exact header below, timezone-aware timestamps and non-negative energy. Intervals cannot overlap. Each file accepts up to 2,000 rows within 31 local days.",
+        "use_a_csv_with_the_exact_header": "Use the columns below, with energy in kWh (energy_kwh) or MWh (energy_mwh), timezone-aware timestamps and non-negative energy; a production export can be imported as it is. Intervals cannot overlap. Each file accepts up to 2,000 rows within 31 local days.",
         "quality_valid_outage_curtailed_or_invalid_quoted": "Quality: valid, outage, curtailed, or invalid. Units apply to the whole file. Imported values are saved corrections and take priority over future provider updates.",
         "choose_and_validate_a_csv_before_importing": "Choose and validate a CSV before importing.",
         "production_csv": "Production CSV",
-        "energy_unit": "Energy unit",
-        "kwh_kilowatthours": "kWh — kilowatt-hours",
-        "mwh_megawatthours": "MWh — megawatt-hours",
         "validated_file": "{file}: {count, plural, one {# valid observations ready} other {# valid observations ready}}.",
         "import_complete": "Import complete: {created} created, {existing} already present, {total} total.",
         "preview_import": "Preview import",

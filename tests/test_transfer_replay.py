@@ -5,7 +5,6 @@ import pytest
 
 from pyracast.connections.models import SiteBinding
 from pyracast.plants.activation import activate_calibration
-from pyracast.plants.forecasting import plant_forecast
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.numerics import MODEL_VERSION
@@ -24,13 +23,14 @@ def _declare_tracking(system: System, plant: Plant) -> None:
 
 
 def _replay(system: System, plant: Plant, resolution_minutes: int) -> dict[str, Any]:
-    return plant_forecast(
+    return plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
         target_date=DAY,
         resolution_minutes=resolution_minutes,
+        as_of=NOW,
     )
 
 

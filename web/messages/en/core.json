@@ -236,13 +236,14 @@
     },
     "ProductionCsv": {
         "size": "Choose a CSV no larger than 2 MiB.",
-        "header": "Use the CSV header: starts_at,ends_at,energy,quality,source",
+        "header": "Use the CSV columns starts_at, ends_at, energy_kwh or energy_mwh, quality and source; timezone is optional.",
         "parse": "CSV could not be parsed: {reason}",
         "count": "Import between 1 and 2,000 observations per batch.",
         "interval": "Row {row}: use timezone-aware ISO timestamps for a 30 or 60 minute interval.",
         "future": "Row {row}: production intervals must be completed.",
         "energy": "Row {row}: energy must be a non-negative number.",
         "quality": "Row {row}: include a valid quality and source (up to 200 characters).",
+        "mixed": "Row {row}: this interval combines stored intervals of different qualities; correct those intervals at their stored resolution instead.",
         "overlap": "The CSV contains overlapping intervals."
     },
     "SocialAuth": {
@@ -423,6 +424,31 @@
             "insufficient": "Insufficient data",
             "provisional": "Provisional",
             "evaluated": "Evaluated"
+        },
+        "IncidentStatus": {
+            "active": "Active",
+            "resolved": "Resolved",
+            "cancelled": "Cancelled"
+        },
+        "SelectionState": {
+            "active": "Active",
+            "candidate": "Candidate",
+            "previous_configuration": "Earlier configuration",
+            "not_ready": "Not ready"
+        },
+        "ActivationBlocker": {
+            "configuration_changed": "configuration changed",
+            "production_source_changed": "production source changed",
+            "outage_history_changed": "outage history changed",
+            "incumbent_changed": "active calibration changed",
+            "calibration_not_activatable": "not activatable"
+        },
+        "AutomationCause": {
+            "toggle": "turned off by a workspace administrator",
+            "manual_activation": "changed by a manual activation",
+            "reset": "turned off by a reset to the uncalibrated model",
+            "configuration_revised": "turned off because the plant configuration changed",
+            "workspace_disabled": "turned off by Pyracast support for this workspace"
         }
     }
 }

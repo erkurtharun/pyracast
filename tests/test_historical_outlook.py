@@ -11,7 +11,6 @@ from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.forecasting import plant_forecast
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import ForecastIssuance, PlantConfiguration
 from pyracast.plants.operations import revise_plant
@@ -34,14 +33,14 @@ def test_forecast_replay_requires_electrical_publication_before_cutoff(
     published = snapshot.collected_at + timedelta(minutes=delay_minutes)
     publish_snapshot(snapshot, published_at=published)
     args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    unavailable = plant_forecast(
+    unavailable = plant_outlook(
         *args, target_date=DAY, resolution_minutes=60, as_of=published - timedelta(microseconds=1)
     )
     assert unavailable["result"] is None
-    available = plant_forecast(*args, target_date=DAY, resolution_minutes=60, as_of=published)
+    available = plant_outlook(*args, target_date=DAY, resolution_minutes=60, as_of=published)
     assert available["snapshot_id"] == snapshot.pk
     assert available["as_of"] == published.isoformat()
-    replay = plant_forecast(
+    replay = plant_outlook(
         *args,
         target_date=DAY,
         resolution_minutes=60,
@@ -62,13 +61,13 @@ def test_later_pre_sunrise_forecast_replaces_previous_evening_archive(
         snapshot_for(system, DAY, power_kw=0.4, collected_at=start + timedelta(hours=3))
     )
     args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    before = plant_forecast(
+    before = plant_outlook(
         *args,
         target_date=DAY,
         resolution_minutes=60,
         as_of=latest.collected_at - timedelta(seconds=1),
     )
-    after = plant_forecast(*args, target_date=DAY, resolution_minutes=60, as_of=latest.collected_at)
+    after = plant_outlook(*args, target_date=DAY, resolution_minutes=60, as_of=latest.collected_at)
     assert before["snapshot_id"] == previous.pk
     assert after["snapshot_id"] == latest.pk
     assert after["as_of"] == latest.collected_at.isoformat()
@@ -105,7 +104,7 @@ def test_eligible_archived_forecast_survives_a_later_configuration(
     original_id = plant.current_configuration_id
     publish_snapshot(snapshot_for(system, DAY))
     args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    archived = plant_forecast(*args, target_date=DAY, resolution_minutes=60)
+    archived = plant_outlook(*args, target_date=DAY, resolution_minutes=60)
     revise_plant(*args, name="Revised", dc_capacity_mw=260, export_limit_mw=200)
     result = plant_outlook(*args, target_date=DAY, resolution_minutes=60)
     assert result["configuration_id"] == original_id

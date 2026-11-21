@@ -90,7 +90,7 @@ def test_intraday_update_keeps_archived_morning_in_current_outlook_and_api(
     assert response.status_code == 200, response.content
     assert response.json()["result"] == payload
     irradiance = response.json()["regional_irradiance"]
-    assert irradiance["vintage"]["scope"] == "primary_forecast_source"
+    assert irradiance["vintage"]["scope"] == "primary_source"
     assert irradiance["provenance"]["source_snapshots"] == payload["provenance"]["source_snapshots"]
     assert irradiance["provenance"]["source_segments"] == payload["provenance"]["source_segments"]
     assert irradiance["intervals"][20]["source_snapshot_ids"] == [old.pk]

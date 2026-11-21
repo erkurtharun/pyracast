@@ -1,15 +1,12 @@
 from datetime import date, datetime, timedelta
 from typing import cast
-from zoneinfo import ZoneInfo
-
-from django.core.exceptions import ValidationError
-from django.utils.translation import gettext
 
 from pyracast.calculation import calculate
-from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
 from pyracast.forecasts.history import ARCHIVED, live_state, result_state
 from pyracast.forecasts.intraday import (
+    VINTAGE_SCOPE,
+    ActualsMode,
     apply_intraday_source,
     prepare_intraday_source,
     preserve_forecast_weather,
@@ -35,14 +32,8 @@ def current_forecast(
     resolution_minutes: int,
     now: datetime,
     *,
-    include_actuals: bool = False,
-    actuals_only: bool = False,
+    actuals: ActualsMode = "none",
 ) -> dict[str, object]:
-    today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
-    if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
-        raise ValidationError(gettext("Resolution must be 30 or 60 minutes."))
-    if not today <= target_date <= today + timedelta(days=14):
-        raise DomainError(ErrorCode.DATE_OUT_OF_RANGE)
     configuration = (
         PlantConfiguration.objects.select_related("binding__provider_account")
         .filter(pk=plant.current_configuration_id, plant=plant, created_at__lte=now)
@@ -53,14 +44,7 @@ def current_forecast(
     if configuration is not None and not configuration_is_current(configuration):
         configuration = None
     return _composed_forecast(
-        plant,
-        target_date,
-        resolution_minutes,
-        now,
-        now,
-        configuration,
-        include_actuals=include_actuals,
-        actuals_only=actuals_only,
+        plant, target_date, resolution_minutes, now, now, configuration, actuals=actuals
     )
 
 
@@ -103,9 +87,9 @@ def _composed_forecast(
     configuration: PlantConfiguration | None,
     *,
     historical: bool = False,
-    include_actuals: bool = False,
-    actuals_only: bool = False,
+    actuals: ActualsMode = "none",
 ) -> dict[str, object]:
+    actuals_only = actuals == "only"
     snapshot = None
     calibration = None
     result = None
@@ -128,7 +112,7 @@ def _composed_forecast(
                     elapsed_cutoff=cutoff,
                     actuals_only=actuals_only,
                 )
-                if include_actuals or actuals_only
+                if actuals != "none"
                 else None
             )
         if source is not None:
@@ -175,7 +159,7 @@ def _composed_forecast(
                     "binding_id": configuration.binding_id,
                     "source_kind": source_kind,
                 }
-                cast(dict[str, object], irradiance["vintage"])["scope"] = "primary_forecast_source"
+                cast(dict[str, object], irradiance["vintage"])["scope"] = VINTAGE_SCOPE
                 if source is not None:
                     apply_intraday_source(irradiance, source)
                     preserve_forecast_weather(

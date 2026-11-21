@@ -1,13 +1,16 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, extend_schema_field
 from rest_framework import serializers
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from pyracast.api.serializers import FiniteFloat, InputSerializer
+from pyracast.errors import ConflictError, ErrorCode
 from pyracast.incidents import operations
-from pyracast.incidents.models import IncidentKind, PlantIncident
+from pyracast.incidents.models import IncidentKind, IncidentStatus, PlantIncident
 from pyracast.plants.api import ScopedView
 from pyracast.plants.serializers import AwareDateTime
 
@@ -39,8 +42,11 @@ class IncidentOutput(serializers.ModelSerializer[PlantIncident]):
     declared_configuration_id = serializers.IntegerField()
     status = serializers.SerializerMethodField()
 
+    @extend_schema_field(serializers.ChoiceField(choices=IncidentStatus.choices))
     def get_status(self, obj: PlantIncident) -> str:
-        return "cancelled" if obj.cancelled_at else "resolved" if obj.ends_at else "active"
+        if obj.cancelled_at:
+            return IncidentStatus.CANCELLED
+        return IncidentStatus.RESOLVED if obj.ends_at else IncidentStatus.ACTIVE
 
     class Meta:
         model = PlantIncident
@@ -61,6 +67,23 @@ class IncidentOutput(serializers.ModelSerializer[PlantIncident]):
             "updated_at",
         )
         read_only_fields = fields
+
+
+class IncidentConflict(serializers.Serializer[dict[str, Any]]):
+    code = serializers.ChoiceField(choices=ErrorCode.choices)
+    message = serializers.CharField()
+    current = IncidentOutput()
+
+
+@contextmanager
+def current_on_conflict() -> Iterator[None]:
+    """A stale write answers with the version it lost to; the caller is already authorized."""
+    try:
+        yield
+    except operations.StaleIncidentError as error:
+        raise ConflictError(
+            error.code, details={"current": IncidentOutput(error.current).data}
+        ) from error
 
 
 class IncidentsView(ScopedView[PlantIncident]):
@@ -84,40 +107,43 @@ class IncidentsView(ScopedView[PlantIncident]):
 class IncidentView(ScopedView[PlantIncident]):
     serializer_class = IncidentOutput
 
-    @extend_schema(request=IncidentUpdate, responses=IncidentOutput)
+    @extend_schema(request=IncidentUpdate, responses={200: IncidentOutput, 409: IncidentConflict})
     def put(self, request: Request, **kwargs: Any) -> Response:
         scope = self.scope()
         data = IncidentUpdate(data=request.data)
         data.is_valid(raise_exception=True)
-        row = operations.save_incident(
-            *scope, incident_id=kwargs["incident_id"], **data.validated_data
-        )
+        with current_on_conflict():
+            row = operations.save_incident(
+                *scope, incident_id=kwargs["incident_id"], **data.validated_data
+            )
         return Response(IncidentOutput(row).data)
 
 
 class ResolveView(ScopedView[PlantIncident]):
     serializer_class = IncidentOutput
 
-    @extend_schema(request=ResolveInput, responses=IncidentOutput)
+    @extend_schema(request=ResolveInput, responses={200: IncidentOutput, 409: IncidentConflict})
     def post(self, request: Request, **kwargs: Any) -> Response:
         scope = self.scope()
         data = ResolveInput(data=request.data)
         data.is_valid(raise_exception=True)
-        row = operations.finish_incident(
-            *scope, incident_id=kwargs["incident_id"], **data.validated_data
-        )
+        with current_on_conflict():
+            row = operations.finish_incident(
+                *scope, incident_id=kwargs["incident_id"], **data.validated_data
+            )
         return Response(IncidentOutput(row).data)
 
 
 class CancelView(ScopedView[PlantIncident]):
     serializer_class = IncidentOutput
 
-    @extend_schema(request=RevisionInput, responses=IncidentOutput)
+    @extend_schema(request=RevisionInput, responses={200: IncidentOutput, 409: IncidentConflict})
     def post(self, request: Request, **kwargs: Any) -> Response:
         scope = self.scope()
         data = RevisionInput(data=request.data)
         data.is_valid(raise_exception=True)
-        row = operations.finish_incident(
-            *scope, incident_id=kwargs["incident_id"], cancel=True, **data.validated_data
-        )
+        with current_on_conflict():
+            row = operations.finish_incident(
+                *scope, incident_id=kwargs["incident_id"], cancel=True, **data.validated_data
+            )
         return Response(IncidentOutput(row).data)

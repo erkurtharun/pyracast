@@ -19,6 +19,12 @@ from pyracast.regions.models import Region
 UNZONED = _("Outage times must include a time zone.")
 
 
+class StaleIncidentError(ConflictError):
+    def __init__(self, current: PlantIncident) -> None:
+        super().__init__(ErrorCode.INCIDENT_REVISION_CHANGED)
+        self.current = current
+
+
 def _snapshot(row: PlantIncident) -> dict[str, object]:
     return {
         "kind": row.kind,
@@ -144,7 +150,7 @@ def prepare_incident(
             rows = rows.select_for_update()
         row = rows.get(pk=incident_id, plant=plant)
         if expected_revision != row.revision:
-            raise ConflictError(ErrorCode.INCIDENT_REVISION_CHANGED)
+            raise StaleIncidentError(row)
         if row.cancelled_at is not None:
             raise DomainError(ErrorCode.INCIDENT_CLOSED)
         configuration = (
@@ -212,7 +218,7 @@ def prepare_incident_finish(
         rows = rows.select_for_update()
     row = rows.get(pk=incident_id, plant=plant)
     if row.revision != expected_revision:
-        raise ConflictError(ErrorCode.INCIDENT_REVISION_CHANGED)
+        raise StaleIncidentError(row)
     if row.cancelled_at is not None or (not cancel and row.ends_at is not None):
         raise DomainError(ErrorCode.INCIDENT_CLOSED)
     now = timezone.now()

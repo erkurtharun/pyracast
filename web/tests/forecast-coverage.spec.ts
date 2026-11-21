@@ -91,7 +91,7 @@ for (const electrical of [true, false]) {
             "utf8",
         );
         expect(csv).not.toContain("missing_source_interval");
-        expect(csv).toContain("2026-11-14T00:30:00Z");
+        expect(csv).toContain("2026-11-14T03:30:00+03:00");
     });
 }
 
@@ -300,14 +300,12 @@ for (const width of [320, 390]) {
             .click();
         const download = await downloadPromise;
         const csv = await readFile(await download.path(), "utf8");
-        expect(csv).toContain("source_snapshot_ids");
-        expect(csv).toContain("snapshot_id");
-        expect(csv).toContain("[6]");
-        expect(csv).toContain("[8]");
+        expect(csv).not.toContain("snapshot");
+        expect(csv).not.toContain("provenance");
     });
 }
 
-test("outage comparison CSV retains normal forecast source IDs", async ({
+test("outage comparison CSV writes both scenarios per interval without provenance", async ({
     page,
 }) => {
     await mockApi(page);
@@ -343,8 +341,12 @@ test("outage comparison CSV retains normal forecast source IDs", async ({
         .click();
     const download = await downloadPromise;
     const csv = await readFile(await download.path(), "utf8");
-    expect(csv).toContain("source_snapshot_ids");
-    expect(csv).toContain("[6]");
+    const [header, row] = csv.replace(/^\uFEFF/, "").split("\r\n");
+    expect(header).toContain('"normal_mean_power_mw","normal_energy_mwh"');
+    expect(header).not.toContain("snapshot");
+    expect(row).toContain(
+        '"2026-11-11T07:00:00+03:00","2026-11-11T07:30:00+03:00",1,0.5',
+    );
 });
 
 for (const state of [
@@ -354,7 +356,7 @@ for (const state of [
     "stale",
     "insufficient",
 ] as const) {
-    test(`production diagnostic ${state} keeps one forecast and its original CSV`, async ({
+    test(`production diagnostic ${state} keeps one forecast and its interval CSV`, async ({
         page,
     }) => {
         await page.setViewportSize({ width: 320, height: 844 });
@@ -481,7 +483,8 @@ for (const state of [
             await (await downloadPromise).path(),
             "utf8",
         );
-        expect(csv).toContain("production_diagnostic.performance_ratio");
+        expect(csv).toContain("mean_power_mw");
+        expect(csv).not.toContain("production_diagnostic");
         expect(csv).not.toContain("affected_energy_mwh");
         expect(csv).not.toContain("derating_scenario");
     });

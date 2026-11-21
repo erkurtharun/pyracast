@@ -795,6 +795,20 @@ export interface components {
          */
         AutomaticCalibrationAttemptOutputStatusEnum: "activated" | "skipped";
         /**
+         * @description * `toggle` - Toggle
+         *     * `manual_activation` - Manual Activation
+         *     * `reset` - Reset
+         *     * `configuration_revised` - Configuration Revised
+         *     * `workspace_disabled` - Workspace Disabled
+         * @enum {string}
+         */
+        AutomationCauseEnum:
+            | "toggle"
+            | "manual_activation"
+            | "reset"
+            | "configuration_revised"
+            | "workspace_disabled";
+        /**
          * @description * `manual` - Manual
          *     * `realtime_generation` - Real-time generation
          *     * `settlement_injection` - Settlement injection
@@ -827,7 +841,7 @@ export interface components {
             next_check_at: string | null;
             disabled_cause:
                 | (
-                      | components["schemas"]["DisabledCauseEnum"]
+                      | components["schemas"]["AutomationCauseEnum"]
                       | components["schemas"]["NullEnum"]
                   )
                 | null;
@@ -1026,12 +1040,6 @@ export interface components {
                 | null;
             incident_title: string | null;
         };
-        /**
-         * @description * `provider_hour_incomplete` - provider_hour_incomplete
-         *     * `energy_exceeds_capacity` - energy_exceeds_capacity
-         * @enum {string}
-         */
-        CodeEnum: "provider_hour_incomplete" | "energy_exceeds_capacity";
         /**
          * @description * `forecasts` - Forecasts
          *     * `estimated_actuals` - Estimated actuals
@@ -1263,20 +1271,6 @@ export interface components {
          * @enum {string}
          */
         DiagnosticStatusEnum: "suspected" | "normal" | "insufficient";
-        /**
-         * @description * `toggle` - Toggle
-         *     * `manual_activation` - Manual Activation
-         *     * `reset` - Reset
-         *     * `configuration_revised` - Configuration Revised
-         *     * `workspace_disabled` - Workspace Disabled
-         * @enum {string}
-         */
-        DisabledCauseEnum:
-            | "toggle"
-            | "manual_activation"
-            | "reset"
-            | "configuration_revised"
-            | "workspace_disabled";
         /**
          * @description * `collection` - Collection
          *     * `notifications` - Notifications
@@ -1638,6 +1632,11 @@ export interface components {
             before: components["schemas"]["IncidentBeforeOutput"] | null;
             applied_revision_id: number | null;
         };
+        IncidentConflict: {
+            code: components["schemas"]["ErrorCode"];
+            message: string;
+            current: components["schemas"]["IncidentOutput"];
+        };
         IncidentInput: {
             kind: components["schemas"]["IncidentKindEnum"];
             title: string;
@@ -1680,7 +1679,7 @@ export interface components {
             /** Format: double */
             readonly available_export_mw: number | null;
             declared_configuration_id: number;
-            readonly status: string;
+            readonly status: components["schemas"]["IncidentStatusEnum"];
             /** Format: date-time */
             readonly created_at: string;
             /** Format: date-time */
@@ -1698,6 +1697,13 @@ export interface components {
             /** Format: date-time */
             ends_at?: string;
         };
+        /**
+         * @description * `active` - Active
+         *     * `resolved` - Resolved
+         *     * `cancelled` - Cancelled
+         * @enum {string}
+         */
+        IncidentStatusEnum: "active" | "resolved" | "cancelled";
         IncidentUpdate: {
             kind: components["schemas"]["IncidentKindEnum"];
             title: string;
@@ -2630,12 +2636,19 @@ export interface components {
             corrected: boolean;
         };
         ProductionPreviewWarningOutput: {
-            code: components["schemas"]["CodeEnum"];
+            code: components["schemas"]["ProductionPreviewWarningOutputCodeEnum"];
             /** Format: date-time */
             starts_at: string;
             /** Format: date-time */
             ends_at: string;
         };
+        /**
+         * @description * `provider_hour_incomplete` - provider_hour_incomplete
+         *     * `energy_exceeds_capacity` - energy_exceeds_capacity
+         * @enum {string}
+         */
+        ProductionPreviewWarningOutputCodeEnum:
+            "provider_hour_incomplete" | "energy_exceeds_capacity";
         ProductionProviderOutput: {
             /** Format: date-time */
             starts_at: string;
@@ -5387,6 +5400,14 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentConflict"];
+                };
+            };
             /** @description Send the request as JSON. */
             415: {
                 headers: {
@@ -5807,6 +5828,14 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentConflict"];
+                };
+            };
             /** @description Send the request as JSON. */
             415: {
                 headers: {
@@ -5889,6 +5918,14 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentConflict"];
+                };
+            };
             /** @description Send the request as JSON. */
             415: {
                 headers: {
@@ -5969,6 +6006,14 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentConflict"];
                 };
             };
             /** @description Send the request as JSON. */

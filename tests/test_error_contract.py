@@ -587,8 +587,8 @@ CASES: dict[str, Case] = {
     ),
     "incident_revision_changed": Case(
         409,
-        "The outage changed. Reload the list and try again.",
-        "Kesinti kayd\u0131 değişti. Listeyi yeniden yükleyip tekrar deneyin.",
+        "The outage changed. Review its current values and save again.",
+        "Kesinti kayd\u0131 değişti. Güncel değerleri inceleyip yeniden kaydedin.",
         domain("ConflictError", "incident_revision_changed"),
     ),
     "idempotency_key_reused": Case(

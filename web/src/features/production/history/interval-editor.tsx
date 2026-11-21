@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
+import { useFormat } from "@/lib/format/use-format";
 import { QUALITIES, qualityOf } from "@/lib/production";
 import { ControlField } from "@/ui/form";
 import { Notice } from "@/ui/ui";
@@ -36,6 +37,13 @@ export function IntervalEditor({
     const energyRef = useRef<HTMLInputElement>(null);
     useEffect(() => energyRef.current?.focus(), []);
     const blocked = saving || (canManage && editor.status === "failed");
+    const format = useFormat();
+    const provider = row.provider_originals.length
+        ? row.provider_originals.reduce(
+              (total, original) => total + original.energy_mwh,
+              0,
+          )
+        : null;
     return (
         <form
             className="production-row-editor"
@@ -112,13 +120,21 @@ export function IntervalEditor({
                     type="button"
                     disabled={blocked}
                     aria-label={
-                        canManage
-                            ? t("revert_interval", { interval })
-                            : proposals("proposeRevertInterval", { interval })
+                        !canManage
+                            ? proposals("proposeRevertInterval", { interval })
+                            : provider === null
+                              ? t("remove_correction_interval", { interval })
+                              : t("revert_interval", { interval })
                     }
                     onClick={() => onSave("revert")}
                 >
-                    {canManage ? t("use_provider") : proposals("proposeRevert")}
+                    {!canManage
+                        ? proposals("proposeRevert")
+                        : provider === null
+                          ? t("remove_correction")
+                          : t("use_provider", {
+                                energy: format.number(provider),
+                            })}
                 </button>
             )}
             {editor.status === "failed" && (

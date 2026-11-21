@@ -6,12 +6,11 @@ import { api } from "@/lib/api/client";
 import type { components } from "@/lib/schema";
 import { displayMessage } from "@/lib/api/errors";
 import { useFormat } from "@/lib/format/use-format";
-import { parseProduction, type Observation } from "@/lib/production";
+import { parseProduction, type ProductionFile } from "@/lib/production";
 import {
     ActionForm,
     CheckboxField,
     ControlField,
-    Select,
     useErrorMessage,
 } from "@/ui/form";
 import { Notice } from "@/ui/ui";
@@ -21,19 +20,13 @@ type Preview = components["schemas"]["ProductionPreviewOutput"];
 type Selection =
     | { status: "empty" }
     | { status: "invalid"; error: string }
-    | {
-          status: "ready";
-          fileName: string;
-          sha256: string;
-          observations: Observation[];
-      }
-    | {
+    | ({ status: "ready"; fileName: string; sha256: string } & ProductionFile)
+    | ({
           status: "preview";
           fileName: string;
           sha256: string;
-          observations: Observation[];
           preview: Preview;
-      };
+      } & ProductionFile);
 type ImportResult = components["schemas"]["ObservationImportOutput"];
 
 async function fileSha256(file: File) {
@@ -63,7 +56,6 @@ export function ProductionImport({
     const errorMessage = useErrorMessage();
     const sequence = useRef(0);
     const [selection, setSelection] = useState<Selection>({ status: "empty" });
-    const [unit, setUnit] = useState<"MWh" | "kWh">("kWh");
     const [result, setResult] = useState<ImportResult>();
     const [confirming, setConfirming] = useState(false);
     const [previewRequest, setPreviewRequest] = useState<
@@ -89,14 +81,14 @@ export function ProductionImport({
             return;
         }
         try {
-            const observations = parseProduction(await file.text(), locale);
+            const parsed = parseProduction(await file.text(), locale);
             const sha256 = await fileSha256(file);
             if (current === sequence.current)
                 setSelection({
                     status: "ready",
                     fileName: file.name,
                     sha256,
-                    observations,
+                    ...parsed,
                 });
         } catch (error) {
             if (current === sequence.current)
@@ -137,7 +129,7 @@ export function ProductionImport({
                 <p>{t("use_a_csv_with_the_exact_header")}</p>
                 <div className="csv-example">
                     <code>
-                        starts_at,ends_at,energy,quality,source
+                        starts_at,ends_at,energy_kwh,quality,source
                         <br />
                         2026-01-01T09:00:00+03:00,2026-01-01T10:00:00+03:00,250,valid,meter
                     </code>
@@ -170,7 +162,7 @@ export function ProductionImport({
                                     path: scope,
                                     body: {
                                         configuration_id: configuration,
-                                        unit,
+                                        unit: selection.unit,
                                         observations: selection.observations,
                                     },
                                 },
@@ -218,35 +210,6 @@ export function ProductionImport({
                                 }
                             />
                         </ControlField>
-                        <Select
-                            label={t("energy_unit")}
-                            value={unit}
-                            disabled={confirming}
-                            onChange={(event) => {
-                                ++sequence.current;
-                                setUnit(
-                                    event.target.value === "MWh"
-                                        ? "MWh"
-                                        : "kWh",
-                                );
-                                setResult(undefined);
-                                setPreviewRequest({ status: "idle" });
-                                if (selection.status === "preview")
-                                    setSelection({
-                                        status: "ready",
-                                        fileName: selection.fileName,
-                                        sha256: selection.sha256,
-                                        observations: selection.observations,
-                                    });
-                            }}
-                        >
-                            <option value="kWh">
-                                {t("kwh_kilowatthours")}
-                            </option>
-                            <option value="MWh">
-                                {t("mwh_megawatthours")}
-                            </option>
-                        </Select>
                     </div>
                     {selection.status === "invalid" && (
                         <Notice error>{selection.error}</Notice>
@@ -346,7 +309,7 @@ export function ProductionImport({
                                             path: scope,
                                             body: {
                                                 configuration_id: configuration,
-                                                unit,
+                                                unit: selection.unit,
                                                 changes:
                                                     selection.preview.changes,
                                                 origin: "csv_import",
@@ -367,6 +330,7 @@ export function ProductionImport({
                                             status: "ready",
                                             fileName: selection.fileName,
                                             sha256: selection.sha256,
+                                            unit: selection.unit,
                                             observations:
                                                 selection.observations,
                                         });

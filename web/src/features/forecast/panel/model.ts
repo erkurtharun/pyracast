@@ -2,28 +2,36 @@ import { dataIntervalRange } from "@/lib/intervals";
 import type { components } from "@/lib/schema";
 import type { ForecastInterval as Interval } from "../forecast-intervals";
 
-export type DaylightSummary = {
-    status: "normal" | "polar_day" | "polar_night";
-    complete: boolean;
-    coverage_fraction: number | null;
-    input_coverage_fraction?: number | null;
-    energy_mwh?: number | null;
-    energy_kwh_m2?: number | null;
-    partial_energy_mwh?: number;
-    partial_energy_kwh_m2?: number;
-};
+type Schemas = components["schemas"];
 
-export type OutageScenario = components["schemas"]["OutageScenarioOutput"];
-export type ProductionDiagnostic =
-    components["schemas"]["ProductionDiagnosticOutput"];
+export type OutageScenario = Schemas["OutageScenarioOutput"];
+export type ProductionDiagnostic = Schemas["ProductionDiagnosticOutput"];
+export type ForecastResult =
+    Schemas["IrradianceResultOutput"] | Schemas["PlantForecastResultOutput"];
 
-export type ForecastResult = Record<string, unknown>;
+type Energy = Partial<
+    Record<
+        | "energy_mwh"
+        | "partial_energy_mwh"
+        | "energy_kwh_m2"
+        | "partial_energy_kwh_m2",
+        number | null
+    >
+>;
+
+// Generation reports MWh and irradiance kWh/m²; a partial day reports only the energy of its covered intervals.
+export function dayEnergy(
+    summary: Energy | undefined,
+    electrical: boolean,
+    partial: boolean,
+) {
+    if (electrical)
+        return partial ? summary?.partial_energy_mwh : summary?.energy_mwh;
+    return partial ? summary?.partial_energy_kwh_m2 : summary?.energy_kwh_m2;
+}
 
 export function hasFlag(result: ForecastResult, flag: string) {
-    return (
-        Array.isArray(result.quality_flags) &&
-        result.quality_flags.includes(flag)
-    );
+    return result.quality_flags?.includes(flag) ?? false;
 }
 
 export function fullDayIntervals(
@@ -69,22 +77,6 @@ export function scenarioIntervals(
         affected_mean_power_mw: byStart.get(row.start)?.mean_power_mw ?? null,
         affected_energy_mwh: byStart.get(row.start)?.energy_mwh ?? null,
         affected_quality_flags: byStart.get(row.start)?.quality_flags,
-    }));
-}
-
-export function forecastCsvRows(rows: Interval[], scenario: boolean) {
-    if (!scenario) return rows;
-    return rows.map((row) => ({
-        start: row.start,
-        end: row.end,
-        normal_mean_power_mw: row.mean_power_mw,
-        normal_energy_mwh: row.energy_mwh,
-        affected_mean_power_mw: row.affected_mean_power_mw,
-        affected_energy_mwh: row.affected_energy_mwh,
-        normal_quality_flags: row.quality_flags,
-        affected_quality_flags: row.affected_quality_flags,
-        source_snapshot_ids: row.source_snapshot_ids,
-        ...(row.source_kinds ? { source_kinds: row.source_kinds } : {}),
     }));
 }
 

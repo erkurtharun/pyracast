@@ -16,6 +16,12 @@ class IncidentKind(models.TextChoices):
     MULTIPLE = "multiple", "Multiple"
 
 
+class IncidentStatus(models.TextChoices):
+    ACTIVE = "active", "Active"
+    RESOLVED = "resolved", "Resolved"
+    CANCELLED = "cancelled", "Cancelled"
+
+
 class PlantIncident(models.Model):
     plant = models.ForeignKey("plants.Plant", on_delete=models.PROTECT)
     declared_configuration = models.ForeignKey(

@@ -178,10 +178,11 @@ test("a customer manages one plant site through the real API", async ({
                 minute: "2-digit",
                 hourCycle: "h23",
             }).format(new Date(stamp));
-        expect(localTime(parsed.data[0]?.start ?? "")).toBe("00:00");
-        expect(localTime(parsed.data.at(-1)?.end ?? "")).toBe("00:00");
-        expect(localTime(positive[0]?.start ?? "")).toBe("06:00");
-        expect(localTime(positive.at(-1)?.end ?? "")).toBe("18:00");
+        expect(parsed.data[0]?.timezone).toBe("Europe/Istanbul");
+        expect(localTime(parsed.data[0]?.starts_at ?? "")).toBe("00:00");
+        expect(localTime(parsed.data.at(-1)?.ends_at ?? "")).toBe("00:00");
+        expect(localTime(positive[0]?.starts_at ?? "")).toBe("06:00");
+        expect(localTime(positive.at(-1)?.ends_at ?? "")).toBe("18:00");
     }
     await expectFullForecastCsv(24);
     await page.getByLabel("Resolution").selectOption("30");
@@ -195,14 +196,25 @@ test("a customer manages one plant site through the real API", async ({
         page.locator(".stat").filter({ hasText: /^Estimated energy/ }),
     ).toContainText(`${daylightEnergy} MWh`);
     await expectFullForecastCsv(48);
+    // Outage times are entered on the plant's wall clock, whatever zone the browser runs in.
     const outageTimes = await page.evaluate(() => {
-        const localInput = (minutesAgo: number) => {
-            const date = new Date(Date.now() - minutesAgo * 60_000);
-            return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-                .toISOString()
-                .slice(0, 16);
+        const plantInput = (minutesAgo: number) =>
+            new Intl.DateTimeFormat("sv-SE", {
+                timeZone: "Europe/Istanbul",
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                hourCycle: "h23",
+            })
+                .format(new Date(Date.now() - minutesAgo * 60_000))
+                .replace(" ", "T");
+        return {
+            starts: plantInput(10),
+            edited: plantInput(9),
+            ends: plantInput(5),
         };
-        return { starts: localInput(10), ends: localInput(5) };
     });
     await page.getByRole("button", { name: "Outages", exact: true }).click();
     await page
@@ -210,7 +222,7 @@ test("a customer manages one plant site through the real API", async ({
         .click();
     await page.getByLabel("Incident title").fill("Browser inverter outage");
     await page
-        .getByLabel("Started at (device time)", { exact: true })
+        .getByLabel("Started at", { exact: true })
         .fill(outageTimes.starts);
     await page
         .getByRole("button", { name: "Save outage", exact: true })
@@ -254,19 +266,79 @@ test("a customer manages one plant site through the real API", async ({
                 row.affected_energy_mwh === "0",
         ),
     ).toBe(true);
-    expect(outageCsv.data[0]?.["outage_scenario.incidents"]).toContain(
-        "Browser inverter outage",
-    );
+    expect(outageCsv.data[0]).toMatchObject({
+        plant_name: "Browser plant",
+        timezone: "Europe/Istanbul",
+    });
     await page.screenshot({
         path: testInfo.outputPath("plant-outage-comparison-desktop.png"),
         fullPage: true,
     });
     await page.getByRole("button", { name: "Outages", exact: true }).click();
     await page
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    await page
+        .getByLabel("Started at", { exact: true })
+        .fill(outageTimes.edited);
+    const outageList = (await page.evaluate(async (url) => {
+        const response = await fetch(`${url}outages/`);
+        return response.json();
+    }, plantUrl)) as {
+        results: { id: number; revision: number; starts_at: string }[];
+    };
+    const reported = outageList.results[0]!;
+    const changedMeanwhile = await page.evaluate(
+        async ({ url, outage }) => {
+            const session = await (await fetch("/api/session/")).json();
+            const response = await fetch(`${url}outages/${outage.id}/`, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": session.csrf_token,
+                },
+                body: JSON.stringify({
+                    kind: "inverter",
+                    title: "Inverter outage changed elsewhere",
+                    starts_at: outage.starts_at,
+                    expected_revision: outage.revision,
+                }),
+            });
+            return response.status;
+        },
+        { url: plantUrl, outage: reported },
+    );
+    expect(changedMeanwhile).toBe(200);
+    const stale = page.waitForResponse(
+        (response) =>
+            response.request().method() === "PUT" &&
+            response.url().endsWith(`/outages/${reported.id}/`),
+    );
+    await page.getByRole("button", { name: "Save outage changes" }).click();
+    expect((await stale).status()).toBe(409);
+    await expect(
+        page.getByText(
+            "Title: Browser inverter outage → Inverter outage changed elsewhere",
+        ),
+    ).toBeVisible();
+    await expect(page.getByLabel("Started at", { exact: true })).toHaveValue(
+        outageTimes.edited,
+    );
+    const applied = page.waitForResponse(
+        (response) =>
+            response.request().method() === "PUT" &&
+            response.url().endsWith(`/outages/${reported.id}/`),
+    );
+    await page.getByRole("button", { name: "Save outage changes" }).click();
+    expect((await applied).status()).toBe(200);
+    await expect(
+        page.getByRole("heading", { name: "Browser inverter outage" }),
+    ).toBeVisible();
+    await page
         .getByRole("button", { name: "Resolve outage", exact: true })
         .click();
     await page
-        .getByLabel("Resolved at (device time)", { exact: true })
+        .getByLabel("Resolved at", { exact: true })
         .fill(outageTimes.ends);
     await page.getByRole("button", { name: "Save resolution" }).click();
     await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
@@ -321,6 +393,7 @@ test("a customer manages one plant site through the real API", async ({
     await page
         .getByLabel("Day", { exact: true })
         .fill(process.env.BROWSER_HISTORY_DATE!);
+    await page.getByRole("checkbox", { name: "Show full day" }).check();
     const productionTable = page.getByRole("table", {
         name: "Production intervals",
     });
@@ -364,13 +437,37 @@ test("a customer manages one plant site through the real API", async ({
     );
     await page
         .getByRole("button", {
-            name: "Use provider value for 00:00–01:00",
+            name: "Remove correction for 00:00–01:00",
             exact: true,
         })
         .click();
     expect((await reverted).status()).toBe(200);
     await expect(firstHour).not.toContainText("2.5");
     await saveProduction("1.25");
+    const productionDownload = page.waitForEvent("download");
+    await page
+        .getByRole("button", { name: "Download CSV", exact: true })
+        .click();
+    const exportedProduction = await readFile(
+        await (await productionDownload).path(),
+    );
+    await page.getByRole("button", { name: "Import CSV" }).click();
+    await page.getByLabel("Production CSV").setInputFiles({
+        name: "production-export.csv",
+        mimeType: "text/csv",
+        buffer: exportedProduction,
+    });
+    await expect(page.getByText(/1 valid observations ready/)).toBeVisible();
+    await page
+        .getByRole("button", { name: "Preview import", exact: true })
+        .click();
+    await page.getByRole("button", { name: "Confirm import (1)" }).click();
+    await expect(
+        page.getByText(
+            "Import complete: 0 created, 1 already present, 1 total.",
+        ),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Import CSV" }).click();
     await page.screenshot({
         path: testInfo.outputPath("production-desktop.png"),
         fullPage: true,

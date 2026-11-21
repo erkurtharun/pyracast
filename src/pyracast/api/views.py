@@ -21,7 +21,7 @@ from pyracast.api.serializers import (
 )
 from pyracast.change_requests.policy import workspace_counters
 from pyracast.db import read_snapshot
-from pyracast.forecasts.history import regional_outlook
+from pyracast.forecasts.outlook import regional_outlook
 from pyracast.plants.serializers import EmptyInput
 from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import request_location_change, withdraw_location_change
@@ -100,7 +100,7 @@ class LocationChangeWithdrawView(APIView):
         return Response(LocationChangeOutput(change).data)
 
 
-class ForecastView(APIView):
+class RegionForecastView(APIView):
     @extend_schema(parameters=[ForecastQuery], responses=ForecastOutput)
     def get(self, request: Request, tenant_id: int, region_id: int) -> Response:
         with read_snapshot():

@@ -1,21 +1,19 @@
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from math import isfinite
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.utils import timezone
 from django.utils.translation import gettext
 
-from pyracast.accounts.authorization import tenant_membership
 from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.outlook import Policy, plant_days_include
 from pyracast.forecasts.projections import saved_day_payload
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import (
@@ -31,7 +29,6 @@ from pyracast.plants.transfer import (
     reference_power_mw,
     tracking_modeled,
 )
-from pyracast.regions.models import Region
 from pyracast.solar import Daylight, TimeWindows, daylight_energy_windows, daylight_window
 
 RETROSPECTIVE_ACTIVATIONS = 60
@@ -270,8 +267,6 @@ def forecast_payload(
         "capacity_normalization": normalization_provenance(snapshot),
         "source_kind": snapshot.source_kind,
         "collected_at": snapshot.collected_at.isoformat(),
-        "scheduled_slot": snapshot.job.scheduled_for.isoformat(),
-        "late": snapshot.collected_at > snapshot.job.scheduled_for,
         "lead_hours": (start - snapshot.collected_at).total_seconds() / 3600,
         "issued_at": snapshot.issued_at.isoformat() if snapshot.issued_at else None,
         "calibration_id": calibration.pk if calibration else None,
@@ -280,6 +275,16 @@ def forecast_payload(
         "calibration_dataset_sha256": calibration.dataset_sha256 if calibration else None,
     }
     return result
+
+
+def require_resolution(resolution_minutes: int) -> None:
+    if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
+        raise ValidationError(gettext("Resolution must be 30 or 60 minutes."))
+
+
+def require_known_cutoff(as_of: datetime | None, now: datetime) -> None:
+    if as_of is not None and (as_of.utcoffset() is None or as_of > now):
+        raise ValidationError(gettext("as_of must be aware and no later than now."))
 
 
 def archived_forecast(
@@ -292,14 +297,16 @@ def archived_forecast(
     binding_id: int | None = None,
 ) -> dict[str, object]:
     today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
-    if not today - timedelta(days=366) <= target_date <= today:
+    if not plant_days_include(Policy.ARCHIVE, target_date, today):
         raise DomainError(ErrorCode.DATE_OUT_OF_RANGE)
-    return _issued_forecast(
+    require_resolution(resolution_minutes)
+    require_known_cutoff(as_of, now)
+    return issued_forecast(
         plant, target_date, resolution_minutes, now, as_of=as_of, binding_id=binding_id
     )
 
 
-def _issued_forecast(
+def issued_forecast(
     plant: Plant,
     target_date: date,
     resolution_minutes: int,
@@ -310,10 +317,6 @@ def _issued_forecast(
 ) -> dict[str, object]:
     from pyracast.plants.forecast_archive import forecast_cutoff, select_forecast_issuance
 
-    if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
-        raise ValidationError(gettext("Resolution must be 30 or 60 minutes."))
-    if as_of is not None and (as_of.utcoffset() is None or as_of > now):
-        raise ValidationError(gettext("as_of must be aware and no later than now."))
     cutoff = (as_of or now).astimezone(UTC)
     issuance = select_forecast_issuance(plant, target_date, as_of=cutoff, binding_id=binding_id)
     if issuance is None:
@@ -378,23 +381,3 @@ def _issued_forecast(
         else None,
         "outage_scenario": scenario,
     }
-
-
-def plant_forecast(
-    actor: User,
-    tenant_id: int,
-    region_id: int,
-    plant_id: int,
-    *,
-    target_date: date,
-    resolution_minutes: int,
-    as_of: datetime | None = None,
-) -> dict[str, object]:
-    tenant_membership(actor, tenant_id)
-    region = Region.objects.active().get(pk=region_id, tenant_id=tenant_id)
-    plant = Plant.objects.get(pk=plant_id, region=region)
-    now = timezone.now()
-    today = now.astimezone(ZoneInfo(region.timezone)).date()
-    if not today - timedelta(days=366) <= target_date <= today + timedelta(days=14):
-        raise DomainError(ErrorCode.DATE_OUT_OF_RANGE)
-    return _issued_forecast(plant, target_date, resolution_minutes, now, as_of=as_of)

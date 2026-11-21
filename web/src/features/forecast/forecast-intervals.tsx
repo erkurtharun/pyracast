@@ -13,7 +13,7 @@ export type ForecastInterval = {
     energy_mwh?: number | null;
     quality_flags?: string[];
     source_snapshot_ids?: number[];
-    source_kinds?: ("forecast" | "estimated_actuals")[];
+    source_kinds?: string[];
     affected_mean_power_mw?: number | null;
     affected_energy_mwh?: number | null;
     affected_quality_flags?: string[];

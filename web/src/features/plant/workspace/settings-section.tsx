@@ -2,6 +2,7 @@
 import { useTranslations } from "next-intl";
 import type { Plant, PlantScope, Region } from "@/lib/api";
 import { api } from "@/lib/api/client";
+import { plantExport } from "@/lib/exports";
 import type { PlantAddress, PlantView } from "@/lib/routes";
 import {
     PlantConfigurationFields,
@@ -72,9 +73,18 @@ export function SettingsSection({
                         <RegionSettings region={region} scope={scope} />
                         <CsvDownload
                             label={t("downloadPlantCSV")}
-                            filename={`plant-${plant.id}`}
-                            records={[plant]}
-                            metadata={{ timezone }}
+                            build={() =>
+                                plantExport(
+                                    {
+                                        id: plant.id,
+                                        name: plant.name,
+                                        timezone,
+                                    },
+                                    region,
+                                    plant.current_configuration ??
+                                        plant.submission,
+                                )
+                            }
                         />
                     </>
                 ) : view === "collection" ? (

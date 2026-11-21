@@ -73,6 +73,28 @@ test("viewer reads shared settings without write controls or requests", async ({
     await page.route("**/api/**/outages/", (route) =>
         route.fulfill({ json: paged([]) }),
     );
+    await page.route("**/api/**/calibration/automation/", (route) =>
+        route.fulfill({
+            json: answer("CalibrationAutomationOutput", {
+                enabled: true,
+                authorized: true,
+                configuration_id: 31,
+                configuration_current: true,
+                next_check_at: null,
+                disabled_cause: null,
+                current_calibration: {
+                    activation_id: 3,
+                    calibration_id: 40,
+                    factor: 1.1,
+                    actor_id: 1,
+                    origin: "manual",
+                    created_at: "2026-01-12T09:00:00Z",
+                    effective: true,
+                },
+                last_attempt: null,
+            }),
+        }),
+    );
     const writes: string[] = [];
     page.on("request", (request) => {
         if (

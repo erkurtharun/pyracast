@@ -1,38 +1,56 @@
-type CsvRecord = Record<string, unknown>;
+export type CsvValue = string | number | boolean | null;
 
-function flatten(record: CsvRecord, prefix = ""): CsvRecord {
-    return Object.fromEntries(
-        Object.entries(record).flatMap(([key, value]) => {
-            if (value === undefined) return [];
-            const name = prefix ? `${prefix}.${key}` : key;
-            return value !== null &&
-                typeof value === "object" &&
-                !Array.isArray(value)
-                ? Object.entries(flatten(value as CsvRecord, name))
-                : [[name, value]];
-        }),
-    );
+export type CsvExport = {
+    filename: string;
+    header: readonly string[];
+    rows: readonly (readonly CsvValue[])[];
+};
+
+const INVISIBLE = /^[\p{White_Space}\p{Cc}\p{Cf}]$/u;
+const FORMULA_START = "=+-@";
+const PLAIN_NUMBER = /^[+-]?\d+(?:\.\d+)?$/;
+
+function startsFormula(value: string): boolean {
+    for (const character of value) {
+        if (!INVISIBLE.test(character))
+            return FORMULA_START.includes(character);
+    }
+    return false;
 }
 
-function cell(value: unknown): string {
-    if (value === null || value === undefined) return "";
-    if (typeof value === "number" || typeof value === "boolean")
-        return String(value);
-    const text = typeof value === "string" ? value : JSON.stringify(value);
-    // Quoting alone does not prevent spreadsheet formula execution.
-    const safe = /^[\p{White_Space}\p{Cc}]*[=+\-@]/u.test(text)
-        ? `'${text}`
-        : text;
+function cell(value: CsvValue): string {
+    if (value === null) return "";
+    if (typeof value === "number")
+        return Number.isFinite(value) ? String(value) : "";
+    if (typeof value === "boolean") return String(value);
+    // Quoting alone does not stop a spreadsheet from evaluating a leading formula character.
+    const safe =
+        startsFormula(value) && !PLAIN_NUMBER.test(value) ? `'${value}` : value;
     return `"${safe.replaceAll('"', '""')}"`;
 }
 
 export function csvDocument(
-    records: CsvRecord[],
-    metadata: CsvRecord = {},
+    header: readonly string[],
+    rows: readonly (readonly CsvValue[])[],
 ): string {
-    const rows = (records.length ? records : [{}]).map((row) =>
-        flatten({ ...metadata, ...row }),
-    );
-    const headers = [...new Set(rows.flatMap((row) => Object.keys(row)))];
-    return `\uFEFF${[headers.map(cell).join(","), ...rows.map((row) => headers.map((key) => cell(row[key])).join(","))].join("\r\n")}\r\n`;
+    const lines = [header, ...rows].map((row) => row.map(cell).join(","));
+    return `\uFEFF${lines.join("\r\n")}\r\n`;
+}
+
+const NAME_EDGE = /^[\s.-]$/u;
+
+function trimNameEdges(part: string): string {
+    let start = 0;
+    let end = part.length;
+    while (start < end && NAME_EDGE.test(part.charAt(start))) start += 1;
+    while (end > start && NAME_EDGE.test(part.charAt(end - 1))) end -= 1;
+    return part.slice(start, end);
+}
+
+// Windows refuses these characters and trailing dots or spaces in file names; plant names keep their letters.
+export function csvFilename(...parts: string[]): string {
+    const safe = parts
+        .map((part) => trimNameEdges(part.replace(/[<>:"/\\|?*\p{Cc}]/gu, "-")))
+        .filter(Boolean);
+    return `${safe.join("-").slice(0, 150)}.csv`;
 }
