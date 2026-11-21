@@ -132,15 +132,13 @@ async function routeTurkishSession(page: Page) {
 }
 
 test("a Turkish visit loads only the Turkish catalogue", async ({ page }) => {
-    await page
-        .context()
-        .addCookies([
-            {
-                name: "pyracast_language",
-                value: "tr",
-                url: "http://127.0.0.1:3100",
-            },
-        ]);
+    await page.context().addCookies([
+        {
+            name: "pyracast_language",
+            value: "tr",
+            url: "http://127.0.0.1:3100",
+        },
+    ]);
     await mockApi(page);
     await routeTurkishSession(page);
     const scripts: Promise<string>[] = [];

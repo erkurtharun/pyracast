@@ -10,6 +10,7 @@ import {
 } from "react";
 import { displayMessage } from "@/lib/api/errors";
 import { createQueryClient, QueryOwner } from "@/lib/api/query";
+import { reloadPage } from "@/lib/on-demand";
 import { browserErrors } from "@/i18n/browser";
 import {
     isCurrent,
@@ -23,33 +24,46 @@ import {
 import { Brand } from "@/ui/brand";
 import { LiveRegion } from "@/ui/live-region";
 import { useLanguageHandoff } from "./language-handoff";
-import { SessionLanguage } from "./session-language";
+import { SessionLanguage, useSessionLanguage } from "./session-language";
 import { Notice } from "@/ui/ui";
 
 export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
     const { session, failure, fail, clear, retry } = useSessionBootstrap();
     const handoff = useLanguageHandoff(session);
-    const ready = session !== undefined && handoff.status === "ready";
+    const language = useSessionLanguage(session?.language);
+    const ready =
+        session !== undefined &&
+        handoff.status === "ready" &&
+        language.status === "ready";
     useFocusSessionRead(ready);
     const current = useCurrentSession(session, ready, fail, clear);
     const owner = sessionOwner(session);
     useForeignCacheRemoval(client, owner);
     return (
         <QueryClientProvider client={client}>
-            <SessionLanguage language={session?.language}>
+            <SessionLanguage value={language}>
                 <LiveRegion>
                     {ready && current ? (
                         <QueryOwner value={owner}>{children}</QueryOwner>
+                    ) : language.status === "failed" ? (
+                        <Bootstrap
+                            failure={{ kind: "catalogue" }}
+                            retry={reloadPage}
+                        />
+                    ) : handoff.status === "failed" ? (
+                        <Bootstrap
+                            failure={{ kind: "language" }}
+                            retry={handoff.retry}
+                        />
                     ) : (
                         <Bootstrap
-                            languageFailed={handoff.status === "failed"}
-                            failure={failure}
-                            retry={
-                                handoff.status === "failed"
-                                    ? handoff.retry
-                                    : retry
+                            failure={
+                                failure === undefined
+                                    ? undefined
+                                    : { kind: "session", message: failure }
                             }
+                            retry={retry}
                         />
                     )}
                 </LiveRegion>
@@ -59,17 +73,24 @@ export function AppRoot({ children }: { children: ReactNode }) {
 }
 
 function Bootstrap({
-    languageFailed,
     failure,
     retry,
 }: {
-    languageFailed: boolean;
-    failure?: string;
+    failure?:
+        | { kind: "catalogue" }
+        | { kind: "language" }
+        | { kind: "session"; message: string };
     retry: () => void;
 }) {
     const t = useTranslations("Dashboard");
     const language = useTranslations("Language");
-    const error = languageFailed ? language("failed") : failure;
+    const page = useTranslations("AppError");
+    const error =
+        failure?.kind === "catalogue"
+            ? page("description")
+            : failure?.kind === "language"
+              ? language("failed")
+              : failure?.message;
     return (
         <main className="auth-page">
             <div className="auth-card">

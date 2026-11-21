@@ -1,8 +1,8 @@
 import Papa from "papaparse";
 import { createTranslator } from "next-intl";
 import { isLanguage } from "@/i18n/language";
+import { shell } from "@/i18n/shell";
 import { DisplayError } from "@/lib/api/errors";
-import { messages } from "@/i18n/messages";
 export const QUALITIES = ["valid", "outage", "curtailed", "invalid"] as const;
 export type Quality = (typeof QUALITIES)[number];
 export function qualityOf(value: string | null | undefined): Quality {
@@ -46,7 +46,7 @@ export function parseProduction(text: string, language = "en"): ProductionFile {
     const locale = isLanguage(language) ? language : "en";
     const t = createTranslator({
         locale,
-        messages: messages[locale].ProductionCsv,
+        messages: shell[locale].ProductionCsv,
     });
     if (new TextEncoder().encode(text).length > 2 * 1024 * 1024)
         throw new DisplayError(t("size"));
