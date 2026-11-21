@@ -1334,3 +1334,19 @@ def test_the_deployment_records_path_outside_the_runner_temp_directory_is_never_
     assert status == 0
     written = (tmp_path / "output").read_text(encoding="utf-8")
     assert written == "current=true\ndeployments=unknown\n"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["authorize", "facts.json"],
+        ["current", MAIN, MAIN, "--deployments", "records.json", "--since", STARTED],
+    ],
+)
+def test_a_command_reading_a_file_refuses_to_run_without_the_runner_temp_directory(
+    arguments: list[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        release_authorization.main(arguments, {})
+
+    assert exit_info.value.code == 2
