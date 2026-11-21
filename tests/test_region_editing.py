@@ -9,6 +9,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import close_old_connections, connection
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
@@ -552,4 +553,76 @@ def test_approval_requires_the_request_to_match_the_region_revision() -> None:
     change = _pending_location_request(system)
     Region.objects.filter(pk=system.region.pk).update(revision=2)
     with raises_code("region_revision_changed"):
-        approve_location_change(system.admin, change.pk, expected_revision=change.base_revision)
+        approve_location_change(system.admin, change.pk, expected_revision=2)
+    change.refresh_from_db()
+    assert change.status == "pending"
+
+
+def test_approval_requires_the_page_to_match_the_region_revision() -> None:
+    system = make_system(approved=True)
+    change = _pending_location_request(system)
+    Region.objects.filter(pk=system.region.pk).update(revision=2)
+    RegionLocationChangeRequest.objects.filter(pk=change.pk).update(base_revision=2)
+    with raises_code("region_revision_changed"):
+        approve_location_change(system.admin, change.pk, expected_revision=1)
+    change.refresh_from_db()
+    assert change.status == "pending"
+
+
+def _region_updates(queries: CaptureQueriesContext) -> list[str]:
+    return [
+        query["sql"]
+        for query in queries.captured_queries
+        if query["sql"].startswith('UPDATE "regions_region" ')
+    ]
+
+
+def _move_by_operator(system: System) -> CaptureQueriesContext:
+    Region.objects.filter(pk=system.region.pk).update(status="pending")
+    change = _pending_location_request(system)
+    with CaptureQueriesContext(connection) as queries:
+        approve_location_change(system.admin, change.pk, expected_revision=1)
+    return queries
+
+
+def _move_by_administrator(system: System) -> CaptureQueriesContext:
+    Region.objects.filter(pk=system.region.pk).update(revision=2, approved_binding=system.binding)
+    system.region.refresh_from_db()
+    with CaptureQueriesContext(connection) as queries:
+        assert _pending_location_request(system).status == "approved"
+    return queries
+
+
+@pytest.mark.parametrize(
+    ("approved", "move"),
+    [(True, _move_by_operator), (False, _move_by_administrator)],
+    ids=["operator-approval", "administrator-move"],
+)
+def test_a_pending_plant_moves_without_its_earlier_approved_binding_in_one_update(
+    approved: bool, move: Callable[[System], CaptureQueriesContext]
+) -> None:
+    system = make_system(approved=approved)
+    queries = move(system)
+    system.region.refresh_from_db()
+    assert (system.region.latitude, system.region.longitude, system.region.timezone) == (
+        41,
+        30,
+        "UTC",
+    )
+    assert (system.region.status, system.region.approved_binding_id) == ("pending", None)
+    [update] = _region_updates(queries)
+    for column in ("latitude", "longitude", "timezone", "revision", "approved_binding_id"):
+        assert f'"{column}" = ' in update
+
+
+def test_a_binding_replacement_on_a_pending_plant_drops_its_earlier_approved_binding() -> None:
+    system = make_system(approved=True)
+    Region.objects.filter(pk=system.region.pk).update(status="pending")
+    with CaptureQueriesContext(connection) as queries:
+        replacement = submit_binding(system, site_id="replacement")
+    system.region.refresh_from_db()
+    assert (system.region.revision, replacement.region_revision) == (2, 2)
+    assert (system.region.status, system.region.approved_binding_id) == ("pending", None)
+    [update] = _region_updates(queries)
+    for column in ("revision", "approved_binding_id"):
+        assert f'"{column}" = ' in update

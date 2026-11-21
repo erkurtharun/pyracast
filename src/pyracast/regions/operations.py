@@ -379,7 +379,8 @@ def _save_reopened(region: Region, *fields: str) -> None:
     # One UPDATE: a second UPDATE of the row in the same transaction re-checks its tenant key
     # (FOR KEY SHARE) and deadlocks with a writer that locked the tenant before the region.
     if region.status == RegionStatus.PENDING:
-        region.save(update_fields=fields)
+        region.approved_binding = None
+        region.save(update_fields=("approved_binding", *fields))
     else:
         set_review_status(region, RegionStatus.PENDING, fields=fields)
 
