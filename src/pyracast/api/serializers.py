@@ -8,6 +8,7 @@ from rest_framework import serializers
 from pyracast.accounts.models import Tenant, WorkspaceRole
 from pyracast.forecasts.models import SnapshotSourceKind
 from pyracast.regions.models import (
+    NAME_MAX_LENGTH,
     Region,
     RegionLocationChangeRequest,
 )
@@ -64,7 +65,7 @@ class TenantOutput(serializers.ModelSerializer[Tenant]):
 
 
 class RegionInput(InputSerializer):
-    name = serializers.CharField(max_length=200)
+    name = serializers.CharField(max_length=NAME_MAX_LENGTH)
     latitude = FiniteFloat(min_value=-90, max_value=90)
     longitude = FiniteFloat(min_value=-180, max_value=180)
     timezone = serializers.CharField(max_length=100)

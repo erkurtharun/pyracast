@@ -1,3 +1,4 @@
+import math
 from dataclasses import asdict
 from datetime import timedelta
 from typing import Any
@@ -19,8 +20,12 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.operations import set_recipient_limit
 from pyracast.notifications.scheduler import PREPARATION_GRACE
-from pyracast.plants.models import Plant
+from pyracast.plants.models import Plant, PlantSubmission
+from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.platform_admin.read_models import (
+    MEAN_EARTH_RADIUS_KM,
+    distance_km,
     operations_context,
     overview_context,
     plant_list_context,
@@ -29,13 +34,15 @@ from pyracast.platform_admin.read_models import (
     summarize_plant,
     workspace_regions,
 )
-from pyracast.regions.models import AuditEvent, Region
+from pyracast.regions.models import AuditEvent, Region, RegionStatus
 from pyracast.regions.operations import request_location_change
+from pyracast.regions.review import set_review_status
 from tests.support.admin_setup import admin_system, setup_input, submitted_plant
 from tests.support.api import verified_admin
 from tests.support.delivery_health import recent_forecast
 from tests.support.domain import make_system
 from tests.support.notifications import freeze, ready
+from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -532,3 +539,91 @@ def test_console_links_open_the_account_and_customer_workspace_routes() -> None:
     assert response.content.count(b'href="/app/account/"') == 2
     assert response.content.count(b'href="/app/w/"') == 2
     assert b"/app/?" not in response.content
+
+
+def test_location_review_shows_the_distance_of_the_move_and_a_time_zone_change() -> None:
+    system = make_system()
+    request_location_change(
+        system.member,
+        system.region.pk,
+        system.tenant.pk,
+        expected_revision=system.region.revision,
+        latitude=41,
+        longitude=30,
+        timezone="UTC",
+    )
+    [change] = review_context(system.region.pk)["location_changes"]
+    assert change["distance_km"] == pytest.approx(139.7, abs=0.1)
+    assert change["timezone_changes"] is True
+    client, _ = verified_admin()
+    page = client.get(reverse("admin:workspace_plant", args=(system.region.pk,))).content
+    assert b"139.7 km" in page
+    assert b"The time zone changes" in page
+
+
+def test_a_location_review_within_the_same_zone_states_no_time_zone_change() -> None:
+    system = make_system()
+    request_location_change(
+        system.member,
+        system.region.pk,
+        system.tenant.pk,
+        expected_revision=system.region.revision,
+        latitude=40,
+        longitude=29.001,
+        timezone="Europe/Istanbul",
+    )
+    [change] = review_context(system.region.pk)["location_changes"]
+    assert change["distance_km"] == pytest.approx(0.085, abs=0.001)
+    assert change["timezone_changes"] is False
+    client, _ = verified_admin()
+    page = client.get(reverse("admin:workspace_plant", args=(system.region.pk,))).content
+    assert b"The time zone changes" not in page
+
+
+def test_setup_page_shows_the_values_approval_activates_and_marks_a_waiting_submission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    PlantSubmission.objects.create(plant=plant, dc_capacity_mw=99, submitted_by=system.member)
+    client, _ = verified_admin()
+    url = reverse("admin:workspace_plant", args=(system.region.pk,))
+    page = client.get(url).content
+    assert b"130.0 MW" in page
+    assert b"99.0 MW" not in page
+    assert b"Awaiting approval" not in page
+    set_review_status(Region.objects.get(pk=system.region.pk), RegionStatus.PENDING)
+    revise_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        PlantParameters(name=plant.name, dc_capacity_mw=77, export_limit_mw=100),
+    )
+    page = client.get(url).content
+    assert b"77.0 MW" in page
+    assert b"130.0 MW" not in page
+    assert b"Awaiting approval" in page
+
+
+def test_setup_page_says_when_a_plant_declares_no_values_yet() -> None:
+    system = make_system(approved=True)
+    Plant.objects.create(region=system.region, name="Bare plant")
+    client, _ = verified_admin()
+    page = client.get(reverse("admin:workspace_plant", args=(system.region.pk,))).content
+    assert b"<h3>Bare plant</h3>" in page
+    assert b"No saved technical configuration or customer submission." in page
+    assert b"Awaiting approval" not in page
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        ((0.0074, 0.0), (-0.0074, 180.0)),
+        ((45.0, 10.0), (-45.0, -170.0)),
+        ((90.0, 0.0), (-90.0, 0.0)),
+    ],
+)
+def test_a_move_to_the_antipode_is_half_the_circumference(
+    start: tuple[float, float], end: tuple[float, float]
+) -> None:
+    assert distance_km(start, end) == pytest.approx(math.pi * MEAN_EARTH_RADIUS_KM)

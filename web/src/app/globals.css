@@ -570,6 +570,13 @@ button.context-label:hover {
     margin-bottom: var(--space-5);
     font-size: 13px;
 }
+.region-card .attention {
+    padding: var(--space-1-5) var(--space-2-5);
+    border: 1px solid var(--amber-218);
+    border-radius: var(--radius);
+    background: var(--amber-51);
+    color: var(--amber-714);
+}
 .region-card-bottom {
     display: flex;
     justify-content: space-between;

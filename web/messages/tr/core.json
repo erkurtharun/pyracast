@@ -212,7 +212,11 @@
         "useAnotherAddress": "Başka bir adres kullan",
         "emailCodeExpired": "Kod artık geçerli değil. Yeni bir kod isteyin.",
         "emailChangeCancelled": "Adres değişikliği iptal edildi.",
-        "emailChanged": "Adresiniz artık {email}."
+        "emailChanged": "Adresiniz artık {email}.",
+        "shownOf": "{total} santralden {shown} tanesi gösteriliyor",
+        "needAttention": "{attention, plural, one {# santral ilgi bekliyor.} other {# santral ilgi bekliyor.}}",
+        "attentionReason": "İlgi bekliyor: {reason}",
+        "awaitingSetup": "Kurulumu bir yöneticinin tamamlaması bekleniyor"
     },
     "Common": {
         "unexpected": "Bir sorun oluştu.",
@@ -223,7 +227,8 @@
         "refreshFailed": "Yenilenemedi; {time} itibarıyla veriler gösteriliyor.",
         "retry": "Tekrar dene",
         "actionFailed": "İşlem tamamlanamadı",
-        "working": "İşleniyor…"
+        "working": "İşleniyor…",
+        "changedField": "{field}: {before} → {after}"
     },
     "AppError": {
         "title": "Bu sayfa görüntülenemedi",
@@ -490,6 +495,16 @@
             "schedule_disabled": "Bu santral için veri toplama kapalı.",
             "quota_too_low": "Sağlayıcı kullanım hakkı tahminlere istek bırakmıyor; yalnızca günlük geçmiş veriler toplanıyor.",
             "provider_unavailable": "Sağlayıcı şu anda istek kabul etmiyor; veri toplama kendiliğinden sürecek."
+        },
+        "SiteAttention": {
+            "setup_incomplete": "Kurulum tamamlanmadı.",
+            "review_rejected": "Onaylanmadı. Santrali düzenleyip yeniden incelemeye gönderin.",
+            "suspended": "Askıya alındı. Tahminler duraklatıldı.",
+            "connection_unavailable": "Veri bağlantısı Pyracast desteğini bekliyor."
+        },
+        "PlantEditBlock": {
+            "suspended": "Santral askıya alındığı için teknik bilgileri değiştirilemez. Yeniden başlatmak için Pyracast destek ekibine yazın.",
+            "connection_unavailable": "Santralin veri bağlantısıyla Pyracast destek ekibinin ilgilenmesi gerekiyor; bu nedenle teknik bilgileri henüz değiştirilemez."
         }
     }
 }

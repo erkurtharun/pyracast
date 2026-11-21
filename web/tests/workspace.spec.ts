@@ -95,7 +95,7 @@ test("one plant request saves location and technical details before approval", a
     await page.getByLabel("Plant name", { exact: true }).fill("New solar park");
     await page.getByLabel("Latitude").fill("36.5");
     await page.getByLabel("Longitude").fill("30.2");
-    await page.getByLabel("IANA timezone").fill("Europe/Berlin");
+    await page.getByLabel("Time zone").selectOption("Europe/Berlin");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByLabel("DC nameplate capacity (MW)").fill("130");
     await page.getByLabel("Inverter AC capacity (MW, optional)").fill("100");
@@ -129,8 +129,8 @@ test("one plant request saves location and technical details before approval", a
     await expect(
         page.getByText(/Awaiting administrator approval/),
     ).toBeVisible();
-    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-29");
-    await expect(page.getByLabel("Resolution")).toHaveValue("60");
+    await expect(page.getByRole("list", { name: "Next steps" })).toBeVisible();
+    await expect(page.getByLabel("Forecast date")).toHaveCount(0);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
         "130",
@@ -156,14 +156,17 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
         if (route.request().method() !== "PUT") return route.fallback();
         const body = route.request().postDataJSON();
         bodies.push(body);
+        const { name, expected_revision, ...parameters } = body;
         updated = {
             ...updated,
-            name: body.name,
+            name,
             current_configuration: {
                 ...updated.current_configuration,
-                ...body,
+                ...parameters,
                 id: 31 + bodies.length,
             },
+            parameters: { ...updated.parameters, ...parameters },
+            parameters_revision: expected_revision + 1,
         };
         await route.fulfill({ json: updated });
     });
@@ -1716,6 +1719,9 @@ test("recycle bin confirms deletion and restores a plant site with associated da
                               {
                                   id: entity.id,
                                   name: entity.name,
+                                  plant_name: entity.name,
+                                  latitude: entity.latitude,
+                                  longitude: entity.longitude,
                                   deleted_at: "2026-11-10T12:00:00Z",
                                   purge_after: "2026-12-10T12:00:00Z",
                                   restore_blocker: null,
@@ -1777,7 +1783,7 @@ test("recycle bin confirms deletion and restores a plant site with associated da
         })
         .click();
     await expect(
-        page.getByText(`${entity.name} restored. Find it in Plants.`, {
+        page.getByText(`${entity.name} restored.`, {
             exact: true,
         }),
     ).toBeVisible();
@@ -1809,6 +1815,7 @@ test("recycle bin disables expired records", async ({ page }) => {
                 {
                     id: 91,
                     name: "Expired region",
+                    plant_name: "Expired region",
                     deleted_at: "2026-01-01T00:00:00Z",
                     purge_after: "2026-01-31T00:00:00Z",
                     restore_blocker: "trash_retention_expired",
@@ -1848,6 +1855,7 @@ test("a failed reload after a restore keeps the remaining plants until a retry l
     const deleted = [91, 92].map((id) => ({
         id,
         name: `Deleted plant ${id}`,
+        plant_name: `Deleted plant ${id}`,
         deleted_at: "2026-11-10T12:00:00Z",
         purge_after: "2026-12-10T12:00:00Z",
         restore_blocker: null,
@@ -1937,6 +1945,9 @@ test("recycle bin ignores a prior workspace response and restores only in the se
                     name: first
                         ? "First workspace deleted region"
                         : "Second workspace deleted region",
+                    plant_name: first
+                        ? "First workspace deleted region"
+                        : "Second workspace deleted region",
                     deleted_at: "2026-11-10T00:00:00Z",
                     purge_after: "2026-12-10T00:00:00Z",
                     restore_blocker: null,
@@ -1977,10 +1988,9 @@ test("recycle bin ignores a prior workspace response and restores only in the se
         })
         .click();
     await expect(
-        page.getByText(
-            "Second workspace deleted region restored. Find it in Plants.",
-            { exact: true },
-        ),
+        page.getByText("Second workspace deleted region restored.", {
+            exact: true,
+        }),
     ).toBeVisible();
 });
 

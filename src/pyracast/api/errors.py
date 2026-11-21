@@ -2,6 +2,7 @@ import json
 import logging
 import math
 from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
@@ -30,6 +31,7 @@ from pyracast.accounts.language import request_language
 from pyracast.connections.contracts import ProviderError
 from pyracast.errors import (
     MESSAGES,
+    ConflictError,
     DomainError,
     ErrorCode,
     ForbiddenError,
@@ -76,6 +78,17 @@ class ApiError:
 
 def coded(code: ErrorCode, status: int, **details: Any) -> ApiError:
     return ApiError(status, code, str(MESSAGES[code]), **details)
+
+
+@contextmanager
+def current_on_conflict[E: ConflictError](
+    stale: type[E], current: Callable[[E], object]
+) -> Iterator[None]:
+    """A stale write answers with the version it lost to; the caller is already authorized."""
+    try:
+        yield
+    except stale as error:
+        raise ConflictError(error.code, details={"current": current(error)}) from error
 
 
 def log_server_error(

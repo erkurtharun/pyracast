@@ -59,6 +59,7 @@ export function PlantSite({
             <button className="back-button" onClick={back}>
                 {t("allPlants")}
             </button>
+            <RefreshFailed resource={sites} />
             {sites.loading ? (
                 <p role="status">{t("loadingPlant")}</p>
             ) : !sites.data ? (
@@ -71,6 +72,7 @@ export function PlantSite({
                     tenant={tenant.id}
                     onCancel={back}
                     onCreated={() => void refresh.workspace(tenant.id)}
+                    onOpen={(id) => router.push(routes.plant(tenant.id, id))}
                 />
             ) : (
                 <Notice>{t("plantUnavailable")}</Notice>

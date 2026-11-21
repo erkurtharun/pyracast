@@ -757,6 +757,19 @@ CASES: dict[str, Case] = {
         "Müşterinin okuyaca\u011f\u0131 gerekçeyi yaz\u0131n.",
         domain("DomainError", "review_reason_required"),
     ),
+    "plant_parameters_changed": Case(
+        409,
+        "The technical details changed after you opened them. Check the values and save again.",
+        "Teknik bilgiler siz a\u00e7t\u0131ktan sonra de\u011fi\u015fti. "
+        "De\u011ferleri kontrol edip yeniden kaydedin.",
+        domain("ConflictError", "plant_parameters_changed"),
+    ),
+    "plant_edit_blocked": Case(
+        400,
+        "The plant's technical details cannot change in its current state.",
+        "Santralin teknik bilgileri mevcut durumunda değiştirilemez.",
+        domain("DomainError", "plant_edit_blocked"),
+    ),
 }
 
 

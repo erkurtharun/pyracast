@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from pyracast import trash
 from pyracast.accounts.models import Membership
+from pyracast.api.schema import LOCATION_REFUSAL
 from pyracast.api.serializers import (
     ForecastOutput,
     ForecastQuery,
@@ -92,7 +93,9 @@ class LocationChangeRequestsView(GenericAPIView[RegionLocationChangeRequest]):
         page = self.paginate_queryset(self.get_queryset())
         return self.get_paginated_response(LocationChangeOutput(page, many=True).data)
 
-    @extend_schema(request=LocationChangeInput, responses={201: LocationChangeOutput})
+    @extend_schema(
+        request=LocationChangeInput, responses={201: LocationChangeOutput, 400: LOCATION_REFUSAL}
+    )
     def post(self, request: Request, tenant_id: int, region_id: int) -> Response:
         self.get_region()
         data = LocationChangeInput(data=request.data)

@@ -35,6 +35,17 @@ export function formTexts(data: FormData, name: string) {
         .map((value) => (typeof value === "string" ? value : ""));
 }
 
+// Shows the server's refusal of each named field on that field.
+export function FieldErrors({
+    value,
+    children,
+}: {
+    value: Record<string, string>;
+    children: ReactNode;
+}) {
+    return <FormErrors value={value}>{children}</FormErrors>;
+}
+
 export function useErrorMessage() {
     const t = useTranslations("Common");
     return (error: unknown) => displayMessage(error, t("unexpected"));
@@ -105,6 +116,8 @@ export function Field({
     min?: number;
     max?: number;
     step?: string;
+    pattern?: string;
+    title?: string;
     placeholder?: string;
     autoComplete?: string;
     hint?: string;
@@ -341,10 +354,12 @@ export function ActionForm({
     errorTitle,
     success,
     variant = "primary",
+    onEdit,
 }: {
     children: ReactNode;
     submit: string;
     onSubmit: (data: FormData) => Promise<void>;
+    onEdit?: () => void;
     permitted?: boolean;
     errorTitle?: string;
     success?: string | null;
@@ -366,6 +381,7 @@ export function ActionForm({
             ref={formRef}
             className={canSubmit ? undefined : "readonly-form"}
             onChange={() => {
+                onEdit?.();
                 if (state.status === "success") setState({ status: "idle" });
             }}
             onSubmit={(event) =>

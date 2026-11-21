@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, TypedDict
@@ -531,6 +532,22 @@ def operations_context(issue: str = "") -> dict[str, Any]:
     }
 
 
+MEAN_EARTH_RADIUS_KM = 6371.0088
+
+
+def distance_km(start: tuple[float, float], end: tuple[float, float]) -> float:
+    """Great-circle distance between two (latitude, longitude) points in degrees, on a sphere of
+    the mean Earth radius: a review aid, not a survey measure."""
+    lat1, lon1 = map(math.radians, start)
+    lat2, lon2 = map(math.radians, end)
+    half = (
+        math.sin((lat2 - lat1) / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    )
+    # Rounding can lift `half` a unit in the last place above 1 for antipodal points.
+    return 2 * MEAN_EARTH_RADIUS_KM * math.asin(math.sqrt(min(1.0, half)))
+
+
 def review_history(region_id: int) -> dict[str, Any]:
     """The latest review decision with its reason, and whether the customer resubmitted the
     plant after it."""
@@ -575,6 +592,10 @@ def review_context(region_id: int) -> dict[str, Any]:
                 "created_at": change.created_at,
                 "base_revision": change.base_revision,
                 "requested_by": change.requested_by.username,
+                "distance_km": distance_km(
+                    (region.latitude, region.longitude), (change.latitude, change.longitude)
+                ),
+                "timezone_changes": change.timezone != region.timezone,
             }
             for change in RegionLocationChangeRequest.objects.filter(
                 region=region, status=LocationChangeStatus.PENDING

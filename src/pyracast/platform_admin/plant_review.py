@@ -34,7 +34,8 @@ from pyracast.plants.approval import (
     approval_blockers,
     approve_region,
     decide_review,
-    declaration_fingerprint,
+    declarations,
+    fingerprint_of,
 )
 from pyracast.plants.models import Plant, PlantSubmission
 from pyracast.plants.operations import configuration_is_current
@@ -117,7 +118,6 @@ def _action_initial(region: Region, binding: SiteBinding | None) -> dict[str, An
         "expected_cooldown_until": blocked_until.isoformat() if blocked_until else "",
         "expected_validated_at": validated_at.isoformat() if validated_at else "",
         "expected_status": region.status,
-        "declaration": declaration_fingerprint(region.pk),
     }
 
 
@@ -356,6 +356,9 @@ def _render(request: HttpRequest, site: PlatformAdminSite, page: PlantPage) -> T
     binding = page.binding
     plant = page.plant
     blockers = approval_blockers(binding, binding.provider_account) if binding else []
+    # One read feeds what the page shows and the hash its approval sends.
+    shown = declarations(page.region.pk)
+    page.action_form.show_declaration(fingerprint_of(shown))
     return TemplateResponse(
         request,
         "admin/regions/region/setup.html",
@@ -366,9 +369,9 @@ def _render(request: HttpRequest, site: PlatformAdminSite, page: PlantPage) -> T
             "title": _("Review and set up %(name)s") % {"name": page.region.name},
             "region": page.region,
             "plants": page.plants,
-            "submissions": PlantSubmission.objects.filter(plant__in=page.plants).select_related(
-                "plant", "submitted_by"
-            ),
+            "declarations": [
+                (plant, record, isinstance(record, PlantSubmission)) for plant, record in shown
+            ],
             "binding": binding,
             "active_provider_delay": bool(
                 binding

@@ -10,7 +10,7 @@ from django.utils.translation import gettext_lazy
 
 from pyracast.db import choices_check, lease_check
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
-from pyracast.regions.models import active_region
+from pyracast.regions.models import NAME_MAX_LENGTH, active_region
 
 
 class MeasurementBasis(models.TextChoices):
@@ -113,10 +113,13 @@ class PlantQuerySet[M: Plant = Plant, Row = M](models.QuerySet[M, Row]):
 
 class Plant(models.Model):
     region = models.ForeignKey("regions.Region", on_delete=models.PROTECT)
-    name = models.CharField(max_length=200)
+    name = models.CharField(max_length=NAME_MAX_LENGTH)
     current_configuration = models.ForeignKey(
         "PlantConfiguration", null=True, on_delete=models.PROTECT, related_name="+"
     )
+    # Advances with every change of the name or a declared value; a save names the revision
+    # it edited, so a save from an older one is refused.
+    parameters_revision = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     automatic_calibration_enabled = models.BooleanField(default=False)
     automatic_calibration_enabled_by = models.ForeignKey(
@@ -165,6 +168,11 @@ class PlantSubmission(models.Model):
     surface_tilt_degrees = models.FloatField(null=True)
     surface_azimuth_degrees = models.FloatField(null=True)
     submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    # The configuration current when the submission was saved. The submission awaits
+    # approval while it is still the plant's current one (none before a first approval).
+    base_configuration = models.ForeignKey(
+        "PlantConfiguration", null=True, on_delete=models.PROTECT, related_name="+"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -2,7 +2,7 @@
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { Plant, PlantScope, Region } from "@/lib/api";
+import type { Plant, PlantScope, Site } from "@/lib/api";
 import { useRefresh } from "@/lib/api/query";
 import { plantDay } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
@@ -42,7 +42,7 @@ export function PlantWorkspace({
     plant: Plant;
     scope: PlantScope;
     timezone: string;
-    region: Region;
+    region: Site;
     section: PlantSection;
     address: PlantAddress;
 }) {
@@ -63,6 +63,8 @@ export function PlantWorkspace({
     const portfolio = routes.portfolio(scope.tenant_id);
     const changed = () => refresh.workspace(scope.tenant_id);
     const configuration = currentPlant.current_configuration;
+    // The review notice lists what happens next; an empty forecast would only repeat it.
+    const awaitsFirstApproval = region.status === "pending" && !configuration;
     usePageTitle(`${t(tab)} · ${currentPlant.name} | Pyracast`);
     return (
         <ExportPlant
@@ -108,18 +110,20 @@ export function PlantWorkspace({
                 onSelect={navigation.selectTab}
             />
             {tab === "forecast" ? (
-                <ForecastSection
-                    scope={scope}
-                    timezone={timezone}
-                    configurationId={configuration?.id}
-                    view={forecastView}
-                    date={address.date ?? plantDay(timezone, 1)}
-                    baseDate={navigation.base.date}
-                    leaving={navigation.leaving("forecast")}
-                    options={forecastOptions}
-                    onOptions={setForecastOptions}
-                    show={navigation.show}
-                />
+                awaitsFirstApproval ? null : (
+                    <ForecastSection
+                        scope={scope}
+                        timezone={timezone}
+                        configurationId={configuration?.id}
+                        view={forecastView}
+                        date={address.date ?? plantDay(timezone, 1)}
+                        baseDate={navigation.base.date}
+                        leaving={navigation.leaving("forecast")}
+                        options={forecastOptions}
+                        onOptions={setForecastOptions}
+                        show={navigation.show}
+                    />
+                )
             ) : tab === "outages" ? (
                 <Outages
                     configuration={configuration}

@@ -7,11 +7,13 @@ import { useFormat } from "@/lib/format/use-format";
 import { routes } from "@/lib/routes";
 import { PlantIcon } from "./plant-icon";
 import { PlantOnboarding } from "./plant-onboarding";
+import { matchesSearch, siteName } from "./portfolio-search";
 import { Field, Select } from "@/ui/form";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
 import { ReminderLine } from "@/features/plant/reminders";
 import { useWorkspace } from "@/features/workspace/workspace-shell";
+import { DeletedNotice } from "@/features/trash/recent-deletion";
 
 export function Portfolio() {
     const t = useTranslations("Dashboard");
@@ -36,10 +38,10 @@ export function Portfolio() {
     const filtered = rows.filter(
         (site) =>
             (status === "all" || site.status === status) &&
-            `${site.name} ${site.plant?.name ?? ""} ${site.timezone}`
-                .toLocaleLowerCase(locale)
-                .includes(search.toLocaleLowerCase(locale)),
+            matchesSearch(site, search, locale),
     );
+    const narrowed = filtered.length !== rows.length;
+    const attention = rows.filter((site) => site.attention).length;
     return (
         <>
             <div className="page-heading">
@@ -63,10 +65,12 @@ export function Portfolio() {
                     </button>
                 )}
             </div>
+            <DeletedNotice tenant={tenant.id} />
             {canManage && creating && (
                 <PlantOnboarding
                     tenant={tenant.id}
                     onCancel={() => setCreating(false)}
+                    onOpen={open}
                     onCreated={(site) =>
                         void (async () => {
                             await refresh.workspace(tenant.id);
@@ -107,6 +111,16 @@ export function Portfolio() {
                         </Select>
                     </div>
                 )}
+                <p className="fine" role="status">
+                    {narrowed &&
+                        t("shownOf", {
+                            shown: filtered.length,
+                            total: rows.length,
+                        })}
+                </p>
+                {attention > 0 && (
+                    <p className="fine">{t("needAttention", { attention })}</p>
+                )}
                 <RefreshFailed resource={sites} />
                 {sites.error && !sites.data && (
                     <>
@@ -124,9 +138,7 @@ export function Portfolio() {
                 ) : !sites.data ? null : filtered.length ? (
                     <div className="region-grid">
                         {filtered.map((site) => {
-                            const metadata =
-                                site.plant?.current_configuration ??
-                                site.plant?.submission;
+                            const metadata = site.plant?.parameters;
                             return (
                                 <button
                                     className="region-card"
@@ -145,14 +157,22 @@ export function Portfolio() {
                                             value={site.status}
                                         />
                                     </div>
-                                    <h2>{site.plant?.name ?? site.name}</h2>
+                                    <h2>{siteName(site)}</h2>
                                     <p>
-                                        {metadata
-                                            ? `${format.significant(metadata.dc_capacity_mw, 4)} MW DC`
-                                            : t("completeSetup")}{" "}
-                                        {" · "}
+                                        {metadata &&
+                                            `${format.significant(metadata.dc_capacity_mw, 4)} MW DC · `}
                                         {site.timezone}
                                     </p>
+                                    {site.attention && (
+                                        <p className="attention">
+                                            {t("attentionReason", {
+                                                reason: label(
+                                                    "SiteAttention",
+                                                    site.attention,
+                                                ),
+                                            })}
+                                        </p>
+                                    )}
                                     {site.reminder && (
                                         <ReminderLine
                                             reminder={site.reminder}
@@ -161,9 +181,12 @@ export function Portfolio() {
                                     )}
                                     <div className="region-card-bottom">
                                         <span>
-                                            {site.plant
+                                            {site.plant ||
+                                            site.edit_blocked_reason
                                                 ? t("openPlant")
-                                                : t("completeSetup")}
+                                                : canManage
+                                                  ? t("completeSetup")
+                                                  : t("awaitingSetup")}
                                         </span>
                                         <PlantIcon arrow />
                                     </div>

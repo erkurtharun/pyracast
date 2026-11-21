@@ -5,6 +5,8 @@ type Schemas = components["schemas"];
 // Each label group in the `Enums` catalog names the generated enumeration it labels; a test keeps both in step.
 export const vocabulary = {
     RegionStatus: "RegionStatusEnum",
+    SiteAttention: "SiteAttentionEnum",
+    PlantEditBlock: "PlantEditBlockEnum",
     LocationChangeStatus: "LocationChangeStatusEnum",
     Freshness: "FreshnessEnum",
     CalibrationStatus: "CalibrationStatusEnum",

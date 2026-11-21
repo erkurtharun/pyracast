@@ -21,14 +21,14 @@ msgstr ""
 msgid "A calibration is already pending."
 msgstr "Bekleyen bir kalibrasyon zaten var."
 
+msgid "A plant name cannot contain a null character."
+msgstr "Santral adı boş (NUL) karakter içeremez."
+
 msgid "A plant name of at most 200 characters is required."
 msgstr "En fazla 200 karakterlik bir santral adı girin."
 
 msgid "A reason of at most 1000 characters is required."
 msgstr "Gerekçe en fazla 1000 karakter olmalıdır."
-
-msgid "A region name of at most 200 characters is required."
-msgstr "En fazla 200 karakterlik bir konum adı girin."
 
 msgid "A replacement affects every plant using the selected account."
 msgstr "Değişiklik, seçili hesabı kullanan tüm santralleri etkiler."
@@ -83,9 +83,6 @@ msgstr "Tüm işlemler"
 
 msgid "An IANA timezone is required."
 msgstr "Geçerli bir IANA saat dilimi girin."
-
-msgid "An approved current provider binding is required."
-msgstr "Güncel ve onaylı bir sağlayıcı bağlantısı gereklidir."
 
 msgid "An approved current region and at least one time are required."
 msgstr "Güncel ve onaylı bir konum ile en az bir saat gereklidir."
@@ -2359,6 +2356,15 @@ msgstr "Bilgileri düzenle"
 msgid "This workspace already has a plant at this location."
 msgstr "Bu çalışma alanında bu konumda zaten bir santral var."
 
+msgid ""
+"Technical details cannot change while the plant is suspended or its data "
+"connection is not current. Approve the plant again or validate its "
+"connection first."
+msgstr ""
+"Santral askıya alınmışken veya veri bağlantısı güncel değilken teknik "
+"bilgiler değiştirilemez. Önce santrali yeniden onaylayın veya bağlantısını "
+"doğrulayın."
+
 msgid "Sent"
 msgstr "Gönderildi"
 
@@ -2617,11 +2623,11 @@ msgstr ""
 " tekrar inceleyin."
 
 msgid ""
-"The declared plant details changed after this page opened. Review them again "
-"before approving."
+"The declared plant details changed after this page opened. The details shown "
+"now are the current ones; review them before approving."
 msgstr ""
-"Bu sayfa açıldıktan sonra beyan edilen santral bilgileri değişti. Onaylamadan"
-" önce bunları yeniden inceleyin."
+"Bu sayfa açıldıktan sonra beyan edilen santral bilgileri değişti. Şimdi "
+"gösterilen bilgiler güncel olanlardır; onaylamadan önce bunları inceleyin."
 
 msgid "Validate the current setup and key revision before approval."
 msgstr "Onaydan önce güncel kurulumu ve anahtar revizyonunu doğrulayın."
@@ -2866,6 +2872,13 @@ msgstr "Kayıtlar:"
 msgid "View all"
 msgstr "Tümünü gör"
 
+msgid ""
+"The technical details changed after you opened them. Check the values and "
+"save again."
+msgstr ""
+"Teknik bilgiler siz açtıktan sonra değişti. Değerleri kontrol edip yeniden "
+"kaydedin."
+
 msgid "Review calibrations"
 msgstr "Kalibrasyonları incele"
 
@@ -3106,3 +3119,31 @@ msgstr "E-posta gönderim sınırına ulaşıldı"
 
 msgid "Mail sender forbidden"
 msgstr "E-posta göndericisine izin verilmedi"
+
+msgid "The plant's technical details cannot change in its current state."
+msgstr "Santralin teknik bilgileri mevcut durumunda değiştirilemez."
+
+msgid ""
+"The plant is suspended, so its technical details cannot change. Contact "
+"Pyracast support to resume it."
+msgstr ""
+"Santral askıya alındığı için teknik bilgileri değiştirilemez. Yeniden "
+"başlatmak için Pyracast destek ekibine yazın."
+
+msgid ""
+"The plant's data connection needs attention from Pyracast support, so its "
+"technical details cannot change yet."
+msgstr ""
+"Santralin veri bağlantısıyla Pyracast destek ekibinin ilgilenmesi gerekiyor; "
+"bu nedenle teknik bilgileri henüz değiştirilemez."
+
+msgid "Distance of the move"
+msgstr "Taşıma mesafesi"
+
+#, python-format
+msgid ""
+"The time zone changes from %(old)s to %(new)s: plant days, collection times "
+"and reminders follow the new zone."
+msgstr ""
+"Saat dilimi %(old)s yerine %(new)s olur: santral günleri, toplama saatleri "
+"ve hatırlatmalar yeni dilimi izler."
