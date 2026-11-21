@@ -429,3 +429,267 @@ test("a location request offers the available zones with the current one chosen"
     await zone.selectOption("Asia/Tokyo");
     await expect(zone).toHaveValue("Asia/Tokyo");
 });
+
+async function toReview(page: Page) {
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByLabel("DC nameplate capacity (MW)").fill("5");
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+}
+
+function refuse(page: Page, fields: Record<string, string>) {
+    return page.route("**/api/tenants/1/sites/", (route) =>
+        route.request().method() === "POST"
+            ? route.fulfill({
+                  status: 400,
+                  json: errorBody(
+                      "invalid_request",
+                      "Check the highlighted values and try again.",
+                      { fields },
+                  ),
+              })
+            : route.fallback(),
+    );
+}
+
+const binned = (id: number, name: string, deleted_at: string) => ({
+    id,
+    name,
+    plant_name: name,
+    latitude: 37,
+    longitude: 31,
+    deleted_at,
+    purge_after: "2026-12-30T12:00:00Z",
+    restore_blocker: null,
+});
+
+test("a pasted single number with a decimal comma is not split into a pair", async ({
+    page,
+}) => {
+    await mockApi(page, { empty: true });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: "Add a plant" }).click();
+    const latitude = page.getByLabel("Latitude (°)");
+    const split = await latitude.evaluate((element) => {
+        const data = new DataTransfer();
+        data.setData("text/plain", "41,0082");
+        const event = new ClipboardEvent("paste", {
+            clipboardData: data,
+            bubbles: true,
+            cancelable: true,
+        });
+        element.dispatchEvent(event);
+        return event.defaultPrevented;
+    });
+    expect(split).toBe(false);
+    await expect(page.getByLabel("Longitude (°)")).toHaveValue("");
+});
+
+test("a refusal of fields on two steps opens the earlier step on its refused field", async ({
+    page,
+}) => {
+    await mockApi(page, { empty: true });
+    await refuse(page, {
+        dc_capacity_mw: "Enter a positive capacity.",
+        timezone: "An IANA timezone is required.",
+    });
+    await openWizard(page);
+    await toReview(page);
+    await page
+        .getByRole("button", { name: "Submit plant for approval" })
+        .click();
+    await expect(page.getByLabel("Time zone")).toBeFocused();
+});
+
+test("a refused field no step holds stays on the review with its message", async ({
+    page,
+}) => {
+    await mockApi(page, { empty: true });
+    await refuse(page, { "plant.serial": "The serial number is unknown." });
+    await openWizard(page);
+    await toReview(page);
+    await page
+        .getByRole("button", { name: "Submit plant for approval" })
+        .click();
+    await expect(page.getByRole("alert")).toContainText(
+        "The serial number is unknown.",
+    );
+    await expect(
+        page
+            .getByRole("list", { name: "Plant setup progress" })
+            .getByRole("listitem")
+            .last(),
+    ).toHaveAttribute("aria-current", "step");
+});
+
+test("a second submit before the first answer sends one request", async ({
+    page,
+}) => {
+    await mockApi(page, { empty: true });
+    let posts = 0;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/tenants/1/sites/", async (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        posts++;
+        await held;
+        return route.fallback();
+    });
+    await openWizard(page);
+    await toReview(page);
+    const form = page
+        .locator("form")
+        .filter({ has: page.getByLabel("DC nameplate capacity (MW)") });
+    await form.evaluate((form: HTMLFormElement) => {
+        form.requestSubmit();
+        form.requestSubmit();
+    });
+    await expect.poll(() => posts).toBe(1);
+    release();
+    await expect(
+        page.getByRole("heading", { name: "West plant" }),
+    ).toBeVisible();
+    expect(posts).toBe(1);
+});
+
+test("a restore through the wizard holds the form and goes nowhere once the wizard is left", async ({
+    page,
+}) => {
+    await mockApi(page, { empty: true });
+    await page.route("**/api/tenants/1/trash/regions/", (route) =>
+        route.fulfill({
+            json: paged([binned(15, "Old plant", "2026-11-10T12:00:00Z")]),
+        }),
+    );
+    let restores = 0;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/tenants/1/regions/15/restore/", async (route) => {
+        restores++;
+        await held;
+        return route.fulfill({ json: { ...region, id: 15 } });
+    });
+    await openWizard(page);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("button", { name: "Restore Old plant" }).click();
+    await expect(
+        page.getByRole("button", { name: "Cancel", exact: true }),
+    ).toBeDisabled();
+    await expect(
+        page.getByRole("button", { name: "Continue", exact: true }),
+    ).toBeDisabled();
+    await expect(page.getByLabel("Latitude (°)")).toBeDisabled();
+    await page.getByRole("button", { name: "Recycle bin" }).click();
+    await expect(page).toHaveURL("/app/w/1/trash/");
+    release();
+    await expect.poll(() => restores).toBe(1);
+    await expect(page).toHaveURL("/app/w/1/trash/");
+});
+
+test("the bin offer names the most recently deleted plant at the place and says there are more", async ({
+    page,
+}) => {
+    await mockApi(page, { empty: true });
+    await page.route("**/api/tenants/1/trash/regions/", (route) =>
+        route.fulfill({
+            json: paged([
+                binned(15, "Old plant", "2026-10-25T12:00:00Z"),
+                binned(16, "Newer plant", "2026-11-20T12:00:00Z"),
+            ]),
+        }),
+    );
+    await openWizard(page);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    const offer = page.getByRole("group", {
+        name: "Newer plant is in the recycle bin",
+    });
+    await expect(offer).toContainText(
+        "1 more plant from this location is in the recycle bin.",
+    );
+    await expect(
+        offer.getByRole("button", { name: "Restore Newer plant" }),
+    ).toBeFocused();
+});
+
+test("a blocked location without a plant is opened, not offered for setup", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await sites(page, [
+        {
+            ...location,
+            status: "suspended",
+            attention: "suspended",
+            edit_blocked_reason: "suspended",
+        },
+    ]);
+    await page.goto("/app/");
+    const card = page.getByRole("button", { name: /North location/ });
+    await expect(card).toContainText(
+        "Needs attention: Suspended. Forecasts are paused.",
+    );
+    await expect(card).toContainText("Open plant");
+    await expect(card).not.toContainText("Complete setup");
+});
+
+test("the zone list offers UTC and no empty choice", async ({ page }) => {
+    await mockApi(page, { empty: true });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: "Add a plant" }).click();
+    const zone = page.getByLabel("Time zone");
+    await zone.selectOption("UTC");
+    await expect(zone).toHaveValue("UTC");
+    await expect(zone.locator('option[value=""]')).toHaveCount(0);
+});
+
+test("a browser without a zone list asks for the zone as text", async ({
+    page,
+}) => {
+    await page.addInitScript(() => {
+        Reflect.deleteProperty(Intl, "supportedValuesOf");
+    });
+    await mockApi(page, { empty: true });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: "Add a plant" }).click();
+    await expect(page.getByRole("textbox", { name: "Time zone" })).toHaveValue(
+        await page.evaluate(
+            () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+        ),
+    );
+});
+
+test("a location request without a browser zone list asks for the zone as text", async ({
+    page,
+}) => {
+    await page.addInitScript(() => {
+        Reflect.deleteProperty(Intl, "supportedValuesOf");
+    });
+    await mockApi(page);
+    await page.goto("/app/w/1/plants/11/settings/?view=location");
+    await page.getByText("Request location change").click();
+    await expect(page.getByRole("textbox", { name: "Time zone" })).toHaveValue(
+        "Europe/Istanbul",
+    );
+});
+
+test("an approved plant whose connection stopped says so where the portfolio opens it", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await sites(page, [
+        {
+            ...site,
+            attention: "connection_unavailable",
+            edit_blocked_reason: "connection_unavailable",
+        },
+    ]);
+    await page.goto("/app/");
+    const marker =
+        "Needs attention: The data connection needs Pyracast support.";
+    const card = page.getByRole("button", { name: /East array/ });
+    await expect(card).toContainText(marker);
+    await card.click();
+    await expect(page).toHaveURL("/app/w/1/plants/11/forecast/");
+    await expect(
+        page.getByRole("status").filter({ hasText: marker }),
+    ).toBeVisible();
+});

@@ -1,12 +1,15 @@
+import json
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from io import StringIO
 from threading import Barrier
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import pytest
 from django.contrib.auth.models import User
 from django.contrib.messages import get_messages
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.db import close_old_connections, connection
 from django.test import Client
 from django.urls import reverse
@@ -106,8 +109,38 @@ def test_a_target_another_plant_already_requested_is_refused_at_submission() -> 
 
     status, body = submit(system)
 
-    assert (status, body.get("code")) == (400, "location_already_exists")
+    assert (status, body.get("code"), body.get("region_id")) == (
+        400,
+        "location_already_exists",
+        other.pk,
+    )
     assert RegionLocationChangeRequest.objects.get().region_id == other.pk
+
+
+def _resolved(schema: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    if "$ref" in node:
+        return _resolved(schema, schema["components"]["schemas"][node["$ref"].split("/")[-1]])
+    properties: dict[str, Any] = dict(node.get("properties", {}))
+    for part in node.get("allOf", []):
+        properties |= _resolved(schema, part)["properties"]
+    return {"properties": properties}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/tenants/{tenant_id}/sites/",
+        "/api/tenants/{tenant_id}/regions/{region_id}/location-change-requests/",
+    ],
+)
+def test_the_duplicate_location_refusal_documents_the_plant_that_holds_it(path: str) -> None:
+    output = StringIO()
+    call_command("spectacular", format="openapi-json", validate=True, stdout=output)
+    schema = json.loads(output.getvalue())
+    refusal = schema["paths"][path]["post"]["responses"]["400"]
+    body = _resolved(schema, refusal["content"]["application/json"]["schema"])
+    assert body["properties"]["region_id"]["type"] == "integer"
+    assert {"code", "message", "fields"} <= body["properties"].keys()
 
 
 def test_concurrent_submissions_to_one_target_accept_exactly_one() -> None:

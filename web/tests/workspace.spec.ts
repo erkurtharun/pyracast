@@ -1720,6 +1720,8 @@ test("recycle bin confirms deletion and restores a plant site with associated da
                                   id: entity.id,
                                   name: entity.name,
                                   plant_name: entity.name,
+                                  latitude: entity.latitude,
+                                  longitude: entity.longitude,
                                   deleted_at: "2026-11-10T12:00:00Z",
                                   purge_after: "2026-12-10T12:00:00Z",
                                   restore_blocker: null,

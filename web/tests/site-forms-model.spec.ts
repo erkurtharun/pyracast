@@ -1,12 +1,16 @@
 import { expect, test } from "@playwright/test";
 import {
+    binnedAt,
+    canonicalCoordinate,
     coordinatePair,
     sameLocation,
+    supportedZones,
     zoneChoices,
 } from "../src/features/portfolio/site-location";
 import {
     onboardingSteps,
-    stepOfField,
+    refusalTarget,
+    unplacedFields,
 } from "../src/features/portfolio/onboarding-steps";
 import { matchesSearch } from "../src/features/portfolio/portfolio-search";
 
@@ -14,21 +18,59 @@ test("a pasted coordinate pair splits into latitude and longitude", () => {
     expect(coordinatePair(" -41.5 ; 28.9 ")).toEqual(["-41.5", "28.9"]);
     expect(coordinatePair("41.5\t-28.9")).toEqual(["41.5", "-28.9"]);
     expect(coordinatePair("41.0082, 28.9784")).toEqual(["41.0082", "28.9784"]);
+    expect(coordinatePair("41.0082,28.9784")).toEqual(["41.0082", "28.9784"]);
+    expect(coordinatePair("-41.5,-28")).toEqual(["-41.5", "-28"]);
+    expect(coordinatePair("41 , 29")).toEqual(["41", "29"]);
+    expect(coordinatePair("-41; -29")).toEqual(["-41", "-29"]);
     for (const text of ["41,,29", "41 29 30", "41. 29", "NaN,29", "41"])
         expect(coordinatePair(text)).toBeNull();
 });
 
-test("the zone list holds every supported zone and the current one once, sorted", () => {
+test("a single number with a decimal comma is never split into a pair", () => {
+    for (const text of [
+        "41,0082",
+        "36,9",
+        "-36,9",
+        "-41,-28",
+        "41,5;28,9",
+        "41,5 28,9",
+        "41,0082.5",
+    ])
+        expect(coordinatePair(text)).toBeNull();
+});
+
+test("the zone list adds UTC and the current zone to the browser's list, once and sorted", () => {
     expect(
         zoneChoices(["Europe/Istanbul", "Asia/Tokyo"], "Asia/Calcutta"),
-    ).toEqual(["Asia/Calcutta", "Asia/Tokyo", "Europe/Istanbul"]);
+    ).toEqual(["Asia/Calcutta", "Asia/Tokyo", "Europe/Istanbul", "UTC"]);
     expect(zoneChoices(["UTC", "Europe/Istanbul"], "UTC")).toEqual([
+        "Europe/Istanbul",
+        "UTC",
+    ]);
+    expect(zoneChoices(["Europe/Istanbul"], "")).toEqual([
         "Europe/Istanbul",
         "UTC",
     ]);
 });
 
-test("a location matches a stored one within the stored precision", () => {
+test("a browser without a zone list gets none, so the form asks for the zone as text", () => {
+    expect(supportedZones({})).toBeNull();
+    expect(
+        supportedZones({ supportedValuesOf: () => ["Europe/Istanbul"] }),
+    ).toEqual(["Europe/Istanbul"]);
+});
+
+test("coordinates are rounded as the server stores them, half away from zero at six decimals", () => {
+    expect(canonicalCoordinate(40.0000005)).toBe(40.000001);
+    expect(canonicalCoordinate(-40.0000005)).toBe(-40.000001);
+    expect(canonicalCoordinate(40.0000004999)).toBe(40);
+    expect(canonicalCoordinate(36.1234567)).toBe(36.123457);
+    expect(canonicalCoordinate(1e-7)).toBe(0);
+    expect(canonicalCoordinate(5e-7)).toBe(0.000001);
+    expect(canonicalCoordinate(-180)).toBe(-180);
+});
+
+test("a location matches a stored one when both round to the same stored value", () => {
     const stored = { latitude: 36.123457, longitude: 30.7 };
     expect(
         sameLocation(stored, { latitude: 36.1234567, longitude: 30.7 }),
@@ -39,18 +81,86 @@ test("a location matches a stored one within the stored precision", () => {
     expect(
         sameLocation(stored, { latitude: 36.123457, longitude: 30.71 }),
     ).toBe(false);
+    expect(
+        sameLocation(
+            { latitude: 40.000001, longitude: 30 },
+            { latitude: 40.0000005, longitude: 30 },
+        ),
+    ).toBe(true);
+    expect(
+        sameLocation(
+            { latitude: 40, longitude: 30 },
+            { latitude: 40.0000005, longitude: 30 },
+        ),
+    ).toBe(false);
 });
 
-test("a refused field opens the step that holds it", () => {
+test("the bin offers the most recently deleted restorable plant at the place and counts the others", () => {
+    const row = (id: number, deleted_at: string, blocked = false) => ({
+        id,
+        latitude: 37,
+        longitude: 31,
+        deleted_at,
+        restore_blocker: blocked ? ("trash_retention_expired" as const) : null,
+    });
+    const older = row(1, "2026-11-01T00:00:00Z");
+    const newer = row(2, "2026-11-20T00:00:00Z");
+    const expired = row(3, "2026-11-21T00:00:00Z", true);
+    const elsewhere = { ...row(4, "2026-11-21T00:00:00Z"), latitude: 38 };
+    const place = { latitude: 37, longitude: 31 };
+    expect(binnedAt([older, newer, expired, elsewhere], place)).toEqual({
+        row: newer,
+        others: 2,
+    });
+    expect(binnedAt([older], place)).toEqual({ row: older, others: 0 });
+    expect(binnedAt([expired, elsewhere], place)).toBeNull();
+});
+
+test("a refused field opens the earliest step that holds one and focuses its first refused field", () => {
     expect(onboardingSteps(false)).toEqual(["location", "technical", "review"]);
     expect(onboardingSteps(true)).toEqual(["technical", "review"]);
-    expect(stepOfField(["timezone"], false)).toBe(0);
-    expect(stepOfField(["latitude", "dc_capacity_mw"], false)).toBe(0);
-    expect(stepOfField(["name"], false)).toBe(0);
-    expect(stepOfField(["name"], true)).toBe(0);
-    expect(stepOfField(["export_limit_mw"], false)).toBe(1);
-    expect(stepOfField(["export_limit_mw"], true)).toBe(0);
-    expect(stepOfField([], false)).toBeNull();
+    expect(refusalTarget(["timezone"], false)).toEqual({
+        step: 0,
+        field: "timezone",
+    });
+    expect(refusalTarget(["dc_capacity_mw", "timezone"], false)).toEqual({
+        step: 0,
+        field: "timezone",
+    });
+    expect(refusalTarget(["longitude", "timezone"], false)).toEqual({
+        step: 0,
+        field: "timezone",
+    });
+    expect(refusalTarget(["name"], false)).toEqual({ step: 0, field: "name" });
+    expect(refusalTarget(["name"], true)).toEqual({ step: 0, field: "name" });
+    expect(refusalTarget(["export_limit_mw"], false)).toEqual({
+        step: 1,
+        field: "export_limit_mw",
+    });
+    expect(refusalTarget(["export_limit_mw"], true)).toEqual({
+        step: 0,
+        field: "export_limit_mw",
+    });
+    expect(refusalTarget(["plant.serial", "export_limit_mw"], false)).toEqual({
+        step: 1,
+        field: "export_limit_mw",
+    });
+    expect(refusalTarget(["plant.serial"], false)).toBeNull();
+    expect(refusalTarget(["latitude"], true)).toBeNull();
+    expect(refusalTarget([], false)).toBeNull();
+});
+
+test("a refused field no step holds is left for the general message", () => {
+    expect(
+        unplacedFields(
+            { "plant.serial": "Unknown serial.", timezone: "Choose a zone." },
+            false,
+        ),
+    ).toEqual(["Unknown serial."]);
+    expect(unplacedFields({ latitude: "Out of range." }, true)).toEqual([
+        "Out of range.",
+    ]);
+    expect(unplacedFields({ timezone: "Choose a zone." }, false)).toEqual([]);
 });
 
 test("the portfolio search reads only what a card shows", () => {

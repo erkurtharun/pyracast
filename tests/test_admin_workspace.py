@@ -1,3 +1,4 @@
+import math
 from dataclasses import asdict
 from datetime import timedelta
 from typing import Any
@@ -23,6 +24,8 @@ from pyracast.plants.models import Plant, PlantSubmission
 from pyracast.plants.operations import revise_plant
 from pyracast.plants.parameters import PlantParameters
 from pyracast.platform_admin.read_models import (
+    MEAN_EARTH_RADIUS_KM,
+    distance_km,
     operations_context,
     overview_context,
     plant_list_context,
@@ -600,3 +603,27 @@ def test_setup_page_shows_the_values_approval_activates_and_marks_a_waiting_subm
     assert b"77.0 MW" in page
     assert b"130.0 MW" not in page
     assert b"Awaiting approval" in page
+
+
+def test_setup_page_says_when_a_plant_declares_no_values_yet() -> None:
+    system = make_system(approved=True)
+    Plant.objects.create(region=system.region, name="Bare plant")
+    client, _ = verified_admin()
+    page = client.get(reverse("admin:workspace_plant", args=(system.region.pk,))).content
+    assert b"<h3>Bare plant</h3>" in page
+    assert b"No saved technical configuration or customer submission." in page
+    assert b"Awaiting approval" not in page
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        ((0.0074, 0.0), (-0.0074, 180.0)),
+        ((45.0, 10.0), (-45.0, -170.0)),
+        ((90.0, 0.0), (-90.0, 0.0)),
+    ],
+)
+def test_a_move_to_the_antipode_is_half_the_circumference(
+    start: tuple[float, float], end: tuple[float, float]
+) -> None:
+    assert distance_km(start, end) == pytest.approx(math.pi * MEAN_EARTH_RADIUS_KM)

@@ -1,9 +1,11 @@
 from typing import Any
 
 import pytest
+from django.contrib.auth.models import User
 from django.db.models import F
 from django.test import Client
 
+from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.plants.approval import decide_review
 from pyracast.plants.models import Plant, PlantSubmission
@@ -125,7 +127,7 @@ def test_a_suspended_location_without_a_plant_refuses_setup_and_writes_no_plant(
             PlantParameters(name="Site", dc_capacity_mw=5),
         )
     assert not Plant.objects.filter(region=system.region).exists()
-    assert _states(system, system.region) == ("setup_incomplete", "suspended")
+    assert _states(system, system.region) == ("suspended", "suspended")
 
 
 def test_a_rejected_location_without_a_plant_records_the_setup_for_its_resubmission() -> None:
@@ -205,3 +207,91 @@ def test_a_location_already_in_the_portfolio_names_the_plant_that_holds_it() -> 
     assert response.status_code == 400, response.content
     assert response.json()["code"] == "location_already_exists"
     assert response.json()["region_id"] == region.pk
+
+
+def _region_in(system: System, state: str, *, with_plant: bool) -> Region:
+    if with_plant:
+        create_plant(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            PlantParameters(name="Plant", dc_capacity_mw=5),
+        )
+    if state == "connection_stopped":
+        system.account.credential_revision += 1
+        system.account.save(update_fields=("credential_revision",))
+    elif state in {"suspended", "rejected"}:
+        decision = "suspend" if state == "suspended" else "reject"
+        decide_review(system.admin, system.region.pk, decision, reason="Decided.")
+    return system.region
+
+
+@pytest.mark.parametrize(
+    ("state", "with_plant", "expected"),
+    [
+        ("pending", True, (None, None)),
+        ("pending", False, ("setup_incomplete", None)),
+        ("approved", True, (None, None)),
+        ("approved", False, ("setup_incomplete", None)),
+        ("connection_stopped", True, ("connection_unavailable", "connection_unavailable")),
+        ("connection_stopped", False, ("connection_unavailable", "connection_unavailable")),
+        ("suspended", True, ("suspended", "suspended")),
+        ("suspended", False, ("suspended", "suspended")),
+        ("rejected", True, ("review_rejected", None)),
+        ("rejected", False, ("setup_incomplete", None)),
+    ],
+)
+def test_a_block_is_named_before_an_incomplete_setup_and_that_before_a_rejection(
+    state: str, with_plant: bool, expected: tuple[str | None, str | None]
+) -> None:
+    system = make_system(approved=state in {"approved", "connection_stopped", "suspended"})
+    region = _region_in(system, state, with_plant=with_plant)
+    assert _states(system, region) == expected
+
+
+def test_a_save_that_is_both_blocked_and_stale_is_refused_for_the_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    decide_review(system.admin, system.region.pk, "suspend", reason="Paused by support.")
+    with raises_code("plant_edit_blocked"):
+        revise_plant(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            plant.pk,
+            PlantParameters(name="Plant", dc_capacity_mw=140, export_limit_mw=100),
+            expected_revision=plant.parameters_revision + 1,
+        )
+
+
+@pytest.mark.parametrize(
+    ("role", "status", "code"),
+    [
+        (WorkspaceRole.VIEWER, 403, "workspace_admin_required"),
+        (None, 403, "membership_required"),
+    ],
+)
+def test_a_viewer_or_an_outsider_writing_to_a_blocked_plant_learns_only_the_refused_access(
+    monkeypatch: pytest.MonkeyPatch, role: WorkspaceRole | None, status: int, code: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    decide_review(system.admin, system.region.pk, "suspend", reason="Paused by support.")
+    user = User.objects.create(username="writer")
+    if role is not None:
+        Membership.objects.create(user=user, tenant=system.tenant, role=role)
+    client = Client()
+    client.force_login(user)
+    response = client.put(
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/",
+        {
+            "name": "Plant",
+            "dc_capacity_mw": 140,
+            "export_limit_mw": 100,
+            "expected_revision": plant.parameters_revision,
+        },
+        content_type="application/json",
+    )
+    assert (response.status_code, response.json()["code"]) == (status, code)
+    assert "suspended" not in response.json()["message"]
+    assert Plant.objects.get(pk=plant.pk).parameters_revision == plant.parameters_revision

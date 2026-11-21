@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
 from pyracast.forecasts.validation import validate_binding
-from pyracast.plants.approval import approve_region
+from pyracast.plants.approval import approve_region, decide_review
 from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
 from pyracast.plants.operations import create_plant
 from pyracast.plants.parameters import PlantParameters
@@ -400,3 +400,41 @@ def test_a_details_page_opened_before_an_approval_cannot_save_onto_the_approved_
     assert "This plant changed after you opened this page." in refused.content.decode()
     configuration = PlantConfiguration.objects.get(plant=plant)
     assert (configuration.revision, configuration.dc_capacity_mw) == (1, 130)
+
+
+BLOCKED_FOR_OPERATOR = (
+    "Technical details cannot change while the plant is suspended or its data connection is "
+    "not current. Approve the plant again or validate its connection first."
+)
+
+
+def test_a_blocked_details_save_tells_the_operator_what_to_do_and_saves_nothing() -> None:
+    system, plant = approved_plant()
+    decide_review(system.admin, system.region.pk, "suspend", reason="Paused by support.")
+    client, _ = verified_admin()
+    url = f"/admin/plants/{system.region.pk}/details/"
+    response = client.post(
+        url, details(client, system.region, dc_capacity_mw="140", latitude="40.5")
+    )
+    assert response.status_code == 400
+    page = response.content.decode()
+    assert BLOCKED_FOR_OPERATOR in page
+    assert "Contact Pyracast support" not in page
+    region = Region.objects.get(pk=system.region.pk)
+    assert (region.status, region.latitude) == (RegionStatus.SUSPENDED, 40)
+    assert Plant.objects.get(pk=plant.pk).current_configuration_id == plant.current_configuration_id
+
+
+def test_a_location_correction_of_a_suspended_plant_returns_it_to_review() -> None:
+    system, _plant = approved_plant()
+    decide_review(system.admin, system.region.pk, "suspend", reason="Paused by support.")
+    client, _ = verified_admin()
+    url = f"/admin/plants/{system.region.pk}/details/"
+    response = client.post(url, details(client, system.region, latitude="40.5"))
+    assert response.status_code == 302
+    region = Region.objects.get(pk=system.region.pk)
+    assert (region.status, region.latitude, region.approved_binding_id) == (
+        RegionStatus.PENDING,
+        40.5,
+        None,
+    )

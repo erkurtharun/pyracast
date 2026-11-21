@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
-import { mockApi, paged, plant, region } from "./support/workspace";
+import { mockApi, paged, plant, region, tenantRow } from "./support/workspace";
 
 const binRow = {
     id: region.id,
@@ -110,4 +110,66 @@ test("undo after a delete restores the plant on the portfolio", async ({
         page.getByRole("status").filter({ hasText: `${plant.name} restored.` }),
     ).toBeVisible();
     expect(state.deleted).toBe(false);
+});
+
+async function deleteFromSettings(page: Page) {
+    await page.goto("/app/w/1/plants/11/settings/");
+    await page
+        .getByRole("button", { name: "Delete plant", exact: true })
+        .click();
+    await page
+        .getByRole("button", { name: "Move plant to recycle bin", exact: true })
+        .click();
+}
+
+const deletionNotice = (page: Page) =>
+    page.getByRole("status").filter({
+        hasText: `${plant.name} is in the recycle bin.`,
+    });
+
+test("a plant restored through the add-plant wizard no longer offers its undo", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await bin(page, { deleted: false });
+    await deleteFromSettings(page);
+    await expect(deletionNotice(page)).toBeVisible();
+    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByLabel("Plant name", { exact: true }).fill("Again");
+    await page.getByLabel("Latitude (°)").fill(String(region.latitude));
+    await page.getByLabel("Longitude (°)").fill(String(region.longitude));
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("button", { name: `Restore ${plant.name}` }).click();
+    await expect(page).toHaveURL("/app/w/1/plants/11/forecast/");
+    await page.getByRole("button", { name: /All plants/ }).click();
+    await expect(page.locator(".region-card")).toHaveCount(1);
+    await expect(deletionNotice(page)).toHaveCount(0);
+});
+
+test("the undo notice is gone after leaving the workspace and coming back", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await bin(page, { deleted: false });
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([
+                tenantRow({ id: 1, name: "Sunfield Energy", role: "admin" }),
+                tenantRow({ id: 2, name: "Second Energy", role: "admin" }),
+            ]),
+        }),
+    );
+    await page.route("**/api/tenants/2/sites/", (route) =>
+        route.fulfill({ json: paged([]) }),
+    );
+    await deleteFromSettings(page);
+    await expect(deletionNotice(page)).toBeVisible();
+    await page.getByLabel("Workspace").selectOption("2");
+    await expect(page).toHaveURL("/app/w/2/");
+    await page.getByLabel("Workspace").selectOption("1");
+    await expect(page).toHaveURL("/app/w/1/");
+    await expect(
+        page.getByRole("button", { name: "Add a plant" }),
+    ).toBeVisible();
+    await expect(deletionNotice(page)).toHaveCount(0);
 });
