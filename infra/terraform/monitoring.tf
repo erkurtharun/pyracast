@@ -217,9 +217,10 @@ resource "google_monitoring_alert_policy" "runtime_restarts" {
         "metric.type=\"logging.googleapis.com/user/${google_logging_metric.runtime_restarts.name}\"",
         "resource.type=\"gce_instance\"",
       ])
-      comparison      = "COMPARISON_GT"
-      threshold_value = 2
-      duration        = "0s"
+      comparison              = "COMPARISON_GT"
+      threshold_value         = 2
+      duration                = "60s"
+      evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE"
 
       aggregations {
         alignment_period     = "3600s"
@@ -233,8 +234,10 @@ resource "google_monitoring_alert_policy" "runtime_restarts" {
     }
   }
 
+  # An empty window closes the incident (evaluation_missing_data); this backs that up, never
+  # sooner than the longest window could still hold the lines that opened it.
   alert_strategy {
-    auto_close = "86400s"
+    auto_close = "3600s"
   }
 
   documentation {
@@ -321,9 +324,10 @@ resource "google_monitoring_alert_policy" "security" {
         "metric.label.event=\"${each.value.signal}\"",
         "resource.type=\"gce_instance\"",
       ])
-      comparison      = "COMPARISON_GT"
-      threshold_value = each.value.threshold
-      duration        = "0s"
+      comparison              = "COMPARISON_GT"
+      threshold_value         = each.value.threshold
+      duration                = "60s"
+      evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE"
 
       aggregations {
         alignment_period     = "600s"
@@ -337,8 +341,10 @@ resource "google_monitoring_alert_policy" "security" {
     }
   }
 
+  # An empty window closes the incident (evaluation_missing_data); this backs that up, never
+  # sooner than the longest window could still hold the lines that opened it.
   alert_strategy {
-    auto_close = "86400s"
+    auto_close = "3600s"
   }
 
   documentation {
