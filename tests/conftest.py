@@ -104,6 +104,7 @@ MIGRATION = frozenset(
         "test_location_request_migration",
         "test_reminder_recipient_migration",
         "test_schema_naming_migrations",
+        "test_submission_change_time_migration",
         "test_vocabulary_migrations",
         "test_workspace_name_migration",
     }

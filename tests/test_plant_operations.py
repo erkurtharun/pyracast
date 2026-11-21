@@ -736,7 +736,7 @@ def test_rename_to_the_region_name_leaves_the_region_unchanged(
     assert not AuditEvent.objects.filter(action="region_renamed").exists()
 
 
-SUBMISSION_FIELDS_OUTSIDE_SAVE = {"id", "plant", "submitted_by", "created_at"}
+SUBMISSION_FIELDS_OUTSIDE_SAVE = {"id", "plant", "submitted_by", "created_at", "updated_at"}
 
 
 def pending_submission(system: System) -> tuple[Plant, dict[str, Any]]:

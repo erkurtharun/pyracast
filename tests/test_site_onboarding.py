@@ -12,12 +12,12 @@ from django.utils import timezone
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.forecasts.models import CollectionJob
 from pyracast.forecasts.validation import validate_binding
+from pyracast.plants.approval import approve_region
 from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
 from pyracast.plants.operations import create_plant, revise_plant
 from pyracast.plants.sites import site_queryset, submit_site
 from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import (
-    approve_region,
     configure_binding,
     request_location_change,
     submit_region,
@@ -128,8 +128,8 @@ def test_approval_materializes_submission_once_and_preserves_customer_declaratio
         mounting_type="tracking",
     )
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), NOW)
-    job = approve_region(system.admin, system.region.pk, system.binding.pk, NOW)
-    assert approve_region(system.admin, system.region.pk, system.binding.pk, NOW).pk == job.pk
+    job = approve_region(system.admin, system.region.pk, system.binding.pk, NOW).job
+    assert approve_region(system.admin, system.region.pk, system.binding.pk, NOW).job.pk == job.pk
     plant.refresh_from_db()
     assert plant.current_configuration is not None
     assert plant.current_configuration.dc_capacity_mw == 140
@@ -154,7 +154,7 @@ def test_approval_materializes_submission_once_and_preserves_customer_declaratio
 def test_invalid_approval_keeps_submission_and_creates_no_configuration() -> None:
     system = make_system()
     plant = pending_plant(system)
-    with pytest.raises(ValidationError, match="validated"):
+    with pytest.raises(ValidationError, match="Validate the current setup"):
         approve_region(system.admin, system.region.pk, system.binding.pk, NOW)
     plant.refresh_from_db()
     assert plant.current_configuration_id is None

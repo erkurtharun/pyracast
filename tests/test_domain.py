@@ -14,14 +14,13 @@ from pyracast.connections.operations import create_account, rotate_secret
 from pyracast.forecasts.models import CollectionJob, RequestAttempt, RequestPurpose
 from pyracast.forecasts.quota import QuotaExceededError, reserve_request
 from pyracast.forecasts.validation import validate_binding
+from pyracast.plants.approval import ReviewDecision, approve_region, decide_review
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.regions.operations import (
     approve_location_change,
-    approve_region,
     configure_binding,
     request_location_change,
     submit_region,
-    transition_region,
     validate_location,
 )
 from tests.support.domain import NOW, FakeAdapter, make_system, provider_key
@@ -187,7 +186,7 @@ def test_validation_rechecks_configuration_after_network(change: str) -> None:
 
     with pytest.raises(ValidationError):
         validate_binding(system.admin, system.binding.pk, FakeAdapter(mutate), NOW)
-    assert RequestAttempt.objects.get().outcome == "uncertain"
+    assert RequestAttempt.objects.get().outcome == "succeeded"
 
 
 def test_approval_is_atomic_idempotent_and_permissions_checked() -> None:
@@ -195,19 +194,21 @@ def test_approval_is_atomic_idempotent_and_permissions_checked() -> None:
     with pytest.raises(ValidationError):
         approve_region(system.admin, system.region.pk, system.binding.pk, NOW)
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), NOW)
-    first = approve_region(system.admin, system.region.pk, system.binding.pk, NOW)
+    first = approve_region(system.admin, system.region.pk, system.binding.pk, NOW).job
     duplicate = approve_region(
         system.admin, system.region.pk, system.binding.pk, NOW + timedelta(seconds=1)
-    )
+    ).job
     assert first.pk == duplicate.pk
     assert first.target_date.isoformat() == "2026-11-10"
     assert AuditEvent.objects.filter(action="region_approved").count() == 1
     assert CollectionJob.objects.count() == 1
-    for status in ("suspended", "rejected"):
-        assert transition_region(system.admin, system.region.pk, status).status == status
-        assert AuditEvent.objects.filter(action=f"region_{status}").count() == 1
+    assert decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND)
+    assert Region.objects.get(pk=system.region.pk).status == "suspended"
+    assert AuditEvent.objects.filter(action="region_suspended").count() == 1
     with pytest.raises(ValidationError):
-        transition_region(system.admin, system.region.pk, "approved")
+        decide_review(system.admin, system.region.pk, ReviewDecision.REJECT)
+    with pytest.raises(ValidationError):
+        decide_review(system.admin, system.region.pk, "approved")
     with pytest.raises(ValidationError):
         approve_region(system.admin, system.region.pk, system.binding.pk, NOW.replace(tzinfo=None))
 

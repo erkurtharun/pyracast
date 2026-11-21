@@ -84,11 +84,11 @@ def workspace_name(
     )
 
     def rename() -> HttpResponse:
+        name = {"name": form.cleaned_data["name"]}
         if form.apply(_actor(request)):
-            name = form.cleaned_data["name"]
-            messages.success(request, _("%(name)s is the new workspace name.") % {"name": name})
+            messages.success(request, _("%(name)s is the new workspace name.") % name)
         else:
-            messages.info(request, _("Nothing changed."))
+            messages.info(request, _("%(name)s is already the workspace name.") % name)
         return redirect("admin:workspace_tenant", tenant_id=tenant.pk)
 
     return submitted(request, form, rename) or form_page(
@@ -106,8 +106,11 @@ def workspace_administrator(
     )
 
     def reassign() -> HttpResponse:
-        form.apply(_actor(request))
-        messages.success(request, _("Workspace administrator updated."))
+        label = {"member": member_label(form.cleaned_data["administrator"])}
+        if form.apply(_actor(request)):
+            messages.success(request, _("%(member)s is now the workspace administrator.") % label)
+        else:
+            messages.info(request, _("%(member)s is already the workspace administrator.") % label)
         return _workspace_section(tenant.pk, "members-title")
 
     return submitted(request, form, reassign) or form_page(

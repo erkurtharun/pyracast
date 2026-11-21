@@ -5,10 +5,12 @@ from datetime import datetime, timedelta
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
+from pyracast.errors import ConflictError, ErrorCode
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
@@ -24,6 +26,16 @@ from pyracast.regions.models import AuditAction, Region, RegionStatus, active_re
 
 logger = logging.getLogger(__name__)
 
+# An unanswered validation attempt younger than this is still in flight: it outlasts the
+# whole-request read deadline of a provider answer (outbound.READ_DEADLINE_SECONDS).
+VALIDATION_IN_FLIGHT = timedelta(minutes=1)
+
+
+def refuses_binding(error: ProviderError) -> bool:
+    """Only an unreachable, throttled or failing provider leaves the stored health as it was."""
+    transient = error.code == "provider_request_failed" and error.retryable
+    return not transient or error.status_code in {401, 403, 404}
+
 
 def validate_binding(
     actor: User, binding_id: int, adapter: ProviderAdapter, now: datetime
@@ -38,7 +50,26 @@ def validate_binding(
     ):
         raise ValidationError("Confirmed site settings and installation date are required.")
     adapter.prepare(binding)
-    attempt = reserve_request(binding, now, purpose=RequestPurpose.VALIDATION)
+    with transaction.atomic():
+        current = Region.objects.active().select_for_update().filter(pk=binding.region_id).first()
+        if current is None or current.revision != binding.region_revision:
+            raise ConflictError(
+                ErrorCode.CONFLICT, gettext("This provider binding is no longer current.")
+            )
+        if RequestAttempt.objects.filter(
+            binding=binding,
+            purpose=RequestPurpose.VALIDATION,
+            outcome=RequestOutcome.UNCERTAIN,
+            created_at__gt=now - VALIDATION_IN_FLIGHT,
+        ).exists():
+            raise ConflictError(
+                ErrorCode.CONFLICT,
+                gettext(
+                    "This connection is being validated now. "
+                    "Reload the page in a minute to see the result."
+                ),
+            )
+        attempt = reserve_request(binding, now, purpose=RequestPurpose.VALIDATION)
     try:
         adapter.validate(binding)
     except ProviderError as exc:
@@ -52,11 +83,13 @@ def validate_binding(
         RequestAttempt.objects.filter(pk=attempt.pk).update(
             outcome=RequestOutcome.FAILED, http_status=exc.status_code
         )
-        SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
+        if refuses_binding(exc):
+            SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
         record_provider_failure(
             binding.provider_account, exc, now + timedelta(seconds=time.monotonic() - started)
         )
         raise
+    RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.SUCCEEDED)
     with transaction.atomic():
         region = Region.objects.select_for_update().get(pk=binding.region_id)
         account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
@@ -77,8 +110,6 @@ def validate_binding(
             and account.authorized_at is not None
         ):
             _rearm_after_validation(binding, now + timedelta(seconds=time.monotonic() - started))
-        attempt.outcome = RequestOutcome.SUCCEEDED
-        attempt.save(update_fields=("outcome",))
         record_audit(
             actor=actor,
             region=region,

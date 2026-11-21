@@ -87,9 +87,9 @@ class WorkspaceAdministratorForm(forms.Form):
             "email", "username", "pk"
         )
 
-    def apply(self, actor: User) -> None:
+    def apply(self, actor: User) -> bool:
         user: User = self.cleaned_data["administrator"]
-        reassign_workspace_admin(
+        return reassign_workspace_admin(
             actor,
             self.tenant.pk,
             user.pk,
@@ -158,6 +158,8 @@ class WorkspaceRenameForm(WorkspaceNameForm):
         expected, name = self.cleaned_data["expected_name"], self.cleaned_data["name"]
         with transaction.atomic():
             tenant = Tenant.objects.select_for_update().get(pk=self.instance.pk)
+            if tenant.name == name:
+                return False
             if tenant.name != expected:
                 raise ConflictError(
                     ErrorCode.CONFLICT,
@@ -166,8 +168,6 @@ class WorkspaceRenameForm(WorkspaceNameForm):
                         "Reload it to see the current name."
                     ),
                 )
-            if name == expected:
-                return False
             tenant.name = name
             tenant.save(update_fields=("name",))
             _log(actor, tenant, CHANGE, f"Renamed from {expected} to {name}.")

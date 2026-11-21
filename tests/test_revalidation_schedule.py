@@ -7,8 +7,8 @@ from pyracast.forecasts.jobs import claim, collect
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.forecasts.validation import validate_binding
+from pyracast.plants.approval import approve_region
 from pyracast.regions.models import Region
-from pyracast.regions.operations import approve_region
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate
 
@@ -56,7 +56,7 @@ def test_first_approval_after_cutoff_does_not_backfill_a_preapproval_slot() -> N
     system = make_system()
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), NOW - timedelta(hours=1))
     approval_time = NOW + timedelta(hours=1)
-    initial = approve_region(system.admin, system.region.pk, system.binding.pk, approval_time)
+    initial = approve_region(system.admin, system.region.pk, system.binding.pk, approval_time).job
 
     assert enqueue_due(approval_time) == []
     assert list(CollectionJob.objects.values_list("pk", flat=True)) == [initial.pk]
@@ -74,7 +74,7 @@ def test_approval_acquisition_runs_outside_an_existing_schedule_without_enabling
         times=["09:15", "10:00"],
         effective_from=NOW - timedelta(hours=2),
     )
-    initial = approve_region(system.admin, system.region.pk, system.binding.pk, NOW)
+    initial = approve_region(system.admin, system.region.pk, system.binding.pk, NOW).job
 
     assert collect(initial.pk, FakeAdapter(), calculate, NOW)
     assert RequestAttempt.objects.filter(job=initial).count() == 1

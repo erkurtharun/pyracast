@@ -9,15 +9,16 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import close_old_connections, connection
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.operations import create_account
 from pyracast.forecasts.validation import validate_binding
+from pyracast.plants.approval import approve_region
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
 from pyracast.regions.operations import (
     approve_location_change,
-    approve_region,
     configure_binding,
     reject_location_change,
     request_location_change,
@@ -101,11 +102,13 @@ def test_location_review_requires_new_binding_and_follows_binding_revisions() ->
         approve_location_change(system.member, change.pk, expected_revision=change.base_revision)
     reviewed = approve_location_change(
         system.admin, change.pk, expected_revision=change.base_revision
-    )
+    ).change
     assert reviewed.reviewed_by_id == system.admin.pk
     assert reviewed.reviewed_at is not None
     assert (
-        approve_location_change(system.admin, change.pk, expected_revision=change.base_revision).pk
+        approve_location_change(
+            system.admin, change.pk, expected_revision=change.base_revision
+        ).change.pk
         == change.pk
     )
     with raises_code("location_change_already_reviewed"):
@@ -159,10 +162,12 @@ def test_location_review_requires_new_binding_and_follows_binding_revisions() ->
     assert second.base_revision == 3
     rejected = reject_location_change(
         system.admin, second.pk, expected_revision=second.base_revision
-    )
+    ).change
     assert rejected.status == "rejected"
     assert (
-        reject_location_change(system.admin, second.pk, expected_revision=second.base_revision).pk
+        reject_location_change(
+            system.admin, second.pk, expected_revision=second.base_revision
+        ).change.pk
         == second.pk
     )
     system.region.refresh_from_db()
@@ -190,10 +195,10 @@ def test_approved_location_requires_validated_replacement_before_collection_resu
         capacity_semantics_verified=True,
     )
     assert (replacement.latitude, replacement.longitude, replacement.timezone) == (41, 30, "UTC")
-    with pytest.raises(ValidationError, match="validated first"):
+    with pytest.raises(ValidationError, match="Validate the current setup"):
         approve_region(system.admin, system.region.pk, replacement.pk, NOW)
     validate_binding(system.admin, replacement.pk, FakeAdapter(), NOW)
-    job = approve_region(system.admin, system.region.pk, replacement.pk, NOW)
+    job = approve_region(system.admin, system.region.pk, replacement.pk, NOW).job
     system.region.refresh_from_db()
     assert (system.region.status, system.region.approved_binding_id) == ("approved", replacement.pk)
     assert job.binding_id == replacement.pk
@@ -323,7 +328,7 @@ def test_concurrent_reviews_apply_location_at_most_once() -> None:
             barrier.wait(timeout=10)
             return approve_location_change(
                 system.admin, change.pk, expected_revision=change.base_revision
-            ).status
+            ).change.status
         finally:
             connection.close()
 
@@ -500,7 +505,7 @@ def test_binding_replacement_rebases_pending_location_request() -> None:
     assert (
         approve_location_change(
             system.admin, change.pk, expected_revision=change.base_revision
-        ).status
+        ).change.status
         == "approved"
     )
     system.region.refresh_from_db()
@@ -548,4 +553,76 @@ def test_approval_requires_the_request_to_match_the_region_revision() -> None:
     change = _pending_location_request(system)
     Region.objects.filter(pk=system.region.pk).update(revision=2)
     with raises_code("region_revision_changed"):
-        approve_location_change(system.admin, change.pk, expected_revision=change.base_revision)
+        approve_location_change(system.admin, change.pk, expected_revision=2)
+    change.refresh_from_db()
+    assert change.status == "pending"
+
+
+def test_approval_requires_the_page_to_match_the_region_revision() -> None:
+    system = make_system(approved=True)
+    change = _pending_location_request(system)
+    Region.objects.filter(pk=system.region.pk).update(revision=2)
+    RegionLocationChangeRequest.objects.filter(pk=change.pk).update(base_revision=2)
+    with raises_code("region_revision_changed"):
+        approve_location_change(system.admin, change.pk, expected_revision=1)
+    change.refresh_from_db()
+    assert change.status == "pending"
+
+
+def _region_updates(queries: CaptureQueriesContext) -> list[str]:
+    return [
+        query["sql"]
+        for query in queries.captured_queries
+        if query["sql"].startswith('UPDATE "regions_region" ')
+    ]
+
+
+def _move_by_operator(system: System) -> CaptureQueriesContext:
+    Region.objects.filter(pk=system.region.pk).update(status="pending")
+    change = _pending_location_request(system)
+    with CaptureQueriesContext(connection) as queries:
+        approve_location_change(system.admin, change.pk, expected_revision=1)
+    return queries
+
+
+def _move_by_administrator(system: System) -> CaptureQueriesContext:
+    Region.objects.filter(pk=system.region.pk).update(revision=2, approved_binding=system.binding)
+    system.region.refresh_from_db()
+    with CaptureQueriesContext(connection) as queries:
+        assert _pending_location_request(system).status == "approved"
+    return queries
+
+
+@pytest.mark.parametrize(
+    ("approved", "move"),
+    [(True, _move_by_operator), (False, _move_by_administrator)],
+    ids=["operator-approval", "administrator-move"],
+)
+def test_a_pending_plant_moves_without_its_earlier_approved_binding_in_one_update(
+    approved: bool, move: Callable[[System], CaptureQueriesContext]
+) -> None:
+    system = make_system(approved=approved)
+    queries = move(system)
+    system.region.refresh_from_db()
+    assert (system.region.latitude, system.region.longitude, system.region.timezone) == (
+        41,
+        30,
+        "UTC",
+    )
+    assert (system.region.status, system.region.approved_binding_id) == ("pending", None)
+    [update] = _region_updates(queries)
+    for column in ("latitude", "longitude", "timezone", "revision", "approved_binding_id"):
+        assert f'"{column}" = ' in update
+
+
+def test_a_binding_replacement_on_a_pending_plant_drops_its_earlier_approved_binding() -> None:
+    system = make_system(approved=True)
+    Region.objects.filter(pk=system.region.pk).update(status="pending")
+    with CaptureQueriesContext(connection) as queries:
+        replacement = submit_binding(system, site_id="replacement")
+    system.region.refresh_from_db()
+    assert (system.region.revision, replacement.region_revision) == (2, 2)
+    assert (system.region.status, system.region.approved_binding_id) == ("pending", None)
+    [update] = _region_updates(queries)
+    for column in ("revision", "approved_binding_id"):
+        assert f'"{column}" = ' in update

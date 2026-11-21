@@ -35,11 +35,10 @@ from pyracast.forecasts.validation import validate_binding
 from pyracast.metering.models import EpiasConnection
 from pyracast.notifications.models import NotificationSettings
 from pyracast.plants.models import Plant
-from pyracast.platform_admin.forms import WorkspaceSettingsForm
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import Region
 from tests.support.account_sessions import totp_clock, with_totp
-from tests.support.admin_setup import admin_system, setup_input, submitted_plant
+from tests.support.admin_setup import admin_system, review_fields, setup_input, submitted_plant
 from tests.support.api import verified_admin
 from tests.support.auth_lifecycle import totp_code
 from tests.support.domain import FakeAdapter, System, make_system
@@ -107,6 +106,7 @@ def binding_action(system: System, action: str, **changes: object) -> dict[str, 
         "expected_revision": system.region.revision,
         "binding_id": system.binding.pk,
         "credential_revision": system.account.credential_revision,
+        **review_fields(system),
         **changes,
     }
 
@@ -618,10 +618,10 @@ def test_a_console_write_that_collides_or_times_out_returns_with_a_retry_message
     client, _ = verified_admin()
     page = reverse("admin:workspace_settings")
 
-    def fail(form: WorkspaceSettingsForm, actor: User) -> None:
+    def fail(actor: User, value: int, *, expected: int) -> None:
         raise database_failure(cause)
 
-    monkeypatch.setattr(WorkspaceSettingsForm, "apply", fail)
+    monkeypatch.setattr("pyracast.platform_admin.pages.set_recipient_limit", fail)
     with caplog.at_level("WARNING", logger="pyracast.platform_admin"):
         response = client.post(page, SETTINGS_CHANGE, HTTP_REFERER=f"http://testserver{page}")
 
@@ -641,13 +641,13 @@ def test_other_database_failures_and_failing_reads_keep_the_server_error(
     client.raise_request_exception = False
     page = reverse("admin:workspace_settings")
 
-    def fail(form: WorkspaceSettingsForm, actor: User) -> None:
+    def fail(actor: User, value: int, *, expected: int) -> None:
         raise database_failure(ValueError("connection lost"))
 
     def busy_read(data: object) -> dict[str, Any]:
         raise database_failure(LockNotAvailable("canceling statement due to lock timeout"))
 
-    monkeypatch.setattr(WorkspaceSettingsForm, "apply", fail)
+    monkeypatch.setattr("pyracast.platform_admin.pages.set_recipient_limit", fail)
     write = client.post(page, SETTINGS_CHANGE, HTTP_REFERER=f"http://testserver{page}")
     monkeypatch.setattr("pyracast.platform_admin.pages.settings_context", busy_read)
     read = client.get(page)

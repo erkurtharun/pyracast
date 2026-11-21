@@ -30,16 +30,12 @@ from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import ForecastResult
 from pyracast.forecasts.quota import QuotaExceededError
 from pyracast.forecasts.validation import validate_binding
+from pyracast.plants.approval import ReviewDecision, approve_region, decide_review
 from pyracast.platform_admin.records import ReadOnlyAdmin
 from pyracast.platform_admin.site import site
 from pyracast.providers import FixtureProvider, adapter_for
 from pyracast.regions.models import Region
-from pyracast.regions.operations import (
-    approve_region,
-    configure_binding,
-    submit_region,
-    transition_region,
-)
+from pyracast.regions.operations import configure_binding, submit_region
 from tests.support.api import verified_admin
 
 pytestmark = pytest.mark.django_db
@@ -116,7 +112,7 @@ def test_fixture_workflow_and_freshness(customer: tuple[Client, User, Tenant]) -
     with pytest.raises(ValidationError):
         approve_region(operator, region.pk, binding.pk, timezone.now())
     validate_binding(operator, binding.pk, adapter_for(binding), timezone.now())
-    job = approve_region(operator, region.pk, binding.pk, timezone.now())
+    job = approve_region(operator, region.pk, binding.pk, timezone.now()).job
     path = f"/api/tenants/{tenant.pk}/regions/{region.pk}/forecast/?date={job.target_date}"
     assert client.get(path).json()["freshness"] == "missing"
     assert collect(job.pk, FixtureProvider(), calculate, timezone.now())
@@ -130,7 +126,7 @@ def test_fixture_workflow_and_freshness(customer: tuple[Client, User, Tenant]) -
     assert "unvalidated" in data["result"]["quality_flags"]
     assert not collect(job.pk, FixtureProvider(), calculate, timezone.now())
     assert ForecastResult.objects.count() == 1
-    transition_region(operator, region.pk, "suspended")
+    decide_review(operator, region.pk, ReviewDecision.SUSPEND)
     assert client.get(path).json()["freshness"] == "stale"
     region.timezone = "America/New_York"
     region.save(update_fields=["timezone"])

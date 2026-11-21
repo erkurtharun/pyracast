@@ -17,7 +17,7 @@ from pyracast.connections.contracts import (
     ProviderData,
     ProviderError,
 )
-from pyracast.connections.models import SiteBinding
+from pyracast.connections.models import SITE_ID_PATTERN, SiteBinding
 from pyracast.connections.secrets import decrypt_api_key
 from pyracast.intervals import NormalizedInterval, Sunlight
 from pyracast.irradiance import local_day_bounds
@@ -166,7 +166,7 @@ class SolcastProvider(ProviderAdapter, HistoryAdapter):
             decrypt_api_key(binding.provider_account.encrypted_api_key)
         except ProviderError:
             raise ProviderError("invalid_provider_secret", retryable=False) from None
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", binding.site_id):
+        if not re.fullmatch(SITE_ID_PATTERN, binding.site_id):
             raise ProviderError("invalid_site_id", retryable=False)
 
     def validate(self, binding: SiteBinding) -> None:

@@ -102,6 +102,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0003_lease_check_and_observation_trigger",
             "0004_schema_naming_convention",
             "0005_calibration_preparation_due_at",
+            "0006_submission_updated_at",
         ),
         "regions": (
             "0002_audit_event_details",

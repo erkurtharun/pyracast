@@ -31,15 +31,11 @@ from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob
 from pyracast.forecasts.validation import validate_binding
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.plants.approval import approve_region
 from pyracast.plants.sites import submit_site
 from pyracast.providers import FixtureProvider
 from pyracast.regions.models import Region, RegionLocationChangeRequest
-from pyracast.regions.operations import (
-    approve_region,
-    configure_binding,
-    request_location_change,
-    submit_region,
-)
+from pyracast.regions.operations import configure_binding, request_location_change, submit_region
 from tests.support.domain import FakeAdapter, System, make_system
 from tests.support.gateway_routes import SITE, backend_route
 from tests.support.notifications import freeze, store
@@ -265,7 +261,7 @@ class ForecastDays:
 def seed_forecast_days(system: System) -> ForecastDays:
     now = timezone.now()
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), now)
-    job = approve_region(system.admin, system.region.pk, system.binding.pk, now)
+    job = approve_region(system.admin, system.region.pk, system.binding.pk, now).job
     assert collect(job.pk, FixtureProvider(), calculate, timezone.now())
     today = job.target_date - timedelta(days=1)
     publish_snapshot(snapshot_for(system, today))

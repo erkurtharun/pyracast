@@ -69,12 +69,6 @@ class AuditAction(models.TextChoices):
     )
 
 
-REGION_TRANSITIONS: dict[str, AuditAction] = {
-    RegionStatus.REJECTED: AuditAction.REGION_REJECTED,
-    RegionStatus.SUSPENDED: AuditAction.REGION_SUSPENDED,
-}
-
-
 def location_coordinate(field: str) -> models.Func:
     return models.Func(
         models.F(field),

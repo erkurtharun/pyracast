@@ -13,7 +13,8 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.quota import reserve_request
 from pyracast.forecasts.schedule import configure_schedule, get_schedule, schedule_payload
 from pyracast.forecasts.scheduler import enqueue_due
-from pyracast.regions.operations import configure_binding, submit_region, transition_region
+from pyracast.plants.approval import ReviewDecision, decide_review
+from pyracast.regions.operations import configure_binding, submit_region
 from tests.support.domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -186,5 +187,5 @@ def test_next_collection_is_the_earliest_queued_job_forecast_slot_or_nightly_win
             system.member, system.tenant.pk, system.region.pk, enabled=False, times=[], now=later
         )
     else:
-        transition_region(system.admin, system.region.pk, "suspended")
+        decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND)
     assert next_collection(later) is None

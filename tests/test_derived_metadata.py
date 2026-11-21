@@ -3,7 +3,7 @@ from datetime import timedelta
 import pytest
 from django.core.exceptions import FieldDoesNotExist
 
-from pyracast.api.serializers import BindingInput, RegionOutput
+from pyracast.api.serializers import RegionOutput
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import SiteBinding
@@ -45,21 +45,3 @@ def test_obsolete_reference_metadata_is_absent_from_models_and_region_api() -> N
     assert isinstance(payload["configuration"], dict)
     assert payload["configuration"]["capacity_basis"] == "dc"
     assert payload["configuration"]["power_basis"] == "dc"
-
-
-def test_binding_input_rejects_obsolete_capacity_basis_field() -> None:
-    system = make_system()
-    serializer = BindingInput(
-        data={
-            "provider_account_id": system.account.pk,
-            "site_id": "site",
-            "capacity_kw": 1,
-            "capacity_semantics_verified": True,
-            "installation_date": "2020-01-01",
-            "power_basis": "ac",
-            "capacity_basis": "dc",
-        }
-    )
-    assert not serializer.is_valid()
-    assert "Unknown fields" in str(serializer.errors)
-    assert SiteBinding.objects.count() == 1

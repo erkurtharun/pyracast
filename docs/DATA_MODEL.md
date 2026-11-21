@@ -730,6 +730,7 @@ erDiagram
         integer submitted_by_id FK "references auth_user.id"
         double_precision surface_tilt_degrees "nullable"
         double_precision surface_azimuth_degrees "nullable"
+        timestamp_with_time_zone updated_at
     }
     plants_productionobservation {
         bigint id PK

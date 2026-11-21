@@ -20,12 +20,22 @@ from rest_framework.exceptions import ValidationError as APIValidationError
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.recovery import clear_provider_cooldown
+from pyracast.connections.setup import SetupOutcome, save_provider_setup
 from pyracast.epias import EpiasCredentialsError, EpiasError
-from pyracast.errors import DomainError, ErrorCode
+from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.forecasts.quota import QuotaExceededError, RequestDeferredError
 from pyracast.forecasts.validation import validate_binding
 from pyracast.metering.models import EpiasConnection
 from pyracast.metering.operations import connect_epias, disconnect_epias
+from pyracast.plants.approval import (
+    BLOCKER_MESSAGES,
+    ReviewDecision,
+    ReviewSnapshot,
+    approval_blockers,
+    approve_region,
+    decide_review,
+    declaration_fingerprint,
+)
 from pyracast.plants.models import Plant, PlantSubmission
 from pyracast.plants.operations import configuration_is_current
 from pyracast.platform_admin.forms import (
@@ -38,8 +48,14 @@ from pyracast.platform_admin.forms import (
 )
 from pyracast.platform_admin.read_models import review_context
 from pyracast.providers import adapter_for
-from pyracast.regions.models import Region
-from pyracast.regions.operations import approve_region
+from pyracast.regions.models import (
+    Region,
+    RegionLocationChangeRequest,
+    RegionStatus,
+    active_region,
+)
+from pyracast.regions.operations import approve_location_change, reject_location_change
+from pyracast.regions.review import TRANSITIONS
 
 if TYPE_CHECKING:
     from pyracast.platform_admin.site import PlatformAdminSite
@@ -100,6 +116,8 @@ def _action_initial(region: Region, binding: SiteBinding | None) -> dict[str, An
         "credential_revision": binding.provider_account.credential_revision if binding else None,
         "expected_cooldown_until": blocked_until.isoformat() if blocked_until else "",
         "expected_validated_at": validated_at.isoformat() if validated_at else "",
+        "expected_status": region.status,
+        "declaration": declaration_fingerprint(region.pk),
     }
 
 
@@ -158,6 +176,8 @@ def _applied(form: forms.Form, operation: Callable[[], Notice | None]) -> Notice
         )
     except ProviderError as error:
         form.add_error(None, validation_failure_message(error))
+    except ConflictError as refusal:
+        form.add_error(None, str(refusal.message))
     except ObjectDoesNotExist, ValidationError, APIValidationError:
         form.add_error(None, str(SETUP_REFUSED))
     return None
@@ -169,12 +189,19 @@ def configure(request: HttpRequest, page: PlantPage) -> Notice | None:
 
     @sensitive_variables()
     def save() -> Notice:
-        saved = form.configure(_actor(request), page.region)
-        if saved.pk != form.cleaned_data["expected_binding_id"]:
+        outcome = save_provider_setup(
+            _actor(request),
+            page.region.pk,
+            expected_revision=form.cleaned_data["expected_revision"],
+            expected_binding_id=form.cleaned_data["expected_binding_id"],
+            account=form.account(),
+            binding=form.binding(),
+        )
+        if outcome == SetupOutcome.SAVED:
             return messages.SUCCESS, _(
                 "Private provider setup saved. Validate the connection before approval."
             )
-        if form.cleaned_data["api_key"]:
+        if outcome == SetupOutcome.KEY_REPLACED:
             return messages.SUCCESS, _(
                 "API key replaced. Validate the connection to resume collection."
             )
@@ -208,11 +235,24 @@ def validate(request: HttpRequest, page: PlantPage) -> Notice | None:
 
 def approve(request: HttpRequest, page: PlantPage) -> Notice | None:
     form = page.action_form
+    for name in ("expected_status", "declaration"):
+        form.fields[name].required = True
 
     def run() -> Notice:
         current = form.current_binding(page.region)
-        approve_region(_actor(request), page.region.pk, current.pk, timezone.now())
-        return messages.SUCCESS, _("Plant approved. The first saved forecast is being prepared.")
+        seen = ReviewSnapshot(
+            form.cleaned_data["expected_status"],
+            form.cleaned_data["expected_revision"],
+            form.cleaned_data["declaration"],
+        )
+        approval = approve_region(
+            _actor(request), page.region.pk, current.pk, timezone.now(), seen=seen
+        )
+        if approval.changed:
+            return messages.SUCCESS, _(
+                "Plant approved. The first saved forecast is being prepared."
+            )
+        return messages.INFO, _("This plant is already approved.")
 
     return _applied(form, run)
 
@@ -223,12 +263,13 @@ def clear_cooldown(request: HttpRequest, page: PlantPage) -> Notice | None:
 
     def run() -> Notice:
         current = form.current_binding(page.region)
-        clear_provider_cooldown(
+        if not clear_provider_cooldown(
             _actor(request),
             current.provider_account_id,
             form.cleaned_data["credential_revision"],
             expected_blocked_until=form.cleaned_data["expected_cooldown_until"],
-        )
+        ):
+            return messages.INFO, _("There is no provider wait to clear.")
         return messages.SUCCESS, _(
             "Provider wait cleared. Queued collection can resume within the remaining quota."
         )
@@ -241,12 +282,12 @@ def unknown(request: HttpRequest, page: PlantPage) -> None:
         page.action_form.add_error(None, str(SETUP_REFUSED))
 
 
-def _epias(page: PlantPage, operation: Callable[[Plant], object], done: str) -> Notice | None:
+def _epias(page: PlantPage, operation: Callable[[Plant], Notice]) -> Notice | None:
     form = page.epias_form
     try:
         if page.plant is None:
             raise DomainError(ErrorCode.CONFIGURATION_UNAVAILABLE)
-        operation(page.plant)
+        return operation(page.plant)
     except EpiasError as error:
         form.add_error(
             None,
@@ -265,8 +306,6 @@ def _epias(page: PlantPage, operation: Callable[[Plant], object], done: str) -> 
                 "Approve its current setup and reload before connecting."
             ),
         )
-    else:
-        return messages.SUCCESS, done
     return None
 
 
@@ -274,19 +313,28 @@ def epias_connect(request: HttpRequest, page: PlantPage) -> Notice | None:
     form = page.epias_form
     if not form.is_valid():
         return None
-    return _epias(
-        page,
-        lambda plant: connect_epias(plant.pk, actor=_actor(request), **form.cleaned_data),
-        _("EPİAŞ connection saved. Initial production collection is queued."),
-    )
+
+    def connect(plant: Plant) -> Notice:
+        if connect_epias(plant.pk, actor=_actor(request), **form.cleaned_data).changed:
+            return messages.SUCCESS, _(
+                "EPİAŞ connection saved. Initial production collection is queued."
+            )
+        return messages.INFO, _(
+            "This plant is already connected to this EPİAŞ plant. Nothing changed."
+        )
+
+    return _epias(page, connect)
 
 
 def epias_disconnect(request: HttpRequest, page: PlantPage) -> Notice | None:
-    return _epias(
-        page,
-        lambda plant: disconnect_epias(plant.pk, actor=_actor(request)),
-        _("EPİAŞ connection disconnected. Saved production remains available."),
-    )
+    def disconnect(plant: Plant) -> Notice:
+        if disconnect_epias(plant.pk, actor=_actor(request)):
+            return messages.SUCCESS, _(
+                "EPİAŞ connection disconnected. Saved production remains available."
+            )
+        return messages.INFO, _("This plant is not connected to EPİAŞ.")
+
+    return _epias(page, disconnect)
 
 
 ACTIONS: dict[str, Action] = {
@@ -299,23 +347,10 @@ ACTIONS: dict[str, Action] = {
 }
 
 
-def _can_approve(binding: SiteBinding | None) -> bool:
-    return bool(
-        binding
-        and binding.validated_at
-        and binding.validated_credential_revision == binding.provider_account.credential_revision
-        and binding.provider_account.enabled
-        and binding.provider_account.authorized_at is not None
-        and (
-            binding.provider_account.provider != "solcast"
-            or (binding.settings_verification_reference and binding.installation_date)
-        )
-    )
-
-
 def _render(request: HttpRequest, site: PlatformAdminSite, page: PlantPage) -> TemplateResponse:
     binding = page.binding
     plant = page.plant
+    blockers = approval_blockers(binding, binding.provider_account) if binding else []
     return TemplateResponse(
         request,
         "admin/regions/region/setup.html",
@@ -344,7 +379,9 @@ def _render(request: HttpRequest, site: PlatformAdminSite, page: PlantPage) -> T
                 and plant.current_configuration
                 and configuration_is_current(plant.current_configuration)
             ),
-            "can_approve": _can_approve(binding),
+            "can_approve": binding is not None and not blockers,
+            "approvable": (page.region.status, RegionStatus.APPROVED) in TRANSITIONS,
+            "approval_blockers": [BLOCKER_MESSAGES[blocker] for blocker in blockers],
         },
         status=400 if request.method == "POST" else 200,
     )
@@ -364,24 +401,66 @@ def plant(request: HttpRequest, region_id: int, *, site: PlatformAdminSite) -> H
     return _render(request, site, page)
 
 
+DECISION_NOTICES = {
+    "reject": (gettext_lazy("Plant rejected."), gettext_lazy("This plant is already rejected.")),
+    "suspend": (
+        gettext_lazy("Plant suspended."),
+        gettext_lazy("This plant is already suspended."),
+    ),
+    "approve_location": (
+        gettext_lazy("Location change approved."),
+        gettext_lazy("This location change is already approved."),
+    ),
+    "reject_location": (
+        gettext_lazy("Location change rejected."),
+        gettext_lazy("This location change is already rejected."),
+    ),
+}
+
+
+LOCATION_DECISIONS = {
+    "approve_location": approve_location_change,
+    "reject_location": reject_location_change,
+}
+
+
+def _decide(actor: User, region_id: int, form: ReviewDecisionForm) -> bool:
+    action = form.cleaned_data["action"]
+    if action in ReviewDecision.values:
+        return decide_review(actor, region_id, action, seen=form.seen())
+    change = RegionLocationChangeRequest.objects.get(
+        active_region("region__"), pk=form.cleaned_data["location_change_id"], region_id=region_id
+    )
+    return LOCATION_DECISIONS[action](
+        actor,
+        change.pk,
+        expected_revision=form.cleaned_data["expected_revision"],
+        expected_status=form.cleaned_data["expected_status"],
+        reason=form.cleaned_data["decision_reason"],
+    ).changed
+
+
 @require_POST
 def decision(request: HttpRequest, region_id: int) -> HttpResponse:
     get_object_or_404(Region.objects.active(), pk=region_id)
     form = ReviewDecisionForm(request.POST)
-    if form.is_valid():
-        try:
-            form.apply(_actor(request), region_id)
-        except DomainError as error:
-            messages.error(request, " ".join(error.messages))
-        except ObjectDoesNotExist, ValidationError:
-            messages.error(
-                request,
-                _("The review could not be applied. Reload and review the current plant."),
-            )
-        else:
-            messages.success(request, _("Plant review saved."))
-    else:
+    if not form.is_valid():
         messages.error(
             request, _("Choose a review action and reload the current plant before continuing.")
         )
+        return redirect("admin:workspace_plant", region_id=region_id)
+    try:
+        changed = _decide(_actor(request), region_id, form)
+    except DomainError as refusal:
+        messages.error(request, " ".join(refusal.messages))
+    except ObjectDoesNotExist, ValidationError:
+        messages.error(
+            request, _("The review could not be applied. Reload and review the current plant.")
+        )
+    else:
+        done, unchanged = DECISION_NOTICES[form.cleaned_data["action"]]
+        if changed:
+            messages.success(request, str(done))
+        else:
+            messages.info(request, str(unchanged))
     return redirect("admin:workspace_plant", region_id=region_id)

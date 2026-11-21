@@ -17,9 +17,9 @@ from pyracast.notifications.models import (
     NotificationSettings,
     ReminderSchedule,
 )
+from pyracast.notifications.operations import set_recipient_limit
 from pyracast.notifications.scheduler import PREPARATION_GRACE
 from pyracast.plants.models import Plant
-from pyracast.platform_admin.forms import WorkspaceSettingsForm
 from pyracast.platform_admin.read_models import (
     operations_context,
     overview_context,
@@ -251,15 +251,13 @@ def test_settings_are_validated_audited_and_stale_safe() -> None:
 def test_settings_audit_failure_rolls_back_value(monkeypatch: pytest.MonkeyPatch) -> None:
     system = make_system()
     NotificationSettings.objects.get_or_create(pk=1)
-    form = WorkspaceSettingsForm({"max_recipients": 9, "expected_max_recipients": 5})
-    assert form.is_valid()
 
     def fail(*args: object, **kwargs: object) -> None:
         raise DatabaseError("synthetic failure")
 
     monkeypatch.setattr(LogEntry.objects, "create", fail)
     with pytest.raises(DatabaseError):
-        form.apply(system.admin)
+        set_recipient_limit(system.admin, 9, expected=5)
     assert NotificationSettings.objects.get().max_recipients == 5
 
 

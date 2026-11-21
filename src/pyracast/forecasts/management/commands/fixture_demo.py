@@ -15,11 +15,12 @@ from pyracast.connections.operations import create_account
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.quota import QuotaExceededError
 from pyracast.forecasts.validation import validate_binding
+from pyracast.plants.approval import approve_region
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant
 from pyracast.providers import FixtureProvider
 from pyracast.regions.models import Region
-from pyracast.regions.operations import approve_region, configure_binding, submit_region
+from pyracast.regions.operations import configure_binding, submit_region
 
 REGION = "Synthetic Ankara"
 
@@ -84,7 +85,7 @@ def run_demo(actor: User) -> str:
     plant = _plant(actor, region)
     binding = _binding(actor, region)
     # A plant issuance needs a configuration older than the snapshot, so each step reads the clock.
-    job = approve_region(actor, region.pk, binding.pk, timezone.now())
+    job = approve_region(actor, region.pk, binding.pk, timezone.now()).job
     if job.status != "succeeded" and not collect(
         job.pk, FixtureProvider(), calculate, timezone.now()
     ):

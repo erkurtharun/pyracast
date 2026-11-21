@@ -3,12 +3,14 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Value
 from django.utils import timezone
+from django.utils.translation import gettext
 from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.identity import canonical_account_identity
 from pyracast.connections.models import MAX_DAILY_QUOTA, Provider, ProviderAccount
 from pyracast.connections.secrets import encrypt_secret
+from pyracast.errors import ConflictError, ErrorCode
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction
 
@@ -57,7 +59,10 @@ def create_account(
             },
         )
         if not created and require_new:
-            raise ValidationError("This account already exists. Select the existing account.")
+            raise ConflictError(
+                ErrorCode.CONFLICT,
+                gettext("This account already exists. Select the existing account."),
+            )
         if created:
             account.refresh_from_db(fields=("provider", "external_account_id"))
             record_audit(

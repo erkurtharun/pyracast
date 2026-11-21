@@ -15,14 +15,17 @@ from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import rotate_secret
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
+from pyracast.connections.setup import SetupOutcome, save_provider_setup
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.platform_admin.forms import BindingActionForm, ProviderSetupForm
+from pyracast.provider_retry import retryable_status
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import AuditEvent, Region
 from tests.support.admin_setup import (
     VALIDATION_FAILURES,
     admin_system,
+    review_fields,
     setup_input,
     setup_url,
     submitted_plant,
@@ -39,8 +42,20 @@ def action_input(system: System, action: str, **changes: object) -> dict[str, ob
         "expected_revision": system.region.revision,
         "binding_id": system.binding.pk,
         "credential_revision": system.account.credential_revision,
+        **review_fields(system),
         **changes,
     }
+
+
+def save_setup(form: ProviderSetupForm, system: System) -> SetupOutcome:
+    return save_provider_setup(
+        system.admin,
+        system.region.pk,
+        expected_revision=form.cleaned_data["expected_revision"],
+        expected_binding_id=form.cleaned_data["expected_binding_id"],
+        account=form.account(),
+        binding=form.binding(),
+    )
 
 
 def visible_text(html: str) -> str:
@@ -276,7 +291,7 @@ def test_stale_setup_and_action_revisions_are_rejected() -> None:
     assert form.is_valid(), form.errors
     rotate_secret(system.admin, system.account.pk, "rotated-key")
     with pytest.raises(ValidationError, match="account changed"):
-        form.configure(system.admin, system.region)
+        save_setup(form, system)
     action = BindingActionForm(action_input(system, "validate"))
     assert action.is_valid()
     stale = Region.objects.get(pk=system.region.pk)
@@ -314,7 +329,7 @@ def test_setup_rechecks_selected_account_provider_under_lock() -> None:
     system.account.provider = "fixture"
     system.account.save(update_fields=("provider",))
     with pytest.raises(ProviderAccount.DoesNotExist):
-        form.configure(system.admin, system.region)
+        save_setup(form, system)
     assert SiteBinding.objects.count() == 1
 
 
@@ -375,8 +390,10 @@ def test_failed_validation_shows_its_cause_once_and_logs_one_line(
     system = admin_system()
     client, _ = verified_admin()
 
+    retryable = status is None or retryable_status(status)
+
     def fail() -> None:
-        raise ProviderError(code, status_code=status)
+        raise ProviderError(code, retryable=retryable, status_code=status)
 
     monkeypatch.setattr(
         "pyracast.platform_admin.plant_review.adapter_for", lambda binding: FakeAdapter(fail)
@@ -398,7 +415,8 @@ def test_failed_validation_shows_its_cause_once_and_logs_one_line(
     assert RequestAttempt.objects.get().outcome == "failed"
     system.binding.refresh_from_db()
     system.account.refresh_from_db()
-    assert system.binding.health == "error"
+    transient = code == "provider_request_failed" and retryable
+    assert system.binding.health == ("unknown" if transient else "error")
     assert (system.account.authentication_failed_revision is not None) is (status == 401)
     assert (system.account.request_blocked_until is not None) is (status == 429)
 

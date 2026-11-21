@@ -23,6 +23,8 @@ class BindingHealth(models.TextChoices):
 
 
 MAX_DAILY_QUOTA = 10
+# The provider places the site identity in a URL path segment; anything else is refused.
+SITE_ID_PATTERN = r"[A-Za-z0-9_-]{1,200}"
 
 
 class ProviderAccount(models.Model):

@@ -3,6 +3,7 @@ from datetime import date
 from django.urls import reverse
 
 from pyracast.connections.secrets import encrypt_secret
+from pyracast.plants.approval import review_snapshot
 from pyracast.plants.models import Plant, PlantSubmission
 from tests.support.domain import System, make_system
 
@@ -70,6 +71,11 @@ def admin_system() -> System:
     system.binding.settings_verification_reference = "Verified synthetic site settings"
     system.binding.save(update_fields=("installation_date", "settings_verification_reference"))
     return system
+
+
+def review_fields(system: System) -> dict[str, object]:
+    snapshot = review_snapshot(system.region.pk)
+    return {"expected_status": snapshot.status, "declaration": snapshot.declaration}
 
 
 def setup_url(system: System) -> str:

@@ -165,6 +165,7 @@ class PlantSubmission(models.Model):
     surface_azimuth_degrees = models.FloatField(null=True)
     submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         constraints = (

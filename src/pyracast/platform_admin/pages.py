@@ -8,6 +8,7 @@ from django.shortcuts import redirect
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods, require_safe
 
+from pyracast.notifications.operations import set_recipient_limit
 from pyracast.platform_admin.forms import form_data
 from pyracast.platform_admin.read_models import (
     operations_context,
@@ -49,11 +50,25 @@ def settings(request: HttpRequest, *, site: PlatformAdminSite) -> HttpResponse:
     form = context["settings_form"]
     if request.method == "POST" and form.is_valid():
         try:
-            form.apply(cast(User, request.user))
-        except ValidationError:
-            form.add_error(None, _("The settings changed. Reload this page before saving."))
+            change = set_recipient_limit(
+                cast(User, request.user),
+                form.cleaned_data["max_recipients"],
+                expected=form.cleaned_data["expected_max_recipients"],
+            )
+        except ValidationError as refusal:
+            form.add_error(None, refusal)
         else:
-            messages.success(request, _("Email reminder settings saved."))
+            if change.changed:
+                messages.success(
+                    request,
+                    _("Recipient limit changed from %(previous)s to %(current)s.")
+                    % {"previous": change.previous, "current": change.current},
+                )
+            else:
+                messages.info(
+                    request,
+                    _("The recipient limit is already %(limit)s.") % {"limit": change.current},
+                )
             return redirect("admin:workspace_settings")
     return site.workspace_response(
         request,

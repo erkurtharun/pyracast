@@ -7,8 +7,8 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.test import Client, RequestFactory
 
+from pyracast.plants.approval import ReviewDecision, decide_review
 from pyracast.regions.models import Region
-from pyracast.regions.operations import transition_region
 
 pytestmark = pytest.mark.django_db
 
@@ -30,7 +30,7 @@ def _signed_in(user: User, *, mfa: bool) -> Client:
 
 def _operation_allowed(user: User) -> bool:
     try:
-        transition_region(user, 0, "suspended")
+        decide_review(user, 0, ReviewDecision.SUSPEND)
     except PermissionDenied:
         return False
     except Region.DoesNotExist:
