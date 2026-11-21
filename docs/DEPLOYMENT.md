@@ -620,9 +620,10 @@ not be written. Never delete `release-blocked` by hand.
 
 Every alerted event has its own log-match policy, with its own hourly notification limit and a text
 pointing to its row below. Once Google charges for alerting (no sooner than 2027-09-01), each
-log-based policy costs 0.35 USD a month. A test alert of an alerted event opens an incident on its
-policy and uses that policy's hourly notification limit; a test alert of any other event only
-writes the log line. Test lines never count as a watchdog heartbeat.
+log-based policy costs 0.35 USD a month. Repeated restarts alert on a count instead: see
+`pyracast_runtime_restarted`. A test alert of an event with its own policy opens an incident on
+that policy and uses its hourly notification limit; a test alert of any other event only writes
+the log line. Test lines never count as a watchdog heartbeat or a restart.
 
 | Event | Means | Check first | Recover |
 | --- | --- | --- | --- |
@@ -630,7 +631,7 @@ writes the log line. Test lines never count as a watchdog heartbeat.
 | `pyracast_watchdog_step_failed` | One watchdog check (`step`) timed out or raised; the line names only the step, the outcome and the error type | The other lines of the same run | Run that step by hand as listed below the table to see its error; the other checks still ran |
 | `pyracast_host_capacity` | Disk or memory is low | `df -h`, `free -m` | Free or grow the disk; find the process holding memory |
 | `pyracast_runtime_unhealthy` | A container stays unhealthy after the restart, PostgreSQL or RabbitMQ is unhealthy (`services`), or `pyracast.service` is failed or inactive while no release or stop holds the release lock (`unit_state`) | `docker compose ... ps`, `logs --tail 100 SERVICE`; `systemctl status pyracast.service` | Fix the cause; `systemctl restart pyracast` once it is gone |
-| `pyracast_runtime_restarted` | The watchdog restarted `services` and they recovered | Their logs before the restart | None unless it repeats |
+| `pyracast_runtime_restarted` | The watchdog restarted `services` and they recovered. One line notifies nobody; three runs that restart containers within an hour raise the repeated-restarts alert (counted in total, not per service). A test alert writes a test line, which that count leaves out, so it can neither raise nor hide the alert | The container's last exit: `docker inspect --format '{{.State.ExitCode}} {{.State.OOMKilled}} {{.State.FinishedAt}}' CONTAINER`; memory: `free -m`, `docker stats --no-stream`; the release that preceded the first restart: the release log, `readlink /opt/pyracast/current` | Fix what the exit names; if the loop began with a release, release a fix or revert |
 | `pyracast_delivery_unhealthy` | The delivery health check failed: `alarms` with counts, `dispatch_phases`, `broker_unreachable`, `missing_queues`; `outcome: unreadable` when it printed no report | The Operations page, `pyracast check_delivery_health` in `api` | Restart the worker or dispatcher it names; correct the data the check lists |
 | `pyracast_release_blocked` | A release has kept the site in maintenance for `hours` since the attempt that began the block; the marker records its revision and UTC start, which later attempts keep | "A release that fails during maintenance" below, the release log | Rerun the verified release or follow the printed recovery |
 | `pyracast_certificate_expiring` | The origin certificate renewal is failing | Gateway logs, port 80 reachability | Fix the ACME challenge; the gateway renews by itself |

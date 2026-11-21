@@ -182,6 +182,67 @@ resource "google_monitoring_alert_policy" "watchdog_heartbeat" {
   }
 }
 
+# One line per watchdog run that restarted containers which then recovered. Counted in total:
+# `services` is a list, and a label holds one value, so per service would miss a run that
+# restarted two.
+resource "google_logging_metric" "runtime_restarts" {
+  name = "${var.name}-runtime-restarts"
+
+  filter = join(" AND ", [
+    "resource.type=\"gce_instance\"",
+    "logName=\"projects/${var.project_id}/logs/pyracast-operations\"",
+    "jsonPayload.event=\"pyracast_runtime_restarted\"",
+    "NOT jsonPayload.test=true",
+  ])
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_monitoring_alert_policy" "runtime_restarts" {
+  display_name          = "${var.name} repeated container restarts"
+  combiner              = "OR"
+  enabled               = true
+  notification_channels = [google_monitoring_notification_channel.operator.name]
+  user_labels           = local.labels
+
+  conditions {
+    display_name = "Three watchdog restarts within one hour"
+    condition_threshold {
+      filter = join(" AND ", [
+        "metric.type=\"logging.googleapis.com/user/${google_logging_metric.runtime_restarts.name}\"",
+        "resource.type=\"gce_instance\"",
+      ])
+      comparison      = "COMPARISON_GT"
+      threshold_value = 2
+      duration        = "0s"
+
+      aggregations {
+        alignment_period     = "3600s"
+        per_series_aligner   = "ALIGN_SUM"
+        cross_series_reducer = "REDUCE_SUM"
+      }
+
+      trigger {
+        count = 1
+      }
+    }
+  }
+
+  alert_strategy {
+    auto_close = "86400s"
+  }
+
+  documentation {
+    mime_type = "text/markdown"
+    content   = "pyracast_runtime_restarted: the watchdog restarted containers in at least three runs within one hour and they recovered each time, so one keeps crashing. Test alerts never count. What to check first and how to recover: the event's row under Alert events in docs/DEPLOYMENT.md."
+  }
+}
+
 locals {
   # A container line reaches Cloud Logging as jsonPayload.message, the whole formatted line
   # "<date> <time> <level> <logger> <message>" (settings.LOGGING "standard"). The anchored pattern
