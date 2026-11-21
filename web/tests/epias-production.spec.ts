@@ -1247,6 +1247,57 @@ test("changing dates hides the old production export and ignores late responses"
     await expect(page.getByText("Late old date failure.")).toHaveCount(0);
 });
 
+test("a saved correction cannot be exported before the day it changed is reloaded", async ({
+    page,
+}) => {
+    await productionApi(page);
+    await openProduction(page);
+    await expect(table(page)).toBeVisible();
+    let holding = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let reloading!: () => void;
+    const reload = new Promise<void>((resolve) => {
+        reloading = resolve;
+    });
+    await page.route("**/api/**/production/?*", async (route) => {
+        if (holding) {
+            reloading();
+            await gate;
+        }
+        return route.fallback();
+    });
+    await page
+        .getByRole("button", { name: "Edit 08:00–09:00", exact: true })
+        .click();
+    await page.getByLabel("Production for 08:00–09:00 (MWh)").fill("2.5");
+    holding = true;
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await reload;
+    await expect(page.getByText("Production saved.")).toBeVisible();
+    await expect(row(page, "08:00–09:00")).toContainText("1 Settlement");
+    const csv = page
+        .locator(".production-workspace")
+        .getByRole("button", { name: /^(Download CSV|Working…)$/ });
+    await expect(csv).toBeDisabled();
+    holding = false;
+    release();
+    await expect(row(page, "08:00–09:00")).toContainText("2.5");
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download CSV" }).click();
+    const records = Papa.parse<Record<string, string>>(
+        await readFile(await (await download).path(), "utf8"),
+        { header: true, skipEmptyLines: true },
+    ).data;
+    expect(
+        records.find(
+            (record) => record.starts_at === "2026-11-09T08:00:00+03:00",
+        )?.energy_mwh,
+    ).toBe("2.5");
+});
+
 test("failed production requests stop loading without exposing stale values", async ({
     page,
 }) => {
