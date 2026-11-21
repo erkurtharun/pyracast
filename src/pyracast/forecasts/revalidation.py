@@ -6,7 +6,7 @@ from enum import StrEnum
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import F, QuerySet
+from django.db.models import QuerySet
 from django.utils import timezone
 from dramatiq import Actor
 
@@ -17,9 +17,16 @@ from pyracast.background.deadlines import ACTORS, LAST_REQUEST_START
 from pyracast.background.failures import queue_full
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts.quota import QuotaExceededError, RequestDeferredError
+from pyracast.forecasts.budget import approved_bindings
+from pyracast.forecasts.models import CollectionSchedule
+from pyracast.forecasts.quota import (
+    ForecastBudgetReservedError,
+    QuotaExceededError,
+    RequestDeferredError,
+)
+from pyracast.forecasts.timing import forecast_timing, next_forecast_slot
 from pyracast.forecasts.validation import refuses_binding, validate_binding
-from pyracast.regions.models import AuditAction, AuditEvent, RegionStatus, active_region
+from pyracast.regions.models import AuditAction, AuditEvent
 
 logger = logging.getLogger(__name__)
 
@@ -40,16 +47,30 @@ def stale_bindings(account: ProviderAccount) -> QuerySet[SiteBinding]:
     """Approved plants of the account still validated with an earlier key, longest validated
     first."""
     return (
-        SiteBinding.objects.filter(
-            active_region("region__"),
-            provider_account=account,
-            region__status=RegionStatus.APPROVED,
-            region__approved_binding=F("pk"),
-            region__revision=F("region_revision"),
-        )
+        approved_bindings(account)
         .exclude(validated_credential_revision=account.credential_revision)
         .order_by("validated_at", "pk")
     )
+
+
+def _after_the_next_slot(account: ProviderAccount, moment: datetime) -> datetime:
+    """A reserve refused now may fit once the account's next slot is collected, whose jobs
+    reserve their requests within RETRY_DELAY of it; at the latest on the next UTC day."""
+    due = _next_utc_day(moment)
+    for binding in approved_bindings(account).select_related("region", "provider_account"):
+        timing = forecast_timing(
+            binding, CollectionSchedule.objects.filter(region_id=binding.region_id).first()
+        )
+        slot = (
+            None
+            if timing is None
+            else next_forecast_slot(
+                moment, binding.region.timezone, timing.times, timing.effective_from
+            )
+        )
+        if slot is not None:
+            due = min(due, slot + RETRY_DELAY)
+    return due
 
 
 def claim_due_revalidations(now: datetime) -> list[int]:
@@ -138,8 +159,8 @@ def revalidate_account(
     adapter_for: Callable[[SiteBinding], ProviderAdapter],
 ) -> RevalidationOutcome:
     """Validates each approved plant of the account with its current key, as the operator who
-    replaced it, within the request budget left after the account's forecasts. `claim` is the
-    lease the dispatcher took for this run; a run whose lease moved on does nothing."""
+    replaced it, within the requests the current plants and its own forecasts leave. `claim` is
+    the lease the dispatcher took for this run; a run whose lease moved on does nothing."""
     clock = Clock(now)
     account = _take_lease(account_id, claim, now)
     if account is None:
@@ -169,6 +190,10 @@ def revalidate_account(
             if deferred.available_at is None:
                 return _finish(account, RevalidationOutcome.KEY_REJECTED)
             return _finish(account, RevalidationOutcome.WAITING, deferred.available_at)
+        except ForecastBudgetReservedError:
+            return _finish(
+                account, RevalidationOutcome.WAITING, _after_the_next_slot(account, moment)
+            )
         except QuotaExceededError:
             return _finish(account, RevalidationOutcome.WAITING, _next_utc_day(moment))
         except ProviderError as error:

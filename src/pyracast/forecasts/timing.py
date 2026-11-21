@@ -4,10 +4,17 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
+from django.db.models import QuerySet
 
 from pyracast.collection_window import SLOT_SEARCH_DAYS
 from pyracast.connections.models import SiteBinding
-from pyracast.forecasts.models import CollectionEndpoint, CollectionJob, CollectionSchedule
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionJob,
+    CollectionJobError,
+    CollectionJobStatus,
+    CollectionSchedule,
+)
 from pyracast.local_time import local_slot
 
 HISTORY_REQUESTS_PER_DAY = 1
@@ -37,6 +44,23 @@ def approval_job(binding_id: int) -> tuple[int, datetime] | None:
         .order_by("created_at", "pk")
         .values_list("pk", "scheduled_for")
         .first()
+    )
+
+
+def latest_forecast_job(binding_id: int, moment: datetime) -> QuerySet[CollectionJob]:
+    return CollectionJob.objects.filter(
+        binding_id=binding_id,
+        endpoint=CollectionEndpoint.FORECASTS,
+        reference_import__isnull=True,
+        scheduled_for__lte=moment,
+    ).order_by("-scheduled_for", "-pk")
+
+
+def armed_again_by_validation(job: CollectionJob) -> bool:
+    """A successful validation reopens its binding's latest forecast job refused for the key."""
+    return (
+        job.status == CollectionJobStatus.FAILED
+        and job.last_error == CollectionJobError.PROVIDER_AUTHENTICATION_FAILED
     )
 
 

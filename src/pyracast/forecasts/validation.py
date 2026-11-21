@@ -12,15 +12,13 @@ from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
 from pyracast.errors import ConflictError, ErrorCode
 from pyracast.forecasts.models import (
-    CollectionEndpoint,
-    CollectionJob,
-    CollectionJobError,
     CollectionJobStatus,
     RequestAttempt,
     RequestOutcome,
     RequestPurpose,
 )
 from pyracast.forecasts.quota import record_provider_failure, reserve_request
+from pyracast.forecasts.timing import armed_again_by_validation, latest_forecast_job
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus, active_region
 
@@ -77,7 +75,7 @@ def validate_binding(
                     "Reload the page in a minute to see the result."
                 ),
             )
-        # Revalidating a collecting plant never takes a request its account's forecasts need.
+        # Validating an approved plant never takes a request a current plant's forecast needs.
         attempt = reserve_request(
             binding,
             now,
@@ -144,22 +142,8 @@ def _record_refusal(binding: SiteBinding) -> None:
 
 
 def _rearm_after_validation(binding: SiteBinding, recovered_at: datetime) -> None:
-    latest = (
-        CollectionJob.objects.select_for_update()
-        .filter(
-            binding=binding,
-            endpoint=CollectionEndpoint.FORECASTS,
-            reference_import__isnull=True,
-            scheduled_for__lte=recovered_at,
-        )
-        .order_by("-scheduled_for", "-pk")
-        .first()
-    )
-    if (
-        latest is not None
-        and latest.status == CollectionJobStatus.FAILED
-        and latest.last_error == CollectionJobError.PROVIDER_AUTHENTICATION_FAILED
-    ):
+    latest = latest_forecast_job(binding.pk, recovered_at).select_for_update().first()
+    if latest is not None and armed_again_by_validation(latest):
         latest.status = CollectionJobStatus.PENDING
         latest.available_at = recovered_at
         latest.attempts = 0
