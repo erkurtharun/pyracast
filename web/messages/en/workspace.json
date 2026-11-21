@@ -112,7 +112,10 @@
         "nextReview": "Pyracast checks the plant details and connects its data source.",
         "nextForecasts": "After approval, forecasts appear here and are collected on schedule.",
         "nextSettings": "Until then you can correct the technical details or the location in Settings.",
-        "deletion": "Deletion"
+        "deletion": "Deletion",
+        "serverChanges": "Changed by someone else meanwhile:",
+        "editKept": "(your entry {value} is kept)",
+        "editDropped": "{field}: your entry {value} no longer applies and was dropped."
     },
     "RegionSettings": {
         "plantLocation": "Plant location",
@@ -241,7 +244,6 @@
         "staleEdit": "Someone changed this outage after you opened it. Your entries are kept.",
         "staleApply": "Changed meanwhile (now revision {revision}). Save again to apply your change to this version, or discard it.",
         "staleClosed": "This outage is now {status}, so your change cannot be applied.",
-        "changedField": "{field}: {before} → {after}",
         "discardEdit": "Discard my change",
         "status": "Status",
         "cancelledOutages": "{count, plural, one {# cancelled entry} other {# cancelled entries}}"

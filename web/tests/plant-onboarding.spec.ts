@@ -183,18 +183,85 @@ test("technical details shown before a reload ends follow the reloaded revision"
     await expect(capacity).toHaveValue("7");
 });
 
-test("a save from an older revision keeps what the person typed and saves on the next try", async ({
+const conflictMessage =
+    "The technical details changed after you opened them. Check the values and save again.";
+
+function elsewhere(revision: number, dc_capacity_mw: number) {
+    return {
+        ...plant,
+        parameters: { ...plant.parameters, dc_capacity_mw },
+        parameters_revision: revision,
+    };
+}
+
+test("saves from older revisions in a row keep every edit and name what changed", async ({
     page,
 }) => {
     await mockApi(page);
-    const elsewhere = {
-        ...plant,
-        parameters: { ...plant.parameters, dc_capacity_mw: 6 },
-        parameters_revision: 2,
-    };
+    const answers = [elsewhere(2, 6), elsewhere(3, 8)];
     const bodies: Record<string, unknown>[] = [];
-    const message =
-        "The technical details changed after you opened them. Check the values and save again.";
+    await page.route("**/plants/21/", (route) => {
+        if (route.request().method() !== "PUT") return route.fallback();
+        bodies.push(route.request().postDataJSON());
+        const current = answers[bodies.length - 1];
+        return current
+            ? route.fulfill({
+                  status: 409,
+                  json: {
+                      ...errorBody("plant_parameters_changed", conflictMessage),
+                      current,
+                  },
+              })
+            : route.fulfill({
+                  json: {
+                      ...elsewhere(4, 8),
+                      parameters: {
+                          ...elsewhere(4, 8).parameters,
+                          export_limit_mw: 3,
+                      },
+                  },
+              });
+    });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const save = page.getByRole("button", { name: "Save configuration" });
+    const capacity = page.getByLabel("DC nameplate capacity (MW)");
+    const exportLimit = page.getByLabel("Grid export limit (MW, optional)");
+    await exportLimit.fill("3");
+    await save.click();
+    await expect(page.locator("main").getByRole("alert")).toContainText(
+        conflictMessage,
+    );
+    await expect(
+        page.getByText("DC nameplate capacity (MW): 5 → 6"),
+    ).toBeVisible();
+    await expect(capacity).toHaveValue("6");
+    await expect(exportLimit).toHaveValue("3");
+    await save.click();
+    await expect(
+        page.getByText("DC nameplate capacity (MW): 5 → 8"),
+    ).toBeVisible();
+    await expect(capacity).toHaveValue("8");
+    await expect(exportLimit).toHaveValue("3");
+    await save.click();
+    await expect.poll(() => bodies.length).toBe(3);
+    expect(bodies.map((body) => body.expected_revision)).toEqual([1, 2, 3]);
+    expect(bodies[2]).toMatchObject({
+        dc_capacity_mw: 8,
+        export_limit_mw: 3,
+    });
+    await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
+    await expect(
+        page.getByText(/DC nameplate capacity \(MW\): 5 →/),
+    ).toHaveCount(0);
+});
+
+test("a value both sides changed keeps the typed one beside the server's", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const bodies: Record<string, unknown>[] = [];
     await page.route("**/plants/21/", (route) => {
         if (route.request().method() !== "PUT") return route.fallback();
         bodies.push(route.request().postDataJSON());
@@ -202,47 +269,33 @@ test("a save from an older revision keeps what the person typed and saves on the
             ? route.fulfill({
                   status: 409,
                   json: {
-                      ...errorBody("plant_parameters_changed", message),
-                      current: elsewhere,
+                      ...errorBody("plant_parameters_changed", conflictMessage),
+                      current: elsewhere(2, 6),
                   },
               })
-            : route.fulfill({
-                  json: {
-                      ...elsewhere,
-                      parameters: {
-                          ...elsewhere.parameters,
-                          export_limit_mw: 3,
-                      },
-                      parameters_revision: 3,
-                  },
-              });
+            : route.fulfill({ json: elsewhere(3, 7) });
     });
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByLabel("Grid export limit (MW, optional)").fill("3");
+    const capacity = page.getByLabel("DC nameplate capacity (MW)");
+    await capacity.fill("7");
     await page.getByRole("button", { name: "Save configuration" }).click();
     await expect(page.locator("main").getByRole("alert")).toContainText(
-        message,
-    );
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
-        "6",
+        conflictMessage,
     );
     await expect(
-        page.getByLabel("Grid export limit (MW, optional)"),
-    ).toHaveValue("3");
+        page.getByText(
+            "DC nameplate capacity (MW): 5 → 6 (your entry 7 is kept)",
+        ),
+    ).toBeVisible();
+    await expect(capacity).toHaveValue("7");
     await page.getByRole("button", { name: "Save configuration" }).click();
     await expect.poll(() => bodies.length).toBe(2);
-    expect(bodies[0]).toMatchObject({
-        expected_revision: 1,
-        dc_capacity_mw: 5,
-    });
     expect(bodies[1]).toMatchObject({
         expected_revision: 2,
-        dc_capacity_mw: 6,
-        export_limit_mw: 3,
+        dc_capacity_mw: 7,
     });
-    await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
 });
 
 for (const section of ["Forecast", "Settings"] as const) {

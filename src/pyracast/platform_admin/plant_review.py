@@ -35,10 +35,10 @@ from pyracast.plants.approval import (
     approve_region,
     decide_review,
     declaration_fingerprint,
+    declarations,
 )
-from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
+from pyracast.plants.models import Plant, PlantSubmission
 from pyracast.plants.operations import configuration_is_current
-from pyracast.plants.parameters import declaration
 from pyracast.platform_admin.forms import (
     BindingActionForm,
     EpiasConnectionForm,
@@ -353,18 +353,6 @@ ACTIONS: dict[str, Action] = {
 }
 
 
-def _declarations(
-    plants: QuerySet[Plant],
-) -> list[tuple[Plant, PlantSubmission | PlantConfiguration | None, bool]]:
-    """Per plant the values approval activates, and whether they await it; an earlier
-    submission that no longer awaits approval is history, not a declaration."""
-    rows = []
-    for plant in plants.select_related("current_configuration", "submission__submitted_by"):
-        record = declaration(plant)
-        rows.append((plant, record, isinstance(record, PlantSubmission)))
-    return rows
-
-
 def _render(request: HttpRequest, site: PlatformAdminSite, page: PlantPage) -> TemplateResponse:
     binding = page.binding
     plant = page.plant
@@ -379,7 +367,10 @@ def _render(request: HttpRequest, site: PlatformAdminSite, page: PlantPage) -> T
             "title": _("Review and set up %(name)s") % {"name": page.region.name},
             "region": page.region,
             "plants": page.plants,
-            "declarations": _declarations(page.plants),
+            "declarations": [
+                (plant, record, isinstance(record, PlantSubmission))
+                for plant, record in declarations(page.region.pk)
+            ],
             "binding": binding,
             "active_provider_delay": bool(
                 binding

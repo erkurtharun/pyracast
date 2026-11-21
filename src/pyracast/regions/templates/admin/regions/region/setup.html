@@ -95,8 +95,8 @@
       <div><dt>{% translate "Local timezone" %}</dt><dd>{{ region.timezone }}</dd></div>
       <div><dt>{% translate "Location revision" %}</dt><dd>{{ region.revision }}</dd></div>
     </dl>
-    {% for plant, record, awaiting in declarations %}
-      <h3>{{ plant.name }}{% if awaiting %} <span class="badge">{% translate "Awaiting approval" %}</span>{% endif %}</h3>
+    {% for plant, record, submitted in declarations %}
+      <h3>{{ plant.name }}{% if submitted %} <span class="badge">{% translate "Awaiting approval" %}</span>{% endif %}</h3>
       {% if record %}
         <dl class="facts">
           <div><dt>{% translate "DC nameplate" %}</dt><dd>{{ record.dc_capacity_mw }} MW</dd></div>
@@ -105,7 +105,7 @@
           <div><dt>{% translate "Measurement point" %}</dt><dd>{% translate record.get_measurement_basis_display %}</dd></div>
           <div><dt>{% translate "Mounting" %}</dt><dd>{% translate record.get_mounting_type_display %}</dd></div>
           <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ record.surface_tilt_degrees|default_if_none:_("Unknown") }}{% if record.surface_tilt_degrees != None %}°{% endif %} / {{ record.surface_azimuth_degrees|default_if_none:_("Unknown") }}{% if record.surface_azimuth_degrees != None %}°{% endif %}</dd></div>
-          {% if awaiting %}
+          {% if submitted %}
             <div><dt>{% translate "Submitted by" %}</dt><dd>{{ record.submitted_by.username }} · <time datetime="{{ record.created_at|date:'c' }}">{{ record.created_at|date:"j M Y, H:i T" }}</time></dd></div>
             <div><dt>{% translate "Last changed" %}</dt><dd><time datetime="{{ record.updated_at|date:'c' }}">{{ record.updated_at|date:"j M Y, H:i T" }}</time></dd></div>
           {% else %}

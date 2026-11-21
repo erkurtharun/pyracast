@@ -26,7 +26,6 @@ from pyracast.plants.calibration_runs import (
 )
 from pyracast.plants.events import record_plant_event
 from pyracast.plants.models import (
-    CONFIGURATION_PARAMETERS,
     CalibrationRun,
     Plant,
     PlantConfiguration,
@@ -189,7 +188,8 @@ def revise_plant(
     platform: bool = False,
 ) -> Plant:
     """`expected_revision` is the parameter revision the change was made from; a different
-    change saved since then refuses it. An operator command passes None to overwrite."""
+    change saved since then refuses it. None overwrites, as the operator command does unless
+    it is given a revision."""
     with transaction.atomic():
         authorize_workspace_admin(actor, tenant_id, platform=platform)
         region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
@@ -250,14 +250,8 @@ def activate_submitted_plants(actor: User, region: Region, binding: SiteBinding)
             raise DomainError(ErrorCode.PLANT_SUBMISSION_REQUIRED)
         if isinstance(record, PlantConfiguration) and record.binding_id == binding.pk:
             continue
-        _save_configuration(
-            actor,
-            plant,
-            {
-                "binding": binding,
-                **{name: getattr(record, name) for name in CONFIGURATION_PARAMETERS},
-            },
-        )
+        parameters = PlantParameters.of(plant.name, record)
+        _save_configuration(actor, plant, {"binding": binding, **parameters.declared()})
 
 
 def request_calibration(

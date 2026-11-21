@@ -5,13 +5,19 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
+from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant, revise_plant
 from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 
 
 class Command(BaseCommand):
-    help = "Create or revise a tenant plant configuration."
+    help = (
+        "Create a tenant plant, or revise one with --plant-id. A revision replaces every value: "
+        "an omitted option takes its default. Without --expected-revision it overwrites the "
+        "plant whatever changed meanwhile; with it, a plant at another parameters revision "
+        "refuses the change."
+    )
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--username", required=True)
@@ -35,6 +41,11 @@ class Command(BaseCommand):
             "--measurement-basis", choices=("net_export", "ac_generation"), default="net_export"
         )
         parser.add_argument("--plant-id", type=int)
+        parser.add_argument(
+            "--expected-revision",
+            type=int,
+            help="With --plant-id: the parameters revision the change was made from.",
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         try:
@@ -45,14 +56,25 @@ class Command(BaseCommand):
             )
             if options["plant_id"] is None:
                 plant = create_plant(actor, region.tenant_id, region.pk, parameters)
+                revisions = str(plant.parameters_revision)
             else:
+                before = Plant.objects.get(pk=options["plant_id"], region=region)
                 plant = revise_plant(
-                    actor, region.tenant_id, region.pk, options["plant_id"], parameters
+                    actor,
+                    region.tenant_id,
+                    region.pk,
+                    before.pk,
+                    parameters,
+                    expected_revision=options["expected_revision"],
                 )
+                revisions = f"{before.parameters_revision} to {plant.parameters_revision}"
         except ValidationError as exc:
             raise CommandError(f"Plant configuration failed: {'; '.join(exc.messages)}") from exc
         except (ObjectDoesNotExist, PermissionDenied) as exc:
             raise CommandError(
                 "Plant configuration failed: unknown or inaccessible record."
             ) from exc
-        self.stdout.write(f"Plant {plant.pk}, configuration {plant.current_configuration_id}.")
+        self.stdout.write(
+            f"Plant {plant.pk}, configuration {plant.current_configuration_id}, "
+            f"parameters revision {revisions}."
+        )
