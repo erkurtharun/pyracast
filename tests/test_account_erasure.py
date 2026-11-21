@@ -77,6 +77,7 @@ from tests.support.auth_lifecycle import submit
 from tests.support.company_registration import signup
 from tests.support.concurrency import (
     behind_open_transaction,
+    committed_elsewhere,
     paused_in,
     row_locked_elsewhere,
     short_lock_timeout,
@@ -749,19 +750,14 @@ def address_rows_left() -> dict[str, set[Any]]:
     }
 
 
-@pytest.mark.parametrize("holds", ["account_address", "address_row"])
 @pytest.mark.parametrize("spelling", [str.lower, str.upper], ids=["same_case", "other_case"])
-def test_an_earlier_address_another_account_holds_now_keeps_its_rows(
-    holds: str, spelling: Any
+def test_an_earlier_address_another_account_holds_verified_keeps_its_rows(
+    spelling: Any,
 ) -> None:
     earlier, current = "Moved.From@example.com", "moved.to@example.com"
     person = person_with(current)
-    held = spelling(earlier)
-    holder = User.objects.create_user(
-        username="holder", email=held if holds == "account_address" else "holder@example.com"
-    )
-    if holds == "address_row":
-        EmailAddress.objects.create(user=holder, email=held, primary=False, verified=True)
+    holder = User.objects.create_user(username="holder", email="holder@example.com")
+    EmailAddress.objects.create(user=holder, email=spelling(earlier), primary=False, verified=True)
     session("holder-session", {"_auth_user_id": str(holder.pk)})
     tenant, inviter = administered_workspace()
     outbound(
@@ -792,6 +788,299 @@ def test_an_earlier_address_another_account_holds_now_keeps_its_rows(
     assert [left_out in report.splitlines() for report in reports] == [True, True]
     assert not [report for report in reports if earlier.casefold() in report.casefold()]
     assert dry_run.addresses_left_out == 1
+
+
+NO_ADDRESS_ROWS: dict[str, set[Any]] = {
+    "sessions": set(),
+    "mail": set(),
+    "cache": set(),
+    "invitations": set(),
+    "recipients": set(),
+}
+
+
+@pytest.mark.parametrize("claim", ["account_address", "unverified_row"])
+@pytest.mark.parametrize("claimed", ["earlier", "own"])
+def test_an_unverified_claim_never_keeps_an_address_out_of_erasure(
+    claim: str, claimed: str
+) -> None:
+    earlier, current = "claimed.before@example.com", "claimed.now@example.com"
+    person = person_with(current)
+    address = (earlier if claimed == "earlier" else current).upper()
+    claimant = User.objects.create_user(
+        username="claimant",
+        email=address if claim == "account_address" else "claimant@example.com",
+    )
+    if claim == "unverified_row":
+        EmailAddress.objects.create(user=claimant, email=address, primary=True, verified=False)
+    claimant_rows = (
+        User.objects.filter(pk=claimant.pk).values().get(),
+        list(EmailAddress.objects.filter(user=claimant).values()),
+    )
+    tenant, inviter = administered_workspace()
+    outbound(
+        OutboundMailKind.EMAIL_CHANGED,
+        earlier,
+        {"from_email": earlier, "to_email": current},
+        finished=True,
+    )
+    address_rows(earlier, "earlier", tenant, inviter)
+    address_rows(current, "own", tenant, inviter)
+
+    erased = erase_account(person.pk, execute=True)
+
+    assert address_rows_left() == NO_ADDRESS_ROWS
+    assert (
+        User.objects.filter(pk=claimant.pk).values().get(),
+        list(EmailAddress.objects.filter(user=claimant).values()),
+    ) == claimant_rows
+    assert erased.addresses_left_out == 0
+
+
+def ties_by_address() -> dict[str, set[int]]:
+    return {
+        entry.address: set(entry.ties.values_list("membership_id", flat=True))
+        for entry in ReminderRecipient.objects.all()
+    }
+
+
+def test_erasure_removes_its_membership_ties_from_reminder_entries_whatever_address_they_hold() -> (
+    None
+):
+    person = person_with("member.now@example.com")
+    tenant, _administrator = administered_workspace()
+    own = Membership.objects.create(tenant=tenant, user=person)
+    colleague = Membership.objects.create(
+        tenant=tenant, user=User.objects.create_user(username="colleague", email=COLLEAGUE)
+    )
+    holder = User.objects.create_user(username="holder", email="holder@example.com")
+    only, shared, direct = (
+        "held.only@example.com",
+        "held.shared@example.com",
+        "held.direct@example.com",
+    )
+    for address in (only, shared, direct):
+        EmailAddress.objects.create(user=holder, email=address, primary=False, verified=True)
+    schedule = ReminderSchedule.objects.create(
+        region=Region.objects.create(
+            tenant=tenant, name="Site", latitude=38, longitude=27, timezone="Europe/Istanbul"
+        ),
+        effective_from=NOW,
+    )
+    entries = {
+        address: ReminderRecipient.objects.create(
+            schedule=schedule, address=address, key=recipient_key(address)
+        )
+        for address in (only, shared, direct)
+    }
+    ReminderRecipientTie.objects.bulk_create(
+        ReminderRecipientTie(recipient=entries[address], membership_id=membership.pk)
+        for address, membership in ((only, own), (shared, own), (shared, colleague))
+    )
+    revision = ReminderSchedule.objects.get(pk=schedule.pk).revision
+
+    erased = erase_account(person.pk, execute=True)
+
+    assert ties_by_address() == {shared: {colleague.pk}, direct: set()}
+    assert ReminderSchedule.objects.get(pk=schedule.pk).revision == revision + 1
+    assert {
+        label: erased.changes.get(label)
+        for label in (
+            "notifications.ReminderRecipient",
+            "notifications.ReminderRecipientTie",
+            "notifications.ReminderSchedule",
+        )
+    } == {
+        "notifications.ReminderRecipient": 1,
+        "notifications.ReminderRecipientTie": 2,
+        "notifications.ReminderSchedule": 1,
+    }
+    assert erased.addresses_left_out == 2
+
+
+def test_rows_another_account_gets_for_an_earlier_address_while_erasure_waits_are_kept() -> None:
+    earlier, current = "was.here@example.com", "now.here@example.com"
+    person = person_with(current)
+    tenant, inviter = administered_workspace()
+    Membership.objects.create(tenant=tenant, user=person)
+    newcomer = User.objects.create_user(username="newcomer", email="newcomer@example.com")
+    outbound(
+        OutboundMailKind.EMAIL_CHANGED,
+        earlier,
+        {"from_email": earlier, "to_email": current},
+        finished=True,
+    )
+    address_rows(current, "own", tenant, inviter)
+
+    def verify_and_receive() -> dict[str, set[Any]]:
+        Tenant.objects.select_for_update().get(pk=tenant.pk)
+        EmailAddress.objects.create(user=newcomer, email=earlier, primary=True, verified=True)
+        return address_rows(earlier, "newcomer", tenant, inviter)
+
+    kept, erased = behind_open_transaction(
+        verify_and_receive, lambda: erase_account(person.pk, execute=True)
+    )
+
+    assert address_rows_left() == kept
+    assert list(EmailAddress.objects.filter(user=newcomer).values_list("email", "verified")) == [
+        (earlier, True)
+    ]
+    assert erased.addresses_left_out == 0
+
+
+def provider_signup(first_name: str, last_name: str) -> dict[str, Any]:
+    return {
+        PROVIDER_SIGNUP_SESSION_KEY: {"user": {"first_name": first_name, "last_name": last_name}}
+    }
+
+
+@pytest.mark.parametrize(
+    ("names", "pending", "deleted"),
+    [
+        (("Quill", "Quill"), lambda _other: provider_signup("Quill", "Stranger"), False),
+        (("Quill", "Quill"), lambda _other: provider_signup("Quill", "Quill"), True),
+        ((FIRST_NAME, LAST_NAME), lambda _other: provider_signup(FIRST_NAME, LAST_NAME), True),
+        ((FIRST_NAME, LAST_NAME), lambda _other: provider_signup(LAST_NAME, FIRST_NAME), False),
+        ((FIRST_NAME, LAST_NAME), lambda _other: {"note": FIRST_NAME, "flow": [LAST_NAME]}, False),
+        (
+            (FIRST_NAME, LAST_NAME),
+            lambda _other: {
+                PROVIDER_SIGNUP_SESSION_KEY: {
+                    "user": {"first_name": "", "last_name": ""},
+                    "account": {"extra_data": {"given": FIRST_NAME, "family": LAST_NAME}},
+                }
+            },
+            False,
+        ),
+        (
+            (FIRST_NAME, LAST_NAME),
+            lambda other: {"_auth_user_id": str(other.pk)} | provider_signup(FIRST_NAME, LAST_NAME),
+            False,
+        ),
+        (
+            (FIRST_NAME, LAST_NAME),
+            lambda other: (
+                {PASSWORD_RESET_VERIFICATION_SESSION_KEY: {"user_id": str(other.pk)}}
+                | provider_signup(FIRST_NAME, LAST_NAME)
+            ),
+            False,
+        ),
+        (
+            (FIRST_NAME, LAST_NAME),
+            lambda other: {"_auth_user_id": str(other.pk), "noted": "NAMED.PERSON@example.com"},
+            True,
+        ),
+    ],
+    ids=[
+        "one_name_twice_and_another",
+        "one_name_twice",
+        "ordered_names",
+        "swapped_names",
+        "names_elsewhere",
+        "names_elsewhere_in_the_sign_up",
+        "signed_in_as_another_account",
+        "process_of_another_account",
+        "another_account_holding_an_address",
+    ],
+)
+def test_erasure_matches_a_pending_sign_up_only_by_its_own_ordered_names(
+    names: tuple[str, str], pending: Any, deleted: bool
+) -> None:
+    person = person_with("named.person@example.com")
+    User.objects.filter(pk=person.pk).update(first_name=names[0], last_name=names[1])
+    other = User.objects.create_user(username="other", email="other@example.com")
+    session("pending", pending(other))
+
+    erase_account(person.pk, execute=True)
+
+    assert Session.objects.filter(session_key="pending").exists() is not deleted
+
+
+@pytest.mark.parametrize("table", ["mail", "invitations", "recipients"])
+def test_a_row_committed_after_erasure_locked_its_table_is_not_deleted(
+    monkeypatch: pytest.MonkeyPatch, table: str
+) -> None:
+    address = "locked.out@example.com"
+    person = person_with(address)
+    tenant, inviter = administered_workspace()
+    Membership.objects.create(tenant=tenant, user=person)
+    address_rows(address, "own", tenant, inviter)
+    elsewhere = Tenant.objects.create(name="Later workspace")
+    later_schedule = ReminderSchedule.objects.create(
+        region=Region.objects.create(
+            tenant=elsewhere, name="Later", latitude=37, longitude=27, timezone="Europe/Istanbul"
+        ),
+        effective_from=NOW,
+    )
+    revision = ReminderSchedule.objects.get(pk=later_schedule.pk).revision
+    model: type[models.Model]
+    model, add = {
+        "mail": (
+            OutboundMail,
+            lambda: (
+                outbound(
+                    OutboundMailKind.PASSWORD_CHANGED,
+                    address,
+                    {"to_email": address},
+                    finished=False,
+                ).pk
+            ),
+        ),
+        "invitations": (
+            WorkspaceInvitation,
+            lambda: (
+                WorkspaceInvitation.objects.create(
+                    tenant=elsewhere,
+                    email=address,
+                    created_by=inviter,
+                    expires_at=NOW + timedelta(days=7),
+                ).pk
+            ),
+        ),
+        "recipients": (
+            ReminderRecipient,
+            lambda: (
+                ReminderRecipient.objects.create(
+                    schedule=later_schedule, address=address, key=recipient_key(address)
+                ).pk
+            ),
+        ),
+    }[table]
+    locking = erasure._locked
+    later: list[int] = []
+
+    def lock_then_another_client_commits(rows: models.QuerySet[Any], *fields: str) -> Any:
+        locked = locking(rows, *fields)
+        if rows.model is model and not later:
+            later.append(committed_elsewhere(add))
+        return locked
+
+    monkeypatch.setattr(erasure, "_locked", lock_then_another_client_commits)
+
+    erase_account(person.pk, execute=True)
+
+    assert later
+    assert list(model._default_manager.values_list("pk", flat=True)) == later
+    assert ReminderSchedule.objects.get(pk=later_schedule.pk).revision == revision
+
+
+def test_erasure_compares_addresses_by_one_case_rule_beyond_ascii_letters() -> None:
+    # The sign-up form accepts both and stores them lower-cased by Python.
+    own, held = "İlker@Exämple.com", "Beyza@Exämple.com"
+    person = person_with(own.lower())
+    holder = User.objects.create_user(username="holder", email="holder@example.com")
+    EmailAddress.objects.create(user=holder, email=held.upper(), primary=False, verified=True)
+    tenant, inviter = administered_workspace()
+    outbound(
+        OutboundMailKind.EMAIL_DELETED, own.lower(), {"deleted_email": held.lower()}, finished=True
+    )
+    kept = address_rows(held.lower(), "held", tenant, inviter)
+    address_rows(own.upper(), "own", tenant, inviter)
+
+    erased = erase_account(person.pk, execute=True)
+
+    assert address_rows_left() == kept
+    assert erased.addresses_left_out == 1
 
 
 def test_erasure_refuses_an_account_that_administers_a_workspace(

@@ -112,6 +112,19 @@ def paused_in[T, U](
         return holding.result(timeout=20), reaching.result(timeout=20)
 
 
+def committed_elsewhere[T](action: Callable[[], T]) -> T:
+    # Runs the action in its own transaction on another connection and returns once it commits.
+    def run() -> T:
+        try:
+            with transaction.atomic():
+                return action()
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(run).result(timeout=20)
+
+
 @contextmanager
 def short_lock_timeout() -> Iterator[None]:
     with connection.cursor() as cursor:
