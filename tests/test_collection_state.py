@@ -31,6 +31,8 @@ WINDOW_END = datetime(2026, 11, 10, 6, tzinfo=UTC)
 NIGHT = datetime(2026, 11, 10, tzinfo=UTC)
 NEXT_SLOT = datetime(2026, 11, 10, 13, tzinfo=UTC)
 TICK = timedelta(microseconds=1)
+# claim reads its clock again after taking the locks, so a claim one tick early can reach the time.
+EARLY = timedelta(seconds=1)
 
 
 def read(system: System, now: datetime, user: User | None = None) -> dict[str, Any]:
@@ -283,7 +285,7 @@ def test_reenabled_collection_names_a_partial_history_retry_at_its_own_wait() ->
     retry.refresh_from_db()
     assert (retry.status, retry.available_at) == ("pending", waits_until)
     assert at(read(system, reenabled)["next_collection_at"]) == waits_until
-    assert claim(retry.pk, waits_until - TICK) is None
+    assert claim(retry.pk, waits_until - EARLY) is None
     assert claim(retry.pk, waits_until) is not None
 
 
@@ -359,7 +361,7 @@ def test_an_interrupted_history_job_is_collected_at_its_retry_time() -> None:
 
     assert at(read(system, history.lease_expires_at)["next_collection_at"]) == retry_at
     assert history.pk not in pending_job_ids(retry_at - TICK)
-    assert claim(history.pk, retry_at - TICK) is None
+    assert claim(history.pk, retry_at - EARLY) is None
     assert claim(history.pk, retry_at) is not None
 
 
