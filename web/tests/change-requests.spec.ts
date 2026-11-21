@@ -93,6 +93,24 @@ async function openPlant(page: Page, tab: string) {
     await page.getByRole("button", { name: tab, exact: true }).click();
 }
 
+function draft(page: Page) {
+    return page.getByRole("region", {
+        name: "Correction request",
+        exact: true,
+    });
+}
+
+async function stage(page: Page, start: string, energy: string) {
+    await page
+        .getByRole("button", { name: `Suggest correction for ${start}` })
+        .click();
+    const editor = page.locator(".production-row-editor");
+    await editor.getByRole("textbox").first().fill(energy);
+    await editor
+        .getByRole("button", { name: "Add to request", exact: true })
+        .click();
+}
+
 test("the correction reason is named by its label and described by the approval help", async ({
     page,
 }) => {
@@ -118,9 +136,16 @@ test("the correction reason is named by its label and described by the approval 
     });
     await openPlant(page, "Production");
     await page.getByRole("button", { name: /^Suggest correction for/ }).click();
-    const reason = page
-        .locator(".production-row-editor")
-        .getByRole("textbox", { name: "Reason for correction", exact: true });
+    await expect(
+        page
+            .locator(".production-row-editor")
+            .getByRole("textbox", { name: "Reason for correction" }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Add to request" }).click();
+    const reason = draft(page).getByRole("textbox", {
+        name: "Reason for correction",
+        exact: true,
+    });
     await expect(reason).toHaveAccessibleDescription(
         "A workspace administrator reviews this submission before it changes live data.",
     );
@@ -189,10 +214,9 @@ test("member submits a native production correction with a stable retry key and 
             : route.fulfill({ status: 201, json: proposal() });
     });
     await openPlant(page, "Production");
-    await page.getByRole("button", { name: /^Suggest correction for/ }).click();
-    const editor = page.locator(".production-row-editor");
-    await editor.getByRole("textbox").first().fill("0,75");
-    await editor.getByLabel("Reason for correction").fill("Checked meter");
+    await stage(page, "08:00", "0,75");
+    const staged = draft(page);
+    await staged.getByLabel("Reason for correction").fill("Checked meter");
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({
         path: testInfo.outputPath("production-proposal-320.png"),
@@ -201,17 +225,20 @@ test("member submits a native production correction with a stable retry key and 
     expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(320);
-    await editor
+    await staged
         .getByRole("button", { name: "Send for approval", exact: true })
         .click();
     await expect(
-        editor.getByText("The workspace is busy. Try again in a moment."),
+        staged.getByText("The workspace is busy. Try again in a moment."),
     ).toBeVisible();
-    await editor.getByLabel("Reason for correction").fill("Checked meter");
-    await editor
+    await expect(staged.getByLabel("Reason for correction")).toHaveValue(
+        "Checked meter",
+    );
+    await staged
         .getByRole("button", { name: "Send for approval", exact: true })
         .click();
     await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
+    await expect(staged).toHaveCount(0);
     expect(submissions).toHaveLength(2);
     expect(submissions[0]?.idempotency_key).toEqual(expect.any(String));
     expect(submissions[1]?.idempotency_key).toEqual(expect.any(String));
@@ -238,10 +265,13 @@ test("member submits a native production correction with a stable retry key and 
     await openPlant(page, "Production");
     await page.getByRole("button", { name: /^Suggest correction for/ }).click();
     await page
+        .getByRole("button", { name: /^Request provider reading for/ })
+        .click();
+    await draft(page)
         .getByLabel("Reason for correction")
         .fill("Restore the automatic reading");
-    await page
-        .getByRole("button", { name: /^Request provider reading for/ })
+    await draft(page)
+        .getByRole("button", { name: "Send for approval", exact: true })
         .click();
     await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
     expect(submissions[2]).toMatchObject({
@@ -289,15 +319,14 @@ test("a server error shows its reference", async ({ page }) => {
         }),
     );
     await openPlant(page, "Production");
-    await page.getByRole("button", { name: /^Suggest correction for/ }).click();
-    const editor = page.locator(".production-row-editor");
-    await editor.getByRole("textbox").first().fill("0,75");
-    await editor.getByLabel("Reason for correction").fill("Checked meter");
-    await editor
+    await stage(page, "08:00", "0,75");
+    const staged = draft(page);
+    await staged.getByLabel("Reason for correction").fill("Checked meter");
+    await staged
         .getByRole("button", { name: "Send for approval", exact: true })
         .click();
     await expect(
-        editor.getByText(
+        staged.getByText(
             "The server could not complete this request. Reference: 0123456789abcdef0123456789abcdef",
             { exact: true },
         ),
@@ -1179,4 +1208,340 @@ test("a member marks every decided request read at once", async ({ page }) => {
     await expect(
         page.getByRole("button", { name: "Mark all as read" }),
     ).toHaveCount(0);
+});
+
+function dayRows(
+    date: string,
+    rows: Partial<Parameters<typeof nativeProductionHistory>[2][number]>[],
+) {
+    return nativeProductionHistory(
+        date,
+        "Europe/Istanbul",
+        rows.map((row, index) => {
+            const minutes = 8 * 60 + index * 30;
+            const clock = (value: number) =>
+                `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+            return {
+                starts_at: `${date}T${clock(minutes)}:00+03:00`,
+                ends_at: `${date}T${clock(minutes + 30)}:00+03:00`,
+                effective: reading,
+                can_edit: false,
+                can_propose: true,
+                ...row,
+            };
+        }),
+    );
+}
+
+test("a member stages several intervals of one day and sends them as one request", async ({
+    page,
+}) => {
+    await member(page);
+    const submissions: Record<string, unknown>[] = [];
+    await page.route("**/api/**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        )!;
+        return route.fulfill({
+            json: dayRows(date, [
+                {},
+                {},
+                {
+                    revision_id: 4,
+                    can_propose_revert: true,
+                    observation: {
+                        id: 4,
+                        configuration_id: 31,
+                        starts_at: `${date}T09:00:00+03:00`,
+                        ends_at: `${date}T09:30:00+03:00`,
+                        energy_mwh: 1,
+                        quality: "valid",
+                        source: "meter",
+                        recorded_by_id: 2,
+                        created_at: `${date}T10:00:00Z`,
+                        supersedes_id: null,
+                        is_reverted: false,
+                    },
+                },
+                {},
+            ]),
+        });
+    });
+    await page.route("**/change-requests/production/", (route) => {
+        submissions.push(route.request().postDataJSON());
+        return route.fulfill({ status: 201, json: proposal() });
+    });
+    await openPlant(page, "Production");
+    await stage(page, "08:00", "0,5");
+    await expect(
+        page
+            .getByRole("status")
+            .filter({ hasText: /^Added 08:00.08:30 to the request\.$/ }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+    ).toBeFocused();
+    await stage(page, "08:30", "0,6");
+    await page
+        .getByRole("button", { name: "Suggest correction for 09:00" })
+        .click();
+    await page
+        .getByRole("button", { name: /^Request provider reading for 09:00/ })
+        .click();
+    await stage(page, "09:30", "0,8");
+    const staged = draft(page);
+    await expect(staged.getByRole("listitem")).toHaveCount(4);
+    await expect(
+        page.getByRole("button", { name: "Previous day" }),
+    ).toBeDisabled();
+    await expect(staged).toContainText(
+        "Send or discard this request before choosing another day.",
+    );
+
+    await staged
+        .getByRole("button", { name: /^Remove staged correction for 09:30/ })
+        .click();
+    await expect(staged.getByRole("listitem")).toHaveCount(3);
+    await staged
+        .getByRole("button", { name: /^Edit staged correction for 08:30/ })
+        .click();
+    const editor = page.locator(".production-row-editor");
+    await expect(editor.getByRole("textbox").first()).toHaveValue("0.6");
+    await editor.getByRole("textbox").first().fill("0,65");
+    await editor
+        .getByRole("button", { name: "Update in request", exact: true })
+        .click();
+    await staged.getByLabel("Reason for correction").fill("Meter read on site");
+    await staged
+        .getByRole("button", { name: "Send for approval", exact: true })
+        .click();
+
+    await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
+    await expect(staged).toHaveCount(0);
+    await expect(
+        page.getByRole("button", { name: "Previous day" }),
+    ).toBeEnabled();
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]).toMatchObject({
+        reason: "Meter read on site",
+        unit: "MWh",
+        changes: [
+            {
+                action: "set",
+                energy: 0.5,
+                starts_at: expect.stringContaining("T08:00:00"),
+                expected_revision_id: null,
+            },
+            {
+                action: "set",
+                energy: 0.65,
+                starts_at: expect.stringContaining("T08:30:00"),
+            },
+            {
+                action: "revert",
+                starts_at: expect.stringContaining("T09:00:00"),
+                expected_revision_id: 4,
+            },
+        ],
+    });
+});
+
+test("a refused request keeps the draft and names the concerned interval", async ({
+    page,
+}) => {
+    await member(page);
+    let revision: number | null = null;
+    const answers = [
+        {
+            status: 409,
+            json: errorBody(
+                "production_revision_changed",
+                "Production changed. Reload the latest values before saving.",
+            ),
+        },
+        {
+            status: 400,
+            json: errorBody("invalid_request", "The request is invalid.", {
+                fields: {
+                    "changes.0.energy":
+                        "Ensure this value is less than 1000000.",
+                },
+            }),
+        },
+        {
+            status: 409,
+            json: errorBody(
+                "pending_request_limit",
+                "You have too many pending submissions for this plant.",
+            ),
+        },
+        { status: 201, json: proposal() },
+    ];
+    const submissions: Record<string, unknown>[] = [];
+    await page.route("**/api/**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        )!;
+        return route.fulfill({
+            json: dayRows(date, [{}, { revision_id: revision }]),
+        });
+    });
+    await page.route("**/change-requests/production/", (route) => {
+        submissions.push(route.request().postDataJSON());
+        if (submissions.length === 1) revision = 8;
+        return route.fulfill(answers[submissions.length - 1]!);
+    });
+    await openPlant(page, "Production");
+    await stage(page, "08:00", "5");
+    await stage(page, "08:30", "6");
+    const staged = draft(page);
+    await staged.getByLabel("Reason for correction").fill("Meter read on site");
+    const send = staged.getByRole("button", {
+        name: "Send for approval",
+        exact: true,
+    });
+
+    await send.click();
+    const second = staged.getByRole("listitem").nth(1);
+    await expect(second).toContainText(
+        "This interval changed after you added it. Edit or remove it.",
+    );
+    await expect(staged.getByRole("listitem").nth(0)).not.toContainText(
+        "changed after you added it",
+    );
+    await staged
+        .getByRole("button", { name: /^Edit staged correction for 08:30/ })
+        .click();
+    await page
+        .locator(".production-row-editor")
+        .getByRole("button", { name: "Update in request", exact: true })
+        .click();
+    await expect(second).not.toContainText("changed after you added it");
+
+    await send.click();
+    await expect(staged.getByRole("listitem").nth(0)).toContainText(
+        "Ensure this value is less than 1000000.",
+    );
+    await send.click();
+    await expect(staged).toContainText(
+        "You have too many pending submissions for this plant.",
+    );
+    await expect(staged.getByRole("listitem")).toHaveCount(2);
+    await expect(staged.getByLabel("Reason for correction")).toHaveValue(
+        "Meter read on site",
+    );
+
+    await send.click();
+    await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
+    expect(submissions).toHaveLength(4);
+    expect(submissions[1]).toMatchObject({
+        changes: [{ expected_revision_id: null }, { expected_revision_id: 8 }],
+    });
+    expect(submissions[0]?.idempotency_key).not.toBe(
+        submissions[1]?.idempotency_key,
+    );
+});
+
+test("a member sees which intervals wait for approval and opens the request", async ({
+    page,
+}) => {
+    await member(page);
+    await page.route("**/api/**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        )!;
+        return route.fulfill({
+            json: dayRows(date, [{ pending_request_id: 7 }, {}]),
+        });
+    });
+    await page.route("**/api/tenants/1/change-requests/7/", (route) =>
+        route.fulfill({
+            json: { ...proposal(7), can_review: false, can_withdraw: true },
+        }),
+    );
+    await openPlant(page, "Production");
+    const rows = page.locator(".production-table tbody tr");
+    const marker = rows.nth(0).getByRole("link", {
+        name: /^Waiting for approval: view the request for 08:00/,
+    });
+    await expect(marker).toHaveText("Waiting for approval – view");
+    await expect(marker).toHaveAttribute("href", "/app/w/1/inbox/?request=7");
+    await expect(
+        rows.nth(0).getByRole("button", { name: /^Suggest correction for/ }),
+    ).toBeVisible();
+    await expect(rows.nth(1).getByRole("link")).toHaveCount(0);
+
+    await marker.click();
+    await expect(page).toHaveURL(/\/app\/w\/1\/inbox\/\?request=7$/);
+    const linked = page.getByRole("region", { name: "Linked submission" });
+    await expect(
+        linked.getByRole("heading", { name: "Review details" }),
+    ).toBeFocused();
+    await expect(
+        linked.getByRole("button", { name: "Withdraw submission" }),
+    ).toBeVisible();
+});
+
+test("a member sees which outages wait for approval", async ({ page }) => {
+    await member(page);
+    await page.route("**/api/**/outages/", (route) =>
+        route.fulfill({
+            json: paged([
+                {
+                    id: 4,
+                    revision: 2,
+                    kind: "inverter",
+                    title: "Inverter offline",
+                    notes: "",
+                    starts_at: "2026-11-09T08:00:00Z",
+                    ends_at: null,
+                    available_dc_mw: null,
+                    available_inverter_mw: null,
+                    available_export_mw: null,
+                    status: "active",
+                    declared_configuration_id: 31,
+                    pending_request_id: 9,
+                },
+            ]),
+        }),
+    );
+    await openPlant(page, "Outages");
+    await expect(
+        page.getByRole("link", {
+            name: "Waiting for approval: view the request for Inverter offline",
+        }),
+    ).toHaveAttribute("href", "/app/w/1/inbox/?request=9");
+});
+
+test("an administrator who edits directly sees no proposal draft", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
+    const writes: Record<string, unknown>[] = [];
+    await page.route("**/api/**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        )!;
+        return route.fulfill({
+            json: dayRows(date, [{ can_edit: true, can_propose: false }]),
+        });
+    });
+    await page.route("**/production/changes/", (route) => {
+        writes.push(route.request().postDataJSON());
+        return route.fulfill({
+            json: { created: 1, existing: 0, total: 1, ids: [5] },
+        });
+    });
+    await openPlant(page, "Production");
+    await page.getByRole("button", { name: /^Edit 08:00/ }).click();
+    const editor = page.locator(".production-row-editor");
+    await expect(
+        editor.getByRole("button", { name: "Add to request" }),
+    ).toHaveCount(0);
+    await editor.getByRole("textbox").first().fill("0,5");
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Production saved.")).toBeVisible();
+    expect(writes).toHaveLength(1);
+    await expect(draft(page)).toHaveCount(0);
 });

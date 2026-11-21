@@ -229,6 +229,7 @@ async function setup(page: Page) {
                                   }
                                 : null,
                         edit_unavailable_reason: null,
+                        pending_request_id: null,
                     };
                 }),
             } satisfies components["schemas"]["ProductionHistoryOutput"],

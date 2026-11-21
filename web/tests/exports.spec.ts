@@ -63,6 +63,7 @@ const interval = (
     can_propose: false,
     can_propose_revert: false,
     proposal_unavailable_reason: null,
+    pending_request_id: null,
 });
 
 const outage: Schemas["IncidentOutput"] = {
