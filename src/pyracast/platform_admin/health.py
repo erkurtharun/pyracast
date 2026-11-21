@@ -254,6 +254,22 @@ def summarize_health(report: HealthReport) -> HealthSummary:
                 category="action",
             ),
         )
+    if report.broker_unreachable:
+        checks.insert(
+            0,
+            HealthCheck(
+                key="broker",
+                label=_("Message broker not answering"),
+                count=1,
+                help=_(
+                    "The dispatcher renews its heartbeat only after the message broker answers "
+                    "and is restarted otherwise. Check the message broker."
+                ),
+                action_url=f"{reverse('admin:workspace_operations')}#dispatch-title",
+                action_label=_("Review dispatcher"),
+                category="action",
+            ),
+        )
     categories = {item.category for item in checks}
     if "action" in categories:
         return HealthSummary(_("Action needed"), "attention", tuple(checks), report.checked_at)

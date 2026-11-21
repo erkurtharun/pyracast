@@ -118,18 +118,22 @@ class Deferrals:
         self._until[key] = now + self._delay
 
 
-def _rabbitmq_depth(broker: RabbitmqBroker, queue_name: str) -> int:
+def broker_read[T](broker: RabbitmqBroker, read: Callable[[RabbitmqBroker], T]) -> T:
     # Dramatiq drops a dead connection only inside enqueue and queue declaration, not here, so a
     # lost connection or channel is dropped before a second attempt on a fresh one.
     try:
-        return int(broker.get_queue_message_counts(queue_name)[0])
+        return read(broker)
     except BROKER_ERRORS:
         del broker.connection
     try:
-        return int(broker.get_queue_message_counts(queue_name)[0])
+        return read(broker)
     except BROKER_ERRORS:
         del broker.connection
         raise
+
+
+def _rabbitmq_depth(broker: RabbitmqBroker, queue_name: str) -> int:
+    return broker_read(broker, lambda live: int(live.get_queue_message_counts(queue_name)[0]))
 
 
 def queue_depth(actor: Actor[[int], None]) -> int | None:

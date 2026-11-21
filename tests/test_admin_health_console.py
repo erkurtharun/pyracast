@@ -34,6 +34,7 @@ TURKISH = {
     "Message broker could not be read; queue counts are not shown.": (
         "Mesaj kuyruğu okunamad\u0131; kuyruk say\u0131lar\u0131 gösterilmiyor."
     ),
+    "Message broker not answering": "Mesaj kuyru\u011fu yan\u0131t vermiyor",
     "Checked at": "Kontrol zaman\u0131",
     "Why listed": "Listelenme nedeni",
     "No forecast saved yet": "Henüz kaydedilmiş tahmin yok",
@@ -169,12 +170,16 @@ def test_the_workers_panel_shows_phase_timing_queues_and_provider_requests(
         (row["plant_name"], row["today"], row["busiest_day"])
         for row in page.context["provider_requests"]
     ] == [(system.region.name, 3, 3)]
+    assert page.context["health_summary"].checks == ()
 
     broker(monkeypatch, reachable=False)
-    content = client.get("/admin/operations/").content.decode()
+    page = client.get("/admin/operations/")
+    content = page.content.decode()
     assert (
         text(language, "Message broker could not be read; queue counts are not shown.") in content
     )
+    assert [check.key for check in page.context["health_summary"].checks] == ["broker"]
+    assert text(language, "Message broker not answering") in content
 
 
 @pytest.mark.parametrize("language", ["en", "tr"])

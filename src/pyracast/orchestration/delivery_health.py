@@ -444,7 +444,7 @@ class BrokerState:
 
 
 def read_broker() -> BrokerState:
-    """A diagnostic: the report's health never depends on it."""
+    """The queue counts are a diagnostic; only a broker that does not answer fails the report."""
     try:
         return BrokerState(True, queue_states(QUEUES))
     except Exception as error:
@@ -465,9 +465,17 @@ class HealthReport:
         return [state.phase.value for state in self.phases if not state.healthy]
 
     @property
+    def broker_unreachable(self) -> bool:
+        # The dispatcher renews its heartbeat only after the broker answered and is restarted
+        # within BROKER_OUTAGE_RESTART otherwise; its phases may still record success.
+        return self.broker is not None and not self.broker.reachable
+
+    @property
     def healthy(self) -> bool:
-        return not self.unhealthy_phases and not any(
-            self.counts[item.key] for item in CHECKS if item.alarm
+        return (
+            not self.unhealthy_phases
+            and not self.broker_unreachable
+            and not any(self.counts[item.key] for item in CHECKS if item.alarm)
         )
 
     def as_json(self) -> dict[str, object]:

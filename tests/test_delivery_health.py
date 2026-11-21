@@ -23,7 +23,7 @@ from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.orchestration.delivery_health import delivery_health
 from pyracast.orchestration.dispatcher import record_dispatch_phase
 from pyracast.regions.models import Region
-from tests.support.delivery_health import NOW, recent_forecast
+from tests.support.delivery_health import NOW, answering_broker, recent_forecast
 from tests.support.domain import FakeAdapter, System, make_system
 from tests.support.invariants import stored_again
 from tests.support.metering import connected
@@ -245,6 +245,7 @@ def test_health_command_emits_json_and_nonzero_for_degraded_work(
     monkeypatch.setattr(
         "pyracast.orchestration.management.commands.check_delivery_health.timezone.now", lambda: NOW
     )
+    answering_broker(monkeypatch)
     output = io.StringIO()
     with pytest.raises(CommandError, match="needs attention"):
         call_command("check_delivery_health", stdout=output)

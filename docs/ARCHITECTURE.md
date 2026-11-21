@@ -327,7 +327,8 @@ authentication failures, overdue, failed or uncertain account and invitation mai
 overdue, interrupted or failed calibration runs. Enabled approved regions without a successful
 forecast in 26 hours are unhealthy unless their first collection is still open. Complete
 saved-forecast fallback, queued and running calibrations, provider requests per binding and UTC
-day and the broker's queue counts are informational: a broker outage alone never fails the check.
+day and the broker's queue counts are informational. A broker that does not answer, read through
+the dispatcher's reconnecting read, fails the check: the dispatcher stops renewing its heartbeat then.
 This check needs a working database; monitoring
 must also treat failure to execute it as unhealthy. Run the mailer with
 `worker --queues notifications --threads 2`, separately from the default collection,

@@ -28,10 +28,11 @@ from pyracast.plants.models import CalibrationError, CalibrationRun, Plant, Plan
 from pyracast.plants.training import LEASE_DURATION as LEASE
 from pyracast.regions.models import Region
 from tests.support.budgets import assert_scale_invariant, captured_statements
-from tests.support.delivery_health import NOW, recent_forecast
+from tests.support.delivery_health import NOW, AnsweringBroker, recent_forecast
 from tests.support.domain import System, make_system
 from tests.support.notifications import store
 from tests.support.plant_operations import make_plant
+from tests.support.rabbitmq import install_fake_rabbitmq
 
 pytestmark = pytest.mark.django_db(transaction=True)
 LAG = timedelta(minutes=5)
@@ -46,7 +47,7 @@ def unreachable_broker() -> RabbitmqBroker:
 def printed(
     monkeypatch: pytest.MonkeyPatch,
     *arguments: str,
-    broker: Callable[[], RabbitmqBroker] = unreachable_broker,
+    broker: Callable[[], RabbitmqBroker] = lambda: cast(RabbitmqBroker, AnsweringBroker()),
 ) -> tuple[dict[str, Any], bool]:
     monkeypatch.setattr(f"{COMMAND}.timezone.now", lambda: NOW)
     monkeypatch.setattr("pyracast.background.broker.make_broker", broker)
@@ -291,7 +292,7 @@ class Channel:
         )
 
 
-def test_the_broker_section_reports_each_queue_and_never_decides_health(
+def test_the_broker_section_reports_each_queue_and_its_counts_never_decide_health(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system = make_system(approved=True)
@@ -328,7 +329,7 @@ def test_the_broker_section_reports_each_queue_and_never_decides_health(
 
 
 @pytest.mark.parametrize("failure", ["configuration", "connection"])
-def test_a_broker_outage_alone_leaves_the_report_healthy(
+def test_a_broker_that_does_not_answer_fails_the_report_while_every_phase_succeeded(
     monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
     system = make_system(approved=True)
@@ -343,9 +344,38 @@ def test_a_broker_outage_alone_leaves_the_report_healthy(
         else lambda: cast(RabbitmqBroker, broker),
     )
 
-    assert failed is False
+    assert failed is True
     assert report["broker"] == {"reachable": False, "queues": {}}
+    assert report["unhealthy_dispatch_phases"] == []
     assert broker.closed == (failure == "connection")
+
+
+def test_the_broker_section_reads_a_lost_connection_again_on_a_fresh_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = make_system(approved=True)
+    recent_forecast(system)
+    dispatched()
+    rabbitmq = install_fake_rabbitmq(monkeypatch)
+    broker = RabbitmqBroker(url="amqp://broker.invalid/", confirm_delivery=True)
+    assert broker.channel.is_open
+    rabbitmq.drop()
+
+    report, failed = printed(monkeypatch, broker=lambda: broker)
+
+    assert failed is False
+    assert report["broker"]["reachable"] is True
+    assert rabbitmq.attempts == 2
+    rabbitmq.reachable = False
+
+    report, failed = printed(
+        monkeypatch,
+        broker=lambda: RabbitmqBroker(url="amqp://broker.invalid/", confirm_delivery=True),
+    )
+
+    assert failed is True
+    assert report["broker"] == {"reachable": False, "queues": {}}
+    assert rabbitmq.attempts == 4
 
 
 def test_a_new_plant_waits_for_its_open_first_collection_before_it_is_stale(

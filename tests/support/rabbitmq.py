@@ -67,7 +67,9 @@ class FakeChannel:
     def queue_declare(self, queue: str, **_options: object) -> SimpleNamespace:
         self._check()
         messages = self.connection.server.queues.setdefault(queue, [])
-        return SimpleNamespace(method=SimpleNamespace(message_count=len(messages)))
+        return SimpleNamespace(
+            method=SimpleNamespace(message_count=len(messages), consumer_count=0)
+        )
 
     def basic_publish(
         self, exchange: str, routing_key: str, body: bytes, **_options: object

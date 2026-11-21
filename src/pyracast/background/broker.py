@@ -14,6 +14,7 @@ from pyracast.background.deadlines import (
     BROKER_HEARTBEAT_SECONDS,
     BROKER_SOCKET_SECONDS,
 )
+from pyracast.background.failures import broker_read
 
 LOCAL_BROKER_URL = "amqp://guest:guest@127.0.0.1:5672/%2F"
 MISSING_URL = "Set PYRACAST_RABBITMQ_URL; only development falls back to a local broker."
@@ -67,7 +68,8 @@ def _queue_state(channel: Any, queue: str) -> QueueState:
 def queue_states(queues: Sequence[str]) -> tuple[QueueState, ...]:
     broker = make_broker()
     try:
-        channel = broker.channel
-        return tuple(_queue_state(channel, queue) for queue in queues)
+        return broker_read(
+            broker, lambda live: tuple(_queue_state(live.channel, queue) for queue in queues)
+        )
     finally:
         broker.close()
