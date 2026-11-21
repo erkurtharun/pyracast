@@ -22,13 +22,13 @@ def release_text() -> str:
     return (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
 
 
-def test_one_ci_result_job_judges_every_other_ci_job() -> None:
+def test_one_ci_result_job_judges_every_other_ci_job_but_the_release_start() -> None:
     jobs = ci_jobs()
     result = jobs["ci_result"]
-    (check,) = [candidate for candidate in result["steps"] if "run" in candidate]
+    check = step(result, "Require every CI job")
 
     assert result["name"] == release_authorization.REQUIRED_CI_JOB
-    assert set(result["needs"]) == set(jobs) - {"ci_result"}
+    assert set(result["needs"]) == set(jobs) - {"ci_result", "release_start"}
     assert result["if"] == "${{ !cancelled() }}"
     assert check["run"] == "python3 scripts/ci_result.py"
     assert check["env"] == {"NEEDS": "${{ toJSON(needs) }}"}
@@ -314,9 +314,13 @@ def test_the_serialized_deploy_cancels_a_release_main_moved_past_just_before_the
     transfer = step(deploy, TRANSFER)
 
     assert "getBranch" in read["with"]["script"]
-    assert current["env"] == {"MAIN_SHA": "${{ steps.main.outputs.sha }}"}
+    assert current["env"] == {
+        "MAIN_SHA": "${{ steps.main.outputs.sha }}",
+        "CI_STARTED_AT": "${{ needs.authorize.outputs.ci_started_at }}",
+    }
     assert current["run"] == (
-        'python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA"'
+        'python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA" '
+        '--deployments "$RUNNER_TEMP/release-deployments.json" --since "$CI_STARTED_AT"'
     )
     assert cancel["if"] == "steps.current.outputs.current != 'true'"
     assert "cancelWorkflowRun" in cancel["with"]["script"]
@@ -434,3 +438,171 @@ def test_the_web_dependency_audit_runs_once_per_ci_run() -> None:
     assert step(web, "Audit web dependencies against dated exceptions")["if"] == (
         "runner.os == 'Linux'"
     )
+
+
+RELEASE_TESTED_JOBS = {
+    "deployment",
+    "verify_ubuntu",
+    "verify_windows_shards",
+    "verify_windows",
+    "web_ubuntu",
+    "web_windows",
+    "scientific",
+    "audit",
+}
+PINNED_ACTION = re.compile(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}")
+PARENT = "c" * 40
+TREE = "d" * 40
+
+
+def test_ci_asks_release_to_judge_a_push_to_main_once_its_images_are_ready() -> None:
+    start = ci_jobs()["release_start"]
+    (ask,) = start["steps"]
+    script = " ".join(ask["with"]["script"].split())
+
+    assert start["name"] == release_authorization.RELEASE_START_JOB
+    assert start["needs"] == "deployment"
+    assert start["if"] == (
+        "vars.GCP_DEPLOY_ENABLED == 'true' && github.event_name == 'push' && "
+        "github.ref == 'refs/heads/main'"
+    )
+    assert start["permissions"] == {"actions": "write"}
+    assert start["continue-on-error"] is True
+    assert str(ask["uses"]).startswith("actions/github-script@")
+    assert script == (
+        "await github.rest.actions.createWorkflowDispatch({ ...context.repo, "
+        "workflow_id: 'release.yml', ref: 'main', inputs: { ci_run_id: String(context.runId), "
+        "ci_run_attempt: process.env.GITHUB_RUN_ATTEMPT }, });"
+    )
+
+
+def test_every_repeated_job_still_runs_to_the_end_on_each_push_to_main() -> None:
+    document = workflow("ci.yml")
+    jobs = ci_jobs()
+
+    assert triggers("ci.yml")["push"] == {"branches": ["main"]}
+    assert document["concurrency"] == {
+        "group": "ci-${{ github.workflow }}-${{ github.ref }}",
+        "cancel-in-progress": True,
+    }
+    assert set(jobs) == RELEASE_TESTED_JOBS | {"sonar", "ci_result", "release_start"}
+    for identifier in RELEASE_TESTED_JOBS:
+        assert "if" not in jobs[identifier], identifier
+        assert "continue-on-error" not in jobs[identifier], identifier
+    assert "push" not in jobs["sonar"]["if"]
+    assert "github.ref" not in jobs["sonar"]["if"]
+    assert jobs["ci_result"]["if"] == "${{ !cancelled() }}"
+    for job in jobs.values():
+        assert "release_start" not in str(job.get("needs", "")), job["name"]
+
+
+def test_a_passed_pull_request_run_names_its_tested_tree_before_repository_code_runs() -> None:
+    result = ci_jobs()["ci_result"]
+    steps = result["steps"]
+    read = step(result, "Read the tree this pull request run tested")
+    require = step(result, "Require every CI job")
+    record = step(result, "Record the tested tree for an early release of its squash merge")
+    name = (
+        record["with"]["name"]
+        .replace("${{ steps.tested.outputs.base }}", PARENT)
+        .replace("${{ steps.tested.outputs.tree }}", TREE)
+        .replace("${{ github.run_attempt }}", "2")
+    )
+    match = release_authorization.TESTED_TREE_ARTIFACT.fullmatch(name)
+
+    assert step_index(result, "actions/checkout") == 0
+    assert steps.index(read) == 1
+    assert steps.index(read) < steps.index(require) < steps.index(record)
+    assert read["id"] == "tested"
+    assert read["if"] == "github.event_name == 'pull_request'"
+    assert read["env"] == {"PULL_REQUEST_HEAD": "${{ github.event.pull_request.head.sha }}"}
+    for fragment in ("python", "uv ", "scripts/", "npm", "bash "):
+        assert fragment not in read["run"], fragment
+    assert "git cat-file commit HEAD" in read["run"]
+    assert "git rev-parse 'HEAD^{tree}'" in read["run"]
+    assert '"${parents[1]}" == "$PULL_REQUEST_HEAD"' in read["run"]
+    assert record["if"] == "steps.tested.outputs.tree != ''"
+    assert str(record["uses"]).startswith("actions/upload-artifact@")
+    assert record["with"]["if-no-files-found"] == "error"
+    assert record["with"]["retention-days"] == 7
+    assert match
+    assert (match["base"], match["tree"], match["attempt"]) == (PARENT, TREE, "2")
+
+
+def test_the_release_judges_a_ci_run_its_dispatch_names_through_the_same_gate() -> None:
+    inputs = triggers("release.yml")["workflow_dispatch"]["inputs"]
+    authorize = release_jobs()["authorize"]
+    collect = step(authorize, "Collect the CI run of the current main commit")
+    script = " ".join(collect["with"]["script"].split())
+
+    assert set(inputs) == {"ci_run_id", "ci_run_attempt"}
+    for value in inputs.values():
+        assert (value["required"], value["type"]) == (False, "string")
+    assert (
+        "const requested = context.eventName === 'workflow_dispatch' && inputs.ci_run_id "
+        "? { id: inputs.ci_run_id, run_attempt: inputs.ci_run_attempt ?? '' } : null;"
+    ) in script
+    assert "github.rest.repos.listPullRequestsAssociatedWithCommit" in script
+    assert "event: 'pull_request', head_sha: merged[0].head.sha" in script
+    assert "if (requested) {" in script
+    assert authorize["permissions"] == {
+        "contents": "read",
+        "actions": "read",
+        "deployments": "read",
+        "pull-requests": "read",
+    }
+    assert authorize["outputs"]["ci_started_at"] == "${{ steps.decision.outputs.ci_started_at }}"
+    assert authorize["outputs"]["proven"] == "${{ steps.decision.outputs.proven }}"
+
+
+def test_a_proven_early_start_is_classified_like_the_release_after_the_whole_run() -> None:
+    classify = step(release_jobs()["authorize"], "Classify the changes since the deployed commit")
+
+    assert classify["env"]["RELEASE_EVENT"] == (
+        "${{ steps.decision.outputs.proven == 'true' && 'workflow_run' || github.event_name }}"
+    )
+    assert classify["run"] == (
+        'python3 deploy/release_scope.py "$RELEASE_EVENT" "$DEPLOYED_SHA" "$RELEASE_SHA"'
+    )
+
+
+def test_an_automatic_release_transfers_nothing_for_a_commit_released_since_its_ci_run() -> None:
+    deploy = release_jobs()["deploy"]
+    find = step(deploy, "Find the production deployments of this commit")
+    current = step(deploy, "Decide whether main has moved past this release")
+    script = " ".join(find["with"]["script"].split())
+
+    assert find["if"] == (
+        "github.event_name == 'workflow_run' || needs.authorize.outputs.proven == 'true'"
+    )
+    assert find["continue-on-error"] is True
+    assert find["timeout-minutes"] == 1
+    assert "environment: 'production', sha: process.env.RELEASE_SHA" in script
+    assert "`${process.env.RUNNER_TEMP}/release-deployments.json`" in script
+    assert deploy["steps"].index(find) < deploy["steps"].index(current)
+    assert deploy["permissions"] == {
+        "contents": "read",
+        "actions": "write",
+        "id-token": "write",
+        "deployments": "read",
+    }
+
+
+def test_no_workflow_runs_for_pull_request_targets_and_every_action_is_pinned_by_commit() -> None:
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        assert "pull_request_target" not in triggers(path.name), path.name
+        for job in workflow(path.name)["jobs"].values():
+            for candidate in job["steps"]:
+                if "uses" in candidate:
+                    assert PINNED_ACTION.fullmatch(str(candidate["uses"])), candidate["uses"]
+
+
+def test_in_ci_only_the_release_start_may_write_and_only_to_actions() -> None:
+    writers = {
+        identifier: job["permissions"]
+        for identifier, job in ci_jobs().items()
+        if "write" in str(job.get("permissions", {}))
+    }
+
+    assert workflow("ci.yml")["permissions"] == {"contents": "read"}
+    assert writers == {"release_start": {"actions": "write"}}

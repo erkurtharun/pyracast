@@ -77,6 +77,8 @@ def test_every_uploaded_artifact_has_a_consumer_or_is_a_report() -> None:
             assert "id" not in upload, name
         elif name.startswith("release-images-"):
             assert (source, identifier) == ("ci.yml", "deployment")
+        elif name.startswith("pr-tested-"):
+            assert (source, identifier) == ("ci.yml", "ci_result")
         else:
             outputs = workflow(source)["jobs"][identifier].get("outputs", {})
             keys = {
@@ -207,13 +209,16 @@ def test_the_release_judges_the_ci_attempt_that_triggered_it() -> None:
     script = " ".join(collect["with"]["script"].split())
 
     assert (
+        "const source = requested ?? (context.eventName === 'workflow_run' "
+        "? context.payload.workflow_run : null);"
+    ) in script
+    assert (
         "github.rest.actions.getWorkflowRunAttempt({ ...repository, "
-        "run_id: context.payload.workflow_run.id, "
-        "attempt_number: context.payload.workflow_run.run_attempt, })"
+        "run_id: Number(source.id), attempt_number: Number(source.run_attempt), })"
     ) in script
     assert (
         "github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, { ...repository, "
-        "run_id: run.id, attempt_number: run.run_attempt, per_page: 100, })"
+        "run_id: candidate.id, attempt_number: candidate.run_attempt, per_page: 100, })"
     ) in script
     assert "getWorkflowRun(" not in script
     assert "listJobsForWorkflowRun," not in script
