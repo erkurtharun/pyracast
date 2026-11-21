@@ -154,7 +154,8 @@ def revise_plant(
     platform: bool = False,
 ) -> Plant:
     """`expected_revision` is the parameter revision the change was made from; a different
-    change saved since then refuses it. An operator command passes None to overwrite."""
+    change saved since then refuses it. None overwrites, as the operator command does unless
+    it is given a revision."""
     with transaction.atomic():
         authorize_workspace_admin(actor, tenant_id, platform=platform)
         region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
