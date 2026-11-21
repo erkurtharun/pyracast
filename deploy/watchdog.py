@@ -33,6 +33,8 @@ APPLICATION_SERVICES = (
 )
 SERVICES = (*SUPPORT_SERVICES, *APPLICATION_SERVICES)
 HEALTHY = ("running", "healthy")
+# An activating unit is still starting or waiting to restart after a failure.
+STOPPED_UNIT_STATES = ("failed", "inactive")
 # The unit's TimeoutStartSec leaves 90 s after this deadline for the reports.
 DEADLINE_SECONDS = 210
 DELIVERY_INTERVAL_SECONDS = 300
@@ -104,6 +106,16 @@ def unit_state(run: Run) -> str:
     return run.command(
         ["systemctl", "is-active", "pyracast.service"], capture_output=True
     ).stdout.strip()
+
+
+def check_stopped_unit(run: Run) -> None:
+    # A release, and systemd stopping the unit, hold the release lock while the unit is down.
+    with host.release_lock(0) as locked:
+        if not locked or host.RELEASE_BLOCKED.exists():
+            return
+        unit = unit_state(run)
+    if unit in STOPPED_UNIT_STATES:
+        report("pyracast_runtime_unhealthy", "ERROR", unit_state=unit)
 
 
 def check_capacity() -> None:
@@ -335,6 +347,8 @@ def supervise(run: Run, release: Path) -> dict[str, str]:
     run.step("rehearsal", check_rehearsal)
     unit = run.step("unit", unit_state, run)
     if unit != "active":
+        if unit in STOPPED_UNIT_STATES:
+            run.step("unit", check_stopped_unit, run)
         return {"state": "unit_failed", "unit_state": str(unit or "unknown")}
     compose = compose_command(release)
     heartbeat = run.step("runtime", check_runtime, run, compose) or {"state": "ok"}

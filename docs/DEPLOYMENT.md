@@ -614,9 +614,9 @@ not be written. Never delete `release-blocked` by hand.
 | Event | Means | Check first | Recover |
 | --- | --- | --- | --- |
 | `pyracast_watchdog_heartbeat` | One watchdog run ended; `state` says how. Its absence for 15 minutes alerts | `systemctl status pyracast-watchdog.timer` | Start the timer; a down VM needs a start |
-| `pyracast_watchdog_step_failed` | One watchdog check (`step`) timed out or raised | `journalctl -u pyracast-watchdog.service` | Fix the cause the journal names; the other checks still ran |
+| `pyracast_watchdog_step_failed` | One watchdog check (`step`) timed out or raised; the line names only the step, the outcome and the error type | The other lines of the same run | Run that step by hand as listed below the table to see its error; the other checks still ran |
 | `pyracast_host_capacity` | Disk or memory is low | `df -h`, `free -m` | Free or grow the disk; find the process holding memory |
-| `pyracast_runtime_unhealthy` | A container stays unhealthy after the restart, or PostgreSQL or RabbitMQ is unhealthy | `docker compose ... ps`, `logs --tail 100 SERVICE` | Fix the service; `systemctl restart pyracast` once the cause is gone |
+| `pyracast_runtime_unhealthy` | A container stays unhealthy after the restart, PostgreSQL or RabbitMQ is unhealthy (`services`), or `pyracast.service` is failed or inactive while no release or stop holds the release lock (`unit_state`) | `docker compose ... ps`, `logs --tail 100 SERVICE`; `systemctl status pyracast.service` | Fix the cause; `systemctl restart pyracast` once it is gone |
 | `pyracast_runtime_restarted` | The watchdog restarted `services` and they recovered | Their logs before the restart | None unless it repeats |
 | `pyracast_delivery_unhealthy` | The delivery health check failed: `alarms` with counts, `dispatch_phases`, `broker_unreachable`, `missing_queues`; `outcome: unreadable` when it printed no report | The Operations page, `pyracast check_delivery_health` in `api` | Restart the worker or dispatcher it names; correct the data the check lists |
 | `pyracast_release_blocked` | A release has kept the site in maintenance for `hours` since the attempt that began the block; the marker records its revision and UTC start, which later attempts keep | "A release that fails during maintenance" below, the release log | Rerun the verified release or follow the printed recovery |
@@ -625,13 +625,25 @@ not be written. Never delete `release-blocked` by hand.
 | `pyracast_backup_succeeded` | A dump was uploaded | None | None |
 | `pyracast_backup_skipped` | A release held the lock or stayed blocked | Whether a release runs | None; the next hour backs up |
 | `pyracast_backup_failed` | A dump failed, was stopped, or the last verified one is older than 90 minutes | `journalctl -u pyracast-backup.service`, the bucket | Fix the cause; `systemctl start pyracast-backup.service`; release nothing before one succeeds |
-| `pyracast_backup_setting_invalid` | `daily_backups` in `/etc/pyracast/host.json` is neither true nor false; the hourly dump was kept | The file | Run the startup script again (Terraform writes it) |
+| `pyracast_backup_setting_invalid` | `daily_backups` in `/etc/pyracast/host.json` is neither true nor false. An hourly run ends failed: one that took its backup kept it, a skipped one took none; a pre-release backup only warns | The file and `backup_daily_tier` in Terraform | Rewrite the file from Terraform's value with `sudo google_metadata_script_runner startup` |
 | `pyracast_backup_daily_copied` | The day's first backup was copied under `daily/` | None | None |
 | `pyracast_backup_daily_copy_failed` | The hourly dump succeeded, its daily copy did not (`error`) | The bucket and its IAM | The next hour retries |
 | `pyracast_rehearsal_passed` | A restore rehearsal passed | None | None |
 | `pyracast_rehearsal_failed` | A rehearsal failed in `step` | `journalctl -u pyracast-rehearsal.service` | Fix the step; `systemctl start pyracast-rehearsal.service` |
 | `pyracast_rehearsal_unhealthy` | The last rehearsal failed or none passed within eight days | `/var/lib/pyracast/last-rehearsal.json` | As for `pyracast_rehearsal_failed` |
 | `pyracast_secrets_failed` | A release's environment files were not prepared (`category`, `secret`) | The release log, `journalctl -u pyracast.service` | Fix the secret version or permission it names; release again |
+
+A failed watchdog step by hand, in `/opt/pyracast/current` with
+`compose=(docker compose --env-file deploy/release.env -f deploy/compose.yaml)`:
+
+- `capacity`: `df -h / /var/lib/pyracast` and `grep Mem /proc/meminfo`.
+- `release_blocked`, `backup_age`, `rehearsal`: read `/var/lib/pyracast/release-blocked`,
+  `last-backup.json` or `last-rehearsal.json`.
+- `unit`: `systemctl is-active pyracast.service`.
+- `runtime`: `"${compose[@]}" ps --all`, then `docker inspect` of the containers it lists.
+- `delivery`: `"${compose[@]}" exec -T api pyracast check_delivery_health`.
+- `certificate`: `openssl s_client -connect 127.0.0.1:8443 -servername DOMAIN </dev/null | openssl x509 -noout -dates`.
+- `origin_pull`: `python3 deploy/probe_origin_pull.py DOMAIN --attempts 1`.
 
 ## Database reset and restore
 
