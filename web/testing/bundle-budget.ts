@@ -83,10 +83,15 @@ export function budgetLimit(recorded: number, tolerancePercent: number) {
     return Math.floor((recorded * (100 + tolerancePercent)) / 100);
 }
 
+const literally = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // Turbopack registers a module's exports by name (`e.s(["Calibrations",0,...`), the one stable
-// name an on-demand chunk carries; its file names and module ids change with every build.
+// name an on-demand chunk carries; its file names and module ids change with every build. The name
+// is looked for up to the registration's first `]`; a miss fails the measurement.
 function exporting(dist: string, files: string[], name: string) {
-    const marker = new RegExp(`[\\w$]\\.s\\(\\[${JSON.stringify(name)},`);
+    const marker = new RegExp(
+        `[\\w$]\\.s\\(\\[(?:[^\\]]*?,)?${literally(JSON.stringify(name))},`,
+    );
     const found = files.filter((file) =>
         marker.test(readFileSync(path.join(dist, file), "utf8")),
     );
@@ -123,7 +128,7 @@ export function measure(dist: string, budget: Budget): Measured[] {
     const onDemand = staticChunks(dist).filter(
         (file) => !loaded.has(file) && !polyfills.has(file),
     );
-    const named = new Set<string>();
+    const named = new Map<string, string>();
     const entry = (
         name: string,
         recorded: number,
@@ -139,7 +144,14 @@ export function measure(dist: string, budget: Budget): Measured[] {
         ),
         ...Object.entries(budget.onDemand).map(([name, recorded]) => {
             const files = exporting(dist, onDemand, name);
-            for (const file of files) named.add(file);
+            for (const file of files) {
+                const counted = named.get(file);
+                if (counted)
+                    throw new Error(
+                        `${name} resolves to ${file}, which ${counted} already counts.`,
+                    );
+                named.set(file, name);
+            }
             return entry(name, recorded, files);
         }),
     ];
