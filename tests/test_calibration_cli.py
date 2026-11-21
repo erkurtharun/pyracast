@@ -2,7 +2,6 @@ import json
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -136,8 +135,8 @@ def test_an_output_named_by_a_relative_path_is_staged_beside_it(
     staged: list[Path] = []
     make = tempfile.mkdtemp
 
-    def recorded(*args: Any, **kwargs: Any) -> str:
-        path = make(*args, **kwargs)
+    def recorded(prefix: str, dir: Path) -> str:
+        path = make(prefix=prefix, dir=dir)
         staged.append(Path(path).resolve())
         return path
 
