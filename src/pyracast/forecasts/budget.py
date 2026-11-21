@@ -140,8 +140,9 @@ def forecast_need(binding: SiteBinding, now: datetime, daily_quota: int) -> int:
 def remaining_forecast_requests(
     account: ProviderAccount, now: datetime, *, validating: SiteBinding | None = None
 ) -> int:
-    """What every plant that collects now or once revalidated still needs today. Validating a
-    plant that awaits revalidation counts only the plants that collect now and that plant."""
+    """What every plant that collects now or once revalidated still needs today, plus one
+    validation request for each plant awaiting revalidation. Validating such a plant counts only
+    the forecasts of the plants that collect now and of that plant."""
     plants = list(approved_bindings(account).select_related("region", "provider_account"))
     waiting = {
         binding.pk
@@ -149,9 +150,11 @@ def remaining_forecast_requests(
         if binding.validated_credential_revision != account.credential_revision
     }
     if validating is not None and validating.pk in waiting:
-        plants = [
-            binding
+        return sum(
+            forecast_need(binding, now, account.daily_quota)
             for binding in plants
             if binding.pk == validating.pk or binding.pk not in waiting
-        ]
-    return sum(forecast_need(binding, now, account.daily_quota) for binding in plants)
+        )
+    return len(waiting) + sum(
+        forecast_need(binding, now, account.daily_quota) for binding in plants
+    )

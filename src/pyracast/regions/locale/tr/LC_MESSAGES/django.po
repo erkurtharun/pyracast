@@ -2872,8 +2872,8 @@ msgstr "Bugünkü istekler (UTC)"
 msgid "Left today"
 msgstr "Bugün kalan"
 
-msgid "Still needed by forecasts today"
-msgstr "Bugün tahminlerin hâlâ ihtiyaç duyduğu"
+msgid "Still needed by forecasts and revalidations today"
+msgstr "Bugün tahminlerin ve yeniden doğrulamaların hâlâ ihtiyaç duyduğu"
 
 msgid "Account state"
 msgstr "Hesap durumu"

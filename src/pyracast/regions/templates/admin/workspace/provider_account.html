@@ -8,7 +8,7 @@
     <div><dt>{% translate "Key revision" %}</dt><dd>{{ account.credential_revision }}</dd></div>
     <div><dt>{% translate "Requests today (UTC)" %}</dt><dd>{{ budget.used }} / {{ budget.quota }}</dd></div>
     <div><dt>{% translate "Left today" %}</dt><dd>{{ budget.remaining }}</dd></div>
-    <div><dt>{% translate "Still needed by forecasts today" %}</dt><dd>{{ budget.reserved }}</dd></div>
+    <div><dt>{% translate "Still needed by forecasts and revalidations today" %}</dt><dd>{{ budget.reserved }}</dd></div>
   </dl>
 {% endblock %}
 {% block content %}

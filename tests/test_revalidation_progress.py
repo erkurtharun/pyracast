@@ -114,7 +114,7 @@ def test_the_previous_days_due_slot_is_counted_only_within_the_starts_claim_admi
     system, (waiting,) = collecting_account([["16:00"]])
     start = utc(D2, 0)
 
-    assert remaining_forecast_requests(account(system), start) == 1
+    assert remaining_forecast_requests(account(system), start) == 2
     runs = run_revalidations(system, slots_of([D2], [13]), start, utc(D3, 0))
 
     assert runs == [Run(start, DONE, None, 1)]

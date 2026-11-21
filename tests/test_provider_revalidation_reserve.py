@@ -85,8 +85,8 @@ def test_a_replaced_key_keeps_the_forecasts_its_plants_still_need_today() -> Non
     replace_key(system.admin, system.account.pk, provider_key("NEW"))
 
     assert before == 1
-    assert remaining_forecast_requests(account(system), NOW) == 1
-    assert account_context(account(system), NOW)["budget"].reserved == 1
+    assert remaining_forecast_requests(account(system), NOW) == 2
+    assert account_context(account(system), NOW)["budget"].reserved == 2
 
 
 def test_revalidating_a_collecting_plant_never_takes_a_request_a_forecast_needs() -> None:
@@ -208,7 +208,7 @@ def test_a_history_request_leaves_the_forecast_a_waiting_plant_needs_once_revali
     spend_until(system, moment, 8)
     history = history_job(current, moment)
 
-    assert remaining_forecast_requests(account(system), moment) == 2
+    assert remaining_forecast_requests(account(system), moment) == 3
     with pytest.raises(ForecastBudgetReservedError):
         reserve_request(current, moment, purpose=RequestPurpose.ESTIMATED_ACTUALS, job=history)
 
@@ -259,7 +259,7 @@ def test_the_due_slot_of_a_current_plant_is_kept_before_its_job_is_created() -> 
     spend_until(system, moment, 9)
 
     assert not CollectionJob.objects.filter(binding=current, scheduled_for=utc(DAY, 13)).exists()
-    assert remaining_forecast_requests(account(system), moment) == 1
+    assert remaining_forecast_requests(account(system), moment) == 2
     with pytest.raises(ForecastBudgetReservedError):
         reserve_request(
             current,
