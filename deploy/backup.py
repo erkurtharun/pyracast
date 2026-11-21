@@ -419,9 +419,23 @@ def main(arguments: list[str] | None = None) -> int:
             return REFUSED_EXIT_STATUS
         if not isinstance(daily, bool):
             report("pyracast_backup_setting_invalid", "ERROR", setting="daily_backups")
+            # Only an hourly run reads the daily tier; failing a pre-release backup would stop
+            # a release inside maintenance over a setting it does not use.
+            if options.kind != "hourly":
+                print(
+                    f"WARNING: the daily_backups setting of {options.host_config} is neither "
+                    "true nor false; the pre-release backup does not use it.",
+                    file=sys.stderr,
+                )
+                return 0
+            outcome = (
+                "this run took no backup, and no daily copy is made until it is fixed"
+                if name is None
+                else "the hourly backup was kept, but no daily copy was made"
+            )
             print(
                 f"The daily_backups setting of {options.host_config} is neither true nor false; "
-                "no daily copy was made.",
+                f"{outcome}.",
                 file=sys.stderr,
             )
             return 1
