@@ -359,6 +359,20 @@ def test_a_stale_details_page_asks_for_a_reload_and_a_plant_in_review_updates_it
     assert client.get(f"/admin/plants/{empty.pk}/details/").status_code == 404
 
 
+def trash_while_the_save_waits(monkeypatch: pytest.MonkeyPatch, region: Region) -> None:
+    tenants = Tenant.objects
+
+    class TrashedWhileWaiting:
+        @staticmethod
+        def select_for_update() -> QuerySet[Tenant]:
+            Region.objects.filter(pk=region.pk).update(deleted_at=timezone.now())
+            return tenants.select_for_update()
+
+    monkeypatch.setattr(
+        "pyracast.platform_admin.plants.Tenant", SimpleNamespace(objects=TrashedWhileWaiting)
+    )
+
+
 def test_a_details_save_does_not_find_a_location_moved_to_the_trash_while_it_waited(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -366,19 +380,24 @@ def test_a_details_save_does_not_find_a_location_moved_to_the_trash_while_it_wai
     client, operator = verified_admin()
     form = PlantDetailsForm(details(client, system.region))
     assert form.is_valid(), form.errors
-    tenants = Tenant.objects
-
-    class TrashedWhileWaiting:
-        @staticmethod
-        def select_for_update() -> QuerySet[Tenant]:
-            Region.objects.filter(pk=system.region.pk).update(deleted_at=timezone.now())
-            return tenants.select_for_update()
-
-    monkeypatch.setattr(
-        "pyracast.platform_admin.plants.Tenant", SimpleNamespace(objects=TrashedWhileWaiting)
-    )
+    trash_while_the_save_waits(monkeypatch, system.region)
     with pytest.raises(Region.DoesNotExist):
         save_plant_details(operator, system.region.pk, form)
+
+
+def test_a_details_page_saved_after_its_location_moved_to_the_trash_answers_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = approved_plant()
+    client, _ = verified_admin()
+    opened = details(client, system.region, dc_capacity_mw="140")
+    trash_while_the_save_waits(monkeypatch, system.region)
+
+    response = client.post(f"/admin/plants/{system.region.pk}/details/", opened)
+
+    assert response.status_code == 404
+    configuration = PlantConfiguration.objects.get(plant=plant)
+    assert (configuration.revision, configuration.dc_capacity_mw) == (1, 130)
 
 
 def test_a_details_page_opened_before_an_approval_cannot_save_onto_the_approved_plant() -> None:
