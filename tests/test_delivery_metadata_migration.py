@@ -17,6 +17,9 @@ UNREADABLE: dict[str, object] = {**PLAIN, "kind": "unavailable", "prepared_at": 
 NAIVE: dict[str, object] = {**PLAIN, "kind": "current", "prepared_at": "2026-11-09T08:00:00"}
 UNNAMED: dict[str, object] = {**PLAIN, "prepared_at": "2026-11-09T08:00:00+00:00"}
 UNDATED: dict[str, object] = {**PLAIN, "kind": "unavailable"}
+# Not an object: the 0009 checks read keys of objects only, so such a message was storable.
+LISTED: list[object] = [PLAIN]
+WORDED = "Not prepared."
 
 
 def test_preparation_metadata_moves_from_the_message_into_typed_columns(
@@ -29,7 +32,7 @@ def test_preparation_metadata_moves_from_the_message_into_typed_columns(
         apps = MigrationExecutor(connection).loader.project_state([PREVIOUS]).apps
         deliveries = apps.get_model("notifications", "NotificationDelivery")._default_manager
 
-        def stored(hours: int, message: dict[str, object] | None) -> int:
+        def stored(hours: int, message: object) -> int:
             return int(
                 deliveries.create(
                     schedule_id=schedule.pk,
@@ -56,7 +59,14 @@ def test_preparation_metadata_moves_from_the_message_into_typed_columns(
         )
         skipped = [
             stored(hours, message)
-            for hours, message in ((3, UNREADABLE), (4, NAIVE), (5, UNNAMED), (6, UNDATED))
+            for hours, message in (
+                (3, UNREADABLE),
+                (4, NAIVE),
+                (5, UNNAMED),
+                (6, UNDATED),
+                (8, LISTED),
+                (9, WORDED),
+            )
         ]
         unprepared = stored(7, None)
         capsys.readouterr()
@@ -75,15 +85,11 @@ def test_preparation_metadata_moves_from_the_message_into_typed_columns(
         WORKBOOK,
     )
     assert columns[plain] == ("unavailable", None, datetime(2026, 11, 9, 6, tzinfo=UTC), PLAIN)
-    assert [columns[pk] for pk in skipped] == [
-        ("", None, None, UNREADABLE),
-        ("", None, None, NAIVE),
-        ("", None, None, UNNAMED),
-        ("", None, None, UNDATED),
-    ]
+    unchanged = [UNREADABLE, NAIVE, UNNAMED, UNDATED, LISTED, WORDED]
+    assert [columns[pk] for pk in skipped] == [("", None, None, message) for message in unchanged]
     assert columns[unprepared] == ("", None, None, None)
     assert (
-        "notifications: 4 prepared delivery message(s) carried no readable kind and time "
+        "notifications: 6 prepared delivery message(s) carried no readable kind and time "
         "and kept their message unchanged." in capsys.readouterr().out
     )
 
@@ -92,12 +98,13 @@ def test_preparation_metadata_moves_from_the_message_into_typed_columns(
         apps = MigrationExecutor(connection).loader.project_state([PREVIOUS]).apps
         restored = dict(
             apps.get_model("notifications", "NotificationDelivery")
-            ._default_manager.filter(pk__in=(workbook, plain))
+            ._default_manager.filter(pk__in=(workbook, plain, *skipped))
             .values_list("pk", "prepared_message")
         )
     finally:
         forward()
 
+    assert [restored.pop(pk) for pk in skipped] == unchanged
     assert restored == {
         workbook: {
             **WORKBOOK,

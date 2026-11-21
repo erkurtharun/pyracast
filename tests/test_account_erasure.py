@@ -1,22 +1,40 @@
 import io
+import json
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import reduce
 from operator import or_
 from typing import Any
+from uuid import uuid4
 
 import pytest
-from allauth.account.models import EmailAddress
+from allauth.account.internal.flows.password_reset_by_code import (
+    PASSWORD_RESET_VERIFICATION_SESSION_KEY,
+)
+from allauth.account.internal.stagekit import LOGIN_SESSION_KEY
+from allauth.account.models import EmailAddress, EmailConfirmation
 from allauth.mfa.models import Authenticator
-from allauth.socialaccount.models import SocialAccount
+from allauth.socialaccount.models import SocialAccount, SocialToken
 from allauth.usersessions.models import UserSession
 from django.apps import apps
+from django.contrib.admin import site
+from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth.models import Group, User
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
+from django.core import mail
 from django.core.management import CommandError, call_command
-from django.db import models
+from django.db import OperationalError, models
 from django.db.models.functions import Cast
+from django.test import Client, override_settings
+from django.urls import reverse
+from django.utils import timezone
+from django.utils.http import int_to_base36
 
+from pyracast.accounts import erasure
+from pyracast.accounts import retention as account_retention
+from pyracast.accounts.authorization import is_platform_admin
 from pyracast.accounts.erasure import AdministersWorkspaceError, erase_account
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import (
@@ -24,32 +42,68 @@ from pyracast.accounts.models import (
     Membership,
     OutboundMail,
     OutboundMailKind,
+    OutboundMailStatus,
     Tenant,
     UserLanguagePreference,
+    WorkspaceInvitation,
+    WorkspaceMemberRemoval,
     WorkspaceRole,
 )
 from pyracast.accounts.operations import reassign_workspace_admin
-from pyracast.notifications.models import DeliveryRecipient, ReminderRecipient, ReminderSchedule
+from pyracast.accounts.processes import PROVIDER_SIGNUP_SESSION_KEY
+from pyracast.change_requests.models import ChangeRequest
+from pyracast.change_requests.operations import submit_production
+from pyracast.incidents.models import IncidentRevision, PlantIncident
+from pyracast.notifications import outbox
+from pyracast.notifications.models import (
+    DeliveryRecipient,
+    NotificationDelivery,
+    ReminderRecipient,
+    ReminderRecipientTie,
+    ReminderSchedule,
+)
 from pyracast.notifications.operations import configure_reminders
+from pyracast.notifications.outbox import send_outbound_mail
+from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.recipients import recipient_key
 from pyracast.notifications.scheduler import enqueue_due
-from pyracast.regions.models import Region
+from pyracast.orchestration import dispatcher
+from pyracast.plants.models import Plant, PlantSubmission
+from pyracast.plants.production_changes import ProductionChange
+from pyracast.regions.models import Region, RegionLocationChangeRequest
 from tests.support.account_sessions import capture_security_events
-from tests.support.concurrency import behind_open_transaction
+from tests.support.api import verified_admin
+from tests.support.auth_lifecycle import submit
+from tests.support.company_registration import signup
+from tests.support.concurrency import (
+    behind_open_transaction,
+    paused_in,
+    row_locked_elsewhere,
+    short_lock_timeout,
+)
 from tests.support.domain import NOW, System
 from tests.support.notifications import SLOT, saved
 from tests.support.plant_operations import make_plant
+from tests.support.social_accounts import PROVIDERS, begin, complete, serve_provider_profile
+from tests.support.workspaces import administered_workspace, signed_in
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 PRIMARY = "Aylin.Quillfeather@example.com"
 SECONDARY = "aylin.q@work-example.net"
+# Earlier addresses of the person: changed away from and removed (both still named by the
+# outbox), and one that only a reminder entry tied to the person's membership still holds.
+EARLIER = "aylin.before@example.org"
+REMOVED = "aylin.removed@example.org"
+TIED = "aylin.tied@example.org"
 FIRST_NAME = "Aylinzq"
 LAST_NAME = "Quillfeather"
 USERNAME = "aylinzq-person"
 COLLEAGUE = "colleague@example.com"
 KEPT_ADDRESS = "kept@example.com"
-PERSONAL = (PRIMARY, SECONDARY, FIRST_NAME, LAST_NAME, USERNAME)
+PERSONAL = (PRIMARY, SECONDARY, EARLIER, REMOVED, TIED, FIRST_NAME, LAST_NAME, USERNAME)
+PROVIDER_UID = "person-google-subject"
+LOCMEM = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
 HISTORY = "business history keeps pointing at the anonymized account"
 # Relations erasure empties: the rows hold the person's identity, credentials or addresses.
 ERASED = frozenset(
@@ -113,6 +167,10 @@ def pointing_at(user: User) -> dict[str, int]:
     }
 
 
+def decoded_session(data: str) -> dict[str, Any]:
+    return dict(SessionStore().decode(data))
+
+
 def rows_holding(values: tuple[str, ...]) -> list[str]:
     found = []
     for model in apps.get_models(include_auto_created=True):
@@ -123,7 +181,14 @@ def rows_holding(values: tuple[str, ...]) -> list[str]:
             matches = reduce(or_, (models.Q(text__icontains=value) for value in values))
             if model._base_manager.annotate(text=text).filter(matches).exists():
                 found.append(f"{model._meta.db_table}.{field.column}")
-    return found
+    # Session data is signed and encoded; its decoded content is what a reader recovers.
+    if any(
+        value.casefold() in json.dumps(decoded_session(data), ensure_ascii=False).casefold()
+        for data in Session.objects.values_list("session_data", flat=True)
+        for value in values
+    ):
+        found.append("django_session.session_data (decoded)")
+    return sorted(found)
 
 
 def database() -> dict[str, list[tuple[Any, ...]]]:
@@ -133,18 +198,54 @@ def database() -> dict[str, list[tuple[Any, ...]]]:
     }
 
 
+def session(key: str, data: dict[str, Any]) -> None:
+    Session.objects.create(
+        session_key=key,
+        session_data=SessionStore().encode(data),
+        expire_date=timezone.now() + timedelta(hours=1),
+    )
+
+
+def outbound(
+    kind: OutboundMailKind, recipient: str, context: dict[str, str], *, finished: bool
+) -> OutboundMail:
+    return OutboundMail.objects.create(
+        kind=kind,
+        recipient=recipient,
+        language="en",
+        context=context,
+        created_at=NOW - timedelta(days=1),
+        available_at=NOW - timedelta(days=1),
+        expires_at=NOW + timedelta(hours=1),
+        status=OutboundMailStatus.SENT if finished else OutboundMailStatus.PENDING,
+        finished_at=NOW - timedelta(hours=1) if finished else None,
+    )
+
+
+def person_with(*addresses: str, username: str = USERNAME) -> User:
+    person = User.objects.create_user(
+        username=username, email=addresses[0], first_name=FIRST_NAME, last_name=LAST_NAME
+    )
+    for index, address in enumerate(addresses):
+        EmailAddress.objects.create(user=person, email=address, primary=not index, verified=True)
+    return person
+
+
 @dataclass(frozen=True)
 class Seeded:
     system: System
+    plant: Plant
     person: User
     successor: User
     other: Tenant
     schedule: ReminderSchedule
     other_schedule: ReminderSchedule
+    change_request: ChangeRequest
+    bystanders: dict[str, set[Any]]
 
 
 def seeded(monkeypatch: pytest.MonkeyPatch) -> Seeded:
-    system, _plant = make_plant(monkeypatch)
+    system, plant = make_plant(monkeypatch)
     person = system.member
     User.objects.filter(pk=person.pk).update(
         username=USERNAME, email=PRIMARY, first_name=FIRST_NAME, last_name=LAST_NAME
@@ -152,27 +253,45 @@ def seeded(monkeypatch: pytest.MonkeyPatch) -> Seeded:
     person.refresh_from_db()
     person.set_password("Person-passw0rd-2026")
     person.save()
-    EmailAddress.objects.create(user=person, email=PRIMARY, primary=True, verified=True)
+    primary = EmailAddress.objects.create(user=person, email=PRIMARY, primary=True, verified=True)
     EmailAddress.objects.create(user=person, email=SECONDARY, primary=False, verified=True)
-    SocialAccount.objects.create(
+    EmailConfirmation.objects.create(email_address=primary, key="person-confirmation", created=NOW)
+    identity = SocialAccount.objects.create(
         user=person,
         provider="google",
-        uid="person-google-subject",
+        uid=PROVIDER_UID,
         extra_data={"email": PRIMARY, "name": f"{FIRST_NAME} {LAST_NAME}"},
     )
+    SocialToken.objects.create(account=identity, token=uuid4().hex)
     Authenticator.objects.create(
         user=person, type=Authenticator.Type.TOTP, data={"secret": "person-totp-secret"}
     )
     UserLanguagePreference.objects.create(user=person, language="tr")
     person.groups.add(Group.objects.create(name="operators"))
-    Session.objects.create(
-        session_key="person-session", session_data="", expire_date=NOW + timedelta(hours=1)
-    )
+    session("person-session", {"_auth_user_id": str(person.pk), "noted": PRIMARY})
     UserSession.objects.create(
         user=person,
         session_key="person-session",
         ip="203.0.113.7",
         user_agent=f"Browser of {FIRST_NAME}",
+    )
+    # Sessions without a device row: pending flows of the person and of a bystander.
+    session("person-unbound", {"_auth_user_id": str(person.pk)})
+    session("person-reset", {PASSWORD_RESET_VERIFICATION_SESSION_KEY: {"user_id": str(person.pk)}})
+    session("person-login", {LOGIN_SESSION_KEY: {"user_pk": int_to_base36(person.pk)}})
+    session(
+        "person-provider-signup",
+        {
+            PROVIDER_SIGNUP_SESSION_KEY: {
+                "account": {"provider": "microsoft", "extra_data": {}},
+                "user": {"email": "", "first_name": "", "last_name": ""},
+                "email_addresses": [{"email": EARLIER.upper(), "verified": False}],
+            }
+        },
+    )
+    session(
+        "person-named-signup",
+        {PROVIDER_SIGNUP_SESSION_KEY: {"user": {"first_name": FIRST_NAME, "last_name": LAST_NAME}}},
     )
     schedule = configure_reminders(
         person,
@@ -185,39 +304,162 @@ def seeded(monkeypatch: pytest.MonkeyPatch) -> Seeded:
         now=NOW,
     )
     saved(system)
-    assert len(enqueue_due(SLOT)) == 1
+    (delivery_id,) = enqueue_due(SLOT)
+    assert prepare_delivery(NotificationDelivery.objects.get(pk=delivery_id), NOW)
     successor = User.objects.create(username="successor", email="successor@example.com")
     Membership.objects.create(tenant=system.tenant, user=successor)
     reassign_workspace_admin(
         system.admin, system.tenant.pk, successor.pk, expected_admin_id=person.pk
     )
+    membership = Membership.objects.get(tenant=system.tenant, user=person)
+    tied = ReminderRecipient.objects.create(
+        schedule=schedule, address=TIED, key=recipient_key(TIED)
+    )
+    ReminderRecipientTie.objects.create(recipient=tied, membership_id=membership.pk)
+    assert plant.current_configuration_id is not None
+    change_request = submit_production(
+        person,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        configuration_id=plant.current_configuration_id,
+        unit="kWh",
+        changes=[ProductionChange(NOW - timedelta(hours=1), NOW, None, "set", 1234.5)],
+        reason="Verified meter reading",
+        idempotency_key=uuid4(),
+    )
+    RegionLocationChangeRequest.objects.create(
+        region=system.region,
+        requested_by=person,
+        base_revision=Region.objects.get(pk=system.region.pk).revision,
+        latitude=41,
+        longitude=29,
+        timezone="Europe/Istanbul",
+    )
+    PlantSubmission.objects.create(plant=plant, dc_capacity_mw=130, submitted_by=person)
+    incident = PlantIncident.objects.create(
+        plant=plant,
+        declared_configuration_id=plant.current_configuration_id,
+        kind="inverter",
+        title="Inverter maintenance",
+        starts_at=NOW - timedelta(hours=2),
+        created_by=person,
+        updated_by=person,
+    )
+    IncidentRevision.objects.create(
+        incident=incident,
+        revision=1,
+        snapshot={
+            "kind": incident.kind,
+            "title": incident.title,
+            "notes": "",
+            "starts_at": incident.starts_at.isoformat(),
+            "ends_at": None,
+            "available_dc_mw": None,
+            "available_inverter_mw": None,
+            "available_export_mw": None,
+            "declared_configuration_id": plant.current_configuration_id,
+            "cancelled_at": None,
+        },
+        actor=person,
+    )
     inviter = User.objects.create(username="inviter", email="inviter@example.com")
     other = Tenant.objects.create(name="Other workspace")
     Membership.objects.create(tenant=other, user=inviter, role=WorkspaceRole.ADMIN)
+    WorkspaceMemberRemoval.objects.create(tenant=other, actor=inviter, user=person)
+    LogEntry.objects.create(
+        user=person,
+        content_type=ContentType.objects.get_for_model(Tenant),
+        object_id=str(other.pk),
+        object_repr=other.name,
+        action_flag=CHANGE,
+    )
     invite_workspace_member(inviter, other.pk, SECONDARY)
+    joined = Tenant.objects.create(name="Joined workspace")
+    Membership.objects.create(tenant=joined, user=person)
+    invitations = (
+        WorkspaceInvitation.objects.create(
+            tenant=joined,
+            email=PRIMARY.lower(),
+            created_by=inviter,
+            expires_at=NOW + timedelta(days=7),
+            accepted_at=NOW,
+            accepted_by=person,
+        ),
+        WorkspaceInvitation.objects.create(
+            tenant=other, email=TIED, created_by=inviter, expires_at=NOW + timedelta(days=7)
+        ),
+    )
+    assert all(invitation.pk for invitation in invitations)
+    colleague_invitation = WorkspaceInvitation.objects.create(
+        tenant=other, email=COLLEAGUE, created_by=inviter, expires_at=NOW + timedelta(days=7)
+    )
     other_region = Region.objects.create(
         tenant=other, name="Other site", latitude=38, longitude=27, timezone="Europe/Istanbul"
     )
     other_schedule = ReminderSchedule.objects.create(region=other_region, effective_from=NOW)
-    for address in (SECONDARY.upper(), KEPT_ADDRESS):
+    for address in (SECONDARY.upper(), KEPT_ADDRESS, REMOVED):
         ReminderRecipient.objects.create(
             schedule=other_schedule, address=address, key=recipient_key(address)
         )
-    OutboundMail.objects.create(
-        kind=OutboundMailKind.PASSWORD_CHANGED,
-        recipient=PRIMARY,
-        language="en",
-        context={"to_email": PRIMARY},
-        created_at=NOW,
-        available_at=NOW,
-        expires_at=NOW + timedelta(hours=1),
+    outbound(OutboundMailKind.PASSWORD_CHANGED, PRIMARY, {"to_email": PRIMARY}, finished=False)
+    outbound(
+        OutboundMailKind.EMAIL_CHANGED,
+        EARLIER,
+        {"from_email": EARLIER, "to_email": PRIMARY},
+        finished=True,
+    )
+    outbound(OutboundMailKind.EMAIL_DELETED, PRIMARY, {"deleted_email": REMOVED}, finished=True)
+    outbound(OutboundMailKind.PASSWORD_RESET, REMOVED, {}, finished=True)
+    colleague_mail = outbound(
+        OutboundMailKind.PASSWORD_CHANGED, COLLEAGUE, {"to_email": COLLEAGUE}, finished=False
     )
     AuthenticationCacheEntry.objects.create(
         cache_key="provider-login:person",
         value={"email": PRIMARY, "name": LAST_NAME},
         expires=NOW + timedelta(minutes=10),
     )
-    return Seeded(system, person, successor, other, schedule, other_schedule)
+    AuthenticationCacheEntry.objects.create(
+        cache_key="provider-login:earlier",
+        value={"account": {"extra_data": {"email": EARLIER.upper()}}},
+        expires=NOW + timedelta(minutes=10),
+    )
+    AuthenticationCacheEntry.objects.create(
+        cache_key="provider-login:colleague",
+        value={"email": COLLEAGUE},
+        expires=NOW + timedelta(minutes=10),
+    )
+    session(
+        "colleague-signup",
+        {PROVIDER_SIGNUP_SESSION_KEY: {"user": {"first_name": "Colleague", "email": COLLEAGUE}}},
+    )
+    session("successor-unbound", {"_auth_user_id": str(successor.pk)})
+    bystanders: dict[str, set[Any]] = {
+        "sessions": {"colleague-signup", "successor-unbound"},
+        "mail": {colleague_mail.pk},
+        "cache": {"provider-login:colleague"},
+        "invitations": {colleague_invitation.pk},
+    }
+    return Seeded(
+        system,
+        plant,
+        person,
+        successor,
+        other,
+        schedule,
+        other_schedule,
+        change_request,
+        bystanders,
+    )
+
+
+def bystanders_left() -> dict[str, set[Any]]:
+    return {
+        "sessions": set(Session.objects.values_list("session_key", flat=True)),
+        "mail": set(OutboundMail.objects.values_list("pk", flat=True)),
+        "cache": set(AuthenticationCacheEntry.objects.values_list("cache_key", flat=True)),
+        "invitations": set(WorkspaceInvitation.objects.values_list("pk", flat=True)),
+    }
 
 
 def test_every_relation_to_an_account_is_erased_or_kept_for_a_stated_reason() -> None:
@@ -231,12 +473,30 @@ def test_erasure_leaves_no_personal_data_and_keeps_the_history_that_points_at_th
     seed = seeded(monkeypatch)
     person = seed.person
     before = pointing_at(person)
-    assert rows_holding(PERSONAL)
+    assert rows_holding(PERSONAL) == [
+        "account_emailaddress.email",
+        "accounts_workspaceinvitation.email",
+        "auth_user.email",
+        "auth_user.first_name",
+        "auth_user.last_name",
+        "auth_user.username",
+        "django_session.session_data (decoded)",
+        "notifications_deliveryrecipient.address",
+        "notifications_deliveryrecipient.key",
+        "notifications_outboundmail.context",
+        "notifications_outboundmail.recipient",
+        "notifications_reminderrecipient.address",
+        "notifications_reminderrecipient.key",
+        "pyracast_authentication_cache.value",
+        "socialaccount_socialaccount.extra_data",
+        "usersessions_usersession.user_agent",
+    ]
     revisions = dict(ReminderSchedule.objects.values_list("pk", "revision"))
 
-    erasure = erase_account(person.pk, execute=True)
+    erasure_result = erase_account(person.pk, execute=True)
 
     assert rows_holding(PERSONAL) == []
+    assert bystanders_left() == seed.bystanders
     after = pointing_at(person)
     assert {relation: after[relation] for relation in ERASED} == dict.fromkeys(ERASED, 0)
     assert {relation: after[relation] for relation in KEPT} == {
@@ -244,10 +504,18 @@ def test_erasure_leaves_no_personal_data_and_keeps_the_history_that_points_at_th
     }
     assert {relation for relation in KEPT if before[relation]} == {
         "accounts.WorkspaceAdminChange.previous_administrator",
+        "accounts.WorkspaceMemberRemoval.user",
+        "admin.LogEntry.user",
+        "change_requests.ChangeRequest.proposed_by",
+        "incidents.IncidentRevision.actor",
+        "incidents.PlantIncident.created_by",
+        "incidents.PlantIncident.updated_by",
         "notifications.ReminderSchedule.configured_by",
         "plants.PlantConfiguration.created_by",
         "plants.PlantEvent.actor",
+        "plants.PlantSubmission.submitted_by",
         "regions.AuditEvent.actor",
+        "regions.RegionLocationChangeRequest.requested_by",
     }
     person.refresh_from_db()
     assert (person.username, person.email, person.first_name, person.last_name) == (
@@ -263,8 +531,9 @@ def test_erasure_leaves_no_personal_data_and_keeps_the_history_that_points_at_th
         False,
         None,
     )
-    assert not Session.objects.filter(session_key="person-session").exists()
-    assert not AuthenticationCacheEntry.objects.exists()
+    assert not EmailConfirmation.objects.exists()
+    assert not SocialToken.objects.exists()
+    assert NotificationDelivery.objects.get().prepared_message is not None
     assert sorted(ReminderRecipient.objects.values_list("address", flat=True)) == [
         COLLEAGUE,
         KEPT_ADDRESS,
@@ -274,23 +543,25 @@ def test_erasure_leaves_no_personal_data_and_keeps_the_history_that_points_at_th
         pk: revision + 1 for pk, revision in revisions.items()
     }
     assert Membership.objects.filter(tenant=seed.system.tenant).get().user == seed.successor
-    assert erasure.account_id == person.pk
-    assert erasure.changes == {
+    assert erasure_result.account_id == person.pk
+    assert erasure_result.changes == {
         "account.EmailAddress": 2,
-        "accounts.AuthenticationCacheEntry": 1,
-        "accounts.Membership": 1,
+        "account.EmailConfirmation": 1,
+        "accounts.AuthenticationCacheEntry": 2,
+        "accounts.Membership": 2,
         "accounts.UserLanguagePreference": 1,
-        "accounts.WorkspaceInvitation": 1,
+        "accounts.WorkspaceInvitation": 3,
         "auth.User": 1,
         "auth.User_groups": 1,
         "mfa.Authenticator": 1,
         "notifications.DeliveryRecipient": 1,
-        "notifications.OutboundMail": 3,
-        "notifications.ReminderRecipient": 2,
-        "notifications.ReminderRecipientTie": 1,
+        "notifications.OutboundMail": 6,
+        "notifications.ReminderRecipient": 4,
+        "notifications.ReminderRecipientTie": 2,
         "notifications.ReminderSchedule": 2,
-        "sessions.Session": 1,
+        "sessions.Session": 6,
         "socialaccount.SocialAccount": 1,
+        "socialaccount.SocialToken": 1,
         "usersessions.UserSession": 1,
     }
 
@@ -305,6 +576,130 @@ def test_a_dry_run_reports_what_erasure_would_change_and_changes_nothing(
 
     assert database() == before
     assert dry_run.changes == erase_account(seed.person.pk, execute=True).changes
+
+
+def test_erasure_deletes_only_mail_and_cache_entries_that_hold_the_exact_address() -> None:
+    person = person_with("A@example.com")
+    bystanders = ("aa@example.com", "ba@example.com", "a@example.com.tr")
+    kept_mail, kept_entries = set(), set()
+    for index, address in enumerate(bystanders):
+        kept_mail |= {
+            outbound(
+                OutboundMailKind.PASSWORD_CHANGED, address, {"to_email": address}, finished=False
+            ).pk,
+            outbound(
+                OutboundMailKind.EMAIL_CHANGED,
+                address,
+                {"from_email": address, "to_email": f"next{index}@example.com"},
+                finished=True,
+            ).pk,
+            outbound(
+                OutboundMailKind.EMAIL_DELETED,
+                f"next{index}@example.com",
+                {"deleted_email": address},
+                finished=True,
+            ).pk,
+        }
+        for key, value in (
+            (f"flat-{index}", {"email": address}),
+            (f"nested-{index}", {"user": {"emails": [address.upper()]}}),
+        ):
+            AuthenticationCacheEntry.objects.create(cache_key=key, value=value, expires=None)
+            kept_entries.add(key)
+    outbound(OutboundMailKind.PASSWORD_CHANGED, "a@example.com", {}, finished=False)
+    outbound(
+        OutboundMailKind.EMAIL_DELETED,
+        "a@example.com",
+        {"deleted_email": "a.old@example.com"},
+        finished=True,
+    )
+    for key, value in (
+        ("own", {"email": "a@example.com"}),
+        ("own-nested", {"user": {"emails": ["A@EXAMPLE.COM"]}}),
+    ):
+        AuthenticationCacheEntry.objects.create(cache_key=key, value=value, expires=None)
+
+    changes = erase_account(person.pk, execute=True).changes
+
+    assert set(OutboundMail.objects.values_list("pk", flat=True)) == kept_mail
+    assert set(AuthenticationCacheEntry.objects.values_list("cache_key", flat=True)) == (
+        kept_entries
+    )
+    assert (
+        changes["notifications.OutboundMail"],
+        changes["accounts.AuthenticationCacheEntry"],
+    ) == (2, 2)
+
+
+def test_erasure_follows_the_earlier_addresses_of_the_account_everywhere() -> None:
+    person = person_with("now@example.com")
+    tenant, inviter = administered_workspace()
+    membership = Membership.objects.create(tenant=tenant, user=person)
+    region = Region.objects.create(
+        tenant=tenant, name="Site", latitude=38, longitude=27, timezone="Europe/Istanbul"
+    )
+    schedule = ReminderSchedule.objects.create(region=region, effective_from=NOW)
+    recipient = ReminderRecipient.objects.create(
+        schedule=schedule, address="Tied@example.com", key=recipient_key("tied@example.com")
+    )
+    ReminderRecipientTie.objects.create(recipient=recipient, membership_id=membership.pk)
+    # A chain the outbox still names: first -> before -> now, and gone removed from now.
+    outbound(
+        OutboundMailKind.EMAIL_CHANGED,
+        "before@example.com",
+        {"from_email": "before@example.com", "to_email": "now@example.com"},
+        finished=True,
+    )
+    outbound(
+        OutboundMailKind.EMAIL_CHANGED,
+        "first@example.com",
+        {"from_email": "first@example.com", "to_email": "Before@example.com"},
+        finished=True,
+    )
+    outbound(
+        OutboundMailKind.EMAIL_DELETED,
+        "now@example.com",
+        {"deleted_email": "gone@example.com"},
+        finished=True,
+    )
+    held = {
+        "invitations": {
+            WorkspaceInvitation.objects.create(
+                tenant=tenant, email=email, created_by=inviter, expires_at=NOW + timedelta(days=7)
+            ).pk
+            for email in ("before@example.com", "tied@example.com")
+        },
+        "mail": {
+            outbound(OutboundMailKind.PASSWORD_RESET, "first@example.com", {}, finished=True).pk
+        },
+    }
+    ReminderRecipient.objects.create(
+        schedule=schedule, address="gone@example.com", key="gone@example.com"
+    )
+    AuthenticationCacheEntry.objects.create(
+        cache_key="provider-login:gone", value={"email": "GONE@example.com"}, expires=None
+    )
+    session(
+        "pending-reset",
+        {PASSWORD_RESET_VERIFICATION_SESSION_KEY: {"email": "tied@example.com"}},
+    )
+    bystander = outbound(
+        OutboundMailKind.EMAIL_CHANGED,
+        "other.before@example.com",
+        {"from_email": "other.before@example.com", "to_email": "other@example.com"},
+        finished=True,
+    )
+    session(
+        "bystander-reset", {PASSWORD_RESET_VERIFICATION_SESSION_KEY: {"email": "x@example.com"}}
+    )
+
+    erase_account(person.pk, execute=True)
+
+    assert not WorkspaceInvitation.objects.filter(pk__in=held["invitations"]).exists()
+    assert list(OutboundMail.objects.values_list("pk", flat=True)) == [bystander.pk]
+    assert not ReminderRecipient.objects.exists()
+    assert not AuthenticationCacheEntry.objects.exists()
+    assert list(Session.objects.values_list("session_key", flat=True)) == ["bystander-reset"]
 
 
 def test_erasure_refuses_an_account_that_administers_a_workspace(
@@ -324,6 +719,23 @@ def test_erasure_refuses_an_account_that_administers_a_workspace(
         "Assign another administrator or purge each workspace first."
     )
     assert database() == before
+
+
+@pytest.mark.parametrize("held", ["account", "workspace"])
+def test_an_administrator_is_refused_before_erasure_takes_any_lock(
+    monkeypatch: pytest.MonkeyPatch, held: str
+) -> None:
+    system, _plant = make_plant(monkeypatch)
+    row: tuple[type[models.Model], int] = (
+        (User, system.member.pk) if held == "account" else (Tenant, system.tenant.pk)
+    )
+
+    with (
+        row_locked_elsewhere(*row),
+        short_lock_timeout(),
+        pytest.raises(AdministersWorkspaceError),
+    ):
+        erase_account(system.member.pk, execute=True)
 
 
 def test_erasure_waiting_for_an_administrator_assignment_refuses_once_it_commits(
@@ -353,6 +765,305 @@ def test_erasure_waiting_for_an_administrator_assignment_refuses_once_it_commits
         seed.person.pk
     )
     assert EmailAddress.objects.filter(user=seed.person).count() == 2
+
+
+def test_erasure_reaching_an_invitation_mail_a_mail_worker_holds_waits_for_the_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    person = person_with("invitee@example.com")
+    tenant, inviter = administered_workspace()
+    invitation = invite_workspace_member(inviter, tenant.pk, "invitee@example.com")
+    held = OutboundMail.objects.get(invitation=invitation)
+
+    with override_settings(MAILERS=LOCMEM):
+        _sent, erased = paused_in(
+            monkeypatch,
+            outbox,
+            "_compose",
+            lambda: send_outbound_mail(held.pk, timezone.now()),
+            lambda: erase_account(person.pk, execute=True),
+        )
+
+    # The worker held the mail before erasure reached it, so it sent first; erasure then
+    # deleted both rows.
+    assert [message.to for message in mail.outbox] == [["invitee@example.com"]]
+    assert (
+        erased.changes["notifications.OutboundMail"],
+        erased.changes["accounts.WorkspaceInvitation"],
+    ) == (1, 1)
+    assert not WorkspaceInvitation.objects.exists()
+    assert not OutboundMail.objects.exists()
+
+
+def test_erasure_that_meets_a_held_lock_changes_nothing_and_says_to_run_it_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed = seeded(monkeypatch)
+    account = seed.person.pk
+    before = database()
+
+    with row_locked_elsewhere(Region, seed.system.region.pk), short_lock_timeout():
+        with pytest.raises(erasure.ErasureInterruptedError) as interrupted:
+            erase_account(account, execute=True)
+        with pytest.raises(CommandError) as reported:
+            erase_command("--account", str(account), "--execute")
+
+    message = (
+        f"Erasure of account {account} waited for a lock held by concurrent work and changed "
+        "nothing. Run it again."
+    )
+    assert str(interrupted.value) == str(reported.value) == message
+    assert interrupted.value.__suppress_context__
+    assert database() == before
+
+
+def test_a_database_failure_other_than_a_lock_conflict_is_not_reported_as_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    person = person_with("failing@example.com")
+
+    def fail(_account: User) -> None:
+        raise OperationalError("server closed the connection")
+
+    monkeypatch.setattr(erasure, "_anonymize", fail)
+
+    with pytest.raises(OperationalError, match=r"^server closed the connection$"):
+        erase_account(person.pk, execute=True)
+    assert User.objects.get(pk=person.pk).email == "failing@example.com"
+
+
+def platform_administrator(name: str) -> User:
+    return User.objects.create_user(
+        username=name, email=f"{name}@example.com", is_staff=True, is_superuser=True
+    )
+
+
+def test_the_last_active_platform_administrator_is_not_erased() -> None:
+    only = platform_administrator("only-admin")
+    User.objects.create_user(
+        username="former-admin", is_staff=True, is_superuser=True, is_active=False
+    )
+    User.objects.create_user(username="staff-only", is_staff=True)
+    before = database()
+
+    with pytest.raises(erasure.LastPlatformAdministratorError) as refused:
+        erase_account(only.pk, execute=True)
+    with pytest.raises(CommandError) as reported:
+        erase_command("--account", str(only.pk))
+
+    assert (
+        str(refused.value)
+        == str(reported.value)
+        == (
+            f"Account {only.pk} is the last active platform administrator. Create another one with "
+            "bootstrap_admin first."
+        )
+    )
+    assert database() == before
+
+
+def test_erasures_of_the_last_two_platform_administrators_keep_one() -> None:
+    first, second = platform_administrator("first-admin"), platform_administrator("second-admin")
+
+    def erase_second() -> type[Exception] | None:
+        try:
+            erase_account(second.pk, execute=True)
+        except erasure.LastPlatformAdministratorError as error:
+            return type(error)
+        return None
+
+    _, refused = behind_open_transaction(
+        lambda: erase_account(first.pk, execute=True), erase_second
+    )
+
+    assert refused is erasure.LastPlatformAdministratorError
+    assert not is_platform_admin(User.objects.get(pk=first.pk))
+    assert is_platform_admin(User.objects.get(pk=second.pk))
+
+
+def test_the_dry_run_says_when_the_account_has_platform_access() -> None:
+    platform_administrator("remaining-admin")
+    leaving = platform_administrator("leaving-admin")
+    staff = User.objects.create_user(username="staff-member", is_staff=True)
+    customer = User.objects.create_user(username="customer")
+
+    assert (
+        f"Account {leaving.pk} is a platform administrator; erasure removes that access."
+        in erase_command("--account", str(leaving.pk)).splitlines()
+    )
+    assert (
+        f"Account {staff.pk} has staff or superuser access; erasure removes it."
+        in erase_command("--account", str(staff.pk)).splitlines()
+    )
+    assert not [
+        line
+        for line in erase_command("--account", str(customer.pk)).splitlines()
+        if "access" in line
+    ]
+
+
+def test_erasing_an_erased_account_again_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    seed = seeded(monkeypatch)
+    account = seed.person.pk
+    erase_account(account, execute=True)
+    lines = capture_security_events(pyracast_logs, monkeypatch)
+    pyracast_logs.clear()
+    before = database()
+
+    again = erase_account(account, execute=True)
+    outputs = [erase_command("--account", str(account), *flag) for flag in ((), ("--execute",))]
+
+    assert (again.already_erased, again.changes) == (True, {})
+    assert outputs == [f"Account {account} is already erased. Nothing was changed.\n"] * 2
+    assert database() == before
+    assert not [line for line in lines() if line["event"] == "account_erased"]
+
+
+def test_concurrent_erasures_of_one_account_erase_it_once(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    person = person_with("twice@example.com")
+    lines = capture_security_events(pyracast_logs, monkeypatch)
+
+    first, second = behind_open_transaction(
+        lambda: erase_account(person.pk, execute=True),
+        lambda: erase_account(person.pk, execute=True),
+    )
+
+    assert (first.already_erased, second.already_erased, second.changes) == (False, True, {})
+    assert [line["target_id"] for line in lines() if line["event"] == "account_erased"] == [
+        person.pk
+    ]
+
+
+def test_erasure_refuses_while_another_account_holds_the_anonymized_username() -> None:
+    person = person_with("named@example.com")
+    holder = User.objects.create(username=f"erased-{person.pk}")
+    before = database()
+
+    with pytest.raises(erasure.ErasedNameTakenError) as refused:
+        erase_account(person.pk, execute=True)
+    with pytest.raises(CommandError) as reported:
+        erase_command("--account", str(person.pk), "--execute")
+
+    assert (
+        str(refused.value)
+        == str(reported.value)
+        == (
+            f"Account {holder.pk} holds the username erasure gives account {person.pk}. "
+            f"Rename account {holder.pk} first."
+        )
+    )
+    assert database() == before
+
+
+def test_a_retention_cycle_leaves_erased_accounts_as_erasure_left_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed = seeded(monkeypatch)
+    loner = person_with("loner@example.com", username="loner")
+    erased = (seed.person.pk, loner.pk)
+    User.objects.filter(pk__in=erased).update(date_joined=NOW - timedelta(days=8))
+    for account in erased:
+        erase_account(account, execute=True)
+    left = list(User.objects.filter(pk__in=erased).order_by("pk").values_list())
+    selected: list[int] = []
+    reclaim = account_retention.reclaim_signup
+
+    def spied(user_id: int, cutoff: Any) -> bool:
+        selected.append(user_id)
+        return reclaim(user_id, cutoff)
+
+    monkeypatch.setattr(account_retention, "reclaim_signup", spied)
+
+    dispatcher._retention()
+
+    assert selected == []
+    assert list(User.objects.filter(pk__in=erased).order_by("pk").values_list()) == left
+
+
+def test_the_console_and_the_api_show_kept_history_under_the_anonymized_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed = seeded(monkeypatch)
+    person = seed.person
+    history = {
+        relation: model
+        for relation, (model, field) in relations_to_accounts().items()
+        if relation in KEPT and model._base_manager.filter(**{field: person.pk}).exists()
+    }
+    erase_account(person.pk, execute=True)
+    name = f"erased-{person.pk}"
+    client, _ = verified_admin()
+    pages = [
+        reverse("admin:index"),
+        reverse("admin:workspace_plant", args=(seed.system.region.pk,)),
+    ]
+    for relation, model in history.items():
+        if model not in site._registry:
+            continue
+        options = model._meta
+        _, field = relations_to_accounts()[relation]
+        pages.append(reverse(f"admin:{options.app_label}_{options.model_name}_changelist"))
+        pages += [
+            reverse(f"admin:{options.app_label}_{options.model_name}_change", args=(pk,))
+            for pk in model._base_manager.filter(**{field: person.pk}).values_list("pk", flat=True)
+        ]
+
+    shown = {page: client.get(page) for page in pages}
+
+    assert {page: response.status_code for page, response in shown.items()} == dict.fromkeys(
+        pages, 200
+    )
+    texts = {page: response.content.decode() for page, response in shown.items()}
+    assert [page for page, text in texts.items() if name not in text] == []
+    assert [page for page, text in texts.items() if ">None<" in text] == []
+    assert [
+        (page, value)
+        for page, text in texts.items()
+        for value in PERSONAL
+        if value.casefold() in text.casefold()
+    ] == []
+    detail = signed_in(seed.successor).get(
+        f"/api/tenants/{seed.system.tenant.pk}/change-requests/{seed.change_request.pk}/"
+    )
+    assert detail.status_code == 200
+    assert detail.json()["proposed_by"] == {"id": person.pk, "name": name}
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_a_later_sign_up_and_provider_sign_in_never_reach_the_erased_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    person = person_with(PRIMARY, SECONDARY)
+    SocialAccount.objects.create(user=person, provider="google", uid=PROVIDER_UID)
+    erase_account(person.pk, execute=True)
+    erased = User.objects.filter(pk=person.pk).values().get()
+    profile = serve_provider_profile(monkeypatch)
+    profile.update(sub=PROVIDER_UID, email=SECONDARY)
+
+    with override_settings(SOCIALACCOUNT_PROVIDERS=PROVIDERS, MAILERS=LOCMEM):
+        signed_up = signup(
+            Client(enforce_csrf_checks=True), {"email": PRIMARY, "company_name": "Later Solar"}
+        )
+        client = Client()
+        pending = complete(client, begin(client))
+        provider_signup = submit(
+            client, "auth/provider/signup", {"email": SECONDARY, "company_name": "Provider Solar"}
+        )
+
+    assert (signed_up.status_code, pending.status_code, provider_signup.status_code) == (
+        401,
+        401,
+        401,
+    )
+    later = User.objects.get(email__iexact=PRIMARY)
+    provider_user = SocialAccount.objects.get(provider="google", uid=PROVIDER_UID).user
+    assert person.pk not in (later.pk, provider_user.pk)
+    assert later.pk != provider_user.pk
+    assert User.objects.filter(pk=person.pk).values().get() == erased
 
 
 def test_erasure_of_an_unknown_account_is_refused() -> None:

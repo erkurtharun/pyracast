@@ -1,11 +1,13 @@
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 from django.utils import timezone
 
 from pyracast.accounts.models import (
+    InvitationDeliveryStatus,
     InvitationRevocation,
     OutboundMail,
     OutboundMailKind,
@@ -14,16 +16,18 @@ from pyracast.accounts.models import (
 )
 from pyracast.accounts.retention import purge_closed_invitations
 from pyracast.background.failures import ItemsFailedError
+from pyracast.notifications import outbox
 from pyracast.notifications.models import (
     DeliveryRecipient,
     NotificationDelivery,
     NotificationDeliveryStatus,
     PreparedMessageKind,
 )
-from pyracast.notifications.outbox import purge_finished_mail
+from pyracast.notifications.outbox import purge_finished_mail, send_outbound_mail
 from pyracast.notifications.retention import trim_rendered_mail
 from pyracast.orchestration import dispatcher
 from pyracast.retention import RETENTION, SWEEP_BATCH, Retention
+from tests.support.concurrency import paused_in
 from tests.support.domain import NOW, make_system
 from tests.support.notifications import ready
 
@@ -129,6 +133,60 @@ def test_closed_invitations_leave_oldest_first_in_bounded_runs_once_their_period
     assert purge_closed_invitations(CUTOFF, 2) == 0
     assert set(remaining.all()) == kept
     assert not WorkspaceInvitation.objects.filter(pk__in=(expired, revoked)).exists()
+
+
+def test_the_invitation_sweep_passes_an_invitation_whose_mail_a_mail_worker_holds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = make_system()
+
+    def closed(name: str) -> WorkspaceInvitation:
+        return WorkspaceInvitation.objects.create(
+            tenant=system.tenant,
+            email=f"{name}@example.com",
+            created_by=system.member,
+            expires_at=CUTOFF - timedelta(days=2),
+            revoked_at=CUTOFF - timedelta(days=1),
+            revoked_reason=InvitationRevocation.CANCELLED,
+        )
+
+    invitation, unmailed = closed("held"), closed("unmailed")
+    # Its worker vanished after the transmit marker: the next claim records it as uncertain,
+    # which also marks the invitation.
+    held = OutboundMail.objects.create(
+        kind=OutboundMailKind.WORKSPACE_INVITATION,
+        recipient="held@example.com",
+        invitation=invitation,
+        language="en",
+        created_at=CUTOFF - timedelta(days=2),
+        available_at=CUTOFF - timedelta(days=2),
+        expires_at=CUTOFF - timedelta(days=2),
+        status=OutboundMailStatus.SENDING,
+        attempts=1,
+        lease_token=uuid4(),
+        lease_expires_at=NOW - timedelta(minutes=1),
+        transmit_started_at=NOW - timedelta(minutes=2),
+    )
+
+    recovered, swept = paused_in(
+        monkeypatch,
+        outbox,
+        "_recover",
+        lambda: send_outbound_mail(held.pk, NOW),
+        lambda: purge_closed_invitations(CUTOFF, 10),
+    )
+
+    assert (recovered, swept) == (False, 1)
+    assert not WorkspaceInvitation.objects.filter(pk=unmailed.pk).exists()
+    held.refresh_from_db()
+    invitation.refresh_from_db()
+    assert (held.status, invitation.delivery_status) == (
+        OutboundMailStatus.UNCERTAIN,
+        InvitationDeliveryStatus.UNCERTAIN,
+    )
+    assert purge_closed_invitations(CUTOFF, 10) == 1
+    assert not WorkspaceInvitation.objects.exists()
+    assert not OutboundMail.objects.exists()
 
 
 def delivery_at(

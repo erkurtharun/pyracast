@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from threading import Event
 
+import pytest
 from django.db import connection, connections, transaction
 from django.db.models import Model
 
@@ -59,6 +60,56 @@ def behind_open_transaction[T, U](holder: Callable[[], T], waiter: Callable[[], 
         finally:
             release.set()
         return holding.result(timeout=20), waiting.result(timeout=20)
+
+
+def _backend_pid() -> int:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_backend_pid()")
+        row = cursor.fetchone()
+    assert row is not None
+    return int(row[0])
+
+
+def paused_in[T, U](
+    monkeypatch: pytest.MonkeyPatch,
+    owner: object,
+    step: str,
+    holder: Callable[[], T],
+    other: Callable[[], U],
+) -> tuple[T, U]:
+    # The holder pauses when it calls `owner.step`, keeping every lock it took before; it goes on
+    # once the other client waits for one of those locks or has finished.
+    original = getattr(owner, step)
+    paused, resume = Event(), Event()
+    pids: dict[str, int] = {}
+
+    def pause(*args: object, **kwargs: object) -> object:
+        paused.set()
+        assert resume.wait(timeout=20)
+        return original(*args, **kwargs)
+
+    def run[R](name: str, action: Callable[[], R]) -> R:
+        try:
+            pids[name] = _backend_pid()
+            return action()
+        finally:
+            connections.close_all()
+
+    monkeypatch.setattr(owner, step, pause)
+    with ThreadPoolExecutor(2) as pool:
+        holding = pool.submit(run, "holder", holder)
+        try:
+            assert paused.wait(timeout=10)
+            reaching = pool.submit(run, "other", other)
+            deadline = time.monotonic() + 10
+            while not reaching.done() and not (
+                "other" in pids and _waits_for(pids["holder"], pids["other"])
+            ):
+                assert time.monotonic() < deadline
+                time.sleep(0.02)
+        finally:
+            resume.set()
+        return holding.result(timeout=20), reaching.result(timeout=20)
 
 
 @contextmanager
