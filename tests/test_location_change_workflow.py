@@ -10,8 +10,10 @@ from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection
 from django.test import Client
 from django.urls import reverse
+from django.utils import translation
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.errors import DomainError
 from pyracast.plants.sites import submit_site
 from pyracast.regions import operations
 from pyracast.regions.models import (
@@ -34,6 +36,13 @@ class Location(TypedDict):
 
 
 TARGET: Location = {"latitude": 41.5, "longitude": 30.5, "timezone": "UTC"}
+SETUP_CHANGED = (
+    "The plant setup changed after this page opened. Reload the plant and review it again."
+)
+SETUP_CHANGED_TR = (
+    "Bu sayfa aç\u0131ld\u0131ktan sonra santral kurulumu değişti. "
+    "Santrali yeniden yükleyip tekrar inceleyin."
+)
 
 
 def requests_path(system: System, region: Region | None = None) -> str:
@@ -368,11 +377,80 @@ def test_the_console_names_why_a_location_decision_was_refused() -> None:
     )
 
     assert refused.status_code == 302
-    assert [str(message) for message in get_messages(refused.wsgi_request)] == [
-        "The plant location changed. Reopen the plant and try again."
-    ]
+    assert [str(message) for message in get_messages(refused.wsgi_request)] == [SETUP_CHANGED]
     change.refresh_from_db()
     assert change.status == "pending"
+
+
+def test_a_decision_after_a_binding_change_names_a_setup_change_not_a_location_change() -> None:
+    system = make_system()
+    change = request_location_change(
+        system.member, system.region.pk, system.tenant.pk, expected_revision=1, **TARGET
+    )
+    operations.configure_binding(
+        system.admin,
+        system.region.pk,
+        provider_account_id=system.account.pk,
+        site_id="replacement",
+        capacity_kw=1,
+        capacity_semantics_verified=True,
+    )
+    operator, _ = verified_admin()
+
+    refused = operator.post(
+        reverse("admin:workspace_decision", args=(system.region.pk,)),
+        {
+            "expected_revision": 1,
+            "expected_status": "pending",
+            "action": "approve_location",
+            "location_change_id": change.pk,
+        },
+    )
+
+    assert [str(message) for message in get_messages(refused.wsgi_request)] == [SETUP_CHANGED]
+    with translation.override("tr"):
+        with pytest.raises(DomainError) as refusal:
+            operations.approve_location_change(
+                system.admin, change.pk, expected_revision=1, expected_status="pending"
+            )
+        shown = [str(message) for message in refusal.value.messages]
+    assert (refusal.value.code, shown) == ("region_revision_changed", [SETUP_CHANGED_TR])
+    change.refresh_from_db()
+    system.region.refresh_from_db()
+    assert (change.status, change.base_revision, system.region.revision) == ("pending", 2, 2)
+    assert (system.region.latitude, system.region.longitude) == (40, 29)
+
+
+REFUSAL_ORDER = (
+    ("settled", "location_change_already_reviewed"),
+    ("status", "conflict"),
+    ("revision", "region_revision_changed"),
+    ("target", "location_already_exists"),
+)
+
+
+@pytest.mark.parametrize("step", range(len(REFUSAL_ORDER)), ids=[s for s, _ in REFUSAL_ORDER])
+def test_a_location_approval_names_the_first_failing_check_in_a_fixed_order(step: int) -> None:
+    system = make_system(approved=True)
+    change = request_location_change(
+        system.member, system.region.pk, system.tenant.pk, expected_revision=1, **TARGET
+    )
+    failing = {check for check, _ in REFUSAL_ORDER[step:]}
+    Region.objects.filter(pk=second_region(system).pk).update(**TARGET)
+    if "settled" in failing:
+        operations.withdraw_location_change(
+            system.member, system.tenant.pk, system.region.pk, change.pk
+        )
+    if "revision" in failing:
+        Region.objects.filter(pk=system.region.pk).update(revision=2)
+
+    with raises_code(REFUSAL_ORDER[step][1]):
+        operations.approve_location_change(
+            system.admin,
+            change.pk,
+            expected_revision=1,
+            expected_status="pending" if "status" in failing else "approved",
+        )
 
 
 def test_a_decision_note_longer_than_500_characters_is_refused() -> None:

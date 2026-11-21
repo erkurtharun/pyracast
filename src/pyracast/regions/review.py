@@ -26,6 +26,9 @@ DECISION_UNAVAILABLE = gettext_lazy(
 STATUS_CHANGED = gettext_lazy(
     "The review status changed after this page opened. Reload the plant and review it again."
 )
+SETUP_CHANGED = gettext_lazy(
+    "The plant setup changed after this page opened. Reload the plant and review it again."
+)
 
 
 def require_seen_status(region: Region, status: str | None) -> None:

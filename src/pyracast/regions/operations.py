@@ -33,7 +33,7 @@ from pyracast.regions.models import (
     active_region,
     location_coordinate,
 )
-from pyracast.regions.review import require_seen_status, set_review_status
+from pyracast.regions.review import SETUP_CHANGED, require_seen_status, set_review_status
 
 SITE_ID_REFUSED = _(
     "The resource ID contains characters the provider does not use. "
@@ -273,7 +273,7 @@ def _require_current(
 ) -> None:
     require_seen_status(region, status)
     if expected != region.revision or change.base_revision != region.revision:
-        raise ConflictError(ErrorCode.REGION_REVISION_CHANGED)
+        raise ConflictError(ErrorCode.REGION_REVISION_CHANGED, SETUP_CHANGED)
 
 
 def _close(
