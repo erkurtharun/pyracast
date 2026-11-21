@@ -15,11 +15,11 @@ class Migration(migrations.Migration):
             name="available_at",
             field=models.DateTimeField(null=True),
         ),
-        # Backfill: when a requeued run started waiting again is unknown, so it waits from the
-        # upgrade; every other run waits from its creation.
+        # When a requeued run started waiting again is unknown, so it waits from the upgrade;
+        # every other row keeps null, which reads as its creation.
         migrations.RunSQL(
-            "UPDATE plants_calibrationrun SET available_at = CASE "
-            "WHEN status = 'pending' AND attempts > 0 THEN now() ELSE created_at END",
+            "UPDATE plants_calibrationrun SET available_at = now() "
+            "WHERE status = 'pending' AND attempts > 0",
             migrations.RunSQL.noop,
         ),
     ]
