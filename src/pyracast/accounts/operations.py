@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.db import transaction
@@ -15,6 +17,7 @@ from pyracast.accounts.models import (
     UserLanguagePreference,
     WorkspaceAdminChange,
     WorkspaceInvitation,
+    WorkspaceInvitationQuerySet,
     WorkspaceMemberRemoval,
     WorkspaceRole,
 )
@@ -74,6 +77,15 @@ def remove_workspace_member(
     return True
 
 
+def invitations_closed_by_reassignment(
+    tenant_id: int, now: datetime
+) -> WorkspaceInvitationQuerySet:
+    # An expired administrator invitation closes too: no one may send it again.
+    return WorkspaceInvitation.objects.filter(
+        Q(expires_at__gt=now) | Q(role=WorkspaceRole.ADMIN), tenant_id=tenant_id
+    ).open()
+
+
 @transaction.atomic
 def reassign_workspace_admin(
     actor: User, tenant_id: int, user_id: int, *, expected_admin_id: int | None
@@ -105,10 +117,9 @@ def reassign_workspace_admin(
     membership.role = WorkspaceRole.ADMIN
     membership.save(update_fields=["role"])
     now = timezone.now()
-    # An expired administrator invitation closes too: no one may send it again.
-    WorkspaceInvitation.objects.filter(
-        Q(expires_at__gt=now) | Q(role=WorkspaceRole.ADMIN), tenant_id=tenant_id
-    ).revoke(now, InvitationRevocation.ADMINISTRATOR_CHANGED)
+    invitations_closed_by_reassignment(tenant_id, now).revoke(
+        now, InvitationRevocation.ADMINISTRATOR_CHANGED
+    )
     change = WorkspaceAdminChange.objects.create(
         tenant_id=tenant_id,
         actor=actor,
