@@ -609,9 +609,7 @@ def served_certificate(tmp_path: Path) -> ServedCertificate:
     return ServedCertificate(server, authority.public_bytes(serialization.Encoding.PEM).decode())
 
 
-def probe_served(
-    server: ssl.SSLContext, context: ssl.SSLContext | None = None
-) -> tuple[float, float]:
+def probe_served(server: ssl.SSLContext, authority: str) -> tuple[float, float]:
     with socket.create_server(("127.0.0.1", 0)) as listener:
 
         def serve() -> None:
@@ -624,21 +622,20 @@ def probe_served(
 
         thread = threading.Thread(target=serve)
         thread.start()
-        validity = watchdog.certificate_validity("localhost", listener.getsockname()[:2], context)
+        validity = watchdog.certificate_validity(
+            "localhost", listener.getsockname()[:2], authority=authority
+        )
         thread.join(timeout=10)
     return validity
 
 
 def test_certificate_validity_reads_the_served_certificate(tmp_path: Path) -> None:
     served = served_certificate(tmp_path)
-    client = ssl.create_default_context(cadata=served.authority)
-    client.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
 
-    remaining, lifetime = probe_served(served.server, client)
+    remaining, lifetime = probe_served(served.server, served.authority)
 
     assert lifetime == 90 * DAY
     assert abs(remaining - 10 * DAY) < 120
-    assert client.minimum_version == ssl.TLSVersion.MINIMUM_SUPPORTED
 
 
 def test_the_certificate_probe_requires_tls_1_2_whatever_the_host_default(
@@ -648,15 +645,15 @@ def test_the_certificate_probe_requires_tls_1_2_whatever_the_host_default(
     create_default_context = ssl.create_default_context
     built: list[ssl.SSLContext] = []
 
-    def host_default(*_args: object, **_options: object) -> ssl.SSLContext:
-        context = create_default_context(cadata=served.authority)
+    def host_default(*, cadata: str | None = None) -> ssl.SSLContext:
+        context = create_default_context(cadata=cadata)
         context.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
         built.append(context)
         return context
 
     monkeypatch.setattr(ssl, "create_default_context", host_default)
 
-    remaining, lifetime = probe_served(served.server)
+    remaining, lifetime = probe_served(served.server, served.authority)
 
     assert lifetime == 90 * DAY
     assert abs(remaining - 10 * DAY) < 120
