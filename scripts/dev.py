@@ -414,16 +414,16 @@ def wait_for_jobs(timeout: float = DRAIN.total_seconds()) -> None:
     django.setup()
     from pyracast.forecasts.models import CollectionJob
     from pyracast.metering.models import EpiasCollectionJob
-    from pyracast.notifications.models import NotificationDelivery
+    from pyracast.notifications.models import NotificationDelivery, OutboundMail
     from pyracast.plants.models import CalibrationRun
 
     deadline = time.monotonic() + timeout
-    while (
-        any(
-            model.objects.filter(status="running").exists()
-            for model in (CollectionJob, EpiasCollectionJob, CalibrationRun)
-        )
-        or NotificationDelivery.objects.filter(status="sending").exists()
+    while any(
+        model.objects.filter(status="running").exists()
+        for model in (CollectionJob, EpiasCollectionJob, CalibrationRun)
+    ) or any(
+        model.objects.filter(status="sending").exists()
+        for model in (NotificationDelivery, OutboundMail)
     ):
         if time.monotonic() >= deadline:
             raise RuntimeError("Jobs are still running; worker was left running. Retry stop later.")

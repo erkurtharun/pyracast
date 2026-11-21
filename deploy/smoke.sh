@@ -142,7 +142,9 @@ database_log=$("${compose[@]}" logs --no-log-prefix postgres)
 "${bootstrap[@]}" converge "$temporary" "$temporary"
 "${compose[@]}" run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING
 no_broker=("${compose[@]}" run --rm -T --no-deps --env PYRACAST_RABBITMQ_URL=)
-if "${no_broker[@]}" migrate pyracast check --deploy --fail-level WARNING; then exit 1; fi
+refused=0
+deploy_check=$("${no_broker[@]}" migrate pyracast check --deploy --fail-level WARNING 2>&1) || refused=$?
+[[ $refused != 0 && $deploy_check == *background.E001* ]]
 refused=0
 missing_broker=$("${no_broker[@]}" worker 2>&1) || refused=$?
 [[ $refused != 0 && $missing_broker == *PYRACAST_RABBITMQ_URL* ]]

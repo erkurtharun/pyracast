@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -10,10 +11,12 @@ from django.db import close_old_connections, connections
 from pyracast.collection_window import nightly_window
 from pyracast.epias import TIMEZONE, EpiasDay, EpiasPlant
 from pyracast.metering.jobs import run_epias_job
-from pyracast.metering.models import EpiasCollectionJob
+from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.metering.scheduler import enqueue_due_epias_jobs
 from pyracast.regions.models import Region
+from tests.support.domain import NOW
 from tests.support.metering import NEXT_NIGHT, connected, day_data
+from tests.support.metering_settlement import SETTLEMENT, link_settlement, month_data
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -22,6 +25,9 @@ REPAIRS_PER_NIGHT = 31
 # At NEXT_NIGHT the market day is 2026-11-10: the rolling window re-collects 11-03 to 11-09.
 NEWEST_REPAIRABLE = date(2026, 11, 2)
 OLDEST_REPAIRABLE = date(2026, 8, 12)
+# Settlement months 1 to 3 back are collected each night; months 4 to 12 back are repaired.
+NEWEST_REPAIRABLE_MONTH = date(2026, 7, 1)
+OLDEST_REPAIRABLE_MONTH = date(2025, 11, 1)
 
 
 def night(offset: int) -> datetime:
@@ -199,6 +205,90 @@ def test_concurrent_schedulers_repair_each_slot_once_inside_the_nightly_cap(
     assert results[0] == results[1]
     assert repairs(NEXT_NIGHT) == days[:REPAIRS_PER_NIGHT]
     assert EpiasCollectionJob.objects.count() == 90 + 7 + REPAIRS_PER_NIGHT
+
+
+def settlement(month: date) -> EpiasCollectionJob:
+    return EpiasCollectionJob.objects.get(source_kind="settlement_injection", target_date=month)
+
+
+def fail_months(months: Iterable[date]) -> None:
+    EpiasCollectionJob.objects.filter(
+        source_kind="settlement_injection", target_date__in=list(months)
+    ).update(status="failed", attempts=3, last_error="attempts_exhausted")
+
+
+def settlement_repairs(moment: datetime) -> list[tuple[date, date | None]]:
+    return list(
+        EpiasCollectionJob.objects.filter(
+            source_kind="settlement_injection",
+            scheduled_for=window(moment)[0],
+            target_date__lte=NEWEST_REPAIRABLE_MONTH,
+        )
+        .order_by("-target_date")
+        .values_list("target_date", "period_end_day")
+    )
+
+
+def test_settlement_months_four_to_twelve_back_without_a_snapshot_are_repaired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    link_settlement(monkeypatch)
+    late_days = settlement(date(2026, 4, 1))
+    assert run_epias_job(
+        late_days.pk,
+        fetch=lambda *_: month_data(SETTLEMENT, date(2026, 4, 1), date(2026, 4, 30)),
+        now=NOW,
+    )
+    EpiasSnapshot.objects.filter(job=late_days, target_date__lt=date(2026, 4, 15)).delete()
+    unpublished = settlement(date(2026, 3, 1))
+    empty = month_data(SETTLEMENT, unpublished.target_date, date(2026, 3, 31))
+    assert not run_epias_job(
+        unpublished.pk,
+        fetch=lambda *_: replace(empty, readings=(), raw_payload=json.dumps({"items": []})),
+        now=NOW,
+    )
+    assert settlement(date(2026, 3, 1)).status == "awaiting_publication"
+    fail_months(
+        [date(2026, 8, 1), NEWEST_REPAIRABLE_MONTH, date(2026, 4, 1), OLDEST_REPAIRABLE_MONTH]
+    )
+
+    enqueue_due_epias_jobs(now=NEXT_NIGHT)
+
+    assert settlement_repairs(NEXT_NIGHT) == [
+        (NEWEST_REPAIRABLE_MONTH, date(2026, 7, 31)),
+        (OLDEST_REPAIRABLE_MONTH, date(2025, 11, 30)),
+    ]
+    assert EpiasCollectionJob.objects.filter(target_date=date(2026, 8, 1)).count() == 1
+    assert not EpiasCollectionJob.objects.filter(target_date__lt=OLDEST_REPAIRABLE_MONTH).exclude(
+        source_kind="realtime_generation"
+    )
+    repair = EpiasCollectionJob.objects.get(
+        target_date=OLDEST_REPAIRABLE_MONTH, scheduled_for=window(NEXT_NIGHT)[0]
+    )
+    assert (repair.status, repair.attempts, repair.retry_until) == (
+        "pending",
+        0,
+        window(NEXT_NIGHT)[1],
+    )
+
+
+def test_a_settlement_month_that_keeps_failing_is_repaired_on_three_nights(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    link_settlement(monkeypatch)
+    month = OLDEST_REPAIRABLE_MONTH
+    fail_months([month])
+    for offset in range(REPAIR_NIGHTS):
+        enqueue_due_epias_jobs(now=night(offset))
+        assert settlement_repairs(night(offset)) == [(month, date(2025, 11, 30))]
+        fail_months([month])
+
+    enqueue_due_epias_jobs(now=night(REPAIR_NIGHTS))
+
+    assert settlement_repairs(night(REPAIR_NIGHTS)) == []
+    jobs = EpiasCollectionJob.objects.filter(source_kind="settlement_injection", target_date=month)
+    assert jobs.count() == 1 + REPAIR_NIGHTS
+    assert set(jobs.values_list("status", flat=True)) == {"failed"}
 
 
 def test_a_suspended_plant_is_not_repaired(monkeypatch: pytest.MonkeyPatch) -> None:

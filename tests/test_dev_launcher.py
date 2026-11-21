@@ -274,6 +274,22 @@ def test_worker_drain_timeout_preserves_active_notification() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
+def test_worker_drain_waits_for_outbound_mail_being_sent() -> None:
+    from pyracast.accounts.invitations import invite_workspace_member
+    from pyracast.notifications.models import OutboundMail
+    from tests.support.domain import NOW, make_system
+
+    system = make_system()
+    invite_workspace_member(system.member, system.tenant.pk, "guest@example.com")
+    OutboundMail.objects.update(
+        status="sending", lease_token=uuid4(), lease_expires_at=NOW + timedelta(minutes=5)
+    )
+
+    with pytest.raises(RuntimeError, match="worker was left running"):
+        launcher.wait_for_jobs(timeout=0)
+
+
+@pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("status", ["pending", "retry", "uncertain"])
 def test_worker_drain_does_not_wait_for_inactive_notification(status: str) -> None:
     from tests.support.notifications import ready
