@@ -4,7 +4,7 @@ import pytest
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.budget import remaining_forecast_requests
-from pyracast.forecasts.models import CollectionJob, RequestAttempt
+from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.quota import ForecastBudgetReservedError
 from pyracast.forecasts.revalidation import RETRY_DELAY, RevalidationOutcome
 from pyracast.forecasts.validation import validate_binding
@@ -146,3 +146,14 @@ def test_a_plant_whose_need_completes_the_quota_waits_without_costing_a_current_
     assert unsucceeded_forecasts(current, utc(D1, 0)) == set()
     assert {used(system, utc(day, 23)) for day in (D1, D2)} == {9}
     assert account_context(account(system), datetime.now(UTC))["waiting_plants"] == 1
+
+
+def test_a_refused_revalidation_retries_after_the_next_slot_of_a_plant_that_collects() -> None:
+    system, (current, waiting) = collecting_account([["16:00"], ["15:00"]])
+    CollectionSchedule.objects.filter(region_id=waiting.region_id).update(enabled=False)
+    validate_binding(system.admin, current.pk, FakeAdapter(), utc(D1, 10))
+    spend_until(system, utc(D1, 11), 9)
+
+    runs = run_revalidations(system, [], utc(D1, 11), utc(D1, 12))
+
+    assert runs == [Run(utc(D1, 11), WAITING, utc(D1, 13) + RETRY_DELAY, 1)]
