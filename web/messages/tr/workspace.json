@@ -178,7 +178,7 @@
         "proposalUnavailable": "Şu anda kesinti gönderilemez.",
         "proposalReasons": {
             "configuration_unavailable": "Kesinti, santral yapılandırması onaylandıktan sonra bildirilebilir.",
-            "pending_request_limit": "Bu santral için onay bekleyen başvurunuz çok fazla. Yeni bir kesinti göndermeden önce birini geri çekin veya bir karar bekleyin."
+            "pending_request_limit": "Bu santral için onay bekleyen başvurunuz çok fazla. Başka bir kesinti veya kesinti değişikliği önermeden önce birini geri çekin veya bir karar bekleyin."
         },
         "capacityRequired": "En az bir kullanılabilir kapasite girin veya etkiyi bilinmiyor olarak seçin.",
         "capacityCeiling": "En fazla {value} MW, yapılandırılmış kapasite.",

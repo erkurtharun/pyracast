@@ -39,6 +39,7 @@ export function OutageCard({
     pendingRequestId,
     timezone,
     direct,
+    actionable,
     configurationChanged,
     resolving,
     onEdit,
@@ -50,6 +51,7 @@ export function OutageCard({
     pendingRequestId: number | null;
     timezone: string;
     direct: boolean;
+    actionable: boolean;
     configurationChanged: boolean;
     resolving: boolean;
     onEdit: () => void;
@@ -61,6 +63,7 @@ export function OutageCard({
     const format = useFormat();
     const label = useLabel();
     const time = (value: string) => format.time(value, timezone);
+    const changeable = actionable && outage.status !== "cancelled";
     return (
         <article className="provenance">
             <div className="section-heading">
@@ -103,7 +106,7 @@ export function OutageCard({
                     subject={outage.title}
                 />
             )}
-            {outage.status !== "cancelled" && (
+            {changeable && (
                 <div className="button-group">
                     <button className="button secondary" onClick={onEdit}>
                         {direct ? t("editReport") : proposals("proposeUpdate")}
@@ -120,7 +123,7 @@ export function OutageCard({
                     )}
                 </div>
             )}
-            {resolving && (
+            {changeable && resolving && (
                 <ResolveOutageForm
                     outage={outage}
                     timezone={timezone}
@@ -129,7 +132,7 @@ export function OutageCard({
                     onClose={() => onResolve(false)}
                 />
             )}
-            {outage.status !== "cancelled" && (
+            {changeable && (
                 <details>
                     <summary>
                         {direct

@@ -88,6 +88,10 @@ export function Outages({
     };
     const offer = resource.data;
     const canOpen = direct ? !!configuration : !!offer?.can_propose;
+    // Every proposal is one more pending request; the member's own pending one is revised by withdrawing it.
+    const atLimit =
+        !direct &&
+        offer?.proposal_unavailable_reason === "pending_request_limit";
     const unavailable = direct
         ? !configuration && t("configurationRequired")
         : offer &&
@@ -104,6 +108,9 @@ export function Outages({
             pendingRequestId={outage.pending_request_id}
             timezone={timezone}
             direct={direct}
+            actionable={
+                direct || (!atLimit && outage.pending_request_id == null)
+            }
             configurationChanged={
                 outage.status === "active" &&
                 !!configuration &&
