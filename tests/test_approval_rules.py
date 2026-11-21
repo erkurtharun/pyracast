@@ -1,4 +1,5 @@
 import re
+from collections.abc import Mapping
 from typing import Any
 
 import pytest
@@ -77,7 +78,7 @@ def review_decision(region: Region, action: str) -> dict[str, object]:
     }
 
 
-def notices(client: Client, url: str, data: dict[str, object]) -> tuple[int, list[str]]:
+def notices(client: Client, url: str, data: Mapping[str, object]) -> tuple[int, list[str]]:
     response = client.post(url, data, follow=True)
     status = response.redirect_chain[0][1] if response.redirect_chain else response.status_code
     return status, [str(message) for message in response.context["messages"]]
@@ -414,11 +415,10 @@ def test_a_review_page_whose_location_moved_to_the_trash_before_it_rendered_is_n
 ) -> None:
     system, _, _ = edited_while_approved_then_back_in_review()
     client, _ = verified_admin()
-    read = plant_review.declarations
 
     def trashed_after_the_page_loaded(region_id: int) -> Any:
         trash(system.region)
-        return read(region_id)
+        return approval.declarations(region_id)
 
     monkeypatch.setattr(plant_review, "declarations", trashed_after_the_page_loaded)
 
@@ -431,11 +431,10 @@ def test_an_approval_whose_location_moved_to_the_trash_while_it_waited_is_not_fo
     system, plant, _ = edited_while_approved_then_back_in_review()
     client, _ = verified_admin()
     seen = {**page_actions(client, system.region), "action": "approve"}
-    approve = plant_review.approve_region
 
     def trashed_while_waiting(*arguments: Any, **keywords: Any) -> Any:
         trash(system.region)
-        return approve(*arguments, **keywords)
+        return approval.approve_region(*arguments, **keywords)
 
     monkeypatch.setattr(plant_review, "approve_region", trashed_while_waiting)
 
@@ -448,10 +447,9 @@ def test_the_review_page_names_the_plant_from_the_read_its_values_and_hash_come_
 ) -> None:
     system, plant, _ = edited_while_approved_then_back_in_review()
     client, _ = verified_admin()
-    read = plant_review.declarations
 
     def renamed_after_the_read(region_id: int) -> Any:
-        rows = read(region_id)
+        rows = approval.declarations(region_id)
         customer_edit(system, plant, name="Renamed array", dc_capacity_mw=150)
         return rows
 
