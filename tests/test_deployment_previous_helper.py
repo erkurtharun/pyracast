@@ -1,4 +1,5 @@
 import ast
+import contextlib
 import dataclasses
 import gzip
 import json
@@ -6,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,8 @@ DEPLOY = ROOT / "deploy"
 # The helper that recovers the first upgrade to this installer: deploy/reset_database.py on main
 # at 7c7c272. Its application services are every service of its drain order.
 FIRST_UPGRADE = "7c7c272"
+# The helper of the release production serves when this one is installed: main at 4d94243c.
+PREVIOUS_RELEASE = "4d94243c"
 FIRST_UPGRADE_STOP_ORDER = (
     ("660", ("dispatcher",)),
     ("660", ("worker", "notifications")),
@@ -172,9 +176,9 @@ def helper_keeps_notice(release: Path) -> bool:
     return result.returncode == 0
 
 
-def main_source(name: str) -> str | None:
+def main_source(name: str, commit: str = FIRST_UPGRADE) -> str | None:
     result = subprocess.run(  # noqa: S603
-        ["git", "show", f"{FIRST_UPGRADE}:deploy/{name}"],  # noqa: S607
+        ["git", "show", f"{commit}:deploy/{name}"],  # noqa: S607
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -184,11 +188,11 @@ def main_source(name: str) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
-def first_upgrade_helper(root: Path) -> Path:
+def first_upgrade_helper(root: Path, commit: str = FIRST_UPGRADE) -> Path:
     # Read from git, never vendored; a shallow checkout (CI) lacks that history.
-    sources = {name: main_source(name) for name in FIRST_UPGRADE_HELPER_FILES}
+    sources = {name: main_source(name, commit) for name in FIRST_UPGRADE_HELPER_FILES}
     if any(source is None for source in sources.values()):
-        pytest.skip(f"Needs the history of main at {FIRST_UPGRADE}; CI checks out one commit.")
+        pytest.skip(f"Needs the history of main at {commit}; CI checks out one commit.")
     (root / "deploy").mkdir(parents=True)
     for name, source in sources.items():
         (root / "deploy" / name).write_text(str(source), encoding="utf-8")
@@ -196,7 +200,10 @@ def first_upgrade_helper(root: Path) -> Path:
 
 
 def helper_root(helper: str, tmp_path: Path) -> Path:
-    return ROOT if helper == "current" else first_upgrade_helper(tmp_path / "main")
+    if helper == "current":
+        return ROOT
+    commit = PREVIOUS_RELEASE if helper == "previous" else FIRST_UPGRADE
+    return first_upgrade_helper(tmp_path / helper, commit)
 
 
 class Maintenance:
@@ -257,21 +264,33 @@ class Maintenance:
         reset_database.save_session(self.host, dataclasses.replace(session, replaced=True))
         self.load("empty")
 
+    @property
+    def record(self) -> Path:
+        return self.state / "prerelease-backup.json"
+
     def release(self, *, migrates: bool) -> str:
-        """One installer run: the marker, its pre-release dump and, before migrate, its record."""
+        """One installer run: the marker, its pre-release dump and, before migrate, its record.
+
+        backup.py uploads the dump and keeps it where the recovery helper looks for an archive.
+        """
         if not self.host.marker.exists():
             self.host.marker.touch()
         name = f"postgres/2026/11/18/20261118T1{len(self.runs)}0000Z-prerelease-run.dump"
         dump = self.state / "bucket" / name
         dump.parent.mkdir(parents=True, exist_ok=True)
         dump.write_text(json.dumps(self.ledger()), encoding="utf-8")
-        record = self.state / "prerelease-backup.json"
-        record.write_text(json.dumps({"object": name}), encoding="utf-8")
+        self.host.state.mkdir(exist_ok=True)
+        shutil.copyfile(dump, reset_database.archive_path(self.host, name))
+        counts = reset_database.parse_counts(COUNTS[self.ledger()])
+        self.record.write_text(json.dumps({"object": name, "counts": counts}), encoding="utf-8")
         self.runs.append(name)
         if migrates:
-            release_record.record_session(self.host, record)
+            release_record.record_session(self.host, self.record)
             self.load("newer")
         return name
+
+    def kept(self) -> list[str]:
+        return sorted(path.name for path in self.host.state.iterdir())
 
 
 # Each maintenance as the events that left it, and the object that holds what the previous
@@ -324,9 +343,15 @@ def run_helper(root: Path, state: Path, arguments: str) -> subprocess.CompletedP
     )
 
 
+@contextlib.contextmanager
+def counted_copy(_host: reset_database.Host, archive: Path) -> Iterator[Callable[[str], str]]:
+    yield lambda _sql: COUNTS[json.loads(archive.read_text(encoding="utf-8"))]
+
+
 @pytest.fixture(autouse=True)
 def unsynced(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(reset_database, "sync", lambda path: None)
+    monkeypatch.setattr(reset_database, "throwaway_copy", counted_copy)
 
 
 def test_the_stop_path_keeps_the_notice_only_for_a_helper_that_runs_beside_it() -> None:
@@ -594,6 +619,258 @@ def test_both_helpers_read_the_session_the_installer_records(tmp_path: Path, hel
     )
 
 
+@pytest.mark.parametrize("helper", ["current", "main", "previous"])
+@pytest.mark.parametrize("scenario", ["release failed in migrate", "retry failed in its migrate"])
+def test_the_printed_restore_serves_from_the_kept_archive_once_the_bucket_lost_the_dump(
+    tmp_path: Path, helper: str, scenario: str
+) -> None:
+    root = helper_root(helper, tmp_path)
+    maintenance, kept = maintenance_after(tmp_path / "host", scenario)
+    shutil.rmtree(maintenance.state / "bucket")
+
+    result = run_helper(root, maintenance.state, f"restore --confirm {kept}")
+
+    assert result.returncode == 0, result.stderr
+    assert (maintenance.state / "served").read_text(encoding="utf-8") == "current"
+
+
+def test_the_record_keeps_the_dump_with_the_counts_of_its_throwaway_restore(
+    tmp_path: Path,
+) -> None:
+    maintenance = Maintenance(tmp_path / "host")
+
+    name = maintenance.release(migrates=True)
+
+    archive = reset_database.archive_path(maintenance.host, name)
+    record = reset_database.load_record(maintenance.host, name)
+    assert record == reset_database.Record(
+        object=name,
+        sha256=reset_database.file_sha256(archive),
+        counts={"django_migrations": 40, "plants_plant": 3},
+    )
+    assert maintenance.kept() == sorted(
+        [archive.name, archive.with_suffix(".json").name, "session.json"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("ledger", "dumped", "message"),
+    [
+        ("empty", None, "holds no applied migration"),
+        ("current", {"django_migrations": 40, "plants_plant": 4}, "row counts differ"),
+    ],
+)
+def test_the_record_refuses_a_dump_no_release_could_serve_and_keeps_nothing(
+    tmp_path: Path, ledger: str, dumped: dict[str, int] | None, message: str
+) -> None:
+    maintenance = Maintenance(tmp_path / "host")
+    maintenance.load(ledger)
+    name = maintenance.release(migrates=False)
+    if dumped is not None:
+        maintenance.record.write_text(json.dumps({"object": name, "counts": dumped}))
+
+    with pytest.raises((ValueError, RuntimeError), match=message):
+        release_record.record_session(maintenance.host, maintenance.record)
+
+    assert maintenance.host.marker.read_text(encoding="utf-8") == ""
+    assert maintenance.kept() == []
+
+
+def test_a_dump_the_throwaway_cannot_restore_is_not_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maintenance = Maintenance(tmp_path / "host")
+    maintenance.release(migrates=False)
+
+    def broken(
+        _host: reset_database.Host, archive: Path
+    ) -> contextlib.AbstractContextManager[Callable[[str], str]]:
+        raise subprocess.CalledProcessError(1, ["pg_restore"], stderr=archive.name)
+
+    monkeypatch.setattr(reset_database, "throwaway_copy", broken)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        release_record.record_session(maintenance.host, maintenance.record)
+
+    assert maintenance.kept() == []
+
+
+def test_a_retry_drops_its_own_dump_and_keeps_the_first_runs_recovery_point(
+    tmp_path: Path,
+) -> None:
+    maintenance = Maintenance(tmp_path / "host")
+    first = maintenance.release(migrates=True)
+    files = maintenance.kept()
+
+    maintenance.release(migrates=True)
+
+    assert maintenance.kept() == files
+    assert reset_database.archive_path(maintenance.host, first).name in files
+
+
+def test_a_prepared_reset_keeps_its_archive_and_the_release_drops_its_dump(tmp_path: Path) -> None:
+    maintenance = Maintenance(tmp_path / "host")
+    maintenance.prepare()
+    files = maintenance.kept()
+
+    maintenance.release(migrates=True)
+
+    assert maintenance.kept() == files
+
+
+def state_after_maintenances(tmp_path: Path) -> Maintenance:
+    maintenance = Maintenance(tmp_path / "host")
+    maintenance.prepare()
+    maintenance.host.marker.unlink()
+    maintenance.release(migrates=True)
+    reset_database.archive_path(maintenance.host, maintenance.runs[0]).with_suffix(
+        ".partial"
+    ).write_bytes(b"")
+    return maintenance
+
+
+def test_the_end_of_a_successful_release_removes_its_pre_release_archives_and_the_session(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maintenance = state_after_maintenances(tmp_path)
+    monkeypatch.setattr(reset_database, "load_host", lambda config: maintenance.host)
+    maintenance.host.marker.unlink()
+
+    assert release_record.main(["/etc/pyracast/host.json", "end"]) == 0
+
+    assert all("-prerelease-" not in name for name in maintenance.kept())
+    assert maintenance.kept() == sorted(
+        [
+            reset_database.archive_path(maintenance.host, ARCHIVE).name,
+            reset_database.record_path(maintenance.host, ARCHIVE).name,
+            reset_database.archive_path(maintenance.host, reset_database.export_name(ARCHIVE)).name,
+        ]
+    )
+    assert str(maintenance.host.state) in capsys.readouterr().out
+
+
+def test_the_end_step_leaves_an_open_maintenance_alone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maintenance = state_after_maintenances(tmp_path)
+    monkeypatch.setattr(reset_database, "load_host", lambda config: maintenance.host)
+    files = maintenance.kept()
+
+    assert release_record.main(["/etc/pyracast/host.json", "end"]) == 1
+
+    assert maintenance.kept() == files
+    assert str(maintenance.host.marker) in capsys.readouterr().err
+
+
+def test_the_end_step_on_a_host_without_kept_files_changes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maintenance = Maintenance(tmp_path / "host")
+    monkeypatch.setattr(reset_database, "load_host", lambda config: maintenance.host)
+
+    assert release_record.main(["/etc/pyracast/host.json", "end"]) == 0
+    assert not maintenance.host.state.exists()
+
+
+def prerelease_files(maintenance: Maintenance) -> list[str]:
+    return [name for name in maintenance.kept() if "-prerelease-" in name]
+
+
+def test_discarding_without_a_held_session_removes_every_pre_release_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maintenance = state_after_maintenances(tmp_path)
+    monkeypatch.setattr(reset_database, "load_host", lambda config: maintenance.host)
+    maintenance.host.marker.unlink()
+    maintenance.release(migrates=False)
+    session = maintenance.host.session.read_bytes()
+
+    assert release_record.main(["/etc/pyracast/host.json", "discard"]) == 0
+
+    assert prerelease_files(maintenance) == []
+    assert reset_database.archive_path(maintenance.host, ARCHIVE).name in maintenance.kept()
+    assert maintenance.host.session.read_bytes() == session
+    assert str(maintenance.host.state) in capsys.readouterr().out
+
+
+def test_discarding_keeps_the_dump_the_held_session_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maintenance = cli_host(tmp_path, monkeypatch)
+    first = maintenance.release(migrates=True)
+    kept = maintenance.kept()
+    maintenance.release(migrates=False)
+    reset_database.archive_path(maintenance.host, first).with_suffix(".partial").write_bytes(b"")
+
+    assert release_record.main(["/etc/pyracast/host.json", "discard"]) == 0
+
+    assert maintenance.kept() == kept
+    assert reset_database.archive_path(maintenance.host, first).name in kept
+
+
+def test_discarding_beside_an_unreadable_session_removes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    maintenance = cli_host(tmp_path, monkeypatch)
+    maintenance.release(migrates=False)
+    maintenance.host.marker.write_text("m", encoding="utf-8")
+    maintenance.host.session.write_text("not json", encoding="utf-8")
+    files = maintenance.kept()
+
+    assert release_record.main(["/etc/pyracast/host.json", "discard"]) == 1
+
+    assert maintenance.kept() == files
+    assert str(maintenance.host.session) in capsys.readouterr().err
+
+
+def written_then_failed(path: Path) -> None:
+    if path.name == "session.json":
+        raise subprocess.CalledProcessError(1, ["sync", "-f", str(path)], stderr="disk failed")
+
+
+@pytest.mark.parametrize(
+    "failure", ["record", "marker", "session", "session synced", "session unreadable"]
+)
+def test_a_recovery_point_that_cannot_be_recorded_keeps_only_a_dump_the_session_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    maintenance = Maintenance(tmp_path / "host")
+    name = maintenance.release(migrates=False)
+
+    def failed(*_arguments: object) -> None:
+        raise OSError("No space left on device")
+
+    match failure:
+        case "record":
+            monkeypatch.setattr(reset_database, "save_record", failed)
+        case "marker":
+            monkeypatch.setattr(reset_database, "marker_identity", failed)
+        case "session":
+            monkeypatch.setattr(reset_database, "save_session", failed)
+        case "session unreadable":
+
+            def torn(host: reset_database.Host, _session: reset_database.Session) -> None:
+                host.session.write_text("not json", encoding="utf-8")
+                raise OSError("No space left on device")
+
+            monkeypatch.setattr(reset_database, "save_session", torn)
+        case _:
+            monkeypatch.setattr(reset_database, "sync", written_then_failed)
+
+    with pytest.raises((OSError, subprocess.CalledProcessError)):
+        release_record.record_session(maintenance.host, maintenance.record)
+
+    if failure == "session unreadable":
+        assert reset_database.archive_path(maintenance.host, name).name in maintenance.kept()
+    elif failure == "session synced":
+        archive = reset_database.archive_path(maintenance.host, name)
+        assert maintenance.kept() == sorted(
+            [archive.name, archive.with_suffix(".json").name, "session.json"]
+        )
+    else:
+        assert prerelease_files(maintenance) == []
+
+
 def cli_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Maintenance:
     maintenance = Maintenance(tmp_path / "host")
     monkeypatch.setattr(reset_database, "load_host", lambda config: maintenance.host)
@@ -604,14 +881,13 @@ def test_the_record_command_prints_the_recovery_point_and_the_recovery_reads_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     maintenance = cli_host(tmp_path, monkeypatch)
-    maintenance.host.marker.touch()
-    record = tmp_path / "prerelease-backup.json"
-    record.write_text(json.dumps({"object": ARCHIVE}), encoding="utf-8")
+    name = maintenance.release(migrates=False)
+    record = str(maintenance.record)
 
-    assert release_record.main(["/etc/pyracast/host.json", "record", str(record)]) == 0
-    assert ARCHIVE in capsys.readouterr().out
+    assert release_record.main(["/etc/pyracast/host.json", "record", record]) == 0
+    assert name in capsys.readouterr().out
     assert release_record.main(["/etc/pyracast/host.json", "recovery"]) == 0
-    assert maintenance.host.command(f"restore --confirm {ARCHIVE}") in capsys.readouterr().out
+    assert maintenance.host.command(f"restore --confirm {name}") in capsys.readouterr().out
     assert release_record.main(["/etc/pyracast/host.json"]) == 2
 
 
@@ -619,9 +895,8 @@ def test_a_record_that_cannot_be_written_fails_with_its_reason(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     maintenance = cli_host(tmp_path, monkeypatch)
-    maintenance.host.marker.touch()
-    record = tmp_path / "prerelease-backup.json"
-    record.write_text(json.dumps({"object": ARCHIVE}), encoding="utf-8")
+    maintenance.release(migrates=False)
+    record = maintenance.record
 
     def failing_sync(path: Path) -> None:
         raise subprocess.CalledProcessError(1, ["sync", "-f", str(path)], stderr="disk failed")

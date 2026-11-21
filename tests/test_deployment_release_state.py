@@ -1,12 +1,19 @@
+import errno
 import json
+import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from deploy import host as helpers
 from deploy import release_state
+from tests.support.links import link
 
 REPOSITORY = "us-docker.pkg.dev/project/repo"
+YIELDED = "A restore rehearsal is running, so nothing was pruned; the next release prunes.\n"
 
 
 def images(digit: str, *, web: str | None = None) -> dict[str, str]:
@@ -57,6 +64,66 @@ class Host:
 @pytest.fixture
 def host(tmp_path: Path) -> Host:
     return Host(tmp_path)
+
+
+class Rehearsal:
+    LOCK_EX = 2
+    LOCK_NB = 4
+
+    def __init__(self, lock: Path) -> None:
+        self.lock = lock
+        self.running = False
+        self.error: OSError | None = None
+        self.looks = 0
+        self.on_look: Callable[[], None] = lambda: None
+
+    def flock(self, _stream: object, operation: int) -> None:
+        assert operation == self.LOCK_EX | self.LOCK_NB
+        self.looks += 1
+        self.on_look()
+        if self.error is not None:
+            raise self.error
+        if self.running:
+            raise BlockingIOError
+
+
+@pytest.fixture
+def command_line(host: Host, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    lock = tmp_path / "rehearsal.lock"
+    monkeypatch.setattr(release_state, "STATE", host.state)
+    monkeypatch.setattr(release_state, "RELEASES", host.releases)
+    monkeypatch.setattr(release_state, "SECRETS", host.secrets)
+    monkeypatch.setattr(release_state, "CURRENT", host.current)
+    monkeypatch.setattr(helpers, "REHEARSAL_LOCK", lock)
+    return lock
+
+
+@pytest.fixture
+def rehearsal(command_line: Path, monkeypatch: pytest.MonkeyPatch) -> Rehearsal:
+    fake = Rehearsal(command_line)
+    monkeypatch.setattr(
+        helpers, "importlib", SimpleNamespace(import_module={"fcntl": fake}.__getitem__)
+    )
+    return fake
+
+
+@pytest.fixture
+def docker(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **_options: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    return commands
+
+
+def three_releases(host: Host) -> tuple[Path, Path, Path]:
+    first = host.release("first", images("1"))
+    second = host.release("second", images("2"))
+    third = host.release("third", images("3"))
+    return first, second, third
 
 
 def test_record_names_the_serving_and_the_previous_release(host: Host) -> None:
@@ -200,15 +267,14 @@ def test_prune_removes_an_unkept_release_without_images_and_leaves_files(host: H
 
 
 def test_command_line_records_and_prunes_with_docker(
-    host: Host, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    host: Host,
+    rehearsal: Rehearsal,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     host.release("old", images("1"))
     previous = host.release("previous", images("2"))
     serving = host.release("serving", images("3"))
-    monkeypatch.setattr(release_state, "STATE", host.state)
-    monkeypatch.setattr(release_state, "RELEASES", host.releases)
-    monkeypatch.setattr(release_state, "SECRETS", host.secrets)
-    monkeypatch.setattr(release_state, "CURRENT", host.current)
     commands: list[list[str]] = []
 
     def run(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
@@ -225,5 +291,130 @@ def test_command_line_records_and_prunes_with_docker(
     assert sorted(command[-1] for command in commands) == sorted(images("1").values())
     assert all(command[:3] == ["docker", "image", "rm"] for command in commands)
     assert "was not removed" in capsys.readouterr().err
+    assert rehearsal.looks == 1
     assert release_state.main(["record", str(serving)]) == 0
     assert json.loads(host.state.read_text())["previous"] is None
+
+
+def test_two_promotions_during_a_rehearsal_keep_its_release_until_the_first_prune_after_it(
+    host: Host,
+    rehearsal: Rehearsal,
+    docker: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rehearsed, second, third = three_releases(host)
+    rehearsal.running = True
+
+    release_state.record(host.state, second, rehearsed)
+    assert release_state.main(["prune"]) == 0
+    release_state.record(host.state, third, second)
+    assert release_state.main(["prune"]) == 0
+
+    assert (rehearsed / "deploy/release.env").is_file()
+    assert (host.secrets / rehearsed.name / "runtime.env").is_file()
+    assert docker == []
+    assert capsys.readouterr() == (YIELDED * 2, "")
+
+    rehearsal.running = False
+    assert release_state.main(["prune"]) == 0
+
+    assert sorted(path.name for path in host.releases.iterdir()) == ["second", "third"]
+    assert sorted(path.name for path in host.secrets.iterdir()) == ["second", "third"]
+    assert sorted(command[-1] for command in docker) == sorted(images("1").values())
+    assert capsys.readouterr() == ("", "")
+    assert rehearsal.looks == 3
+
+
+def test_a_rehearsal_that_starts_right_after_pruning_looked_binds_to_a_kept_release(
+    host: Host, rehearsal: Rehearsal, docker: list[list[str]]
+) -> None:
+    retired, previous, serving = three_releases(host)
+    link(serving, host.current)
+    release_state.record(host.state, serving, previous)
+    bound: list[Path] = []
+    rehearsal.on_look = lambda: bound.append(host.current.resolve(strict=True))
+
+    assert release_state.main(["prune"]) == 0
+
+    assert bound == [serving.resolve()]
+    assert (serving / "deploy/release.env").is_file()
+    assert (host.secrets / serving.name / "runtime.env").is_file()
+    assert not {command[-1] for command in docker} & set(images("3").values())
+    assert not retired.exists()
+
+
+def test_pruning_without_a_rehearsal_lock_file_creates_it_as_the_rehearsal_does(
+    host: Host, rehearsal: Rehearsal, docker: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    retired, previous, serving = three_releases(host)
+    release_state.record(host.state, serving, previous)
+    opened: list[tuple[int, int]] = []
+    real_open = os.open
+
+    def recording_open(
+        path: str, flags: int, mode: int = 0o777, *, dir_fd: int | None = None
+    ) -> int:
+        if Path(path) == rehearsal.lock:
+            opened.append((flags, mode))
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", recording_open)
+
+    assert release_state.main(["prune"]) == 0
+
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    assert opened == [(flags, 0o600)]
+    assert rehearsal.lock.is_file()
+    assert not retired.exists()
+    assert sorted(command[-1] for command in docker) == sorted(images("1").values())
+
+
+@pytest.mark.parametrize("case", ["missing directory", "directory", "lock error"])
+def test_a_rehearsal_lock_that_cannot_be_opened_or_locked_never_stops_pruning(
+    host: Host,
+    rehearsal: Rehearsal,
+    docker: list[list[str]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    case: str,
+) -> None:
+    retired, previous, serving = three_releases(host)
+    release_state.record(host.state, serving, previous)
+    if case == "missing directory":
+        monkeypatch.setattr(helpers, "REHEARSAL_LOCK", tmp_path / "missing" / "rehearsal.lock")
+    elif case == "directory":
+        rehearsal.lock.mkdir()
+    else:
+        rehearsal.error = OSError(errno.ENOLCK, "No locks available")
+
+    assert release_state.main(["prune"]) == 0
+
+    assert not retired.exists()
+    assert sorted(path.name for path in host.releases.iterdir()) == ["second", "third"]
+    assert sorted(command[-1] for command in docker) == sorted(images("1").values())
+    assert not (tmp_path / "missing").exists()
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="flock exists only on the POSIX host")
+def test_a_rehearsal_lock_held_by_another_descriptor_makes_pruning_yield_until_it_is_released(
+    host: Host,
+    command_line: Path,
+    docker: list[list[str]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rehearsed, second, third = three_releases(host)
+    release_state.record(host.state, third, second)
+
+    with helpers.open_lock(command_line) as held:
+        assert helpers.try_lock(held)
+        assert release_state.main(["prune"]) == 0
+        assert rehearsed.is_dir()
+        assert docker == []
+    assert release_state.main(["prune"]) == 0
+    with helpers.open_lock(command_line) as after:
+        assert helpers.try_lock(after)
+
+    assert not rehearsed.exists()
+    assert capsys.readouterr() == (YIELDED, "")

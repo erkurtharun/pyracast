@@ -23,6 +23,7 @@ from deploy import host, watchdog
 
 HEALTHY = dict.fromkeys(watchdog.SERVICES, "running")
 DAY = 86400
+UPTIME = 30 * DAY
 
 
 def states(**changes: str) -> dict[str, str]:
@@ -48,8 +49,14 @@ class Host:
         (self.release / "deploy").mkdir(parents=True)
         (self.release / "deploy/release.env").write_text("SITE_ADDRESS=example.com\n")
         self.blocked = root / "release-blocked"
+        self.boot_id = root / "boot_id"
+        self.boot_id.write_text("boot-a\n")
+        self.uptime = root / "uptime"
+        self.uptime.write_text(f"{UPTIME:.2f} 0.00\n")
         self.last_backup = root / "last-backup.json"
-        self.last_backup.write_text(json.dumps({"completed_at": time.time()}))
+        self.backed_up(age=60)
+        self.last_rehearsal = root / "last-rehearsal.json"
+        self.rehearsed("passed", age=DAY)
         self.delivery_checked = root / "delivery-checked"
         self.meminfo = root / "meminfo"
         self.meminfo.write_text("MemTotal: 100 kB\nMemAvailable: 50 kB\n")
@@ -64,6 +71,16 @@ class Host:
         self.locked: list[list[str]] = []
         self.timeouts: list[float] = []
         self.events: list[tuple[str, str, dict[str, object]]] = []
+
+    def backed_up(self, *, age: float, boot: str = "boot-a") -> None:
+        mark = {"boot_id": boot, "uptime_seconds": UPTIME - age}
+        self.last_backup.write_text(json.dumps({"object": "postgres/x.dump", "mark": mark}))
+
+    def rehearsed(self, status: str, *, age: float, boot: str = "boot-a") -> None:
+        mark = {"boot_id": boot, "uptime_seconds": UPTIME - age}
+        self.last_rehearsal.write_text(
+            json.dumps({"status": status, "step": "counts", "mark": mark})
+        )
 
     def run(self, command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         self.commands.append(command)
@@ -135,6 +152,9 @@ def watched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Host:
     monkeypatch.setattr(host, "CURRENT_RELEASE", fake.release)
     monkeypatch.setattr(host, "RELEASE_BLOCKED", fake.blocked)
     monkeypatch.setattr(host, "LAST_BACKUP", fake.last_backup)
+    monkeypatch.setattr(host, "LAST_REHEARSAL", fake.last_rehearsal)
+    monkeypatch.setattr(host, "BOOT_ID", fake.boot_id)
+    monkeypatch.setattr(host, "UPTIME", fake.uptime)
     monkeypatch.setattr(host, "release_lock", fake.release_lock)
     monkeypatch.setattr(watchdog, "DELIVERY_CHECKED", fake.delivery_checked)
     monkeypatch.setattr(watchdog, "MEMINFO", fake.meminfo)
@@ -150,7 +170,7 @@ def watched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Host:
 def test_timed_out_delivery_check_still_checks_backup_age_and_capacity(watched: Host) -> None:
     watched.delivery = subprocess.TimeoutExpired(["check_delivery_health"], 60)
     watched.free["/var/lib/pyracast"] = 5
-    watched.last_backup.write_text(json.dumps({"completed_at": time.time() - 2 * 3600}))
+    watched.backed_up(age=2 * 3600)
 
     assert watchdog.main() == 1
     assert watched.names() == [
@@ -295,7 +315,8 @@ def test_blocked_release_reports_heartbeat_and_capacity_without_touching_contain
 ) -> None:
     watched.blocked.touch()
     watched.free["/"] = 5
-    watched.last_backup.write_text(json.dumps({"completed_at": time.time() - 3 * 3600}))
+    watched.backed_up(age=3 * 3600)
+    watched.rehearsed("failed", age=DAY)
 
     assert watchdog.main() == 0
     assert watched.commands == []
@@ -307,7 +328,7 @@ def test_blocked_release_reports_heartbeat_and_capacity_without_touching_contain
 def test_inactive_application_unit_is_reported_without_recovery(watched: Host, unit: str) -> None:
     watched.unit = unit
     watched.snapshots = [states(worker="exited")]
-    watched.last_backup.write_text(json.dumps({"completed_at": time.time() - 3 * 3600}))
+    watched.backed_up(age=3 * 3600)
 
     assert watchdog.main() == 0
     assert [command[0] for command in watched.commands] == ["systemctl"]
@@ -337,37 +358,166 @@ def test_first_delivery_check_runs_and_records_its_time(watched: Host) -> None:
     assert "pyracast_runtime_unhealthy" not in watched.names()
 
 
-@pytest.mark.parametrize(
-    ("marker", "age", "stale"),
-    [
-        ({"completed_at": "recent"}, 0, False),
-        ({"completed_at": "old"}, 0, True),
-        ({"completed_at": "recent"}, 3 * 3600, False),
-        ("not json", 3 * 3600, True),
-        ({"object": "postgres/x.dump"}, 0, False),
-        (None, 0, False),
-        (None, 3 * 3600, True),
-    ],
-)
-def test_backup_age_uses_the_recorded_completion_time(
-    watched: Host, marker: object, age: float, stale: bool
+def step_wall_clock(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
+    stepped = time.time() + seconds
+    monkeypatch.setattr(time, "time", lambda: stepped)
+
+
+@pytest.mark.parametrize("step", [-DAY, 0, DAY])
+@pytest.mark.parametrize(("age", "stale"), [(60, False), (2 * 3600, True)])
+def test_backup_age_is_measured_in_uptime_so_a_clock_step_neither_hides_nor_fakes_staleness(
+    watched: Host, monkeypatch: pytest.MonkeyPatch, step: float, age: float, stale: bool
 ) -> None:
-    now = time.time()
-    completed = {"recent": now - 60, "old": now - 3 * 3600}
-    if marker is None:
-        watched.last_backup.unlink()
-        target = watched.release / "deploy/release.env"
-    else:
-        target = watched.last_backup
-        if isinstance(marker, dict):
-            marker = {key: completed.get(value, value) for key, value in marker.items()}
-            target.write_text(json.dumps(marker))
-        else:
-            target.write_text(str(marker))
-    os.utime(target, (now - age, now - age))
+    mark = {"boot_id": "boot-a", "uptime_seconds": UPTIME - age}
+    watched.last_backup.write_text(json.dumps({"object": "postgres/x.dump", "mark": mark}))
+    step_wall_clock(monkeypatch, step)
 
     watchdog.main()
     assert ("pyracast_backup_failed" in watched.names()) is stale
+
+
+@pytest.mark.parametrize(("uptime", "stale"), [(600, False), (3 * 3600, True)])
+@pytest.mark.parametrize(
+    "pointer",
+    [
+        {"object": "postgres/x.dump", "mark": {"boot_id": "boot-z", "uptime_seconds": 10}},
+        {"object": "postgres/x.dump", "completed_at": 0},
+        ["not", "a", "pointer"],
+        "not json",
+        None,
+    ],
+)
+def test_a_backup_not_recorded_in_this_boot_is_stale_once_the_boot_outlasts_the_bound(
+    watched: Host, pointer: object, uptime: float, stale: bool
+) -> None:
+    watched.uptime.write_text(f"{uptime:.2f} 0.00\n")
+    if pointer is None:
+        watched.last_backup.unlink()
+    else:
+        text = pointer if isinstance(pointer, str) else json.dumps(pointer)
+        watched.last_backup.write_text(text)
+
+    watchdog.main()
+    assert ("pyracast_backup_failed" in watched.names()) is stale
+
+
+def rehearsal_events(watched: Host) -> list[tuple[str, dict[str, object]]]:
+    return [
+        (severity, details)
+        for event, severity, details in watched.events
+        if event == "pyracast_rehearsal_unhealthy"
+    ]
+
+
+@pytest.mark.parametrize("step", [-30 * DAY, 0, 30 * DAY])
+@pytest.mark.parametrize(
+    ("status", "age", "expected"),
+    [
+        ("passed", DAY, []),
+        ("passed", 9 * DAY, [("WARNING", {"state": "overdue"})]),
+        ("failed", DAY, [("WARNING", {"state": "failed", "step": "counts"})]),
+        ("failed", 9 * DAY, [("WARNING", {"state": "failed", "step": "counts"})]),
+    ],
+)
+def test_the_rehearsal_status_is_reported_unless_a_recent_rehearsal_passed(
+    watched: Host,
+    monkeypatch: pytest.MonkeyPatch,
+    step: float,
+    status: str,
+    age: float,
+    expected: list[tuple[str, dict[str, object]]],
+) -> None:
+    watched.rehearsed(status, age=age)
+    step_wall_clock(monkeypatch, step)
+
+    watchdog.main()
+    assert rehearsal_events(watched) == expected
+
+
+@pytest.mark.parametrize("uptime", [DAY, 9 * DAY])
+def test_a_host_without_a_rehearsal_record_ages_it_from_the_first_check_that_finds_none(
+    watched: Host, uptime: float
+) -> None:
+    watched.uptime.write_text(f"{uptime:.2f} 0.00\n")
+    watched.last_rehearsal.unlink()
+
+    watchdog.main()
+
+    assert rehearsal_events(watched) == []
+    assert json.loads(watched.last_rehearsal.read_text()) == {
+        "status": "scheduled",
+        "mark": {"boot_id": "boot-a", "uptime_seconds": uptime},
+    }
+    assert [
+        path.name
+        for path in watched.last_rehearsal.parent.iterdir()
+        if path.name.startswith(watched.last_rehearsal.name)
+    ] == [watched.last_rehearsal.name]
+
+
+def test_a_rehearsal_record_written_meanwhile_is_never_replaced_by_the_schedule(
+    watched: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    watched.last_rehearsal.unlink()
+    mark = host.clock_mark
+
+    def rehearsed_meanwhile() -> dict[str, object]:
+        watched.rehearsed("failed", age=60)
+        return mark()
+
+    monkeypatch.setattr(host, "clock_mark", rehearsed_meanwhile)
+
+    watchdog.main()
+
+    assert json.loads(watched.last_rehearsal.read_text())["status"] == "failed"
+    assert [
+        path.name
+        for path in watched.last_rehearsal.parent.iterdir()
+        if path.name.startswith(watched.last_rehearsal.name)
+    ] == [watched.last_rehearsal.name]
+
+
+@pytest.mark.parametrize(
+    ("age", "boot", "overdue"),
+    [
+        (DAY, "boot-a", False),
+        (7 * DAY, "boot-a", False),
+        (9 * DAY, "boot-a", True),
+        (DAY, "boot-z", True),
+    ],
+)
+def test_a_scheduled_rehearsal_is_overdue_once_its_first_run_could_have_passed_long_ago(
+    watched: Host, age: float, boot: str, overdue: bool
+) -> None:
+    watched.uptime.write_text(f"{9 * DAY + 60:.2f} 0.00\n")
+    mark = {"boot_id": boot, "uptime_seconds": 9 * DAY + 60 - age}
+    watched.last_rehearsal.write_text(json.dumps({"status": "scheduled", "mark": mark}))
+    recorded = watched.last_rehearsal.read_bytes()
+
+    watchdog.main()
+
+    assert rehearsal_events(watched) == ([("WARNING", {"state": "overdue"})] if overdue else [])
+    assert watched.last_rehearsal.read_bytes() == recorded
+
+
+@pytest.mark.parametrize(("uptime", "overdue"), [(DAY, False), (9 * DAY, True)])
+@pytest.mark.parametrize(
+    "status",
+    [
+        "not json",
+        json.dumps(["passed"]),
+        json.dumps({"status": "passed", "mark": {"boot_id": "boot-z", "uptime_seconds": 1}}),
+        json.dumps({"status": "unknown"}),
+    ],
+)
+def test_without_a_rehearsal_of_this_boot_it_is_overdue_once_the_boot_outlasts_the_bound(
+    watched: Host, status: str, uptime: float, overdue: bool
+) -> None:
+    watched.uptime.write_text(f"{uptime:.2f} 0.00\n")
+    watched.last_rehearsal.write_text(status)
+
+    watchdog.main()
+    assert rehearsal_events(watched) == ([("WARNING", {"state": "overdue"})] if overdue else [])
 
 
 @pytest.mark.parametrize(("remaining_days", "warns"), [(30, False), (22, True)])

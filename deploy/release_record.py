@@ -8,10 +8,11 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from deploy import reset_database
-from deploy.reset_database import Host, Session
+from deploy.reset_database import Host, Record, Session
 
 # The installer prints the name into a shell command: no whitespace, quotes, NUL or dot segments.
 OBJECT = re.compile(r"postgres(?:/[A-Za-z0-9_.-]+)+\.dump")
+PRERELEASE = "-prerelease-"
 
 
 def valid_object(value: object) -> str | None:
@@ -22,12 +23,16 @@ def valid_object(value: object) -> str | None:
     return value
 
 
-def object_name(record: Path) -> str | None:
+def dumped_backup(record: Path) -> tuple[str, dict[str, int]] | None:
     try:
-        value = json.loads(record.read_text(encoding="utf-8"))["object"]
-    except (OSError, ValueError, KeyError, TypeError):
+        data = json.loads(record.read_text(encoding="utf-8"))
+        name = valid_object(data["object"])
+        counts = {str(table): int(count) for table, count in data["counts"].items()}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return None
-    return valid_object(value)
+    if name is None or PRERELEASE not in name:
+        return None
+    return name, counts
 
 
 def held_session(host: Host) -> Session | None:
@@ -37,32 +42,104 @@ def held_session(host: Host) -> Session | None:
     return session
 
 
+def discard(host: Host, name: str) -> None:
+    archive = reset_database.archive_path(host, name)
+    for path in (archive, archive.with_suffix(".partial"), reset_database.record_path(host, name)):
+        path.unlink(missing_ok=True)
+
+
+def named_by_session(host: Host, name: str) -> bool:
+    # A session that cannot be read may still name the dump, so it keeps it.
+    try:
+        session = held_session(host)
+    except (OSError, ValueError, TypeError):
+        return True
+    return session is not None and session.object == name
+
+
+def discard_unnamed(host: Host) -> int:
+    try:
+        session = held_session(host)
+    except (OSError, ValueError, TypeError) as error:
+        print(
+            f"The maintenance session {host.session} cannot be read ({error}); "
+            "no pre-release file was removed.",
+            file=sys.stderr,
+        )
+        return 1
+    named = (
+        set()
+        if session is None
+        else {
+            reset_database.archive_path(host, session.object),
+            reset_database.record_path(host, session.object),
+        }
+    )
+    removed = [path for path in sorted(host.state.glob(f"*{PRERELEASE}*")) if path not in named]
+    for path in removed:
+        path.unlink()
+    print(f"Removed {len(removed)} pre-release files no session names from {host.state}.")
+    return 0
+
+
+def counted_record(host: Host, name: str, dumped: dict[str, int]) -> Record:
+    archive = reset_database.archive_path(host, name)
+    counts = reset_database.verify_archive(host, archive)
+    reset_database.require_equal_counts(dumped, counts, "Dumped and restored")
+    if not counts.get("django_migrations"):
+        raise ValueError(f"{name} holds no applied migration, so no release could serve it again.")
+    return Record(object=name, sha256=reset_database.file_sha256(archive), counts=counts)
+
+
 def record_session(host: Host, record: Path) -> Session:
     """Before a release changes the database, the session names what the previous release served.
 
-    A session that holds the marker keeps its object; without one the database is unchanged in
-    this maintenance, so this run's pre-release dump holds it.
+    A session that holds the marker keeps its object, and this run's dump goes. Without one the
+    database is unchanged in this maintenance: this run's dump, kept on the host by backup.py and
+    counted by a throwaway restore, holds it, so recovery needs neither the bucket nor a token.
     """
     session = held_session(host)
-    if session is not None and session.replaced:
-        return session
-    if session is None:
-        name = object_name(record)
-        if name is None:
-            raise ValueError(f"{record} names no valid pre-release object")
-        session = Session(
+    dumped = dumped_backup(record)
+    if session is not None:
+        if dumped is not None and dumped[0] != session.object:
+            discard(host, dumped[0])
+        if session.replaced:
+            return session
+        recorded = dataclasses.replace(session, replaced=True)
+        reset_database.save_session(host, recorded)
+        return recorded
+    if dumped is None:
+        raise ValueError(f"{record} names no valid pre-release object")
+    name, counts = dumped
+    try:
+        reset_database.save_record(host, counted_record(host, name, counts))
+        recorded = Session(
             marker=reset_database.marker_identity(host),
             object=name,
             release=host.release.resolve().name,
-            replaced=False,
+            replaced=True,
         )
-    recorded = dataclasses.replace(session, replaced=True)
-    reset_database.save_session(host, recorded)
+        reset_database.save_session(host, recorded)
+    except BaseException:
+        if not named_by_session(host, name):
+            discard(host, name)
+        raise
     return recorded
 
 
+def end(host: Host) -> int:
+    if host.marker.exists():
+        print(f"{host.marker} exists: a maintenance is open; nothing was removed.", file=sys.stderr)
+        return 1
+    removed = sorted(host.state.glob(f"*{PRERELEASE}*"))
+    for path in removed:
+        path.unlink()
+    host.session.unlink(missing_ok=True)
+    print(f"Removed {len(removed)} pre-release files and the ended session from {host.state}.")
+    return 0
+
+
 def recovery(host: Host) -> str:
-    """The recovery the helper accepts from this maintenance's session, as its guards read it."""
     try:
         session = held_session(host)
     except (OSError, ValueError, TypeError) as error:
@@ -85,9 +162,13 @@ def recovery(host: Host) -> str:
 def main(arguments: list[str] | None = None) -> int:
     match sys.argv[1:] if arguments is None else arguments:
         case [config, "record", record]:
-            prerelease: Path | None = Path(record)
+            action = "record"
         case [config, "recovery"]:
-            prerelease = None
+            action, record = "recovery", ""
+        case [config, "end"]:
+            action, record = "end", ""
+        case [config, "discard"]:
+            action, record = "discard", ""
         case _:
             return 2
     try:
@@ -95,11 +176,15 @@ def main(arguments: list[str] | None = None) -> int:
     except Exception as error:
         print(f"Cannot read the host configuration {config}: {error!r}", file=sys.stderr)
         return 1
-    if prerelease is None:
+    if action == "recovery":
         print(recovery(host))
         return 0
+    if action == "end":
+        return end(host)
+    if action == "discard":
+        return discard_unnamed(host)
     try:
-        session = record_session(host, prerelease)
+        session = record_session(host, Path(record))
     except Exception as error:
         print(
             f"The recovery point was not recorded in {host.session}: "

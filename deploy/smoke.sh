@@ -446,15 +446,58 @@ errors = json.load(sys.stdin)["errors"]
 assert [error["code"] for error in errors] == ["email_password_mismatch"], errors
 ' < "$temporary/sign-in.json"
 [[ $("${secure_curl[@]}" https://localhost:18443/app/) == *'<title>Pyracast workspace'* ]]
+"${compose[@]}" exec -T api python - <<'PY'
+import django
+django.setup()
+from pyracast.connections.models import ProviderAccount
+from pyracast.connections.secrets import encrypt_secret
+assert ProviderAccount.objects.filter(external_account_id='container-smoke').update(
+    encrypted_api_key=encrypt_secret('smoke-provider-key')) == 1
+PY
 uv run --no-project --python 3.15.2 python - "$temporary" "$root" <<'PY'
+import importlib.util
+import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 sys.path.insert(0, sys.argv[2])
-from deploy.backup import dump_database, restore_archive
-release = Path(sys.argv[1])
-dump_database(release, release / 'database.dump')
-restore_archive(release, release / 'database.dump', 'local-smoke')
+from deploy import backup, host, rehearsal, reset_database
+temporary = Path(sys.argv[1])
+bucket = temporary / 'bucket'
+
+def upload(_bucket, name, archive):
+    (bucket / name).parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(archive, bucket / name)
+
+def download(_throwaway, directory, name):
+    archive = directory / name.rsplit('/', 1)[-1]
+    shutil.copyfile(bucket / name, archive)
+    return archive
+
+backup.upload_backup = upload
+rehearsal.download = download
+host.LAST_BACKUP = temporary / 'last-backup.json'
+host.LAST_REHEARSAL = temporary / 'last-rehearsal.json'
+host.REHEARSAL_LOCK = temporary / 'rehearsal.lock'
+if not Path('/proc/uptime').exists():
+    host.boot_clock = lambda: ('smoke', 1.0)
+if importlib.util.find_spec('fcntl') is None:
+    host.try_lock = lambda _stream: True
+if sys.platform != 'linux':
+    rehearsal.require_capacity = lambda *_arguments: None
+reset_database.load_host = lambda config: reset_database.Host(
+    config=config, release=temporary, bucket='smoke-backups', runtime_version='smoke',
+    state=temporary / 'reset')
+with tempfile.TemporaryDirectory() as directory:
+    backup.store_backup(temporary, 'smoke-backups', 'hourly', Path(directory))
+assert rehearsal.main([str(temporary / 'host.json')]) == 0
+status = json.loads(host.LAST_REHEARSAL.read_text())
+assert status['status'] == 'passed' and status['secrets'] >= 1, status
+assert status['tables'] > 20 and status['rows'] > 0, status
 PY
+[[ -z $(docker ps --all --quiet --filter label=pyracast.rehearsal) ]]
+[[ -z $(docker volume ls --quiet --filter label=pyracast.rehearsal) ]]
 "${compose[@]}" exec -T api pyracast dispatch
 "${compose[@]}" stop -t 30 dispatcher
 "${compose[@]}" stop -t 30 worker notifications

@@ -81,6 +81,34 @@ variable "data_disk_gb" {
   }
 }
 
+variable "backup_retention_days" {
+  description = "Days each backup generation cannot be permanently deleted, by an unlocked retention policy; an overwrite or a delete still makes the live object noncurrent. No extra storage cost: the lifecycle keeps every generation seven days anyway. 0 sets none."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.backup_retention_days >= 0 && var.backup_retention_days <= 7 && floor(var.backup_retention_days) == var.backup_retention_days
+    error_message = "Use whole days from 0 to 7."
+  }
+}
+
+variable "backup_daily_tier" {
+  description = "Keep the first hourly backup of each UTC day for 30 days under daily/ (storage cost). Change the published seven-day backup statement first."
+  type        = bool
+  default     = false
+}
+
+variable "data_disk_snapshot_days" {
+  description = "Days a daily snapshot of the data disk is kept (storage cost); 0 takes none. At most seven, the published backup lifetime."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.data_disk_snapshot_days >= 0 && var.data_disk_snapshot_days <= 7 && floor(var.data_disk_snapshot_days) == var.data_disk_snapshot_days
+    error_message = "Use whole days from 0 to 7."
+  }
+}
+
 variable "deletion_protection" {
   description = "Protect the VM against accidental deletion."
   type        = bool

@@ -9,7 +9,7 @@ if [[ $# != 2 || ! $1 =~ ^(verify|install)$ || ! -d $2/deploy/systemd ]]; then
 fi
 shipped=$2/deploy/systemd
 installed=/etc/systemd/system
-units=(pyracast-backup.service pyracast-backup.timer pyracast-watchdog.service pyracast-watchdog.timer)
+units=(pyracast-backup.service pyracast-backup.timer pyracast-rehearsal.service pyracast-rehearsal.timer pyracast-watchdog.service pyracast-watchdog.timer)
 systemd-analyze verify "${units[@]/#/$shipped/}"
 if [[ $1 == verify ]]; then exit 0; fi
 changed=0
@@ -21,4 +21,4 @@ for unit in "${units[@]}"; do
   fi
 done
 if (( changed )); then systemctl daemon-reload; fi
-systemctl enable --now pyracast-backup.timer pyracast-watchdog.timer
+systemctl enable --now pyracast-backup.timer pyracast-rehearsal.timer pyracast-watchdog.timer

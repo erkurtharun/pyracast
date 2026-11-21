@@ -170,13 +170,38 @@ resource "google_storage_bucket" "backup" {
 
   # Age counts from each generation's creation: a live backup becomes noncurrent at seven days
   # and a later lifecycle run deletes it, as it deletes a backup deleted or replaced earlier.
+  # The public legal copy promises this seven-day lifetime.
   lifecycle_rule {
     condition {
-      age        = 7
-      with_state = "ANY"
+      age            = 7
+      with_state     = "ANY"
+      matches_prefix = var.backup_daily_tier ? ["postgres/"] : null
     }
     action {
       type = "Delete"
+    }
+  }
+
+  dynamic "lifecycle_rule" {
+    for_each = var.backup_daily_tier ? [30] : []
+    content {
+      condition {
+        age            = lifecycle_rule.value
+        with_state     = "ANY"
+        matches_prefix = ["daily/"]
+      }
+      action {
+        type = "Delete"
+      }
+    }
+  }
+
+  # Unlocked: it guards against an accidental permanent deletion, and its owner can still remove it.
+  dynamic "retention_policy" {
+    for_each = var.backup_retention_days > 0 ? [var.backup_retention_days] : []
+    content {
+      retention_period = retention_policy.value * 86400
+      is_locked        = false
     }
   }
 
@@ -203,6 +228,39 @@ resource "google_compute_disk" "data" {
   }
 
   depends_on = [google_project_service.required]
+}
+
+# A crash-consistent copy of PostgreSQL, RabbitMQ and certificates beside the off-host dumps.
+resource "google_compute_resource_policy" "data_snapshots" {
+  count  = var.data_disk_snapshot_days > 0 ? 1 : 0
+  name   = "${var.name}-data-snapshots"
+  region = var.region
+
+  snapshot_schedule_policy {
+    schedule {
+      daily_schedule {
+        days_in_cycle = 1
+        start_time    = "02:00"
+      }
+    }
+    retention_policy {
+      max_retention_days    = var.data_disk_snapshot_days
+      on_source_disk_delete = "APPLY_RETENTION_POLICY"
+    }
+    snapshot_properties {
+      labels            = local.labels
+      storage_locations = [var.region]
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_compute_disk_resource_policy_attachment" "data_snapshots" {
+  count = var.data_disk_snapshot_days > 0 ? 1 : 0
+  name  = google_compute_resource_policy.data_snapshots[0].name
+  disk  = google_compute_disk.data.name
+  zone  = var.zone
 }
 
 resource "google_compute_instance" "application" {
@@ -255,7 +313,8 @@ resource "google_compute_instance" "application" {
     serial-port-enable     = "FALSE"
     startup-script = templatefile("${path.module}/templates/startup.sh.tftpl", {
       network_guard_base64 = filebase64("${path.module}/templates/network-guard.sh")
-      host_config_base64 = base64encode(jsonencode({
+      # Off, daily_backups is absent, so host.json and the instance metadata stay unchanged.
+      host_config_base64 = base64encode(jsonencode(merge({
         project_id              = var.project_id
         runtime_secret_id       = google_secret_manager_secret.application["runtime"].id
         runtime_secret_version  = "${google_secret_manager_secret.application["runtime"].id}/versions/${var.runtime_secret_version}"
@@ -264,7 +323,7 @@ resource "google_compute_instance" "application" {
         domain                  = var.domain
         acme_email              = var.acme_email
         origin_pull_ca          = var.origin_pull_ca
-      }))
+      }, { for key, value in { daily_backups = true } : key => value if var.backup_daily_tier })))
     })
   }
 

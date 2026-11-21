@@ -25,6 +25,7 @@ from deploy import (
     backup,
     host,
     probe_origin_pull,
+    rehearsal,
     release_state,
     reset_database,
     runtime_secrets,
@@ -519,7 +520,7 @@ def test_gmail_authorization_helper_matches_the_backend_configuration() -> None:
 
 def test_host_configuration_provides_every_key_the_host_scripts_read() -> None:
     written = re.search(
-        r"host_config_base64 = base64encode\(jsonencode\(\{(.*?)\}\)\)",
+        r"host_config_base64 = base64encode\(jsonencode\(merge\(\{(.*?)\}, \{",
         text(TERRAFORM / "main.tf"),
         re.S,
     )
@@ -544,22 +545,101 @@ def shipped_unit(name: str) -> dict[str, list[str]]:
     return values
 
 
-def test_release_ships_the_watchdog_and_backup_units_and_the_host_keeps_its_own() -> None:
+def test_release_ships_the_watchdog_backup_and_rehearsal_units_and_the_host_keeps_its_own() -> None:
     shipped = {path.name for path in (DEPLOY / "systemd").iterdir()}
-    installed = re.search(r"^units=\((.*)\)$", text(DEPLOY / "install-units.sh"), re.M)
+    script = text(DEPLOY / "install-units.sh")
+    installed = re.search(r"^units=\((.*)\)$", script, re.M)
     template = text(TERRAFORM / "templates" / "startup.sh.tftpl")
 
     assert shipped == {
         "pyracast-backup.service",
         "pyracast-backup.timer",
+        "pyracast-rehearsal.service",
+        "pyracast-rehearsal.timer",
         "pyracast-watchdog.service",
         "pyracast-watchdog.timer",
     }
     assert installed
     assert set(installed[1].split()) == shipped
+    enabled = re.search(r"^systemctl enable --now (.*)$", script, re.M)
+    assert enabled
+    assert set(enabled[1].split()) == {name for name in shipped if name.endswith(".timer")}
     assert not any(f"/etc/systemd/system/{name}" in template for name in shipped)
     assert "cat >/etc/systemd/system/pyracast.service" in template
     assert "deploy/install-units.sh install /opt/pyracast/current" in template
+
+
+def test_the_weekly_rehearsal_runs_detached_from_the_site_and_outlasts_its_deadline() -> None:
+    service = shipped_unit("pyracast-rehearsal.service")
+    timer = shipped_unit("pyracast-rehearsal.timer")
+
+    assert service["ExecStart"] == [
+        "/usr/bin/python3 /opt/pyracast/current/deploy/rehearsal.py /etc/pyracast/host.json"
+    ]
+    assert service["ConditionPathExists"] == ["/opt/pyracast/current/deploy/rehearsal.py"]
+    assert service["PrivateTmp"] == ["true"]
+    assert service["Nice"] == ["19"]
+    assert service["IOSchedulingClass"] == ["idle"]
+    assert int(service["TimeoutStartSec"][0]) >= rehearsal.DEADLINE_SECONDS + 300
+    assert "ConditionPathExists=!/var/lib/pyracast/release-blocked" not in text(
+        DEPLOY / "systemd" / "pyracast-rehearsal.service"
+    )
+    assert timer["OnCalendar"] == ["Sun *-*-* 03:00:00"]
+    assert timer["Persistent"] == ["true"]
+    assert timer["OnBootSec"] == ["1h"]
+    week = 7 * 86400
+    assert week + int(timer["RandomizedDelaySec"][0]) + 3600 <= host.REHEARSAL_MAX_AGE_SECONDS
+
+
+def test_backup_protection_that_costs_money_is_off_until_the_operator_turns_it_on() -> None:
+    variables = {
+        name: terraform_block(TERRAFORM / "variables.tf", f'variable "{name}"')
+        for name in ("backup_retention_days", "backup_daily_tier", "data_disk_snapshot_days")
+    }
+    bucket = terraform_block(TERRAFORM / "main.tf", 'resource "google_storage_bucket" "backup"')
+    policy = terraform_block(
+        TERRAFORM / "main.tf", 'resource "google_compute_resource_policy" "data_snapshots"'
+    )
+    attachment = terraform_block(
+        TERRAFORM / "main.tf",
+        'resource "google_compute_disk_resource_policy_attachment" "data_snapshots"',
+    )
+
+    assert "type = number default = 0" in variables["backup_retention_days"]
+    assert "var.backup_retention_days <= 7" in variables["backup_retention_days"]
+    assert "type = bool default = false" in variables["backup_daily_tier"]
+    assert "type = number default = 0" in variables["data_disk_snapshot_days"]
+    assert "var.data_disk_snapshot_days <= 7" in variables["data_disk_snapshot_days"]
+    assert (
+        'dynamic "retention_policy" { for_each = var.backup_retention_days > 0 ? '
+        "[var.backup_retention_days] : [] content { retention_period = retention_policy.value "
+        "* 86400 is_locked = false } }"
+    ) in bucket
+    assert (
+        'dynamic "lifecycle_rule" { for_each = var.backup_daily_tier ? [30] : [] content { '
+        'condition { age = lifecycle_rule.value with_state = "ANY" matches_prefix = ["daily/"] } '
+        'action { type = "Delete" } } }'
+    ) in bucket
+    assert "soft_delete_policy { retention_duration_seconds = 0 }" in bucket
+    assert policy.startswith("count = var.data_disk_snapshot_days > 0 ? 1 : 0 ")
+    assert "max_retention_days = var.data_disk_snapshot_days" in policy
+    assert 'on_source_disk_delete = "APPLY_RETENTION_POLICY"' in policy
+    assert "storage_locations = [var.region]" in policy
+    assert attachment.startswith("count = var.data_disk_snapshot_days > 0 ? 1 : 0 ")
+    assert "disk = google_compute_disk.data.name" in attachment
+    assert "resource_policies" not in terraform_block(
+        TERRAFORM / "main.tf", 'resource "google_compute_disk" "data"'
+    )
+
+
+def test_the_host_copies_daily_backups_only_when_the_daily_tier_keeps_them() -> None:
+    main = text(TERRAFORM / "main.tf")
+
+    assert (
+        "}, { for key, value in { daily_backups = true } : key => value if var.backup_daily_tier })"
+    ) in main
+    assert backup.DAILY_PREFIX == "daily/"
+    assert 'config.get("daily_backups") is True' in text(DEPLOY / "backup.py")
 
 
 def test_watchdog_unit_outlasts_its_deadline_and_runs_while_a_release_is_blocked() -> None:
@@ -618,9 +698,17 @@ def test_host_paths_agree_between_scripts_units_and_helpers() -> None:
     assert "/run/lock" not in installer + harness + template
     assert f"touch {blocked}" in installer
     assert application["ConditionPathExists"] == f"!{blocked}"
-    for name in ("pyracast-backup.service", "pyracast-watchdog.service"):
+    for name in (
+        "pyracast-backup.service",
+        "pyracast-rehearsal.service",
+        "pyracast-watchdog.service",
+    ):
         (command,) = shipped_unit(name)["ExecStart"]
         assert f" {host.CURRENT_RELEASE.as_posix()}/deploy/" in command
+    assert helper["state"] == host.RECOVERY_STATE
+    assert host.RECOVERY_STATE.parent == host.LAST_REHEARSAL.parent == host.LAST_BACKUP.parent
+    assert host.REHEARSAL_LOCK.parent == host.RELEASE_LOCK.parent
+    assert host.REHEARSAL_LOCK != host.RELEASE_LOCK
 
 
 def test_the_python_helpers_open_the_release_lock_for_root_alone_without_following_a_link(
@@ -662,7 +750,10 @@ def test_every_backup_generation_stays_recoverable_until_seven_days_after_its_cr
     rules = re.findall(r"lifecycle_rule \{ (.*?) \} \}", bucket)
 
     assert "versioning { enabled = true }" in bucket
-    assert rules == ['condition { age = 7 with_state = "ANY" } action { type = "Delete"']
+    assert rules == [
+        'condition { age = 7 with_state = "ANY" matches_prefix = var.backup_daily_tier ? '
+        '["postgres/"] : null } action { type = "Delete"'
+    ]
     assert "soft_delete_policy { retention_duration_seconds = 0 }" in bucket
 
 
@@ -758,11 +849,46 @@ def test_an_upgrade_records_the_maintenance_recovery_point_right_before_migrate(
 
     assert script.index("--kind prerelease") < script.index('"${compose[@]}" up -d rabbitmq')
     assert script.index('"${compose[@]}" up -d rabbitmq') < record
-    assert script.count("release_record.py") == 2
+    assert script.count("release_record.py") == 5
     assert script.count(host.PRERELEASE_RECORD) == 2
     assert (
         f'rm -f "$release/{host.PRERELEASE_RECORD}"' in script[: script.index("--kind prerelease")]
     )
+
+
+def test_a_release_keeps_no_pre_release_dump_the_held_session_does_not_name() -> None:
+    script = text(DEPLOY / "install-release.sh")
+    discard = 'python3 "$release/deploy/release_record.py" /etc/pyracast/host.json discard'
+    path = failure_path()
+
+    assert script.count(discard) == 2
+    before = script.rindex(discard)
+    assert script.index("if [[ ! -L /opt/pyracast/current ]]; then") < before
+    assert before < script.index("\nbegin_maintenance\nif [[ -L /opt/pyracast/current")
+    assert (
+        "      if (( recorded == 0 )); then\n"
+        f"        {discard} >&2 \\\n"
+        "          || echo 'WARNING: pre-release files in /var/lib/pyracast/reset were not "
+        "removed; see the line above.' >&2\n"
+        "      fi\n"
+    ) in path
+    assert path.index(discard) < path.index("stop_application")
+
+
+def test_a_successful_release_ends_the_maintenance_session_without_risking_the_release() -> None:
+    script = text(DEPLOY / "install-release.sh")
+    end = (
+        'python3 "$release/deploy/release_record.py" /etc/pyracast/host.json end \\\n'
+        "  || echo 'WARNING: the pre-release archives and the session in /var/lib/pyracast/reset "
+        "were not removed; see the line above.' >&2\n"
+    )
+
+    assert end in script
+    assert script.index("rm -f /var/lib/pyracast/release-blocked\nsync -f /var/lib/pyracast\n") < (
+        script.index(end)
+    )
+    assert script.index("promoted=1") < script.index(end)
+    assert script.index(end) < script.index('echo "Release $revision is healthy."')
 
 
 def test_every_printed_recovery_reads_the_maintenance_session() -> None:
@@ -1247,7 +1373,7 @@ def test_the_origin_requires_the_edge_certificate_only_once_the_host_names_its_a
     placeholder = text(DEPLOY / "origin-pull-off.pem")
     variables = text(TERRAFORM / "variables.tf")
     host_config = re.search(
-        r"host_config_base64 = base64encode\(jsonencode\(\{(.*?)\}\)\)",
+        r"host_config_base64 = base64encode\(jsonencode\(merge\(\{(.*?)\}, \{",
         text(TERRAFORM / "main.tf"),
         re.S,
     )

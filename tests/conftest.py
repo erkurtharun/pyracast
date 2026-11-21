@@ -33,6 +33,7 @@ TOOLING = frozenset(
         "test_deployment_helpers",
         "test_deployment_host",
         "test_deployment_previous_helper",
+        "test_deployment_rehearsal",
         "test_deployment_release_state",
         "test_deployment_reset",
         "test_deployment_secrets",

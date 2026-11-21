@@ -381,10 +381,11 @@ successful `main` CI runs trigger it automatically. The workflow:
    running release keeps serving until the database is reset.
 5. Promotes `current` only after container readiness checks and a local HTTPS request
    verify the public certificate, routing and database health, then installs the
-   release's watchdog and backup units. Each build has its own release directory;
+   release's watchdog, backup and restore rehearsal units. Each build has its own release directory;
    a redeploy never edits the live one. It records the serving and the previous
-   release in `/var/lib/pyracast/release-state.json` and removes every other release
-   directory, its staged secrets and the images no kept release uses.
+   release in `/var/lib/pyracast/release-state.json` and, unless a restore rehearsal
+   runs, removes every other release directory, its staged secrets and the images no
+   kept release uses.
 
 Image artifacts expire after one day and are deleted after successful deployment.
 Retry a failed Release while its artifact remains available; otherwise run
@@ -464,12 +465,12 @@ fixtures do not establish provider access or inbox delivery.
   A worker that exhausts its five automatic retries stays stopped until restarted.
   Do not automatically resend an email marked `uncertain`.
 - **Host supervision:** `pyracast-watchdog.timer` runs independent checks (capacity,
-  backup age, containers, delivery at most every five minutes, origin certificate)
-  within one deadline and ends each run with a `pyracast_watchdog_heartbeat` whose
+  backup age, restore rehearsal, containers, delivery at most every five minutes, origin
+  certificate) within one deadline and ends each run with a `pyracast_watchdog_heartbeat` whose
   `state` is `ok`, `blocked`, `unit_failed` or `lock_busy`; a missing heartbeat
   alerts. It restarts application containers only under the release lock and never
   restarts or starts a stopped PostgreSQL or RabbitMQ; it only recreates missing
-  ones. The watchdog and backup units ship in
+  ones. The watchdog, backup and rehearsal units ship in
   `deploy/systemd/` and are installed by each release and at boot; change them there,
   not on the host.
 - **Planned host maintenance:** run `sudo systemctl stop pyracast` and wait before
@@ -501,8 +502,12 @@ fixtures do not establish provider access or inbox delivery.
   the reset tool and the stop of `pyracast.service`. Hourly backups and releases
   exclude each other through it from the dump to the replacement of
   `/var/lib/pyracast/last-backup.json`, so the pointer always names the newest
-  snapshot; a release waits up to its 300-second lock timeout for a running backup and
-  otherwise stops without changing anything. The bucket keeps object versions:
+  snapshot, with the row count of every table in the dump's snapshot and the boot
+  uptime it was written at: freshness is judged on uptime, which a clock correction
+  cannot move, and a backup of an earlier boot counts as at least as old as this boot.
+  A release waits up to its 300-second lock timeout for a running backup and
+  otherwise stops without changing anything. A dump stops before its disk has less
+  than 5 percent free. The bucket keeps object versions:
   lifecycle cleanup deletes every generation seven days after its creation
   (asynchronously), so a deleted or replaced dump stays recoverable until then. Find it
   with `gcloud storage ls --all-versions gs://BUCKET/OBJECT` and copy
@@ -510,13 +515,33 @@ fixtures do not establish provider access or inbox delivery.
   of the bucket is in the Cloud Storage Data Access audit log. Check the last
   successful upload, not just timer activation. A one-hour recovery point depends on successful hourly backups;
   failures increase possible data loss, and there is no WAL/PITR recovery. Keep
-  the external encryption key separately. Rehearse `pg_restore` into a separate
-  PostgreSQL 18 database and measure recovery time before launch and regularly
-  afterward. Restore tests must include restricted roles, constraints, saved
-  forecasts and decryption. After restoring an older request ledger, suspend
+  the external encryption key separately. After restoring an older request ledger, suspend
   provider collection for the remaining UTC quota day unless its complete ledger
   can be recovered. A data disk or VM snapshot alone is not an off-host logical
   backup or a restore test.
+- **Restore rehearsal:** `pyracast-rehearsal.timer` runs `deploy/rehearsal.py` an hour
+  after boot and every Sunday at 03:00. Without the release lock, it restores the backup
+  the pointer names, with its roles, owners and privileges, into a throwaway PostgreSQL
+  without network beside the site (bounded in memory, CPU, disk and one hour, and
+  removed on every exit), compares every table's row count with the pointer's, runs
+  `migrate --check` (`--plan` for a pre-release dump) and requires a stored secret to
+  decrypt. The outcome, with the recovery time or the failed step, goes to
+  `/var/lib/pyracast/last-rehearsal.json` and the operations log; the watchdog reports
+  a failed rehearsal, or none passed within eight days of uptime. A host without that
+  file starts the eight days at the watchdog's first check after the units are installed.
+  One rehearsal reads one release directory from start to end; everything it starts
+  carries the `pyracast.rehearsal` label. Run one at once with
+  `systemctl start pyracast-rehearsal.service`.
+- **Optional backup protection** is off until set in `terraform.tfvars` and applied.
+  `backup_retention_days` (up to 7): days each backup generation cannot be permanently
+  deleted, by an unlocked retention policy; an overwrite or a delete still makes the live
+  object noncurrent. No extra storage cost: the lifecycle keeps every generation seven
+  days anyway. `data_disk_snapshot_days` (up to 7) takes a daily data-disk snapshot and
+  `backup_daily_tier = true` keeps the first hourly backup of each UTC day for 30 days
+  under `daily/` once the startup script has run again; both cost storage. The daily tier
+  breaks the published seven-day statement: change
+  `web/src/features/public-site/legal-copy.ts` first. To restore a `daily/` object with
+  the helper, copy it to a `postgres/` name.
 - **Key rotation:** add a numeric runtime secret version, update Terraform's
   `runtime_secret_version`, apply it, and run the VM startup script through a
   controlled maintenance session to refresh `/etc/pyracast/host.json`, then
@@ -546,8 +571,9 @@ fixtures do not establish provider access or inbox delivery.
   pinned Docker/Compose/PostgreSQL versions during planned maintenance. PostgreSQL
   major upgrades need a separately rehearsed dump/restore or `pg_upgrade` procedure.
   Each release keeps the serving and the previous release with their images and
-  removes the rest; never run volume pruning in production. Monitor registry/backup/log
-  retention and adjust deliberately to control cost.
+  removes the rest (the next one does while a rehearsal runs); never run volume
+  pruning in production. Monitor registry/backup/log retention and adjust
+  deliberately to control cost.
 
 ## Database reset and restore
 
@@ -575,7 +601,7 @@ refuse and name the `restore` command for that object.
 | `prepare` | the release lock is free, no `release-blocked` marker, the site answers `/health/ready/` | writes the marker, stops the application in the installer's order (PostgreSQL, RabbitMQ and the gateway with its maintenance notice stay up), dumps the database into `/var/lib/pyracast/reset/`, uploads it as `postgres/<stamp>-prereset-<uuid>.dump`, restores it into a throwaway PostgreSQL without network, compares every table's row count with the live database, exports the Solcast forecast snapshots with their site parameters as `<archive>.solcast.jsonl.gz`, checks it against the database's count and uploads it too; records both objects' SHA-256 and the counts and opens the session; prints them with the release commit, its image digests, the runtime secret version and any earlier archives kept on the host |
 | `abort` | the marker; the session does not say the database changed in this maintenance; `migrate --check` of the release in `/opt/pyracast/current` passes on the database | writes the runtime secrets with that release, starts it with `docker compose --env-file deploy/release.env -f deploy/compose.yaml up --detach --wait`, probes `/health/ready/` and removes the marker and the session |
 | `reset --confirm OBJECT` | the marker, no running, restarting or paused application container, `OBJECT` is the session's archive and its file and Solcast export still have the recorded SHA-256, both database roles | writes the runtime secrets; purges every RabbitMQ queue, dead-letter queues included, and checks that none holds a message; marks the session replaced and syncs it; runs `DROP DATABASE pyracast WITH (FORCE)` and `CREATE DATABASE pyracast`; applies `deploy/bootstrap.sql`; checks that the owner can create a table, that the runtime role can connect and read but cannot write the migration ledger, and that the owner lost database `CREATE`. The marker stays |
-| `restore --confirm OBJECT` | the marker, no application container, `OBJECT` is the session's object once the database changed in this maintenance, a pre-reset archive's Solcast export still has the recorded SHA-256, the archive has applied migrations, both database roles | writes the runtime secrets; uses the archive `prepare` kept, or downloads `OBJECT` (a pre-reset archive with its Solcast export) from the backup bucket, checks each against the bucket's MD5 and size and verifies them in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, applies `deploy/bootstrap.sql` again over the archive's privileges, compares every table's row count with the record, checks both roles and `migrate --check`, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker and the session |
+| `restore --confirm OBJECT` | the marker, no application container, `OBJECT` is the session's object once the database changed in this maintenance, a pre-reset archive's Solcast export still has the recorded SHA-256, the archive has applied migrations, both database roles | writes the runtime secrets; uses the archive `prepare` or a release kept on the host, or downloads `OBJECT` (a pre-reset archive with its Solcast export) from the backup bucket, checks each against the bucket's MD5 and size and verifies them in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, applies `deploy/bootstrap.sql` again over the archive's privileges, compares every table's row count with the record, checks both roles and `migrate --check`, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker and the session |
 
 When the start, readiness or the service unit fails or is interrupted, `abort` and
 `restore` write the marker back and send each stop command of the installer's
@@ -742,9 +768,16 @@ again.
 Right before `migrate`, an upgrade records the maintenance's one recovery point in the
 helper's session (`/var/lib/pyracast/reset/session.json`): a session that holds the
 marker stays, a prepared reset's now marked replaced; without one, the database is
-unchanged in this maintenance and the session names this run's pre-release dump. A
-failure to record exits before `migrate`. Every later run of the maintenance keeps that
-session. The log names the state and prints its recovery, read from the session:
+unchanged in this maintenance and the session names this run's pre-release dump, which
+`backup.py` kept in `/var/lib/pyracast/reset` and the record restores into a throwaway
+PostgreSQL, compares with the dump's row counts and records for the helper. A dump
+without an applied migration is refused. A failure to record, or to keep the dump,
+exits before `migrate`. Every later run of the maintenance keeps that session and
+drops its own dump. Each run starts by deleting every pre-release file the held session
+does not name, and a run that fails before its record deletes its own dump again; while
+the session cannot be read, nothing is deleted. A successful release deletes the kept
+pre-release dumps, their records and the session file. The
+log names the state and prints its recovery, read from the session:
 
 | State | Marker | `current` | Runtime password | Running | Recovery |
 | --- | --- | --- | --- | --- | --- |
@@ -782,10 +815,9 @@ python3 /opt/pyracast/releases/<release>/deploy/runtime_secrets.py /etc/pyracast
 `abort` and `restore` run `python3 /opt/pyracast/current/deploy/reset_database.py
 /etc/pyracast/host.json`. `abort` starts the release in `current`; it refuses when the
 session says the database changed or that release's `migrate --check` fails on it.
-`restore --confirm` accepts only the session's object once the database changed. A
-pre-release dump exists only in the backup bucket, which deletes objects after seven
-days: `restore` downloads it, checks the bucket's MD5 and size and counts its rows in a
-throwaway PostgreSQL before it drops anything. Both start PostgreSQL
+`restore --confirm` accepts only the session's object once the database changed, and
+restores the recorded copy on the host, so it needs neither the bucket, whose objects
+expire after seven days, nor a token. Both start PostgreSQL
 and RabbitMQ from the previous release's Compose file and refuse without the marker;
 `restore` also refuses while an application container runs. After promotion the new
 release serves the migrated database: `restore` refuses without the marker, and the
@@ -809,7 +841,9 @@ while the next router still grants that client its whole budget, publishes one
 synthetic forecast through the real RabbitMQ worker, and exercises dispatcher and
 idle worker stop. Through the gateway it also checks the anonymous `/api/session/` JSON shape, that a
 wrong-password sign-in gets the normal 400 `email_password_mismatch` refusal and
-that the `/app/` workspace app shell loads.
+that the `/app/` workspace app shell loads. It takes an hourly backup of those rows
+and runs the restore rehearsal on it (a local directory stands in for the bucket),
+which must pass with a decrypted provider key and leave no throwaway behind.
 On those rows it runs `reset_database.py` `prepare`, checks that the gateway then
 answers 503 with `Retry-After` (the maintenance page for a navigation, the
 `maintenance` API error for an API call), then `abort`; `prepare`,
@@ -825,7 +859,10 @@ proves that a failure before `migrate` starts the previous release with the secr
 failed stop, that the printed password command works after `/run` is emptied, that a
 reset session keeps its marker and is recovered with its own archive, that a second
 release in the same maintenance and a kill during `migrate` keep the first recovery
-point, that pruning keeps the previous release, that a release whose job is
+point, that the previous release's helper runs the printed `restore` from the kept
+archive without the bucket and the printed `abort`, that a failed run leaves no
+pre-release dump the session does not name, that the next successful release deletes
+the kept pre-release files and pruning keeps the previous release, that a release whose job is
 cancelled during `migrate` still completes and can be followed again, and that a
 release whose public port does not enforce required origin pulls resumes the previous
 release.
@@ -834,8 +871,9 @@ the releases before the built one, the built broker and that public broker again
 data volume, and each keeps the queued work and accepts more: a failed release returns to
 the previous broker, and RabbitMQ does not guarantee downgrades.
 `tests/test_deployment_previous_helper.py` runs each recovery the installer prints
-through the current helper and the one on `main` before the maintenance notice,
-against a model of the database, and counts it only when the previous release serves
+through the current helper and two earlier ones on `main` (before the maintenance
+notice, and the one this release upgrades from), against a model of the database, also
+once the bucket lost the dump, and counts it only when the previous release serves
 again.
 `tests/test_operations_contracts.py` keeps the values that `deploy/`,
 `infra/terraform` and the workflows restate in agreement: worker queues, the

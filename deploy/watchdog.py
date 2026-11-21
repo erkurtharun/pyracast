@@ -1,12 +1,14 @@
 # ruff: noqa: S603 -- Fixed Docker and systemd executables with argument lists; no shell interpolation.
 import argparse
 import json
+import os
 import shutil
 import socket
 import ssl
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -118,20 +120,46 @@ def check_capacity() -> None:
         )
 
 
-def last_backup_time(release: Path) -> float:
-    if not host.LAST_BACKUP.exists():
-        return (release / "deploy/release.env").stat().st_mtime
+def recorded(path: Path) -> dict[str, Any]:
     try:
-        return float(json.loads(host.LAST_BACKUP.read_text())["completed_at"])
-    except (ValueError, KeyError, TypeError):
-        return host.LAST_BACKUP.stat().st_mtime
+        content = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return content if isinstance(content, dict) else {}
 
 
-def check_backup_age(release: Path) -> None:
-    if time.time() - last_backup_time(release) > host.BACKUP_MAX_AGE_SECONDS:
+def check_backup_age() -> None:
+    if host.minimum_age(recorded(host.LAST_BACKUP).get("mark")) > host.BACKUP_MAX_AGE_SECONDS:
         report(
             "pyracast_backup_failed", "ERROR", reason="last_verified_backup_older_than_90_minutes"
         )
+
+
+def schedule_rehearsal() -> None:
+    # A host without a record starts the rehearsal's window at the first check after the units
+    # are installed; linking never replaces a record the rehearsal wrote meanwhile.
+    temporary = host.LAST_REHEARSAL.with_name(f"{host.LAST_REHEARSAL.name}.{uuid.uuid4().hex}")
+    temporary.write_text(json.dumps({"status": "scheduled", "mark": host.clock_mark()}))
+    try:
+        os.link(temporary, host.LAST_REHEARSAL)
+    except FileExistsError:
+        pass
+    finally:
+        temporary.unlink()
+
+
+def check_rehearsal() -> None:
+    if not host.LAST_REHEARSAL.exists():
+        schedule_rehearsal()
+        return
+    status = recorded(host.LAST_REHEARSAL)
+    if status.get("status") == "failed":
+        step = str(status.get("step"))
+        report("pyracast_rehearsal_unhealthy", "WARNING", state="failed", step=step)
+        return
+    mark = status.get("mark") if status.get("status") in ("passed", "scheduled") else None
+    if host.minimum_age(mark) > host.REHEARSAL_MAX_AGE_SECONDS:
+        report("pyracast_rehearsal_unhealthy", "WARNING", state="overdue")
 
 
 def recover(run: Run, compose: list[str]) -> dict[str, str]:
@@ -227,7 +255,8 @@ def supervise(run: Run, release: Path) -> dict[str, str]:
     run.step("capacity", check_capacity)
     if host.RELEASE_BLOCKED.exists():
         return {"state": "blocked"}
-    run.step("backup_age", check_backup_age, release)
+    run.step("backup_age", check_backup_age)
+    run.step("rehearsal", check_rehearsal)
     unit = run.step("unit", unit_state, run)
     if unit != "active":
         return {"state": "unit_failed", "unit_state": str(unit or "unknown")}

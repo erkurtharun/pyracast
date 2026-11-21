@@ -72,6 +72,7 @@ line-length = 100
 "deploy/pin_release_images.py" = "py312"
 "deploy/probe_origin.py" = "py312"
 "deploy/probe_origin_pull.py" = "py312"
+"deploy/rehearsal.py" = "py312"
 "deploy/release_authorization.py" = "py312"
 "deploy/release_environment.py" = "py312"
 "deploy/release_record.py" = "py312"
