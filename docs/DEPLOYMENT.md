@@ -478,7 +478,8 @@ fixtures do not establish provider access or inbox delivery.
   'FILTER' --bucket=pyracast-security --location=REGION --view=_AllLogs --freshness=365d`.
   Storage beyond 30 days costs 0.01 USD per GiB a month; the volume is small. A line carries
   the event, ids, counts, the client IP and a keyed `subject` instead of an email address, and
-  never a name; an erased account's lines keep its id and client IP until they expire. Log-based alerts in
+  never a name; an erased account's lines keep its id, the client IP and the keyed `subject`
+  until they expire, the IP for the whole period because a security record needs it. Log-based alerts in
   `monitoring.tf` count them; the release does not apply Terraform, so after a
   change there run the `plan`/`apply` commands above and confirm the policies
   under Monitoring → Alerting. Durable job/audit records remain in PostgreSQL. API logs omit query strings and
