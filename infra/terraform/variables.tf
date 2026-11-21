@@ -98,6 +98,12 @@ variable "backup_daily_tier" {
   default     = false
 }
 
+variable "alert_policy_per_event" {
+  description = "One operations alert policy per alerted event instead of one per family (backup, runtime, host, certificate, secrets, origin_pull); each added policy is a billable log-match condition."
+  type        = bool
+  default     = false
+}
+
 variable "data_disk_snapshot_days" {
   description = "Days a daily snapshot of the data disk is kept (storage cost); 0 takes none. At most seven, the published backup lifetime."
   type        = number

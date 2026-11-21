@@ -611,6 +611,14 @@ counts only. `sudo python3 /opt/pyracast/current/deploy/operations_events.py --t
 writes one sample line with `test: true` and changes nothing else; it exits 1 when the line could
 not be written. Never delete `release-blocked` by hand.
 
+By default the alerted events share the six existing policies by family (backup, runtime, host,
+certificate, secrets, origin pull), so alerting costs nothing new. `alert_policy_per_event = true`
+gives every alerted event its own policy, six more billable log-match conditions, so a warning no
+longer shares the hourly notification limit with an error of its family. A test alert of an
+alerted event opens an incident on its policy and uses that policy's hourly notification limit
+(by default its family's); a test alert of an event that is not alerted only writes the log line.
+Test lines never count as a watchdog heartbeat.
+
 | Event | Means | Check first | Recover |
 | --- | --- | --- | --- |
 | `pyracast_watchdog_heartbeat` | One watchdog run ended; `state` says how. Its absence for 15 minutes alerts | `systemctl status pyracast-watchdog.timer` | Start the timer; a down VM needs a start |
