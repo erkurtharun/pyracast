@@ -30,13 +30,16 @@ def session_tag(request: HttpRequest) -> str | None:
 
 
 def _held(request: HttpRequest) -> str:
+    # A stored tag counts only while the session signs an account in: an account switched off or
+    # removed, a changed credential or an unlisted backend leaves the browser with the empty tag
+    # its session read answers.
     tag = request.session.get(TAG)
-    return tag if isinstance(tag, str) else ""
+    return tag if request.user.is_authenticated and isinstance(tag, str) else ""
 
 
 class SessionTagCheck:
     # A request the web client prepared for another session than the one the browser now holds
-    # is refused before any later middleware or view runs, so it changes nothing. The session
+    # is refused before any later middleware or view writes, so it changes nothing. The session
     # read is never refused: it is how a tab learns the session the browser holds.
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response

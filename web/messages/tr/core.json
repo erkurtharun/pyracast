@@ -141,6 +141,7 @@
         "reauthMfaDescription": "Devam etmek için doğrulama uygulamanızdan bir kod veya bir kurtarma kodu girin.",
         "reauthPasswordDescription": "Devam etmek için mevcut şifrenizi girin.",
         "reauthStillRequired": "Doğrulama tamamlanamadı. Lütfen tekrar deneyin.",
+        "confirmAgain": "Bu değişiklik için onayınız yeniden gerekiyor.",
         "verifying": "Doğrulanıyor…",
         "working": "İşleniyor…",
         "emailReauthTitle": "E-posta ile doğrulayın",
@@ -290,7 +291,7 @@
         "unknownDevice": "Bilinmeyen tarayıcı",
         "details": "{ip} · son etkinlik {seen} · oturum açma {since}",
         "end": "Oturumu kapat",
-        "endOne": "{device} oturumunu kapat",
+        "endOne": "{device} oturumunu kapat, son etkinlik {seen}, oturum açma {since}",
         "endOthers": "Diğer tüm oturumları kapat",
         "endFailed": "Oturum kapatılamadı."
     },

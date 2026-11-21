@@ -8,6 +8,7 @@ import { useFormat } from "@/lib/format/use-format";
 import { loadSession } from "@/lib/session-client";
 import { AsyncButton } from "@/ui/form";
 import { Tag } from "@/ui/ui";
+import { useOneAction } from "./one-action";
 
 export type SignedInSession = {
     id: number;
@@ -58,6 +59,7 @@ export function SignedInDevices() {
     const format = useFormat();
     const [listing, setListing] = useState<Listing>({ status: "loading" });
     const [attempt, setAttempt] = useState(0);
+    const { acting, run } = useOneAction();
 
     useEffect(() => {
         let active = true;
@@ -83,19 +85,20 @@ export function SignedInDevices() {
         };
     }, [attempt, t]);
 
-    async function end(ids: number[]) {
-        const result = await authRequest<SignedInSession[]>(
-            "auth/sessions",
-            "DELETE",
-            { sessions: ids },
-        );
-        if (result.status === 401) {
-            await loadSession();
-            return;
-        }
-        const sessions = sessionsOf(result.data);
-        if (sessions) setListing({ status: "ready", sessions });
-    }
+    const end = (ids: number[]) =>
+        run(async () => {
+            const result = await authRequest<SignedInSession[]>(
+                "auth/sessions",
+                "DELETE",
+                { sessions: ids },
+            );
+            if (result.status === 401) {
+                await loadSession();
+                return;
+            }
+            const sessions = sessionsOf(result.data);
+            if (sessions) setListing({ status: "ready", sessions });
+        });
 
     // The server sends seconds since the epoch.
     const time = (seconds: number) => format.deviceTime(seconds * 1000);
@@ -132,6 +135,8 @@ export function SignedInDevices() {
                         const device =
                             deviceLabel(session.user_agent) ||
                             t("unknownDevice");
+                        const seen = time(session.last_seen_at);
+                        const since = time(session.created_at);
                         return (
                             <li key={session.id} className="linked-provider">
                                 <span className="linked-provider-identity">
@@ -144,15 +149,20 @@ export function SignedInDevices() {
                                     <span className="muted">
                                         {t("details", {
                                             ip: session.ip,
-                                            seen: time(session.last_seen_at),
-                                            since: time(session.created_at),
+                                            seen,
+                                            since,
                                         })}
                                     </span>
                                 </span>
                                 {!session.is_current && (
                                     <AsyncButton
                                         variant="secondary"
-                                        label={t("endOne", { device })}
+                                        disabled={acting}
+                                        label={t("endOne", {
+                                            device,
+                                            seen,
+                                            since,
+                                        })}
                                         errorTitle={t("endFailed")}
                                         onClick={() => end([session.id])}
                                     >
@@ -167,6 +177,7 @@ export function SignedInDevices() {
             {others.length > 1 && (
                 <AsyncButton
                     variant="secondary"
+                    disabled={acting}
                     errorTitle={t("endFailed")}
                     onClick={() => end(others.map((session) => session.id))}
                 >

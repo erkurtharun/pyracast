@@ -1,5 +1,5 @@
 import time
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from allauth.account.internal.flows.logout import logout
 from allauth.core import ratelimit
@@ -9,23 +9,37 @@ from allauth.headless.internal.restkit.inputs import Input
 from allauth.headless.internal.restkit.response import APIResponse
 from allauth.headless.usersessions.inputs import SelectSessionsInput
 from allauth.usersessions.models import UserSession
+from django import forms
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
-from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.session_cookie import SessionStore
 from pyracast.accounts.sessions import end_sessions, expiry_reason
 
+if TYPE_CHECKING:
+    SessionsField = forms.ModelMultipleChoiceField[UserSession]
+else:
+    SessionsField = forms.ModelMultipleChoiceField
+
 ENDED_BY_OWNER = "ended_by_owner"
 
 
+class OwnSessionsField(SessionsField):
+    # Another device may end a listed session before this request: an id that names no session of
+    # this account selects nothing, whether it ended or belongs to another account.
+    def clean(self, value: Any) -> QuerySet[UserSession]:
+        try:
+            return super().clean(value)
+        except ValidationError as error:
+            if error.code != "invalid_choice":
+                raise
+        return cast(QuerySet[UserSession], self.queryset).filter(pk__in=list(value))
+
+
 class OwnSessionsInput(SelectSessionsInput):
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        # The same answer for an id of another account's session and one that does not exist.
-        self.fields["sessions"].error_messages["invalid_choice"] = gettext_lazy(
-            "Choose sessions of this account."
-        )
+    sessions = OwnSessionsField(queryset=UserSession.objects.none())
 
 
 def live_sessions(user: User) -> list[UserSession]:

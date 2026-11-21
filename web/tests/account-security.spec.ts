@@ -314,6 +314,10 @@ test("one sign-out runs at a time, says it is working and names each session by 
     const answered = new Promise<void>((resolve) => {
         release = resolve;
     });
+    let arrive: () => void = () => {};
+    const arrived = new Promise<void>((resolve) => {
+        arrive = resolve;
+    });
     await page.route("**/api/auth/browser/v1/auth/sessions", async (route) => {
         if (route.request().method() !== "DELETE")
             return route.fulfill({
@@ -323,6 +327,7 @@ test("one sign-out runs at a time, says it is working and names each session by 
                 },
             });
         ended.push(route.request().postDataJSON());
+        arrive();
         await answered;
         return route.fulfill({
             json: { status: 200, data: [second, signedInSession] },
@@ -351,6 +356,7 @@ test("one sign-out runs at a time, says it is working and names each session by 
     await expect(
         devices.getByRole("button", { name: "Sign out all other sessions" }),
     ).toBeDisabled();
+    await arrived;
     expect(ended).toEqual([{ sessions: [2] }]);
     release();
     await expect(rows).toHaveCount(1);
@@ -366,10 +372,15 @@ test("the email change runs one action at a time", async ({ page }) => {
     const answered = new Promise<void>((resolve) => {
         release = resolve;
     });
+    let arrive: () => void = () => {};
+    const arrived = new Promise<void>((resolve) => {
+        arrive = resolve;
+    });
     await page.route(
         "**/api/auth/browser/v1/auth/email/verify/resend",
         async (route) => {
             sent.push("resend");
+            arrive();
             await answered;
             return route.fulfill({ json: { status: 200 } });
         },
@@ -388,6 +399,7 @@ test("the email change runs one action at a time", async ({ page }) => {
     await expect(
         change.getByRole("button", { name: "Use another address" }),
     ).toBeDisabled();
+    await arrived;
     expect(sent).toEqual(["resend"]);
     release();
     await expect(change.getByText("A new code was sent.")).toBeVisible();

@@ -1,10 +1,11 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { sessionTag, type Tag } from "@/lib/api/lane";
 import { displayMessage } from "@/lib/api/errors";
 import type { AuthResult } from "@/lib/auth-api";
+import { Notice } from "@/ui/ui";
 import {
     ReauthenticationForm,
     type ReauthMode,
@@ -29,25 +30,48 @@ export function stepUpMode(
     return typeof id === "string" ? MODES[id] : undefined;
 }
 
-type Pending = { mode: ReauthMode; resume: () => Promise<void>; tag: Tag };
+type Pending = {
+    mode: ReauthMode;
+    resume: () => Promise<void>;
+    tag: Tag;
+    again: boolean;
+};
 
 export type StepUp = {
     pending?: Pending;
     ask: (mode: ReauthMode, resume: () => Promise<void>) => void;
     cancel: () => void;
+    proceed: (confirmed: Pending) => Promise<void>;
 };
 
 // One action at a time asks for a confirmation; after the proof only that action runs, once, in
-// this tab and for the session that asked.
+// this tab and for the session that asked. An action that asks again while it resumes is told so.
 export function useStepUp(): StepUp {
     const [pending, setPending] = useState<Pending>();
-    const ask = useCallback(
-        (mode: ReauthMode, resume: () => Promise<void>) =>
-            setPending({ mode, resume, tag: sessionTag() }),
-        [],
-    );
+    const resuming = useRef(false);
+    const ask = useCallback((mode: ReauthMode, resume: () => Promise<void>) => {
+        const asked = {
+            mode,
+            resume,
+            tag: sessionTag(),
+            again: resuming.current,
+        };
+        setPending((current) => current ?? asked);
+    }, []);
     const cancel = useCallback(() => setPending(undefined), []);
-    return useMemo(() => ({ pending, ask, cancel }), [pending, ask, cancel]);
+    const proceed = useCallback(async (confirmed: Pending) => {
+        setPending(undefined);
+        resuming.current = true;
+        try {
+            await confirmed.resume();
+        } finally {
+            resuming.current = false;
+        }
+    }, []);
+    return useMemo(
+        () => ({ pending, ask, cancel, proceed }),
+        [pending, ask, cancel, proceed],
+    );
 }
 
 export function StepUpPrompt({
@@ -79,6 +103,7 @@ export function StepUpPrompt({
                       ? t("emailReauthDescription")
                       : t("reauthPasswordDescription")}
             </p>
+            {pending.again && <Notice>{t("confirmAgain")}</Notice>}
             <ReauthenticationForm
                 key={pending.mode}
                 mode={pending.mode}
@@ -86,13 +111,13 @@ export function StepUpPrompt({
                 autoFocus
                 onCancel={stepUp.cancel}
                 onVerified={async () => {
-                    stepUp.cancel();
                     if (sessionTag() !== pending.tag) {
+                        stepUp.cancel();
                         onError(errors("sessionChanged"));
                         return;
                     }
                     try {
-                        await pending.resume();
+                        await stepUp.proceed(pending);
                     } catch (error) {
                         onError(
                             displayMessage(error, t("reauthStillRequired")),

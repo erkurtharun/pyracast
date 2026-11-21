@@ -2,6 +2,7 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import {
+    useCallback,
     useEffect,
     useState,
     useSyncExternalStore,
@@ -26,11 +27,11 @@ import { Notice } from "@/ui/ui";
 
 export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
-    const { session, failure, retry } = useSessionBootstrap();
+    const { session, failure, fail, retry } = useSessionBootstrap();
     const handoff = useLanguageHandoff(session);
     const ready = session !== undefined && handoff.status === "ready";
     useFocusSessionRead(ready);
-    const current = useCurrentSession(session, ready);
+    const current = useCurrentSession(session, ready, fail);
     const owner = sessionOwner(session);
     useForeignCacheRemoval(client, owner);
     return (
@@ -95,21 +96,22 @@ function useSessionBootstrap() {
     const [attempt, setAttempt] = useState(0);
     const [failure, setFailure] = useState<string>();
     const { session } = useSessionState();
+    const fail = useCallback((error: unknown) => {
+        setFailure(displayMessage(error, browserErrors()("unexpected")));
+    }, []);
     useEffect(() => {
         let active = true;
         loadSession().catch((error: unknown) => {
-            if (active)
-                setFailure(
-                    displayMessage(error, browserErrors()("unexpected")),
-                );
+            if (active) fail(error);
         });
         return () => {
             active = false;
         };
-    }, [attempt]);
+    }, [attempt, fail]);
     return {
         session,
         failure,
+        fail,
         retry: () => {
             setFailure(undefined);
             setAttempt((value) => value + 1);
@@ -143,16 +145,20 @@ function subscribeObservedTag(listener: () => void) {
 }
 
 // Another tab observed a session other than this tab's: its screens stay hidden until a read
-// adopts the session the browser holds.
-function useCurrentSession(session: Session | undefined, enabled: boolean) {
+// adopts the session the browser holds, and a failed read offers the retry of a first read.
+function useCurrentSession(
+    session: Session | undefined,
+    enabled: boolean,
+    fail: (error: unknown) => void,
+) {
     const current = useSyncExternalStore(
         subscribeObservedTag,
         () => isCurrent(session),
         () => true,
     );
     useEffect(() => {
-        if (enabled && !current) loadSession().catch(() => {});
-    }, [enabled, current]);
+        if (enabled && !current) loadSession().catch(fail);
+    }, [enabled, current, fail]);
     return current;
 }
 

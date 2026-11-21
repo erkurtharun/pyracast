@@ -141,6 +141,7 @@
         "reauthMfaDescription": "Enter a code from your authenticator app or a recovery code to continue.",
         "reauthPasswordDescription": "Enter your current password to continue.",
         "reauthStillRequired": "Verification could not be completed. Please try again.",
+        "confirmAgain": "This change needs your confirmation again.",
         "verifying": "Verifying…",
         "working": "Working…",
         "emailReauthTitle": "Confirm with email",
@@ -290,7 +291,7 @@
         "unknownDevice": "Unknown browser",
         "details": "{ip} · last active {seen} · signed in {since}",
         "end": "Sign out",
-        "endOne": "Sign out {device}",
+        "endOne": "Sign out {device}, last active {seen}, signed in {since}",
         "endOthers": "Sign out all other sessions",
         "endFailed": "The session could not be signed out."
     },

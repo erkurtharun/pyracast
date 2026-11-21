@@ -19,7 +19,15 @@ export type SessionState = { session?: Session; ended: boolean };
 export const observedTagKey = "pyracast.sessionTag";
 
 let state: SessionState = { ended: false };
-let flight: { epoch: number; promise: Promise<Session> } | undefined;
+type Flight = {
+    epoch: number;
+    observed: string | null;
+    promise: Promise<Session>;
+};
+
+let flight: Flight | undefined;
+let started = 0;
+let adopted = 0;
 let confirming: Promise<Tag> | undefined;
 let signingOut = false;
 const listeners = new Set<() => void>();
@@ -65,7 +73,6 @@ function observe(tag: string) {
     }
 }
 
-// A tab is current while the last tag observed in this browser is the one it adopted.
 export function isCurrent(session: Session | undefined) {
     const observed = observedTag();
     return observed === null || observed === tagOf(session);
@@ -97,21 +104,38 @@ async function confirmedRead(): Promise<Session> {
     return readSession();
 }
 
-export function loadSession(): Promise<Session> {
-    const epoch = mutationEpoch();
-    if (flight?.epoch === epoch) return flight.promise;
-    const promise = confirmedRead().then((session) => {
-        adoptSession(session);
-        return session;
-    });
-    const current = { epoch, promise };
+// A read is shared while neither this tab sent a session change nor another tab observed a tag
+// since it started; one that settles after a later read adopted adopts nothing and answers with
+// the session that later read adopted.
+function startRead(): Flight {
+    const order = (started += 1);
+    const current: Flight = {
+        epoch: mutationEpoch(),
+        observed: observedTag(),
+        promise: confirmedRead().then((session) => {
+            if (order < adopted) return state.session ?? session;
+            adopted = order;
+            adoptSession(session);
+            return session;
+        }),
+    };
     flight = current;
-    promise
+    current.promise
         .finally(() => {
             if (flight === current) flight = undefined;
         })
         .catch(() => {});
-    return promise;
+    return current;
+}
+
+export function loadSession(): Promise<Session> {
+    if (
+        flight &&
+        flight.epoch === mutationEpoch() &&
+        flight.observed === observedTag()
+    )
+        return flight.promise;
+    return startRead().promise;
 }
 
 // One sign-out request, for the session this tab adopted; when another tab changed the session
@@ -134,11 +158,8 @@ export async function signOut() {
 confirmSessionWith({
     tag: () => tagOf(state.session),
     confirm: () => {
-        confirming ??= confirmedRead()
-            .then((session) => {
-                adoptSession(session);
-                return tagOf(session);
-            })
+        confirming ??= startRead()
+            .promise.then(tagOf)
             .finally(() => {
                 confirming = undefined;
             });

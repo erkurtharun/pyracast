@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api/errors";
 import { authRequest, type AuthResult } from "@/lib/auth-api";
 import { loadSession } from "@/lib/session-client";
+import { useOneAction } from "./one-action";
 import { refreshExpiredSession } from "./security-reauthentication";
 import { StepUpPrompt, stepUpMode, useStepUp } from "./step-up";
 import { ActionForm, AsyncButton, Field, formText } from "@/ui/form";
@@ -17,12 +18,20 @@ type Step =
     | { kind: "codeSent"; email: string; resent?: boolean }
     | { kind: "done"; email: string };
 
-// The pending change is the account's one unverified address.
 function pendingChange(addresses: Address[] | undefined): Step {
     const pending = addresses?.find((address) => !address.verified);
     return pending
         ? { kind: "codeSent", email: pending.email }
         : { kind: "idle" };
+}
+
+// The session's code for the change has ended: the change starts again from the address.
+function codeEnded(failure: unknown) {
+    return (
+        failure instanceof ApiError &&
+        failure.status === 409 &&
+        failure.code !== "session_changed"
+    );
 }
 
 export function EmailChange({ email }: { email: string }) {
@@ -31,6 +40,7 @@ export function EmailChange({ email }: { email: string }) {
     const [step, setStep] = useState<Step>({ kind: "loading" });
     const [error, setError] = useState<string>();
     const stepUp = useStepUp();
+    const { acting, run } = useOneAction();
 
     useEffect(() => {
         let active = true;
@@ -53,7 +63,7 @@ export function EmailChange({ email }: { email: string }) {
         if (result.status !== 401) return true;
         const mode = stepUpMode(result);
         if (!mode) await refreshExpiredSession(security("sessionExpired"));
-        else stepUp.ask(mode, repeat);
+        else stepUp.ask(mode, () => run(repeat));
         return false;
     }
 
@@ -74,11 +84,7 @@ export function EmailChange({ email }: { email: string }) {
             });
             if (!(await confirmed(result, () => verify(code, address)))) return;
         } catch (failure) {
-            if (
-                failure instanceof ApiError &&
-                failure.status === 409 &&
-                failure.code !== "session_changed"
-            ) {
+            if (codeEnded(failure)) {
                 setStep({ kind: "idle", notice: "expired" });
                 return;
             }
@@ -86,6 +92,24 @@ export function EmailChange({ email }: { email: string }) {
         }
         setStep({ kind: "done", email: address });
         await loadSession();
+    }
+
+    async function resend() {
+        setError(undefined);
+        try {
+            await authRequest("auth/email/verify/resend", "POST", {});
+        } catch (failure) {
+            if (codeEnded(failure)) {
+                setStep({ kind: "idle", notice: "expired" });
+                return;
+            }
+            throw failure;
+        }
+        setStep((current) =>
+            current.kind === "codeSent"
+                ? { ...current, resent: true }
+                : current,
+        );
     }
 
     async function cancelChange(address: string) {
@@ -115,7 +139,7 @@ export function EmailChange({ email }: { email: string }) {
                     <ActionForm
                         submit={t("sendVerification")}
                         onSubmit={(data) =>
-                            requestCode(formText(data, "email"))
+                            run(() => requestCode(formText(data, "email")))
                         }
                     >
                         <Field
@@ -135,37 +159,36 @@ export function EmailChange({ email }: { email: string }) {
                     <Notice>
                         {t("emailCodeSentTo", { email: step.email })}
                     </Notice>
-                    <ActionForm
-                        submit={t("verifyEmail")}
-                        onSubmit={(data) =>
-                            verify(formText(data, "key"), step.email)
-                        }
-                    >
-                        <Field
-                            label={t("emailCode")}
-                            name="key"
-                            autoComplete="one-time-code"
-                            required
-                        />
-                    </ActionForm>
+                    <fieldset disabled={acting}>
+                        <ActionForm
+                            submit={t("verifyEmail")}
+                            onSubmit={(data) =>
+                                run(() =>
+                                    verify(formText(data, "key"), step.email),
+                                )
+                            }
+                        >
+                            <Field
+                                label={t("emailCode")}
+                                name="key"
+                                autoComplete="one-time-code"
+                                required
+                            />
+                        </ActionForm>
+                    </fieldset>
                     {step.resent && <Notice>{t("emailCodeResent")}</Notice>}
                     <p className="fine">{t("emailCodeResendLimit")}</p>
                     <AsyncButton
                         variant="secondary"
-                        onClick={async () => {
-                            await authRequest(
-                                "auth/email/verify/resend",
-                                "POST",
-                                {},
-                            );
-                            setStep({ ...step, resent: true });
-                        }}
+                        disabled={acting}
+                        onClick={() => run(resend)}
                     >
                         {t("sendCodeAgain")}
                     </AsyncButton>
                     <AsyncButton
                         variant="secondary"
-                        onClick={() => cancelChange(step.email)}
+                        disabled={acting}
+                        onClick={() => run(() => cancelChange(step.email))}
                     >
                         {t("useAnotherAddress")}
                     </AsyncButton>

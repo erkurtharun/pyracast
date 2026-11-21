@@ -531,7 +531,8 @@ arriving after a newer one never restores an older key, and an expiry never dele
 key of a later sign-in; a request whose session no longer exists answers as signed out.
 Each web-client request names the tag of the session it was prepared for (a random value
 issued at sign-in, kept when a confirmation renews the key, returned by `/api/session/`,
-never logged); a middleware before any other refuses one for another session with 409
+never logged; a session that signs in no account holds the empty tag); a middleware right
+after the session's user is known refuses one for another session with 409
 `session_changed`, so it changes nothing. The client then reads the session and repeats the
 request once only when that read shows the same tag, and drops an answer that arrives after
 it adopted another session. Tabs share the last tag a session read observed in

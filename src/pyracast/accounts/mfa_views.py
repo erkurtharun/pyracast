@@ -1,11 +1,13 @@
 from typing import Any, cast
 
+from allauth.account import app_settings as account_settings
 from allauth.account.internal.flows.login import (
     AUTHENTICATION_METHODS_SESSION_KEY,
     get_authentication_records,
 )
 from allauth.account.internal.flows.reauthentication import raise_if_reauthentication_required
 from allauth.account.internal.stagekit import LOGIN_SESSION_KEY, clear_login
+from allauth.core.exceptions import ReauthenticationRequired
 from allauth.headless.base.response import UnauthorizedResponse
 from allauth.headless.internal.restkit.inputs import Input
 from allauth.headless.mfa import views
@@ -33,7 +35,6 @@ from pyracast.accounts.processes import (
     account_state,
     confirmation,
     credential_write,
-    live_confirmations,
     require_authority,
 )
 from pyracast.accounts.security import Factor
@@ -67,18 +68,31 @@ def shown_once(generated: Authenticator) -> list[str]:
     return list(codes.get_unused_codes())
 
 
-def record_activation_proof(request: HttpRequest, authenticator: Authenticator) -> None:
+def judged_confirmation(request: HttpRequest) -> float:
+    # allauth reads the clock once to find the session's last confirmation live; the request keeps
+    # that confirmation's time instead of judging it again.
+    raise_if_reauthentication_required(request, app="allauth.mfa")
+    flagged = [
+        record
+        for record in get_authentication_records(request, cast(User, request.user))
+        if record.get("reauthenticated")
+        and record.get("method") in account_settings.REAUTHENTICATION_METHODS
+    ]
+    return float(flagged[-1]["at"])
+
+
+def record_activation_proof(
+    request: HttpRequest, authenticator: Authenticator, confirmed_at: float
+) -> None:
     # The activation code proves the new authenticator, so it counts as a confirmation by it,
     # within the window of the confirmation that allowed the activation and never longer.
-    user = cast(User, request.user)
-    window = max(record["at"] for record in live_confirmations(request, user))
-    records = get_authentication_records(request, user)
+    records = get_authentication_records(request, cast(User, request.user))
     records.append(
         {
             "method": Factor.MFA.value,
             "type": authenticator.type,
             "id": authenticator.pk,
-            "at": window,
+            "at": confirmed_at,
             "reauthenticated": True,
         }
     )
@@ -129,6 +143,8 @@ class ManageRecoveryCodesView(StepUpAnswers, AllauthRecoveryCodesView):
 
 
 class ManageTOTPView(StepUpAnswers, AllauthTOTPView):
+    confirmed_at: float | None = None
+
     def get_input_class(self) -> type[Input] | None:
         return TOTPActivationInput if self.request.method == "POST" else None
 
@@ -149,7 +165,7 @@ class ManageTOTPView(StepUpAnswers, AllauthTOTPView):
             return super().handle(request, *args, **kwargs)
         with credential_write(request) as authorized:
             if enrolling:
-                raise_if_reauthentication_required(request, app="allauth.mfa")
+                self.confirmed_at = judged_confirmation(request)
             refused = require_recent_mfa(request) if request.method == "DELETE" else None
             if refused is not None:
                 return refused
@@ -159,7 +175,9 @@ class ManageTOTPView(StepUpAnswers, AllauthTOTPView):
             return response
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        if self.confirmed_at is None:
+            raise ReauthenticationRequired
         authenticator, generated = totp_flows.activate_totp(request, self.input)
-        record_activation_proof(request, authenticator)
+        record_activation_proof(request, authenticator, self.confirmed_at)
         meta = None if generated is None else {"recovery_codes": shown_once(generated)}
         return AuthenticatorResponse(request, authenticator, meta=meta)

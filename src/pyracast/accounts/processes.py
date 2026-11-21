@@ -343,7 +343,6 @@ def renew_authority(request: HttpRequest, user_id: Any) -> None:
 
 @contextmanager
 def credential_write(request: HttpRequest) -> Iterator[str]:
-    # Yields the credential state the write was authorized under.
     user_id = request.user.pk
     with transaction.atomic():
         yield authorize_credential_write(request)
