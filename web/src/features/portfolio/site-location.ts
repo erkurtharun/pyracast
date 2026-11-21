@@ -6,8 +6,9 @@ const coordinateNumber = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
 // followed by white space; a bare comma only when a part has a decimal point. "41,0082" is
 // one Turkish-style number, never 41 and 82.
 function pairParts(input: string): string[] {
-    if (input.includes(";")) return input.split(/\s*;\s*/);
-    if (/,\s/.test(input)) return input.split(/\s*,\s+/);
+    if (input.includes(";")) return input.split(";").map((part) => part.trim());
+    if (/,\s/.test(input))
+        return input.split(/,\s+/).map((part) => part.trim());
     if (/\s/.test(input)) return input.split(/\s+/);
     const parts = input.split(",");
     return parts.some((part) => part.includes(".")) ? parts : [input];
@@ -48,7 +49,7 @@ export function coordinatePair(text: string): [string, string] | null {
 export function zoneChoices(supported: readonly string[], current: string) {
     return [
         ...new Set([...supported, "UTC", ...(current ? [current] : [])]),
-    ].sort();
+    ].sort((a, b) => a.localeCompare(b));
 }
 
 type ZoneSource = { supportedValuesOf?: (key: "timeZone") => string[] };

@@ -66,8 +66,8 @@ const coordinateNumber = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
 // The workspace wizard's rule: a pair needs a separator that a decimal comma cannot be, so
 // "41,0082" stays one number.
 function pairParts(input) {
-  if (input.includes(";")) return input.split(/\s*;\s*/);
-  if (/,\s/.test(input)) return input.split(/\s*,\s+/);
+  if (input.includes(";")) return input.split(";").map((part) => part.trim());
+  if (/,\s/.test(input)) return input.split(/,\s+/).map((part) => part.trim());
   if (/\s/.test(input)) return input.split(/\s+/);
   const parts = input.split(",");
   return parts.some((part) => part.includes(".")) ? parts : [input];
