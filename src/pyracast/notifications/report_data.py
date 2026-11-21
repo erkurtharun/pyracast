@@ -24,6 +24,7 @@ from pyracast.plants.measurements import production_identity_at
 from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration
 from pyracast.plants.numerics import PowerInterval, forecast
 from pyracast.plants.operating_limits import affected_power
+from pyracast.plants.transfer import transfer_model
 
 
 class ReportDay(TypedDict):
@@ -110,7 +111,13 @@ def _electrical_day(
 ) -> ReportDay:
     intervals = source.composition.intervals if source is not None else None
     normal = forecast_payload(
-        configuration, snapshot, calibration, day, 60, source_intervals=intervals
+        configuration,
+        snapshot,
+        calibration,
+        day,
+        60,
+        model_version=transfer_model(configuration, calibration),
+        source_intervals=intervals,
     )
     if source is not None:
         apply_intraday_source(normal, source)

@@ -60,6 +60,7 @@ TOOLING = frozenset(
         "test_start_postgres",
         "test_start_rabbitmq",
         "test_suite_conventions",
+        "test_tracker_geometry_evaluation",
         "test_translations",
         "test_version_pins",
     }

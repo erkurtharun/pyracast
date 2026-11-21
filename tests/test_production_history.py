@@ -18,7 +18,7 @@ from pyracast.plants.availability import (
     reference_intervals,
 )
 from pyracast.plants.models import Plant, ProductionObservation
-from pyracast.plants.numerics import PowerInterval
+from pyracast.plants.numerics import MODEL_VERSION, PowerInterval
 from pyracast.plants.operations import revise_plant
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import ObservationInput, import_observations
@@ -331,7 +331,7 @@ def test_invalid_source_intervals_remain_missing(
         source.normalized_intervals[0]["end"] = "2026-11-07T21:30:00"
     else:
         source.normalized_intervals[0]["end"] = source.normalized_intervals[0]["start"]
-    intervals = actual_power_intervals(source, configuration)
+    intervals = actual_power_intervals(source, configuration, model_version=MODEL_VERSION)
     assert len(intervals) == 47
     assert all(
         row.start != datetime.fromisoformat(source.normalized_intervals[0]["start"])

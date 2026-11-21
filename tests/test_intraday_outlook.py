@@ -20,6 +20,7 @@ from pyracast.plants.forecast_sources import replay_composition
 from pyracast.plants.forecasting import forecast_payload
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import CalibrationActivation
+from pyracast.plants.transfer import transfer_model
 from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
 from pyracast.weather_data import serialize_weather
@@ -390,6 +391,7 @@ def test_paired_actuals_grace_admits_only_its_slot_and_completed_native_interval
         None,
         DAY,
         60,
+        model_version=transfer_model(plant.current_configuration, None),
         source_intervals=prepared.composition.intervals,
     )
     apply_intraday_source(payload, prepared)
@@ -575,6 +577,7 @@ def test_disjoint_actual_acquisitions_keep_owned_history_and_can_complete_daylig
         None,
         DAY,
         60,
+        model_version=transfer_model(plant.current_configuration, None),
         source_intervals=prepared.composition.intervals,
     )
     apply_intraday_source(result, prepared)
@@ -748,6 +751,7 @@ def test_pinned_intraday_replay_rejects_unavailable_source_evidence(
         None,
         DAY,
         60,
+        model_version=transfer_model(plant.current_configuration, None),
         source_intervals=source.composition.intervals,
     )
     apply_intraday_source(result, source)

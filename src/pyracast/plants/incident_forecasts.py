@@ -135,6 +135,7 @@ def _uncalibrated(
             None,
             target_date,
             resolution_minutes,
+            model_version=normal["model_version"],
             source_intervals=selected_sources[0].intervals if selected_sources else None,
         ),
     )

@@ -24,6 +24,7 @@ from pyracast.plants.forecasting import calibration_at, forecast_payload
 from pyracast.plants.measurements import production_identity_at, production_identity_current
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.operations import configuration_is_current
+from pyracast.plants.transfer import transfer_model
 
 
 def current_forecast(
@@ -159,6 +160,7 @@ def _composed_forecast(
                     calibration,
                     target_date,
                     resolution_minutes,
+                    model_version=transfer_model(configuration, calibration),
                     source_intervals=composition.intervals,
                 )
                 if source is not None:

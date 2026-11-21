@@ -30,6 +30,7 @@ from pyracast.plants.forecasting import (
 from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration
 from pyracast.plants.operations import configuration_is_current
+from pyracast.plants.transfer import transfer_model
 from pyracast.regions.models import Region
 
 
@@ -213,6 +214,7 @@ def _plant_outlook(
                 calibration,
                 target_date,
                 resolution_minutes,
+                model_version=transfer_model(configuration, calibration),
                 source_intervals=actual_source.composition.intervals
                 if actual_source.composition is not None
                 else None,

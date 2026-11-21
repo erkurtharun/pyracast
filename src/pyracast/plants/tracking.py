@@ -3,7 +3,13 @@ from math import acos, atan2, cos, degrees, pi, radians, sin, sqrt
 
 from astral import Observer, sun
 
-MODEL_VERSION = "tracking-geometry-transfer-v1"
+# v1 feeds Astral's refraction-adjusted zenith to both the Erbs split and the tracker geometry;
+# v2 feeds the true zenith to Erbs and the apparent zenith to the geometry. A result records
+# its version and replays under it; a calibrated plant moves to the default only by a refit.
+MODEL_V1 = "tracking-geometry-transfer-v1"
+MODEL_V2 = "tracking-geometry-transfer-v2"
+MODELS = (MODEL_V1, MODEL_V2)
+DEFAULT_MODEL = MODEL_V1
 # Assumed north-south horizontal axis with slope-free backtracking; not declared plant geometry.
 GROUND_COVERAGE_RATIO = 0.40
 MAX_ROTATION_DEGREES = 55.0
@@ -57,25 +63,32 @@ def _rotation(across_axis: float, vertical: float) -> float:
 
 
 def tracking_gain(
-    reference_fraction: float, zenith: float, azimuth: float, day_of_year: int
+    reference_fraction: float,
+    decomposition_zenith: float,
+    geometry_zenith: float,
+    azimuth: float,
+    day_of_year: int,
 ) -> float:
     """Ratio of tracker plane output to horizontal output for one interval mean.
 
     `reference_fraction` is loss-free horizontal reference power per unit DC capacity;
-    angles are degrees with azimuth clockwise from north. Low sun returns 1.
+    angles are degrees with azimuth clockwise from north. The Erbs split takes
+    `decomposition_zenith`, rotation and transposition take `geometry_zenith`. Low sun
+    returns 1.
     """
-    cos_zenith = cos(radians(zenith))
-    if reference_fraction <= 0 or zenith >= MAX_ZENITH_DEGREES:
+    if reference_fraction <= 0 or max(decomposition_zenith, geometry_zenith) >= MAX_ZENITH_DEGREES:
         return 1.0
     discriminant = REFERENCE_LINEAR**2 + 4 * REFERENCE_QUADRATIC * reference_fraction
     ghi = 1000 * (sqrt(max(discriminant, 0.0)) - REFERENCE_LINEAR) / (2 * REFERENCE_QUADRATIC)
     if ghi <= MIN_GHI_WM2:
         return 1.0
     extraterrestrial = _extraterrestrial(day_of_year)
-    clearness = min(ghi / (extraterrestrial * max(cos_zenith, _MIN_COS_ZENITH)), 1.0)
+    cos_decomposition = cos(radians(decomposition_zenith))
+    clearness = min(ghi / (extraterrestrial * max(cos_decomposition, _MIN_COS_ZENITH)), 1.0)
     dhi = ghi * _diffuse_fraction(clearness)
-    dni = (ghi - dhi) / cos_zenith
-    across_axis = sin(radians(zenith)) * sin(radians(azimuth - 180))
+    dni = (ghi - dhi) / cos_decomposition
+    cos_zenith = cos(radians(geometry_zenith))
+    across_axis = sin(radians(geometry_zenith)) * sin(radians(azimuth - 180))
     rotation = radians(_rotation(across_axis, cos_zenith))
     cos_incidence = max(across_axis * sin(rotation) + cos_zenith * cos(rotation), 0.0)
     anisotropy = min(dni / extraterrestrial, 1.0)
@@ -90,10 +103,24 @@ def tracking_gain(
 
 
 def interval_gain(
-    start: datetime, end: datetime, reference_fraction: float, latitude: float, longitude: float
+    start: datetime,
+    end: datetime,
+    reference_fraction: float,
+    latitude: float,
+    longitude: float,
+    *,
+    model: str,
 ) -> float:
-    """Evaluate the gain at the interval midpoint with a sea-level observer."""
+    """Evaluate the gain of geometry version `model` at the interval midpoint with a sea-level
+    observer."""
+    if model not in MODELS:
+        raise ValueError("Unknown tracker geometry version")
     midpoint = (start + (end - start) / 2).astimezone(UTC)
     observer = Observer(latitude, longitude, 0.0)
-    zenith, azimuth = sun.zenith(observer, midpoint), sun.azimuth(observer, midpoint)
-    return tracking_gain(reference_fraction, zenith, azimuth, midpoint.timetuple().tm_yday)
+    apparent, azimuth = sun.zenith(observer, midpoint), sun.azimuth(observer, midpoint)
+    decomposition = (
+        apparent if model == MODEL_V1 else sun.zenith(observer, midpoint, with_refraction=False)
+    )
+    return tracking_gain(
+        reference_fraction, decomposition, apparent, azimuth, midpoint.timetuple().tm_yday
+    )

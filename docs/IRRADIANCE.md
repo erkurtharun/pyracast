@@ -158,9 +158,9 @@ weather filename or treat a grid export limit as an inverter rating.
 
 One number cannot scale a horizontal reference to a tracking plant: the plane-of-array gain
 depends on solar position and on the beam share. For a `tracking` configuration whose
-reference binding is horizontal (`tilt=0`) with a declared DC capacity,
-`tracking-geometry-transfer-v1` multiplies each native reference interval by a physical gain
-before calibration and clipping:
+reference binding is horizontal (`tilt=0`) with a declared DC capacity, the tracking geometry
+transfer multiplies each native reference interval by a physical gain before calibration and
+clipping:
 
 `raw_power_mw = reference_power_kw / reference_capacity_kw * plant_dc_capacity_mw * gain`
 
@@ -174,15 +174,47 @@ solar position at sea level. Zero reference power, zenith of 87° or more, or GH
 1 W/m² give gain 1, and the ratio is capped at 6. These are versioned assumptions flagged
 `assumed_tracker_geometry`: declared axis, row spacing, bifacial gain and terrain are not
 modeled. Other configurations keep `reference-power-transfer-v1` and `geometry_not_modeled`.
-The reference gains in `tests/fixtures/tracking_gain_reference.json` come from an
-independent pvlib 0.16.1 chain: the same GHI estimate, `erbs`, `singleaxis` (axis azimuth
-180°, ±55°, backtracking, GCR 0.4), Hay–Davies `get_total_irradiance` with pvlib's
-extraterrestrial irradiance (solar constant 1366.1 W/m², where the model uses 1361) and
-albedo 0.20, and the cell-temperature factor from `pvsyst_cell` at 29 W/m²K.
-The stored gains are that chain's values rounded to four decimals.
-`scripts/check_scientific.py` recomputes the chain in CI on Windows and Ubuntu and requires
-the stored gains within 0.0001 of it and the pure-Python gain within 0.012; the unit tests
-hold the model to the stored gains with the same 0.012.
+
+Geometry versions: `tracking-geometry-transfer-v1` gives Astral's refraction-adjusted zenith
+to both the Erbs split and the tracker geometry. `tracking-geometry-transfer-v2` gives the
+true zenith to the Erbs split (clearness index, DNI and the 87° cut-off) and the apparent
+zenith to rotation and transposition, as `docs/STACK.md` requires; the two differ by up to
+about 5 % in the gain near the cut-off and below 0.1 % at high sun. New results use
+`tracking.DEFAULT_MODEL`; it is v1, as the recorded evaluation below decided. Every result
+records its model (`model_version` on forecasts, issuances and recomputed performance days,
+`transfer_model` on calibrations) and is replayed under it, never under another version; an
+unknown model is refused. A tracking plant forecasts with the version its active calibration
+was fitted under and uses the default only while uncalibrated; a refit is fitted under the
+default, compared only with an incumbent of the same model and moves the plant when it is
+activated. Derating evidence is shown only next to a forecast of the model it was fitted
+under.
+
+The reference gains in `tests/fixtures/tracking_gain_reference.json` (v1) and
+`tracking_gain_reference_v2.json` (v2) come from an independent pvlib 0.16.1 chain: the same
+GHI estimate, `erbs`, `singleaxis` (axis azimuth 180°, ±55°, backtracking, GCR 0.4),
+Hay–Davies `get_total_irradiance` with pvlib's extraterrestrial irradiance (solar constant
+1366.1 W/m², where the model uses 1361) and albedo 0.20, and the cell-temperature factor from
+`pvsyst_cell` at 29 W/m²K; the v2 chain gives `erbs` the true and the geometry the apparent
+zenith. The stored gains are that chain's values rounded to four decimals.
+`scripts/check_scientific.py` recomputes both chains in CI on Windows and Ubuntu and requires
+the stored gains within 0.0001 of them and the pure-Python gain within 0.012; the unit tests
+hold the model to the stored gains with the same 0.012. v1 is held to the outputs the code gave
+before the versions existed (`tests/fixtures/tracking_v1_golden.json`: 400 gains, 192 interval
+gains and 25 reference powers, including night, twilight and the 87° edge) within a relative
+1e-12 on every platform, not bit for bit, because the platforms' maths libraries differ in the
+last bits. That catches any change that moves a sampled output by more than one part in 10¹²;
+a change in the last written digit of a coefficient moves outputs by about 10⁻⁷. Regrouping
+floating-point operations (about 10⁻¹⁶) and paths outside the sampled cases are not caught.
+Stored results are never recomputed in place, so such differences cannot alter a stored value.
+
+`scripts/evaluate_tracker_geometry.py` decides the default on an archive database, read-only,
+and prints aggregates per plant ordinal only. It compares the hourly EPIAS readings of the
+plant's enabled connection and its provider plants (settlement before real-time, latest
+snapshot per day and kind) with estimated actuals (the latest snapshot covering each hour)
+inside daylight on complete days; hours a manual observation overlaps are skipped. Each week after the first is scored with factors that
+`fit_calibration` refits per version on the same 37 preceding days. v2 is not worse unless
+the 95 % delete-one-week jackknife interval of RMSE(v2) − RMSE(v1) lies wholly above zero,
+with at least four scored weeks.
 
 Evidence from the authorized case, 2025-11-05 to 2026-11-03, against hourly settlement
 energy: a weekly rolling origin refit the factor on the trailing 30/60/90 days and scored the
@@ -193,9 +225,9 @@ factors from 0.83 to 1.00. Morning, midday and afternoon factors fitted separate
 improved unseen days. Using Solcast DNI/DHI instead of the reference-derived split changed
 in-sample MAE by 0.2 MW. One scalar therefore remains the calibrated quantity; time-of-day
 and seasonal factors are not fitted. This is transfer accuracy against estimated actuals,
-not day-ahead forecast accuracy. A calibration records its `transfer_model` and is neither
-applied, compared nor activated under another one. Outputs saved earlier keep their recorded
-model and factor, and their outage scenarios replay that model.
+not day-ahead forecast accuracy. A calibration is applied and activated only within the
+transfer it was fitted under (direct or tracking); a calibration without `transfer_model`
+predates the tracker transfer and stays direct.
 
 Known limit: the horizontal rooftop reference includes dynamic snow soiling. In the case
 year 57 days were affected, with reference power near zero on days when the plant produced

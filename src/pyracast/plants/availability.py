@@ -10,7 +10,7 @@ from pyracast.forecasts.actuals import select_archived_actual_source
 from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.numerics import PowerInterval
-from pyracast.plants.transfer import reference_power_mw
+from pyracast.plants.transfer import reference_power_mw, transfer_model
 
 
 def reference_intervals(
@@ -19,13 +19,19 @@ def reference_intervals(
     source = select_archived_actual_source(configuration.binding, day, as_of)
     if source is None:
         return ()
-    return actual_power_intervals(source.snapshot, configuration, source_intervals=source.intervals)
+    return actual_power_intervals(
+        source.snapshot,
+        configuration,
+        model_version=transfer_model(configuration, None),
+        source_intervals=source.intervals,
+    )
 
 
 def actual_power_intervals(
     snapshot: ForecastSnapshot,
     configuration: PlantConfiguration,
     *,
+    model_version: str,
     source_intervals: Sequence[dict[str, Any]] | None = None,
 ) -> tuple[PowerInterval, ...]:
     result = []
@@ -43,7 +49,11 @@ def actual_power_intervals(
         if start.utcoffset() is None or end.utcoffset() is None or end <= start:
             continue
         result.append(
-            PowerInterval(start, end, reference_power_mw(configuration, start, end, power))
+            PowerInterval(
+                start,
+                end,
+                reference_power_mw(configuration, start, end, power, model_version=model_version),
+            )
         )
     return tuple(sorted(result, key=lambda interval: interval.start))
 

@@ -7,7 +7,7 @@ from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import CalibrationRun, CalibrationStatus, PlantConfiguration
 from pyracast.plants.numerics import DERATING_POLICY, POLICY_VERSION
-from pyracast.plants.transfer import calibration_matches_transfer
+from pyracast.plants.transfer import recorded_transfer
 
 
 def production_diagnostic(
@@ -49,7 +49,7 @@ def production_diagnostic(
         or assessment.get("policy") != DERATING_POLICY
         or assessment.get("status") not in {"suspected", "normal", "insufficient"}
         or assessment.get("baseline_factor") != normal["factor"]
-        or not calibration_matches_transfer(run, configuration)
+        or recorded_transfer(run) != normal["model_version"]
         or not production_identity_current(run)
         or not incidents_unchanged(run, known_at)
     ):

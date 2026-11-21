@@ -49,18 +49,26 @@ def scalar(values: object) -> float:
     return float(np.ravel(values)[0])
 
 
-def chain_gain(reference: float, zenith: float, azimuth: float, day_of_year: int) -> float:
+def chain_gain(
+    reference: float, true_zenith: float, apparent_zenith: float, azimuth: float, day_of_year: int
+) -> float:
     # GHI from p = 0.9964 g - 0.1484 g^2 (g = GHI / 1000), the documented model input.
     ghi = 1000 * (sqrt(0.9964**2 - 4 * 0.1484 * reference) - 0.9964) / (2 * -0.1484)
-    parts = pvlib.irradiance.erbs(ghi, zenith, day_of_year)
+    parts = pvlib.irradiance.erbs(ghi, true_zenith, day_of_year)
     tracker = pvlib.tracking.singleaxis(
-        zenith, azimuth, axis_tilt=0, axis_azimuth=180, max_angle=55, backtrack=True, gcr=0.4
+        apparent_zenith,
+        azimuth,
+        axis_tilt=0,
+        axis_azimuth=180,
+        max_angle=55,
+        backtrack=True,
+        gcr=0.4,
     )
     plane = scalar(
         pvlib.irradiance.get_total_irradiance(
             scalar(tracker["surface_tilt"]),
             scalar(tracker["surface_azimuth"]),
-            zenith,
+            apparent_zenith,
             azimuth,
             scalar(parts["dni"]),
             ghi,
@@ -79,16 +87,27 @@ def chain_gain(reference: float, zenith: float, azimuth: float, day_of_year: int
     return plane / ghi * (1 - 0.0035 * (cell(plane) - cell(ghi)))
 
 
-table = root / "tests" / "fixtures" / "tracking_gain_reference.json"
-cases = json.loads(table.read_text("utf-8"))
-assert cases, "Tracker gain reference table must contain cases."
-for case in cases:
-    inputs = (case["reference_fraction"], case["zenith"], case["azimuth"], case["day_of_year"])
-    expected = chain_gain(*inputs)
-    model = tracking_gain(*inputs)
-    assert abs(expected - case["gain"]) <= 0.0001, (case, expected)
-    assert abs(model - expected) <= 0.012, (case, model, expected)
-    print(f"tracker gain {inputs}: pvlib {expected:.4f}, model {model:.4f}")
+fixtures = root / "tests" / "fixtures"
+versions = {
+    "v1": (fixtures / "tracking_gain_reference.json", "zenith", "zenith"),
+    "v2": (fixtures / "tracking_gain_reference_v2.json", "true_zenith", "apparent_zenith"),
+}
+for version, (table, true_key, apparent_key) in versions.items():
+    cases = json.loads(table.read_text("utf-8"))
+    assert cases, f"Tracker gain {version} reference table must contain cases."
+    for case in cases:
+        inputs = (
+            case["reference_fraction"],
+            case[true_key],
+            case[apparent_key],
+            case["azimuth"],
+            case["day_of_year"],
+        )
+        expected = chain_gain(*inputs)
+        model = tracking_gain(*inputs)
+        assert abs(expected - case["gain"]) <= 0.0001, (version, case, expected)
+        assert abs(model - expected) <= 0.012, (version, case, model, expected)
+        print(f"tracker gain {version} {inputs}: pvlib {expected:.4f}, model {model:.4f}")
 """
 
 

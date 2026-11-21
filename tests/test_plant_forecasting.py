@@ -15,6 +15,7 @@ from pyracast.plants.models import (
     ForecastIssuance,
     PlantConfiguration,
 )
+from pyracast.plants.numerics import MODEL_VERSION
 from pyracast.plants.operations import revise_plant
 from tests.support.domain import NOW
 from tests.support.invariants import stored_again
@@ -291,7 +292,7 @@ def test_corrupt_source_power_is_rejected(monkeypatch: pytest.MonkeyPatch, value
         pk=plant.current_configuration_id
     )
     with pytest.raises(ValueError, match="Invalid source power"):
-        power_intervals(source, configuration)
+        power_intervals(source, configuration, model_version=MODEL_VERSION)
 
 
 def test_corrupt_source_metadata_and_changed_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -303,11 +304,11 @@ def test_corrupt_source_metadata_and_changed_timezone(monkeypatch: pytest.Monkey
     )
     configuration.binding.capacity_kw = float("inf")
     with pytest.raises(ValueError, match="Invalid reference capacity"):
-        power_intervals(source, configuration)
+        power_intervals(source, configuration, model_version=MODEL_VERSION)
     configuration.binding.capacity_kw = 1
     source.normalized_intervals[0]["start"] = 1
     with pytest.raises(ValueError, match="Invalid source interval timestamps"):
-        power_intervals(source, configuration)
+        power_intervals(source, configuration, model_version=MODEL_VERSION)
     system.region.timezone = "UTC"
     system.region.save()
     replay = plant_forecast(
@@ -421,7 +422,9 @@ def test_pure_projection_claims_archive_selection_only_after_publication(
     configuration = plant.current_configuration
     assert configuration is not None
     source = snapshot_for(system, DAY)
-    projected = forecasting.forecast_payload(configuration, source, None, DAY, 60)
+    projected = forecasting.forecast_payload(
+        configuration, source, None, DAY, 60, model_version=MODEL_VERSION
+    )
     provenance = cast(dict[str, Any], projected["provenance"])
     assert provenance["selection_policy"] == "single-snapshot-forecast-projection-v1"
     assert "published_at" not in provenance
