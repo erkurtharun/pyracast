@@ -1,4 +1,3 @@
-import io
 import json
 import uuid
 from collections.abc import Callable
@@ -40,6 +39,7 @@ from pyracast.plants.models import CalibrationError, CalibrationRun, Plant, Plan
 from pyracast.plants.training import LEASE_DURATION as LEASE
 from pyracast.regions.models import Region
 from tests.support.budgets import assert_scale_invariant, captured_statements
+from tests.support.command_output import process_streams
 from tests.support.delivery_health import NOW, AnsweringBroker, recent_forecast
 from tests.support.domain import System, make_system
 from tests.support.notifications import store
@@ -63,13 +63,13 @@ def printed(
 ) -> tuple[dict[str, Any], bool]:
     monkeypatch.setattr(f"{COMMAND}.timezone.now", lambda: NOW)
     monkeypatch.setattr("pyracast.background.broker.make_broker", broker)
-    output = io.StringIO()
-    try:
-        call_command("check_delivery_health", *arguments, stdout=output)
-    except CommandError:
-        failed = True
-    else:
-        failed = False
+    with process_streams() as (output, _):
+        try:
+            call_command("check_delivery_health", *arguments)
+        except CommandError:
+            failed = True
+        else:
+            failed = False
     report: dict[str, Any] = json.loads(output.getvalue())
     assert report["healthy"] is not failed
     return report, failed

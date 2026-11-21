@@ -205,7 +205,7 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     NotificationDelivery.objects.filter(pk=delivery.pk).update(
         status="uncertain", lease_token=token, lease_expires_at=NOW
     )
-    valid = {key: v for key, v in _tuples().items() if key[0] != "plants_calibrationrun"}
+    valid = _tuples()
     del valid["forecasts_collectionjob", released.pk]
     # The delivery's preparation metadata moves into typed columns at the leaf.
     del valid["notifications_notificationdelivery", delivery.pk]

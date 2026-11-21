@@ -370,14 +370,15 @@ def test_only_the_lines_of_the_containers_that_run_the_application_count_as_secu
         if "PYRACAST_SECURITY_LOG_PATH" in service.get("environment", {})
     }
     counted = {
-        name
+        name: [
+            matches(terms, shipped_entry(line, f"/{project}-{name}-{replica}"))
+            for replica in ("1", "run-0123456789ab")
+        ]
         for name in compose_services()
-        for container in (f"/{project}-{name}-1", f"/{project}-{name}-run-0123456789ab")
-        if matches(terms, shipped_entry(line, container))
     }
 
     assert application == {"api", "worker", "notifications", "dispatcher", "migrate"}
-    assert counted == application
+    assert counted == {name: [name in application] * 2 for name in compose_services()}
     for container in ("/pyracast-api", "/pyracast-api-1x", "/other-api-1", "/pyracast-api-run-"):
         assert not matches(terms, shipped_entry(line, container))
     assert not matches(terms, {**shipped_entry(line, "/pyracast-api-1"), "jsonPayload": {}})

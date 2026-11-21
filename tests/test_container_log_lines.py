@@ -5,7 +5,10 @@ import sys
 from pathlib import Path
 
 import pytest
+from django.db import connection
 
+from deploy.watchdog import failing_delivery
+from pyracast.forecasts.models import DispatcherPhase
 from tests.support.container_logs import shipped
 from tests.support.log_filters import filter_of, matches, resources
 
@@ -122,6 +125,21 @@ LONG_RECORDS_EACH = 100
 RECORD_START = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]{3} WARNING pyracast[.]forecasts "
 )
+ANSWERING_BROKER = (
+    DJANGO
+    + """
+import pyracast.background.broker
+from tests.support.delivery_health import AnsweringBroker
+pyracast.background.broker.make_broker = AnsweringBroker
+"""
+)
+HEALTH_CHECK = """
+import sys
+from pyracast.cli import main
+sys.argv = ["pyracast", "check_delivery_health"]
+main()
+"""
+UNREACHABLE_BROKER = "amqp://guest:guest@127.0.0.1:1/%2F"
 
 
 def writer_environment(script: str, forged: str) -> dict[str, str]:
@@ -185,18 +203,19 @@ def test_a_security_line_counts_once_from_the_application_container(security_lin
     assert counted(security_line + "\n", "") == [security_line]
 
 
-def assert_one_line_start(script: str, security_line: str) -> None:
+def assert_one_line_start(script: str, security_line: str) -> str:
     stdout, stderr = container_output(script, security_line)
 
     assert counted(stdout, stderr) == []
     assert CONTINUATION + security_line[: security_line.index("{")] in stdout + stderr
+    return stdout
 
 
 @pytest.mark.parametrize("writer", WRITERS)
 def test_a_record_starts_one_line_whatever_line_break_its_text_carries(
     writer: str, security_line: str
 ) -> None:
-    assert_one_line_start(WRITERS[writer], security_line)
+    assert assert_one_line_start(WRITERS[writer], security_line) == ""
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Gunicorn runs only on the POSIX host")
@@ -211,8 +230,9 @@ def test_a_record_longer_than_a_docker_line_starts_no_further_entry(security_lin
     stdout, stderr = container_output(LONG_LINE, security_line)
 
     assert counted(stdout, stderr) == []
-    assert max(len(line.encode()) for line in stdout.split("\n")) < 16 * 1024
-    assert stdout.replace(CONTINUATION, "").count(security_line) == 120
+    assert stdout == ""
+    assert max(len(line.encode()) for line in stderr.split("\n")) < 16 * 1024
+    assert stderr.replace(CONTINUATION, "").count(security_line) == 120
 
 
 def test_records_of_processes_sharing_one_pipe_start_no_line_but_their_own(
@@ -249,3 +269,39 @@ def test_records_of_processes_sharing_one_pipe_start_no_line_but_their_own(
     assert len(starts) == 3 * LONG_RECORDS_EACH
     assert [text for text in starts if not RECORD_START.match(text)] == []
     assert counted("\n".join(texts) + "\n", "") == []
+
+
+def health_check(broker: str) -> subprocess.CompletedProcess[str]:
+    """The health check's process as the watchdog runs it, with a broker that cannot be reached or
+    one that answers."""
+    script = (ANSWERING_BROKER if broker == "answering" else "") + HEALTH_CHECK
+    return subprocess.run(
+        [sys.executable, "-c", "import os; exec(os.environ['LOG_WRITER'])"],
+        cwd=ROOT,
+        env=writer_environment(script, "")
+        | {
+            "PGDATABASE": str(connection.settings_dict["NAME"]),
+            "PYRACAST_RABBITMQ_URL": UNREACHABLE_BROKER,
+        },
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("broker", ["unreachable", "answering"])
+def test_the_watchdog_reads_the_health_report_from_the_check_stdout(broker: str) -> None:
+    result = health_check(broker)
+
+    assert result.returncode == 1
+    assert failing_delivery(result.stdout) == {
+        "alarms": {},
+        "dispatch_phases": list(DispatcherPhase.values),
+        "broker_unreachable": broker == "unreachable",
+        "missing_queues": [],
+    }
+    assert result.stdout.count("\n") == 1
+    unreadable = " ERROR pyracast.orchestration.delivery_health health_broker_unreadable "
+    assert (unreadable in result.stderr) is (broker == "unreachable")

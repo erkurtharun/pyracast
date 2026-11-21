@@ -97,6 +97,38 @@ def test_a_term_the_documentation_does_not_settle_is_refused(term: str, value: o
         term_matches(term, entry(**{field: value}))
 
 
+@pytest.mark.parametrize(
+    "term",
+    [
+        "jsonPayload.message=~^first",
+        'jsonPayload.message=~"^\\d"',
+        'jsonPayload.message="first\\tline"',
+        'jsonPayload.message:"\\x41"',
+        'jsonPayload.message=~"[[:digit:]]"',
+        'jsonPayload.message=~"[[:alpha:][:digit:]]+"',
+        'jsonPayload.message=~"a{1001}"',
+        'jsonPayload.message=~"a{2,1001}"',
+        'jsonPayload.message=~"a{1001,}"',
+    ],
+)
+def test_a_term_the_service_refuses_is_refused(term: str) -> None:
+    with pytest.raises(UnsupportedTermError):
+        term_matches(term, entry(message="first line 1"))
+
+
+def test_a_quoted_string_reads_an_escaped_quote_and_backslash() -> None:
+    line = entry(message='say "hi" \\ bye')
+
+    assert term_matches('jsonPayload.message="say \\"hi\\" \\\\ bye"', line)
+    assert term_matches('jsonPayload.message:"\\"hi\\""', line)
+    assert term_matches('jsonPayload.message=~"\\"hi\\""', line)
+
+
+def test_a_repetition_up_to_the_bound_of_re2_is_evaluated() -> None:
+    assert term_matches('jsonPayload.message=~"^a{2,1000}$"', entry(message="aaa"))
+    assert not term_matches('jsonPayload.message=~"^a{1000}"', entry(message="aaa"))
+
+
 def test_every_term_of_a_filter_must_hold() -> None:
     line = entry(event="pyracast_backup_failed")
 

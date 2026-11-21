@@ -26,6 +26,7 @@ TOOLING = frozenset(
         "test_ci_artifacts",
         "test_ci_images",
         "test_ci_result",
+        "test_container_log_lines",
         "test_deadline_ladder",
         "test_deployment_backup",
         "test_deployment_backup_lock",

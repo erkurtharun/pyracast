@@ -2,6 +2,9 @@ import copy
 import io
 import logging
 import logging.config
+import re
+import sys
+import threading
 from collections.abc import Buffer, Callable
 from pathlib import Path
 from runpy import run_path
@@ -184,6 +187,118 @@ def test_a_line_that_cannot_be_written_is_reported_to_the_handler_not_the_caller
     deployed.handle(record)
 
     assert reported == [record]
+
+
+class Unreadable:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def __str__(self) -> str:
+        raise ValueError(self.text)
+
+
+DEPLOYED = ["console", "security", "security to a path", "gunicorn stdout", "gunicorn stderr"]
+UNFORMATTABLE = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]{3} WARNING pyracast[.]forecasts "
+    rf"unformattable_record error_type=ValueError origin={re.escape(__file__)}:7\n"
+)
+
+
+@pytest.mark.parametrize("handler", DEPLOYED)
+def test_a_record_that_cannot_be_formatted_is_one_line_naming_its_logger_and_error(
+    handler: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = RecordingRaw()
+    target = STREAMS["buffered"][0](raw)
+    deployed = deployed_handler(handler, tmp_path, monkeypatch)
+    assert isinstance(deployed, logging.StreamHandler)
+    deployed.setStream(target)
+    errors = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", errors)
+    line = "2026-11-22 00:00:00,000 INFO pyracast.security {}"
+    record = logging.getLogger("pyracast.forecasts").makeRecord(
+        "pyracast.forecasts", logging.WARNING, __file__, 7, Unreadable(f"x\n{line}"), (), None
+    )
+
+    deployed.handle(record)
+    deployed.close()
+
+    (call,) = raw.calls
+    assert UNFORMATTABLE.fullmatch(call.decode())
+    assert errors.getvalue() == ""
+
+
+class SteppedStream(io.TextIOWrapper):
+    """A buffered stream that holds the first thread at its first flush until the second thread
+    has written a line or waits for the lock, and the second thread after its first write until
+    the first thread has written."""
+
+    def __init__(self, raw: RecordingRaw, second: Callable[[], object]) -> None:
+        super().__init__(io.BufferedWriter(raw), encoding="utf-8", newline="\n")
+        self.second = second
+        self.first_thread = threading.get_ident()
+        self.started: threading.Thread | None = None
+        self.settled = threading.Event()
+        self.first_wrote = threading.Event()
+
+    def flush(self) -> None:
+        super().flush()
+        if threading.get_ident() == self.first_thread and self.started is None:
+            self.started = threading.Thread(target=self.second)
+            self.started.start()
+            assert self.settled.wait(timeout=10)
+
+    def write(self, text: str, /) -> int:
+        written = super().write(text)
+        if threading.get_ident() == self.first_thread:
+            self.first_wrote.set()
+        elif not self.settled.is_set():
+            self.settled.set()
+            assert self.first_wrote.wait(timeout=10)
+        return written
+
+
+class ProbedLock:
+    """A handler's lock that tells the stream when its thread would wait for it."""
+
+    def __init__(self, lock: Any, stream: SteppedStream) -> None:
+        self.lock = lock
+        self.stream = stream
+
+    def __enter__(self) -> None:
+        if not self.lock.acquire(blocking=False):
+            self.stream.settled.set()
+            self.lock.acquire()
+
+    def __exit__(self, *exception: object) -> None:
+        self.lock.release()
+
+
+@pytest.mark.parametrize(
+    "handlers", [("console", "gunicorn stderr"), ("gunicorn stdout", "security")]
+)
+def test_handlers_sharing_a_buffered_stream_write_each_line_in_a_call_of_its_own(
+    handlers: tuple[str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second = (deployed_handler(name, tmp_path, monkeypatch) for name in handlers)
+    assert isinstance(first, logging.StreamHandler)
+    assert isinstance(second, logging.StreamHandler)
+    raw = RecordingRaw()
+    records = [warning(f"{name} {'x' * 4000}") for name in handlers]
+    target = SteppedStream(raw, lambda: second.handle(records[1]))
+    first.setStream(target)
+    second.setStream(target)
+    monkeypatch.setattr(second, "lock", ProbedLock(second.lock, target))
+
+    first.handle(records[0])
+    assert target.started is not None
+    target.started.join()
+
+    assert raw.calls == [
+        (handler.format(record) + "\n").encode()
+        for handler, record in zip((first, second), records, strict=True)
+    ]
+    assert max(len(call) for call in raw.calls) <= PIPE_BUF
 
 
 def test_a_recursion_error_while_writing_reaches_the_caller() -> None:

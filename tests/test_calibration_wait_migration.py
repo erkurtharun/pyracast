@@ -14,7 +14,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 PREVIOUS = ("plants", "0006_submission_updated_at")
 
 
-def test_a_requeued_run_waits_from_the_upgrade_and_every_other_run_from_its_creation(
+def test_a_requeued_run_waits_from_the_upgrade_and_every_other_run_keeps_no_wait_time(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -45,7 +45,8 @@ def test_a_requeued_run_waits_from_the_upgrade_and_every_other_run_from_its_crea
         forward()
 
     waits = dict(CalibrationRun.objects.values_list("pk", "available_at"))
-    assert waits[finished] == waits[replaced] == NOW - timedelta(days=2)
+    assert waits[finished] is None
+    assert waits[replaced] is None
     requeued_wait = waits[requeued]
     assert requeued_wait is not None
     assert before <= requeued_wait <= datetime.now(UTC)
