@@ -281,7 +281,8 @@ def test_the_api_writes_its_security_lines_through_a_blocking_log_path() -> None
 
 def container_entry(record: logging.LogRecord, handler: str) -> dict[str, Any]:
     """One line of a container stream, formatted by a configured handler, as gcplogs ships it."""
-    formatter = settings.LOGGING["formatters"][settings.LOGGING["handlers"][handler]["formatter"]]
+    configuration: dict[str, Any] = settings.LOGGING
+    formatter = configuration["formatters"][configuration["handlers"][handler]["formatter"]]
     return {
         "logName": "projects/project/logs/gcplogs-docker-driver",
         "resource": {"type": "gce_instance"},
