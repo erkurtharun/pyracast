@@ -2909,11 +2909,12 @@ msgid "Workers"
 msgstr "Arka plan işleri"
 
 msgid ""
-"Queue counts are a diagnostic; only a message broker that does not answer "
-"changes the health result."
+"Queue counts are a diagnostic; only a message broker that does not answer or "
+"a work queue no worker declared changes the health result."
 msgstr ""
 "Kuyruk sayıları yalnızca tanılama içindir; sağlık sonucunu yalnızca yanıt "
-"vermeyen bir mesaj kuyruğu değiştirir."
+"vermeyen bir mesaj kuyruğu ya da hiçbir işçinin tanımlamadığı bir iş kuyruğu "
+"değiştirir."
 
 msgid "Message broker not answering"
 msgstr "Mesaj kuyruğu yanıt vermiyor"
@@ -2924,6 +2925,22 @@ msgid ""
 msgstr ""
 "Dağıtıcı, kalp atışını yalnızca mesaj kuyruğu yanıt verdiğinde yeniler; "
 "aksi hâlde yeniden başlatılır. Mesaj kuyruğunu denetleyin."
+
+msgid "Missing message queues"
+msgstr "Eksik mesaj kuyrukları"
+
+msgid ""
+"No worker has declared %(queues)s, so nothing consumes its messages. Check "
+"that its worker runs."
+msgstr ""
+"%(queues)s kuyruğunu henüz hiçbir işçi tanımlamadı; iletilerini tüketen yok. "
+"İşçisinin çalıştığını denetleyin."
+
+msgid "Review queues"
+msgstr "Kuyrukları incele"
+
+msgid "Not declared"
+msgstr "Tanımlanmamış"
 
 msgid "Duration"
 msgstr "Süre"

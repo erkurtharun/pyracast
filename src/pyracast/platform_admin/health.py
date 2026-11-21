@@ -254,6 +254,23 @@ def summarize_health(report: HealthReport) -> HealthSummary:
                 category="action",
             ),
         )
+    if missing := report.missing_queues:
+        checks.insert(
+            0,
+            HealthCheck(
+                key="missing_queues",
+                label=_("Missing message queues"),
+                count=len(missing),
+                help=_(
+                    "No worker has declared %(queues)s, so nothing consumes its messages. "
+                    "Check that its worker runs."
+                )
+                % {"queues": ", ".join(missing)},
+                action_url=f"{reverse('admin:workspace_operations')}#queues-title",
+                action_label=_("Review queues"),
+                category="action",
+            ),
+        )
     if report.broker_unreachable:
         checks.insert(
             0,

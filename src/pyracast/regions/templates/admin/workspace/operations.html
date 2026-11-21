@@ -14,7 +14,7 @@
   {% if health_filter %}<div class="panel-head"><p>{{ health_filter.label }}</p><a class="text-link" href="{% url 'admin:workspace_operations' %}">{% translate "Show all operations" %}</a></div>{% endif %}
   {% if show_dispatch %}
   <section class="panel" aria-labelledby="dispatch-title">
-    <div class="panel-head"><h2 id="dispatch-title">{% translate "Workers" %}</h2><p class="row-meta">{% translate "Queue counts are a diagnostic; only a message broker that does not answer changes the health result." %}</p></div>
+    <div class="panel-head"><h2 id="dispatch-title">{% translate "Workers" %}</h2><p class="row-meta">{% translate "Queue counts are a diagnostic; only a message broker that does not answer or a work queue no worker declared changes the health result." %}</p></div>
       <div class="table-wrap" role="region" aria-labelledby="dispatch-title" tabindex="0">
         <table class="table table--stack">
           <thead>
@@ -45,9 +45,14 @@
           <tbody>
             {% for queue in broker.queues %}<tr>
               <th scope="row" data-label="{% translate "Queue" %}"><span class="code">{{ queue.queue }}</span></th>
-              <td data-label="{% translate "Waiting messages" %}">{{ queue.messages }}</td>
-              <td data-label="{% translate "Consumers" %}">{{ queue.consumers }}</td>
-              <td data-label="{% translate "Dead letters" %}">{{ queue.dead_letters }}</td>
+              {% if queue.missing %}
+                <td data-label="{% translate "Waiting messages" %}"><span class="badge badge--needs-attention">{% translate "Not declared" %}</span></td>
+                <td data-label="{% translate "Consumers" %}"><span class="muted">—</span></td>
+              {% else %}
+                <td data-label="{% translate "Waiting messages" %}">{{ queue.messages }}</td>
+                <td data-label="{% translate "Consumers" %}">{{ queue.consumers }}</td>
+              {% endif %}
+              <td data-label="{% translate "Dead letters" %}">{% if queue.dead_letters is None %}<span class="muted">{% translate "Not declared" %}</span>{% else %}{{ queue.dead_letters }}{% endif %}</td>
             </tr>{% endfor %}
           </tbody>
         </table>

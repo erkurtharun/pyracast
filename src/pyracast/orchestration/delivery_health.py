@@ -437,6 +437,8 @@ class BrokerState:
                     "messages": state.messages,
                     "consumers": state.consumers,
                     "dead_letters": state.dead_letters,
+                    "missing": state.missing,
+                    "dead_letters_missing": state.dead_letters is None,
                 }
                 for state in self.queues
             },
@@ -444,7 +446,8 @@ class BrokerState:
 
 
 def read_broker() -> BrokerState:
-    """The queue counts are a diagnostic; only a broker that does not answer fails the report."""
+    """The queue counts are a diagnostic; a broker that does not answer or a work queue nobody
+    declared fails the report."""
     try:
         return BrokerState(True, queue_states(QUEUES))
     except Exception as error:
@@ -471,10 +474,17 @@ class HealthReport:
         return self.broker is not None and not self.broker.reachable
 
     @property
+    def missing_queues(self) -> list[str]:
+        # Workers and the dispatcher declare a work queue together with its dead-letter queue, so
+        # a missing work queue has no consumer; a dead-letter queue alone holds no waiting work.
+        return [] if self.broker is None else [s.queue for s in self.broker.queues if s.missing]
+
+    @property
     def healthy(self) -> bool:
         return (
             not self.unhealthy_phases
             and not self.broker_unreachable
+            and not self.missing_queues
             and not any(self.counts[item.key] for item in CHECKS if item.alarm)
         )
 
