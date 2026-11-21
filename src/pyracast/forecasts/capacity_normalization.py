@@ -206,14 +206,14 @@ def _write(
         if copy.payload is None:
             continue
         copy.snapshot.capacity_normalization = record
-        payload = copy.payload | {
-            "reference_capacity_normalization": normalization_provenance(copy.snapshot)
-        }
+        provenance = {"reference_capacity_normalization": normalization_provenance(copy.snapshot)}
         results.append(
             ForecastResult(
                 snapshot=copy.snapshot,
-                payload=payload,
-                daily_payloads=copy.daily_payloads,
+                payload=copy.payload | provenance,
+                daily_payloads={
+                    day: payload | provenance for day, payload in copy.daily_payloads.items()
+                },
                 published_at=moment,
             )
         )
