@@ -12,8 +12,8 @@
   </section>
 
   {% if health_filter %}<div class="panel-head"><p>{{ health_filter.label }}</p><a class="text-link" href="{% url 'admin:workspace_operations' %}">{% translate "Show all operations" %}</a></div>{% endif %}
-  {% if work_window == "recent" %}<div class="panel-head"><p>{% translate "Work of the last 24 hours." %}</p><a class="text-link" href="{% url 'admin:workspace_operations' %}?window=all">{% translate "Show all work" %}</a></div>
-  {% elif work_window == "all" %}<div class="panel-head"><p>{% translate "All work." %}</p><a class="text-link" href="{% url 'admin:workspace_operations' %}">{% translate "Show the last 24 hours" %}</a></div>{% endif %}
+  {% if work_window == "recent" %}<div class="panel-head"><p>{% translate "Work of the last 24 hours and all open work." %}</p><a class="text-link" href="{% url 'admin:workspace_operations' %}{{ window_links.all }}">{% translate "Show all work" %}</a></div>
+  {% elif work_window == "all" %}<div class="panel-head"><p>{% translate "All work." %}</p><a class="text-link" href="{% url 'admin:workspace_operations' %}{{ window_links.recent }}">{% translate "Show the last 24 hours" %}</a></div>{% endif %}
   {% if show_dispatch %}
   <section class="panel" aria-labelledby="dispatch-title">
     <div class="panel-head"><h2 id="dispatch-title">{% translate "Workers" %}</h2><p class="row-meta">{% translate "Queue counts are a diagnostic; only a message broker that does not answer or a work queue the broker has not declared changes the health result." %}</p></div>

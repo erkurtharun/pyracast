@@ -3098,8 +3098,8 @@ msgstr "E-posta göndericisine izin verilmedi"
 msgid "Showing %(first)s–%(last)s of %(total)s"
 msgstr "%(total)s kayıttan %(first)s–%(last)s gösteriliyor"
 
-msgid "Work of the last 24 hours."
-msgstr "Son 24 saatin işleri."
+msgid "Work of the last 24 hours and all open work."
+msgstr "Son 24 saatin işleri ve tüm açık işler."
 
 msgid "Show all work"
 msgstr "Tüm işleri göster"

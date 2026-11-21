@@ -16,6 +16,7 @@ from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.budget import OPEN as OPEN_COLLECTIONS
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJobError,
@@ -30,7 +31,7 @@ from pyracast.notifications.models import (
     PreparedMessageKind,
 )
 from pyracast.notifications.operations import recipient_limit
-from pyracast.notifications.recipients import delivery_addresses
+from pyracast.notifications.recipients import OPEN_DELIVERIES, delivery_addresses
 from pyracast.orchestration.delivery_health import (
     DISPATCH_LAG,
     TABLES,
@@ -43,6 +44,7 @@ from pyracast.orchestration.delivery_health import (
     listed,
     read_broker,
 )
+from pyracast.plants.calibration_runs import OPEN_STATUSES as OPEN_CALIBRATIONS
 from pyracast.plants.models import CalibrationError, CalibrationStatus, Plant
 from pyracast.platform_admin.forms import ReviewDecisionForm, WorkspaceSettingsForm
 from pyracast.platform_admin.health import PRESENTATION, presented, summarize_health
@@ -336,6 +338,14 @@ WORK_REGION: Mapping[Scope, str] = {
 }
 WORK_WINDOW = timedelta(hours=24)
 WORK_PAGE_SIZE = 20
+# Rows in these statuses stay listed whatever their age. A metering job awaiting publication is
+# never claimed again: a later night's job asks EPIAS for the same period anew.
+OPEN_WORK: Mapping[Scope, tuple[str, ...]] = {
+    "collections": OPEN_COLLECTIONS,
+    "deliveries": OPEN_DELIVERIES,
+    "metering": (EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING),
+    "calibrations": OPEN_CALIBRATIONS,
+}
 
 
 def _first_plant_name(region: str, fallback: str) -> Coalesce:
@@ -500,14 +510,31 @@ def _page_url(query: QueryDict, key: str, number: int) -> str:
     return f"?{linked.urlencode()}"
 
 
-def work_pages(selected: Check | None, now: datetime, query: QueryDict) -> dict[str, Any]:
-    """Each operations list as one page; without a selected check, of the last 24 hours unless
-    the query asks for all work."""
-    recent = selected is None and query.get("window") != "all"
+def _window_url(query: QueryDict, window: str) -> str:
+    """The same query in another window; each list starts again at its first page."""
+    linked = query.copy()
+    for key in [key for key in linked if key == "window" or key.endswith("_page")]:
+        del linked[key]
+    if window == "all":
+        linked["window"] = window
+    return f"?{linked.urlencode()}" if linked else ""
+
+
+def work_pages(
+    selected: Check | None, section: str, now: datetime, query: QueryDict
+) -> dict[str, Any]:
+    """Each operations list the section shows, as one page; on the unfiltered page the rows of
+    the last 24 hours and every open row, unless the query asks for all work."""
+    recent = not section and query.get("window") != "all"
     context: dict[str, Any] = {}
     for scope, table in _work_tables(None, selected, Window(now, DISPATCH_LAG)).items():
+        if section and section != scope:
+            continue
         if recent:
-            table = table.filter(**{f"{WORK_ORDER[scope]}__gte": now - WORK_WINDOW})
+            table = table.filter(
+                Q(**{f"{WORK_ORDER[scope]}__gte": now - WORK_WINDOW})
+                | Q(status__in=OPEN_WORK[scope])
+            )
         key = f"{scope}_page"
         page = Paginator(table, WORK_PAGE_SIZE).get_page(query.get(key))
         context[scope] = [WORK_ROWS[scope](row) for row in page]
@@ -516,7 +543,8 @@ def work_pages(selected: Check | None, now: datetime, query: QueryDict) -> dict[
             "previous": _page_url(query, key, page.number - 1) if page.has_previous() else "",
             "next": _page_url(query, key, page.number + 1) if page.has_next() else "",
         }
-    context["work_window"] = "" if selected is not None else "recent" if recent else "all"
+    context["work_window"] = "" if section else "recent" if recent else "all"
+    context["window_links"] = {"recent": _window_url(query, ""), "all": _window_url(query, "all")}
     return context
 
 
@@ -576,7 +604,7 @@ def operations_context(issue: str = "", query: QueryDict | None = None) -> dict[
         ],
         "broker": health.broker,
         "provider_requests": provider_request_rows(health.requests[:20]),
-        **work_pages(selected, now, query if query is not None else QueryDict()),
+        **work_pages(selected, section, now, query if query is not None else QueryDict()),
     }
 
 
