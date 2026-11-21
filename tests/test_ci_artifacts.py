@@ -78,7 +78,7 @@ def test_every_uploaded_artifact_has_a_consumer_or_is_a_report() -> None:
         elif name.startswith("release-images-"):
             assert (source, identifier) == ("ci.yml", "deployment")
         elif name.startswith("pr-tested-"):
-            assert (source, identifier) == ("ci.yml", "ci_result")
+            assert (source, identifier) == ("ci.yml", "pr_tested")
         else:
             outputs = workflow(source)["jobs"][identifier].get("outputs", {})
             keys = {

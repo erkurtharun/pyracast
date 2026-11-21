@@ -30,6 +30,8 @@ WORKFLOW = 41
 STARTED = "2026-11-21T05:00:00Z"
 BEFORE_RUN = "2026-11-21T04:00:00Z"
 AFTER_START = "2026-11-21T05:10:00Z"
+SECOND_LATER = "2026-11-21T05:10:01Z"
+RERUN_STARTED = "2026-11-21T05:20:00Z"
 PULL_RUN_CREATED = "2026-11-21T04:30:00Z"
 GIT = shutil.which("git")
 
@@ -67,6 +69,7 @@ def facts(run_changes: dict[str, Any] | None = None, **changes: Any) -> dict[str
             {"id": 92, "name": "coverage-2", "expired": False, "head_sha": MAIN},
         ],
         "deployments": [],
+        "sonar_enabled": True,
     }
     value.update(changes)
     return value
@@ -225,15 +228,13 @@ def test_an_unreadable_main_commit_is_refused(main: str | None) -> None:
         decide(facts({"head_sha": main}, main_sha=main, event_sha=main))
 
 
-def deployment(**changes: Any) -> dict[str, Any]:
-    return {"sha": MAIN, "created_at": AFTER_START, "state": "success", **changes}
+def deployment(state: str = "success", **changes: Any) -> dict[str, Any]:
+    status = {"id": 301, "state": state, "created_at": AFTER_START}
+    return {"sha": MAIN, "created_at": AFTER_START, "statuses": [status], **changes}
 
 
-@pytest.mark.parametrize("state", ["success", "in_progress", "queued", "pending"])
-def test_the_release_after_the_whole_run_skips_a_commit_released_since_the_run_started(
-    state: str,
-) -> None:
-    decision = decide(facts(deployments=[deployment(state=state)]))
+def test_the_release_after_the_whole_run_skips_a_commit_released_since_the_run_started() -> None:
+    decision = decide(facts(deployments=[deployment()]))
 
     assert isinstance(decision, Superseded)
     assert f"{MAIN} is already released" in decision.reason
@@ -243,20 +244,78 @@ def test_the_release_after_the_whole_run_skips_a_commit_released_since_the_run_s
     "deployments",
     [
         None,
-        [deployment(state="failure")],
-        [deployment(state="error")],
-        [deployment(state="inactive")],
+        [deployment("in_progress")],
+        [deployment("queued")],
+        [deployment("pending")],
+        [deployment("failure")],
+        [deployment("error")],
+        [deployment("inactive")],
+        [deployment(statuses=[])],
         [deployment(created_at=BEFORE_RUN)],
         [deployment(sha=OLDER)],
         [deployment(created_at="yesterday")],
+        [deployment(statuses=[{"id": 301, "state": "success"}])],
         [{"sha": MAIN}],
         "unreadable",
     ],
 )
-def test_the_release_after_the_whole_run_deploys_without_an_earlier_release_of_this_run(
+def test_the_release_after_the_whole_run_deploys_without_a_successful_release_of_this_run(
     deployments: Any,
 ) -> None:
     assert decide(facts(deployments=deployments)) == authorized()
+
+
+def statuses(*listed: tuple[int, str, str]) -> list[dict[str, Any]]:
+    return [{"id": id_, "state": state, "created_at": at} for id_, state, at in listed]
+
+
+@pytest.mark.parametrize(
+    ("listed", "released"),
+    [
+        (statuses((10, "in_progress", AFTER_START), (11, "failure", AFTER_START)), False),
+        (statuses((11, "failure", AFTER_START), (10, "in_progress", AFTER_START)), False),
+        (statuses((10, "in_progress", AFTER_START), (11, "success", AFTER_START)), True),
+        (statuses((11, "success", AFTER_START), (10, "in_progress", AFTER_START)), True),
+        (statuses((12, "in_progress", AFTER_START), (5, "success", SECOND_LATER)), True),
+        (statuses((5, "success", SECOND_LATER), (12, "failure", AFTER_START)), True),
+        (statuses((5, "success", AFTER_START), (4, "failure", SECOND_LATER)), False),
+    ],
+)
+def test_the_newest_deployment_status_is_chosen_by_time_then_by_id(
+    listed: list[dict[str, Any]], released: bool
+) -> None:
+    record = deployment(statuses=listed)
+
+    assert released_since([record], MAIN, STARTED, {"success"}) is released
+    assert isinstance(decide(facts(deployments=[record])), Superseded) is released
+
+
+def test_a_partial_rerun_of_main_after_a_release_of_its_earlier_images_is_superseded() -> None:
+    for artifacts in ([], [images(1, 90)]):
+        decision = decide(
+            facts(
+                {"run_started_at": RERUN_STARTED}, artifacts=artifacts, deployments=[deployment()]
+            )
+        )
+
+        assert isinstance(decision, Superseded), artifacts
+        assert f"{MAIN} is already released" in decision.reason
+
+
+def test_a_full_rerun_of_main_that_rebuilt_its_images_is_judged_on_its_own() -> None:
+    value = facts(
+        {"run_started_at": RERUN_STARTED},
+        artifacts=[images(1, 90), images(2, 91)],
+        deployments=[deployment()],
+    )
+
+    assert decide(value) == authorized(ci_started_at=RERUN_STARTED)
+
+
+def test_a_partial_rerun_measures_earlier_releases_from_the_creation_of_its_run() -> None:
+    value = facts({"run_started_at": RERUN_STARTED}, artifacts=[images(1, 90)])
+
+    assert decide(value) == authorized(ci_run_attempt=1, artifact_id=90, ci_started_at=STARTED)
 
 
 def test_an_operator_dispatch_releases_a_commit_already_released_from_its_run() -> None:
@@ -272,6 +331,9 @@ def test_the_released_check_needs_a_readable_start_of_the_ci_run() -> None:
 
 
 IMAGE_JOB = "Deployment configuration and containers"
+SONAR = "Sonar quality gate"
+RECORD = "Record the tested tree"
+RELEASE_START = "Start the release of a proven merge"
 PULL_REQUEST_JOBS = [
     IMAGE_JOB,
     "Verify (ubuntu-latest)",
@@ -280,8 +342,9 @@ PULL_REQUEST_JOBS = [
     "Web (ubuntu-latest)",
     "Scientific (ubuntu-latest)",
     "Dependency audit",
-    "Sonar quality gate",
+    SONAR,
     "CI result",
+    RECORD,
 ]
 
 
@@ -365,9 +428,9 @@ def early(
 
 
 def evidence_artifact(
-    base: str = PARENT, tree: str = TREE, attempt: int = 1, **changes: Any
+    base: str = PARENT, tree: str = TREE, attempt: int = 1, number: int = 82, **changes: Any
 ) -> dict[str, Any]:
-    name = f"pr-tested-{base}-{tree}-{attempt}"
+    name = f"pr-tested-{number}-{base}-{tree}-{attempt}"
     return {"id": 52, "name": name, "expired": False, "head_sha": HEAD, **changes}
 
 
@@ -393,13 +456,28 @@ def jobs_with(name: str, conclusion: str | None) -> list[dict[str, Any]]:
     ]
 
 
-def test_the_pull_request_run_may_skip_sonar_and_the_release_start_alone() -> None:
-    skipped = [
-        *jobs_with("Sonar quality gate", "skipped"),
-        {"name": "Start the release of a proven merge", "conclusion": "skipped"},
+def test_the_pull_request_run_may_skip_the_release_start_and_sonar_while_sonar_is_off() -> None:
+    started_on_main_only = [
+        *jobs_with(SONAR, "success"),
+        {"name": RELEASE_START, "conclusion": "skipped"},
     ]
+    sonar_off = [*jobs_with(SONAR, "skipped"), {"name": RELEASE_START, "conclusion": "skipped"}]
 
-    assert decide(early(tested_jobs=skipped)) == proven()
+    assert decide(early(tested_jobs=started_on_main_only)) == proven()
+    assert decide(early(tested_jobs=sonar_off, sonar_enabled=False)) == proven()
+
+
+@pytest.mark.parametrize("enabled", [True, "false", None, "absent"])
+def test_a_pull_request_run_that_skipped_sonar_while_it_is_on_is_no_proof(enabled: object) -> None:
+    value = early(tested_jobs=jobs_with(SONAR, "skipped"), sonar_enabled=enabled)
+    if enabled == "absent":
+        value.pop("sonar_enabled")
+
+    deferred(value, "did not pass every job")
+
+
+def test_a_pull_request_run_whose_tree_record_failed_is_no_proof() -> None:
+    deferred(early(tested_jobs=jobs_with(RECORD, "failure")), "did not pass every job")
 
 
 @pytest.mark.parametrize(
@@ -450,10 +528,22 @@ def test_the_pull_request_run_may_skip_sonar_and_the_release_start_alone() -> No
         (early(evidence=[]), "no single tested tree"),
         (early(evidence=[evidence_artifact(attempt=2)]), "no single tested tree"),
         (
-            early(evidence=[{**evidence_artifact(), "name": f"pr-tested-{PARENT}-{TREE}"}]),
+            early(tested={"run_attempt": 2}, evidence=[evidence_artifact(attempt=1)]),
+            "no single tested tree for attempt 2",
+        ),
+        (
+            early(evidence=[{**evidence_artifact(), "name": f"pr-tested-82-{PARENT}-{TREE}"}]),
             "no single",
         ),
-        (early(evidence=[{**evidence_artifact(), "name": "pr-tested-main-tree-1"}]), "no single"),
+        (
+            early(evidence=[{**evidence_artifact(), "name": f"pr-tested-{PARENT}-{TREE}-1"}]),
+            "no single",
+        ),
+        (
+            early(evidence=[{**evidence_artifact(), "name": "pr-tested-82-main-tree-1"}]),
+            "no single",
+        ),
+        (early(evidence=[evidence_artifact(number=83)]), "names pull request #83"),
         (
             early(evidence=[evidence_artifact(), evidence_artifact(tree=OTHER)]),
             "no single tested tree",
@@ -471,17 +561,72 @@ def test_an_early_release_needs_the_pull_request_run_of_this_exact_tree(
     deferred(value, reason)
 
 
+PIPELINE = [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    ".github/actions/setup/action.yml",
+    ".github/dependabot.yml",
+    "deploy/release_authorization.py",
+    "deploy/compose.yaml",
+    "infra/terraform/main.tf",
+    "infra/terraform/.terraform.lock.hcl",
+    "scripts/ci_result.py",
+    "scripts/check.py",
+    "scripts/check_scientific.py",
+    "scripts/npm_audit.py",
+    "scripts/start_postgres.py",
+    "sonar-project.properties",
+    "pyproject.toml",
+    "uv.lock",
+    ".python-version",
+    "Dockerfile",
+    ".dockerignore",
+    ".gitattributes",
+    ".gitignore",
+    ".editorconfig",
+    "web/package.json",
+    "web/package-lock.json",
+    "web/Dockerfile",
+    "web/.dockerignore",
+    "web/.gitignore",
+    "web/.prettierignore",
+    "web/coverage-floor.json",
+    "web/bundle-budget.json",
+    "web/audit-exceptions.json",
+    "web/eslint.config.mjs",
+    "web/tsconfig.json",
+    "web/playwright.config.ts",
+    "web/playwright.integration.config.ts",
+    "web/testing/run-coverage.mjs",
+    "web/testing/coverage-floor.ts",
+]
+
+
+@pytest.mark.parametrize("path", PIPELINE)
+def test_a_commit_that_changes_the_pipeline_waits_for_the_whole_run(path: str) -> None:
+    deferred(early(commit={"paths": ["src/pyracast/views.py", path]}), f"pipeline ({path})")
+
+
 @pytest.mark.parametrize(
     "path",
     [
-        ".github/workflows/ci.yml",
-        ".github/workflows/release.yml",
-        "deploy/release_authorization.py",
-        "infra/terraform/main.tf",
+        "src/pyracast/views.py",
+        "tests/test_release_authorization.py",
+        "tests/conftest.py",
+        "web/src/app/page.tsx",
+        "web/tests/workspace.spec.ts",
+        "web/next.config.ts",
+        "web/messages/en/core.json",
+        "docs/DEPLOYMENT.md",
+        "README.md",
+        "deployment/notes.md",
+        "scripts.md",
+        "web/package.json.md",
+        "src/pyproject.toml",
     ],
 )
-def test_a_commit_that_changes_the_pipeline_waits_for_the_whole_run(path: str) -> None:
-    deferred(early(commit={"paths": ["src/pyracast/views.py", path]}), f"pipeline ({path})")
+def test_product_tests_and_documents_are_outside_the_pipeline(path: str) -> None:
+    assert decide(early(commit={"paths": [path]})) == proven()
 
 
 @pytest.mark.parametrize(
@@ -554,8 +699,6 @@ def test_a_failed_git_read_waits_for_the_whole_run() -> None:
 @pytest.mark.parametrize(
     ("value", "reason"),
     [
-        (early(run={"status": "completed", "conclusion": "success"}), "has ended"),
-        (early(run={"status": "completed", "conclusion": "failure"}), "has ended"),
         (early(jobs=[{"name": IMAGE_JOB, "conclusion": None}]), "image job"),
         (early(jobs=[{"name": IMAGE_JOB, "conclusion": "failure"}]), "image job"),
         (early(jobs=[]), "image job"),
@@ -571,10 +714,111 @@ def test_an_early_release_needs_the_images_this_attempt_built_while_the_run_goes
     deferred(value, reason)
 
 
+def running_jobs(*finished: tuple[str, str]) -> list[dict[str, Any]]:
+    return [
+        {"name": IMAGE_JOB, "conclusion": "success"},
+        *({"name": name, "conclusion": conclusion} for name, conclusion in finished),
+        {"name": "Verify (ubuntu-latest)", "conclusion": None},
+        {"name": "CI result", "conclusion": None},
+        {"name": RELEASE_START, "conclusion": None},
+    ]
+
+
+@pytest.mark.parametrize(
+    "conclusion", ["failure", "cancelled", "timed_out", "action_required", "skipped"]
+)
+def test_a_job_of_the_main_run_that_already_ended_without_success_defers_the_release(
+    conclusion: str,
+) -> None:
+    value = early(jobs=running_jobs(("Dependency audit", conclusion)))
+
+    deferred(value, f"Dependency audit of CI run 7001 ended {conclusion}")
+
+
+def test_the_main_run_may_skip_the_tree_record_and_sonar_while_sonar_is_off() -> None:
+    skipped = running_jobs((RECORD, "skipped"), (SONAR, "skipped"))
+
+    assert decide(early(jobs=skipped, sonar_enabled=False)) == proven()
+    deferred(early(jobs=skipped), f"{SONAR} of CI run 7001 ended skipped")
+
+
+@pytest.mark.parametrize(
+    ("found", "error", "reason"),
+    [
+        (False, None, "not this repository's CI of a push to main"),
+        (False, "Request timed out", "The CI run facts are unavailable: Request timed out"),
+        (True, "Server Error", "The CI run facts are unavailable: Server Error"),
+    ],
+)
+def test_an_early_start_without_the_facts_of_its_run_waits_for_the_whole_run(
+    found: bool, error: str | None, reason: str
+) -> None:
+    value = early(run_error=error)
+    if not found:
+        value["run"] = None
+
+    deferred(value, reason)
+    assert decide(value).reason.endswith("the release after the whole CI run 7001 decides.")
+
+
+def ended(conclusion: str = "success", **changes: Any) -> dict[str, Any]:
+    value = early(run={"status": "completed", "conclusion": conclusion}, **changes)
+    value["jobs"] = [
+        {"name": IMAGE_JOB, "conclusion": "success"},
+        {"name": "CI result", "conclusion": "success" if conclusion == "success" else "failure"},
+    ]
+    return value
+
+
+def test_an_early_start_judged_after_its_run_succeeded_releases_by_the_whole_run_rule() -> None:
+    assert decide(ended()) == authorized(ci_run_attempt=1)
+    assert decide(ended(proof={"error": "Request timed out"})) == authorized(ci_run_attempt=1)
+
+
+def test_an_early_start_judged_after_its_run_was_released_is_superseded() -> None:
+    decision = decide(ended(deployments=[deployment()]))
+
+    assert isinstance(decision, Superseded)
+    assert f"{MAIN} is already released" in decision.reason
+
+
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out"])
+def test_an_early_start_judged_after_its_run_failed_is_refused(
+    tmp_path: Path, conclusion: str
+) -> None:
+    with pytest.raises(RefusedError, match="successful repository CI"):
+        decide(ended(conclusion))
+
+    status, outputs, summary = run_main(tmp_path, ended(conclusion))
+
+    assert (status, outputs) == (1, {"authorized": "false"})
+    assert summary.startswith("Refused: Only the current main SHA")
+
+
 def test_an_early_release_of_a_commit_main_has_moved_past_is_superseded() -> None:
     decision = decide(early(event_sha=OLDER))
 
     assert isinstance(decision, Superseded)
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        {"head_sha": OLDER},
+        {"head_sha": OLDER, "status": "completed", "conclusion": "cancelled"},
+        {"head_sha": OLDER, "status": "completed", "conclusion": "success"},
+    ],
+)
+def test_an_early_start_of_a_merge_the_next_merge_of_a_train_replaced_is_superseded(
+    run: dict[str, Any],
+) -> None:
+    # In a train each merge pushes to main while the run of the merge before it is cancelled.
+    decision = decide(early(run=run, event_sha=OLDER))
+
+    assert isinstance(decision, Superseded)
+    assert decision.reason == (
+        f"main moved from {OLDER} to {MAIN}; the release for {MAIN} deploys it."
+    )
 
 
 def run_command(
@@ -703,6 +947,49 @@ def test_the_commit_facts_of_a_merge_or_a_root_commit_list_no_paths(repository: 
     assert first is not None
     assert (merged["parents"][1], merged["paths"]) == (side, [])
     assert (first["parents"], first["paths"], first["parent_committed_at"]) == ([], [], None)
+
+
+def test_the_commit_facts_keep_each_changed_path_exactly_as_git_names_it(
+    repository: Path,
+) -> None:
+    parent = commit(repository, "src/a.py")
+    blob = git(repository, "hash-object", "-w", "src/a.py")
+    git(repository, "update-index", "--add", "--cacheinfo", "100644", blob, " deploy.md")
+    git(repository, "commit", "--quiet", "--message", "change")
+    head = git(repository, "rev-parse", "HEAD")
+
+    facts_of_head = commit_facts(repository, head)
+
+    assert facts_of_head is not None
+    assert (facts_of_head["parents"], facts_of_head["paths"]) == ([parent], [" deploy.md"])
+
+
+def test_a_one_commit_rebase_onto_an_unmoved_main_has_the_facts_of_a_squash(
+    repository: Path,
+) -> None:
+    base = commit(repository, "src/a.py")
+    git(repository, "switch", "--quiet", "-c", "feature")
+    first = commit(repository, "src/b.py", date=STARTED)
+    second = commit(repository, "src/c.py", date=STARTED)
+    git(repository, "switch", "--quiet", "--detach", base)
+    git(repository, "merge", "--quiet", "--squash", first)
+    git(repository, "commit", "--quiet", "--message", "squash", date=AFTER_START)
+    squash = git(repository, "rev-parse", "HEAD")
+    git(repository, "switch", "--quiet", "--detach", base)
+    git(repository, "cherry-pick", first, date=AFTER_START)
+    rebased_first = git(repository, "rev-parse", "HEAD")
+    git(repository, "cherry-pick", second, date=AFTER_START)
+    rebased_last = git(repository, "rev-parse", "HEAD")
+
+    squashed = commit_facts(repository, squash)
+    rebased = commit_facts(repository, rebased_last)
+
+    assert squash != rebased_first
+    assert squashed is not None
+    assert squashed["parents"] == [base]
+    assert commit_facts(repository, rebased_first) == squashed
+    assert rebased is not None
+    assert rebased["parents"] == [rebased_first] != [base]
 
 
 def test_the_commit_facts_are_absent_when_git_cannot_read_the_commit(
