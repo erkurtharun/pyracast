@@ -31,7 +31,7 @@ def register_account(user: User, *, language: str, workspace_name: str | None) -
 @transaction.atomic
 def remove_workspace_member(
     actor: User, tenant_id: int, user_id: int, *, platform: bool = False
-) -> None:
+) -> bool:
     # A refused caller locks nothing. Then the member's account rows before the workspace, the
     # order of the account processes: an acceptance or an address verified meanwhile is among
     # what is read below.
@@ -44,7 +44,7 @@ def remove_workspace_member(
         .first()
     )
     if membership is None:
-        return
+        return False
     if membership.role == WorkspaceRole.ADMIN or user_id == actor.pk:
         raise DomainError(ErrorCode.WORKSPACE_ADMIN_NOT_REMOVABLE)
     addresses = list(EmailAddress.objects.filter(user_id=user_id).values_list("email", "verified"))
@@ -70,6 +70,7 @@ def remove_workspace_member(
         tenant_id=tenant_id,
         target_id=user_id,
     )
+    return True
 
 
 @transaction.atomic

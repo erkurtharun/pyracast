@@ -1,3 +1,5 @@
+import json
+import logging
 import re
 from collections.abc import Callable
 from datetime import timedelta
@@ -9,10 +11,12 @@ from django.core import mail
 from django.test import Client
 from django.utils import timezone
 
+from pyracast.accounts.audit import logger as security_logger
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import (
     Membership,
     Tenant,
+    WorkspaceAdminChange,
     WorkspaceInvitation,
     WorkspaceMemberRemoval,
     WorkspaceRole,
@@ -516,6 +520,78 @@ def test_member_removal_states_its_consequences_and_keeps_the_administrator() ->
     assert refused.status_code == 400
     assert "The workspace administrator cannot be removed." in refused.content.decode()
     assert Membership.objects.get(user=owner).role == WorkspaceRole.ADMIN
+
+
+def notices(client: Client, url: str, data: dict[str, object] | None = None) -> list[str]:
+    response = client.post(url, data or {}, follow=True)
+    return [str(message) for message in response.context["messages"]]
+
+
+def security_events(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        json.loads(record.getMessage())["event"]
+        for record in caplog.records
+        if record.name == "pyracast.security"
+    ]
+
+
+def test_a_double_submitted_cancellation_reports_it_once(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant, _, _ = workspace()
+    client, operator = verified_admin()
+    invitation = invite_workspace_member(operator, tenant.pk, "guest@example.com", platform=True)
+    url = f"/admin/workspaces/{tenant.pk}/invitations/{invitation.pk}/revocation/"
+    monkeypatch.setattr(security_logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(security_logger, "propagate", False)
+    caplog.set_level(logging.INFO, logger="pyracast.security")
+    caplog.clear()
+
+    assert notices(client, url) == ["Invitation to guest@example.com revoked."]
+    assert notices(client, url) == ["The invitation to guest@example.com is already closed."]
+    assert security_events(caplog) == ["invitation_revoked"]
+
+
+def test_a_double_submitted_member_removal_reports_it_once() -> None:
+    tenant, _, viewer = workspace()
+    client, _ = verified_admin()
+    url = f"/admin/workspaces/{tenant.pk}/members/{viewer.pk}/removal/"
+
+    assert notices(client, url) == ["viewer@example.com was removed from the workspace."]
+    assert notices(client, url) == ["viewer@example.com is not a member of the workspace."]
+    assert WorkspaceMemberRemoval.objects.count() == 1
+    assert client.post(f"/admin/workspaces/{tenant.pk}/members/999999/removal/").status_code == 404
+
+
+def test_only_a_console_administrator_change_that_changes_something_closes_invitations(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant, owner, viewer = workspace()
+    client, operator = verified_admin()
+    invitation = invite_workspace_member(operator, tenant.pk, "guest@example.com", platform=True)
+    url = f"/admin/workspaces/{tenant.pk}/administrator/"
+    monkeypatch.setattr(security_logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(security_logger, "propagate", False)
+    caplog.set_level(logging.INFO, logger="pyracast.security")
+    caplog.clear()
+
+    kept = notices(client, url, {"administrator": owner.pk, "expected_admin_id": owner.pk})
+
+    assert kept == ["owner@example.com is already the workspace administrator."]
+    assert WorkspaceInvitation.objects.get().state_at(timezone.now()) == "pending"
+    assert not WorkspaceAdminChange.objects.exists()
+    assert security_events(caplog) == []
+
+    changed = notices(client, url, {"administrator": viewer.pk, "expected_admin_id": owner.pk})
+
+    assert changed == ["viewer@example.com is now the workspace administrator."]
+    closed = WorkspaceInvitation.objects.get(pk=invitation.pk)
+    assert (closed.revoked_reason, closed.state_at(timezone.now())) == (
+        "administrator_changed",
+        "revoked",
+    )
+    assert WorkspaceAdminChange.objects.count() == 1
+    assert security_events(caplog) == ["workspace_admin_reassigned"]
 
 
 def settings_section(html: str) -> str:

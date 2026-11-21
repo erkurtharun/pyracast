@@ -377,7 +377,8 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
 @transaction.atomic
 def revoke_workspace_invitation(
     actor: User, tenant_id: int, invitation_id: int, *, platform: bool = False
-) -> None:
+) -> bool:
+    """False when the invitation was already closed."""
     authorize_workspace_admin(actor, tenant_id, platform=platform)
     invitation = (
         WorkspaceInvitation.objects.select_for_update()
@@ -387,7 +388,7 @@ def revoke_workspace_invitation(
     if invitation is None or invitation.accepted_at is not None:
         raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
     if invitation.revoked_at is not None:
-        return
+        return False
     invitation.revoked_at = timezone.now()
     invitation.revoked_reason = InvitationRevocation.CANCELLED
     invitation.save(update_fields=["revoked_at", "revoked_reason"])
@@ -397,6 +398,7 @@ def revoke_workspace_invitation(
         tenant_id=tenant_id,
         target_id=invitation.pk,
     )
+    return True
 
 
 @transaction.atomic

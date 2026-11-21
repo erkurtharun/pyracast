@@ -14,7 +14,7 @@ class OpeningBackend(BaseEmailBackend):
     """Records what it is asked to send; `action` runs as the connection opens and `reply`
     answers each message in place of the mail server, raising to refuse it."""
 
-    action: ClassVar[Callable[[], None] | None] = None
+    action: ClassVar[Callable[[], object] | None] = None
     reply: ClassVar[Callable[[EmailMessage], None] | None] = None
     sent: ClassVar[list[EmailMessage]] = []
 
