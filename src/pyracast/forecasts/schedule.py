@@ -11,6 +11,7 @@ from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
+from pyracast.background.lease import claimable
 from pyracast.collection_window import (
     HISTORY_CLOCK,
     HISTORY_END_CLOCK,
@@ -144,13 +145,18 @@ class CollectionStatus:
 
 def _next_collection_at(collecting: Collecting, timezone: str, now: datetime) -> datetime | None:
     """The scheduler's next act: a missing nightly history job, one it revives, the latest slot's
-    job it opens again, a queued job claim takes, a slot."""
+    job it opens again, a queued or interrupted job claim takes, a slot."""
     night = open_night_window(now, timezone)
     timing = collecting.timing
     slot = latest_forecast_slot(now, timezone, timing.times, timing.effective_from)
     moment = Value(now, output_field=DateTimeField())
     jobs = CollectionJob.objects.filter(binding=collecting.binding).aggregate(
         queued=Min(claimable_from(now), filter=Q(status__in=WAITING) & open_at_claim(now)),
+        # A running job whose lease ended: the ready query hands it to claim again from then.
+        interrupted=Min(
+            Greatest(F("available_at"), moment),
+            filter=claimable(CollectionJobStatus.RUNNING, now) & open_at_claim(now),
+        ),
         **(
             {
                 "history": Count("pk", filter=night.history()),
@@ -183,6 +189,7 @@ def _next_collection_at(collecting: Collecting, timezone: str, now: datetime) ->
         now if due_now else None,
         jobs.get("revived"),
         jobs["queued"],
+        jobs["interrupted"],
         next_forecast_slot(now, timezone, timing.times, timing.effective_from),
         next_nightly_start(now, timezone),
     )
