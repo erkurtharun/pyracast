@@ -14,7 +14,13 @@ from pyracast.accounts.invitations import (
     reissue_workspace_invitation,
     revoke_workspace_invitation,
 )
-from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
+from pyracast.accounts.models import (
+    Membership,
+    Tenant,
+    WorkspaceInvitation,
+    WorkspaceMemberRemoval,
+    WorkspaceRole,
+)
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.plants.models import Plant
 from pyracast.platform_admin.forms import form_data, form_page, submitted
@@ -222,9 +228,14 @@ def member_removal(
     if membership is None:
         if request.method != "POST":
             raise Http404
-        get_object_or_404(Tenant, pk=tenant_id)
-        user = get_object_or_404(User, pk=user_id)
-        return _report_removal(request, tenant_id, member_label(user), removed=False)
+        removal = (
+            WorkspaceMemberRemoval.objects.select_related("user")
+            .filter(tenant_id=tenant_id, user_id=user_id)
+            .first()
+        )
+        if removal is None:
+            raise Http404
+        return _report_removal(request, tenant_id, member_label(removal.user), removed=False)
     label = member_label(membership.user)
     is_self = membership.user_id == _actor(request).pk
     errors: list[str] = []

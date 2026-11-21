@@ -563,6 +563,39 @@ def test_a_double_submitted_member_removal_reports_it_once() -> None:
     assert client.post(f"/admin/workspaces/{tenant.pk}/members/999999/removal/").status_code == 404
 
 
+def test_only_an_account_this_workspace_removed_gets_the_repeat_removal_notice() -> None:
+    tenant, _, viewer = workspace()
+    other = Tenant.objects.create(name="Other workspace")
+    neighbour = User.objects.create_user(username="neighbour", email="neighbour@example.com")
+    Membership.objects.create(tenant=other, user=neighbour)
+    loner = User.objects.create_user(username="loner", email="loner@example.com")
+    client, operator = verified_admin()
+    WorkspaceMemberRemoval.objects.create(tenant=other, actor=operator, user=loner)
+
+    def removal(user: User) -> str:
+        return f"/admin/workspaces/{tenant.pk}/members/{user.pk}/removal/"
+
+    def page_notices() -> list[str]:
+        response = client.get(f"/admin/workspaces/{tenant.pk}/")
+        return [str(message) for message in response.context["messages"]]
+
+    for stranger in (neighbour, loner):
+        assert client.post(removal(stranger)).status_code == 404
+        assert client.get(removal(stranger)).status_code == 404
+    assert page_notices() == []
+
+    removed_once = notices(client, removal(viewer))
+    Membership.objects.create(tenant=tenant, user=viewer)
+    removed_twice = notices(client, removal(viewer))
+
+    assert removed_once == removed_twice == ["viewer@example.com was removed from the workspace."]
+    assert notices(client, removal(viewer)) == [
+        "viewer@example.com is not a member of the workspace."
+    ]
+    assert client.get(removal(viewer)).status_code == 404
+    assert WorkspaceMemberRemoval.objects.filter(tenant=tenant, user=viewer).count() == 2
+
+
 def test_only_a_console_administrator_change_that_changes_something_closes_invitations(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
