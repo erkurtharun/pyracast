@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, cast
 
 from django import forms
@@ -356,13 +356,18 @@ def _render(request: HttpRequest, site: PlatformAdminSite, page: PlantPage) -> T
     binding = page.binding
     plant = page.plant
     blockers = approval_blockers(binding, binding.provider_account) if binding else []
-    # One read feeds what the page shows and the hash its approval sends.
+    # One read feeds what the page shows, the plant name its headings carry and the hash its
+    # approval sends.
     shown = declarations(page.region.pk)
     page.action_form.show_declaration(fingerprint_of(shown))
     try:
         review = review_context(page.region.pk)
     except Region.DoesNotExist as missing:
         raise Http404 from missing
+    review["plant_summary"] = replace(
+        review["plant_summary"],
+        plant_name=next((plant.name for plant, _ in shown), page.region.name),
+    )
     return TemplateResponse(
         request,
         "admin/regions/region/setup.html",
