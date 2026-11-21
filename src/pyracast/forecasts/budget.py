@@ -4,12 +4,14 @@ from zoneinfo import ZoneInfo
 from django.db.models import Exists, F, OuterRef, Q, QuerySet
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.forecasts.jobs.ready import WAITING
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
     CollectionJobStatus,
     CollectionSchedule,
     RequestAttempt,
+    RequestOutcome,
     RequestPurpose,
 )
 from pyracast.forecasts.scheduler import SLOT_FINAL_ERRORS
@@ -25,6 +27,17 @@ from pyracast.regions.models import RegionStatus, active_region
 
 OPEN = (CollectionJobStatus.PENDING, CollectionJobStatus.RETRY, CollectionJobStatus.RUNNING)
 ENDED = (CollectionJobStatus.SUCCEEDED, CollectionJobStatus.FAILED, CollectionJobStatus.STALE)
+# An unanswered validation attempt younger than this is still in flight: it outlasts the
+# whole-request read deadline of a provider answer (outbound.READ_DEADLINE_SECONDS).
+VALIDATION_IN_FLIGHT = timedelta(minutes=1)
+
+
+def validations_in_flight(now: datetime) -> QuerySet[RequestAttempt]:
+    return RequestAttempt.objects.filter(
+        purpose=RequestPurpose.VALIDATION,
+        outcome=RequestOutcome.UNCERTAIN,
+        created_at__gt=now - VALIDATION_IN_FLIGHT,
+    )
 
 
 def approved_bindings(account: ProviderAccount) -> QuerySet[SiteBinding]:
@@ -67,6 +80,9 @@ def _jobs_still_sent(
 ) -> dict[datetime, CollectionJob | None]:
     day_start = datetime.combine(now.astimezone(UTC).date(), datetime.min.time(), UTC)
     day_end = day_start + timedelta(days=1)
+    # The slot the scheduler opens, or opens again, once the binding is current. Claim ends an
+    # unclaimed job of an older slot without a request (jobs.claim._stale_reason).
+    due = latest_forecast_slot(now, binding.region.timezone, timing.times, timing.effective_from)
     jobs = list(
         CollectionJob.objects.filter(
             Q(status__in=OPEN) | Q(scheduled_for__gte=day_start, scheduled_for__lt=day_end),
@@ -86,7 +102,10 @@ def _jobs_still_sent(
     sent: dict[datetime, CollectionJob | None] = {
         job.scheduled_for: job
         for job in jobs
-        if job.status in OPEN and job.pk not in attempted and job.available_at < day_end
+        if job.status in OPEN
+        and job.pk not in attempted
+        and job.available_at < day_end
+        and not (job.status in WAITING and due is not None and job.scheduled_for < due)
     }
     zone = ZoneInfo(binding.region.timezone)
     day = day_start.astimezone(zone).date()
@@ -101,8 +120,6 @@ def _jobs_still_sent(
             ):
                 sent.setdefault(slot, None)
         day += timedelta(days=1)
-    # The slot the scheduler opens, or opens again, once the binding is current.
-    due = latest_forecast_slot(now, binding.region.timezone, timing.times, timing.effective_from)
     if due is not None:
         job = CollectionJob.objects.filter(
             binding=binding, endpoint=CollectionEndpoint.FORECASTS, scheduled_for=due
@@ -114,7 +131,7 @@ def _jobs_still_sent(
         ):
             sent.setdefault(due, job)
     latest = latest_forecast_job(binding.pk, now).first()
-    if latest is not None and armed_again_by_validation(latest):
+    if latest is not None and armed_again_by_validation(latest, due):
         sent[latest.scheduled_for] = latest
     return sent
 
@@ -142,7 +159,8 @@ def remaining_forecast_requests(
 ) -> int:
     """What every plant that collects now or once revalidated still needs today, plus one
     validation request for each plant awaiting revalidation. Validating such a plant counts only
-    the forecasts of the plants that collect now and of that plant."""
+    the forecasts of the plants that collect now, of those whose validation is in flight, and of
+    that plant."""
     plants = list(approved_bindings(account).select_related("region", "provider_account"))
     waiting = {
         binding.pk
@@ -150,10 +168,15 @@ def remaining_forecast_requests(
         if binding.validated_credential_revision != account.credential_revision
     }
     if validating is not None and validating.pk in waiting:
+        collecting = (waiting - {validating.pk}) & set(
+            validations_in_flight(now)
+            .filter(provider_account=account)
+            .values_list("binding_id", flat=True)
+        )
         return sum(
             forecast_need(binding, now, account.daily_quota)
             for binding in plants
-            if binding.pk == validating.pk or binding.pk not in waiting
+            if binding.pk not in waiting or binding.pk in collecting | {validating.pk}
         )
     return len(waiting) + sum(
         forecast_need(binding, now, account.daily_quota) for binding in plants

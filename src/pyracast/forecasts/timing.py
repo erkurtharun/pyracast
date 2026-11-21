@@ -56,11 +56,13 @@ def latest_forecast_job(binding_id: int, moment: datetime) -> QuerySet[Collectio
     ).order_by("-scheduled_for", "-pk")
 
 
-def armed_again_by_validation(job: CollectionJob) -> bool:
-    """A successful validation reopens its binding's latest forecast job refused for the key."""
+def armed_again_by_validation(job: CollectionJob, due: datetime | None) -> bool:
+    """A successful validation reopens its binding's latest forecast job refused for the key;
+    one older than the due slot stays ended, as the scheduler opens the due slot instead."""
     return (
         job.status == CollectionJobStatus.FAILED
         and job.last_error == CollectionJobError.PROVIDER_AUTHENTICATION_FAILED
+        and (due is None or job.scheduled_for >= due)
     )
 
 

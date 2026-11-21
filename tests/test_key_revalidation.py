@@ -19,6 +19,7 @@ from pyracast.connections import operations
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts import revalidation
+from pyracast.forecasts.budget import VALIDATION_IN_FLIGHT
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.forecasts.revalidation import (
     RevalidationOutcome,
@@ -27,7 +28,7 @@ from pyracast.forecasts.revalidation import (
     dispatch_revalidations,
     revalidate_account,
 )
-from pyracast.forecasts.validation import VALIDATION_IN_FLIGHT, validate_binding
+from pyracast.forecasts.validation import validate_binding
 from pyracast.orchestration import dispatcher as command
 from pyracast.orchestration.kinds import REVALIDATION
 from pyracast.regions.models import AuditEvent, Region
