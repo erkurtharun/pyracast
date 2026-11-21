@@ -59,7 +59,8 @@ def purge_closed_invitations(cutoff: datetime, limit: int) -> int:
 
 
 def _abandoned(cutoff: datetime) -> QuerySet[User]:
-    # Never signed in, no proven address, and every workspace it belongs to is its own and empty.
+    # Active (a sign-up is; erasure leaves an account inactive), never signed in, no proven
+    # address, and every workspace it belongs to is its own and empty.
     shared = Membership.objects.filter(tenant_id=OuterRef("tenant_id")).exclude(
         user_id=OuterRef("user_id")
     )
@@ -69,7 +70,11 @@ def _abandoned(cutoff: datetime) -> QuerySet[User]:
     )
     return (
         User.objects.filter(
-            last_login__isnull=True, date_joined__lte=cutoff, is_staff=False, is_superuser=False
+            is_active=True,
+            last_login__isnull=True,
+            date_joined__lte=cutoff,
+            is_staff=False,
+            is_superuser=False,
         )
         .exclude(emailaddress__verified=True)
         .exclude(Exists(kept))
