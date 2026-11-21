@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 from django.db.models import Exists, F, OuterRef, Q, QuerySet
 
+from pyracast.background.deadlines import DATABASE_LOCK_SECONDS, PROVIDER_REQUEST
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs.claim import claimable_from
 from pyracast.forecasts.jobs.ready import WAITING
@@ -28,9 +29,10 @@ from pyracast.regions.models import RegionStatus, active_region
 
 OPEN = (CollectionJobStatus.PENDING, CollectionJobStatus.RETRY, CollectionJobStatus.RUNNING)
 ENDED = (CollectionJobStatus.SUCCEEDED, CollectionJobStatus.FAILED, CollectionJobStatus.STALE)
-# An unanswered validation attempt younger than this is still in flight: it outlasts the
-# whole-request read deadline of a provider answer (outbound.READ_DEADLINE_SECONDS).
-VALIDATION_IN_FLIGHT = timedelta(minutes=1)
+# An unanswered validation attempt younger than this is still in flight: the provider request
+# and the region and account lock waits before its answer commits. An answer committed later
+# checks the reserve again (validation.validate_binding).
+VALIDATION_IN_FLIGHT = PROVIDER_REQUEST + timedelta(seconds=2 * DATABASE_LOCK_SECONDS)
 
 
 def validations_in_flight(now: datetime) -> QuerySet[RequestAttempt]:
