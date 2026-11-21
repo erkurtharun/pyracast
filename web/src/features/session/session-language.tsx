@@ -9,6 +9,7 @@ import {
 import { loadCatalogue, useCatalogues } from "@/i18n/catalogue";
 import { isLanguage, type Language } from "@/i18n/language";
 import { shell } from "@/i18n/shell";
+import type { Session } from "@/lib/session-client";
 
 export type SessionLanguageState = {
     locale: Language;
@@ -16,15 +17,16 @@ export type SessionLanguageState = {
     status: "ready" | "loading" | "failed";
 };
 
-// `language` is undefined until the first session read, and a pending language hand-off may still
-// change it: until both have settled only the shell shows, and a hand-off starts no catalogue. After a
-// catalogue was shown, a change keeps it until the next one arrives, so a screen never shows two
-// languages at once.
+// `session` is undefined until the first session read, and a pending language hand-off may still
+// change its language: until both have settled only the shell shows, and a hand-off starts no
+// catalogue. After a catalogue was shown, a change keeps it until the next one arrives, so a screen
+// never shows two languages at once.
 export function useSessionLanguage(
-    language: string | undefined,
+    session: Session | undefined,
     handoff: boolean,
 ): SessionLanguageState {
     const initialLocale = useLocale();
+    const language = session?.language;
     const wanted = isLanguage(language)
         ? language
         : isLanguage(initialLocale)
@@ -36,7 +38,7 @@ export function useSessionLanguage(
     useEffect(() => {
         if (!handoff && !entry) loadCatalogue(wanted).catch(() => {});
     }, [handoff, entry, wanted]);
-    if (language === undefined || handoff)
+    if (session === undefined || handoff)
         return { locale: wanted, messages: shell[wanted], status: "loading" };
     if (entry?.status === "ready") {
         if (shown !== wanted) setShown(wanted);
