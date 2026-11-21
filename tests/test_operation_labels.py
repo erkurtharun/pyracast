@@ -24,6 +24,7 @@ from pyracast.plants.models import (
 from tests.support.api import verified_admin
 from tests.support.delivery_health import NOW
 from tests.support.metering import connected
+from tests.support.notifications import freeze
 
 VOCABULARIES: tuple[type[TextChoices], ...] = (
     CollectionJobStatus,
@@ -81,16 +82,16 @@ def test_the_operations_tables_label_statuses_and_errors_in_turkish(
         pk__in=EpiasCollectionJob.objects.order_by("pk").values("pk")[:1]
     ).update(status="failed", last_error="epias_credentials_rejected", scheduled_for=NOW)
     schedule = ReminderSchedule.objects.create(region=system.region, effective_from=NOW)
-    NotificationDelivery.objects.create(
+    delivery = NotificationDelivery.objects.create(
         schedule=schedule,
         binding=system.binding,
-        recipients=["recipient@example.com"],
         scheduled_for=NOW + timedelta(minutes=1),
         preparation_deadline=NOW + PREPARATION_GRACE,
         available_at=NOW,
         status="cancelled",
         last_error="cancelled_by_settings_change",
     )
+    freeze(delivery, ["recipient@example.com"])
     client, user = verified_admin()
     UserLanguagePreference.objects.create(user=user, language="tr")
 

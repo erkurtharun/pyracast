@@ -30,6 +30,7 @@ from pyracast.regions.models import Region
 from tests.support.budgets import assert_scale_invariant, captured_statements
 from tests.support.delivery_health import NOW, recent_forecast
 from tests.support.domain import System, make_system
+from tests.support.notifications import store
 from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -431,13 +432,15 @@ def test_the_whole_report_reads_a_fixed_number_of_statements_whatever_the_tenant
                 validated_credential_revision=system.account.credential_revision,
             )
             Region.objects.filter(pk=region.pk).update(status="approved", approved_binding=binding)
-            ReminderSchedule.objects.create(
-                region=region,
-                enabled=True,
-                effective_from=NOW,
-                include_workspace_members=True,
-                recipients=[user.email],
-                recipient_memberships={user.email: [membership.pk]},
+            store(
+                ReminderSchedule.objects.create(
+                    region=region,
+                    enabled=True,
+                    effective_from=NOW,
+                    include_workspace_members=True,
+                ),
+                [user.email],
+                {user.email: [membership.pk]},
             )
 
     def report() -> None:
@@ -446,5 +449,5 @@ def test_the_whole_report_reads_a_fixed_number_of_statements_whatever_the_tenant
     assert_scale_invariant(seed, report, small=1, large=4)
     with captured_statements() as statements:
         report()
-    # BEGIN, SET LOCAL statement_timeout, ten reads and COMMIT.
-    assert len(statements) <= 13
+    # BEGIN, SET LOCAL statement_timeout, eleven reads and COMMIT.
+    assert len(statements) <= 14

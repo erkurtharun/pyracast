@@ -7,8 +7,9 @@ from django.core.management import CommandError, call_command
 
 from pyracast.forecasts.models import CollectionJob, DispatcherPhase, DispatcherStatus
 from pyracast.notifications.models import ReminderSchedule
-from tests.support.delivery_health import NOW, recent_forecast
+from tests.support.delivery_health import NOW, answering_broker, recent_forecast
 from tests.support.domain import make_system
+from tests.support.notifications import store
 
 # Operators and scripts read these keys of the printed report: keys may be added, but none of
 # these is removed, renamed or retyped.
@@ -43,6 +44,7 @@ def printed_report(monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, object], 
     monkeypatch.setattr(
         "pyracast.orchestration.management.commands.check_delivery_health.timezone.now", lambda: NOW
     )
+    answering_broker(monkeypatch)
     output = io.StringIO()
     try:
         call_command("check_delivery_health", stdout=output)
@@ -100,8 +102,9 @@ def test_the_printed_report_keeps_every_key_with_its_type_on_degraded_and_health
     assert failed is False
     assert report["unhealthy_dispatch_phases"] == []
 
-    ReminderSchedule.objects.create(
-        region=system.region, enabled=True, effective_from=NOW, recipients=["not-an-address"]
+    store(
+        ReminderSchedule.objects.create(region=system.region, enabled=True, effective_from=NOW),
+        ["not-an-address"],
     )
     CollectionJob.objects.create(
         binding=system.binding,

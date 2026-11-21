@@ -12,6 +12,7 @@ from pyracast.orchestration.delivery_health import CHECKS, Window, check, delive
 from pyracast.platform_admin.health import PRESENTATION
 from tests.support.delivery_health import NOW
 from tests.support.domain import make_system
+from tests.support.notifications import freeze
 
 LAG = timedelta(minutes=5)
 
@@ -44,10 +45,9 @@ def test_overdue_and_interrupted_jobs_are_jobs_their_owners_publish() -> None:
     )
     schedule = ReminderSchedule.objects.create(region=system.region, effective_from=NOW)
     for index, (status, lease) in enumerate((("pending", None), ("sending", NOW))):
-        NotificationDelivery.objects.create(
+        delivery = NotificationDelivery.objects.create(
             schedule=schedule,
             binding=system.binding,
-            recipients=["recipient@example.com"],
             scheduled_for=late - timedelta(minutes=index),
             preparation_deadline=late + PREPARATION_GRACE,
             available_at=late,
@@ -56,6 +56,7 @@ def test_overdue_and_interrupted_jobs_are_jobs_their_owners_publish() -> None:
             lease_expires_at=lease,
             prepared_message={"kind": "current", "tomorrow_complete": True},
         )
+        freeze(delivery, ["recipient@example.com"])
     window = Window(NOW, LAG)
     report = delivery_health(NOW, LAG)
 
