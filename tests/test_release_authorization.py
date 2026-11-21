@@ -922,7 +922,11 @@ def run_command(
     summary = tmp_path / "summary"
     status = release_authorization.main(
         list(arguments),
-        {"GITHUB_OUTPUT": str(output), "GITHUB_STEP_SUMMARY": str(summary)},
+        {
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_STEP_SUMMARY": str(summary),
+            "RUNNER_TEMP": str(tmp_path),
+        },
         root,
     )
     lines = output.read_text(encoding="utf-8").splitlines() if output.exists() else []
@@ -1299,3 +1303,34 @@ def test_a_decision_refuses_an_unreadable_deployment_lookup_flag(
 def test_outside_a_workflow_the_decision_needs_no_step_output_files() -> None:
     assert release_authorization.main(["current", MAIN, OLDER], {}) == 0
     assert release_authorization.main(["current", "HEAD", MAIN], {}) == 1
+
+
+def test_a_facts_path_outside_the_runner_temp_directory_is_never_read(tmp_path: Path) -> None:
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "facts.json").write_text(json.dumps(facts()), encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError):
+        release_authorization.main(
+            ["authorize", str(elsewhere / "facts.json")], {"RUNNER_TEMP": str(runner)}
+        )
+
+
+def test_the_deployment_records_path_outside_the_runner_temp_directory_is_never_read(
+    tmp_path: Path,
+) -> None:
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    environ = {"RUNNER_TEMP": str(runner), "GITHUB_OUTPUT": str(tmp_path / "output")}
+    elsewhere = tmp_path / "records.json"
+    elsewhere.write_text(json.dumps([deployment()]), encoding="utf-8")
+
+    status = release_authorization.main(
+        ["current", MAIN, MAIN, "--deployments", str(elsewhere), "--since", STARTED], environ
+    )
+
+    assert status == 0
+    written = (tmp_path / "output").read_text(encoding="utf-8")
+    assert written == "current=true\ndeployments=unknown\n"

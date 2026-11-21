@@ -512,6 +512,10 @@ def _authorize(facts_path: Path, environ: Mapping[str, str], root: Path) -> int:
     return 0
 
 
+def _runner_file(runner_temp: str, requested: Path) -> Path:
+    return Path(runner_temp) / requested.name
+
+
 def _read_records(path: Path | None) -> object:
     if path is None:
         return None
@@ -574,9 +578,16 @@ def main(
     # An operator's dispatch looks up no deployments, so it reports no deployment state.
     current.add_argument("--deployment-lookup", choices=("true", "false"), default="true")
     options = parser.parse_args(arguments)
+    runner_temp = environ.get("RUNNER_TEMP")
     if options.command == "authorize":
-        return _authorize(options.facts, environ, root or Path.cwd())
-    deployments = options.deployments if options.deployment_lookup == "true" else None
+        if runner_temp is None:
+            parser.error("RUNNER_TEMP is required")
+        return _authorize(_runner_file(runner_temp, options.facts), environ, root or Path.cwd())
+    deployments = None
+    if options.deployment_lookup == "true" and options.deployments is not None:
+        if runner_temp is None:
+            parser.error("RUNNER_TEMP is required")
+        deployments = _runner_file(runner_temp, options.deployments)
     return _current(options.main_sha, options.release_sha, environ, deployments, options.since)
 
 
