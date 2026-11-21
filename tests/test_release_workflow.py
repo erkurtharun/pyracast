@@ -809,6 +809,8 @@ NAMED_WORD = re.compile(r"(?<![\w$}/-])[\w.*-]+(?:/[\w.*-]+)*")
 PYTHON_MODULE = re.compile(r"\bpython3? -m ([\w.]+)")
 NPM_SCRIPT = re.compile(r"\bnpm (?:run ([\w:-]+)|(test)\b)")
 RELATIVE_NAME = re.compile(r"""["'](\.\.?/[^"'\s]*)["']""")
+# The walk follows relative names only; the source alias of tsconfig.json would bypass it.
+SOURCE_ALIAS = re.compile(r"""(?:\bfrom|\bimport|\brequire)\s*\(?\s*["']@/""")
 SCRIPT_SUFFIXES = (".mjs", ".cjs", ".js", ".mts", ".cts", ".ts", ".tsx")
 
 
@@ -971,7 +973,9 @@ def test_every_local_file_a_web_tool_configuration_imports_is_a_pipeline_path() 
         if name not in reached:
             reached.add(name)
             path = ROOT / name
-            for specifier in RELATIVE_NAME.findall(path.read_text("utf-8")):
+            text = path.read_text("utf-8")
+            assert SOURCE_ALIAS.search(text) is None, name
+            for specifier in RELATIVE_NAME.findall(text):
                 if (found := script_file(path.parent / specifier, files)) is not None:
                     pending.append(found)
     typescript = (ROOT / "web" / "tsconfig.json").read_text("utf-8")
