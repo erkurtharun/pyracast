@@ -473,11 +473,13 @@ fixtures do not establish provider access or inbox delivery.
   nonblocking. `pyracast.security` lines, including those of `exec` commands, go to
   the container stream through `PYRACAST_SECURITY_LOG_PATH`. Every record of the application
   and of Gunicorn starts one line, `DATE TIME LEVEL LOGGER MESSAGE`, and indents every further
-  line (a line break in a message or traceback, or 4000 characters), so text a request carries
-  never starts a line. A sink routes the lines whose logger is `pyracast.security`, and only
-  those of the containers that write them (`api`, `worker`, `notifications`, `dispatcher`,
-  `migrate`), to the log bucket `pyracast-security` in the Terraform region, which keeps them
-  365 days; `_Default` keeps its own copy for 30 days, so recent lines are searched as usual.
+  line (a line break in a message or traceback, or about 4 KiB of UTF-8), so text a request
+  carries never starts a line. Each line, at most 4096 bytes with its line break, is written by a
+  call of its own, so the lines of processes writing at once alternate but never mix. A sink
+  routes the lines whose logger is `pyracast.security`, and only those of the containers that
+  write them (`api`, `worker`, `notifications`, `dispatcher`, `migrate`), to the log bucket
+  `pyracast-security` in the Terraform region, which keeps them 365 days; `_Default` keeps its
+  own copy for 30 days, so recent lines are searched as usual.
   For older ones, refine the Logs Explorer scope to that bucket or run `gcloud logging read
   'FILTER' --bucket=pyracast-security --location=REGION --view=_AllLogs --freshness=365d`.
   Storage beyond 30 days costs 0.01 USD per GiB a month; the volume is small. A line carries

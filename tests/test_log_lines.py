@@ -135,3 +135,61 @@ def test_every_line_of_a_record_is_its_own_write_call_of_at_most_4096_bytes(
         *((line + line_break).encode() for line in lines),
     ]
     assert max(len(call) for call in raw.calls) <= PIPE_BUF
+
+
+def warning(message: str) -> logging.LogRecord:
+    return logging.makeLogRecord(
+        {
+            "name": "pyracast.forecasts",
+            "levelno": logging.WARNING,
+            "levelname": "WARNING",
+            "msg": message,
+        }
+    )
+
+
+def test_the_security_handler_opens_its_path_with_the_first_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deployed = deployed_handler("security to a path", tmp_path, monkeypatch)
+    record = warning("first\nsecond")
+
+    deployed.handle(record)
+    deployed.close()
+
+    assert (tmp_path / "container-stream").read_text(encoding="utf-8") == (
+        deployed.format(record) + "\n"
+    )
+
+
+class FailingStream(io.StringIO):
+    def __init__(self, error: BaseException) -> None:
+        super().__init__()
+        self.error = error
+
+    def write(self, text: str, /) -> int:
+        raise self.error
+
+
+def test_a_line_that_cannot_be_written_is_reported_to_the_handler_not_the_caller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deployed = configured_handler(settings.LOGGING, "console")
+    assert isinstance(deployed, logging.StreamHandler)
+    reported: list[logging.LogRecord] = []
+    monkeypatch.setattr(deployed, "handleError", reported.append)
+    deployed.setStream(FailingStream(OSError("stream closed")))
+    record = warning("unwritten")
+
+    deployed.handle(record)
+
+    assert reported == [record]
+
+
+def test_a_recursion_error_while_writing_reaches_the_caller() -> None:
+    deployed = configured_handler(settings.LOGGING, "console")
+    assert isinstance(deployed, logging.StreamHandler)
+    deployed.setStream(FailingStream(RecursionError()))
+
+    with pytest.raises(RecursionError):
+        deployed.handle(warning("unwritten"))

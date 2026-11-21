@@ -416,21 +416,21 @@ LOGGING = {
     },
     "handlers": {
         "console": {
-            "class": "logging.StreamHandler",
+            "class": "pyracast.log_lines.LineHandler",
             "formatter": "standard",
             "stream": "ext://sys.stdout",
         },
         "discard": {"class": "logging.NullHandler"},
         "security": (
             {
-                "class": "logging.FileHandler",
+                "class": "pyracast.log_lines.LineFileHandler",
                 "formatter": "standard",
                 "filename": _security_log_path,
                 "delay": True,
             }
             if _security_log_path
             else {
-                "class": "logging.StreamHandler",
+                "class": "pyracast.log_lines.LineHandler",
                 "formatter": "standard",
                 "stream": "ext://sys.stdout",
             }
