@@ -80,15 +80,22 @@ def load_exceptions(text: str) -> list[ScanException]:
     entries = json.loads(text)
     if not isinstance(entries, list):
         raise ValueError("Image scan exceptions must be a list.")
+    seen: set[Key] = set()
     for entry in entries:
         if (
             not isinstance(entry, dict)
             or set(entry) != EXCEPTION_KEYS
             or not all(isinstance(value, str) for value in entry.values())
             or entry["service"] not in SERVICES
+            or not entry["vulnerability"].strip()
+            or not entry["package"].strip()
+            or date.fromisoformat(entry["expires"]).isoformat() != entry["expires"]
         ):
             raise ValueError(f"Malformed image scan exception: {entry!r}")
-        date.fromisoformat(entry["expires"])
+        key = (entry["service"], entry["vulnerability"], entry["package"])
+        if key in seen:
+            raise ValueError(f"Duplicate image scan exception: {_label(key)}")
+        seen.add(key)
     exceptions: list[ScanException] = entries
     return exceptions
 
