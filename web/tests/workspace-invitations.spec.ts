@@ -1,5 +1,5 @@
 import { test, expect } from "./support/test";
-import { invitationPreview, mockApi } from "./support/workspace";
+import { answer, invitationPreview, mockApi } from "./support/workspace";
 import { errorBody } from "./support/errors";
 import type { components } from "../src/lib/schema";
 import enWorkspace from "../messages/en/workspace.json";
@@ -26,7 +26,12 @@ test("an invitee sees the workspace, role and inviter before signing in and then
         });
         expect(route.request().headers()["x-csrftoken"]).toBe("signed-token");
         accepted++;
-        return route.fulfill({ json: { tenant_id: 1, role: "viewer" } });
+        return route.fulfill({
+            json: answer("InvitationAcceptanceOutput", {
+                tenant_id: 1,
+                role: "viewer",
+            }),
+        });
     });
     await page.goto("/app/invitation/#token=invite-secret");
     await expect(page).toHaveURL("/app/invitation/");
@@ -132,7 +137,12 @@ test("a preview that cannot be loaded still lets the invitee accept", async ({
         }),
     );
     await page.route("**/api/invitations/accept/", (route) =>
-        route.fulfill({ json: { tenant_id: 1, role: "viewer" } }),
+        route.fulfill({
+            json: answer("InvitationAcceptanceOutput", {
+                tenant_id: 1,
+                role: "viewer",
+            }),
+        }),
     );
     await page.goto("/app/invitation/#token=invite-secret");
     await expect(
@@ -189,22 +199,26 @@ for (const first of ["resend", "cancel"] as const)
         });
         let rows = [invitation(3)];
         const writes: string[] = [];
-        let answer = () => {};
+        let release = () => {};
         const held = new Promise<void>((resolve) => {
-            answer = resolve;
+            release = resolve;
         });
         await page.route("**/api/tenants/1/members/", (route) =>
             route.fulfill({
-                json: {
+                json: answer("WorkspaceMembersOutput", {
                     members: [
                         { id: 1, email: "owner@example.test", role: "admin" },
                     ],
                     plants_at_recipient_limit: 0,
-                },
+                }),
             }),
         );
         await page.route("**/api/tenants/1/invitations/", (route) =>
-            route.fulfill({ json: { invitations: rows } }),
+            route.fulfill({
+                json: answer("WorkspaceInvitationsOutput", {
+                    invitations: rows,
+                }),
+            }),
         );
         await page.route(
             "**/api/tenants/1/invitations/3/resend/",
@@ -240,7 +254,7 @@ for (const first of ["resend", "cancel"] as const)
         await expect.poll(() => writes).toEqual([first]);
         await expect(other).toBeDisabled();
         await other.click({ force: true });
-        answer();
+        release();
         const region = page.locator("[data-live-region]");
         if (first === "resend") {
             await expect(region).toHaveText(

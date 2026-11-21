@@ -1,5 +1,5 @@
 import { test, expect } from "./support/test";
-import { mockApi, paged, user, tenantRow } from "./support/workspace";
+import { answer, mockApi, paged, user, tenantRow } from "./support/workspace";
 import { allauthErrorBody, errorBody } from "./support/errors";
 import type { components } from "../src/lib/schema";
 
@@ -163,12 +163,12 @@ test("workspace administrator invites, sends again and cancels with the server's
         Number(new URL(url).pathname.split("/")[5]);
     await page.route("**/api/tenants/1/members/", (route) =>
         route.fulfill({
-            json: {
+            json: answer("WorkspaceMembersOutput", {
                 members: [
                     { id: 1, email: "owner@example.test", role: "admin" },
                 ],
                 plants_at_recipient_limit: 0,
-            },
+            }),
         }),
     );
     await page.route("**/api/tenants/1/invitations/", async (route) => {
@@ -191,7 +191,9 @@ test("workspace administrator invites, sends again and cancels with the server's
             rows = [created, ...rows];
             return route.fulfill({ status: 201, json: created });
         }
-        return route.fulfill({ json: { invitations: rows } });
+        return route.fulfill({
+            json: answer("WorkspaceInvitationsOutput", { invitations: rows }),
+        });
     });
     await page.route("**/api/tenants/1/invitations/*/resend/", (route) => {
         expect(route.request().method()).toBe("POST");
