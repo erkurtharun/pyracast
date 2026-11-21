@@ -5,7 +5,8 @@ from zoneinfo import ZoneInfo
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count, Max, Min, Q
+from django.db.models import Count, DateTimeField, F, Max, Min, Q, Value
+from django.db.models.functions import Greatest
 from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
@@ -142,17 +143,19 @@ class CollectionStatus:
 
 
 def _next_collection_at(collecting: Collecting, timezone: str, now: datetime) -> datetime | None:
-    """The scheduler's next act: a due nightly history job, the latest slot's job it opens again,
-    a queued job claim takes, a slot."""
+    """The scheduler's next act: a missing nightly history job, one it revives, the latest slot's
+    job it opens again, a queued job claim takes, a slot."""
     night = open_night_window(now, timezone)
     timing = collecting.timing
     slot = latest_forecast_slot(now, timezone, timing.times, timing.effective_from)
+    moment = Value(now, output_field=DateTimeField())
     jobs = CollectionJob.objects.filter(binding=collecting.binding).aggregate(
         queued=Min(claimable_from(now), filter=Q(status__in=WAITING) & open_at_claim(now)),
         **(
             {
                 "history": Count("pk", filter=night.history()),
-                "revivable": Count("pk", filter=night.revivable()),
+                # The scheduler revives it at Greatest(available_at, now).
+                "revived": Min(Greatest(F("available_at"), moment), filter=night.revivable()),
             }
             if night is not None
             else {}
@@ -173,11 +176,12 @@ def _next_collection_at(collecting: Collecting, timezone: str, now: datetime) ->
             else {}
         ),
     )
-    due_now = (night is not None and (not jobs["history"] or jobs["revivable"])) or (
+    due_now = (night is not None and not jobs["history"]) or (
         slot is not None and bool(jobs["reopened"])
     )
     moments = (
         now if due_now else None,
+        jobs.get("revived"),
         jobs["queued"],
         next_forecast_slot(now, timezone, timing.times, timing.effective_from),
         next_nightly_start(now, timezone),
