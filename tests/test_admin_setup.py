@@ -26,6 +26,7 @@ from pyracast.regions.models import AuditEvent, Region
 from tests.support.admin_setup import (
     VALIDATION_FAILURES,
     admin_system,
+    form_fields,
     review_fields,
     setup_input,
     setup_url,
@@ -231,6 +232,19 @@ def test_invalid_setup_preserves_safe_fields_and_never_renders_secrets(
     assert field in response.context["setup_form"].errors
     assert b"never-render-this" not in response.content
     assert ProviderAccount.objects.count() == SiteBinding.objects.count() == 1
+
+
+def test_a_refused_setup_page_carries_the_hidden_values_of_a_fresh_page() -> None:
+    system = admin_system()
+    submitted_plant(system)
+    client, _ = verified_admin()
+    fresh = client.get(setup_url(system))
+
+    refused = client.post(setup_url(system), setup_input(system, capacity_kw="nan"))
+
+    assert refused.status_code == 400
+    for action in ("configure", "validate"):
+        assert form_fields(refused.content, action) == form_fields(fresh.content, action)
 
 
 def test_existing_key_can_be_rotated_and_invalid_site_rolls_back_rotation() -> None:
