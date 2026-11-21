@@ -64,6 +64,7 @@ class Host:
         self.unit = "active"
         self.snapshots = [HEALTHY]
         self.delivery: int | BaseException = 0
+        self.delivery_output = "{}"
         self.lock_free = True
         self.held = False
         self.on_lock: Callable[[], None] = lambda: None
@@ -103,7 +104,7 @@ class Host:
         if "check_delivery_health" in command:
             if isinstance(self.delivery, BaseException):
                 raise self.delivery
-            return subprocess.CompletedProcess(command, self.delivery, "{}", "")
+            return subprocess.CompletedProcess(command, self.delivery, self.delivery_output, "")
         return subprocess.CompletedProcess(command, 0, "", "")
 
     @contextmanager
@@ -176,10 +177,10 @@ def test_timed_out_delivery_check_still_checks_backup_age_and_capacity(watched: 
     assert watched.names() == [
         "pyracast_host_capacity",
         "pyracast_backup_failed",
-        "pyracast_runtime_unhealthy",
+        "pyracast_watchdog_step_failed",
         "pyracast_watchdog_heartbeat",
     ]
-    assert watched.details("pyracast_runtime_unhealthy") == [
+    assert watched.details("pyracast_watchdog_step_failed") == [
         {"step": "delivery", "outcome": "timeout"}
     ]
     assert watched.heartbeat() == {"state": "ok"}
@@ -211,7 +212,7 @@ def test_a_failing_compose_call_is_reported_without_skipping_other_checks(
     watched.free["/"] = 5
 
     assert watchdog.main() == 1
-    assert watched.details("pyracast_runtime_unhealthy") == [
+    assert watched.details("pyracast_watchdog_step_failed") == [
         {"step": "runtime", "outcome": "error", "error_type": "CalledProcessError"}
     ]
     assert "pyracast_host_capacity" in watched.names()
@@ -324,6 +325,39 @@ def test_blocked_release_reports_heartbeat_and_capacity_without_touching_contain
     assert watched.heartbeat() == {"state": "blocked"}
 
 
+@pytest.mark.parametrize(
+    ("age", "events"),
+    [
+        (3600 - 60, []),
+        (3600 + 180, [{"hours": 1.1}]),
+        (5 * DAY, [{"hours": 120.0}]),
+    ],
+)
+def test_a_release_blocked_for_longer_than_an_hour_is_reported_with_its_age(
+    watched: Host, age: float, events: list[dict[str, object]]
+) -> None:
+    watched.blocked.touch()
+    stamp = time.time() - age
+    os.utime(watched.blocked, (stamp, stamp))
+
+    assert watchdog.main() == 0
+    assert watched.details("pyracast_release_blocked") == events
+    assert watched.heartbeat() == {"state": "blocked"}
+
+
+def test_a_block_that_ends_while_it_is_checked_is_not_reported(
+    watched: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def ended() -> os.stat_result:
+        raise FileNotFoundError(watched.blocked)
+
+    monkeypatch.setattr(host, "RELEASE_BLOCKED", SimpleNamespace(exists=lambda: True, stat=ended))
+
+    assert watchdog.main() == 0
+    assert watched.names() == ["pyracast_watchdog_heartbeat"]
+    assert watched.heartbeat() == {"state": "blocked"}
+
+
 @pytest.mark.parametrize("unit", ["inactive", "failed", "activating"])
 def test_inactive_application_unit_is_reported_without_recovery(watched: Host, unit: str) -> None:
     watched.unit = unit
@@ -347,7 +381,7 @@ def test_delivery_check_runs_at_most_every_five_minutes(
 
     watchdog.main()
     assert bool(watched.compose("pyracast", "check_delivery_health")) is runs
-    assert ({"reason": "delivery_health"} in watched.details("pyracast_runtime_unhealthy")) is runs
+    assert bool(watched.details("pyracast_delivery_unhealthy")) is runs
     assert (watched.delivery_checked.stat().st_mtime > stamp + 1) is runs
 
 
@@ -355,7 +389,72 @@ def test_first_delivery_check_runs_and_records_its_time(watched: Host) -> None:
     watchdog.main()
     assert watched.compose("pyracast", "check_delivery_health")
     assert watched.delivery_checked.exists()
+    assert "pyracast_delivery_unhealthy" not in watched.names()
+
+
+def test_an_unhealthy_delivery_report_names_its_failing_checks_and_counts(watched: Host) -> None:
+    watched.delivery = 1
+    watched.delivery_output = json.dumps(
+        {
+            "healthy": False,
+            "alarms": {"overdue_collections": 2, "failed_calibrations": 1},
+            "overdue_collections": 2,
+            "paused_notifications": 4,
+            "unhealthy_dispatch_phases": ["collection"],
+            "broker": {
+                "reachable": True,
+                "queues": {
+                    "collections": {"missing": True, "messages": 0},
+                    "notifications": {"missing": False, "messages": 3},
+                },
+            },
+        }
+    )
+
+    assert watchdog.main() == 0
+    assert watched.details("pyracast_delivery_unhealthy") == [
+        {
+            "alarms": {"overdue_collections": 2, "failed_calibrations": 1},
+            "dispatch_phases": ["collection"],
+            "broker_unreachable": False,
+            "missing_queues": ["collections"],
+        }
+    ]
     assert "pyracast_runtime_unhealthy" not in watched.names()
+
+
+def test_an_unreachable_broker_is_named_by_the_delivery_alert(watched: Host) -> None:
+    watched.delivery = 1
+    watched.delivery_output = json.dumps(
+        {"alarms": {}, "unhealthy_dispatch_phases": [], "broker": {"reachable": False}}
+    )
+
+    watchdog.main()
+    assert watched.details("pyracast_delivery_unhealthy") == [
+        {"alarms": {}, "dispatch_phases": [], "broker_unreachable": True, "missing_queues": []}
+    ]
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "",
+        "not json",
+        "[]",
+        '{"unhealthy_dispatch_phases": [], "broker": {"reachable": true}}',
+        '{"alarms": [], "unhealthy_dispatch_phases": [], "broker": {"reachable": true}}',
+        '{"alarms": {}, "unhealthy_dispatch_phases": "collection", "broker": {}}',
+        '{"alarms": {}, "unhealthy_dispatch_phases": [], "broker": "down"}',
+    ],
+)
+def test_a_delivery_check_without_a_readable_report_says_so(watched: Host, output: str) -> None:
+    watched.delivery = 1
+    watched.delivery_output = output
+
+    assert watchdog.main() == 0
+    assert watched.details("pyracast_delivery_unhealthy") == [
+        {"outcome": "unreadable", "exit_status": 1}
+    ]
 
 
 def step_wall_clock(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:

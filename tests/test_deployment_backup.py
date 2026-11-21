@@ -873,6 +873,57 @@ def test_the_hourly_backup_keeps_a_daily_copy_only_where_the_host_enables_it(
         assert reports[-1][1:] == ("WARNING", {"error": "OSError"})
 
 
+@pytest.mark.parametrize("blocked", [False, True])
+@pytest.mark.parametrize("value", ["true", 1, None, [True]])
+def test_an_ill_typed_daily_setting_keeps_the_hourly_backup_and_fails_the_run_naming_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    value: object,
+    blocked: bool,
+) -> None:
+    reports: list[tuple[str, str, dict[str, object]]] = []
+    stored: list[str] = []
+
+    @contextmanager
+    def release_lock(_wait: float) -> Iterator[bool]:
+        yield True
+
+    def store(_release: Path, _bucket: str, kind: str, directory: Path) -> tuple[str, Path]:
+        stored.append(kind)
+        archive = directory / "x.dump"
+        archive.write_bytes(b"PGDMP")
+        return "postgres/x-hourly-y.dump", archive
+
+    def copy(_bucket: str, _name: str) -> str:
+        pytest.fail("an ill-typed setting makes no daily copy")
+
+    monkeypatch.setattr(host, "release_lock", release_lock)
+    monkeypatch.setattr(host, "RELEASE_BLOCKED", tmp_path / "release-blocked")
+    if blocked:
+        (tmp_path / "release-blocked").touch()
+    monkeypatch.setattr(backup, "store_backup", store)
+    monkeypatch.setattr(backup, "copy_daily", copy)
+    monkeypatch.setattr(
+        backup,
+        "report",
+        lambda event, severity, **details: reports.append((event, severity, details)),
+    )
+    config = tmp_path / "host.json"
+    config.write_text(json.dumps({"backup_bucket": "private-backups", "daily_backups": value}))
+
+    assert backup.main([str(config), "--release-dir", str(tmp_path)]) == 1
+    assert stored == ([] if blocked else ["hourly"])
+    assert [event for event, _, _ in reports] == [
+        "pyracast_backup_skipped" if blocked else "pyracast_backup_succeeded",
+        "pyracast_backup_setting_invalid",
+    ]
+    assert reports[-1][1:] == ("ERROR", {"setting": "daily_backups"})
+    assert capsys.readouterr().err.splitlines() == [
+        f"The daily_backups setting of {config} is neither true nor false; no daily copy was made."
+    ]
+
+
 def test_a_refused_command_line_is_not_reported_as_a_failed_backup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -7,6 +7,7 @@ from django.core.management import CommandError, call_command
 
 from pyracast.forecasts.models import CollectionJob, DispatcherPhase, DispatcherStatus
 from pyracast.notifications.models import ReminderSchedule
+from pyracast.orchestration.delivery_health import CHECKS
 from tests.support.delivery_health import NOW, answering_broker, recent_forecast
 from tests.support.domain import make_system
 from tests.support.notifications import store
@@ -73,6 +74,10 @@ def assert_contract(report: dict[str, object], failed: bool) -> None:
         value = report[key]
         assert type(value) is int, key
         assert value >= 0, key
+    # The host watchdog names these in its alert; the counts of the other checks stay here.
+    assert report["alarms"] == {
+        item.key: report[item.key] for item in CHECKS if item.alarm and report[item.key]
+    }
 
 
 @pytest.mark.django_db(transaction=True)

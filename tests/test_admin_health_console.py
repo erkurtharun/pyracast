@@ -1,5 +1,5 @@
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -24,6 +24,7 @@ from pyracast.forecasts.models import (
 from pyracast.orchestration.kinds import QUEUES
 from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration
 from tests.support.api import verified_admin
+from tests.support.budgets import assert_scale_invariant
 from tests.support.delivery_health import NOW, recent_forecast
 from tests.support.domain import System, make_system
 from tests.support.plant_operations import make_plant
@@ -48,6 +49,10 @@ TURKISH = {
     "No forecast saved yet": "Henüz kaydedilmiş tahmin yok",
     "Last forecast": "Son tahmin",
     "No plants currently match this check.": "Bu kontrole şu anda uyan santral yok.",
+    "Showing 1\u20132 of 2": "2 kay\u0131ttan 1\u20132 gösteriliyor",
+    "Showing 1\u20135 of 5": "5 kay\u0131ttan 1\u20135 gösteriliyor",
+    "Work of the last 24 hours.": "Son 24 saatin işleri.",
+    "All work.": "Tüm işler.",
 }
 
 
@@ -329,7 +334,105 @@ def test_a_filtered_operations_section_says_how_many_rows_it_shows(
     page = client.get("/admin/operations/?issue=failed_collections")
 
     assert len(page.context["collections"]) == 20
-    assert "Showing 20 of 25" in page.content.decode()
+    assert "Showing 1\u201320 of 25" in page.content.decode()
+
+    second = client.get("/admin/operations/?issue=failed_collections&collections_page=2")
+
+    assert len(second.context["collections"]) == 5
+    content = second.content.decode()
+    assert "Showing 21\u201325 of 25" in content
+    assert 'href="?issue=failed_collections&amp;collections_page=1"' in content
+    assert "collections_page=3" not in content
+
+
+def failed_jobs(system: System, count: int, created_at: datetime) -> None:
+    first = CollectionJob.objects.count()
+    jobs = [
+        CollectionJob.objects.create(
+            binding=system.binding,
+            target_date=NOW.date(),
+            scheduled_for=NOW - timedelta(minutes=10, seconds=first + index),
+            available_at=NOW,
+            status="failed",
+            lease_token=None,
+        )
+        for index in range(count)
+    ]
+    CollectionJob.objects.filter(pk__in=[job.pk for job in jobs]).update(created_at=created_at)
+
+
+@pytest.mark.parametrize("language", ["en", "tr"])
+def test_operations_lists_show_the_last_24_hours_until_all_work_is_asked_for(
+    monkeypatch: pytest.MonkeyPatch, language: str
+) -> None:
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    broker(monkeypatch, reachable=False)
+    system = make_system(approved=True)
+    dispatched()
+    CollectionJob.objects.filter(binding=system.binding).delete()
+    failed_jobs(system, 2, NOW - timedelta(hours=24))
+    failed_jobs(system, 3, NOW - timedelta(hours=24, microseconds=1))
+    client = console(language)
+
+    recent = client.get("/admin/operations/")
+
+    assert recent.context["collections_page"].paginator.count == 2
+    content = recent.content.decode()
+    assert text(language, "Showing 1\u20132 of 2") in content
+    assert text(language, "Work of the last 24 hours.") in content
+    assert 'href="/admin/operations/?window=all"' in content
+
+    everything = client.get("/admin/operations/?window=all&collections_page=1")
+
+    assert everything.context["collections_page"].paginator.count == 5
+    content = everything.content.decode()
+    assert text(language, "Showing 1\u20135 of 5") in content
+    assert text(language, "All work.") in content
+    assert 'href="/admin/operations/"' in content
+
+
+def test_a_selected_check_lists_its_rows_whatever_their_age(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    broker(monkeypatch, reachable=False)
+    system = make_system(approved=True)
+    dispatched()
+    CollectionJob.objects.filter(binding=system.binding).delete()
+    job = CollectionJob.objects.create(
+        binding=system.binding,
+        target_date=NOW.date(),
+        scheduled_for=NOW - timedelta(hours=30),
+        available_at=NOW - timedelta(hours=30),
+    )
+    CollectionJob.objects.filter(pk=job.pk).update(created_at=NOW - timedelta(hours=30))
+    client = console("en")
+
+    page = client.get("/admin/operations/?issue=overdue_collections")
+
+    assert [row["id"] for row in page.context["collections"]] == [job.pk]
+    assert "Work of the last 24 hours." not in page.content.decode()
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+@pytest.mark.parametrize("query", ["", "?window=all&collections_page=2&calibrations_page=x"])
+def test_the_operations_page_reads_a_fixed_number_of_statements_whatever_it_lists(
+    monkeypatch: pytest.MonkeyPatch, query: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    broker(monkeypatch, reachable=False)
+    dispatched()
+    client = console("en")
+
+    def seed(count: int) -> None:
+        failed_jobs(system, count, NOW - timedelta(minutes=1))
+        for _ in range(count):
+            failed_calibration(system, plant)
+
+    assert_scale_invariant(
+        seed, lambda: client.get(f"/admin/operations/{query}"), small=1, large=30
+    )
 
 
 @pytest.mark.parametrize("language", ["en", "tr"])

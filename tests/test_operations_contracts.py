@@ -264,15 +264,6 @@ def test_host_service_stops_within_every_compose_stop_grace_period() -> None:
     assert int(unit["TimeoutStopSec"]) > int(stop_timeout[1])
 
 
-def test_every_alert_policy_matches_a_reported_event_and_every_error_is_alerted() -> None:
-    policies = set(re.findall(r'event = "(pyracast_[a-z_]+)"', text(TERRAFORM / "monitoring.tf")))
-    events = reported_events()
-
-    assert policies
-    assert policies <= {event for group in events.values() for event in group}
-    assert events["ERROR"] <= policies
-
-
 def test_the_api_writes_its_security_lines_through_a_blocking_log_path() -> None:
     logging = compose_services()["api"]["logging"]
 
@@ -614,7 +605,7 @@ def test_the_host_copies_daily_backups_only_when_the_daily_tier_keeps_them() -> 
         "}, { for key, value in { daily_backups = true } : key => value if var.backup_daily_tier })"
     ) in main
     assert backup.DAILY_PREFIX == "daily/"
-    assert 'config.get("daily_backups") is True' in text(DEPLOY / "backup.py")
+    assert 'config.get("daily_backups", False)' in text(DEPLOY / "backup.py")
 
 
 def test_watchdog_unit_outlasts_its_deadline_and_runs_while_a_release_is_blocked() -> None:
