@@ -1,89 +1,96 @@
-# Create the first platform administrator and provision TOTP by CLI
+# Create a platform administrator and reset its authenticator by CLI
 
-A host operator with shell access creates a superuser with Django's stock `createsuperuser`, then runs `pyracast provision_admin_mfa --username <name> [--email <address>]`. The command, in one transaction, keeps the user's primary email identity or creates an unverified one, and inserts an encrypted TOTP factor; it then prints the enrollment QR code and `otpauth` URI once. Until that factor exists a staff or superuser account cannot sign in, so this CLI is the only supported way to obtain a working platform administrator.
+A host operator with shell access runs `pyracast bootstrap_admin --email <address>`. The command asks for a new password, shows a private QR code, setup key and link for an authenticator app, checks one code from the app, and then, in one transaction, creates or promotes the account, keeps or adds an unverified email identity and stores an encrypted TOTP factor with its recovery codes. It also enrolls an administrator whose factors were removed. `pyracast reset_mfa --email <address> --reason lost_device|compromised` removes every second factor of an account for a lost or compromised authenticator. Until a TOTP factor exists a staff or superuser account cannot sign in, so these commands are the only way to obtain a working platform administrator.
 
 ## Entry points
 
-- `pyracast createsuperuser`: stock Django command reached through `pyproject.toml` script `pyracast` -> `pyracast.cli` `main` (`execute_from_command_line`). Project code adds nothing; it creates `auth_user` with `is_staff` and `is_superuser` and the optional `email`, but no `EmailAddress` row. `AUTH_PASSWORD_VALIDATORS` run only interactively and can be bypassed at the prompt; `--noinput` takes `DJANGO_SUPERUSER_PASSWORD` unvalidated, or leaves an unusable password.
-- `pyracast provision_admin_mfa --username --email`: `pyracast.accounts.management.commands.provision_admin_mfa` `Command.handle`, helper `bind_administrator_email` (no other caller). Actor: operator via the local shell or `docker compose exec api` in production.
-- Documented callers: `README.md` "First administrator and demo" and `docs/DEPLOYMENT.md` step 4. No tracked script, CI job or test runs `createsuperuser` and the command end to end.
-- First sign-in afterwards uses the customer screen `web/src/components/auth.tsx` (flow in `sign-in-and-sign-out`); recovery codes are managed in `two-factor-management`.
+- `pyracast bootstrap_admin --email [--dry-run]`: `pyracast.accounts.management.commands.bootstrap_admin` `Command.handle`, reached through the `pyracast` script in `pyproject.toml` (`pyracast.cli` `main`). Actor: operator at a terminal, locally or through `docker compose exec api` in production.
+- `pyracast reset_mfa --email --reason [--dry-run]`: `pyracast.accounts.management.commands.reset_mfa` `Command.handle`.
+- Shared base `pyracast.accounts.management.operator` (`OperatorCommand`): answers are read from stdin (`getpass` for passwords at a terminal), `operator_address` normalizes the address, `account_using` finds the one account that holds it.
+- Documented callers: `README.md` "First administrator and demo" and `docs/DEPLOYMENT.md` step 4. First sign-in afterwards uses the customer screen `web/src/features/auth/auth.tsx` (flow in `sign-in-and-sign-out`); recovery codes are saved in `two-factor-management`.
 
 ## Sequence
 
 ```mermaid
 sequenceDiagram
     actor O as Operator
-    participant C as provision_admin_mfa
+    participant C as bootstrap_admin
     participant D as PostgreSQL
-    participant L as Security log on stdout
+    participant L as Security log
     participant P as Authenticator app
-    O->>C: "--username and optional --email"
-    C->>D: BEGIN then lock auth_user row by username
-    alt missing, inactive or not staff or superuser
-        C-->>O: "CommandError active administrator required"
-    else any mfa_authenticator row exists
-        C-->>O: "CommandError never replaces a factor"
+    O->>C: "--email, optional --dry-run"
+    C->>D: "read the account that holds the address"
+    alt invalid, shared, inactive, customer, already enrolled or address cannot sign in
+        C-->>O: "CommandError, nothing written"
+    else dry run
+        C-->>O: "plan only, nothing asked"
     else
-        C->>D: read account_emailaddress and auth_user for the address
-        alt email missing, invalid, replacing, taken or non-primary only
-            C-->>O: "CommandError, rollback, nothing written"
+        O->>C: "new password twice"
+        C-->>O: "QR code, setup key, setup link"
+        O->>P: "scan"
+        O->>C: "current code"
+        C->>D: "BEGIN, advisory lock, account locks, re-read and compare"
+        alt account, address or factors changed meanwhile
+            C-->>O: "CommandError, rollback"
         else
-            C->>D: insert account_emailaddress primary unverified if user has none
-            C->>D: update auth_user.email
-            C->>D: insert mfa_authenticator totp with Fernet secret
-            C->>D: COMMIT
-            C->>L: admin_mfa_provisioned with user_id
-            C-->>O: QR code then otpauth URI
-            O->>P: scan the QR code
+            C->>D: "upsert auth_user, add missing email row, insert totp and recovery_codes"
+            C->>D: "COMMIT"
+            C->>L: "admin_mfa_provisioned reason created or enrolled"
+            C-->>O: "ready, username"
         end
     end
-    Note over O,P: "First login is password, emailed code if unverified, then TOTP. can_admin needs staff and superuser"
+    Note over O,P: "First sign-in: password, emailed code while the address is unverified, then TOTP"
 ```
 
 ## Data
 
 | Table | R/W | What |
 |---|---|---|
-| `auth_user` | R/W | Row locked `FOR UPDATE` by exact username; `email` is rewritten (lower-cased) on every success; read for another user with the same email (`iexact`). |
-| `account_emailaddress` | R/W | Reads the user's primary row, any of the user's rows, and other users' rows equal to the address (`iexact`); inserts one primary row with `verified=False` only when the user has none. Never updates or deletes. |
-| `mfa_authenticator` | R/W | Existence check on any type; inserts one `totp` row with `data.secret` = `mfa:v1:` + Fernet token (HKDF context `pyracast-mfa-credentials-v1`, keys from `SECRET_KEY` then `SECRET_KEY_FALLBACKS`). No `recovery_codes` row. |
+| `auth_user` | R/W | The account holding the address (`email` or an `account_emailaddress` row, case-insensitive) is locked; a new account gets a generated username. Success sets `is_staff` and `is_superuser`, the new password and, when empty, `email`. |
+| `account_emailaddress` | R/W | Reads the account's rows; inserts the address unverified when the account has none for it, primary only when it has no primary row. Never updates or deletes. |
+| `mfa_authenticator` | R/W | Bootstrap inserts one `totp` row (`data.secret` = `mfa:v1:` + Fernet token, HKDF context `pyracast-mfa-credentials-v1`, keys from `SECRET_KEY` then `SECRET_KEY_FALLBACKS`) and one `recovery_codes` row. Reset deletes every row of the account. |
+| `django_session`, `usersessions_usersession` | W (reset) | Reset deletes the account's sessions and their device records. |
+| `notifications_outboundmail` | W (reset) | One `account/email/second_factor_reset` notice to the primary address, mailed later by the notification worker. |
+
 ## Authorization
 
-- No application authorization: the trust boundary is shell access to the host or container (`Command.help` says "trusted operator channel"). There is no operator identity, password or step-up.
-- Target eligibility is checked inside the command: active and (`is_staff` or `is_superuser`). Later admin access uses other predicates: `get_can_admin` needs both flags, `PlatformAdminSite.has_permission` needs active, staff and superuser, `pyracast.api.views` `PlatformAdmin` needs active and superuser; all three also need MFA evidence in the session.
-- Enforcement that makes the CLI the only bootstrap path: `pyracast.accounts.authentication` `AuthenticationBackend` and `pyracast.accounts.social` `SocialAccountAdapter.pre_social_login` (existing social accounts) refuse privileged users without a `totp` row; `pyracast.accounts.middleware` `PrivilegedAuthenticatorEnrollment` blocks GET and POST on the customer TOTP endpoint for them; `pyracast.accounts.mfa_views` `ManageTOTPView` refuses their `DELETE`.
-- Database: partial unique constraint `unique_authenticator_type` allows one `totp` row per user; `select_for_update` serializes two concurrent provisioning runs for the same user.
+- No application authorization: the trust boundary is shell access to the host or container. There is no operator identity, password or step-up.
+- Bootstrap targets no account or an active account that is `is_staff` or `is_superuser` and has no authenticator of any type; it then sets both flags. The sign-in refusals use the same test (`authorization.requires_admin_mfa`). Console admission needs active staff and superuser plus MFA evidence (`has_platform_admin_session`).
+- Enforcement that makes the commands the only enrolment path: `pyracast.accounts.authentication` `AuthenticationBackend` and `pyracast.accounts.social` `SocialAccountAdapter.pre_social_login` refuse privileged accounts without a `totp` row; `pyracast.accounts.mfa_views` `ManageTOTPView` answers 403 to every method for them; `MFAAdapter.can_delete_authenticator` refuses their TOTP removal.
+- Concurrency: the final step takes the advisory lock `OPERATOR_LOCK`, then the account's locks in the account lock order (addresses, provider identities, account row, authenticators), re-reads the holder and compares it with the account the run started from. Both commands share this.
 
 ## Failure paths
 
 | Condition | Result |
 |---|---|
-| `--username` missing | argparse error, exit 2 |
-| Unknown, inactive, or neither staff nor superuser | `CommandError` "An active administrator account is required." (one message for all three), exit 1 |
-| Any authenticator (TOTP or recovery codes) exists | `CommandError` "...never replaces a factor." |
-| Second concurrent run for the same user | Waits on the row lock, then the same "never replaces a factor" error |
-| No primary email row and no `--email` | `CommandError` "--email is required to bind a legacy administrator's email identity." |
-| Address (supplied or from the primary row) invalid or longer than 254 characters | `CommandError` "A valid email address is required." |
-| Primary row exists with a different address | `CommandError` "An email identity already exists; provisioning never replaces it." |
-| Address used by another `EmailAddress` or `User.email` | `CommandError` "...already associated with another account." |
-| Non-primary rows only and no primary | `CommandError` "Resolve the existing email identities before provisioning." |
-| Any `CommandError` above | Transaction rolled back, nothing written, nothing printed to stdout |
-| Console cannot encode the QR (`UnicodeEncodeError`) | Factor already committed; prints a fallback line, then the URI |
-| Output lost after commit (closed pipe, lost terminal; inferred) | Factor exists, secret is gone; a rerun is refused, no supported recovery |
-| Privileged user without TOTP signs in later | 400 generic login error, counted as a failed password (password), or `PermissionDenied` (social) |
+| `--email` missing (either command) or `--reason` missing or not one of the two (reset) | argparse error, exit 2 |
+| Address invalid or over 254 characters | `CommandError` "Enter a valid email address." |
+| Address held by more than one account | `CommandError` "...more than one account. Resolve that first." |
+| Inactive account | `CommandError` "...is inactive. Nothing was changed." |
+| Account neither staff nor superuser | `CommandError` naming a customer account; use an address of its own |
+| Account already has any authenticator | `CommandError` "Reset it with reset_mfa first." |
+| Existing account could not sign in afterwards with the address (not verified and not its only, primary address) | One fixed `CommandError` before anything is asked, and again under the locks; nothing stored |
+| Passwords differ, password over 1,024 characters or with a null character, or refused by `AUTH_PASSWORD_VALIDATORS` | `CommandError` before the QR code is shown; nothing stored |
+| Code from the app does not match | `CommandError`; nothing stored, a rerun starts clean |
+| Account, address or factors changed during the run | `CommandError` "...changed while the command ran"; rolled back |
+| Console cannot encode the QR (`UnicodeEncodeError`) | A fallback line; the setup key and link are still printed |
+| `reset_mfa`: unknown address, account without a factor | `CommandError`; nothing changed |
+| `reset_mfa`: confirmation address not retyped identically, or the address moved to another account meanwhile | `CommandError`; nothing changed |
+| Privileged account without TOTP signs in | 400 generic login error with a `login_refused` line (`mfa_not_provisioned`), or `PermissionDenied` for a provider sign-in |
 
 ## Rules and invariants
 
-- The factor, the email identity and `auth_user.email` commit or roll back together; the audit event, QR and URI come after commit, so they are never emitted for a failed run.
-- The secret is generated once and not stored in plaintext or logged. The URI is the only copy; `record_security_event` logs event name, `user_id` and a null `client_ip`, with no operator identity and no database row. Logger `pyracast` writes to `sys.stdout` (`settings.LOGGING`), so under `docker compose exec` the line reaches the operator's terminal, not the container log stream. No job is enqueued and no mail or external call is made.
-- A new email identity is created unverified on purpose: with `ACCOUNT_EMAIL_VERIFICATION = "mandatory"` the login runs the emailed code before TOTP, so mailbox ownership is proven at first sign-in. A kept primary row that is already verified skips that stage. Login is email-only (`ACCOUNT_LOGIN_METHODS`) and `pyracast.accounts.authentication` `email_identity` consults only `EmailAddress`, accepting a lone unverified primary; without that row the user cannot be found.
-- Provisioning never replaces, resets or rotates a factor, and never replaces an email identity. Allauth's `activate_totp` flow is bypassed (direct `Authenticator.objects.create`), so no `authenticator_added` signal fires: no `mfa_added` event, no notification mail, no `revoke_other_sessions`.
-- The live customer-side guards (middleware for GET and POST, `ManageTOTPView` for DELETE) make a lost factor unrecoverable through the product; only database or shell edits remain. `MFAAdapter.can_delete_authenticator` is not reached: allauth calls it only from its HTML form, and the project is headless-only.
+- The password, the account, the address row and both factor rows commit or roll back together; `admin_mfa_provisioned` (`reason` `created` or `enrolled`) and `mfa_reset_by_operator` (`reason`, `count` of rows removed) are written after the commit. Lines carry no address, password, code or secret and no operator identity. They go to the `pyracast.security` logger: the file named by `PYRACAST_SECURITY_LOG_PATH` when set (deployments point it at the container log stream), else stdout. The setup key and link appear only on the operator's terminal. An alert policy watches `admin_mfa_provisioned`.
+- The secret is generated before the transaction and stored only after the operator proved the app by a valid code, so a lost terminal leaves nothing half-enrolled.
+- A new address is stored unverified on purpose: while `ACCOUNT_EMAIL_VERIFICATION = "mandatory"` holds, the first sign-in runs the emailed code before TOTP, proving mailbox ownership. A verified address skips that step. Sign-in accepts an unverified address only for the account whose only address row it is, primary; hence the refusal before anything is stored.
+- Enrolment bypasses allauth's `activate_totp` (`TOTP.activate` and `RecoveryCodes.activate`), so no `mfa_added` event, notification mail or session revocation follows. Both commands change the account's credential state, which ends its pending sign-in steps and reauthentications.
+- `reset_mfa` removes factors of any account, ends its sessions (`sessions_revoked`, reason `mfa_reset`) and queues the notice in the same transaction; a failure after the notice is stored rolls everything back. The next step it prints is `bootstrap_admin` for a privileged account, Account settings for a customer.
+- Bootstrap never replaces a factor and never changes an existing address.
 
 ## Tests
 
-- `tests/test_admin_mfa_bootstrap.py`: password alone cannot sign in (400, no factor created), customer TOTP endpoint 403 for admins, every `api/platform/` route 403 without MFA evidence, command encrypts the secret and never replaces a factor, ASCII-console fallback, ineligible users, legacy admin with explicit `--email`, email conflict/invalid/replacement/non-primary rollbacks.
-- `tests/test_session_serialization.py` `test_provisioned_legacy_admin_needs_totp_after_email_code`: provision, emailed code, TOTP, then `/admin/` 200.
-- `tests/test_mfa_secrets.py` (adapter encryption and `can_delete_authenticator`), `tests/test_admin_recovery_security.py` (recovery codes and the staff DELETE refusal).
-- Gaps: no test for `createsuperuser`, the `admin_mfa_provisioned` log event, the two-run concurrency case, or the `--email` casing against an existing row (`test_legacy_administrator_requires_explicit_email_and_proves_ownership_later` covers a staff-only target); `tests/test_browser.py` and `web/integration/admin-csp.spec.ts` seed the administrator through the ORM, so no Playwright test covers CLI output to sign-in.
+- `tests/test_admin_mfa_bootstrap.py`: creation from the terminal (QR, key, link, encrypted secret, recovery row, audit line), re-enrolment, dry run, ineligible accounts, invalid address, wrong answers and policy refusals storing nothing, changes meanwhile, the sign-in usability refusal, the longest sign-in password, ended pending steps, ASCII-console fallback, passwords not echoed, password alone cannot sign in, customer TOTP endpoint 403 for administrators.
+- `tests/test_mfa_reset.py`: factors, sessions and notice removed together, dispatcher publishes the notice in the account language, rollback after a stored notice, re-enrolment after a reset, ended pending steps, dry run, refusals and confirmation mismatches.
+- `tests/test_session_serialization.py` `test_a_bootstrapped_administrator_needs_the_authenticator_after_the_email_code`: bootstrap, emailed code, TOTP, then `/admin/` 200.
+- `tests/test_mfa_secrets.py` (adapter encryption, `test_administrators_cannot_remove_their_required_factor`), `tests/test_admin_recovery_security.py` (customer-only factor removal).
+- Gaps: the alert policy; no browser test covers command output to sign-in (`tests/support/browser.py` seeds the administrator through the ORM).
