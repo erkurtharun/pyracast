@@ -182,15 +182,42 @@ resource "google_monitoring_alert_policy" "watchdog_heartbeat" {
   }
 }
 
-# Counts the pyracast.security lines the API ships through the gcplogs driver, by event.
+locals {
+  # A container line reaches Cloud Logging as jsonPayload.message, the whole formatted line
+  # "<date> <time> <level> <logger> <message>" (settings.LOGGING "standard"). The anchored pattern
+  # requires the fourth field, the record's own logger, to be pyracast.security: a line of another
+  # logger that quotes the name has its own logger there.
+  security_log_filter = join(" AND ", [
+    "resource.type=\"gce_instance\"",
+    "logName=\"projects/${var.project_id}/logs/gcplogs-docker-driver\"",
+    "jsonPayload.message=~\"^[^ ]+ [^ ]+ [A-Z]+ pyracast[.]security \"",
+  ])
+}
+
+# Security lines are kept 365 days here; the default bucket keeps its own copy for 30 days.
+resource "google_logging_project_bucket_config" "security" {
+  project        = var.project_id
+  location       = var.region
+  bucket_id      = "${var.name}-security"
+  description    = "pyracast.security lines, kept 365 days."
+  retention_days = 365
+
+  depends_on = [google_project_service.required]
+}
+
+# A sink into a log bucket of its own project is authorized without a service account or grant.
+resource "google_logging_project_sink" "security" {
+  name        = "${var.name}-security"
+  description = "Routes the pyracast.security lines to their 365-day bucket."
+  destination = "logging.googleapis.com/projects/${var.project_id}/locations/${google_logging_project_bucket_config.security.location}/buckets/${google_logging_project_bucket_config.security.bucket_id}"
+  filter      = local.security_log_filter
+}
+
+# Counts by event the same pyracast.security lines the security sink keeps.
 resource "google_logging_metric" "security_events" {
   name = "${var.name}-security-events"
 
-  filter = join(" AND ", [
-    "resource.type=\"gce_instance\"",
-    "logName=\"projects/${var.project_id}/logs/gcplogs-docker-driver\"",
-    "jsonPayload.message:\" pyracast.security \"",
-  ])
+  filter = local.security_log_filter
 
   label_extractors = {
     event = "REGEXP_EXTRACT(jsonPayload.message, \"\\\"event\\\": \\\"([a-z_]+)\\\"\")"

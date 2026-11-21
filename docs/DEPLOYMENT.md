@@ -471,7 +471,14 @@ fixtures do not establish provider access or inbox delivery.
   cache. Logging is best effort: the API logs in blocking mode, but the gcplogs
   client can still drop entries on overflow or outage; the other containers log
   nonblocking. `pyracast.security` lines, including those of `exec` commands, go to
-  the container stream through `PYRACAST_SECURITY_LOG_PATH`. Log-based alerts in
+  the container stream through `PYRACAST_SECURITY_LOG_PATH`. A sink routes these lines, and
+  only these, to the log bucket `pyracast-security` in the Terraform region, which keeps them
+  365 days; `_Default` keeps its own copy for 30 days, so recent lines are searched as usual.
+  For older ones, refine the Logs Explorer scope to that bucket or run `gcloud logging read
+  'FILTER' --bucket=pyracast-security --location=REGION --view=_AllLogs --freshness=365d`.
+  Storage beyond 30 days costs 0.01 USD per GiB a month; the volume is small. A line carries
+  the event, ids, counts, the client IP and a keyed `subject` instead of an email address, and
+  never a name; an erased account's lines keep its id and client IP until they expire. Log-based alerts in
   `monitoring.tf` count them; the release does not apply Terraform, so after a
   change there run the `plan`/`apply` commands above and confirm the policies
   under Monitoring → Alerting. Durable job/audit records remain in PostgreSQL. API logs omit query strings and
