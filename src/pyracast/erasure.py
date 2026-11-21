@@ -279,13 +279,16 @@ def _forget_mail(account_id: int, addresses: Collection[str], changes: Counter[s
     invitations = WorkspaceInvitation.objects.alias(folded=_folded("email")).filter(
         Q(folded__in=addresses) & _unheld(account_id, "folded") | Q(accepted_by_id=account_id)
     )
-    # Mail before its invitation, each in id order: the order of the mail worker.
-    mail = _locked(_mail().filter(_naming(account_id, addresses) | Q(invitation__in=invitations)))
-    _count(changes, OutboundMail.objects.filter(pk__in=mail).delete())
+    # Mail before its invitation, each in id order: the order of the mail worker. Each delete
+    # applies the guards again: a lock statement that waited for a row still decides on the
+    # addresses held when it began.
+    named = _naming(account_id, addresses) | Q(invitation__in=invitations)
+    mail = _locked(_mail().filter(named))
+    _count(changes, _mail().filter(named, pk__in=mail).delete())
     # An invitation whose mail was queued after that lock stays: deleting it would delete the
     # mail out of that order.
     unmailed = invitations.exclude(Exists(OutboundMail.objects.filter(invitation=OuterRef("pk"))))
-    _count(changes, WorkspaceInvitation.objects.filter(pk__in=_locked(unmailed)).delete())
+    _count(changes, invitations.filter(pk__in=_locked(unmailed)).delete())
     # The addresses no other account holds verified when this statement runs, as one JSON array.
     holding = RawSQL(
         "jsonb_path_exists(lower(value::text COLLATE pg_unicode_fast)::jsonb, "
