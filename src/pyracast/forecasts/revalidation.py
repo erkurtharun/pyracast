@@ -14,6 +14,7 @@ from pyracast import providers
 from pyracast.background.actor import fresh_connections
 from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS, LAST_REQUEST_START
+from pyracast.background.failures import queue_full
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.quota import QuotaExceededError, RequestDeferredError
@@ -32,6 +33,7 @@ class RevalidationOutcome(StrEnum):
     WAITING = "waiting"
     KEY_REJECTED = "key_rejected"
     STOPPED = "stopped"
+    LEASE_LOST = "lease_lost"
 
 
 def stale_bindings(account: ProviderAccount) -> QuerySet[SiteBinding]:
@@ -51,7 +53,7 @@ def stale_bindings(account: ProviderAccount) -> QuerySet[SiteBinding]:
 
 
 def claim_due_revalidations(now: datetime) -> list[int]:
-    """Leases each due account so that the dispatcher sends it once per lease."""
+    """Leases each due account until `now + LEASE`; the account's message carries that lease."""
     with transaction.atomic():
         due = list(
             ProviderAccount.objects.select_for_update(skip_locked=True)
@@ -61,6 +63,21 @@ def claim_due_revalidations(now: datetime) -> list[int]:
         )
         ProviderAccount.objects.filter(pk__in=due).update(revalidation_due_at=now + LEASE)
     return due
+
+
+def _take_lease(account_id: int, claim: datetime, now: datetime) -> ProviderAccount | None:
+    # Another run, a newer dispatch, a back-off or a key replacement has moved the due time.
+    with transaction.atomic():
+        account = (
+            ProviderAccount.objects.select_for_update()
+            .filter(pk=account_id, revalidation_due_at=claim)
+            .first()
+        )
+        if account is None:
+            return None
+        account.revalidation_due_at = now + LEASE
+        account.save(update_fields=("revalidation_due_at",))
+    return account
 
 
 def _replacing_operator(account: ProviderAccount) -> User | None:
@@ -77,12 +94,20 @@ def _replacing_operator(account: ProviderAccount) -> User | None:
     return event.actor if event else None
 
 
+def _key_replaced(account: ProviderAccount) -> bool:
+    return not ProviderAccount.objects.filter(
+        pk=account.pk, credential_revision=account.credential_revision
+    ).exists()
+
+
 def _finish(
     account: ProviderAccount, outcome: RevalidationOutcome, due: datetime | None = None
 ) -> RevalidationOutcome:
     # A key replaced meanwhile keeps the due time its replacement set.
     ProviderAccount.objects.filter(
-        pk=account.pk, credential_revision=account.credential_revision
+        pk=account.pk,
+        credential_revision=account.credential_revision,
+        revalidation_due_at=account.revalidation_due_at,
     ).update(revalidation_due_at=due)
     return outcome
 
@@ -97,12 +122,16 @@ def revalidate_account(
     account_id: int,
     now: datetime,
     *,
+    claim: datetime,
     adapter_for: Callable[[SiteBinding], ProviderAdapter],
 ) -> RevalidationOutcome:
     """Validates each approved plant of the account with its current key, as the operator who
-    replaced it, within the request budget left after the account's forecasts."""
+    replaced it, within the request budget left after the account's forecasts. `claim` is the
+    lease the dispatcher took for this run; a run whose lease moved on does nothing."""
     clock = Clock(now)
-    account = ProviderAccount.objects.get(pk=account_id)
+    account = _take_lease(account_id, claim, now)
+    if account is None:
+        return RevalidationOutcome.LEASE_LOST
     bindings = list(stale_bindings(account))
     operator = _replacing_operator(account) if bindings else None
     for index, binding in enumerate(bindings):
@@ -113,7 +142,13 @@ def revalidate_account(
         try:
             if operator is None:
                 raise PermissionDenied
-            validate_binding(operator, binding.pk, adapter_for(binding), moment)
+            validate_binding(
+                operator,
+                binding.pk,
+                adapter_for(binding),
+                moment,
+                credential_revision=account.credential_revision,
+            )
         except PermissionDenied:
             return _finish(account, RevalidationOutcome.STOPPED)
         except RequestDeferredError as deferred:
@@ -128,18 +163,41 @@ def revalidate_account(
             if not refuses_binding(error):
                 return _finish(account, RevalidationOutcome.WAITING, moment + RETRY_DELAY)
         except ValidationError:
-            continue
+            # The newer key is revalidated by the run its replacement queued.
+            if _key_replaced(account):
+                return RevalidationOutcome.STOPPED
     return _finish(account, RevalidationOutcome.DONE)
 
 
 @fresh_connections
-def deliver_revalidation(account_id: int) -> None:
-    outcome = revalidate_account(account_id, timezone.now(), adapter_for=providers.adapter_for)
+def deliver_revalidation(account_id: int, lease: str | None = None) -> None:
+    # A message without the lease of its dispatch runs nothing; the lease ends and is sent again.
+    outcome = (
+        RevalidationOutcome.LEASE_LOST
+        if lease is None
+        else revalidate_account(
+            account_id,
+            timezone.now(),
+            claim=datetime.fromisoformat(lease),
+            adapter_for=providers.adapter_for,
+        )
+    )
     logger.info("provider_revalidation account_id=%s outcome=%s", account_id, outcome)
 
 
 def dispatch_revalidations(actor: Actor[[int], None]) -> int:
-    due = claim_due_revalidations(timezone.now())
-    for account_id in due:
-        actor.send(account_id)
+    if queue_full(actor, logger):
+        return 0
+    now = timezone.now()
+    due = claim_due_revalidations(now)
+    lease = now + LEASE
+    for index, account_id in enumerate(due):
+        try:
+            actor.send_with_options(args=(account_id,), kwargs={"lease": lease.isoformat()})
+        except Exception:
+            # An unpublished claim is due again at the next dispatch instead of after its lease.
+            ProviderAccount.objects.filter(pk__in=due[index:], revalidation_due_at=lease).update(
+                revalidation_due_at=now
+            )
+            raise
     return len(due)

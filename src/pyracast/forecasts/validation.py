@@ -38,13 +38,21 @@ def refuses_binding(error: ProviderError) -> bool:
 
 
 def validate_binding(
-    actor: User, binding_id: int, adapter: ProviderAdapter, now: datetime
+    actor: User,
+    binding_id: int,
+    adapter: ProviderAdapter,
+    now: datetime,
+    *,
+    credential_revision: int | None = None,
 ) -> SiteBinding:
+    """`credential_revision` names the key the caller validates for; another one refuses."""
     started = time.monotonic()
     require_platform_admin(actor)
     binding = SiteBinding.objects.select_related("provider_account").get(
         active_region("region__"), pk=binding_id
     )
+    if credential_revision not in {None, binding.provider_account.credential_revision}:
+        raise ValidationError("Configuration changed during validation.")
     if binding.provider_account.provider == Provider.SOLCAST and (
         not binding.settings_verification_reference or binding.installation_date is None
     ):
