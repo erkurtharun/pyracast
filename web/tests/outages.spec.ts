@@ -1,9 +1,12 @@
 import { expect, test, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { tenantRow } from "./support/workspace";
+import { answer, tenantRow, type Mock } from "./support/workspace";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import { errorBody } from "./support/errors";
+import type { components } from "../src/lib/schema";
+
+type Schemas = components["schemas"];
 
 test.use({ timezoneId: "Europe/Istanbul" });
 
@@ -22,7 +25,7 @@ async function workspace(
         next: null,
         previous: null,
     });
-    let incident: Record<string, unknown> | null = null;
+    let incident: Mock<Schemas["IncidentOutput"]> | null = null;
     let outageReads = 0;
     let conflict = false;
     const configuration = {
@@ -94,13 +97,13 @@ async function workspace(
                 };
                 await route.fulfill({
                     status: 409,
-                    json: {
+                    json: answer("IncidentConflict", {
                         ...errorBody(
                             "incident_revision_changed",
                             "The outage changed. Reload the list and try again.",
                         ),
                         current: incident,
-                    },
+                    }),
                 });
                 return;
             }
@@ -122,10 +125,10 @@ async function workspace(
                     ...body,
                     revision: Number(incident?.revision) + 1,
                 };
-                if (incident && path.endsWith("/resolve/"))
-                    incident.status = "resolved";
-                if (incident && path.endsWith("/cancel/"))
-                    incident.status = "cancelled";
+                if (path.endsWith("/resolve/"))
+                    incident = { ...incident, status: "resolved" };
+                if (path.endsWith("/cancel/"))
+                    incident = { ...incident, status: "cancelled" };
             }
             data = incident;
         } else if (path.endsWith("/forecast/")) {

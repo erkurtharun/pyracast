@@ -1,40 +1,47 @@
 import { test, expect, type Page } from "./support/test";
-import { mockApi, paged } from "./support/workspace";
+import { answer, mockApi, paged, type Mock } from "./support/workspace";
 import { errorBody } from "./support/errors";
+import type { components } from "../src/lib/schema";
 
-const run = (id: number, fields: Record<string, unknown> = {}) => ({
-    id,
-    configuration_id: 31,
-    binding_id: 7,
-    requested_by_id: 1,
-    window_start: "2026-01-01",
-    window_end: "2026-01-10",
-    cutoff_at: "2026-01-11T00:00:00Z",
-    created_at: "2026-01-11T01:00:00Z",
-    completed_at: "2026-01-11T02:00:00Z",
-    status: "ready",
-    reason: null,
-    selection_state: "candidate",
-    assessment: "evaluated",
-    factor: 1.1,
-    result: {},
-    dataset_sha256: "",
-    activation_blocker: null,
-    dataset_manifest: {},
-    ...fields,
-});
+type Schemas = components["schemas"];
 
-const automation = (fields: Record<string, unknown> = {}) => ({
-    enabled: false,
-    authorized: false,
-    configuration_id: 31,
-    configuration_current: true,
-    next_check_at: null,
-    disabled_cause: null,
-    current_calibration: null,
-    last_attempt: null,
-    ...fields,
-});
+const run = (id: number, fields: Mock<Schemas["CalibrationOutput"]> = {}) =>
+    answer("CalibrationOutput", {
+        id,
+        configuration_id: 31,
+        binding_id: 7,
+        requested_by_id: 1,
+        window_start: "2026-01-01",
+        window_end: "2026-01-10",
+        cutoff_at: "2026-01-11T00:00:00Z",
+        created_at: "2026-01-11T01:00:00Z",
+        completed_at: "2026-01-11T02:00:00Z",
+        status: "ready",
+        reason: null,
+        selection_state: "candidate",
+        assessment: "evaluated",
+        factor: 1.1,
+        result: {},
+        dataset_sha256: "",
+        activation_blocker: null,
+        dataset_manifest: {},
+        ...fields,
+    });
+
+const automation = (
+    fields: Mock<Schemas["CalibrationAutomationOutput"]> = {},
+) =>
+    answer("CalibrationAutomationOutput", {
+        enabled: false,
+        authorized: false,
+        configuration_id: 31,
+        configuration_current: true,
+        next_check_at: null,
+        disabled_cause: null,
+        current_calibration: null,
+        last_attempt: null,
+        ...fields,
+    });
 
 async function routeRuns(page: Page, runs: () => ReturnType<typeof run>[]) {
     await page.route("**/plants/21/calibrations/", (route) =>
@@ -435,14 +442,14 @@ test("an older automation response cannot undo an enabled setting", async ({
     ).toBeVisible();
 });
 
-const states = {
-    active: { tag: "Active", review: false },
-    candidate: { tag: "Candidate", review: true },
-    previous_configuration: { tag: "Earlier configuration", review: false },
-    not_ready: { tag: "Not ready", review: false },
-} as const;
+const states = [
+    ["active", { tag: "Active", review: false }],
+    ["candidate", { tag: "Candidate", review: true }],
+    ["previous_configuration", { tag: "Earlier configuration", review: false }],
+    ["not_ready", { tag: "Not ready", review: false }],
+] as const;
 
-for (const [state, expected] of Object.entries(states))
+for (const [state, expected] of states)
     test(`a run in selection state ${state} is labelled and offers activation only as a candidate`, async ({
         page,
     }) => {
@@ -526,20 +533,30 @@ test("the calibration in force names its run, time and who selected it", async (
     ).toBeVisible();
 });
 
-const blockers = {
-    configuration_changed:
+const blockers = [
+    [
+        "configuration_changed",
         "configuration changed. It was made for another plant configuration",
-    production_source_changed:
+    ],
+    [
+        "production_source_changed",
         "production source changed. The production source changed after it was trained.",
-    outage_history_changed:
+    ],
+    [
+        "outage_history_changed",
         "outage history changed. The outage history inside its window changed after it was trained.",
-    incumbent_changed:
+    ],
+    [
+        "incumbent_changed",
         "active calibration changed. The active calibration changed after it was compared.",
-    calibration_not_activatable:
+    ],
+    [
+        "calibration_not_activatable",
         "not activatable. It did not finish with a held-out evaluation that allows activation.",
-} as const;
+    ],
+] as const;
 
-for (const [blocker, explanation] of Object.entries(blockers))
+for (const [blocker, explanation] of blockers)
     test(`the ${blocker} blocker is explained and offers a new calibration instead of activation`, async ({
         page,
     }) => {

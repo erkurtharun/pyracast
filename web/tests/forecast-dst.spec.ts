@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "./support/test";
-import { mockApi, paged, plant, region } from "./support/workspace";
+import { answer, mockApi, paged, plant, region } from "./support/workspace";
 
 const zone = "Europe/Berlin";
 
@@ -8,12 +8,15 @@ async function openDay(page: Page, date: string, starts: string[]) {
     await mockApi(page);
     await page.route("**/api/tenants/1/sites/", (route) =>
         route.fulfill({
-            json: paged([{ ...region, timezone: zone, plant }]),
+            json: answer(
+                "PaginatedSiteOutputList",
+                paged([{ ...region, timezone: zone, plant }]),
+            ),
         }),
     );
     await page.route("**/plants/21/forecast/**", (route) =>
         route.fulfill({
-            json: {
+            json: answer("PlantForecastOutput", {
                 date,
                 timezone: zone,
                 freshness: "fresh",
@@ -34,7 +37,7 @@ async function openDay(page: Page, date: string, starts: string[]) {
                         quality_flags: [],
                     })),
                 },
-            },
+            }),
         }),
     );
     await page.goto("/app/");

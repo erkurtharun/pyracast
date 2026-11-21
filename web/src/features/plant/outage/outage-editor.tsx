@@ -5,13 +5,7 @@ import { DisplayError } from "@/lib/api/errors";
 import { fromPlantInput, toPlantInput } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
-import {
-    ActionForm,
-    Field,
-    Select,
-    TextAreaField,
-    formText,
-} from "@/ui/form";
+import { ActionForm, Field, Select, TextAreaField, formText } from "@/ui/form";
 import { useLabel } from "@/ui/vocabulary";
 import {
     capacityImpact,

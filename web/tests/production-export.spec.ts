@@ -18,7 +18,7 @@ test("an empty production day downloads the import header and no fabricated row"
     expect(file.suggestedFilename()).toBe(
         "production-East array-2026-01-07.csv",
     );
-    const text = await readFile((await file.path())!, "utf8");
+    const text = await readFile(await file.path(), "utf8");
     expect(text.replace(/^\uFEFF/, "").split("\r\n")).toEqual([
         '"starts_at","ends_at","energy_mwh","quality","source","timezone"',
         "",

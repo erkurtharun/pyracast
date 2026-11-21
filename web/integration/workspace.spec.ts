@@ -450,7 +450,7 @@ test("a customer manages one plant site through the real API", async ({
         .getByRole("button", { name: "Download CSV", exact: true })
         .click();
     const exportedProduction = await readFile(
-        (await (await productionDownload).path())!,
+        await (await productionDownload).path(),
     );
     await page.getByRole("button", { name: "Import CSV" }).click();
     await page.getByLabel("Production CSV").setInputFiles({
