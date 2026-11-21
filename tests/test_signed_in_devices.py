@@ -151,7 +151,11 @@ def test_sessions_that_ended_meanwhile_leave_the_named_ones_that_remain_to_end()
     assert session_user(here) == owner.pk
 
 
-@pytest.mark.parametrize("ids", [[], ["first"], "2"])
+@pytest.mark.parametrize(
+    "ids",
+    [[], ["first"], "2", None, ["2"], [None], [True], [False], [1.5], [2**63], [10**30]],
+    ids=repr,
+)
 def test_a_selection_that_is_not_a_list_of_session_ids_is_refused(ids: Any) -> None:
     owner = account("owner")
     here, there = signed_in(owner), signed_in(owner)
@@ -159,7 +163,36 @@ def test_a_selection_that_is_not_a_list_of_session_ids_is_refused(ids: Any) -> N
     response = end(here, ids)
 
     assert response.status_code == 400
+    assert response.json()["code"] == "invalid_request"
     assert session_user(there) == owner.pk
+    assert session_user(here) == owner.pk
+
+
+def selection_reads(statements: list[str]) -> list[str]:
+    return [sql for sql in statements if '"usersessions_usersession"."id" IN' in sql]
+
+
+def test_unknown_and_foreign_sessions_read_the_selection_once_and_answer_alike() -> None:
+    owner, stranger = account("owner"), account("stranger")
+    here, theirs = signed_in(owner), signed_in(stranger)
+    foreign = row_of(theirs).pk
+    missing = UserSession.objects.order_by("-pk").values_list("pk", flat=True)[0] + 1000
+    token = token_of(here)
+
+    def ending(ids: list[int]) -> tuple[Any, list[str]]:
+        with CaptureQueriesContext(connection) as queries:
+            response = end(here, ids, token=token)
+        return response, [query["sql"] for query in queries.captured_queries]
+
+    with_foreign, foreign_statements = ending([foreign])
+    with_missing, missing_statements = ending([missing])
+
+    assert with_foreign.status_code == with_missing.status_code == 200
+    assert with_foreign.json() == with_missing.json()
+    assert len(foreign_statements) == len(missing_statements)
+    assert len(selection_reads(foreign_statements)) == 1
+    assert len(selection_reads(missing_statements)) == 1
+    assert session_user(theirs) == stranger.pk
 
 
 def test_ending_sessions_needs_the_form_token() -> None:

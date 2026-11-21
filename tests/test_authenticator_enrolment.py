@@ -7,6 +7,7 @@ import pytest
 from allauth.account.internal.flows import reauthentication
 from allauth.account.internal.flows.login import AUTHENTICATION_METHODS_SESSION_KEY
 from allauth.account.models import EmailAddress
+from allauth.mfa import signals as mfa_signals
 from allauth.mfa.models import Authenticator
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal.auth import generate_totp_secret
@@ -14,7 +15,7 @@ from django.contrib.auth.models import User
 from django.contrib.sessions.backends.db import SessionStore
 from django.test import Client, override_settings
 
-from pyracast.accounts import processes
+from pyracast.accounts import middleware, processes, security, sessions
 from tests.support.account_sessions import account, session_key, signed_in, totp_clock
 from tests.support.auth_lifecycle import AUTH, PASSWORD, submit, totp_code
 from tests.support.step_up import holds_current_authority
@@ -166,25 +167,37 @@ def test_an_activation_judged_inside_its_confirmations_window_is_answered_with_t
     client = confirmed(user)
     secret = setup_secret(client)
     confirmed_at = confirmation_times(client)[0]
-    judged = False
+    judgments: list[float] = []
 
     def judge() -> float:
-        nonlocal judged
-        judged = True
-        return confirmed_at + 299
+        judgments.append(confirmed_at + (301 if judgments else 299))
+        return judgments[-1]
 
     def later() -> float:
-        return confirmed_at + (301 if judged else 299)
+        return confirmed_at + (301 if judgments else 299)
 
     monkeypatch.setattr(reauthentication, "time", SimpleNamespace(time=judge))
-    monkeypatch.setattr(processes, "time", SimpleNamespace(time=later))
+    for clocked in (processes, security, sessions, middleware):
+        monkeypatch.setattr(clocked, "time", SimpleNamespace(time=later))
+    added: list[str] = []
 
-    activation = activate(client, secret, now)
+    def record_added(authenticator: Authenticator, **_kwargs: Any) -> None:
+        added.append(authenticator.type)
 
-    assert judged
+    mfa_signals.authenticator_added.connect(record_added)
+    try:
+        activation = activate(client, secret, now)
+    finally:
+        mfa_signals.authenticator_added.disconnect(record_added)
+
+    assert judgments == [confirmed_at + 299]
     assert activation.status_code == 200
     assert len(activation.json()["meta"]["recovery_codes"]) == 10
     assert confirmation_times(client) == [confirmed_at, confirmed_at]
+    kinds = {Authenticator.Type.TOTP, Authenticator.Type.RECOVERY_CODES}
+    assert set(Authenticator.objects.filter(user=user).values_list("type", flat=True)) == kinds
+    assert sorted(added) == sorted(kinds)
+    assert SETUP_KEY not in SessionStore(session_key(client))
 
 
 def test_only_the_session_that_made_a_change_keeps_its_authority() -> None:

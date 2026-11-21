@@ -220,7 +220,7 @@ test("a session read started before sign-out is not handed out after it", async 
     const signOut = authRequest("auth/session", "DELETE");
     const later = loadSession();
     release();
-    expect((await earlier).csrf_token).toBe("before");
+    expect((await earlier).csrf_token).toBe("after");
     expect((await signOut).status).toBe(401);
     expect((await later).csrf_token).toBe("after");
     expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([

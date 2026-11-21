@@ -436,3 +436,112 @@ test("a resend that finds the code expired starts the change again", async ({
     await expect(change.getByLabel("New email address")).toBeVisible();
     await expect(change.getByLabel("Email verification code")).toHaveCount(0);
 });
+
+test("the address form stays disabled while the confirmed request runs", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const submitted: unknown[] = [];
+    let release: () => void = () => {};
+    const answered = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let arrive: () => void = () => {};
+    const arrived = new Promise<void>((resolve) => {
+        arrive = resolve;
+    });
+    await page.route("**/api/auth/browser/v1/account/email", async (route) => {
+        if (route.request().method() === "GET") return route.fallback();
+        submitted.push(route.request().postDataJSON());
+        if (submitted.length === 1) return route.fulfill(askPassword);
+        arrive();
+        await answered;
+        return route.fulfill({ json: { status: 200 } });
+    });
+    await page.route("**/api/auth/browser/v1/auth/reauthenticate", (route) =>
+        route.fulfill({
+            json: { status: 200, meta: { is_authenticated: true } },
+        }),
+    );
+    await page.goto("/app/account/");
+    const change = emailChange(page);
+    await change.getByText("Change email", { exact: true }).click();
+    await change.getByLabel("New email address").fill("new@example.test");
+    await change
+        .getByRole("button", { name: "Send verification code" })
+        .click();
+    await change
+        .getByLabel("Current password", { exact: true })
+        .fill("current-password");
+    await change.getByRole("button", { name: "Confirm password" }).click();
+    await arrived;
+    await expect(change.getByLabel("New email address")).toBeDisabled();
+    await expect(
+        change.getByRole("button", { name: "Send verification code" }),
+    ).toBeDisabled();
+    release();
+    await expect(
+        change.getByText(
+            "Enter the code sent to new@example.test. It is valid for 10 minutes.",
+        ),
+    ).toBeVisible();
+    expect(submitted).toEqual([
+        { email: "new@example.test" },
+        { email: "new@example.test" },
+    ]);
+});
+
+test("using another address after the change ended starts the change again", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let pending = true;
+    const removed: unknown[] = [];
+    await page.route("**/api/auth/browser/v1/account/email", (route) => {
+        const method = route.request().method();
+        if (method === "GET")
+            return route.fulfill({
+                json: {
+                    status: 200,
+                    data: [
+                        { email: user.email, primary: true, verified: true },
+                        ...(pending
+                            ? [
+                                  {
+                                      email: "pending@example.test",
+                                      primary: false,
+                                      verified: false,
+                                  },
+                              ]
+                            : []),
+                    ],
+                },
+            });
+        if (method !== "DELETE") return route.fallback();
+        removed.push(route.request().postDataJSON());
+        return route.fulfill({
+            status: 400,
+            json: allauthErrorBody(400, "invalid_request", [
+                {
+                    message: "The address is not assigned to this account.",
+                    code: "unknown_email",
+                    param: "email",
+                },
+            ]),
+        });
+    });
+    await page.goto("/app/account/");
+    const change = emailChange(page);
+    await change.getByText("Change email", { exact: true }).click();
+    await expect(change.getByText(/pending@example\.test/)).toBeVisible();
+    pending = false;
+    await change.getByRole("button", { name: "Use another address" }).click();
+    await expect(
+        change.getByText("The code is no longer valid. Request a new one."),
+    ).toBeVisible();
+    await expect(change.getByLabel("New email address")).toBeVisible();
+    await expect(
+        change.getByText("The address is not assigned to this account."),
+    ).toHaveCount(0);
+    expect(removed).toEqual([{ email: "pending@example.test" }]);
+});

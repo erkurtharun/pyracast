@@ -370,3 +370,111 @@ test("a read that settles after a newer one does not adopt its answer", async ()
     expect(sessionState().session?.session_tag).toBe("b");
     expect(stored.get(observedTagKey)).toBe("b");
 });
+
+// Runs every promise reaction already queued; no time passes.
+const drained = () => new Promise((resolve) => setImmediate(resolve));
+
+function arrival() {
+    let arrive!: () => void;
+    const arrived = new Promise<void>((resolve) => {
+        arrive = resolve;
+    });
+    return { arrived, arrive };
+}
+
+test("a read that settles after another tab changed the session adopts the answer of a read sent after the change", async () => {
+    adoptSession(session("a"));
+    const { gate, release } = held();
+    answer(
+        async () => {
+            await gate;
+            return json(session("a"));
+        },
+        () => json(signedOut),
+        () => json(signedOut),
+    );
+    const earlier = loadSession();
+    stored.set(observedTagKey, "");
+    release();
+    expect((await earlier).user).toBeNull();
+    expect(calls).toHaveLength(3);
+    expect(sessionState().session?.user).toBeNull();
+    expect(stored.get(observedTagKey)).toBe("");
+});
+
+for (const later of ["answers", "fails"] as const) {
+    test(`a read that settles while a read sent after another tab's change is in flight adopts nothing; the later read ${later}`, async () => {
+        adoptSession(session("a"));
+        const first = held();
+        const second = held();
+        const { arrived, arrive } = arrival();
+        answer(
+            async () => {
+                await first.gate;
+                return json(session("a"));
+            },
+            async () => {
+                arrive();
+                await second.gate;
+                return later === "answers"
+                    ? json(signedOut)
+                    : json(errorBody("server_error", "Unavailable."), 503);
+            },
+            () => json(signedOut),
+        );
+        const earlier = loadSession().catch((failure: unknown) => failure);
+        stored.set(observedTagKey, "");
+        const newer = loadSession().catch((failure: unknown) => failure);
+        first.release();
+        await arrived;
+        await drained();
+        expect(sessionState().session?.session_tag).toBe("a");
+        expect(stored.get(observedTagKey)).toBe("");
+        expect(isCurrent(sessionState().session)).toBe(false);
+        second.release();
+        const [settled, answered] = await Promise.all([earlier, newer]);
+        expect(settled).toBe(answered);
+        expect(stored.get(observedTagKey)).toBe("");
+        if (later === "answers") {
+            expect(sessionState().session?.user).toBeNull();
+            expect(calls).toHaveLength(3);
+        } else {
+            expect(answered).toBeInstanceOf(ApiError);
+            expect(sessionState().session?.session_tag).toBe("a");
+            expect(isCurrent(sessionState().session)).toBe(false);
+            expect(calls).toHaveLength(2);
+        }
+    });
+}
+
+test("a session adopted from a write's answer is kept over a read that started before the write", async () => {
+    adoptSession(session("a"));
+    const first = held();
+    const second = held();
+    const turkish = { ...session("a"), language: "tr" };
+    answer(
+        async () => {
+            await first.gate;
+            return json(signedOut);
+        },
+        () => json(turkish),
+        async () => {
+            await second.gate;
+            return json(session("a"));
+        },
+    );
+    const earlier = loadSession();
+    const language = api.post("/api/session/language/", {
+        body: { language: "tr" },
+    });
+    first.release();
+    adoptSession(await language);
+    second.release();
+    expect((await earlier).language).toBe("tr");
+    expect(sessionState().session?.language).toBe("tr");
+    expect(sent()).toEqual([
+        "GET /api/session/ null",
+        "POST /api/session/language/ a",
+        "GET /api/session/ null",
+    ]);
+});
