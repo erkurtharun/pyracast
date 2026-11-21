@@ -3,14 +3,15 @@ import io
 import json
 import re
 import urllib.request
-from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping
+from collections import defaultdict
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
 from deploy import operations_events, operations_log
+from tests.support.log_filters import filter_of, filter_terms, matches, resources
 
 EVENTS = operations_events.EVENTS
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,7 +34,16 @@ ENDPOINT = re.compile(r"pyracast-operations|entries:write|logging\.googleapis\.c
 LOG_WRITE = re.compile(
     rf"{ENDPOINT.pattern}|gcloud logging write|operations_events\.py|operations_log\.report"
 )
-FAMILIES = {"backup", "runtime", "host", "certificate", "secrets", "origin_pull"}
+PROJECT = "project"
+# The policies that existed before each alerted event had its own, with the event each matches.
+EXISTING_POLICIES = {
+    "backup": "pyracast_backup_failed",
+    "runtime": "pyracast_runtime_unhealthy",
+    "host": "pyracast_host_capacity",
+    "certificate": "pyracast_certificate_expiring",
+    "secrets": "pyracast_secrets_failed",
+    "origin_pull": "pyracast_origin_pull_unenforced",
+}
 
 
 class Write:
@@ -148,32 +158,63 @@ def other_log_writers(paths: Iterable[Path]) -> list[str]:
     return found
 
 
-def operations_alerts() -> dict[str, tuple[str, str]]:
-    block = re.search(
-        r"^  operations_alerts = \{\n(.*?)\n  \}$",
-        MONITORING.read_text(encoding="utf-8"),
-        re.S | re.M,
-    )
+def monitoring() -> str:
+    return MONITORING.read_text(encoding="utf-8")
+
+
+def operations_alerts() -> dict[str, str]:
+    block = re.search(r"^  operations_alerts = \{\n(.*?)\n  \}$", monitoring(), re.S | re.M)
     assert block
+    return dict(
+        re.findall(r'^\s+(\w+)\s*=\s*\{\s*event\s*=\s*"(pyracast_[a-z_]+)"', block[1], re.M)
+    )
+
+
+def log_policies() -> dict[str, list[str]]:
+    """Each operations log-match policy's filter, rendered for the event it is keyed by."""
+    policy = resources(monitoring(), "google_monitoring_alert_policy")["operations"]
     return {
-        key: (family, event)
-        for key, family, event in re.findall(
-            r'^\s+(\w+)\s*=\s*\{\s*family\s*=\s*"(\w+)",\s*event\s*=\s*"(pyracast_[a-z_]+)"',
-            block[1],
-            re.M,
-        )
+        key: filter_terms(policy, {"var.project_id": PROJECT, "each.value.event": event})
+        for key, event in operations_alerts().items()
     }
 
 
-def alert_policies(per_event: bool) -> dict[str, list[str]]:
-    """The events each operations policy matches, as monitoring.tf's locals build them."""
-    alerts = operations_alerts()
-    if per_event:
-        return {key: [event] for key, (_, event) in alerts.items()}
-    families: dict[str, list[str]] = defaultdict(list)
-    for family, event in alerts.values():
-        families[family].append(event)
-    return dict(families)
+def rate_policies() -> dict[str, list[str]]:
+    """The filter of the log-based metric behind each threshold policy that counts one."""
+    source = monitoring()
+    metrics = resources(source, "google_logging_metric")
+    return {
+        name: filter_of(metrics[metric], source, {"var.project_id": PROJECT})
+        for name, policy in resources(source, "google_monitoring_alert_policy").items()
+        if "condition_threshold" in policy
+        for metric in re.findall(r"google_logging_metric\.(\w+)\.name", policy)
+    }
+
+
+@pytest.fixture
+def written(monkeypatch: pytest.MonkeyPatch) -> Callable[[str, bool], dict[str, Any]]:
+    """The entry operations_log sends for an event: a real line, or its test alert."""
+    bodies: list[dict[str, Any]] = []
+
+    def urlopen(request: urllib.request.Request, timeout: float) -> io.BytesIO:
+        bodies.append(json.loads(cast(bytes, request.data)))
+        return io.BytesIO(b"{}")
+
+    monkeypatch.setattr(operations_log, "log_resource", lambda: (PROJECT, {"type": "gce_instance"}))
+    monkeypatch.setattr(operations_log, "access_token", lambda: "token")
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+
+    def entry(name: str, test: bool) -> dict[str, Any]:
+        event = EVENTS[name]
+        if test:
+            assert operations_events.main(["--test-alert", name]) == 0
+        else:
+            assert operations_log.report(name, event.severity, **event.sample)
+        body = bodies.pop()
+        (line,) = body["entries"]
+        return {"logName": body["logName"], "resource": body["resource"], **line}
+
+    return entry
 
 
 def runbook_rows() -> list[list[str]]:
@@ -200,40 +241,60 @@ def test_every_event_of_the_vocabulary_is_written_by_a_host_script() -> None:
     assert set(EVENTS) <= set(writes())
 
 
-@pytest.mark.parametrize("per_event", [False, True], ids=["by_family", "per_event"])
-def test_every_alerted_event_is_matched_by_exactly_one_policy_in_either_mode(
-    per_event: bool,
+@pytest.mark.parametrize("name", sorted(EVENTS))
+def test_each_event_pages_through_one_log_policy_or_one_rate_or_stays_silent_with_its_reason(
+    name: str, written: Callable[[str, bool], dict[str, Any]]
 ) -> None:
-    matched = Counter(event for events in alert_policies(per_event).values() for event in events)
-    alerted = {name for name, event in EVENTS.items() if event.alerts}
+    logs, rates = log_policies(), rate_policies()
+    line = written(name, False)
+    matched = [key for key, terms in logs.items() if matches(terms, line)]
+    counted = [key for key, terms in rates.items() if matches(terms, line)]
+    alerts = EVENTS[name].alerts
 
-    assert set(matched) == alerted
-    assert set(matched.values()) == {1}
-    assert {name for name, event in EVENTS.items() if event.severity == "ERROR"} <= alerted
+    assert logs
+    assert rates
+    if alerts == "match":
+        assert (len(matched), counted) == (1, [])
+    elif alerts == "rate":
+        assert (matched, len(counted)) == ([], 1)
+    else:
+        assert isinstance(alerts, operations_events.Silent)
+        assert alerts.reason
+        assert (matched, counted) == ([], [])
+    if EVENTS[name].severity == "ERROR":
+        assert alerts == "match"
 
 
-def test_the_default_alerts_each_family_through_the_policies_that_existed_before() -> None:
-    by_family = alert_policies(per_event=False)
-    per_event = alert_policies(per_event=True)
-    monitoring = MONITORING.read_text(encoding="utf-8")
+@pytest.mark.parametrize("name", sorted(EVENTS))
+def test_a_test_alert_reaches_its_events_log_policy_and_never_counts_toward_a_rate(
+    name: str, written: Callable[[str, bool], dict[str, Any]]
+) -> None:
+    logs, rates = log_policies(), rate_policies()
+    line = written(name, True)
 
-    assert set(by_family) == FAMILIES
-    assert set(per_event) > FAMILIES
-    for family in FAMILIES:
-        assert per_event[family][0] in by_family[family]
-    assert re.search(
-        r'variable "alert_policy_per_event" \{\n.*?type\s*=\s*bool\n\s*default\s*=\s*false\n',
-        VARIABLES.read_text(encoding="utf-8"),
-        re.S,
+    assert line["jsonPayload"]["test"] is True
+    assert logs
+    assert len([key for key, terms in logs.items() if matches(terms, line)]) == (
+        1 if EVENTS[name].alerts == "match" else 0
     )
-    assert "operations_policies = var.alert_policy_per_event ?" in monitoring
-    policy = re.search(
-        r'resource "google_monitoring_alert_policy" "operations" \{\n(.*?)\n\}', monitoring, re.S
+    assert [key for key, terms in rates.items() if matches(terms, line)] == []
+
+
+def test_each_alerted_event_has_its_own_policy_and_the_existing_keys_keep_their_events() -> None:
+    alerts = operations_alerts()
+    policy = " ".join(
+        resources(monitoring(), "google_monitoring_alert_policy")["operations"].split()
     )
-    assert policy
-    assert "for_each = local.operations_policies" in " ".join(policy[1].split())
-    assert r'"jsonPayload.event=\"${alert.event}\""' in policy[1]
-    assert '"${alert.event}: ${alert.description}"' in policy[1]
+
+    assert {key: alerts.get(key) for key in EXISTING_POLICIES} == EXISTING_POLICIES
+    assert sorted(alerts.values()) == sorted(
+        name for name, event in EVENTS.items() if event.alerts == "match"
+    )
+    assert "for_each = local.operations_alerts" in policy
+    assert 'notification_rate_limit { period = "3600s" }' in policy
+    assert '"${each.value.event}: ${each.value.description} ' in policy
+    assert "alert_policy_per_event" not in monitoring()
+    assert "alert_policy_per_event" not in VARIABLES.read_text(encoding="utf-8")
 
 
 def test_every_event_has_one_runbook_entry_saying_what_to_check_and_how_to_recover() -> None:
@@ -241,6 +302,19 @@ def test_every_event_has_one_runbook_entry_saying_what_to_check_and_how_to_recov
 
     assert sorted(row[0] for row in rows) == sorted(f"`{name}`" for name in EVENTS)
     assert all(len(row) == 4 and all(row) for row in rows)
+
+
+def test_the_restart_row_says_the_rate_pages_test_lines_never_count_and_what_to_check() -> None:
+    ((_, means, check, _),) = [
+        row for row in runbook_rows() if row[0] == "`pyracast_runtime_restarted`"
+    ]
+
+    assert "three" in means
+    assert "within an hour" in means
+    assert "test line" in means
+    assert "docker inspect" in check
+    assert "memory" in check
+    assert "release" in check
 
 
 def test_no_event_field_identifies_a_customer_an_address_or_a_key() -> None:

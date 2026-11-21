@@ -3,9 +3,12 @@ import dataclasses
 import io
 import ipaddress
 import itertools
+import json
+import logging
 import os
 import re
 import runpy
+import urllib.request
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +28,7 @@ from deploy import (
     backup,
     host,
     host_contract,
+    operations_log,
     probe_origin_pull,
     rehearsal,
     release_state,
@@ -33,6 +37,8 @@ from deploy import (
     watchdog,
 )
 from pyracast import maintenance
+from pyracast.accounts.audit import SecurityEvent, record_security_event
+from pyracast.accounts.audit import logger as security_logger
 from pyracast.accounts.authentication import login_identity
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.forecasts.historical_upload import MAX_UPLOAD_BYTES
@@ -51,6 +57,7 @@ from tests.support.gateway_routes import (
     routers,
     routes,
 )
+from tests.support.log_filters import filter_of, matches, resources
 from tests.support.workflows import ci_job_names, ci_jobs, job_names
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -270,6 +277,93 @@ def test_the_api_writes_its_security_lines_through_a_blocking_log_path() -> None
     assert logging["driver"] == "gcplogs"
     assert logging["options"]["mode"] == "blocking"
     assert compose_environment()["PYRACAST_SECURITY_LOG_PATH"] == "/proc/1/fd/1"
+
+
+def container_entry(record: logging.LogRecord, handler: str) -> dict[str, Any]:
+    """One line of a container stream, formatted by a configured handler, as gcplogs ships it."""
+    formatter = settings.LOGGING["formatters"][settings.LOGGING["handlers"][handler]["formatter"]]
+    return {
+        "logName": "projects/project/logs/gcplogs-docker-driver",
+        "resource": {"type": "gce_instance"},
+        "jsonPayload": {
+            "message": logging.Formatter(formatter["format"]).format(record),
+            "container": {"name": "/pyracast-api-1"},
+        },
+    }
+
+
+def operations_entry(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    bodies: list[dict[str, Any]] = []
+
+    def urlopen(request: Any, timeout: float) -> io.BytesIO:
+        bodies.append(json.loads(request.data))
+        return io.BytesIO(b"{}")
+
+    monkeypatch.setattr(
+        operations_log, "log_resource", lambda: ("project", {"type": "gce_instance"})
+    )
+    monkeypatch.setattr(operations_log, "access_token", lambda: "token")
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    assert operations_log.report(
+        "pyracast_backup_failed", "ERROR", reason="last_verified_backup_older_than_90_minutes"
+    )
+    (body,) = bodies
+    (line,) = body["entries"]
+    return {"logName": body["logName"], "resource": body["resource"], **line}
+
+
+def test_the_security_bucket_receives_exactly_the_lines_of_the_security_logger(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(security_logger, "handlers", [caplog.handler])
+    caplog.set_level(logging.INFO, logger="pyracast.security")
+    record_security_event(
+        SecurityEvent.LOGIN_LOCKED, address="someone@example.com", client_ip="203.0.113.7"
+    )
+    (security,) = caplog.records
+    quoting = logging.getLogger("pyracast").makeRecord(
+        "pyracast",
+        logging.INFO,
+        __file__,
+        1,
+        "pyracast.security %s",
+        (security.getMessage(),),
+        None,
+    )
+    monitoring = text(TERRAFORM / "monitoring.tf")
+    sink = resources(monitoring, "google_logging_project_sink")["security"]
+    metric = resources(monitoring, "google_logging_metric")["security_events"]
+    terms = filter_of(sink, monitoring, {"var.project_id": "project"})
+
+    assert security.name == "pyracast.security"
+    assert matches(terms, container_entry(security, "security"))
+    assert not matches(terms, container_entry(quoting, "console"))
+    assert not matches(terms, operations_entry(monkeypatch))
+    assert filter_of(metric, monitoring, {"var.project_id": "project"}) == terms
+    assert "filter = local.security_log_filter" in " ".join(sink.split())
+    assert "filter = local.security_log_filter" in " ".join(metric.split())
+
+
+def test_security_lines_are_kept_a_year_in_their_own_unlocked_bucket_beside_the_default() -> None:
+    bucket = terraform_block(
+        TERRAFORM / "monitoring.tf", 'resource "google_logging_project_bucket_config" "security"'
+    )
+    sink = terraform_block(
+        TERRAFORM / "monitoring.tf", 'resource "google_logging_project_sink" "security"'
+    )
+    configuration = "".join(text(path) for path in TERRAFORM.glob("*.tf"))
+
+    assert "project = var.project_id location = var.region" in bucket
+    assert "retention_days = 365" in bucket
+    assert "locked" not in bucket
+    assert (
+        'destination = "logging.googleapis.com/projects/${var.project_id}/locations/'
+        "${google_logging_project_bucket_config.security.location}/buckets/"
+        '${google_logging_project_bucket_config.security.bucket_id}"'
+    ) in sink
+    assert "exclusions" not in sink
+    assert "_Default" not in configuration
+    assert "writer_identity" not in configuration
 
 
 def test_origin_firewall_admits_exactly_the_gateway_trusted_ipv4_ranges() -> None:
@@ -787,6 +881,25 @@ def test_a_silent_watchdog_is_alerted() -> None:
     assert "condition_absent" in policy[1]
     assert "google_logging_metric.watchdog_heartbeat.name" in policy[1]
     assert "pyracast_watchdog_heartbeat" in reported_events()["INFO"]
+
+
+def test_a_service_restarted_three_times_within_an_hour_is_alerted() -> None:
+    metric = terraform_block(
+        TERRAFORM / "monitoring.tf", 'resource "google_logging_metric" "runtime_restarts"'
+    )
+    policy = terraform_block(
+        TERRAFORM / "monitoring.tf", 'resource "google_monitoring_alert_policy" "runtime_restarts"'
+    )
+
+    assert r'"jsonPayload.event=\"pyracast_runtime_restarted\""' in metric
+    assert '"NOT jsonPayload.test=true"' in metric
+    assert "google_logging_metric.runtime_restarts.name" in policy
+    assert (
+        'comparison = "COMPARISON_GT" threshold_value = 2 duration = "0s" aggregations { '
+        'alignment_period = "3600s" per_series_aligner = "ALIGN_SUM" '
+        'cross_series_reducer = "REDUCE_SUM" }'
+    ) in policy
+    assert "pyracast_runtime_restarted" in reported_events()["WARNING"]
 
 
 def test_release_drains_producers_and_workers_while_the_site_still_serves() -> None:
