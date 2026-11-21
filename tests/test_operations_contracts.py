@@ -51,7 +51,7 @@ from tests.support.gateway_routes import (
     routers,
     routes,
 )
-from tests.support.workflows import ci_job_names, ci_jobs, job_names
+from tests.support.workflows import WORKFLOWS, ci_job_names, ci_jobs, job_names, workflow
 
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = ROOT / "deploy"
@@ -473,9 +473,15 @@ def test_windows_tests_run_in_four_shards_that_the_verify_job_combines() -> None
     assert jobs["verify_windows"]["needs"] == "verify_windows_shards"
 
 
-def test_every_ci_job_caches_exactly_the_locked_dependencies_it_installs() -> None:
+def test_every_workflow_job_caches_exactly_the_locked_dependencies_it_installs() -> None:
     installs_by_key: dict[str, set[tuple[str, ...]]] = {}
-    for key, job in ci_jobs().items():
+    jobs = {
+        (path.name, identifier): job
+        for path in sorted(WORKFLOWS.glob("*.yml"))
+        for identifier, job in workflow(path.name)["jobs"].items()
+    }
+    assert {("release.yml", "scan"), ("release.yml", "deploy")} <= jobs.keys()
+    for key, job in jobs.items():
         commands = "\n".join(step.get("run", "") for step in job["steps"])
         scripts = run_scripts(commands)
         installs = locked_installs(commands, scripts)

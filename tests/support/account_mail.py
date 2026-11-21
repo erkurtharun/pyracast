@@ -31,7 +31,14 @@ from pyracast.accounts.models import UserLanguagePreference
 from tests.support.auth_lifecycle import AUTH, PASSWORD, submit, totp_code
 from tests.support.company_registration import signup
 from tests.support.outbox import deliver_mail
-from tests.support.social_accounts import CALLBACK, PROVIDERS, complete, provider_destination
+from tests.support.social_accounts import (
+    CALLBACK,
+    PROVIDER_TOKEN,
+    PROVIDERS,
+    complete,
+    provider_destination,
+    provider_endpoint,
+)
 
 FIREFOX = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:139.0) Gecko/20100101 Firefox/139.0"
 HOSTILE_AGENT = f'{FIREFOX} <script>alert("agent")</script>\r\nX-Injected: agent'
@@ -878,17 +885,18 @@ def provider_requests(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     def request(
         self: requests.Session, method: str, url: str, *args: Any, **kwargs: Any
     ) -> requests.Response:
+        provider, endpoint = provider_endpoint(url)
         response = requests.Response()
         response.status_code = 200
         response.headers["content-type"] = "application/json"
         keys = (
             {"id", "mail", "userPrincipalName"}
-            if "graph.microsoft.com" in url
+            if provider == "microsoft"
             else {"sub", "email", "email_verified"}
         )
         response._content = json.dumps(
-            {"access_token": "test-access-token", "token_type": "Bearer", "expires_in": 3600}
-            if url.endswith("/token")
+            PROVIDER_TOKEN
+            if endpoint == "token"
             else {key: value for key, value in profile.items() if key in keys}
         ).encode()
         return response
