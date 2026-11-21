@@ -71,7 +71,13 @@ test("viewer reads shared settings without write controls or requests", async ({
         }),
     );
     await page.route("**/api/**/outages/", (route) =>
-        route.fulfill({ json: paged([]) }),
+        route.fulfill({
+            json: {
+                ...paged([]),
+                can_propose: true,
+                proposal_unavailable_reason: null,
+            },
+        }),
     );
     await page.route("**/api/**/calibration/automation/", (route) =>
         route.fulfill({

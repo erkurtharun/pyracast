@@ -1,13 +1,15 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 
-from drf_spectacular.utils import extend_schema, extend_schema_field
+from django.contrib.auth.models import User
+from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_field
 from rest_framework import serializers
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from pyracast.api.serializers import FiniteFloat, InputSerializer
+from pyracast.change_requests.queries import outage_proposal, own_pending_outages
 from pyracast.errors import ConflictError, ErrorCode
 from pyracast.incidents import operations
 from pyracast.incidents.models import IncidentKind, IncidentStatus, PlantIncident
@@ -50,7 +52,7 @@ class IncidentOutput(serializers.ModelSerializer[PlantIncident]):
 
     class Meta:
         model = PlantIncident
-        fields = (
+        fields: tuple[str, ...] = (
             "id",
             "revision",
             "kind",
@@ -69,31 +71,76 @@ class IncidentOutput(serializers.ModelSerializer[PlantIncident]):
         read_only_fields = fields
 
 
+class IncidentListOutput(IncidentOutput):
+    pending_request_id = serializers.SerializerMethodField()
+
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_pending_request_id(self, obj: PlantIncident) -> int | None:
+        return cast(dict[int, int], self.context["pending"]).get(obj.pk)
+
+    class Meta(IncidentOutput.Meta):
+        fields = (*IncidentOutput.Meta.fields, "pending_request_id")
+        read_only_fields = fields
+
+
 class IncidentConflict(serializers.Serializer[dict[str, Any]]):
     code = serializers.ChoiceField(choices=ErrorCode.choices)
     message = serializers.CharField()
-    current = IncidentOutput()
+    current = IncidentListOutput()
+
+
+def outage_rows(
+    actor: User, tenant_id: int, plant_id: int, rows: list[PlantIncident]
+) -> list[dict[str, Any]]:
+    pending = own_pending_outages(actor, tenant_id, plant_id, [row.pk for row in rows])
+    return cast(
+        list[dict[str, Any]],
+        IncidentListOutput(rows, many=True, context={"pending": pending}).data,
+    )
 
 
 @contextmanager
-def current_on_conflict() -> Iterator[None]:
-    """A stale write answers with the version it lost to; the caller is already authorized."""
+def current_on_conflict(actor: User, tenant_id: int) -> Iterator[None]:
+    """A stale write answers with the version it lost to as the actor's outage list shows it;
+    the caller is already authorized."""
     try:
         yield
     except operations.StaleIncidentError as error:
+        current = error.current
         raise ConflictError(
-            error.code, details={"current": IncidentOutput(error.current).data}
+            error.code,
+            details={"current": outage_rows(actor, tenant_id, current.plant_id, [current])[0]},
         ) from error
+
+
+class IncidentPage(serializers.Serializer[dict[str, Any]]):
+    count = serializers.IntegerField()
+    next = serializers.URLField(allow_null=True)
+    previous = serializers.URLField(allow_null=True)
+    can_propose = serializers.BooleanField()
+    proposal_unavailable_reason = serializers.CharField(allow_null=True)
+    results = IncidentListOutput(many=True)
 
 
 class IncidentsView(ScopedView[PlantIncident]):
     serializer_class = IncidentOutput
 
-    @extend_schema(responses=IncidentOutput(many=True))
-    def get(self, _request: Request, **_kwargs: Any) -> Response:
-        rows = PlantIncident.objects.filter(plant=self.plant()).order_by("-starts_at", "-id")
-        page = self.paginate_queryset(rows)
-        return self.get_paginated_response(IncidentOutput(page, many=True).data)
+    @extend_schema(
+        operation_id="tenants_regions_plants_outages_list",
+        parameters=[
+            OpenApiParameter(
+                "page", int, description="A page number within the paginated result set."
+            )
+        ],
+        responses=IncidentPage,
+    )
+    def get(self, request: Request, **_kwargs: Any) -> Response:
+        plant, actor, tenant_id = self.plant(), cast(User, request.user), self.kwargs["tenant_id"]
+        rows = PlantIncident.objects.filter(plant=plant).order_by("-starts_at", "-id")
+        page = cast(list[PlantIncident], self.paginate_queryset(rows))
+        response = self.get_paginated_response(outage_rows(actor, tenant_id, plant.pk, page))
+        response.data.update(outage_proposal(actor, tenant_id, plant))
+        return response
 
     @extend_schema(request=IncidentInput, responses={201: IncidentOutput})
     def post(self, request: Request, **_kwargs: Any) -> Response:
@@ -112,7 +159,7 @@ class IncidentView(ScopedView[PlantIncident]):
         scope = self.scope()
         data = IncidentUpdate(data=request.data)
         data.is_valid(raise_exception=True)
-        with current_on_conflict():
+        with current_on_conflict(cast(User, request.user), kwargs["tenant_id"]):
             row = operations.save_incident(
                 *scope, incident_id=kwargs["incident_id"], **data.validated_data
             )
@@ -127,7 +174,7 @@ class ResolveView(ScopedView[PlantIncident]):
         scope = self.scope()
         data = ResolveInput(data=request.data)
         data.is_valid(raise_exception=True)
-        with current_on_conflict():
+        with current_on_conflict(cast(User, request.user), kwargs["tenant_id"]):
             row = operations.finish_incident(
                 *scope, incident_id=kwargs["incident_id"], **data.validated_data
             )
@@ -142,7 +189,7 @@ class CancelView(ScopedView[PlantIncident]):
         scope = self.scope()
         data = RevisionInput(data=request.data)
         data.is_valid(raise_exception=True)
-        with current_on_conflict():
+        with current_on_conflict(cast(User, request.user), kwargs["tenant_id"]):
             row = operations.finish_incident(
                 *scope, incident_id=kwargs["incident_id"], cancel=True, **data.validated_data
             )

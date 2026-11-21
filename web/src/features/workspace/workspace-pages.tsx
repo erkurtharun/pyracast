@@ -1,8 +1,8 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
-import { routes } from "@/lib/routes";
+import { routeId, routes } from "@/lib/routes";
 import { OperationalInbox } from "@/features/inbox/operational-inbox";
 import { RecycleBin } from "@/features/trash/recycle-bin";
 import { WorkspaceMembers } from "./workspace-members";
@@ -43,8 +43,13 @@ export function MembersPage() {
 
 export function InboxPage() {
     const { tenant } = useWorkspace();
+    const linked = routeId(useSearchParams().get("request") ?? undefined);
     return (
-        <OperationalInbox key={`${tenant.id}:${tenant.role}`} tenant={tenant} />
+        <OperationalInbox
+            key={`${tenant.id}:${tenant.role}`}
+            tenant={tenant}
+            linked={linked}
+        />
     );
 }
 

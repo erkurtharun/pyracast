@@ -1,11 +1,13 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { Fragment, type ReactNode, type RefObject } from "react";
+import { PendingApproval } from "@/features/inbox/pending-approval";
 import { ScrollRegion } from "@/ui/scroll-region";
 import { intervalKey, type Interval } from "./model";
 import { ProductionReading } from "./production-reading";
 
 export function ProductionTable({
+    tenantId,
     rows,
     visibleRows,
     timeFormatter,
@@ -20,6 +22,7 @@ export function ProductionTable({
     onOpen,
     renderEditor,
 }: {
+    tenantId: number;
     rows: Interval[];
     visibleRows: Interval[];
     timeFormatter: Intl.DateTimeFormat;
@@ -36,7 +39,9 @@ export function ProductionTable({
 }) {
     const t = useTranslations("ProductionHistory");
     const proposals = useTranslations("ChangeRequests");
-    const actions = canManage || rows.some((row) => row.can_propose);
+    const actions =
+        canManage ||
+        rows.some((row) => row.can_propose || row.pending_request_id != null);
     return (
         <ScrollRegion label={t("production_intervals")}>
             <table className="production-table">
@@ -102,6 +107,15 @@ export function ProductionTable({
                                                 <span className="fine">
                                                     {unavailable(row)}
                                                 </span>
+                                            )}
+                                            {row.pending_request_id != null && (
+                                                <PendingApproval
+                                                    tenantId={tenantId}
+                                                    requestId={
+                                                        row.pending_request_id
+                                                    }
+                                                    subject={intervalLabel(row)}
+                                                />
                                             )}
                                         </td>
                                     )}

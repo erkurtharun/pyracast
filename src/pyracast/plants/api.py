@@ -9,6 +9,7 @@ from rest_framework.generics import GenericAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from pyracast.change_requests.queries import with_own_pending_requests
 from pyracast.plants import operations
 from pyracast.plants.activation import (
     activate_calibration,
@@ -125,7 +126,13 @@ class ProductionView(ScopedView[Plant]):
         plant = self.plant()
         data = ProductionQuery(data=request.query_params)
         data.is_valid(raise_exception=True)
-        result = production_history(plant, actor=cast(User, request.user), **data.validated_data)
+        actor = cast(User, request.user)
+        result = with_own_pending_requests(
+            actor,
+            self.kwargs["tenant_id"],
+            plant.pk,
+            production_history(plant, actor=actor, **data.validated_data),
+        )
         return Response(ProductionHistoryOutput(result).data)
 
 

@@ -1742,7 +1742,7 @@ export interface components {
         IncidentConflict: {
             code: components["schemas"]["ErrorCode"];
             message: string;
-            current: components["schemas"]["IncidentOutput"];
+            current: components["schemas"]["IncidentListOutput"];
         };
         IncidentInput: {
             kind: components["schemas"]["IncidentKindEnum"];
@@ -1769,6 +1769,30 @@ export interface components {
          * @enum {string}
          */
         IncidentKindEnum: "inverter" | "panels" | "grid" | "other" | "multiple";
+        IncidentListOutput: {
+            readonly id: number;
+            readonly revision: number;
+            readonly kind: components["schemas"]["IncidentKindEnum"];
+            readonly title: string;
+            readonly notes: string;
+            /** Format: date-time */
+            readonly starts_at: string;
+            /** Format: date-time */
+            readonly ends_at: string | null;
+            /** Format: double */
+            readonly available_dc_mw: number | null;
+            /** Format: double */
+            readonly available_inverter_mw: number | null;
+            /** Format: double */
+            readonly available_export_mw: number | null;
+            declared_configuration_id: number;
+            readonly status: components["schemas"]["IncidentStatusEnum"];
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly updated_at: string;
+            readonly pending_request_id: number | null;
+        };
         IncidentOutput: {
             readonly id: number;
             readonly revision: number;
@@ -1791,6 +1815,16 @@ export interface components {
             readonly created_at: string;
             /** Format: date-time */
             readonly updated_at: string;
+        };
+        IncidentPage: {
+            count: number;
+            /** Format: uri */
+            next: string | null;
+            /** Format: uri */
+            previous: string | null;
+            can_propose: boolean;
+            proposal_unavailable_reason: string | null;
+            results: components["schemas"]["IncidentListOutput"][];
         };
         IncidentRequestInput: {
             action: components["schemas"]["IncidentChangeActionEnum"];
@@ -2181,21 +2215,6 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["ChangeRequestSummaryOutput"][];
-        };
-        PaginatedIncidentOutputList: {
-            /** @example 123 */
-            count: number;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=4
-             */
-            next?: string | null;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=2
-             */
-            previous?: string | null;
-            results: components["schemas"]["IncidentOutput"][];
         };
         PaginatedLocationChangeOutputList: {
             /** @example 123 */
@@ -2701,6 +2720,7 @@ export interface components {
             can_propose: boolean;
             can_propose_revert: boolean;
             proposal_unavailable_reason: string | null;
+            pending_request_id: number | null;
         };
         ProductionItemOutput: {
             id: number;
@@ -5822,7 +5842,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedIncidentOutputList"];
+                    "application/json": components["schemas"]["IncidentPage"];
                 };
             };
             /** @description Sign-in is required. */

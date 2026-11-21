@@ -175,6 +175,11 @@
     "Outages": {
         "plantOutages": "Plant outages",
         "configurationRequired": "Outages can be reported once the plant configuration is approved.",
+        "proposalUnavailable": "Outages cannot be submitted right now.",
+        "proposalReasons": {
+            "configuration_unavailable": "Outages can be reported once the plant configuration is approved.",
+            "pending_request_limit": "Too many of your requests for this plant await approval. Withdraw one or wait for a decision before submitting another outage."
+        },
         "capacityRequired": "Enter at least one available capacity, or choose unknown impact.",
         "capacityCeiling": "At most {value} MW, the configured capacity.",
         "reportOutage": "Report outage",
@@ -363,7 +368,6 @@
         "formerMember": "Former member",
         "reason": "Reason for correction",
         "optionalReason": "Reason (optional)",
-        "reasonRequired": "Enter a reason for this correction.",
         "send": "Send for approval",
         "approvalHelp": "A workspace administrator reviews this submission before it changes live data.",
         "proposeCorrection": "Suggest correction",
@@ -410,6 +414,23 @@
         "beforeChange": "Before change",
         "withdrawHelp": "To revise a submission, withdraw it and send a new one.",
         "unread": "Unread outcome",
-        "intervals": "{count, plural, one {# interval} other {# intervals}}"
+        "intervals": "{count, plural, one {# interval} other {# intervals}}",
+        "addToRequest": "Add to request",
+        "updateInRequest": "Update in request",
+        "staged": "Added {interval} to the request.",
+        "draftTitle": "Correction request",
+        "draftDayLocked": "Send or discard this request before choosing another day.",
+        "editStaged": "Edit",
+        "editStagedInterval": "Edit staged correction for {interval}",
+        "removeStaged": "Remove",
+        "removeStagedInterval": "Remove staged correction for {interval}",
+        "stagedProviderReading": "Provider reading",
+        "stagedChanged": "This interval changed after you added it. Edit or remove it.",
+        "sending": "Sending…",
+        "discardDraft": "Discard request",
+        "discarded": "Correction request discarded.",
+        "waitingForApproval": "Waiting for approval – view",
+        "waitingForApprovalOf": "Waiting for approval: view the request for {subject}",
+        "linkedRequest": "Linked submission"
     }
 }

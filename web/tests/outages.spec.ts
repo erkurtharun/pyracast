@@ -84,7 +84,20 @@ async function workspace(
             };
         else if (path.endsWith("/outages/") && method === "GET") {
             outageReads++;
-            data = paged(incident ? [incident] : []);
+            data = {
+                ...paged(incident ? [incident] : []),
+                ...(role === "admin"
+                    ? {
+                          can_propose: false,
+                          proposal_unavailable_reason: "admin_edits_directly",
+                      }
+                    : {
+                          can_propose: configured,
+                          proposal_unavailable_reason: configured
+                              ? null
+                              : "configuration_unavailable",
+                      }),
+            };
         } else if (path.includes("/outages/")) {
             expect(route.request().headers()["x-csrftoken"]).toBe("token");
             const body = route.request().postDataJSON();

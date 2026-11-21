@@ -3,12 +3,14 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import type { Plant, PlantScope } from "@/lib/api";
 import { useApiList } from "@/lib/api/query";
+import type { components } from "@/lib/schema";
 import { outagesExport } from "@/lib/exports";
 import { useProposalKey } from "@/lib/idempotency";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
 import { Resource } from "@/ui/resource";
 import { Notice } from "@/ui/ui";
+import { useCodeLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import {
     staleVersion,
@@ -20,6 +22,7 @@ import { OutageCard } from "./outage/outage-card";
 import { OutageEditor, type Ceilings } from "./outage/outage-editor";
 
 type Configuration = NonNullable<Plant["current_configuration"]>;
+type OutageRow = components["schemas"]["IncidentListOutput"];
 type Editor = { status: "closed" } | { status: "open"; outage?: Outage };
 
 export function Outages({
@@ -34,6 +37,7 @@ export function Outages({
     configuration?: Configuration | null;
 }) {
     const t = useTranslations("Outages");
+    const reason = useCodeLabel("Outages.proposalReasons");
     const proposals = useTranslations("ChangeRequests");
     const direct = useCanManageWorkspace();
     const plant = useExportPlant();
@@ -55,6 +59,7 @@ export function Outages({
         }
     }
     async function submit(change: OutageChange) {
+        setSubmitted(false);
         try {
             await submitOutageChange(scope, change, { proposalKey, direct });
         } catch (error) {
@@ -78,12 +83,25 @@ export function Outages({
             : undefined;
     const open = (outage?: Outage) => {
         proposalKey.reset();
+        setSubmitted(false);
         setEditor({ status: "open", outage });
     };
-    const card = (outage: Outage) => (
+    const offer = resource.data;
+    const canOpen = direct ? !!configuration : !!offer?.can_propose;
+    const unavailable = direct
+        ? !configuration && t("configurationRequired")
+        : offer &&
+          !offer.can_propose &&
+          reason(
+              offer.proposal_unavailable_reason ?? "",
+              t("proposalUnavailable"),
+          );
+    const card = (outage: OutageRow) => (
         <OutageCard
             key={outage.id}
             outage={outage}
+            tenantId={scope.tenant_id}
+            pendingRequestId={outage.pending_request_id}
             timezone={timezone}
             direct={direct}
             configurationChanged={
@@ -95,6 +113,7 @@ export function Outages({
             onEdit={() => open(outage)}
             onResolve={(next) => {
                 proposalKey.reset();
+                setSubmitted(false);
                 setResolving(next ? outage.id : null);
             }}
             onSubmit={submit}
@@ -106,7 +125,7 @@ export function Outages({
                 <div>
                     <h2>{t("plantOutages")}</h2>
                 </div>
-                {configuration && (
+                {canOpen && (
                     <button className="button" onClick={() => open()}>
                         {direct
                             ? t("reportOutage")
@@ -114,7 +133,7 @@ export function Outages({
                     </button>
                 )}
             </div>
-            {!configuration && <Notice>{t("configurationRequired")}</Notice>}
+            {unavailable && <Notice>{unavailable}</Notice>}
             {submitted && <Notice>{proposals("submitted")}</Notice>}
             {!direct && <p className="fine">{proposals("approvalHelp")}</p>}
             <details>

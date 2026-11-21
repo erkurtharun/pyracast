@@ -390,6 +390,7 @@ class ProductionIntervalOutput(serializers.Serializer[dict[str, Any]]):
     can_propose = serializers.BooleanField()
     can_propose_revert = serializers.BooleanField()
     proposal_unavailable_reason = serializers.CharField(allow_null=True)
+    pending_request_id = serializers.IntegerField(allow_null=True)
 
 
 class ProductionHistoryOutput(serializers.Serializer[dict[str, Any]]):
