@@ -2356,6 +2356,15 @@ msgstr "Bilgileri düzenle"
 msgid "This workspace already has a plant at this location."
 msgstr "Bu çalışma alanında bu konumda zaten bir santral var."
 
+msgid ""
+"Technical details cannot change while the plant is suspended or its data "
+"connection is not current. Approve the plant again or validate its "
+"connection first."
+msgstr ""
+"Santral askıya alınmışken veya veri bağlantısı güncel değilken teknik "
+"bilgiler değiştirilemez. Önce santrali yeniden onaylayın veya bağlantısını "
+"doğrulayın."
+
 msgid "Sent"
 msgstr "Gönderildi"
 

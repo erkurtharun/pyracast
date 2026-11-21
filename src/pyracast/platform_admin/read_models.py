@@ -544,7 +544,8 @@ def distance_km(start: tuple[float, float], end: tuple[float, float]) -> float:
         math.sin((lat2 - lat1) / 2) ** 2
         + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
     )
-    return 2 * MEAN_EARTH_RADIUS_KM * math.asin(math.sqrt(half))
+    # Rounding can lift `half` a unit in the last place above 1 for antipodal points.
+    return 2 * MEAN_EARTH_RADIUS_KM * math.asin(math.sqrt(min(1.0, half)))
 
 
 def review_history(region_id: int) -> dict[str, Any]:
