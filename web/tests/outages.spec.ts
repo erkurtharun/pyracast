@@ -84,8 +84,14 @@ async function workspace(
             };
         else if (path.endsWith("/outages/") && method === "GET") {
             outageReads++;
-            data = {
-                ...paged(incident ? [incident] : []),
+            const results = incident
+                ? [{ ...incident, pending_request_id: null }]
+                : [];
+            data = answer("IncidentPage", {
+                results,
+                count: results.length,
+                next: null,
+                previous: null,
                 ...(role === "admin"
                     ? {
                           can_propose: false,
@@ -97,7 +103,7 @@ async function workspace(
                               ? null
                               : "configuration_unavailable",
                       }),
-            };
+            });
         } else if (path.includes("/outages/")) {
             expect(route.request().headers()["x-csrftoken"]).toBe("token");
             const body = route.request().postDataJSON();
@@ -115,7 +121,7 @@ async function workspace(
                             "incident_revision_changed",
                             "The outage changed. Review its current values and save again.",
                         ),
-                        current: incident,
+                        current: { ...incident, pending_request_id: null },
                     }),
                 });
                 return;

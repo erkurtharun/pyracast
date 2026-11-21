@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 from uuid import uuid4
 
@@ -21,6 +22,7 @@ from tests.support.change_request_boundaries import (
 )
 from tests.support.domain import NOW, System
 from tests.support.notification_groups import second_workspace
+from tests.support.trash_operations import sibling_plant
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -244,19 +246,72 @@ def test_outage_list_marks_only_the_members_own_pending_request(
 
 def test_outage_markers_keep_a_fixed_number_of_queries(monkeypatch: pytest.MonkeyPatch) -> None:
     case = make_request_case(monkeypatch)
-    incident = _outage(case)
-    client = Client()
-    client.force_login(case.proposer)
+    system = case.system
+    client = _signed_in(case.proposer)
     url = (
-        f"/api/tenants/{case.system.tenant.pk}/regions/{case.system.region.pk}/"
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/"
         f"plants/{case.plant.pk}/outages/"
     )
+    outages = 0
 
     def seed(count: int) -> None:
+        nonlocal outages
         for _ in range(count):
-            _propose_outage_update(case, case.proposer, incident)
+            outages += 1
+            start = NOW - timedelta(hours=2 * outages + 1)
+            values = {
+                **incident_values(),
+                "starts_at": start,
+                "ends_at": start + timedelta(hours=1),
+            }
+            incident = save_incident(*case.scope(system.member), **values)
+            submit_incident(
+                *case.scope(case.proposer),
+                action="update",
+                idempotency_key=uuid4(),
+                incident_id=incident.pk,
+                expected_revision=1,
+                values={**values, "available_dc_mw": 0},
+            )
 
-    assert_scale_invariant(seed, lambda: client.get(url), small=1, large=10)
+    def listed() -> None:
+        response = client.get(url)
+        assert response.status_code == 200, response.content
+        rows = response.json()["results"]
+        assert len(rows) == outages
+        assert all(row["pending_request_id"] for row in rows)
+
+    assert_scale_invariant(seed, listed, small=1, large=10)
+
+
+def test_markers_never_cross_to_another_plant_of_the_same_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = make_request_case(monkeypatch)
+    sibling = sibling_plant(case.system)
+    beside = replace(case.system, region=sibling.region)
+    here = _propose(case.proposer, case.system, case.plant, _slot(3))
+    there = _propose(case.proposer, beside, sibling, _slot(2))
+    _propose_outage_update(case, case.proposer, _outage(case))
+    sibling_outage = save_incident(
+        beside.member,
+        beside.tenant.pk,
+        beside.region.pk,
+        sibling.pk,
+        **{**incident_values(), "available_dc_mw": 1.0},
+    )
+    client = _signed_in(case.proposer)
+
+    listed = client.get(
+        f"/api/tenants/{beside.tenant.pk}/regions/{beside.region.pk}/plants/{sibling.pk}/outages/"
+    )
+
+    assert _marked(case.proposer, case.system, case.plant) == {_slot(3)[0]: here.pk}
+    assert _marked(case.proposer, beside, sibling) == {_slot(2)[0]: there.pk}
+    assert listed.status_code == 200, listed.content
+    assert [(row["id"], row["pending_request_id"]) for row in listed.json()["results"]] == [
+        (sibling_outage.pk, None)
+    ]
 
 
 def test_a_multi_interval_proposal_refusal_names_the_refused_item(

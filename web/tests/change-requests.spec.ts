@@ -1,6 +1,14 @@
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { answer, mockApi, paged, tenantRow, user } from "./support/workspace";
+import {
+    answer,
+    mockApi,
+    paged,
+    tenantRow,
+    user,
+    type Mock,
+} from "./support/workspace";
+import type { components } from "../src/lib/schema";
 import { nativeProductionHistory } from "./support/native-production";
 import { errorBody } from "./support/errors";
 
@@ -93,15 +101,14 @@ async function openPlant(page: Page, tab: string) {
     await page.getByRole("button", { name: tab, exact: true }).click();
 }
 
-function outagePage(
-    results: Record<string, unknown>[],
-    reason: string | null = null,
-) {
-    return {
+type OutageRow = components["schemas"]["IncidentListOutput"];
+
+function outagePage(results: Mock<OutageRow>[], reason: string | null = null) {
+    return answer("IncidentPage", {
         ...paged(results),
         can_propose: reason === null,
         proposal_unavailable_reason: reason,
-    };
+    });
 }
 
 function draft(page: Page) {
@@ -350,7 +357,7 @@ test("member outage reports remain proposals and use explicit action envelopes",
     await member(page);
     await page.setViewportSize({ width: 320, height: 844 });
     const submissions: Record<string, unknown>[] = [];
-    const outage = {
+    const outage: OutageRow = {
         id: 4,
         revision: 2,
         kind: "inverter",
@@ -363,6 +370,9 @@ test("member outage reports remain proposals and use explicit action envelopes",
         available_export_mw: null,
         status: "active",
         declared_configuration_id: 31,
+        created_at: "2026-11-09T08:10:00Z",
+        updated_at: "2026-11-09T08:10:00Z",
+        pending_request_id: null,
     };
     await page.route("**/api/**/outages/", (route) => {
         expect(route.request().method()).toBe("GET");
@@ -1410,6 +1420,11 @@ test("a member stages several intervals of one day and sends them as one request
         .getByRole("button", { name: /^Remove staged correction for 09:30/ })
         .click();
     await expect(staged.getByRole("listitem")).toHaveCount(3);
+    await expect(
+        page.getByRole("status").filter({
+            hasText: /^Removed 09:30.10:00 from the request\.$/,
+        }),
+    ).toBeVisible();
     await staged
         .getByRole("button", { name: /^Edit staged correction for 08:30/ })
         .click();
@@ -1419,6 +1434,11 @@ test("a member stages several intervals of one day and sends them as one request
     await editor
         .getByRole("button", { name: "Update in request", exact: true })
         .click();
+    await expect(
+        page.getByRole("status").filter({
+            hasText: /^Updated 08:30.09:00 in the request\.$/,
+        }),
+    ).toBeVisible();
     await staged.getByLabel("Reason for correction").fill("Meter read on site");
     await staged
         .getByRole("button", { name: "Send for approval", exact: true })
@@ -1576,6 +1596,9 @@ test("a member sees which intervals wait for approval and opens the request", as
     await expect(marker).toHaveAttribute("href", "/app/w/1/inbox/?request=7");
     await expect(
         rows.nth(0).getByRole("button", { name: /^Suggest correction for/ }),
+    ).toHaveCount(0);
+    await expect(
+        rows.nth(1).getByRole("button", { name: /^Suggest correction for/ }),
     ).toBeVisible();
     await expect(rows.nth(1).getByRole("link")).toHaveCount(0);
 
@@ -1590,11 +1613,25 @@ test("a member sees which intervals wait for approval and opens the request", as
     ).toBeVisible();
 });
 
+function proposalControls(page: Page, title: string) {
+    const card = page.locator("article").filter({
+        has: page.getByRole("heading", { name: title }),
+    });
+    return [
+        card.getByRole("button", { name: "Suggest changes", exact: true }),
+        card.getByRole("button", { name: "Submit resolution", exact: true }),
+        card.getByText("Request cancellation", { exact: true }),
+    ] as const;
+}
+
 test("a member sees which outages wait for approval", async ({ page }) => {
     await member(page);
     await page.route("**/api/**/outages/", (route) =>
         route.fulfill({
-            json: outagePage([{ ...activeOutage(), pending_request_id: 9 }]),
+            json: outagePage([
+                { ...activeOutage(), pending_request_id: 9 },
+                { ...activeOutage(), id: 5, title: "Export limited" },
+            ]),
         }),
     );
     await openPlant(page, "Outages");
@@ -1603,9 +1640,13 @@ test("a member sees which outages wait for approval", async ({ page }) => {
             name: "Waiting for approval: view the request for Inverter offline",
         }),
     ).toHaveAttribute("href", "/app/w/1/inbox/?request=9");
+    for (const control of proposalControls(page, "Inverter offline"))
+        await expect(control).toHaveCount(0);
+    for (const control of proposalControls(page, "Export limited"))
+        await expect(control).toBeVisible();
 });
 
-function activeOutage() {
+function activeOutage(): OutageRow {
     return {
         id: 4,
         revision: 2,
@@ -1619,6 +1660,8 @@ function activeOutage() {
         available_export_mw: null,
         status: "active",
         declared_configuration_id: 31,
+        created_at: "2026-11-09T08:10:00Z",
+        updated_at: "2026-11-09T08:10:00Z",
         pending_request_id: null,
     };
 }
@@ -1630,7 +1673,7 @@ for (const [reason, explanation] of [
     ],
     [
         "pending_request_limit",
-        "Too many of your requests for this plant await approval. Withdraw one or wait for a decision before submitting another outage.",
+        "Too many of your requests for this plant await approval. Withdraw one or wait for a decision before proposing another outage or a change to one.",
     ],
 ] as const) {
     test(`a member sees why a new outage cannot be submitted: ${reason}`, async ({
@@ -1648,6 +1691,14 @@ for (const [reason, explanation] of [
         await expect(
             page.getByRole("heading", { name: "Inverter offline" }),
         ).toBeVisible();
+        const [change, resolution, cancellation] = proposalControls(
+            page,
+            "Inverter offline",
+        );
+        if (reason === "pending_request_limit")
+            for (const control of [change, resolution, cancellation])
+                await expect(control).toHaveCount(0);
+        else await expect(resolution).toBeVisible();
     });
 }
 
@@ -1709,4 +1760,328 @@ test("an administrator who edits directly sees no proposal draft", async ({
     await expect(page.getByText("Production saved.")).toBeVisible();
     expect(writes).toHaveLength(1);
     await expect(draft(page)).toHaveCount(0);
+});
+
+async function serveDays(
+    page: Page,
+    rows: () => Parameters<typeof dayRows>[1],
+) {
+    await page.route("**/api/**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        )!;
+        return route.fulfill({ json: dayRows(date, rows()) });
+    });
+}
+
+function showDay(page: Page, date: string) {
+    return page.evaluate((date) => {
+        const url = new URL(window.location.href);
+        url.searchParams.set("date", date);
+        window.history.pushState(null, "", url);
+    }, date);
+}
+
+// A full page load drops an unsent draft, so leaving the page is confirmed first.
+function leavingIsConfirmed(page: Page) {
+    return page.evaluate(() => {
+        const leaving = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(leaving);
+        return leaving.defaultPrevented;
+    });
+}
+
+test("a staged interval that comes to wait for the member's own request is named and cannot be edited", async ({
+    page,
+}) => {
+    await member(page);
+    let pending: number | null = null;
+    await serveDays(page, () => [{ pending_request_id: pending }, {}]);
+    await openPlant(page, "Production");
+    await stage(page, "08:00", "0,5");
+    pending = 7;
+    await page.locator(".production-refresh").click();
+
+    const rows = page.locator(".production-table tbody tr");
+    await expect(
+        rows.nth(0).getByRole("link", {
+            name: /^Waiting for approval: view the request for 08:00/,
+        }),
+    ).toBeVisible();
+    await expect(
+        rows.nth(0).getByRole("button", { name: /^Suggest correction for/ }),
+    ).toHaveCount(0);
+    const item = draft(page).getByRole("listitem");
+    await expect(item).toContainText(
+        "A request of yours for this interval already waits for approval. Remove it here, or withdraw that request first.",
+    );
+    await expect(
+        item.getByRole("button", { name: /^Edit staged correction for 08:00/ }),
+    ).toBeDisabled();
+});
+
+test("editing a staged interval outside daylight shows its row and discarding closes the editor", async ({
+    page,
+}) => {
+    await member(page);
+    await serveDays(page, () => [{ effective: null }, {}, {}]);
+    await openPlant(page, "Production");
+    const fullDay = page.getByRole("checkbox", { name: "Show full day" });
+    const night = page.getByRole("button", {
+        name: "Suggest correction for 08:00",
+    });
+    await expect(night).toHaveCount(0);
+    await fullDay.check();
+    await stage(page, "08:00", "0,4");
+    await fullDay.uncheck();
+    await expect(night).toHaveCount(0);
+    const staged = draft(page);
+    const edit = staged.getByRole("button", {
+        name: /^Edit staged correction for 08:00/,
+    });
+
+    await edit.click();
+    const editor = page.locator(".production-row-editor");
+    await expect(editor.getByRole("textbox").first()).toHaveValue("0.4");
+    await expect(fullDay).toBeChecked();
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(night).toBeFocused();
+
+    await edit.click();
+    await expect(editor).toHaveCount(1);
+    await staged
+        .getByRole("button", { name: "Discard request", exact: true })
+        .click();
+    await expect(page.getByText("Correction request discarded.")).toBeVisible();
+    await expect(editor).toHaveCount(0);
+    await expect(fullDay).toBeEnabled();
+    await expect(night).toBeEnabled();
+    await expect(
+        page.getByRole("button", { name: "Previous day" }),
+    ).toBeEnabled();
+});
+
+test("a reason of only spaces is refused at its field and a refused reason is shown there", async ({
+    page,
+}) => {
+    await member(page);
+    const submissions: unknown[] = [];
+    await serveDays(page, () => [{}, {}]);
+    await page.route("**/change-requests/production/", (route) => {
+        submissions.push(route.request().postDataJSON());
+        return route.fulfill({
+            status: 400,
+            json: errorBody(
+                "invalid_request",
+                "Check the highlighted values and try again.",
+                {
+                    fields: {
+                        reason: "This field may not be blank.",
+                        changes: "Submit 1 to 100 production intervals.",
+                    },
+                },
+            ),
+        });
+    });
+    await openPlant(page, "Production");
+    await stage(page, "08:00", "0,5");
+    const staged = draft(page);
+    const reason = staged.getByLabel("Reason for correction");
+    const send = staged.getByRole("button", {
+        name: "Send for approval",
+        exact: true,
+    });
+
+    await reason.fill("   ");
+    await send.click();
+    await expect(reason).toBeFocused();
+    await expect(reason).toHaveAttribute("aria-invalid", "true");
+    await expect(reason).toHaveAccessibleDescription(
+        /Enter a reason for this correction\./,
+    );
+    expect(submissions).toHaveLength(0);
+
+    await reason.fill("Meter read on site");
+    await expect(reason).not.toHaveAttribute("aria-invalid", "true");
+    await send.click();
+    await expect(staged.getByRole("alert")).toContainText(
+        "Submit 1 to 100 production intervals.",
+    );
+    await expect(reason).toHaveAttribute("aria-invalid", "true");
+    await expect(reason).toHaveAccessibleDescription(
+        /This field may not be blank\./,
+    );
+    expect(submissions).toHaveLength(1);
+});
+
+test("a reason of only spaces is refused at its field in Turkish", async ({
+    page,
+}) => {
+    await member(page, "tr");
+    const submissions: unknown[] = [];
+    await serveDays(page, () => [{}, {}]);
+    await page.route("**/change-requests/production/", (route) => {
+        submissions.push(route.request().postDataJSON());
+        return route.fulfill({ status: 201, json: proposal() });
+    });
+    await openPlant(page, "Üretim");
+    await page
+        .getByRole("button", {
+            name: /^08:00.08:30 aralığı için düzeltme öner/,
+        })
+        .click();
+    const editor = page.locator(".production-row-editor");
+    await editor.getByRole("textbox").first().fill("0,5");
+    await editor
+        .getByRole("button", { name: "Talebe ekle", exact: true })
+        .click();
+    const staged = page.getByRole("region", {
+        name: "Düzeltme talebi",
+        exact: true,
+    });
+    const reason = staged.getByLabel("Düzeltme gerekçesi");
+
+    await reason.fill("  ");
+    await staged
+        .getByRole("button", { name: "Onaya gönder", exact: true })
+        .click();
+    await expect(reason).toBeFocused();
+    await expect(reason).toHaveAttribute("aria-invalid", "true");
+    await expect(reason).toHaveAccessibleDescription(
+        /Bu düzeltme için gerekçe girin\./,
+    );
+    expect(submissions).toHaveLength(0);
+});
+
+test("a draft stays with its day when Back shows another day", async ({
+    page,
+}) => {
+    await member(page);
+    await serveDays(page, () => [{}, {}]);
+    await openPlant(page, "Production");
+    const day = page.getByLabel("Day", { exact: true });
+    await showDay(page, "2026-11-08");
+    await expect(day).toHaveValue("2026-11-08");
+    await stage(page, "08:00", "0,5");
+    const staged = draft(page);
+    const send = staged.getByRole("button", {
+        name: "Send for approval",
+        exact: true,
+    });
+
+    await page.goBack();
+    await expect(day).toHaveValue("2026-11-09");
+    await expect(staged).toContainText(
+        "This request is for 2026-11-08. Return to that day to send it, or discard it.",
+    );
+    await expect(staged.getByRole("listitem")).toHaveCount(1);
+    await expect(send).toBeDisabled();
+    await expect(
+        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+    ).toBeDisabled();
+
+    await staged
+        .getByRole("button", { name: "Return to 2026-11-08", exact: true })
+        .click();
+    await expect(day).toHaveValue("2026-11-08");
+    await expect(staged).not.toContainText("This request is for");
+    await expect(staged.getByRole("listitem")).toHaveCount(1);
+    await expect(send).toBeEnabled();
+});
+
+test("a draft stays with its day when a link shows another day", async ({
+    page,
+}) => {
+    await member(page);
+    await serveDays(page, () => [{}, {}]);
+    await openPlant(page, "Production");
+    const day = page.getByLabel("Day", { exact: true });
+    await stage(page, "08:00", "0,5");
+    const staged = draft(page);
+    await staged.getByLabel("Reason for correction").fill("Meter read on site");
+    expect(await leavingIsConfirmed(page)).toBe(true);
+
+    await showDay(page, "2026-11-07");
+    await expect(day).toHaveValue("2026-11-07");
+    await expect(staged).toContainText(
+        "This request is for 2026-11-09. Return to that day to send it, or discard it.",
+    );
+    await expect(
+        staged.getByRole("button", { name: "Send for approval", exact: true }),
+    ).toBeDisabled();
+    await expect(
+        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+    ).toBeDisabled();
+
+    await staged
+        .getByRole("button", { name: "Discard request", exact: true })
+        .click();
+    await expect(page.getByText("Correction request discarded.")).toBeVisible();
+    await expect(staged).toHaveCount(0);
+    await expect(day).toHaveValue("2026-11-07");
+    await expect(
+        page.getByRole("button", { name: "Previous day" }),
+    ).toBeEnabled();
+    expect(await leavingIsConfirmed(page)).toBe(false);
+    await stage(page, "08:00", "0,6");
+    await expect(draft(page).getByLabel("Reason for correction")).toHaveValue(
+        "",
+    );
+});
+
+test("a member promoted while a draft is open can choose another day", async ({
+    page,
+}) => {
+    await page.clock.install({ time: new Date("2026-11-10T12:00:00Z") });
+    await mockApi(page);
+    let role: "viewer" | "admin" = "viewer";
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: { user, language: "en", csrf_token: "signed-token" },
+        }),
+    );
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([tenantRow({ id: 1, name: "Workspace", role })]),
+        }),
+    );
+    await page.route("**/change-requests/?*", (route) =>
+        route.fulfill({ json: paged([]) }),
+    );
+    await serveDays(page, () => [{}, {}]);
+    await openPlant(page, "Production");
+    await stage(page, "08:00", "0,5");
+    const previous = page.getByRole("button", { name: "Previous day" });
+    await expect(previous).toBeDisabled();
+
+    role = "admin";
+    await page.clock.runFor(120_001);
+    await expect(draft(page)).toHaveCount(0);
+    await expect(previous).toBeEnabled();
+    await previous.click();
+    await expect(page.getByLabel("Day", { exact: true })).toHaveValue(
+        "2026-11-08",
+    );
+});
+
+test("the manual mark as read recovers a failed read receipt", async ({
+    page,
+}) => {
+    let posts = 0;
+    await memberWithOutcome(page, () => (++posts === 1 ? 500 : 200));
+    await page.goto("/app/w/1/inbox/");
+    const card = page.locator(".inbox-card").filter({ hasText: "Rejected" });
+    await card.getByRole("button", { name: "Review details" }).click();
+    await expect.poll(() => posts).toBe(1);
+
+    const mark = card.getByRole("button", {
+        name: "Mark as read",
+        exact: true,
+    });
+    await mark.click();
+    await expect(mark).toHaveCount(0);
+    await expect(
+        page.getByRole("button", { name: "Inbox", exact: true }),
+    ).toBeVisible();
+    expect(posts).toBe(2);
 });

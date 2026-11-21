@@ -232,6 +232,52 @@ def test_the_outage_list_offers_a_new_proposal_exactly_when_submission_accepts_i
     assert accepted or response.json()["code"] == offered["proposal_unavailable_reason"]
 
 
+def test_a_new_outage_both_invalid_and_over_the_limit_is_refused_for_the_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = make_request_case(monkeypatch)
+    client = _client(_arrange(case, "member at the pending limit"))
+
+    response = client.post(
+        _plant_path(case.system, case.plant) + "change-requests/incidents/",
+        {
+            "action": "create",
+            "idempotency_key": str(uuid4()),
+            "values": _wire({**incident_values(), "starts_at": NOW + timedelta(hours=1)}),
+        },
+        content_type="application/json",
+    )
+
+    assert response.status_code == 409, response.content
+    assert response.json()["code"] == "pending_request_limit"
+    assert ChangeRequest.objects.count() == PENDING_LIMIT
+
+
+@pytest.mark.parametrize("action", ["create", "update"])
+def test_an_outage_proposal_counts_the_members_pending_requests_once(
+    monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    case = make_request_case(monkeypatch)
+    existing = _outage(case.system, case.plant).pk if action == "update" else None
+
+    with captured_statements() as statements:
+        submit_incident(
+            *case.scope(case.proposer),
+            action=action,
+            idempotency_key=uuid4(),
+            incident_id=existing,
+            expected_revision=None if existing is None else 1,
+            values={**incident_values(), "available_dc_mw": 0},
+        )
+
+    counts = [
+        statement
+        for statement in statements
+        if "COUNT(" in statement.upper() and '"change_requests_changerequest"' in statement
+    ]
+    assert len(counts) == 1, statements
+
+
 def test_the_outage_proposal_flag_never_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     case = make_request_case(monkeypatch)
     client = _client(case.proposer)

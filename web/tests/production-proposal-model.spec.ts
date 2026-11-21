@@ -2,7 +2,9 @@ import { expect, test } from "@playwright/test";
 import { ApiError } from "../src/lib/api/errors";
 import type { Interval } from "../src/features/production/history/model";
 import {
+    canStage,
     changedSinceStaged,
+    fieldRefusals,
     proposalChanges,
     refusals,
     stageChange,
@@ -137,4 +139,44 @@ test("a refusal naming an item by its position names that staged change", () => 
         ),
     ).toEqual([]);
     expect(refusals(new Error("offline"), items)).toEqual([]);
+});
+
+test("an interval holding the member's own pending request cannot be staged", () => {
+    expect(canStage(row(8))).toBe(true);
+    expect(canStage(row(8, { pending_request_id: 7 }))).toBe(false);
+    expect(canStage(row(8, { can_propose_revert: true }), "revert")).toBe(true);
+    expect(
+        canStage(
+            row(8, { can_propose_revert: true, pending_request_id: 7 }),
+            "revert",
+        ),
+    ).toBe(false);
+    expect([
+        ...changedSinceStaged(
+            [staged(8), staged(9)],
+            [row(8, { pending_request_id: 7 }), row(9)],
+        ),
+    ]).toEqual([staged(8).key]);
+});
+
+test("a refused reason and a refusal of the whole request are told apart from the items", () => {
+    expect(
+        fieldRefusals(
+            new ApiError("Invalid", {
+                status: 400,
+                code: "invalid_request",
+                fields: {
+                    "changes.0.energy": "Too large.",
+                    "changes.3": "Gone",
+                    reason: "This field may not be blank.",
+                    changes: "Submit 1 to 100 production intervals.",
+                    unit: "",
+                },
+            }),
+        ),
+    ).toEqual({
+        reason: "This field may not be blank.",
+        general: ["Submit 1 to 100 production intervals."],
+    });
+    expect(fieldRefusals(new Error("offline"))).toEqual({ general: [] });
 });
