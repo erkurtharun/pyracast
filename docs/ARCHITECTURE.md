@@ -537,7 +537,9 @@ after the session's user is known refuses one for another session with 409
 request once only when that read shows the same tag, and drops an answer that arrives after
 it adopted another session. Tabs share the last tag a session read observed in
 `localStorage`; a tab whose adopted tag differs hides its screens until it reads again. A
-read that would end a signed-in session is confirmed by a second read.
+read adopts its answer only if nothing changed while it ran (no session change sent by the
+tab, no newer read or adoption, no other tag observed); otherwise a read sent after the
+change answers. A read that would end a signed-in session is confirmed by a second read.
 Revoke sessions after 12 hours or 30 minutes without requests; polling of a visible
 tab counts as activity, and hidden tabs do not poll. Sessions predating the lifetime markers fail closed. A request
 whose session another session of the account ended while it ran answers 400

@@ -12,6 +12,7 @@ from allauth.usersessions.models import UserSession
 from django import forms
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.db import connection
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
 
@@ -27,15 +28,24 @@ ENDED_BY_OWNER = "ended_by_owner"
 
 
 class OwnSessionsField(SessionsField):
-    # Another device may end a listed session before this request: an id that names no session of
-    # this account selects nothing, whether it ended or belongs to another account.
+    # A selection is a non-empty list of integer session ids within the key's range, never
+    # coerced. Another device may end a listed session before this request: an id that names no
+    # session of this account selects nothing, whether it ended or belongs to another account.
     def clean(self, value: Any) -> QuerySet[UserSession]:
-        try:
-            return super().clean(value)
-        except ValidationError as error:
-            if error.code != "invalid_choice":
-                raise
-        return cast(QuerySet[UserSession], self.queryset).filter(pk__in=list(value))
+        if value in self.empty_values:
+            raise ValidationError(self.error_messages["required"], code="required")
+        if not isinstance(value, list):
+            raise ValidationError(self.error_messages["invalid_list"], code="invalid_list")
+        low, high = connection.ops.integer_field_range(UserSession._meta.pk.get_internal_type())
+        for item in value:
+            if isinstance(item, bool) or not isinstance(item, int) or not low <= item <= high:
+                raise ValidationError(
+                    self.error_messages["invalid_pk_value"],
+                    code="invalid_pk_value",
+                    params={"pk": item},
+                )
+        self.run_validators(value)
+        return cast(QuerySet[UserSession], self.queryset).filter(pk__in=set(value))
 
 
 class OwnSessionsInput(SelectSessionsInput):

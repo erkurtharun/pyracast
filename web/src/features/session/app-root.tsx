@@ -16,6 +16,7 @@ import {
     loadSession,
     observedTagKey,
     sessionOwner,
+    sessionState,
     useSessionState,
     type Session,
 } from "@/lib/session-client";
@@ -27,11 +28,11 @@ import { Notice } from "@/ui/ui";
 
 export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
-    const { session, failure, fail, retry } = useSessionBootstrap();
+    const { session, failure, fail, clear, retry } = useSessionBootstrap();
     const handoff = useLanguageHandoff(session);
     const ready = session !== undefined && handoff.status === "ready";
     useFocusSessionRead(ready);
-    const current = useCurrentSession(session, ready, fail);
+    const current = useCurrentSession(session, ready, fail, clear);
     const owner = sessionOwner(session);
     useForeignCacheRemoval(client, owner);
     return (
@@ -92,12 +93,22 @@ function Bootstrap({
     );
 }
 
+// A failure belongs to the session held when it happened; a session adopted after it hides it.
 function useSessionBootstrap() {
     const [attempt, setAttempt] = useState(0);
-    const [failure, setFailure] = useState<string>();
+    const [failure, setFailure] = useState<{
+        message: string;
+        session?: Session;
+    }>();
     const { session } = useSessionState();
     const fail = useCallback((error: unknown) => {
-        setFailure(displayMessage(error, browserErrors()("unexpected")));
+        setFailure({
+            message: displayMessage(error, browserErrors()("unexpected")),
+            session: sessionState().session,
+        });
+    }, []);
+    const clear = useCallback(() => {
+        setFailure(undefined);
     }, []);
     useEffect(() => {
         let active = true;
@@ -110,10 +121,14 @@ function useSessionBootstrap() {
     }, [attempt, fail]);
     return {
         session,
-        failure,
+        failure:
+            failure && failure.session === session
+                ? failure.message
+                : undefined,
         fail,
+        clear,
         retry: () => {
-            setFailure(undefined);
+            clear();
             setAttempt((value) => value + 1);
         },
     };
@@ -150,6 +165,7 @@ function useCurrentSession(
     session: Session | undefined,
     enabled: boolean,
     fail: (error: unknown) => void,
+    clear: () => void,
 ) {
     const current = useSyncExternalStore(
         subscribeObservedTag,
@@ -157,8 +173,16 @@ function useCurrentSession(
         () => true,
     );
     useEffect(() => {
-        if (enabled && !current) loadSession().catch(fail);
-    }, [enabled, current, fail]);
+        if (!enabled || current) return;
+        let active = true;
+        clear();
+        loadSession().catch((error: unknown) => {
+            if (active) fail(error);
+        });
+        return () => {
+            active = false;
+        };
+    }, [enabled, current, fail, clear]);
     return current;
 }
 

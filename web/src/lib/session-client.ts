@@ -19,15 +19,14 @@ export type SessionState = { session?: Session; ended: boolean };
 export const observedTagKey = "pyracast.sessionTag";
 
 let state: SessionState = { ended: false };
-type Flight = {
-    epoch: number;
-    observed: string | null;
-    promise: Promise<Session>;
-};
+// What a session read's answer may have missed: this tab's session changes, another tab's
+// observation and every read started or session adopted here.
+type Mark = { epoch: number; observed: string | null; generation: number };
+type Flight = Mark & { promise: Promise<Session> };
 
 let flight: Flight | undefined;
-let started = 0;
-let adopted = 0;
+let generation = 0;
+let adopted: { mark: Mark; session: Session } | undefined;
 let confirming: Promise<Tag> | undefined;
 let signingOut = false;
 const listeners = new Set<() => void>();
@@ -90,7 +89,22 @@ export function adoptSession(session: Session) {
     };
     setCsrfToken(session.csrf_token);
     observe(session.session_tag ?? "");
+    generation += 1;
+    adopted = { mark: mark(), session };
     for (const listener of listeners) listener();
+}
+
+function mark(): Mark {
+    return { epoch: mutationEpoch(), observed: observedTag(), generation };
+}
+
+function unchangedSince(since: Mark) {
+    const now = mark();
+    return (
+        since.epoch === now.epoch &&
+        since.observed === now.observed &&
+        since.generation === now.generation
+    );
 }
 
 const readSession = () =>
@@ -105,18 +119,22 @@ async function confirmedRead(): Promise<Session> {
 }
 
 // A read is shared while neither this tab sent a session change nor another tab observed a tag
-// since it started; one that settles after a later read adopted adopts nothing and answers with
-// the session that later read adopted.
+// since it started. It adopts its answer only when nothing changed while it ran; otherwise it
+// answers with a session adopted after the change, or with a read started after it.
 function startRead(): Flight {
-    const order = (started += 1);
+    generation += 1;
+    const started = mark();
     const current: Flight = {
-        epoch: mutationEpoch(),
-        observed: observedTag(),
+        ...started,
         promise: confirmedRead().then((session) => {
-            if (order < adopted) return state.session ?? session;
-            adopted = order;
-            adoptSession(session);
-            return session;
+            if (unchangedSince(started)) {
+                adoptSession(session);
+                return session;
+            }
+            if (flight === current) flight = undefined;
+            return adopted && unchangedSince(adopted.mark)
+                ? adopted.session
+                : loadSession();
         }),
     };
     flight = current;

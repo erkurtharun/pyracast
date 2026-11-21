@@ -1,4 +1,7 @@
 import secrets
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 from typing import Any, cast
 
@@ -69,9 +72,28 @@ LOGIN_LIMITED_MESSAGE = gettext_lazy(
 )
 
 
+# Set only while a step acts on the confirmation its request already judged: allauth's gate inside
+# that step answers from the judgment and reads no clock.
+_confirmation_judged: ContextVar[bool] = ContextVar("confirmation_judged", default=False)
+
+
+@contextmanager
+def acting_on_judged_confirmation() -> Iterator[None]:
+    token = _confirmation_judged.set(True)
+    try:
+        yield
+    finally:
+        _confirmation_judged.reset(token)
+
+
 class AccountAdapter(DefaultAccountAdapter):
     _client_failure: RateLimitUsage | None = None
     _login_failed_rl_usage: RateLimitUsage | None = None
+
+    def is_reauthentication_required(self, *, app: str, **kwargs: Any) -> bool:
+        if _confirmation_judged.get():
+            return False
+        return super().is_reauthentication_required(app=app, **kwargs)
 
     def validation_error(self, code: str, *args: Any) -> ValidationError:
         # allauth also answers a sign-in within the confirm_email window with this code.

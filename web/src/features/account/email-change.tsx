@@ -34,6 +34,15 @@ function codeEnded(failure: unknown) {
     );
 }
 
+// A removal refused because the change ended meanwhile: no pending address is left to remove.
+async function changeEnded(failure: unknown) {
+    if (!(failure instanceof ApiError && failure.status === 400)) return false;
+    const listed = await authRequest<Address[]>("account/email", "GET").catch(
+        () => undefined,
+    );
+    return listed !== undefined && pendingChange(listed.data).kind === "idle";
+}
+
 export function EmailChange({ email }: { email: string }) {
     const t = useTranslations("Dashboard");
     const security = useTranslations("Security");
@@ -114,9 +123,18 @@ export function EmailChange({ email }: { email: string }) {
 
     async function cancelChange(address: string) {
         setError(undefined);
-        const result = await authRequest("account/email", "DELETE", {
-            email: address,
-        });
+        let result: AuthResult<unknown>;
+        try {
+            result = await authRequest("account/email", "DELETE", {
+                email: address,
+            });
+        } catch (failure) {
+            if (await changeEnded(failure)) {
+                setStep({ kind: "idle", notice: "expired" });
+                return;
+            }
+            throw failure;
+        }
         if (await confirmed(result, () => cancelChange(address)))
             setStep({ kind: "idle", notice: "cancelled" });
     }
@@ -136,22 +154,24 @@ export function EmailChange({ email }: { email: string }) {
                                 : t("emailChangeCancelled")}
                         </Notice>
                     )}
-                    <ActionForm
-                        submit={t("sendVerification")}
-                        onSubmit={(data) =>
-                            run(() => requestCode(formText(data, "email")))
-                        }
-                    >
-                        <Field
-                            label={t("newEmail")}
-                            name="email"
-                            type="email"
-                            autoComplete="email"
-                            maxLength={254}
-                            hint={t("emailChangeSignsOut")}
-                            required
-                        />
-                    </ActionForm>
+                    <fieldset disabled={acting}>
+                        <ActionForm
+                            submit={t("sendVerification")}
+                            onSubmit={(data) =>
+                                run(() => requestCode(formText(data, "email")))
+                            }
+                        >
+                            <Field
+                                label={t("newEmail")}
+                                name="email"
+                                type="email"
+                                autoComplete="email"
+                                maxLength={254}
+                                hint={t("emailChangeSignsOut")}
+                                required
+                            />
+                        </ActionForm>
+                    </fieldset>
                 </>
             )}
             {!stepUp.pending && step.kind === "codeSent" && (

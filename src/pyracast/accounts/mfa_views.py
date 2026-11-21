@@ -23,7 +23,12 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
 
-from pyracast.accounts.adapters import RECOVERY_CODES_GENERATED, TOTP_ACTIVATED, AccountAdapter
+from pyracast.accounts.adapters import (
+    RECOVERY_CODES_GENERATED,
+    TOTP_ACTIVATED,
+    AccountAdapter,
+    acting_on_judged_confirmation,
+)
 from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.inputs import (
     SecondFactorInput,
@@ -69,8 +74,8 @@ def shown_once(generated: Authenticator) -> list[str]:
 
 
 def judged_confirmation(request: HttpRequest) -> float:
-    # allauth reads the clock once to find the session's last confirmation live; the request keeps
-    # that confirmation's time instead of judging it again.
+    # The request's one judgment of its confirmation: allauth's gate reads the clock once here, and
+    # the steps that act on it keep the time of the record it judged instead of judging again.
     raise_if_reauthentication_required(request, app="allauth.mfa")
     flagged = [
         record
@@ -177,7 +182,8 @@ class ManageTOTPView(StepUpAnswers, AllauthTOTPView):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         if self.confirmed_at is None:
             raise ReauthenticationRequired
-        authenticator, generated = totp_flows.activate_totp(request, self.input)
+        with acting_on_judged_confirmation():
+            authenticator, generated = totp_flows.activate_totp(request, self.input)
         record_activation_proof(request, authenticator, self.confirmed_at)
         meta = None if generated is None else {"recovery_codes": shown_once(generated)}
         return AuthenticatorResponse(request, authenticator, meta=meta)
