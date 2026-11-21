@@ -707,8 +707,8 @@ def test_host_paths_agree_between_scripts_units_and_helpers() -> None:
         assert f" {host.CURRENT_RELEASE.as_posix()}/deploy/" in command
     assert helper["state"] == host.RECOVERY_STATE
     assert host.RECOVERY_STATE.parent == host.LAST_REHEARSAL.parent == host.LAST_BACKUP.parent
-    assert rehearsal.LOCK.parent == host.RELEASE_LOCK.parent
-    assert rehearsal.LOCK != host.RELEASE_LOCK
+    assert host.REHEARSAL_LOCK.parent == host.RELEASE_LOCK.parent
+    assert host.REHEARSAL_LOCK != host.RELEASE_LOCK
 
 
 def test_the_python_helpers_open_the_release_lock_for_root_alone_without_following_a_link(

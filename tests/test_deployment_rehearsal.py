@@ -1,9 +1,7 @@
 import base64
 import hashlib
-import importlib
 import io
 import json
-import os
 import shutil
 import signal
 import subprocess
@@ -17,6 +15,7 @@ from typing import IO, Any, NamedTuple
 import pytest
 
 from deploy import backup, host, rehearsal, reset_database
+from tests.support.links import link, unlink
 from tests.support.processes import interpreter
 
 BOUNDED_RUN = backup.bounded_run
@@ -143,7 +142,16 @@ class Rehearsed:
         self.events: list[tuple[str, str, dict[str, object]]] = []
         self.handlers: dict[int, Callable[[int, FrameType | None], None]] = {}
         self.locked = True
+        self.now = 0.0
+        self.sleeps: list[float] = []
         self.point()
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
 
     def point(self, **changes: object) -> None:
         pointer = {
@@ -189,7 +197,8 @@ def rehearsed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Rehearsed:
     monkeypatch.setattr(host, "LAST_BACKUP", fake.pointer)
     monkeypatch.setattr(host, "LAST_REHEARSAL", fake.status)
     monkeypatch.setattr(host, "try_lock", lambda _stream: fake.locked)
-    monkeypatch.setattr(rehearsal, "LOCK", tmp_path / "rehearsal.lock")
+    monkeypatch.setattr(host, "time", SimpleNamespace(monotonic=fake.monotonic, sleep=fake.sleep))
+    monkeypatch.setattr(host, "REHEARSAL_LOCK", tmp_path / "rehearsal.lock")
     monkeypatch.setattr(rehearsal, "MEMINFO", fake.meminfo)
     monkeypatch.setattr(rehearsal, "report", fake.report)
     monkeypatch.setattr(shutil, "disk_usage", fake.usage)
@@ -489,6 +498,20 @@ def test_a_busy_rehearsal_lock_leaves_the_status_and_the_host_alone(
     assert rehearsed.docker.commands == []
     assert rehearsed.events == []
     assert "Another restore rehearsal" in capsys.readouterr().err
+    assert rehearsed.sleeps == [1] * rehearsal.LOCK_WAIT_SECONDS
+
+
+def test_a_rehearsal_that_meets_pruning_looking_at_its_lock_waits_for_it_and_runs(
+    rehearsed: Rehearsed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts = iter([False, True])
+    monkeypatch.setattr(host, "try_lock", lambda _stream: next(attempts))
+
+    assert rehearsed.run() == 0
+
+    assert rehearsed.recorded()["status"] == "passed"
+    assert rehearsed.sleeps == [1]
+    assert (rehearsed.root / "rehearsal.lock").exists()
 
 
 def test_a_rehearsal_stopped_by_systemd_removes_its_throwaway_and_records_the_stop(
@@ -612,22 +635,6 @@ def test_a_probe_stopped_at_its_deadline_is_labelled_and_removed_by_name(
     assert probe[probe.index("--name") + 1] == f"{container}-probe"
     assert f'{rehearsal.LABEL}: "true"' in rehearsed.docker.overrides[0]
     assert rehearsed.docker.removed()
-
-
-def link(target: Path, at: Path) -> None:
-    try:
-        at.symlink_to(target, target_is_directory=True)
-    except OSError:
-        if os.name != "nt":
-            raise
-        importlib.import_module("_winapi").CreateJunction(str(target), str(at))
-
-
-def unlink(at: Path) -> None:
-    if at.is_junction():
-        os.rmdir(at)
-    else:
-        at.unlink()
 
 
 def test_one_rehearsal_reads_one_release_while_another_is_promoted(rehearsed: Rehearsed) -> None:
