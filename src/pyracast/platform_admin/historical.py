@@ -100,8 +100,6 @@ class HistoricalUploadForm(forms.Form):
 
 @dataclass
 class _Attempt:
-    """One submitted file, parsed once."""
-
     file_name: str
     identity: dict[str, Any]
     upload: HistoricalUpload
