@@ -1,7 +1,10 @@
 import { expect, test } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { answer, mockApi } from "./support/workspace";
+import { answer, mockApi, type Mock } from "./support/workspace";
+import type { components } from "../src/lib/schema";
 import { errorBody } from "./support/errors";
+
+type PerformanceDay = Mock<components["schemas"]["PerformanceDay"]>;
 
 const day = (index: number) =>
     `2026-${index < 20 ? "10" : "11"}-${String(index < 20 ? index + 12 : index - 19).padStart(2, "0")}`;
@@ -35,21 +38,24 @@ test("available historical model days appear without empty grid rows", async ({
                     source_positive_mae_mw: 0.2,
                 },
                 baseline_metrics: { daily_mae_mwh: 2 },
-                days: Array.from({ length: 30 }, (_, index) => ({
-                    date: day(index),
-                    status: index < 22 ? "missing" : "matched",
-                    reason:
-                        index === 0
-                            ? "invalid_forecast_data"
-                            : index < 22
-                              ? "estimated_actuals_not_available"
-                              : null,
-                    measured_energy_mwh: index < 22 ? null : 10,
-                    predicted_energy_mwh: index < 22 ? null : 12,
-                    error_mwh: index < 22 ? null : 2,
-                    provisional_production: index >= 22,
-                    historical_configuration_assumed: index >= 22,
-                })),
+                days: Array.from(
+                    { length: 30 },
+                    (_, index): PerformanceDay => ({
+                        date: day(index),
+                        status: index < 22 ? "missing" : "matched",
+                        reason:
+                            index === 0
+                                ? "invalid_forecast_data"
+                                : index < 22
+                                  ? "estimated_actuals_not_available"
+                                  : null,
+                        measured_energy_mwh: index < 22 ? null : 10,
+                        predicted_energy_mwh: index < 22 ? null : 12,
+                        error_mwh: index < 22 ? null : 2,
+                        provisional_production: index >= 22,
+                        historical_configuration_assumed: index >= 22,
+                    }),
+                ),
             }),
         });
     });
@@ -161,14 +167,17 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
                 skill_days: 0,
                 metrics: null,
                 baseline_metrics: null,
-                days: Array.from({ length: 30 }, (_, index) => ({
-                    date: String(index),
-                    status: "missing",
-                    reason: "forecast_not_available",
-                    measured_energy_mwh: null,
-                    predicted_energy_mwh: null,
-                    error_mwh: null,
-                })),
+                days: Array.from(
+                    { length: 30 },
+                    (_, index): PerformanceDay => ({
+                        date: String(index),
+                        status: "missing",
+                        reason: "forecast_not_available",
+                        measured_energy_mwh: null,
+                        predicted_energy_mwh: null,
+                        error_mwh: null,
+                    }),
+                ),
             }),
         });
     });
