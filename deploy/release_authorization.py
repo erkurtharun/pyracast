@@ -328,6 +328,11 @@ def _proof(facts: Mapping[str, Any], main: str) -> tuple[int, int]:
             f"CI run {identifier} recorded no single tested tree for attempt {attempt}"
         )
     ((match, artifact),) = evidence
+    recorders = [job for job in proof["jobs"] if job["name"] == TESTED_TREE_JOB]
+    if len(recorders) != 1 or not _recorded_by(artifact, recorders[0]):
+        raise _UnprovenError(
+            f"The tested tree of CI run {identifier} was not recorded by its {TESTED_TREE_JOB} job"
+        )
     if int(match["number"]) != number:
         raise _UnprovenError(
             f"The tested tree of CI run {identifier} names pull request #{match['number']}"
@@ -349,6 +354,15 @@ def _proof(facts: Mapping[str, Any], main: str) -> tuple[int, int]:
             f"{commit['tree']}"
         )
     return number, identifier
+
+
+def _recorded_by(artifact: Mapping[str, Any], job: Mapping[str, Any]) -> bool:
+    # Only the record job runs no repository code; a record made outside its run is not its own.
+    try:
+        created = _instant(artifact["created_at"])
+        return _instant(job["started_at"]) <= created <= _instant(job["completed_at"])
+    except (TypeError, ValueError):
+        return False
 
 
 def _committed_before(committed: object, created: object) -> bool:

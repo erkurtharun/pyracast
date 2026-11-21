@@ -81,12 +81,14 @@ jobs:
             };
             const jobsOf = async candidate => (await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
               ...repository, run_id: candidate.id, attempt_number: candidate.run_attempt, per_page: 100,
-            })).map(job => ({ name: job.name, conclusion: job.conclusion }));
+            })).map(job => ({
+              name: job.name, conclusion: job.conclusion, started_at: job.started_at, completed_at: job.completed_at,
+            }));
             const artifactsOf = async candidate => (await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
               ...repository, run_id: candidate.id, per_page: 100,
             })).map(artifact => ({
               id: artifact.id, name: artifact.name, expired: artifact.expired,
-              head_sha: artifact.workflow_run?.head_sha ?? null,
+              head_sha: artifact.workflow_run?.head_sha ?? null, created_at: artifact.created_at,
             }));
             // A failed lookup for an early start leaves it unproven; the release after the whole run decides.
             let run = null;
