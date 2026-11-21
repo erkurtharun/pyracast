@@ -781,14 +781,8 @@ for (const language of ["en", "tr"] as const)
                         .fill("West plant");
                     const latitude = page.getByLabel(text.latitude);
                     const longitude = page.getByLabel(text.longitude);
-                    await expect(latitude).toHaveAttribute(
-                        "inputmode",
-                        "decimal",
-                    );
-                    await expect(longitude).toHaveAttribute(
-                        "inputmode",
-                        "decimal",
-                    );
+                    await expect(latitude).not.toHaveAttribute("inputmode");
+                    await expect(longitude).not.toHaveAttribute("inputmode");
                     await enter(latitude, "41,0082", entry);
                     await enter(longitude, "17,5", entry);
                     await expect(latitude).toHaveValue("41,0082");
@@ -853,14 +847,8 @@ for (const language of ["en", "tr"] as const)
                     await page.getByText(text.requestChange).click();
                     const latitude = page.getByLabel(text.latitude);
                     const longitude = page.getByLabel(text.longitude);
-                    await expect(latitude).toHaveAttribute(
-                        "inputmode",
-                        "decimal",
-                    );
-                    await expect(longitude).toHaveAttribute(
-                        "inputmode",
-                        "decimal",
-                    );
+                    await expect(latitude).not.toHaveAttribute("inputmode");
+                    await expect(longitude).not.toHaveAttribute("inputmode");
                     await enter(latitude, "41,0082", entry);
                     await enter(longitude, "17,5", entry);
                     await page
