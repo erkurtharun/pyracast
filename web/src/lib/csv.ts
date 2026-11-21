@@ -37,14 +37,20 @@ export function csvDocument(
     return `\uFEFF${lines.join("\r\n")}\r\n`;
 }
 
+const NAME_EDGE = /^[\s.-]$/u;
+
+function trimNameEdges(part: string): string {
+    let start = 0;
+    let end = part.length;
+    while (start < end && NAME_EDGE.test(part.charAt(start))) start += 1;
+    while (end > start && NAME_EDGE.test(part.charAt(end - 1))) end -= 1;
+    return part.slice(start, end);
+}
+
 // Windows refuses these characters and trailing dots or spaces in file names; plant names keep their letters.
 export function csvFilename(...parts: string[]): string {
     const safe = parts
-        .map((part) =>
-            part
-                .replace(/[<>:"/\\|?*\p{Cc}]/gu, "-")
-                .replace(/^[\s.-]+|[\s.-]+$/gu, ""),
-        )
+        .map((part) => trimNameEdges(part.replace(/[<>:"/\\|?*\p{Cc}]/gu, "-")))
         .filter(Boolean);
     return `${safe.join("-").slice(0, 150)}.csv`;
 }

@@ -89,6 +89,16 @@ test("every export names the plant safely in its file name", () => {
     expect(csvFilename("outages", ' ..con<>|?*"/\\ ')).toBe("outages-con.csv");
 });
 
+test("a long run of spaces, dots and hyphens is trimmed only at the name edges", () => {
+    const run = " .-\t".repeat(12_500);
+    expect(csvFilename("outages", `${run}plant${run}`, run)).toBe(
+        "outages-plant.csv",
+    );
+    expect(csvFilename("outages", `${run}plant${run}x`)).toBe(
+        `outages-plant${" .--".repeat(12_500)}x`.slice(0, 150) + ".csv",
+    );
+});
+
 test("cells quote text, double quotes and never start a spreadsheet formula", () => {
     const [header, row] = csvDocument(
         ["a", "b", "c", "d", "e", "f", "g"],
@@ -103,14 +113,18 @@ test("cells quote text, double quotes and never start a spreadsheet formula", ()
 });
 
 test("a long run of leading invisible characters still ends in the formula check", () => {
-    const padding = " \t200b".repeat(50_000);
-    const [, row] = csvDocument(
+    const padding = " \t\u200B".repeat(50_000);
+    const lines = csvDocument(
         ["a"],
         [[`${padding}=1+1`], [`${padding}text`], [padding]],
     )
         .replace(/^\uFEFF/, "")
         .split("\r\n");
-    expect(row).toBe(`"'${padding}=1+1"`);
+    expect(lines.slice(1, 4)).toEqual([
+        `"'${padding}=1+1"`,
+        `"${padding}text"`,
+        `"${padding}"`,
+    ]);
 });
 
 test("only a formula character after invisible ones is neutralised", () => {
