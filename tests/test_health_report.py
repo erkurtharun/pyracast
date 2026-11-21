@@ -14,7 +14,16 @@ from django.core.management import CommandError, call_command
 from dramatiq.brokers.rabbitmq import RabbitmqBroker
 from dramatiq.common import xq_name
 
-from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.accounts.models import (
+    EVENT_MAIL,
+    Membership,
+    OutboundMail,
+    OutboundMailError,
+    OutboundMailStatus,
+    Tenant,
+    WorkspaceRole,
+)
+from pyracast.background.failures import ItemsFailedError
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -24,6 +33,7 @@ from pyracast.forecasts.models import (
     RequestPurpose,
 )
 from pyracast.notifications.models import ReminderSchedule
+from pyracast.orchestration import dispatcher
 from pyracast.orchestration.kinds import QUEUES
 from pyracast.plants.calibration_runs import requeue_run, start_run
 from pyracast.plants.models import CalibrationError, CalibrationRun, Plant, PlantConfiguration
@@ -474,6 +484,67 @@ def test_a_new_plant_waits_for_its_open_first_collection_before_it_is_stale(
     report, failed = printed(monkeypatch)
     assert report["regions_without_recent_forecasts"] == 1
     assert report["failed_collections"] == 1
+    assert failed is True
+
+
+MAIL_OUTCOMES = ("overdue_outbound_mail", "failed_outbound_mail", "uncertain_outbound_mail")
+
+
+def ended_event_mail(status: OutboundMailStatus, error: OutboundMailError) -> None:
+    for kind in EVENT_MAIL:
+        OutboundMail.objects.create(
+            kind=kind,
+            recipient="administrator@example.com",
+            language="en",
+            context={"subject_id": "1"},
+            status=status,
+            last_error=error,
+            created_at=NOW - timedelta(hours=1),
+            available_at=NOW - timedelta(hours=1),
+            expires_at=NOW + timedelta(days=1),
+            finished_at=NOW - timedelta(minutes=30),
+        )
+
+
+@pytest.mark.parametrize(
+    "error", [OutboundMailError.SUBJECT_UNAVAILABLE, OutboundMailError.RECIPIENT_UNAVAILABLE]
+)
+def test_an_event_mail_skipped_because_its_subject_or_recipient_is_gone_is_no_failure(
+    monkeypatch: pytest.MonkeyPatch, error: OutboundMailError
+) -> None:
+    healthy_plant(monkeypatch)
+    ended_event_mail(OutboundMailStatus.SKIPPED, error)
+
+    report, failed = printed(monkeypatch)
+    assert [report[key] for key in MAIL_OUTCOMES] == [0, 0, 0]
+    assert failed is False
+
+
+def test_a_failed_event_mail_of_every_kind_fails_the_report_like_other_mail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    healthy_plant(monkeypatch)
+    ended_event_mail(OutboundMailStatus.FAILED, OutboundMailError.MAIL_REJECTED)
+
+    report, failed = printed(monkeypatch)
+    assert [report[key] for key in MAIL_OUTCOMES] == [0, len(EVENT_MAIL), 0]
+    assert failed is True
+
+
+def test_a_purge_warning_that_fails_an_item_fails_the_retention_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    healthy_plant(monkeypatch)
+    monkeypatch.setattr("django.utils.timezone.now", lambda: NOW)
+
+    def warning_fails(_: datetime) -> int:
+        raise ItemsFailedError(1)
+
+    monkeypatch.setattr(dispatcher, "warn_before_purge", warning_fails)
+    assert dispatcher._run_phase("retention", dispatcher._retention) == ["retention"]
+
+    report, failed = printed(monkeypatch)
+    assert report["unhealthy_dispatch_phases"] == ["retention"]
     assert failed is True
 
 
