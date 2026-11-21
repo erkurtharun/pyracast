@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 from allauth.account.models import EmailAddress
+from django.contrib.auth import BACKEND_SESSION_KEY
 from django.contrib.auth.models import User
 from django.contrib.sessions.backends.db import SessionStore
 from django.db import connection
@@ -259,6 +260,78 @@ def test_a_request_under_a_key_a_confirmation_replaced_is_refused_and_runs_nothi
     assert (response.status_code, response.json()["code"]) == (409, "session_changed")
     assert not EmailAddress.objects.filter(email="new@example.com").exists()
     assert tag_of(client) == tag
+
+
+def switch_off(user: User, _client: Client) -> None:
+    User.objects.filter(pk=user.pk).update(is_active=False)
+
+
+def remove(user: User, _client: Client) -> None:
+    user.delete()
+
+
+def change_credentials(user: User, _client: Client) -> None:
+    user.set_password(CHANGED_PASSWORD)
+    user.save(update_fields=["password"])
+
+
+def unlist_backend(_user: User, client: Client) -> None:
+    store = SessionStore(session_key(client))
+    store[BACKEND_SESSION_KEY] = "django.contrib.auth.backends.ModelBackend"
+    store.save()
+
+
+SIGNED_OUT_STATES = {
+    "account switched off": switch_off,
+    "account removed": remove,
+    "credentials changed": change_credentials,
+    "sign-in backend no longer listed": unlist_backend,
+}
+ENTRIES = {
+    "sign-in": (
+        "post",
+        AUTH + "auth/login",
+        {"email": "second@example.com", "password": PASSWORD},
+        200,
+    ),
+    "sign-up": (
+        "post",
+        AUTH + "auth/signup",
+        {"email": "fresh@example.com", "password": PASSWORD, "company_name": "Solar"},
+        401,
+    ),
+    "password reset request": (
+        "post",
+        AUTH + "auth/password/request",
+        {"email": "owner@example.com"},
+        401,
+    ),
+    "language": ("post", "/api/session/language/", {"language": "tr"}, 200),
+    "sign-out": ("delete", AUTH + "auth/session", None, 401),
+}
+
+
+@pytest.mark.parametrize("entry", ENTRIES)
+@pytest.mark.parametrize("state", SIGNED_OUT_STATES)
+def test_a_browser_whose_session_signs_in_no_account_holds_the_empty_tag(
+    state: str, entry: str
+) -> None:
+    user = account("owner")
+    second = account("second")
+    client = browser()
+    sign_in(client, user)
+    earlier = str(tag_of(client))
+    SIGNED_OUT_STATES[state](user, client)
+
+    assert read(client)["user"] is None
+    assert tag_of(client) is None
+    method, path, data, status = ENTRIES[entry]
+    response = tagged(client, method, path, "", data)
+
+    assert response.status_code == status
+    assert session_user(client) == (second.pk if entry == "sign-in" else None)
+    refused = tagged(client, "get", "/api/tenants/", earlier)
+    assert (refused.status_code, refused.json()["code"]) == (409, "session_changed")
 
 
 def test_the_tag_authorizes_nothing() -> None:

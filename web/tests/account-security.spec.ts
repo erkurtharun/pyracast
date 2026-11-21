@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "./support/test";
+import { allauthErrorBody } from "./support/errors";
 import { mockApi, signedInSession, user } from "./support/workspace";
 
 const askPassword = {
@@ -292,4 +293,134 @@ test("the account lists where it is signed in and signs out another session", as
         .click();
     await expect(devices.getByText("Safari · iOS")).toHaveCount(0);
     expect(ended).toEqual([{ sessions: [2] }]);
+});
+
+test("one sign-out runs at a time, says it is working and names each session by its own details", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const sameDevice = (id: number, hours: number) => ({
+        ...signedInSession,
+        id,
+        ip: `198.51.100.${id}`,
+        created_at: signedInSession.created_at - hours * 3600,
+        last_seen_at: signedInSession.last_seen_at - hours * 3600,
+        is_current: false,
+    });
+    const first = sameDevice(2, 30);
+    const second = sameDevice(3, 60);
+    const ended: unknown[] = [];
+    let release: () => void = () => {};
+    const answered = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    await page.route("**/api/auth/browser/v1/auth/sessions", async (route) => {
+        if (route.request().method() !== "DELETE")
+            return route.fulfill({
+                json: {
+                    status: 200,
+                    data: [first, second, signedInSession],
+                },
+            });
+        ended.push(route.request().postDataJSON());
+        await answered;
+        return route.fulfill({
+            json: { status: 200, data: [second, signedInSession] },
+        });
+    });
+    await page.goto("/app/account/");
+    const devices = page.getByRole("region", {
+        name: "Where you are signed in",
+    });
+    const rows = devices.getByRole("button", {
+        name: /^Sign out Chrome · Windows/,
+    });
+    await expect(rows).toHaveCount(2);
+    const names = await rows.evaluateAll((buttons) =>
+        buttons.map((button) => button.getAttribute("aria-label") ?? ""),
+    );
+    expect(new Set(names).size).toBe(2);
+    expect(names.some((name) => name.includes("198.51.100."))).toBe(false);
+
+    await rows.first().click();
+    await expect(
+        devices.getByRole("button", { name: "Working…", exact: true }),
+    ).toBeDisabled();
+    await expect(rows).toHaveCount(1);
+    await expect(rows).toBeDisabled();
+    await expect(
+        devices.getByRole("button", { name: "Sign out all other sessions" }),
+    ).toBeDisabled();
+    expect(ended).toEqual([{ sessions: [2] }]);
+    release();
+    await expect(rows).toHaveCount(1);
+    await expect(rows).toBeEnabled();
+    expect(ended).toEqual([{ sessions: [2] }]);
+});
+
+test("the email change runs one action at a time", async ({ page }) => {
+    await mockApi(page);
+    await pendingAddress(page, "pending@example.test");
+    const sent: string[] = [];
+    let release: () => void = () => {};
+    const answered = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    await page.route(
+        "**/api/auth/browser/v1/auth/email/verify/resend",
+        async (route) => {
+            sent.push("resend");
+            await answered;
+            return route.fulfill({ json: { status: 200 } });
+        },
+    );
+    await page.goto("/app/account/");
+    const change = emailChange(page);
+    await change.getByText("Change email", { exact: true }).click();
+    await change.getByLabel("Email verification code").fill("ABCD-EFGH");
+    await change.getByRole("button", { name: "Send the code again" }).click();
+    await expect(
+        change.getByRole("button", { name: "Working…", exact: true }),
+    ).toBeDisabled();
+    await expect(
+        change.getByRole("button", { name: "Verify new email" }),
+    ).toBeDisabled();
+    await expect(
+        change.getByRole("button", { name: "Use another address" }),
+    ).toBeDisabled();
+    expect(sent).toEqual(["resend"]);
+    release();
+    await expect(change.getByText("A new code was sent.")).toBeVisible();
+    await expect(
+        change.getByRole("button", { name: "Verify new email" }),
+    ).toBeEnabled();
+});
+
+test("a resend that finds the code expired starts the change again", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await pendingAddress(page, "pending@example.test");
+    await page.route(
+        "**/api/auth/browser/v1/auth/email/verify/resend",
+        (route) =>
+            route.fulfill({
+                status: 409,
+                json: allauthErrorBody(409, "conflict", [
+                    {
+                        message:
+                            "The request conflicts with the current state.",
+                    },
+                ]),
+            }),
+    );
+    await page.goto("/app/account/");
+    const change = emailChange(page);
+    await change.getByText("Change email", { exact: true }).click();
+    await change.getByRole("button", { name: "Send the code again" }).click();
+    await expect(
+        change.getByText("The code is no longer valid. Request a new one."),
+    ).toBeVisible();
+    await expect(change.getByLabel("New email address")).toBeVisible();
+    await expect(change.getByLabel("Email verification code")).toHaveCount(0);
 });

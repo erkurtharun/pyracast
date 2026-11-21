@@ -119,19 +119,47 @@ def test_ending_this_session_signs_this_browser_out() -> None:
     assert session_user(here) is None
 
 
-def test_another_accounts_session_is_refused_like_one_that_does_not_exist() -> None:
+def test_another_accounts_session_is_left_like_one_that_does_not_exist() -> None:
     owner, stranger = account("owner"), account("stranger")
     here, theirs = signed_in(owner), signed_in(stranger)
     foreign = row_of(theirs).pk
     missing = UserSession.objects.order_by("-pk").values_list("pk", flat=True)[0] + 1000
 
-    refused_foreign = end(here, [foreign])
-    refused_missing = end(here, [missing])
+    with_foreign = end(here, [foreign])
+    with_missing = end(here, [missing])
 
-    assert refused_foreign.status_code == refused_missing.status_code == 400
-    assert refused_foreign.json() == refused_missing.json()
+    assert with_foreign.status_code == with_missing.status_code == 200
+    assert with_foreign.json() == with_missing.json()
+    assert [entry["id"] for entry in with_foreign.json()["data"]] == [row_of(here).pk]
     assert session_user(theirs) == stranger.pk
     assert session_user(here) == owner.pk
+
+
+def test_sessions_that_ended_meanwhile_leave_the_named_ones_that_remain_to_end() -> None:
+    owner, stranger = account("owner"), account("stranger")
+    here, first, second = signed_in(owner), signed_in(owner), signed_in(owner)
+    theirs = signed_in(stranger)
+    ended, remaining = row_of(first).pk, row_of(second).pk
+    assert end(here, [ended]).status_code == 200
+
+    response = end(here, [ended, remaining, row_of(theirs).pk])
+
+    assert response.status_code == 200
+    assert [entry["id"] for entry in response.json()["data"]] == [row_of(here).pk]
+    assert session_user(second) is None
+    assert session_user(theirs) == stranger.pk
+    assert session_user(here) == owner.pk
+
+
+@pytest.mark.parametrize("ids", [[], ["first"], "2"])
+def test_a_selection_that_is_not_a_list_of_session_ids_is_refused(ids: Any) -> None:
+    owner = account("owner")
+    here, there = signed_in(owner), signed_in(owner)
+
+    response = end(here, ids)
+
+    assert response.status_code == 400
+    assert session_user(there) == owner.pk
 
 
 def test_ending_sessions_needs_the_form_token() -> None:

@@ -1,8 +1,10 @@
 import time
 from collections.abc import Iterator
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from allauth.account.internal.flows import reauthentication
 from allauth.account.internal.flows.login import AUTHENTICATION_METHODS_SESSION_KEY
 from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
@@ -12,6 +14,7 @@ from django.contrib.auth.models import User
 from django.contrib.sessions.backends.db import SessionStore
 from django.test import Client, override_settings
 
+from pyracast.accounts import processes
 from tests.support.account_sessions import account, session_key, signed_in, totp_clock
 from tests.support.auth_lifecycle import AUTH, PASSWORD, submit, totp_code
 from tests.support.step_up import holds_current_authority
@@ -60,6 +63,11 @@ def age_confirmations(client: Client, seconds: float) -> None:
         record["at"] -= seconds
     store[AUTHENTICATION_METHODS_SESSION_KEY] = records
     store.save()
+
+
+def confirmation_times(client: Client) -> list[float]:
+    records = SessionStore(session_key(client))[AUTHENTICATION_METHODS_SESSION_KEY]
+    return [record["at"] for record in records if record.get("reauthenticated")]
 
 
 def test_an_authenticator_is_enrolled_with_one_confirmation_and_its_codes_come_with_it(
@@ -149,6 +157,34 @@ def test_a_sessions_own_change_keeps_its_authority_for_the_window_of_its_confirm
     refused = submit(client, CODES, {})
     assert refused.status_code == 401
     assert [flow["id"] for flow in refused.json()["data"]["flows"]] == ["mfa_reauthenticate"]
+
+
+def test_an_activation_judged_inside_its_confirmations_window_is_answered_with_that_window(
+    now: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = account("owner")
+    client = confirmed(user)
+    secret = setup_secret(client)
+    confirmed_at = confirmation_times(client)[0]
+    judged = False
+
+    def judge() -> float:
+        nonlocal judged
+        judged = True
+        return confirmed_at + 299
+
+    def later() -> float:
+        return confirmed_at + (301 if judged else 299)
+
+    monkeypatch.setattr(reauthentication, "time", SimpleNamespace(time=judge))
+    monkeypatch.setattr(processes, "time", SimpleNamespace(time=later))
+
+    activation = activate(client, secret, now)
+
+    assert judged
+    assert activation.status_code == 200
+    assert len(activation.json()["meta"]["recovery_codes"]) == 10
+    assert confirmation_times(client) == [confirmed_at, confirmed_at]
 
 
 def test_only_the_session_that_made_a_change_keeps_its_authority() -> None:

@@ -578,6 +578,12 @@ for (const resumeAllowed of [true, false]) {
             ).toBeVisible();
         else {
             await expect(
+                panel.getByText("This change needs your confirmation again."),
+            ).toBeVisible();
+            await expect(
+                panel.getByLabel("Authenticator or recovery code"),
+            ).toHaveValue("");
+            await expect(
                 panel.getByRole("heading", {
                     name: "Confirm with your authenticator",
                 }),

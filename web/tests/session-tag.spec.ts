@@ -320,3 +320,53 @@ test("a request refused twice for a changed session is not sent a third time", a
     expect(error).toMatchObject({ status: 409, code: "session_changed" });
     expect(calls).toHaveLength(3);
 });
+
+test("a read started before another tab changed the session is not reused after the change", async () => {
+    adoptSession(session("a"));
+    const { gate, release } = held();
+    answer(
+        async () => {
+            await gate;
+            return json(session("a"));
+        },
+        () => json(signedOut),
+        () => json(signedOut),
+    );
+    const earlier = loadSession();
+    stored.set(observedTagKey, "");
+    const later = loadSession();
+    release();
+    await Promise.all([earlier, later]);
+    expect(calls).toHaveLength(3);
+    expect(sessionState().session?.user).toBeNull();
+    expect(stored.get(observedTagKey)).toBe("");
+});
+
+test("a read that settles after a newer one does not adopt its answer", async () => {
+    adoptSession(session("a"));
+    const { gate, release } = held();
+    const reads = [
+        async () => {
+            await gate;
+            return json(signedOut);
+        },
+        () => json(session("b", 2)),
+        () => json(session("a")),
+    ];
+    const reply = (call: Call) => {
+        if (call.method === "POST") return json({ id: 7 }, 201);
+        const next = reads.shift();
+        if (!next) throw new Error("No session read is prepared.");
+        return next();
+    };
+    answer(reply, reply, reply, reply);
+    const earlier = loadSession();
+    await api.post("/api/tenants/{tenant_id}/sites/", site);
+    const later = loadSession();
+    release();
+    expect((await later).session_tag).toBe("b");
+    expect((await earlier).session_tag).toBe("b");
+    expect(reads).toHaveLength(0);
+    expect(sessionState().session?.session_tag).toBe("b");
+    expect(stored.get(observedTagKey)).toBe("b");
+});
