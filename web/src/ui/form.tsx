@@ -35,6 +35,17 @@ export function formTexts(data: FormData, name: string) {
         .map((value) => (typeof value === "string" ? value : ""));
 }
 
+// Shows the server's refusal of each named field on that field.
+export function FieldErrors({
+    value,
+    children,
+}: {
+    value: Record<string, string>;
+    children: ReactNode;
+}) {
+    return <FormErrors value={value}>{children}</FormErrors>;
+}
+
 export function useErrorMessage() {
     const t = useTranslations("Common");
     return (error: unknown) => displayMessage(error, t("unexpected"));

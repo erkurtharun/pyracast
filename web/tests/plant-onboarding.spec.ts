@@ -322,8 +322,11 @@ for (const section of ["Forecast", "Settings"] as const) {
             page.getByText(/Awaiting administrator approval/),
         ).toBeVisible();
         await expect(
-            page.getByRole("heading", { name: "No forecast for this day yet" }),
+            page.getByRole("list", { name: "Next steps" }),
         ).toBeVisible();
+        await expect(
+            page.getByRole("heading", { name: "No forecast for this day yet" }),
+        ).toHaveCount(0);
         if (section === "Settings") {
             await page
                 .getByRole("button", { name: "Settings", exact: true })

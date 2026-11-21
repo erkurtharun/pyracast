@@ -152,7 +152,7 @@ def test_the_site_list_reads_a_fixed_number_of_statements_at_one_and_ten_times_t
         for _ in range(count):
             added += 1
             broken = sibling_plant(system)
-            SiteBinding.objects.filter(pk=broken.region.approved_binding_id).update(
+            SiteBinding.objects.filter(region=broken.region).update(
                 validated_credential_revision=F("validated_credential_revision") + 1
             )
             suspended, _binding = sibling(system)

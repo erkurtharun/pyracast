@@ -64,8 +64,10 @@
               <div><dt>{% translate "Requested timezone" %}</dt><dd>{{ change.timezone }}</dd></div>
               <div><dt>{% translate "Requested by" %}</dt><dd>{{ change.requested_by|default:_("Unknown") }} · <time datetime="{{ change.created_at|date:'c' }}">{{ change.created_at|date:"j M Y, H:i T" }}</time></dd></div>
               <div><dt>{% translate "Based on revision" %}</dt><dd>{{ change.base_revision }}</dd></div>
+              <div><dt>{% translate "Distance of the move" %}</dt><dd>{{ change.distance_km|floatformat:1 }} km</dd></div>
               <div class="facts-wide"><dt>{% translate "Reason" %}</dt><dd>{{ change.reason|default:_("No reason given") }}</dd></div>
             </dl>
+            {% if change.timezone_changes %}<p class="callout callout--warn">{% blocktranslate with old=region.timezone new=change.timezone %}The time zone changes from {{ old }} to {{ new }}: plant days, collection times and reminders follow the new zone.{% endblocktranslate %}</p>{% endif %}
             <p class="callout callout--warn">{% translate "Accepting the new location removes approval. Set up, validate and approve a replacement connection before collection resumes." %}</p>
             <form method="post" action="{% url 'admin:workspace_decision' region.pk %}">
               {% csrf_token %}
@@ -93,40 +95,29 @@
       <div><dt>{% translate "Local timezone" %}</dt><dd>{{ region.timezone }}</dd></div>
       <div><dt>{% translate "Location revision" %}</dt><dd>{{ region.revision }}</dd></div>
     </dl>
-    {% for submission in submissions %}
-      <h3>{{ submission.plant.name }}</h3>
-      <dl class="facts">
-        <div><dt>{% translate "DC nameplate" %}</dt><dd>{{ submission.dc_capacity_mw }} MW</dd></div>
-        <div><dt>{% translate "Inverter AC capacity" %}</dt><dd>{{ submission.inverter_capacity_mw|default_if_none:_("Unknown") }}{% if submission.inverter_capacity_mw != None %} MW{% endif %}</dd></div>
-        <div><dt>{% translate "Grid export limit" %}</dt><dd>{{ submission.export_limit_mw|default_if_none:_("Unknown") }}{% if submission.export_limit_mw != None %} MW{% endif %}</dd></div>
-        <div><dt>{% translate "Measurement point" %}</dt><dd>{% translate submission.get_measurement_basis_display %}</dd></div>
-        <div><dt>{% translate "Mounting" %}</dt><dd>{% translate submission.get_mounting_type_display %}</dd></div>
-        <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ submission.surface_tilt_degrees|default_if_none:_("Unknown") }}{% if submission.surface_tilt_degrees != None %}°{% endif %} / {{ submission.surface_azimuth_degrees|default_if_none:_("Unknown") }}{% if submission.surface_azimuth_degrees != None %}°{% endif %}</dd></div>
-        <div><dt>{% translate "Submitted by" %}</dt><dd>{{ submission.submitted_by.username }} · <time datetime="{{ submission.created_at|date:'c' }}">{{ submission.created_at|date:"j M Y, H:i T" }}</time></dd></div>
-        <div><dt>{% translate "Last changed" %}</dt><dd><time datetime="{{ submission.updated_at|date:'c' }}">{{ submission.updated_at|date:"j M Y, H:i T" }}</time></dd></div>
-      </dl>
-    {% empty %}
-      {% for plant in plants %}
-        <h3>{{ plant.name }}</h3>
-        {% with configuration=plant.current_configuration %}
-          {% if configuration %}
-            <dl class="facts">
-              <div><dt>{% translate "DC nameplate" %}</dt><dd>{{ configuration.dc_capacity_mw }} MW</dd></div>
-              <div><dt>{% translate "Inverter AC capacity" %}</dt><dd>{{ configuration.inverter_capacity_mw|default_if_none:_("Unknown") }}{% if configuration.inverter_capacity_mw != None %} MW{% endif %}</dd></div>
-              <div><dt>{% translate "Grid export limit" %}</dt><dd>{{ configuration.export_limit_mw|default_if_none:_("Unknown") }}{% if configuration.export_limit_mw != None %} MW{% endif %}</dd></div>
-              <div><dt>{% translate "Measurement point" %}</dt><dd>{% translate configuration.get_measurement_basis_display %}</dd></div>
-              <div><dt>{% translate "Mounting" %}</dt><dd>{% translate configuration.get_mounting_type_display %}</dd></div>
-              <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ configuration.surface_tilt_degrees|default_if_none:_("Unknown") }}{% if configuration.surface_tilt_degrees != None %}°{% endif %} / {{ configuration.surface_azimuth_degrees|default_if_none:_("Unknown") }}{% if configuration.surface_azimuth_degrees != None %}°{% endif %}</dd></div>
-              <div><dt>{% translate "Configuration revision" %}</dt><dd>{{ configuration.revision }}</dd></div>
-              <div><dt>{% translate "Saved" %}</dt><dd><time datetime="{{ configuration.created_at|date:'c' }}">{{ configuration.created_at|date:"j M Y, H:i T" }}</time></dd></div>
-            </dl>
+    {% for plant, record, awaiting in declarations %}
+      <h3>{{ plant.name }}{% if awaiting %} <span class="badge">{% translate "Awaiting approval" %}</span>{% endif %}</h3>
+      {% if record %}
+        <dl class="facts">
+          <div><dt>{% translate "DC nameplate" %}</dt><dd>{{ record.dc_capacity_mw }} MW</dd></div>
+          <div><dt>{% translate "Inverter AC capacity" %}</dt><dd>{{ record.inverter_capacity_mw|default_if_none:_("Unknown") }}{% if record.inverter_capacity_mw != None %} MW{% endif %}</dd></div>
+          <div><dt>{% translate "Grid export limit" %}</dt><dd>{{ record.export_limit_mw|default_if_none:_("Unknown") }}{% if record.export_limit_mw != None %} MW{% endif %}</dd></div>
+          <div><dt>{% translate "Measurement point" %}</dt><dd>{% translate record.get_measurement_basis_display %}</dd></div>
+          <div><dt>{% translate "Mounting" %}</dt><dd>{% translate record.get_mounting_type_display %}</dd></div>
+          <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ record.surface_tilt_degrees|default_if_none:_("Unknown") }}{% if record.surface_tilt_degrees != None %}°{% endif %} / {{ record.surface_azimuth_degrees|default_if_none:_("Unknown") }}{% if record.surface_azimuth_degrees != None %}°{% endif %}</dd></div>
+          {% if awaiting %}
+            <div><dt>{% translate "Submitted by" %}</dt><dd>{{ record.submitted_by.username }} · <time datetime="{{ record.created_at|date:'c' }}">{{ record.created_at|date:"j M Y, H:i T" }}</time></dd></div>
+            <div><dt>{% translate "Last changed" %}</dt><dd><time datetime="{{ record.updated_at|date:'c' }}">{{ record.updated_at|date:"j M Y, H:i T" }}</time></dd></div>
           {% else %}
-            <p class="empty">{% translate "No saved technical configuration or customer submission." %}</p>
+            <div><dt>{% translate "Configuration revision" %}</dt><dd>{{ record.revision }}</dd></div>
+            <div><dt>{% translate "Saved" %}</dt><dd><time datetime="{{ record.created_at|date:'c' }}">{{ record.created_at|date:"j M Y, H:i T" }}</time></dd></div>
           {% endif %}
-        {% endwith %}
-      {% empty %}
-        <p class="empty">{% translate "No plant has been submitted for this location." %}</p>
-      {% endfor %}
+        </dl>
+      {% else %}
+        <p class="empty">{% translate "No saved technical configuration or customer submission." %}</p>
+      {% endif %}
+    {% empty %}
+      <p class="empty">{% translate "No plant has been submitted for this location." %}</p>
     {% endfor %}
   </section>
 

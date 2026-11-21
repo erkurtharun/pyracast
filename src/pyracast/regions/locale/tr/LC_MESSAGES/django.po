@@ -81,9 +81,6 @@ msgstr "Tüm işlemler"
 msgid "An IANA timezone is required."
 msgstr "Geçerli bir IANA saat dilimi girin."
 
-msgid "An approved current provider binding is required."
-msgstr "Güncel ve onaylı bir sağlayıcı bağlantısı gereklidir."
-
 msgid "An approved current region and at least one time are required."
 msgstr "Güncel ve onaylı bir konum ile en az bir saat gereklidir."
 
@@ -3110,3 +3107,31 @@ msgstr "E-posta gönderim sınırına ulaşıldı"
 
 msgid "Mail sender forbidden"
 msgstr "E-posta göndericisine izin verilmedi"
+
+msgid "The plant's technical details cannot change in its current state."
+msgstr "Santralin teknik bilgileri mevcut durumunda değiştirilemez."
+
+msgid ""
+"The plant is suspended, so its technical details cannot change. Contact "
+"Pyracast support to resume it."
+msgstr ""
+"Santral askıya alındığı için teknik bilgileri değiştirilemez. Yeniden "
+"başlatmak için Pyracast destek ekibine yazın."
+
+msgid ""
+"The plant's data connection needs attention from Pyracast support, so its "
+"technical details cannot change yet."
+msgstr ""
+"Santralin veri bağlantısıyla Pyracast destek ekibinin ilgilenmesi gerekiyor; "
+"bu nedenle teknik bilgileri henüz değiştirilemez."
+
+msgid "Distance of the move"
+msgstr "Taşıma mesafesi"
+
+#, python-format
+msgid ""
+"The time zone changes from %(old)s to %(new)s: plant days, collection times "
+"and reminders follow the new zone."
+msgstr ""
+"Saat dilimi %(old)s yerine %(new)s olur: santral günleri, toplama saatleri "
+"ve hatırlatmalar yeni dilimi izler."

@@ -5,9 +5,13 @@ import { api } from "@/lib/api/client";
 import { useApiQuery, useRefresh } from "@/lib/api/query";
 import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
-import { ActionForm, AsyncButton, Field, formText } from "@/ui/form";
+import { ActionForm, AsyncButton, Field, Select, formText } from "@/ui/form";
 import { Resource } from "@/ui/resource";
 import { StatusTag } from "@/ui/vocabulary";
+import {
+    supportedZones,
+    zoneChoices,
+} from "@/features/portfolio/site-location";
 
 type LocationRequest = components["schemas"]["LocationChangeOutput"];
 
@@ -131,13 +135,21 @@ function LocationRequests({
                                         defaultValue={region.longitude}
                                         required
                                     />
-                                    <Field
-                                        label={t("ianaTimezone")}
+                                    <Select
+                                        label={t("timezone")}
                                         name="timezone"
-                                        maxLength={100}
                                         defaultValue={region.timezone}
                                         required
-                                    />
+                                    >
+                                        {zoneChoices(
+                                            supportedZones(),
+                                            region.timezone,
+                                        ).map((zone) => (
+                                            <option key={zone} value={zone}>
+                                                {zone}
+                                            </option>
+                                        ))}
+                                    </Select>
                                     <Field
                                         label={t("reasonOptional")}
                                         name="reason"

@@ -11,8 +11,9 @@ from rest_framework.response import Response
 from pyracast.api.serializers import RegionInput
 from pyracast.notifications.overview import reminder_summaries
 from pyracast.notifications.serializers import ReminderSummaryOutput
+from pyracast.plants.operations import PlantEditBlock
 from pyracast.plants.serializers import PlantInput, PlantOutput
-from pyracast.plants.sites import Site, site_queryset, sites, submit_site
+from pyracast.plants.sites import Site, SiteAttention, site_queryset, sites, submit_site
 from pyracast.regions.models import Region, RegionStatus
 
 
@@ -38,6 +39,18 @@ class SiteOutput(serializers.Serializer[Site]):
         source="region.review_reason", allow_null=True, read_only=True
     )
     plant = PlantOutput(allow_null=True, read_only=True)
+    attention = serializers.ChoiceField(
+        choices=SiteAttention.choices,
+        allow_null=True,
+        read_only=True,
+        help_text="The first thing the plant needs from the customer; none when nothing.",
+    )
+    edit_blocked_reason = serializers.ChoiceField(
+        choices=PlantEditBlock.choices,
+        allow_null=True,
+        read_only=True,
+        help_text="Why the plant's technical details cannot change now; none when they can.",
+    )
     reminder = serializers.SerializerMethodField()
 
     @extend_schema_field(ReminderSummaryOutput(allow_null=True))

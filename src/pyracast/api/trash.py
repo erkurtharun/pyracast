@@ -2,7 +2,8 @@ from datetime import datetime
 from typing import Any, cast
 
 from django.contrib.auth.models import User
-from django.db.models import QuerySet
+from django.db.models import OuterRef, QuerySet, Subquery
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, extend_schema_field
 from rest_framework import serializers
@@ -14,6 +15,7 @@ from rest_framework.views import APIView
 from pyracast import trash
 from pyracast.api.serializers import RegionOutput
 from pyracast.errors import ErrorCode
+from pyracast.plants.models import Plant
 from pyracast.plants.serializers import EmptyInput
 from pyracast.regions.models import Region
 from pyracast.regions.review import with_review_outcome
@@ -22,6 +24,9 @@ RESTORE_BLOCKERS = (ErrorCode.TRASH_RETENTION_EXPIRED, ErrorCode.LOCATION_ALREAD
 
 
 class TrashedRegionOutput(serializers.ModelSerializer[Region]):
+    plant_name = serializers.CharField(
+        read_only=True, help_text="The plant's name, else the location's name."
+    )
     deleted_at = serializers.DateTimeField()
     purge_after = serializers.SerializerMethodField()
     restore_blocker = serializers.SerializerMethodField()
@@ -40,7 +45,16 @@ class TrashedRegionOutput(serializers.ModelSerializer[Region]):
 
     class Meta:
         model = Region
-        fields = ("id", "name", "deleted_at", "purge_after", "restore_blocker")
+        fields = (
+            "id",
+            "name",
+            "plant_name",
+            "latitude",
+            "longitude",
+            "deleted_at",
+            "purge_after",
+            "restore_blocker",
+        )
         read_only_fields = fields
 
 
@@ -48,9 +62,11 @@ class TrashedRegionsView(GenericAPIView[Region]):
     serializer_class = TrashedRegionOutput
 
     def get_queryset(self) -> QuerySet[Region]:
+        plant = Plant.objects.filter(region=OuterRef("pk")).order_by("pk").values("name")[:1]
         return trash.with_restore_facts(
             Region.objects.trashed()
             .filter(tenant_id=self.kwargs["tenant_id"], purge_started_at__isnull=True)
+            .annotate(plant_name=Coalesce(Subquery(plant), "name"))
             .order_by("deleted_at", "id")
         )
 

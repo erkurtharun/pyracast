@@ -32,7 +32,16 @@ export function ReviewNotice({
     const refresh = useRefresh();
     if (region.status === "approved") return null;
     if (region.status === "pending")
-        return <Notice>{t("awaitingApproval")}</Notice>;
+        return (
+            <Notice>
+                <p>{t("awaitingApproval")}</p>
+                <ol aria-label={t("nextSteps")}>
+                    <li>{t("nextReview")}</li>
+                    <li>{t("nextForecasts")}</li>
+                    <li>{t("nextSettings")}</li>
+                </ol>
+            </Notice>
+        );
     return (
         <Notice>
             <p>

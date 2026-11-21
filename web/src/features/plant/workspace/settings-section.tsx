@@ -1,7 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import type { Plant, PlantScope, Region } from "@/lib/api";
+import type { Plant, PlantScope, Site } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
 import { plantExport } from "@/lib/exports";
@@ -11,11 +11,12 @@ import {
     configurationInput,
     type Configuration,
 } from "@/features/portfolio/plant-configuration-fields";
-import { MoveToRecycleBin } from "@/features/trash/recycle-bin";
+import { MoveToRecycleBin } from "@/features/trash/move-to-recycle-bin";
 import { ViewNav } from "@/ui/action";
 import { CsvDownload } from "@/ui/csv-download";
 import { ActionForm } from "@/ui/form";
 import { Notice } from "@/ui/ui";
+import { useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { CollectionSchedule } from "../collection-schedule";
 import { RegionSettings } from "../region-settings";
@@ -35,7 +36,7 @@ export function SettingsSection({
 }: {
     plant: Plant;
     scope: PlantScope;
-    region: Region;
+    region: Site;
     timezone: string;
     view: PlantView<"settings">;
     leaving: boolean;
@@ -65,15 +66,14 @@ export function SettingsSection({
                 aria-busy={leaving || undefined}
             >
                 {view === "configuration" ? (
-                    <PlantConfiguration
-                        plant={plant}
-                        scope={scope}
-                        onSaved={onSaved}
-                        onChanged={onChanged}
-                    />
-                ) : view === "location" ? (
                     <>
-                        <RegionSettings region={region} scope={scope} />
+                        <PlantConfiguration
+                            plant={plant}
+                            scope={scope}
+                            blocked={region.edit_blocked_reason}
+                            onSaved={onSaved}
+                            onChanged={onChanged}
+                        />
                         <CsvDownload
                             label={t("downloadPlantCSV")}
                             build={() =>
@@ -90,6 +90,8 @@ export function SettingsSection({
                             }
                         />
                     </>
+                ) : view === "location" ? (
+                    <RegionSettings region={region} scope={scope} />
                 ) : view === "collection" ? (
                     <CollectionSchedule scope={scope} region={region} />
                 ) : (
@@ -98,8 +100,7 @@ export function SettingsSection({
             </fieldset>
             {canManage && view === "configuration" && (
                 <section className="panel">
-                    <h2>{t("deletePlant")}</h2>
-                    <p>{t("deletionHelp")}</p>
+                    <h2>{t("deletion")}</h2>
                     <MoveToRecycleBin
                         name={plant.name}
                         scope={scope}
@@ -160,23 +161,29 @@ function conflictPlant(error: unknown, id: number): Plant | null {
 function PlantConfiguration({
     plant,
     scope,
+    blocked,
     onSaved,
     onChanged,
 }: {
     plant: Plant;
     scope: PlantScope;
+    blocked: Site["edit_blocked_reason"];
     onSaved: (plant: Plant) => void;
     onChanged: () => Promise<unknown>;
 }) {
     const t = useTranslations("PlantWorkspace");
+    const label = useLabel();
+    const canManage = useCanManageWorkspace();
     return (
         <section className="panel">
             <h2>{t("technicalDetails")}</h2>
+            {blocked && <Notice>{label("PlantEditBlock", blocked)}</Notice>}
             {plant.parameters ? (
                 <TechnicalDetails
                     plant={plant}
                     parameters={plant.parameters}
                     scope={scope}
+                    permitted={canManage && !blocked}
                     onSaved={onSaved}
                     onChanged={onChanged}
                 />
@@ -191,12 +198,14 @@ function TechnicalDetails({
     plant,
     parameters,
     scope,
+    permitted,
     onSaved,
     onChanged,
 }: {
     plant: Plant;
     parameters: Configuration;
     scope: PlantScope;
+    permitted: boolean;
     onSaved: (plant: Plant) => void;
     onChanged: () => Promise<unknown>;
 }) {
@@ -207,6 +216,7 @@ function TechnicalDetails({
     return (
         <ActionForm
             submit={t("saveConfiguration")}
+            permitted={permitted}
             onEdit={() => {
                 if (!draft.edited) setDraft({ ...draft, edited: true });
             }}

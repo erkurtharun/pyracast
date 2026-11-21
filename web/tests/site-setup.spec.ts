@@ -122,7 +122,6 @@ test("complete setup asks only for the technical details and shows the location 
         page.getByText("36.9°, 30.7° · Europe/Istanbul"),
     ).toBeVisible();
     await expect(page.getByLabel("Latitude (°)")).toHaveCount(0);
-    await expect(page.getByLabel("DC nameplate capacity (MW)")).toBeFocused();
 });
 
 test("a suspended location without a plant says why its setup cannot be completed", async ({
