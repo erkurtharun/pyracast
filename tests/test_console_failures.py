@@ -245,6 +245,7 @@ def decision(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) ->
             "expected_revision": system.region.revision,
             "expected_status": system.region.status,
             "action": "reject",
+            "decision_reason": "The declared capacity does not match the grid licence.",
         },
         system.region,
         lambda: Region.objects.get(pk=system.region.pk).status == "pending",

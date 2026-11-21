@@ -9,7 +9,12 @@ from django.utils.safestring import SafeString
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 
-from pyracast.accounts.models import OutboundMail, Tenant
+from pyracast.accounts.models import (
+    OutboundMail,
+    Tenant,
+    WorkspaceAdminChange,
+    WorkspaceMemberRemoval,
+)
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -31,6 +36,8 @@ from pyracast.plants.models import (
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest, active_region
 
 if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise
+
     AdminBase = admin.ModelAdmin[Any]
 else:
     AdminBase = admin.ModelAdmin
@@ -74,6 +81,45 @@ class ReadOnlyAdmin(AdminBase):
         return False
 
 
+def region_filter(path: str) -> type[admin.SimpleListFilter]:
+    """A filter by plant location for the plant page's record links; it shows only the
+    location the link names, and a value naming no live location filters nothing."""
+
+    class RegionFilter(admin.SimpleListFilter):
+        title = gettext_lazy("plant location")
+        parameter_name = "region"
+
+        def _region(self) -> tuple[int, str] | None:
+            value = self.value()
+            if not value or not value.isdigit():
+                return None
+            return Region.objects.active().filter(pk=int(value)).values_list("pk", "name").first()
+
+        def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+            region = self._region()
+            return [(str(region[0]), region[1])] if region else []
+
+        def queryset(self, request: HttpRequest, queryset: QuerySet[Any]) -> QuerySet[Any]:
+            return queryset.filter(**{path: self.value()})
+
+    return RegionFilter
+
+
+def region_records(region_id: int) -> list[tuple[StrOrPromise, str]]:
+    """Links from a plant page to its rows in the record browser."""
+    return [
+        (label, f"{reverse(f'admin:{name}_changelist')}?region={region_id}")
+        for label, name in (
+            (gettext_lazy("Audit trail"), "regions_auditevent"),
+            (gettext_lazy("Plant events"), "plants_plantevent"),
+            (gettext_lazy("Collection jobs"), "forecasts_collectionjob"),
+            (gettext_lazy("Request attempts"), "forecasts_requestattempt"),
+            (gettext_lazy("Email deliveries"), "notifications_notificationdelivery"),
+            (gettext_lazy("Provider bindings"), "connections_sitebinding"),
+        )
+    ]
+
+
 class NotificationSettingsAdmin(ReadOnlyAdmin):
     fields = ("max_recipients",)
     list_display = ("max_recipients",)
@@ -93,9 +139,12 @@ class NotificationDeliveryAdmin(ReadOnlyAdmin):
         "last_error",
         "sent_at",
     )
-    list_filter = ("status",)
+    list_filter = ("status", region_filter("schedule__region"))
+    list_select_related = ("schedule__region",)
     search_fields = ("recipient_rows__key", "schedule__region__name")
     readonly_fields = ("recipients",)
+    ordering = ("-scheduled_for", "-pk")
+    show_full_result_count = False
     fields = (
         "schedule",
         "recipients",
@@ -151,6 +200,74 @@ class RegionAdmin(ReadOnlyAdmin):
         )
 
 
+class AuditEventAdmin(ReadOnlyAdmin):
+    list_display = ("created_at", "action", "region", "provider_account", "actor", "revision")
+    list_filter = ("action", region_filter("region"))
+    list_select_related = ("region", "provider_account", "actor")
+    search_fields = ("region__name", "provider_account__external_account_id")
+    date_hierarchy = "created_at"
+    ordering = ("-created_at", "-pk")
+    show_full_result_count = False
+
+
+class PlantEventAdmin(ReadOnlyAdmin):
+    list_display = ("created_at", "action", "plant", "actor")
+    list_filter = ("action", region_filter("plant__region"))
+    list_select_related = ("plant", "actor")
+    search_fields = ("plant__name",)
+    date_hierarchy = "created_at"
+    ordering = ("-created_at", "-pk")
+    show_full_result_count = False
+
+
+class PlantAdmin(ReadOnlyAdmin):
+    list_display = ("name", "region", "automatic_calibration_enabled")
+    list_select_related = ("region",)
+    search_fields = ("name", "region__name", "region__tenant__name")
+    ordering = ("name", "pk")
+    show_full_result_count = False
+
+
+class SiteBindingAdmin(ReadOnlyAdmin):
+    list_display = ("id", "region", "provider_account", "site_id", "region_revision", "health")
+    list_filter = ("health", region_filter("region"))
+    list_select_related = ("region", "provider_account")
+    search_fields = ("site_id", "region__name")
+    ordering = ("-pk",)
+    show_full_result_count = False
+
+
+class CollectionJobAdmin(ReadOnlyAdmin):
+    list_display = ("id", "binding", "endpoint", "status", "scheduled_for", "attempts")
+    list_filter = ("status", "endpoint", region_filter("binding__region"))
+    list_select_related = ("binding",)
+    date_hierarchy = "scheduled_for"
+    ordering = ("-scheduled_for", "-pk")
+    show_full_result_count = False
+
+
+class RequestAttemptAdmin(ReadOnlyAdmin):
+    list_display = ("id", "provider_account", "binding", "purpose", "outcome", "created_at")
+    list_filter = ("purpose", "outcome", region_filter("binding__region"))
+    list_select_related = ("provider_account", "binding")
+    ordering = ("-created_at", "-pk")
+    show_full_result_count = False
+
+
+class WorkspaceAdminChangeAdmin(ReadOnlyAdmin):
+    list_display = ("created_at", "tenant", "actor", "administrator", "previous_administrator")
+    list_select_related = ("tenant", "actor", "administrator", "previous_administrator")
+    search_fields = ("tenant__name",)
+    ordering = ("-created_at", "-pk")
+
+
+class WorkspaceMemberRemovalAdmin(ReadOnlyAdmin):
+    list_display = ("created_at", "tenant", "actor", "user")
+    list_select_related = ("tenant", "actor", "user")
+    search_fields = ("tenant__name",)
+    ordering = ("-created_at", "-pk")
+
+
 class RegionLocationChangeRequestAdmin(ReadOnlyAdmin):
     list_display = ("id", "region", "status", "base_revision", "created_at", "reviewed_at")
     list_filter = ("status",)
@@ -163,20 +280,22 @@ ADMINS: dict[type[Model], type[ReadOnlyAdmin]] = {
     OutboundMail: OutboundMailAdmin,
     Region: RegionAdmin,
     RegionLocationChangeRequest: RegionLocationChangeRequestAdmin,
+    AuditEvent: AuditEventAdmin,
+    PlantEvent: PlantEventAdmin,
+    Plant: PlantAdmin,
+    SiteBinding: SiteBindingAdmin,
+    CollectionJob: CollectionJobAdmin,
+    RequestAttempt: RequestAttemptAdmin,
+    WorkspaceAdminChange: WorkspaceAdminChangeAdmin,
+    WorkspaceMemberRemoval: WorkspaceMemberRemovalAdmin,
     **dict.fromkeys(
         (
             Tenant,
-            SiteBinding,
-            CollectionJob,
             ForecastResult,
-            RequestAttempt,
-            AuditEvent,
-            Plant,
             PlantConfiguration,
             ProductionObservation,
             CalibrationRun,
             CalibrationActivation,
-            PlantEvent,
         ),
         ReadOnlyAdmin,
     ),

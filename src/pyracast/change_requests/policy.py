@@ -25,6 +25,12 @@ def _unread(user: User, memberships: Iterable[Membership]) -> Q:
     )
 
 
+def unread_requests(membership: Membership) -> QuerySet[ChangeRequest]:
+    """Decided requests of the membership whose outcome it has not opened; `is_unread` holds
+    for each of them."""
+    return visible_requests(membership).filter(_unread(membership.user, (membership,)))
+
+
 def visible_requests(membership: Membership) -> QuerySet[ChangeRequest]:
     rows = ChangeRequest.objects.filter(
         active_plant("plant__"), plant__region__tenant_id=membership.tenant_id

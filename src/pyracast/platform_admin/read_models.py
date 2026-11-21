@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from django.core.paginator import Paginator
 from django.db.models import Count, OuterRef, Q, QuerySet, Subquery
+from django.db.models.fields.json import KT
 from django.db.models.functions import Coalesce
 from django.urls import reverse
 from django.utils import timezone
@@ -34,6 +35,7 @@ from pyracast.platform_admin.health_queries import (
     notification_deliveries_for_issue,
     regions_for_issue,
 )
+from pyracast.platform_admin.records import region_records
 from pyracast.regions.models import (
     AuditAction,
     AuditEvent,
@@ -43,6 +45,7 @@ from pyracast.regions.models import (
     RegionStatus,
     active_region,
 )
+from pyracast.regions.review import REVIEW_DECISIONS
 
 if TYPE_CHECKING:
     from django_stubs_ext import StrOrPromise, WithAnnotations
@@ -159,8 +162,16 @@ def summarize_plant(region: WithAnnotations[Region, WorkspaceAnnotations]) -> Pl
     )
 
 
-def plant_list_context(query: str, status: str, page: str, issue: str = "") -> dict[str, Any]:
+def plant_list_context(
+    query: str, status: str, page: str, issue: str = "", *, location_change: str = ""
+) -> dict[str, Any]:
     regions = workspace_regions()
+    if location_change == LocationChangeStatus.PENDING:
+        regions = regions.filter(
+            regionlocationchangerequest__status=LocationChangeStatus.PENDING
+        ).distinct()
+    else:
+        location_change = ""
     health_filter = None
     if issue:
         now = timezone.now()
@@ -186,6 +197,7 @@ def plant_list_context(query: str, status: str, page: str, issue: str = "") -> d
         "status": status,
         "status_choices": RegionStatus.choices,
         "health_filter": health_filter,
+        "location_change": location_change,
     }
 
 
@@ -199,7 +211,9 @@ def overview_context() -> dict[str, Any]:
             for row in regions.values("status").annotate(count=Count("pk")).order_by()
         }
     )
-    counts["total"] = sum(counts.values())
+    counts["needs_attention"] = sum(
+        summarize_plant(region).connection == "Needs attention" for region in regions
+    )
     counts["location_changes"] = RegionLocationChangeRequest.objects.filter(
         active_region("region__"), status=LocationChangeStatus.PENDING
     ).count()
@@ -234,13 +248,20 @@ def overview_context() -> dict[str, Any]:
 def recent_activity_context(
     region_id: int | None = None, *, limit: int = 5
 ) -> list[dict[str, Any]]:
-    events = AuditEvent.objects.filter(active_region("region__"), region__isnull=False)
+    """Events of live plants and, on the overview, of provider accounts."""
+    events = AuditEvent.objects.filter(
+        Q(active_region("region__"), region__isnull=False) | Q(provider_account__isnull=False)
+    )
     if region_id is not None:
         events = events.filter(region_id=region_id)
     return [
         {**row, "action_label": str(AuditAction(row["action"]).label)}
         for row in events.order_by("-created_at", "-pk").values(
-            "action", "created_at", "region__name", "actor__username"
+            "action",
+            "created_at",
+            "region__name",
+            "provider_account__external_account_id",
+            "actor__username",
         )[:limit]
     ]
 
@@ -397,6 +418,25 @@ def operations_context(issue: str = "") -> dict[str, Any]:
     }
 
 
+def review_history(region_id: int) -> dict[str, Any]:
+    """The latest review decision with its reason, and whether the customer resubmitted the
+    plant after it."""
+    events = list(
+        AuditEvent.objects.filter(
+            region_id=region_id, action__in=(*REVIEW_DECISIONS, AuditAction.REGION_RESUBMITTED)
+        )
+        .annotate(reason=KT("details__reason"))
+        .order_by("-created_at", "-pk")
+        .values("action", "reason", "created_at")[:2]
+    )
+    resubmitted = bool(events) and events[0]["action"] == AuditAction.REGION_RESUBMITTED
+    decision = events[1 if resubmitted else 0] if len(events) > resubmitted else None
+    return {
+        "decision": decision and {**decision, "label": AuditAction(decision["action"]).label},
+        "resubmitted_at": events[0]["created_at"] if resubmitted else None,
+    }
+
+
 def review_context(region_id: int) -> dict[str, Any]:
     region = workspace_regions().get(pk=region_id)
     summary = summarize_plant(region)
@@ -407,6 +447,8 @@ def review_context(region_id: int) -> dict[str, Any]:
         "recent_collections": work["collections"],
         "recent_deliveries": work["deliveries"],
         "recent_activity": recent_activity_context(region.pk),
+        "region_records": region_records(region.pk),
+        "review_history": review_history(region.pk),
         "review_form": ReviewDecisionForm(
             initial={"expected_revision": region.revision, "expected_status": region.status}
         ),

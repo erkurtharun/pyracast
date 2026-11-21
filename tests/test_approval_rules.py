@@ -17,6 +17,7 @@ from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
+REASON = "The declared capacity does not match the grid licence."
 APPROVED = "Plant approved. The first saved forecast is being prepared."
 ALREADY_APPROVED = "This plant is already approved."
 DECLARATION_CHANGED = (
@@ -61,6 +62,7 @@ def review_decision(region: Region, action: str) -> dict[str, object]:
         "expected_revision": region.revision,
         "expected_status": region.status,
         "action": action,
+        **({"decision_reason": REASON} if action in {"reject", "suspend"} else {}),
     }
 
 
@@ -231,7 +233,7 @@ def test_a_location_decision_is_refused_after_the_review_status_changed() -> Non
     )
     client, _ = verified_admin()
     seen = {**review_decision(system.region, "reject_location"), "location_change_id": change.pk}
-    decide_review(system.admin, system.region.pk, ReviewDecision.REJECT)
+    decide_review(system.admin, system.region.pk, ReviewDecision.REJECT, reason=REASON)
 
     assert notices(client, decision_url(system.region), seen) == (302, [STATUS_CHANGED])
     change.refresh_from_db()

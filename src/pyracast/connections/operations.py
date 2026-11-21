@@ -30,17 +30,17 @@ def create_account(
     provider = provider.strip().casefold()
     identity = external_account_id.strip()
     if provider not in Provider.values or not identity:
-        raise ValidationError("Invalid provider account identity.")
+        raise ValidationError(gettext("Invalid provider account identity."))
     if provider == Provider.SOLCAST and not api_key:
-        raise ValidationError({"api_key": "An API key is required for a Solcast account."})
+        raise ValidationError({"api_key": gettext("An API key is required for a Solcast account.")})
     encrypted_api_key = encrypt_secret(api_key) if api_key else ""
     if not 1 <= daily_quota <= MAX_DAILY_QUOTA:
-        raise ValidationError("Account quota must be between 1 and 10.")
+        raise ValidationError(gettext("Account quota must be between 1 and 10."))
     authorization_reference = authorization_reference.strip()
     if (provider == Provider.SOLCAST and not authorization_reference) or (
         len(authorization_reference) > 500
     ):
-        raise ValidationError("A service authorization reference is required.")
+        raise ValidationError(gettext("A service authorization reference is required."))
     with transaction.atomic():
         account, created = ProviderAccount.objects.alias(
             canonical_provider=canonical_account_identity("provider"),

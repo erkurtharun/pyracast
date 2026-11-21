@@ -287,8 +287,12 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
         del row["calibration_preparation_due_at"]
     assert after["regions_region"]
     assert all(row["purge_started_at"] is None for row in after["regions_region"])
+    assert [
+        (row["id"], row["purge_warning_sent_at"] is not None) for row in after["regions_region"]
+    ] == [(row["id"], row["deleted_at"] is not None) for row in before["regions_region"]]
     for row in after["regions_region"]:
         del row["purge_started_at"]
+        del row["purge_warning_sent_at"]
     assert all(row["updated_at"] == row["created_at"] for row in after["plants_plantsubmission"])
     for row in after["plants_plantsubmission"]:
         del row["updated_at"]

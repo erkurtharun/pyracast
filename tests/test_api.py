@@ -126,7 +126,7 @@ def test_fixture_workflow_and_freshness(customer: tuple[Client, User, Tenant]) -
     assert "unvalidated" in data["result"]["quality_flags"]
     assert not collect(job.pk, FixtureProvider(), calculate, timezone.now())
     assert ForecastResult.objects.count() == 1
-    decide_review(operator, region.pk, ReviewDecision.SUSPEND)
+    decide_review(operator, region.pk, ReviewDecision.SUSPEND, reason="Paused for review.")
     assert client.get(path).json()["freshness"] == "stale"
     region.timezone = "America/New_York"
     region.save(update_fields=["timezone"])

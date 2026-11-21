@@ -162,7 +162,8 @@ MAIL_INVITATION_RULE = "(kind = 'workspace_invitation') = (invitation_id IS NOT 
 MAIL_CONTEXT_RULE = """CASE WHEN jsonb_typeof(context) = 'object' THEN NOT EXISTS (
     SELECT 1 FROM jsonb_each(context) AS entry
     WHERE jsonb_typeof(entry.value) <> 'string' OR entry.key NOT IN (
-        'from_email', 'to_email', 'deleted_email', 'provider', 'timestamp', 'ip', 'user_agent'))
+        'from_email', 'to_email', 'deleted_email', 'provider', 'timestamp', 'ip', 'user_agent',
+        'subject_id'))
     ELSE false END"""
 # Every row invariant the database enforces on the constrained tables; archive immutability is
 # a before/after property and is audited by `rewritten_archive_rows`.

@@ -168,8 +168,8 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
         now = timezone.now()
         if (blocker := restore_blocker(region, now)) is not None:
             raise DomainError(blocker)
-        region.deleted_at = None
-        region.save(update_fields=("deleted_at",))
+        region.deleted_at = region.purge_warning_sent_at = None
+        region.save(update_fields=("deleted_at", "purge_warning_sent_at"))
         CollectionSchedule.objects.get_or_create(
             region=region,
             defaults={
@@ -305,6 +305,10 @@ def _purge_region(region: Region, plants: list[Plant], budget: _Budget) -> None:
     _delete(AuditEvent.objects.filter(region=region), budget)
     _delete(RegionLocationChangeRequest.objects.filter(region=region), budget)
     _delete(Region.objects.filter(pk=region.pk), budget)
+
+
+def trashed_within_retention(now: datetime, remaining: timedelta) -> Q:
+    return Q(deleted_at__lte=now - (RETENTION - remaining), deleted_at__gt=now - RETENTION)
 
 
 def _purgeable(cutoff: datetime) -> Q:

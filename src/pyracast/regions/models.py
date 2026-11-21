@@ -40,9 +40,14 @@ class AuditAction(models.TextChoices):
     )
     BINDING_CONFIGURED = "binding_configured", gettext_lazy("Provider connection configured")
     CONNECTION_VALIDATED = "connection_validated", gettext_lazy("Provider connection validated")
+    CONNECTION_VALIDATION_FAILED = (
+        "connection_validation_failed",
+        gettext_lazy("Provider connection validation failed"),
+    )
     REGION_APPROVED = "region_approved", gettext_lazy("Plant approved")
     REGION_REJECTED = "region_rejected", gettext_lazy("Plant rejected")
     REGION_SUSPENDED = "region_suspended", gettext_lazy("Plant suspended")
+    REGION_RESUBMITTED = "region_resubmitted", gettext_lazy("Plant resubmitted for review")
     REGION_TRASHED = "region_trashed", gettext_lazy("Plant location moved to trash")
     REGION_RESTORED = "region_restored", gettext_lazy("Plant location restored")
     COLLECTION_SCHEDULE_UPDATED = (
@@ -106,6 +111,9 @@ class Region(models.Model):
     deleted_at = models.DateTimeField(null=True, db_index=True)
     # Set by the first purge transaction; such a region can no longer be restored.
     purge_started_at = models.DateTimeField(null=True)
+    # Set when the administrators are warned before the purge, cleared by a restore. Regions
+    # already in the trash when the column was added carry the migration time: never warned.
+    purge_warning_sent_at = models.DateTimeField(null=True)
 
     objects = RegionQuerySet.as_manager()
 

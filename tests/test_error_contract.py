@@ -751,6 +751,12 @@ CASES: dict[str, Case] = {
         "kalibrasyon etkinle\u015ftirilebilir.",
         domain("DomainError", "calibration_not_activatable"),
     ),
+    "review_reason_required": Case(
+        400,
+        "Enter the reason the customer will read.",
+        "Müşterinin okuyaca\u011f\u0131 gerekçeyi yaz\u0131n.",
+        domain("DomainError", "review_reason_required"),
+    ),
 }
 
 

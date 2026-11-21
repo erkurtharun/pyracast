@@ -91,6 +91,7 @@ class ErrorCode(models.TextChoices):
     OUTAGE_HISTORY_CHANGED = "outage_history_changed"
     INCUMBENT_CHANGED = "incumbent_changed"
     CALIBRATION_NOT_ACTIVATABLE = "calibration_not_activatable"
+    REVIEW_REASON_REQUIRED = "review_reason_required"
 
 
 MESSAGES: Mapping[ErrorCode, StrPromise] = {
@@ -222,6 +223,7 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.CALIBRATION_NOT_ACTIVATABLE: _(
         "Only a completed, held-out evaluated calibration can be activated."
     ),
+    ErrorCode.REVIEW_REASON_REQUIRED: _("Enter the reason the customer will read."),
 }
 
 

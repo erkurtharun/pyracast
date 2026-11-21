@@ -26,6 +26,7 @@ from pyracast.change_requests.policy import (
     is_unread,
     pending_limit_reached,
     request_for,
+    unread_requests,
 )
 from pyracast.change_requests.preparation import (
     INCIDENT_FIELDS,
@@ -334,6 +335,12 @@ def withdraw_request(actor: User, tenant_id: int, request_id: int) -> ChangeRequ
     if not _terminal(request, ChangeRequestStatus.WITHDRAWN):
         _close(request, ChangeRequestStatus.WITHDRAWN, None)
     return request
+
+
+@transaction.atomic
+def mark_all_seen(actor: User, tenant_id: int) -> int:
+    membership = tenant_membership(actor, tenant_id, lock=True)
+    return unread_requests(membership).update(outcome_seen_at=timezone.now())
 
 
 @transaction.atomic

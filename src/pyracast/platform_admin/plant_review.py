@@ -158,7 +158,10 @@ def _page(request: HttpRequest, region_id: int, action: str | None) -> PlantPage
     )
 
 
-def _applied(form: forms.Form, operation: Callable[[], Notice | None]) -> Notice | None:
+def _applied(
+    form: forms.Form, operation: Callable[[], Notice | None], *, named: bool = False
+) -> Notice | None:
+    """`named` shows the operation's own refusal; its messages are translated texts."""
     if not form.is_valid():
         return None
     try:
@@ -178,7 +181,9 @@ def _applied(form: forms.Form, operation: Callable[[], Notice | None]) -> Notice
         form.add_error(None, validation_failure_message(error))
     except ConflictError as refusal:
         form.add_error(None, str(refusal.message))
-    except ObjectDoesNotExist, ValidationError, APIValidationError:
+    except ValidationError as refusal:
+        form.add_error(None, " ".join(refusal.messages) if named else str(SETUP_REFUSED))
+    except ObjectDoesNotExist, APIValidationError:
         form.add_error(None, str(SETUP_REFUSED))
     return None
 
@@ -207,7 +212,7 @@ def configure(request: HttpRequest, page: PlantPage) -> Notice | None:
             )
         return messages.INFO, _("Nothing changed.")
 
-    return _applied(form, save)
+    return _applied(form, save, named=True)
 
 
 def validate(request: HttpRequest, page: PlantPage) -> Notice | None:
@@ -427,7 +432,9 @@ LOCATION_DECISIONS = {
 def _decide(actor: User, region_id: int, form: ReviewDecisionForm) -> bool:
     action = form.cleaned_data["action"]
     if action in ReviewDecision.values:
-        return decide_review(actor, region_id, action, seen=form.seen())
+        return decide_review(
+            actor, region_id, action, reason=form.cleaned_data["decision_reason"], seen=form.seen()
+        )
     change = RegionLocationChangeRequest.objects.get(
         active_region("region__"), pk=form.cleaned_data["location_change_id"], region_id=region_id
     )

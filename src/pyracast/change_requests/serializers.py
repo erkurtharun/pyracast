@@ -38,6 +38,10 @@ class IncidentRequestInput(InputSerializer):
     ends_at = AwareDateTime(required=False)
 
 
+class SeenAllOutput(serializers.Serializer[dict[str, int]]):
+    marked = serializers.IntegerField()
+
+
 class InboxQuery(InputSerializer):
     scope = serializers.ChoiceField(choices=("pending", "history", "mine"), default="pending")
     plant_id = serializers.IntegerField(min_value=1, required=False)

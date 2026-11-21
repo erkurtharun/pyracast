@@ -30,7 +30,7 @@ def _signed_in(user: User, *, mfa: bool) -> Client:
 
 def _operation_allowed(user: User) -> bool:
     try:
-        decide_review(user, 0, ReviewDecision.SUSPEND)
+        decide_review(user, 0, ReviewDecision.SUSPEND, reason="Paused.")
     except PermissionDenied:
         return False
     except Region.DoesNotExist:

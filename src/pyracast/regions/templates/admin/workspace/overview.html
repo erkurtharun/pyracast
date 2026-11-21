@@ -9,10 +9,13 @@
     <ul class="stats">
       <li><a class="stat stat--focus" href="{% url 'admin:workspace_plants' %}?status=pending">
         <span class="stat-value">{{ counts.pending }}</span><span class="stat-label">{% translate "Awaiting approval" %}</span></a></li>
-      <li><a class="stat" href="#location-queue-title">
+      <li><a class="stat" href="{% url 'admin:workspace_plants' %}?location_change=pending">
         <span class="stat-value">{{ counts.location_changes }}</span><span class="stat-label">{% translate "Location change requests" %}</span></a></li>
       <li><a class="stat" href="{% url 'admin:workspace_plants' %}?status=approved">
         <span class="stat-value">{{ counts.approved }}</span><span class="stat-label">{% translate "Approved" %}</span></a></li>
+      <li><a class="stat" href="{% url 'admin:workspace_plants' %}?status=suspended">
+        <span class="stat-value">{{ counts.suspended }}</span><span class="stat-label">{% translate "Suspended" %}</span></a></li>
+      <li><span class="stat"><span class="stat-value">{{ counts.needs_attention }}</span><span class="stat-label">{% translate "Needs attention" %}</span></span></li>
     </ul>
   </section>
 
@@ -71,12 +74,12 @@
       </section>
 
       <section class="panel" aria-labelledby="activity-title">
-        <div class="panel-head"><h2 id="activity-title">{% translate "Recent activity" %}</h2></div>
+        <div class="panel-head"><h2 id="activity-title">{% translate "Recent activity" %}</h2><a class="text-link" href="{% url 'admin:regions_auditevent_changelist' %}">{% translate "View all" %}</a></div>
         {% if recent_activity %}
           <ul class="rows rows--tight">
             {% for event in recent_activity %}
               <li class="row row--block">
-                <p class="row-title-plain">{{ event.action_label }}{% if event.region__name %} · {{ event.region__name }}{% endif %}</p>
+                <p class="row-title-plain">{{ event.action_label }}{% if event.region__name %} · {{ event.region__name }}{% elif event.provider_account__external_account_id %} · {{ event.provider_account__external_account_id }}{% endif %}</p>
                 <p class="row-meta">{% if event.actor__username %}{{ event.actor__username }} · {% endif %}<time datetime="{{ event.created_at|date:'c' }}">{{ event.created_at|date:"j M Y, H:i T" }}</time></p>
               </li>
             {% endfor %}

@@ -15,6 +15,7 @@ from pyracast.platform_admin.read_models import (
     plant_list_context,
     settings_context,
 )
+from pyracast.platform_admin.recipient_limit import crowded_plants, newly_paused
 
 if TYPE_CHECKING:
     from pyracast.platform_admin.site import PlatformAdminSite
@@ -27,6 +28,7 @@ def plants(request: HttpRequest, *, site: PlatformAdminSite) -> HttpResponse:
         request.GET.get("status", ""),
         request.GET.get("page", "1"),
         request.GET.get("issue", "")[:80],
+        location_change=request.GET.get("location_change", ""),
     )
     query = request.GET.copy()
     query.pop("page", None)
@@ -47,8 +49,17 @@ def operations(request: HttpRequest, *, site: PlatformAdminSite) -> HttpResponse
 @require_http_methods(["GET", "POST"])
 def settings(request: HttpRequest, *, site: PlatformAdminSite) -> HttpResponse:
     context = settings_context(form_data(request))
+    context["crowded_plants"] = crowded_plants(context["recipient_limit"])
     form = context["settings_form"]
     if request.method == "POST" and form.is_valid():
+        paused = newly_paused(context["recipient_limit"], form.cleaned_data["max_recipients"])
+        context["newly_paused"] = paused
+        if paused and not form.cleaned_data["confirm_pause"]:
+            form.add_error(
+                "confirm_pause",
+                _("This limit pauses reminders for the plants listed above. Confirm to save it."),
+            )
+            return site.workspace_response(request, "settings", _("Settings"), context, status=400)
         try:
             change = set_recipient_limit(
                 cast(User, request.user),

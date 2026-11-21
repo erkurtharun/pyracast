@@ -51,12 +51,35 @@ def workspace(tenant_id: int, *, leaving: int | None = None) -> Workspace:
     if leaving is not None:
         memberships = memberships.exclude(pk=leaving)
     members = list(memberships.order_by("pk").values_list("pk", "user_id", "user__email"))
-    verified = {
+    return _workspace(members, _verified([tenant_id]))
+
+
+def workspaces(tenant_ids: Iterable[int]) -> dict[int, Workspace]:
+    """`workspace` of several tenants in two queries."""
+    ids = set(tenant_ids)
+    found: dict[int, list[tuple[int, int, str]]] = {pk: [] for pk in ids}
+    for tenant_id, pk, user_id, email in (
+        Membership.objects.filter(tenant_id__in=ids, user__is_active=True)
+        .order_by("pk")
+        .values_list("tenant_id", "pk", "user_id", "user__email")
+    ):
+        found[tenant_id].append((pk, user_id, email))
+    verified = _verified(ids)
+    return {tenant_id: _workspace(members, verified) for tenant_id, members in found.items()}
+
+
+def _verified(tenant_ids: Iterable[int]) -> set[tuple[int, str]]:
+    return {
         (user_id, recipient_key(email))
         for user_id, email in EmailAddress.objects.filter(
-            verified=True, user__membership__tenant_id=tenant_id
+            verified=True, user__membership__tenant_id__in=tenant_ids
         ).values_list("user_id", "email")
     }
+
+
+def _workspace(
+    members: Sequence[tuple[int, int, str]], verified: set[tuple[int, str]]
+) -> Workspace:
     addresses: dict[str, str] = {}
     for _, user_id, email in members:
         key = recipient_key(email)

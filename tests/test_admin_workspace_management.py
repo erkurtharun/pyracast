@@ -178,7 +178,8 @@ def test_workspace_list_offers_creation_and_shows_each_administrator_state() -> 
     assert '<td data-label="Plants">1</td>' in html
     assert '<td data-label="Members">2</td>' in html
     assert (
-        "No workspaces match this search." in client.get("/admin/workspaces/?q=x").content.decode()
+        "No workspaces match this search."
+        in client.get("/admin/workspaces/?q=no-such-workspace").content.decode()
     )
 
 

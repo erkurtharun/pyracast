@@ -555,12 +555,12 @@ msgstr "Kayıplar (%)"
 
 msgid ""
 "Lowering the limit pauses reminders for plants whose saved recipient list is"
-" over it. Their lists are kept, not deleted, and reminders resume once the "
-"list is shortened or the limit is raised."
+" over it. Their lists are kept, and future reminders resume once the list is "
+"shortened or the limit is raised."
 msgstr ""
 "Sınırın düşürülmesi, kayıtlı alıcı listesi sınırı aşan santrallerin "
 "hatırlatmalarını duraklatır. Listeleri korunur; liste kısaltıldığında veya "
-"sınır artırıldığında hatırlatmalar devam eder."
+"sınır artırıldığında sonraki hatırlatmalar devam eder."
 
 msgid "Mail authentication failed"
 msgstr "E-posta kimlik doğrulaması başarısız"
@@ -1533,13 +1533,6 @@ msgstr "Üyeler"
 msgid "Workspace pages"
 msgstr "Çalışma alanı sayfaları"
 
-msgid ""
-"After a change, the new administrator must enable automatic calibration "
-"again."
-msgstr ""
-"Değişiklikten sonra yeni yönetici otomatik kalibrasyonu yeniden "
-"etkinleştirmelidir."
-
 msgid "Action needed"
 msgstr "İşlem gerekiyor"
 
@@ -2165,16 +2158,8 @@ msgstr "Çalışma alanı oluştur"
 msgid "Save changes"
 msgstr "Değişiklikleri kaydet"
 
-msgid ""
-"The current administrator becomes a viewer and pending invitations are "
-"revoked."
-msgstr "Mevcut yönetici izleyici olur ve bekleyen davetler iptal edilir."
-
 msgid "Only active members can be chosen."
 msgstr "Yalnızca etkin üyeler seçilebilir."
-
-msgid "Pending invitations are revoked."
-msgstr "Bekleyen davetler iptal edilir."
 
 msgid "Change administrator"
 msgstr "Yöneticiyi değiştir"
@@ -2744,3 +2729,145 @@ msgstr ""
 
 msgid "The session changed in another tab. The page now shows the current session."
 msgstr "Oturum başka bir sekmede değişti. Sayfa artık geçerli oturumu gösteriyor."
+
+msgid "Enter the reason the customer will read."
+msgstr "Müşterinin okuyacağı gerekçeyi yazın."
+
+msgid "Plant resubmitted for review"
+msgstr "Santral yeniden incelemeye gönderildi"
+
+msgid "Use at most 500 characters for the reason."
+msgstr "Gerekçe en fazla 500 karakter olabilir."
+
+msgid "Only a rejected plant can be resubmitted for review."
+msgstr "Yalnızca reddedilen bir santral yeniden incelemeye gönderilebilir."
+
+msgid "Last review decision"
+msgstr "Son inceleme kararı"
+
+msgid "Reason shown to the customer"
+msgstr "Müşteriye gösterilen gerekçe"
+
+msgid "Resubmitted by the customer"
+msgstr "Müşteri tarafından yeniden gönderildi"
+
+msgid "Provider connection validation failed"
+msgstr "Sağlayıcı bağlantısı doğrulanamadı"
+
+msgid "A provider site identity is required."
+msgstr "Sağlayıcı site kimliği gereklidir."
+
+msgid "Positive finite capacity is required."
+msgstr "Pozitif ve sonlu bir kapasite gereklidir."
+
+msgid "DC capacity must be finite and positive when specified."
+msgstr "DC kapasite girildiyse sonlu ve pozitif olmalıdır."
+
+msgid "An AC or DC power basis is required."
+msgstr "AC veya DC güç esası gereklidir."
+
+msgid "A verified horizontal reference configuration is required."
+msgstr "Doğrulanmış yatay referans yapılandırması gereklidir."
+
+msgid "Azimuth must be between 0 and 360 degrees."
+msgstr "Azimut 0 ile 360 derece arasında olmalıdır."
+
+msgid "Losses must be between 0 and 100 percent."
+msgstr "Kayıplar yüzde 0 ile 100 arasında olmalıdır."
+
+msgid "Confirmed site settings and installation date are required."
+msgstr "Doğrulanmış site ayarları ve kurulum tarihi gereklidir."
+
+msgid "Invalid provider account identity."
+msgstr "Sağlayıcı hesap kimliği geçersiz."
+
+msgid "Account quota must be between 1 and 10."
+msgstr "Hesap kotası 1 ile 10 arasında olmalıdır."
+
+msgid "A service authorization reference is required."
+msgstr "Hizmet yetkilendirme referansı gereklidir."
+
+msgid "An API key is required for a Solcast account."
+msgstr "Solcast hesabı için bir API anahtarı gereklidir."
+
+msgid "Workspace name or member email"
+msgstr "Çalışma alanı adı veya üye e-postası"
+
+msgid "Needs an administrator"
+msgstr "Yönetici gerekiyor"
+
+msgid "Inactive account"
+msgstr "Devre dışı hesap"
+
+msgid "What a change does"
+msgstr "Değişikliğin etkisi"
+
+#, python-format
+msgid "%(member)s becomes a viewer."
+msgstr "%(member)s izleyici olur."
+
+msgid ""
+"Automatic calibration stops on these plants; the new administrator can turn it "
+"on again:"
+msgstr ""
+"Bu santrallerde otomatik kalibrasyon durur; yeni yönetici yeniden "
+"açabilir:"
+
+msgid "No plant uses automatic calibration."
+msgstr "Otomatik kalibrasyon kullanan santral yok."
+
+msgid "These open invitations are revoked:"
+msgstr "Şu açık davetler iptal edilir:"
+
+msgid "No invitation is open."
+msgstr "Açık davet yok."
+
+msgid "Pause reminders for the plants listed above"
+msgstr "Yukarıdaki santrallerin hatırlatmalarını duraklat"
+
+msgid "This limit pauses reminders for the plants listed above. Confirm to save it."
+msgstr ""
+"Bu sınır yukarıdaki santrallerin hatırlatmalarını duraklatır. Kaydetmek için "
+"onaylayın."
+
+msgid "This limit pauses reminders for these plants:"
+msgstr "Bu sınır şu santrallerin hatırlatmalarını duraklatır:"
+
+#, python-format
+msgid "%(counter)s recipient"
+msgid_plural "%(counter)s recipients"
+msgstr[0] "%(counter)s alıcı"
+msgstr[1] "%(counter)s alıcı"
+
+msgid "Plants over the limit"
+msgstr "Sınırı aşan santraller"
+
+msgid "No plant is over the limit."
+msgstr "Sınırı aşan santral yok."
+
+msgid "plant location"
+msgstr "santral konumu"
+
+msgid "Audit trail"
+msgstr "Denetim kaydı"
+
+msgid "Plant events"
+msgstr "Santral olayları"
+
+msgid "Collection jobs"
+msgstr "Veri toplama işleri"
+
+msgid "Request attempts"
+msgstr "İstek denemeleri"
+
+msgid "Email deliveries"
+msgstr "E-posta gönderimleri"
+
+msgid "Provider bindings"
+msgstr "Sağlayıcı bağlantıları"
+
+msgid "Records:"
+msgstr "Kayıtlar:"
+
+msgid "View all"
+msgstr "Tümünü gör"

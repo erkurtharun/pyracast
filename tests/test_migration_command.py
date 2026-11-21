@@ -99,6 +99,8 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0005_schema_naming_convention",
             "0006_outbound_mail",
             "0007_reminder_recipient_rows",
+            "0008_review_and_role_mail",
+            "0009_purge_warning_mail",
         ),
         "plants": (
             "0002_plant_event_action_and_calibration_error_checks",
@@ -113,6 +115,9 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0004_region_purge_started_at",
             "0005_location_request_withdraw_and_decision_reason",
             "0006_reminder_schedule_audit",
+            "0007_audit_region_resubmitted",
+            "0008_region_purge_warning_sent_at",
+            "0009_audit_connection_validation_failed",
         ),
     }
     expected = {app: names | set(forward.get(app, ())) for app, names in baseline.items()}

@@ -10,4 +10,6 @@
 {% translate "Interval forecasts are in the attached Excel file." %}
 
 {% translate "View forecasts" %}: {{ url }}
+
+{{ footer }}
 {% endautoescape %}

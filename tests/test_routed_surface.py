@@ -34,6 +34,7 @@ API_ROUTES = sorted(
         (TENANT + "change-requests/<int:request_id>/approve/", ("POST",)),
         (TENANT + "change-requests/<int:request_id>/reject/", ("POST",)),
         (TENANT + "change-requests/<int:request_id>/seen/", ("POST",)),
+        (TENANT + "change-requests/seen/", ("POST",)),
         (TENANT + "change-requests/<int:request_id>/withdraw/", ("POST",)),
         (TENANT + "invitations/", ("GET", "POST")),
         (TENANT + "invitations/<int:invitation_id>/", ("DELETE",)),
@@ -50,6 +51,7 @@ API_ROUTES = sorted(
         (REGION + "plants/", ("GET", "POST")),
         (REGION + "reminders/", ("GET", "PUT")),
         (REGION + "restore/", ("POST",)),
+        (REGION + "resubmit/", ("POST",)),
         (PLANT, ("PUT",)),
         (PLANT + "calibration/automation/", ("GET", "PATCH")),
         (PLANT + "calibration/reset/", ("POST",)),
@@ -103,7 +105,7 @@ CONSOLE_ROUTES = sorted(
     [
         "admin/",
         "admin/(?P<url>.*)$",
-        "admin/^(?P<app_label>notifications|forecasts|regions|accounts|connections|plants)/$",
+        "admin/^(?P<app_label>notifications|forecasts|regions|plants|connections|accounts)/$",
         "admin/confirm/",
         "admin/jsi18n/",
         "admin/language/",
@@ -132,6 +134,8 @@ CONSOLE_ROUTES = sorted(
 )
 RECORD_BROWSER_MODELS = {
     "accounts.tenant",
+    "accounts.workspaceadminchange",
+    "accounts.workspacememberremoval",
     "connections.sitebinding",
     "forecasts.collectionjob",
     "forecasts.dispatcherstatus",

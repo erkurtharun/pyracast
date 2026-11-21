@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { mockApi, paged, plant, region } from "./support/workspace";
+import { answer, mockApi, paged, plant, region } from "./support/workspace";
 import { errorBody } from "./support/errors";
 
 test("renames a plant without changing its location", async ({ page }) => {
@@ -285,4 +285,51 @@ test("shows the operator's decision and note on the latest request", async ({
     await expect(
         page.getByText("Note: Matches the grid connection record"),
     ).toBeVisible();
+});
+
+test("a rejected plant shows its reason in plant time and is resubmitted for review", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const rejected = answer("RegionOutput", {
+        ...region,
+        status: "rejected",
+        reviewed_at: "2026-11-20T09:15:00Z",
+        review_reason: "The declared capacity does not match the licence.",
+    });
+    let current = answer("SiteOutput", { ...rejected, plant });
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.fulfill({
+            json: answer("PaginatedSiteOutputList", paged([current])),
+        }),
+    );
+    await page.route("**/api/tenants/1/regions/11/resubmit/", async (route) => {
+        expect(route.request().method()).toBe("POST");
+        expect(route.request().postDataJSON()).toEqual({
+            expected_revision: 1,
+        });
+        current = { ...current, status: "pending" };
+        await route.fulfill({
+            json: answer("RegionOutput", { ...rejected, status: "pending" }),
+        });
+    });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /East array/ }).click();
+
+    const notice = page.getByRole("status").filter({
+        hasText: "Pyracast support did not approve this plant.",
+    });
+    await expect(notice).toContainText(
+        "The declared capacity does not match the licence.",
+    );
+    await expect(notice).toContainText("12:15");
+    await expect(notice).toContainText("(plant time)");
+    await notice.getByRole("button", { name: "Resubmit for review" }).click();
+
+    await expect(
+        page.getByText("Awaiting administrator approval."),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Pyracast support did not approve this plant."),
+    ).toHaveCount(0);
 });

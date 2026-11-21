@@ -48,7 +48,9 @@ def validate_binding(
     if binding.provider_account.provider == Provider.SOLCAST and (
         not binding.settings_verification_reference or binding.installation_date is None
     ):
-        raise ValidationError("Confirmed site settings and installation date are required.")
+        raise ValidationError(
+            gettext("Confirmed site settings and installation date are required.")
+        )
     adapter.prepare(binding)
     with transaction.atomic():
         current = Region.objects.active().select_for_update().filter(pk=binding.region_id).first()
@@ -85,6 +87,17 @@ def validate_binding(
         )
         if refuses_binding(exc):
             SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
+        record_audit(
+            actor=actor,
+            region=binding.region,
+            action=AuditAction.CONNECTION_VALIDATION_FAILED,
+            revision=binding.region_revision,
+            details={
+                "binding_id": binding.pk,
+                "error_code": exc.code,
+                "status_code": exc.status_code,
+            },
+        )
         record_provider_failure(
             binding.provider_account, exc, now + timedelta(seconds=time.monotonic() - started)
         )

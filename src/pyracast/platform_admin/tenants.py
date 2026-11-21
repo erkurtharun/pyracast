@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, Exists, OuterRef, QuerySet, Subquery
+from django.db.models import Count, Exists, OuterRef, Q, QuerySet, Subquery
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest, QueryDict
 from django.utils import timezone
@@ -24,8 +24,12 @@ from pyracast.accounts.models import (
     WorkspaceInvitation,
     WorkspaceRole,
 )
-from pyracast.accounts.operations import reassign_workspace_admin
+from pyracast.accounts.operations import (
+    invitations_closed_by_reassignment,
+    reassign_workspace_admin,
+)
 from pyracast.errors import ConflictError, ErrorCode
+from pyracast.plants.automation import automated_plants
 from pyracast.plants.models import Plant
 from pyracast.platform_admin.read_models import summarize_plant, workspace_regions
 from pyracast.regions.models import active_region
@@ -210,20 +214,50 @@ def report_invitation(request: HttpRequest, invitation: WorkspaceInvitation) -> 
     )
 
 
-def tenant_list_context(query: str, page: str) -> dict[str, Any]:
+def reassignment_impact(tenant: Tenant) -> dict[str, Any]:
+    """What `reassign_workspace_admin` changes, read from the queries it writes through."""
+    administrator = (
+        Membership.objects.filter(tenant=tenant, role=WorkspaceRole.ADMIN)
+        .select_related("user")
+        .first()
+    )
+    return {
+        "administrator": administrator and administrator.user,
+        "plants": list(automated_plants(tenant.pk).values_list("name", flat=True)),
+        "invitations": list(
+            invitations_closed_by_reassignment(tenant.pk, timezone.now())
+            .order_by("email")
+            .values_list("email", flat=True)
+        ),
+    }
+
+
+def tenant_list_context(
+    query: str, page: str, *, needs_administrator: bool = False
+) -> dict[str, Any]:
+    """A query matches a workspace name or a member's address, so a ticket naming either finds
+    the workspace."""
     administrator = Membership.objects.filter(tenant_id=OuterRef("pk"), role=WorkspaceRole.ADMIN)
     tenants = Tenant.objects.annotate(
-        member_count=Count("membership", distinct=True),
+        member_count=Count("membership", filter=Q(membership__user__is_active=True), distinct=True),
         plant_count=Count("region__plant", filter=active_region("region__"), distinct=True),
         administrator_email=Subquery(administrator.values("user__email")[:1]),
         administrator_username=Subquery(administrator.values("user__username")[:1]),
+        administrator_active=Exists(administrator.filter(user__is_active=True)),
         administrator_invited=Exists(
             pending_invitations(OuterRef("pk")).filter(role=WorkspaceRole.ADMIN)
         ),
     ).order_by("name", "pk")
     if query:
-        tenants = tenants.filter(name__icontains=query)
-    return {"page_obj": Paginator(tenants, 20).get_page(page), "q": query}
+        members = Membership.objects.filter(tenant_id=OuterRef("pk"), user__email__icontains=query)
+        tenants = tenants.filter(Q(name__icontains=query) | Exists(members))
+    if needs_administrator:
+        tenants = tenants.filter(administrator_active=False)
+    return {
+        "page_obj": Paginator(tenants, 20).get_page(page),
+        "q": query,
+        "needs_administrator": needs_administrator,
+    }
 
 
 def workspace_context(tenant: Tenant) -> dict[str, Any]:

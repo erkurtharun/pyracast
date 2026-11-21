@@ -187,5 +187,5 @@ def test_next_collection_is_the_earliest_queued_job_forecast_slot_or_nightly_win
             system.member, system.tenant.pk, system.region.pk, enabled=False, times=[], now=later
         )
     else:
-        decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND)
+        decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND, reason="Paused.")
     assert next_collection(later) is None

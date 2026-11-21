@@ -109,6 +109,7 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "timezone", SimpleNamespace(now=lambda: moment))
     monkeypatch.setattr(command, "purge_expired", purge)
     monkeypatch.setattr(command, "sweep_accounts", sweep)
+    monkeypatch.setattr(command, "warn_before_purge", MagicMock())
     purge_mail = MagicMock()
     monkeypatch.setattr(command, "purge_finished_mail", purge_mail)
     monkeypatch.setattr(command, "make_broker", lambda: broker)
@@ -226,6 +227,7 @@ def test_commands_handle_termination_and_restore_previous_handlers(
     else:
         monkeypatch.setattr(command, "purge_expired", terminate)
         monkeypatch.setattr(command, "sweep_accounts", MagicMock())
+        monkeypatch.setattr(command, "warn_before_purge", MagicMock())
         monkeypatch.setattr(command, "purge_finished_mail", MagicMock())
         for operation in (
             "dispatch_collections",
@@ -313,6 +315,7 @@ def test_dispatch_repeats_after_poll_timeout_until_stop_requested(
     for operation in (
         "purge_expired",
         "sweep_accounts",
+        "warn_before_purge",
         "purge_finished_mail",
         "publish_outbound_mail",
         "dispatch_collections",

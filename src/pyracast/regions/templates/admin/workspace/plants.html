@@ -22,7 +22,8 @@
     </div>
     <div class="filters-actions">
       <button type="submit" class="btn btn--primary">{% translate "Search" %}</button>
-      {% if q or status %}<a class="btn btn--quiet" href="{% url 'admin:workspace_plants' %}">{% translate "Clear" %}</a>{% endif %}
+      {% if location_change %}<input type="hidden" name="location_change" value="{{ location_change }}">{% endif %}
+      {% if q or status or location_change %}<a class="btn btn--quiet" href="{% url 'admin:workspace_plants' %}">{% translate "Clear" %}</a>{% endif %}
     </div>
   </form>
 

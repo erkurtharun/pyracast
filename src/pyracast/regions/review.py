@@ -1,9 +1,11 @@
 from typing import TYPE_CHECKING
 
+from django.db.models import OuterRef, QuerySet, Subquery
+from django.db.models.fields.json import KT
 from django.utils.translation import gettext_lazy
 
 from pyracast.errors import ConflictError, ErrorCode
-from pyracast.regions.models import Region, RegionStatus
+from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 
 if TYPE_CHECKING:
     from pyracast.connections.models import SiteBinding
@@ -29,6 +31,23 @@ STATUS_CHANGED = gettext_lazy(
 SETUP_CHANGED = gettext_lazy(
     "The plant setup changed after this page opened. Reload the plant and review it again."
 )
+REVIEW_DECISIONS = (
+    AuditAction.REGION_APPROVED,
+    AuditAction.REGION_REJECTED,
+    AuditAction.REGION_SUSPENDED,
+)
+
+
+def with_review_outcome(regions: QuerySet[Region]) -> QuerySet[Region]:
+    """Annotates `reviewed_at` and `review_reason` from the region's latest review decision;
+    an approval and a decision recorded before reasons were stored carry no reason."""
+    latest = AuditEvent.objects.filter(region=OuterRef("pk"), action__in=REVIEW_DECISIONS).order_by(
+        "-created_at", "-pk"
+    )
+    return regions.annotate(
+        reviewed_at=Subquery(latest.values("created_at")[:1]),
+        review_reason=Subquery(latest.annotate(reason=KT("details__reason")).values("reason")[:1]),
+    )
 
 
 def require_seen_status(region: Region, status: str | None) -> None:
