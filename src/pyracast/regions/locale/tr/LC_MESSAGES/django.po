@@ -21,6 +21,9 @@ msgstr ""
 msgid "A calibration is already pending."
 msgstr "Bekleyen bir kalibrasyon zaten var."
 
+msgid "A plant name cannot contain a null character."
+msgstr "Santral adı boş (NUL) karakter içeremez."
+
 msgid "A plant name of at most 200 characters is required."
 msgstr "En fazla 200 karakterlik bir santral adı girin."
 

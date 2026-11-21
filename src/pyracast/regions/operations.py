@@ -83,6 +83,12 @@ def require_name(name: str) -> str:
             _("A plant name of at most 200 characters is required."),
             field="name",
         )
+    if "\x00" in name:
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST,
+            _("A plant name cannot contain a null character."),
+            field="name",
+        )
     return name
 
 
