@@ -86,7 +86,7 @@ def test_outage_rules_answer_their_own_codes_and_fields() -> None:
     assert (listed["id"], listed["revision"]) == (created.json()["id"], 1)
     assert stale.json() == {
         "code": "incident_revision_changed",
-        "message": "The outage changed. Reload the list and try again.",
+        "message": "The outage changed. Review its current values and save again.",
         "current": listed,
     }
     assert post(client, item + "cancel/", {"expected_revision": 1}).status_code == 200

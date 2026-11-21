@@ -45,6 +45,25 @@ const automation = (
         ...fields,
     });
 
+const inForce = (calibration_id: number | null) => ({
+    activation_id: 3,
+    calibration_id,
+    factor: calibration_id === null ? 1 : 1.1,
+    actor_id: 1,
+    origin: "manual" as const,
+    created_at: "2026-01-12T09:00:00Z",
+    effective: true,
+});
+
+async function routeAutomation(
+    page: Page,
+    fields: Mock<Schemas["CalibrationAutomationOutput"]>,
+) {
+    await page.route("**/plants/21/calibration/automation/", (route) =>
+        route.fulfill({ json: automation(fields) }),
+    );
+}
+
 async function routeRuns(page: Page, runs: () => ReturnType<typeof run>[]) {
     await page.route("**/plants/21/calibrations/", (route) =>
         route.fulfill({ json: paged(runs()) }),
@@ -241,6 +260,15 @@ for (const change of selectionChanges)
             holding = true;
             return route.fulfill({ json: {} });
         });
+        await page.route("**/plants/21/calibration/automation/", (route) =>
+            route.fulfill({
+                json: automation({
+                    current_calibration: inForce(
+                        (change.before === "active") !== changed ? 40 : null,
+                    ),
+                }),
+            }),
+        );
         await openCalibration(page);
         await change.act(page);
         await reload;
@@ -273,6 +301,225 @@ for (const change of selectionChanges)
             change.after,
         ]);
     });
+
+test("the calibration exports wait for the runs reloaded after a request", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let requested = false;
+    let holding = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let reloading!: () => void;
+    const reload = new Promise<void>((resolve) => {
+        reloading = resolve;
+    });
+    const blocked = run(40, { activation_blocker: "incumbent_changed" });
+    const current = () =>
+        requested
+            ? [
+                  run(41, {
+                      status: "pending",
+                      selection_state: "not_ready",
+                      factor: null,
+                  }),
+                  blocked,
+              ]
+            : [blocked];
+    await page.route("**/plants/21/calibrations/", async (route) => {
+        if (route.request().method() === "POST") {
+            requested = true;
+            holding = true;
+            return route.fulfill({ status: 202, json: current()[0] });
+        }
+        if (holding) {
+            reloading();
+            await gate;
+        }
+        return route.fulfill({ json: paged(current()) });
+    });
+    await page.route("**/plants/21/calibrations/40/", (route) =>
+        route.fulfill({ json: blocked }),
+    );
+    await openCalibration(page);
+    await page
+        .getByRole("row", { name: /#40/ })
+        .getByRole("button", { name: "View details" })
+        .click();
+    await page
+        .getByRole("button", {
+            name: "Request a new calibration for 2026-01-01 – 2026-01-10",
+        })
+        .click();
+    await reload;
+    await expect(
+        page.getByText(
+            "A new calibration was requested. It appears in the list when it starts.",
+        ),
+    ).toBeVisible();
+    const working = page.getByRole("button", { name: "Working…" });
+    await expect(working).toHaveCount(2);
+    for (const button of await working.all())
+        await expect(button).toBeDisabled();
+    await expect(
+        page.getByRole("button", { name: /^Download calibration/ }),
+    ).toHaveCount(0);
+    holding = false;
+    release();
+    await expect(page.getByRole("row", { name: /#41/ })).toContainText(
+        "Waiting",
+    );
+    const download = page.waitForEvent("download");
+    await page
+        .getByRole("button", { name: "Download calibration CSV" })
+        .click();
+    const records = Papa.parse<Record<string, string>>(
+        await readFile(await (await download).path(), "utf8"),
+        { header: true, skipEmptyLines: true },
+    ).data;
+    expect(records.map((record) => record.id)).toEqual(["41", "40"]);
+});
+
+test("after a reset the opened run shows and exports its reloaded selection", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let reset = false;
+    const current = () =>
+        run(40, {
+            selection_state: reset ? "candidate" : "active",
+            activation_blocker: reset ? "incumbent_changed" : null,
+        });
+    await routeRuns(page, () => [current()]);
+    await page.route("**/plants/21/calibration/reset/", (route) => {
+        reset = true;
+        return route.fulfill({ json: {} });
+    });
+    await page.route("**/plants/21/calibration/automation/", (route) =>
+        route.fulfill({
+            json: automation({
+                current_calibration: inForce(reset ? null : 40),
+            }),
+        }),
+    );
+    await openCalibration(page);
+    await page
+        .getByRole("row", { name: /#40/ })
+        .getByRole("button", { name: "View details" })
+        .click();
+    const detail = page.locator(".calibration-detail");
+    await expect(detail.locator(".tags")).toContainText("Active");
+    await page.getByRole("button", { name: "Reset to baseline" }).click();
+    await page.getByRole("button", { name: "Reset to baseline" }).click();
+    await expect(page.getByRole("row", { name: /#40/ })).toContainText(
+        "Candidate",
+    );
+    await expect(detail.locator(".tags")).toContainText("Candidate");
+    await expect(
+        detail.getByText(
+            "This calibration cannot be activated: active calibration changed.",
+        ),
+    ).toBeVisible();
+    const download = page.waitForEvent("download");
+    await detail
+        .getByRole("button", { name: "Download calibration details CSV" })
+        .click();
+    const [record] = Papa.parse<Record<string, string>>(
+        await readFile(await (await download).path(), "utf8"),
+        { header: true, skipEmptyLines: true },
+    ).data;
+    expect(record).toMatchObject({
+        selection_state: "candidate",
+        activation_blocker: "incumbent_changed",
+    });
+});
+
+const resetOffers = [
+    {
+        name: "a calibration in force",
+        fields: { current_calibration: inForce(40) },
+        offered: true,
+    },
+    {
+        name: "automatic calibration on",
+        fields: {
+            enabled: true,
+            authorized: true,
+            current_calibration: inForce(null),
+        },
+        offered: true,
+    },
+    {
+        name: "the baseline in force and automation off",
+        fields: { current_calibration: inForce(null) },
+        offered: false,
+    },
+    {
+        name: "nothing selected yet",
+        fields: { current_calibration: null },
+        offered: false,
+    },
+    {
+        name: "a configuration that is not current",
+        fields: {
+            enabled: true,
+            authorized: true,
+            configuration_current: false,
+            current_calibration: inForce(40),
+        },
+        offered: false,
+    },
+] as const;
+
+for (const offer of resetOffers)
+    test(`a reset is ${offer.offered ? "offered" : "not offered"} with ${offer.name}`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await routeRuns(page, () => [run(40)]);
+        await routeAutomation(page, offer.fields);
+        await openCalibration(page);
+        await expect(
+            page
+                .getByRole("region", { name: "Calibration in force" })
+                .getByRole("heading", { name: "Calibration in force" }),
+        ).toBeVisible();
+        await expect(
+            page.getByRole("button", { name: "Reset to baseline" }),
+        ).toHaveCount(offer.offered ? 1 : 0);
+    });
+
+test("a reset refused because the configuration changed meanwhile says so", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await routeRuns(page, () => [run(40, { selection_state: "active" })]);
+    await routeAutomation(page, { current_calibration: inForce(40) });
+    await page.route("**/plants/21/calibration/reset/", (route) =>
+        route.fulfill({
+            status: 409,
+            json: errorBody(
+                "configuration_changed",
+                "The plant configuration is no longer current.",
+            ),
+        }),
+    );
+    await openCalibration(page);
+    await page.getByRole("button", { name: "Reset to baseline" }).click();
+    await page.getByRole("button", { name: "Reset to baseline" }).click();
+    await expect(
+        page.getByText("The plant configuration is no longer current.", {
+            exact: true,
+        }),
+    ).toBeVisible();
+    await expect(
+        page.getByText(
+            "Calibration selection updated. Refresh the forecast to see the current result.",
+        ),
+    ).toHaveCount(0);
+});
 
 for (const failing of ["activation", "reload"] as const)
     test(`the calibration export comes back when the ${failing} fails`, async ({
@@ -768,4 +1015,103 @@ test("a blocked run offers no new request while another run is open", async ({
     await expect(
         page.getByRole("button", { name: /Request a new calibration/ }),
     ).toHaveCount(0);
+});
+
+test("a blocked run whose window is not 7 to 90 days long says why it cannot be requested again", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await routeRuns(page, () => [
+        run(40, {
+            activation_blocker: "incumbent_changed",
+            window_end: "2026-01-03",
+        }),
+    ]);
+    await openCalibration(page);
+    await page
+        .getByRole("row", { name: /#40/ })
+        .getByRole("button", { name: "View details" })
+        .click();
+    await expect(
+        page.getByText(
+            "A new calibration needs a window of 7 to 90 days; this window cannot be requested again.",
+        ),
+    ).toBeVisible();
+    await expect(page.getByText(/already pending or running/)).toHaveCount(0);
+    await expect(
+        page.getByRole("button", { name: /Request a new calibration/ }),
+    ).toHaveCount(0);
+});
+
+const plantDays = [
+    { end: "2026-01-10", offered: false },
+    { end: "2026-01-09", offered: true },
+] as const;
+
+for (const day of plantDays)
+    test(`a blocked run ending ${day.end} ${day.offered ? "can" : "cannot yet"} be requested again just after plant midnight`, async ({
+        page,
+    }) => {
+        await page.clock.setFixedTime(new Date("2026-01-09T22:30:00Z"));
+        await mockApi(page);
+        await routeRuns(page, () => [
+            run(40, {
+                activation_blocker: "incumbent_changed",
+                window_end: day.end,
+            }),
+        ]);
+        await openCalibration(page);
+        await page
+            .getByRole("row", { name: /#40/ })
+            .getByRole("button", { name: "View details" })
+            .click();
+        await expect(
+            page.getByText(/This calibration cannot be activated/),
+        ).toBeVisible();
+        await expect(
+            page.getByRole("button", { name: /Request a new calibration/ }),
+        ).toHaveCount(day.offered ? 1 : 0);
+        await expect(
+            page.getByText(
+                "Request a new calibration for this window once its last day has ended in plant time.",
+            ),
+        ).toHaveCount(day.offered ? 0 : 1);
+        await expect(page.getByText(/already pending or running/)).toHaveCount(
+            0,
+        );
+    });
+
+test("a blocked run states no request reason until the calibration status is loaded", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    await routeRuns(page, () => [
+        run(40, { activation_blocker: "incumbent_changed" }),
+    ]);
+    await page.route("**/plants/21/calibration/automation/", async (route) => {
+        await gate;
+        return route.fulfill({ json: automation() });
+    });
+    await openCalibration(page);
+    await page
+        .getByRole("row", { name: /#40/ })
+        .getByRole("button", { name: "View details" })
+        .click();
+    await expect(
+        page.getByText(/This calibration cannot be activated/),
+    ).toBeVisible();
+    await expect(page.getByText(/already pending or running/)).toHaveCount(0);
+    await expect(
+        page.getByRole("button", { name: /Request a new calibration/ }),
+    ).toHaveCount(0);
+    release();
+    await expect(
+        page.getByRole("button", {
+            name: "Request a new calibration for 2026-01-01 – 2026-01-10",
+        }),
+    ).toBeVisible();
 });

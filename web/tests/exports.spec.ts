@@ -172,6 +172,33 @@ test("a production export is imported again without edits", () => {
     ]);
 });
 
+test("an aggregated interval of mixed qualities is exported as shown and refused on import with its way out", () => {
+    const row = interval("2026-11-10T05:00:00Z", "2026-11-10T06:00:00Z", 0.75);
+    const file = productionExport(plant, "2026-11-10", [
+        {
+            ...row,
+            effective: {
+                energy_mwh: 0.75,
+                quality: "mixed",
+                source: "multiple_manual",
+                source_kind: "manual",
+                provisional: false,
+                aggregated: true,
+            },
+        },
+    ]);
+    expect(lines(file)[1]).toBe(
+        '"2026-11-10T08:00:00+03:00","2026-11-10T09:00:00+03:00",0.75,"mixed","multiple_manual","Europe/Istanbul"',
+    );
+    const text = csvDocument(file.header, file.rows);
+    expect(() => parseProduction(text)).toThrow(
+        "Row 2: this interval combines stored intervals of different qualities; correct those intervals at their stored resolution instead.",
+    );
+    expect(() => parseProduction(text, "tr")).toThrow(
+        "Satır 2: bu aralık farklı veri niteliğindeki kayıtlı aralıkları birleştiriyor; bunun yerine o aralıkları kayıtlı çözünürlükte düzeltin.",
+    );
+});
+
 test("an empty list gives the header and no fabricated row", () => {
     for (const file of [
         productionExport(plant, "2026-11-10", []),

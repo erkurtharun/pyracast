@@ -100,7 +100,7 @@ async function workspace(
                     json: answer("IncidentConflict", {
                         ...errorBody(
                             "incident_revision_changed",
-                            "The outage changed. Reload the list and try again.",
+                            "The outage changed. Review its current values and save again.",
                         ),
                         current: incident,
                     }),
@@ -422,6 +422,59 @@ test("a stale edit keeps what was typed, shows what changed and saves only when 
         title: "Inverter disconnected",
         available_dc_mw: 2,
     });
+});
+
+test("the outage export waits for the list reloaded after a stale edit", async ({
+    page,
+}) => {
+    const state = await workspace(page);
+    await create(page);
+    let holding = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let reloading!: () => void;
+    const reload = new Promise<void>((resolve) => {
+        reloading = resolve;
+    });
+    await page.route("**/plants/21/outages/", async (route) => {
+        if (holding && route.request().method() === "GET") {
+            reloading();
+            await gate;
+        }
+        return route.fallback();
+    });
+    await page
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    state.conflict();
+    holding = true;
+    await page.getByRole("button", { name: "Save outage changes" }).click();
+    await reload;
+    await expect(
+        page.getByRole("alert").filter({
+            hasText: "Someone changed this outage after you opened it.",
+        }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Download outages CSV" }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Working…" })).toBeDisabled();
+    holding = false;
+    release();
+    await expect(
+        page.getByRole("heading", { name: "Changed meanwhile" }),
+    ).toBeVisible();
+    const download = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download outages CSV" }).click();
+    const records = Papa.parse<Record<string, string>>(
+        await readFile(await (await download).path(), "utf8"),
+        { header: true, skipEmptyLines: true },
+    ).data;
+    expect(records.map((record) => record.title)).toEqual([
+        "Changed meanwhile",
+    ]);
 });
 
 test("a stale edit can be discarded for the current version", async ({
