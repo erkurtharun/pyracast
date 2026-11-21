@@ -27,6 +27,7 @@ from pyracast.forecasts.revalidation import (
     dispatch_revalidations,
     revalidate_account,
 )
+from pyracast.forecasts.validation import VALIDATION_IN_FLIGHT, validate_binding
 from pyracast.orchestration import dispatcher as command
 from pyracast.orchestration.kinds import REVALIDATION
 from pyracast.regions.models import AuditEvent, Region
@@ -538,3 +539,114 @@ def test_a_failed_publish_leaves_the_account_due_for_the_next_dispatch() -> None
     sent = actor.send_with_options.call_args_list[0].kwargs["args"][0]
     unsent = ({system.account.pk, second.pk} - {sent}).pop()
     assert claim_due_revalidations(timezone.now()) == [unsent]
+
+
+class ReplacedWhilePreparing(FakeAdapter):
+    def __init__(self, system: System, sent: list[int]) -> None:
+        super().__init__(lambda: sent.append(1))
+        self.system = system
+
+    def prepare(self, binding: SiteBinding) -> None:
+        from_another_client(
+            lambda: replace_key(self.system.admin, self.system.account.pk, provider_key("NEWER"))
+        )
+
+
+@pytest.mark.parametrize("credential_revision", [None, 2])
+def test_a_key_replaced_before_the_reservation_spends_and_sends_nothing(
+    credential_revision: int | None,
+) -> None:
+    system = make_system(approved=True)
+    replaced(system)
+    attempts = validation_attempts(system.binding)
+    sent: list[int] = []
+
+    with pytest.raises(ValidationError):
+        validate_binding(
+            system.admin,
+            system.binding.pk,
+            ReplacedWhilePreparing(system, sent),
+            NOW,
+            credential_revision=credential_revision,
+        )
+
+    assert sent == []
+    assert validation_attempts(system.binding) == attempts
+
+
+def test_a_late_refusal_of_a_superseded_key_keeps_the_health_a_newer_key_established() -> None:
+    system = make_system(approved=True)
+    replaced(system)
+
+    def newer_key_validated() -> None:
+        replace_key(system.admin, system.account.pk, provider_key("NEWER"))
+        validate_binding(
+            system.admin, system.binding.pk, FakeAdapter(), NOW + 2 * VALIDATION_IN_FLIGHT
+        )
+
+    def refused_after_a_newer_key() -> None:
+        from_another_client(newer_key_validated)
+        raise ProviderError("provider_request_failed", retryable=False, status_code=404)
+
+    with pytest.raises(ProviderError):
+        validate_binding(
+            system.admin, system.binding.pk, FakeAdapter(refused_after_a_newer_key), NOW
+        )
+
+    system.binding.refresh_from_db()
+    assert (system.binding.health, system.binding.validated_credential_revision) == ("healthy", 3)
+
+
+def test_a_worker_whose_start_plus_lease_equals_its_claim_still_holds_the_lease_alone() -> None:
+    system = make_system(approved=True)
+    replaced(system)
+    claim = NOW + revalidation.LEASE
+    ProviderAccount.objects.filter(pk=system.account.pk).update(revalidation_due_at=claim)
+    during: list[datetime | None] = []
+    duplicates: list[RevalidationOutcome] = []
+    duplicate_adapters = adapters(FakeAdapter())
+
+    def duplicate_worker() -> None:
+        during.append(due(system))
+        duplicates.append(
+            revalidate_account(system.account.pk, NOW, claim=claim, adapter_for=duplicate_adapters)
+        )
+
+    outcome = revalidate_account(
+        system.account.pk,
+        NOW,
+        claim=claim,
+        adapter_for=adapters(FakeAdapter(lambda: from_another_client(duplicate_worker))),
+    )
+
+    assert outcome == RevalidationOutcome.DONE
+    assert during[0] is not None
+    assert during[0] > claim
+    assert duplicates == [RevalidationOutcome.LEASE_LOST]
+    duplicate_adapters.assert_not_called()
+
+
+def test_a_run_whose_lease_the_dispatcher_took_again_starts_no_further_plant() -> None:
+    system = make_system(approved=True)
+    second = second_plant(system)
+    replaced(system)
+    asked: list[int] = []
+
+    def adapter(binding: SiteBinding) -> ProviderAdapter:
+        def validate() -> None:
+            asked.append(binding.pk)
+            if len(asked) == 1:
+                lease_end = due(system)
+                assert lease_end is not None
+                from_another_client(lambda: claim_due_revalidations(lease_end))
+
+        return FakeAdapter(validate)
+
+    outcome = revalidate(system, adapter)
+
+    assert outcome == RevalidationOutcome.LEASE_LOST
+    assert len(asked) == 1
+    assert due(system) == NOW + 2 * revalidation.LEASE
+    later = next(b for b in (system.binding, second) if b.pk != asked[0])
+    later.refresh_from_db()
+    assert later.validated_credential_revision == 1
