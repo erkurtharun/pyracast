@@ -65,17 +65,29 @@ test("a console form is sent once and keeps the pressed action", async ({
             <button type="submit" name="action" value="validate">Validate connection</button>
           </form><script src="/admin-workspace.js" defer></script></html>`);
     try {
+        const secondSubmit = Promise.withResolvers<boolean>();
+        await page.exposeFunction("reportSecondSubmit", secondSubmit.resolve);
         await page.goto(`${origin}/admin/plants/7/`);
         const validate = page.getByRole("button", {
             name: "Validate connection",
         });
         const box = await validate.boundingBox();
         if (!box) throw new Error("No button box");
-        const x = box.x + box.width / 2;
-        const y = box.y + box.height / 2;
-        await page.mouse.click(x, y);
+        // Registered after the deferred script's listener, so it sees the guard's decision;
+        // page.evaluate cannot run once the held navigation is pending.
+        await page.evaluate(() => {
+            const { reportSecondSubmit } = window as unknown as {
+                reportSecondSubmit: (prevented: boolean) => void;
+            };
+            let submits = 0;
+            document.addEventListener("submit", (event) => {
+                if (++submits === 2) reportSecondSubmit(event.defaultPrevented);
+            });
+        });
+        await validate.click({ noWaitAfter: true });
         await firstPost;
-        await page.mouse.click(x, y);
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        expect(await secondSubmit.promise).toBe(true);
         const redirected = page.waitForEvent("load");
         answerPosts();
         await redirected;
