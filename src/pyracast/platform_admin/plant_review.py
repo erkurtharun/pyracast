@@ -315,9 +315,12 @@ def epias_connect(request: HttpRequest, page: PlantPage) -> Notice | None:
         return None
 
     def connect(plant: Plant) -> Notice:
-        connect_epias(plant.pk, actor=_actor(request), **form.cleaned_data)
-        return messages.SUCCESS, _(
-            "EPİAŞ connection saved. Initial production collection is queued."
+        if connect_epias(plant.pk, actor=_actor(request), **form.cleaned_data).changed:
+            return messages.SUCCESS, _(
+                "EPİAŞ connection saved. Initial production collection is queued."
+            )
+        return messages.INFO, _(
+            "This plant is already connected to this EPİAŞ plant. Nothing changed."
         )
 
     return _epias(page, connect)

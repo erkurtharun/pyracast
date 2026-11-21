@@ -2712,6 +2712,9 @@ msgstr "Kaldırılacak bir sağlayıcı beklemesi yok."
 msgid "This plant is not connected to EPİAŞ."
 msgstr "Bu santral EPİAŞ'a bağlı değil."
 
+msgid "This plant is already connected to this EPİAŞ plant. Nothing changed."
+msgstr "Bu santral zaten bu EPİAŞ santraline bağlı. Hiçbir şey değişmedi."
+
 msgid "The account changed. Reload before confirming recovery."
 msgstr "Hesap değişti. Kurtarmayı onaylamadan önce sayfayı yeniden yükleyin."
 

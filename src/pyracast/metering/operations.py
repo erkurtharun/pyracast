@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import Max, Min, Q
@@ -27,6 +29,12 @@ def member_plant(plant_id: int, actor: User) -> Plant:
     return plant
 
 
+@dataclass(frozen=True)
+class EpiasConnect:
+    connection: EpiasConnection
+    changed: bool
+
+
 def connect_epias(
     plant_id: int,
     *,
@@ -34,7 +42,7 @@ def connect_epias(
     provider_plant_id: int,
     expected_eic: str,
     client: EpiasClient | None = None,
-) -> EpiasConnection:
+) -> EpiasConnect:
     require_platform_admin(actor)
     plant = Plant.objects.active().select_related("region").get(pk=plant_id)
     if isinstance(provider_plant_id, bool) or provider_plant_id <= 0 or not expected_eic.strip():
@@ -67,7 +75,7 @@ def connect_epias(
             connection.eic,
             connection.settlement_plant_id,
         ) == (True, selected.id, selected.eic, settlement_id):
-            return connection
+            return EpiasConnect(connection, changed=False)
         if connection is None:
             connection = EpiasConnection(plant=plant, connected_by=actor)
         else:
@@ -104,7 +112,7 @@ def connect_epias(
         from pyracast.metering.scheduler import enqueue_connection
 
         enqueue_connection(connection, timezone.now(), initial=True)
-        return connection
+        return EpiasConnect(connection, changed=True)
 
 
 def disconnect_epias(plant_id: int, *, actor: User) -> bool:

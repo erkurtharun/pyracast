@@ -69,7 +69,7 @@ def connect(plant: Plant, actor: User, client: FixtureClient | None = None) -> E
         provider_plant_id=7,
         expected_eic=PROVIDER_PLANT.eic,
         client=cast(EpiasClient, client or FixtureClient()),
-    )
+    ).connection
 
 
 def unconnected(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant]:

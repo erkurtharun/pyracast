@@ -2,6 +2,7 @@ from typing import Any
 
 import pytest
 from allauth.mfa.models import Authenticator
+from django.contrib import messages
 from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import reverse
@@ -12,8 +13,13 @@ from pyracast.epias import (
     CREDENTIALS_REJECTED,
     EpiasCredentialsError,
     EpiasError,
+    EpiasPlant,
 )
-from pyracast.metering.models import EpiasCollectionJob, EpiasConnection
+from pyracast.metering.models import (
+    EpiasCollectionJob,
+    EpiasConnection,
+    EpiasConnectionRevision,
+)
 from pyracast.plants.models import Plant, PlantEvent
 from tests.support.admin_setup import admin_system, submitted_plant
 from tests.support.api import verified_admin
@@ -21,6 +27,16 @@ from tests.support.metering import PROVIDER_PLANT, FixtureClient
 from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+OTHER_PLANT = EpiasPlant(8, "40X0000000000002", "Other plant", "Other")
+SAVED = "EPİAŞ connection saved. Initial production collection is queued."
+ALREADY_CONNECTED = "This plant is already connected to this EPİAŞ plant. Nothing changed."
+
+
+class TwoPlantsClient(FixtureClient):
+    def list_plants(self) -> tuple[EpiasPlant, ...]:
+        super().list_plants()
+        return (PROVIDER_PLANT, OTHER_PLANT)
 
 
 def connection_input(**changes: Any) -> dict[str, Any]:
@@ -103,6 +119,48 @@ def test_a_double_submitted_disconnect_reports_it_once(monkeypatch: pytest.Monke
         ["This plant is not connected to EPİAŞ."],
     ]
     assert PlantEvent.objects.filter(plant=plant, action="epias_disconnected").count() == 1
+
+
+def test_an_identical_connection_save_reports_that_nothing_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    monkeypatch.setattr("pyracast.metering.operations.get_epias_client", TwoPlantsClient)
+    client, _ = verified_admin()
+    url = reverse("admin:workspace_plant", args=(system.region.pk,))
+
+    def save(**changes: Any) -> list[tuple[int, str]]:
+        response = client.post(url, connection_input(**changes), follow=True)
+        return [(notice.level, str(notice)) for notice in response.context["messages"]]
+
+    def written() -> tuple[int, list[tuple[int, int]], dict[int, int]]:
+        pending = EpiasCollectionJob.objects.filter(status="pending")
+        return (
+            PlantEvent.objects.filter(plant=plant, action="epias_connected").count(),
+            list(
+                EpiasConnectionRevision.objects.order_by("revision").values_list(
+                    "revision", "provider_plant_id"
+                )
+            ),
+            {
+                revision: pending.filter(connection_revision=revision).count()
+                for revision in pending.values_list("connection_revision", flat=True).distinct()
+            },
+        )
+
+    assert save() == [(messages.SUCCESS, SAVED)]
+    first = written()
+    assert first == (1, [(1, PROVIDER_PLANT.id)], {1: 90})
+    jobs = set(EpiasCollectionJob.objects.values_list("pk", "status"))
+
+    assert save() == [(messages.INFO, ALREADY_CONNECTED)]
+    assert written() == first
+    assert set(EpiasCollectionJob.objects.values_list("pk", "status")) == jobs
+
+    assert save(
+        **{"epias-provider_plant_id": OTHER_PLANT.id, "epias-expected_eic": OTHER_PLANT.eic}
+    ) == [(messages.SUCCESS, SAVED)]
+    assert written() == (2, [(1, PROVIDER_PLANT.id), (2, OTHER_PLANT.id)], {2: 90})
 
 
 @pytest.mark.parametrize(
