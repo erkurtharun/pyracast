@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { ApiError } from "../src/lib/api/errors";
 import {
     daylightRows,
+    energyValue,
     intervalKey,
     mostFrequentReason,
     reconcileEditor,
@@ -65,6 +66,14 @@ const draft = (
         ? { status, ...fields, error: "gone" }
         : { status, ...fields };
 };
+
+test("typed energy accepts a comma or a point and only finite non-negative values", () => {
+    expect(energyValue(" 0,75 ")).toBe(0.75);
+    expect(energyValue("2.5")).toBe(2.5);
+    expect(energyValue("0")).toBe(0);
+    for (const text of ["", "  ", "-1", "abc", "Infinity"])
+        expect(energyValue(text)).toBeNull();
+});
 
 test("days step across month and year ends", () => {
     expect(shiftDay("2026-12-31", 1)).toBe("2027-01-01");

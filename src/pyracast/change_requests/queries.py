@@ -1,4 +1,5 @@
-from datetime import datetime
+from bisect import bisect_left
+from datetime import datetime, timedelta
 from typing import Any
 
 from django.contrib.auth.models import User
@@ -13,7 +14,9 @@ from pyracast.change_requests.models import (
     ChangeRequest,
     ChangeRequestKind,
     ChangeRequestStatus,
+    IncidentChange,
     IncidentChangeAction,
+    ProductionChangeItem,
 )
 from pyracast.change_requests.operations import _validate
 from pyracast.change_requests.policy import (
@@ -22,6 +25,7 @@ from pyracast.change_requests.policy import (
     former_proposers,
     inbox_requests,
     is_unread,
+    own_pending,
     request_for,
     visible_requests,
 )
@@ -34,6 +38,9 @@ from pyracast.change_requests.preparation import (
 from pyracast.errors import MESSAGES, ErrorCode
 from pyracast.incidents.models import IncidentRevision
 from pyracast.incidents.operations import lock_incident_plant
+
+# Submission accepts only 30 or 60 minute production intervals.
+LONGEST_PRODUCTION_ITEM = timedelta(hours=1)
 
 
 def inbox(
@@ -194,6 +201,48 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
         "production_items": items,
         "incident": incident,
     }
+
+
+def with_own_pending_requests(
+    actor: User, tenant_id: int, plant_id: int, history: dict[str, Any]
+) -> dict[str, Any]:
+    """Each interval names the actor's latest pending production request with an item
+    overlapping it. The pending quota bounds the items read to 20 requests of 100 items."""
+    membership = tenant_membership(actor, tenant_id)
+    items = sorted(
+        ProductionChangeItem.objects.filter(
+            request__in=own_pending(membership, plant_id)
+        ).values_list("starts_at", "ends_at", "request_id")
+    )
+    starts = [start for start, _, _ in items]
+
+    def latest(start: datetime, end: datetime) -> int | None:
+        nearby = items[
+            bisect_left(starts, start - LONGEST_PRODUCTION_ITEM) : bisect_left(starts, end)
+        ]
+        return max((request for _, finish, request in nearby if finish > start), default=None)
+
+    return {
+        **history,
+        "intervals": [
+            {**row, "pending_request_id": latest(row["starts_at"], row["ends_at"])}
+            for row in history["intervals"]
+        ],
+    }
+
+
+def own_pending_outages(
+    actor: User, tenant_id: int, plant_id: int, incident_ids: list[int]
+) -> dict[int, int]:
+    """The actor's latest pending request per outage it targets."""
+    return dict(
+        IncidentChange.objects.filter(
+            request__in=own_pending(tenant_membership(actor, tenant_id), plant_id),
+            incident_id__in=incident_ids,
+        )
+        .order_by("request_id")
+        .values_list("incident_id", "request_id")
+    )
 
 
 def request_summary(actor: User, tenant_id: int, request: ChangeRequest) -> dict[str, Any]:

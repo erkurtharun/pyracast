@@ -72,7 +72,13 @@ function firstPending(tenantId: number) {
     };
 }
 
-export function OperationalInbox({ tenant }: { tenant: Tenant }) {
+export function OperationalInbox({
+    tenant,
+    linked,
+}: {
+    tenant: Tenant;
+    linked?: number;
+}) {
     const t = useTranslations("ChangeRequests");
     const refresh = useRefresh();
     const [scope, setScope] = useState<Scope>("pending");
@@ -150,6 +156,19 @@ export function OperationalInbox({ tenant }: { tenant: Tenant }) {
                         )}
                     </Notice>
                 </div>
+            )}
+            {linked !== undefined && (
+                <section
+                    className="panel inbox-card"
+                    aria-label={t("linkedRequest")}
+                >
+                    <RequestDetail
+                        key={linked}
+                        id={linked}
+                        tenantId={tenant.id}
+                        onChanged={changed}
+                    />
+                </section>
             )}
             {admin && (
                 <div

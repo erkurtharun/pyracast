@@ -49,9 +49,13 @@ def _propose(
     )
 
 
-def _history(actor: User, system: System, plant: Plant) -> dict[datetime, int | None]:
+def _signed_in(actor: User) -> Client:
     client = Client()
     client.force_login(actor)
+    return client
+
+
+def _history(client: Client, system: System, plant: Plant) -> dict[datetime, int | None]:
     response = client.get(
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/production/",
         {"start_date": DAY.isoformat(), "end_date": DAY.isoformat(), "native_intervals": "true"},
@@ -64,7 +68,8 @@ def _history(actor: User, system: System, plant: Plant) -> dict[datetime, int | 
 
 
 def _marked(actor: User, system: System, plant: Plant) -> dict[datetime, int | None]:
-    return {start: marker for start, marker in _history(actor, system, plant).items() if marker}
+    markers = _history(_signed_in(actor), system, plant)
+    return {start: marker for start, marker in markers.items() if marker}
 
 
 def _colleague(case: RequestCase) -> User:
@@ -83,6 +88,7 @@ def _other_workspace_plant(case: RequestCase) -> tuple[System, Plant]:
         dc_capacity_mw=130,
         export_limit_mw=100,
     )
+    assert plant.current_configuration_id is not None
     PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(
         created_at=NOW - timedelta(days=100)
     )
@@ -153,9 +159,11 @@ def test_history_leaves_withdrawn_and_decided_requests_unmarked(
 def test_history_with_markers_never_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     case = make_request_case(monkeypatch)
     _propose(case.proposer, case.system, case.plant, _slot(3))
+    client = _signed_in(case.proposer)
+    _history(client, case.system, case.plant)
 
     with captured_statements() as statements:
-        assert _marked(case.proposer, case.system, case.plant)
+        assert any(_history(client, case.system, case.plant).values())
 
     assert not [
         statement
@@ -167,6 +175,7 @@ def test_history_with_markers_never_writes(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_history_markers_keep_a_fixed_number_of_queries(monkeypatch: pytest.MonkeyPatch) -> None:
     case = make_request_case(monkeypatch)
+    client = _signed_in(case.proposer)
     proposed = 0
 
     def seed(count: int) -> None:
@@ -176,7 +185,7 @@ def test_history_markers_keep_a_fixed_number_of_queries(monkeypatch: pytest.Monk
             _propose(case.proposer, case.system, case.plant, _slot(proposed + 1))
 
     assert_scale_invariant(
-        seed, lambda: _history(case.proposer, case.system, case.plant), small=1, large=10
+        seed, lambda: _history(client, case.system, case.plant), small=1, large=10
     )
 
 

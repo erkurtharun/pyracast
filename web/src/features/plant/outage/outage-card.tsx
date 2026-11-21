@@ -1,6 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { PendingApproval } from "@/features/inbox/pending-approval";
 import { DisplayError } from "@/lib/api/errors";
 import { toPlantInput } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
@@ -34,6 +35,8 @@ function Capacity({ label, value }: { label: string; value: number | null }) {
 
 export function OutageCard({
     outage,
+    tenantId,
+    pendingRequestId,
     timezone,
     direct,
     configurationChanged,
@@ -43,6 +46,8 @@ export function OutageCard({
     onSubmit,
 }: {
     outage: Outage;
+    tenantId: number;
+    pendingRequestId: number | null;
     timezone: string;
     direct: boolean;
     configurationChanged: boolean;
@@ -90,6 +95,13 @@ export function OutageCard({
             {outage.notes && <p>{outage.notes}</p>}
             {configurationChanged && (
                 <Notice>{t("configurationChanged")}</Notice>
+            )}
+            {pendingRequestId != null && (
+                <PendingApproval
+                    tenantId={tenantId}
+                    requestId={pendingRequestId}
+                    subject={outage.title}
+                />
             )}
             {outage.status !== "cancelled" && (
                 <div className="button-group">

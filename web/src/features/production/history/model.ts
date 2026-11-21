@@ -8,7 +8,6 @@ export type Interval = components["schemas"]["ProductionIntervalOutput"];
 export type Draft = {
     key: string;
     energy: string;
-    reason?: string;
     quality: Quality;
     expectedRevision: number | null;
     error?: string;
@@ -42,6 +41,12 @@ export function daylightRows(rows: Interval[], windows: readonly Window[]) {
 
 export function intervalKey(row: Pick<Interval, "starts_at" | "ends_at">) {
     return `${row.starts_at}/${row.ends_at}`;
+}
+
+// Energy as typed in MWh, with a comma or a point as the decimal separator; null unless finite and non-negative.
+export function energyValue(text: string) {
+    const value = Number(text.trim().replace(",", "."));
+    return text.trim() && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 export function shiftDay(day: string, offset: number) {

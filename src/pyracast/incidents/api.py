@@ -1,13 +1,15 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, cast
 
+from django.contrib.auth.models import User
 from drf_spectacular.utils import extend_schema, extend_schema_field
 from rest_framework import serializers
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from pyracast.api.serializers import FiniteFloat, InputSerializer
+from pyracast.change_requests.queries import own_pending_outages
 from pyracast.errors import ConflictError, ErrorCode
 from pyracast.incidents import operations
 from pyracast.incidents.models import IncidentKind, IncidentStatus, PlantIncident
@@ -50,7 +52,7 @@ class IncidentOutput(serializers.ModelSerializer[PlantIncident]):
 
     class Meta:
         model = PlantIncident
-        fields = (
+        fields: tuple[str, ...] = (
             "id",
             "revision",
             "kind",
@@ -66,6 +68,18 @@ class IncidentOutput(serializers.ModelSerializer[PlantIncident]):
             "created_at",
             "updated_at",
         )
+        read_only_fields = fields
+
+
+class IncidentListOutput(IncidentOutput):
+    pending_request_id = serializers.SerializerMethodField()
+
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_pending_request_id(self, obj: PlantIncident) -> int | None:
+        return cast(dict[int, int], self.context["pending"]).get(obj.pk)
+
+    class Meta(IncidentOutput.Meta):
+        fields = (*IncidentOutput.Meta.fields, "pending_request_id")
         read_only_fields = fields
 
 
@@ -89,11 +103,17 @@ def current_on_conflict() -> Iterator[None]:
 class IncidentsView(ScopedView[PlantIncident]):
     serializer_class = IncidentOutput
 
-    @extend_schema(responses=IncidentOutput(many=True))
-    def get(self, _request: Request, **_kwargs: Any) -> Response:
-        rows = PlantIncident.objects.filter(plant=self.plant()).order_by("-starts_at", "-id")
-        page = self.paginate_queryset(rows)
-        return self.get_paginated_response(IncidentOutput(page, many=True).data)
+    @extend_schema(responses=IncidentListOutput(many=True))
+    def get(self, request: Request, **_kwargs: Any) -> Response:
+        plant = self.plant()
+        rows = PlantIncident.objects.filter(plant=plant).order_by("-starts_at", "-id")
+        page = cast(list[PlantIncident], self.paginate_queryset(rows))
+        pending = own_pending_outages(
+            cast(User, request.user), self.kwargs["tenant_id"], plant.pk, [row.pk for row in page]
+        )
+        return self.get_paginated_response(
+            IncidentListOutput(page, many=True, context={"pending": pending}).data
+        )
 
     @extend_schema(request=IncidentInput, responses={201: IncidentOutput})
     def post(self, request: Request, **_kwargs: Any) -> Response:

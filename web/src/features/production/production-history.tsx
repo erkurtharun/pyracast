@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { cadence, useApiQuery } from "@/lib/api/query";
-import { useProposalKey } from "@/lib/idempotency";
 import type { components } from "@/lib/schema";
 import { productionExport } from "@/lib/exports";
 import { plantDay } from "@/lib/format/time";
@@ -20,19 +19,24 @@ import { ProductionDayNav } from "./history/day-nav";
 import { IntervalEditor } from "./history/interval-editor";
 import {
     daylightRows,
+    energyValue,
     intervalKey,
     mostFrequentReason,
     reconcileEditor,
     saveFailure,
+    type Draft,
     type Editor,
     type History,
     type Interval,
 } from "./history/model";
+import { stageChange, unstageChange } from "./history/proposal";
+import { ProposalDraft, type Proposal } from "./history/proposal-draft";
 import { ProductionTable } from "./history/production-table";
 import { ProductionSourceDetails } from "./history/source-details";
 import { ProductionImport } from "./production-import";
 
 type ChangeRow = components["schemas"]["ProductionChangeRow"];
+type Bounds = Pick<Interval, "starts_at" | "ends_at">;
 
 export function ProductionHistory({
     scope,
@@ -57,7 +61,6 @@ export function ProductionHistory({
     const reason = useCodeLabel("ProductionHistory.reasons");
     const canManage = useCanManageWorkspace();
     const proposals = useTranslations("ChangeRequests");
-    const proposalKey = useProposalKey();
     const plant = useExportPlant();
     const [reconciled, setReconciled] = useState<History>();
     // The server builds days in the zone it answers with; the last answer bounds the day picker.
@@ -68,6 +71,7 @@ export function ProductionHistory({
     const stepFrom = shown(baseDay);
     const [showFullDay, setShowFullDay] = useState(false);
     const [editor, setEditor] = useState<Editor>({ status: "closed" });
+    const [proposal, setProposal] = useState<Proposal | null>(null);
     const [message, setMessage] = useState("");
     // Saves whose reload of these rows is still running; no export is built from rows being reloaded.
     const [reloads, setReloads] = useState(0);
@@ -115,10 +119,14 @@ export function ProductionHistory({
         ]),
     );
     const time = (value: string) => timeFormatter.format(new Date(value));
-    const intervalLabel = (row: Interval) =>
+    const intervalLabel = (row: Bounds) =>
         `${time(row.starts_at)}–${time(row.ends_at)}`;
     const canAct = (row: Interval) =>
         canManage ? row.can_edit : row.can_propose;
+    const staged = (key: string) =>
+        proposal?.day === date
+            ? proposal.items.find((item) => item.key === key)
+            : undefined;
     const saving =
         editor.status === "saving" ||
         editor.status === "reloading" ||
@@ -133,7 +141,7 @@ export function ProductionHistory({
         }
     }
     function selectDate(value: string) {
-        if (!value || value > yesterday || saving) return;
+        if (!value || value > yesterday || saving || proposal) return;
         onDay(value);
         setEditor({ status: "closed" });
         setMessage("");
@@ -141,6 +149,22 @@ export function ProductionHistory({
     function close(key: string) {
         pendingFocus.current = key;
         setEditor({ status: "closed" });
+    }
+    function open(row: Interval) {
+        const item = staged(intervalKey(row));
+        setEditor({
+            status: "editing",
+            key: intervalKey(row),
+            energy:
+                item?.action === "set"
+                    ? item.energy.toString()
+                    : (row.effective?.energy_mwh.toString() ?? ""),
+            quality:
+                item?.action === "set"
+                    ? item.quality
+                    : (row.observation?.quality ?? "valid"),
+            expectedRevision: row.revision_id,
+        });
     }
     async function reloadEditor() {
         if (editor.status === "closed" || saving) return;
@@ -179,36 +203,22 @@ export function ProductionHistory({
             );
         }
     }
-    async function save(
-        row: Interval,
-        action: "set" | "revert",
-        confirmImplausible = false,
-    ) {
-        if (
-            !configuration ||
-            !(canManage || row.can_propose) ||
-            saving ||
-            !history ||
-            !canAct(row) ||
-            (action === "revert" &&
-                !(canManage ? row.can_revert : row.can_propose_revert))
-        )
-            return;
-        const attempt =
-            editor.status !== "closed" && editor.key === intervalKey(row)
-                ? editor
-                : {
-                      key: intervalKey(row),
-                      energy: row.effective?.energy_mwh.toString() ?? "",
-                      quality: qualityOf(row.observation?.quality),
-                      expectedRevision: row.revision_id,
-                      reason: "",
-                  };
-        const energy = Number(attempt.energy.trim().replace(",", "."));
-        if (
-            action === "set" &&
-            (!attempt.energy.trim() || !Number.isFinite(energy) || energy < 0)
-        ) {
+    function attemptFor(row: Interval): Draft {
+        return editor.status !== "closed" && editor.key === intervalKey(row)
+            ? editor
+            : {
+                  key: intervalKey(row),
+                  energy: row.effective?.energy_mwh.toString() ?? "",
+                  quality: qualityOf(row.observation?.quality),
+                  expectedRevision: row.revision_id,
+              };
+    }
+    function stage(row: Interval, action: "set" | "revert") {
+        if (!configuration || !row.can_propose) return;
+        if (action === "revert" && !row.can_propose_revert) return;
+        const attempt = attemptFor(row);
+        const energy = energyValue(attempt.energy);
+        if (action === "set" && energy === null) {
             setEditor({
                 ...attempt,
                 status: "failed",
@@ -216,11 +226,58 @@ export function ProductionHistory({
             });
             return;
         }
-        if (!canManage && !attempt.reason?.trim()) {
+        const bounds = {
+            key: attempt.key,
+            starts_at: row.starts_at,
+            ends_at: row.ends_at,
+            expectedRevision: attempt.expectedRevision,
+        };
+        setProposal((current) => ({
+            day: date,
+            items: stageChange(
+                current?.day === date ? current.items : [],
+                action === "set" && energy !== null
+                    ? { ...bounds, action, energy, quality: attempt.quality }
+                    : { ...bounds, action: "revert" },
+            ),
+        }));
+        setMessage(
+            proposals("staged", {
+                interval: intervalLabel(row),
+            }),
+        );
+        close(attempt.key);
+    }
+    function unstage(key: string) {
+        const items = unstageChange(proposal?.items ?? [], key);
+        setProposal(items.length && proposal ? { ...proposal, items } : null);
+        if (!items.length) summaryRef.current?.focus();
+    }
+    function finishProposal(text: string) {
+        setProposal(null);
+        setMessage(text);
+        summaryRef.current?.focus();
+    }
+    async function save(
+        row: Interval,
+        action: "set" | "revert",
+        confirmImplausible = false,
+    ) {
+        if (
+            !configuration ||
+            saving ||
+            !history ||
+            !row.can_edit ||
+            (action === "revert" && !row.can_revert)
+        )
+            return;
+        const attempt = attemptFor(row);
+        const energy = energyValue(attempt.energy);
+        if (action === "set" && energy === null) {
             setEditor({
                 ...attempt,
                 status: "failed",
-                error: proposals("reasonRequired"),
+                error: t("invalid_energy"),
             });
             return;
         }
@@ -233,52 +290,25 @@ export function ProductionHistory({
                 expected_revision_id: attempt.expectedRevision,
                 action,
                 // An edit on this screen is the operator's value; a revert ignores quality and source.
-                ...(action === "set"
+                ...(action === "set" && energy !== null
                     ? { energy, quality: attempt.quality, source: "operator" }
                     : { quality: "valid", source: "operator" }),
             };
-            const payload = {
-                configuration_id: configuration,
-                unit: "MWh" as const,
-                changes: [change],
-            };
-            if (canManage) {
-                await api.post(
-                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
-                    {
-                        path: scope,
-                        body: {
-                            ...payload,
-                            confirm_implausible: confirmImplausible,
-                        },
+            await api.post(
+                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
+                {
+                    path: scope,
+                    body: {
+                        configuration_id: configuration,
+                        unit: "MWh",
+                        changes: [change],
+                        confirm_implausible: confirmImplausible,
                     },
-                );
-            } else {
-                const proposal = {
-                    ...payload,
-                    reason: attempt.reason?.trim() ?? "",
-                };
-                await api.post(
-                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/change-requests/production/",
-                    {
-                        path: scope,
-                        body: {
-                            ...proposal,
-                            idempotency_key: proposalKey.forPayload(proposal),
-                        },
-                    },
-                );
-                proposalKey.reset();
-            }
+                },
+            );
             pendingFocus.current = attempt.key;
             setEditor({ status: "closed" });
-            setMessage(
-                canManage
-                    ? action === "revert"
-                        ? t("reverted")
-                        : t("saved")
-                    : proposals("submitted"),
-            );
+            setMessage(action === "revert" ? t("reverted") : t("saved"));
             await reloadAfterSave();
         } catch (error) {
             setEditor((current) =>
@@ -318,7 +348,7 @@ export function ProductionHistory({
                     date={date}
                     stepFrom={stepFrom}
                     yesterday={yesterday}
-                    disabled={saving}
+                    disabled={saving || proposal !== null}
                     onSelect={selectDate}
                 />
                 <CheckboxField
@@ -403,6 +433,7 @@ export function ProductionHistory({
                         <p>{t("no_intervals")}</p>
                     ) : (
                         <ProductionTable
+                            tenantId={scope.tenant_id}
                             rows={rows}
                             visibleRows={visibleRows}
                             timeFormatter={timeFormatter}
@@ -419,18 +450,7 @@ export function ProductionHistory({
                             }
                             editButtons={editButtons}
                             unavailable={unavailable}
-                            onOpen={(row) =>
-                                setEditor({
-                                    status: "editing",
-                                    key: intervalKey(row),
-                                    energy:
-                                        row.effective?.energy_mwh.toString() ??
-                                        "",
-                                    quality:
-                                        row.observation?.quality ?? "valid",
-                                    expectedRevision: row.revision_id,
-                                })
-                            }
+                            onOpen={open}
                             renderEditor={(row) =>
                                 editor.status !== "closed" && (
                                     <IntervalEditor
@@ -438,6 +458,9 @@ export function ProductionHistory({
                                         editor={editor}
                                         interval={intervalLabel(row)}
                                         canManage={canManage}
+                                        staged={Boolean(
+                                            staged(intervalKey(row)),
+                                        )}
                                         saving={saving}
                                         onChange={(change) =>
                                             setEditor({
@@ -449,16 +472,15 @@ export function ProductionHistory({
                                             })
                                         }
                                         onSave={(action, confirmImplausible) =>
-                                            void save(
-                                                row,
-                                                action,
-                                                confirmImplausible,
-                                            )
+                                            canManage
+                                                ? void save(
+                                                      row,
+                                                      action,
+                                                      confirmImplausible,
+                                                  )
+                                                : stage(row, action)
                                         }
-                                        onCancel={() => {
-                                            proposalKey.reset();
-                                            close(intervalKey(row));
-                                        }}
+                                        onCancel={() => close(intervalKey(row))}
                                         onReload={() => void reloadEditor()}
                                     />
                                 )
@@ -477,6 +499,31 @@ export function ProductionHistory({
                         }
                     />
                 </>
+            )}
+            {!canManage && configuration && proposal && (
+                <ProposalDraft
+                    scope={scope}
+                    configuration={configuration}
+                    proposal={proposal}
+                    rows={
+                        proposal.day === date ? history?.intervals : undefined
+                    }
+                    intervalLabel={intervalLabel}
+                    editing={editor.status !== "closed"}
+                    onEdit={(key) => {
+                        const row = rows.find(
+                            (row) => intervalKey(row) === key,
+                        );
+                        if (row) open(row);
+                    }}
+                    onRemove={unstage}
+                    onDiscard={() => finishProposal(proposals("discarded"))}
+                    onReload={reading.reload}
+                    onSent={() => {
+                        finishProposal(proposals("submitted"));
+                        void reloadAfterSave();
+                    }}
+                />
             )}
             <ProductionSourceDetails scope={scope} />
             {canManage && configuration && (

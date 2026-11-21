@@ -1189,6 +1189,33 @@ pre,
     font-size: 12px;
     font-weight: 600;
 }
+.production-proposal {
+    display: grid;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+}
+.production-proposal-items {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.production-proposal-items li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+}
+.production-proposal-items .field-error {
+    flex: 1 1 100%;
+}
+.pending-approval {
+    display: inline-block;
+    margin-top: var(--space-1);
+    font-size: 12px;
+}
 .production-row-editor {
     display: flex;
     flex-wrap: wrap;

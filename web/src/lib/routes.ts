@@ -34,7 +34,8 @@ export const routes = {
     workspaces: () => "/app/w/",
     portfolio: workspace,
     members: (tenant: number) => `${workspace(tenant)}members/`,
-    inbox: (tenant: number) => `${workspace(tenant)}inbox/`,
+    inbox: (tenant: number, request?: number) =>
+        `${workspace(tenant)}inbox/${request ? `?request=${request}` : ""}`,
     trash: (tenant: number) => `${workspace(tenant)}trash/`,
     plant(
         tenant: number,

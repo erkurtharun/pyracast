@@ -83,11 +83,12 @@ def can_withdraw(request: ChangeRequest, membership: Membership) -> bool:
     return is_author(request, membership) and request.status == ChangeRequestStatus.PENDING
 
 
+def own_pending(membership: Membership, plant_id: int) -> QuerySet[ChangeRequest]:
+    return ChangeRequest.objects.filter(authored_by(membership), PENDING, plant_id=plant_id)
+
+
 def pending_limit_reached(membership: Membership, plant: Plant) -> bool:
-    return (
-        ChangeRequest.objects.filter(authored_by(membership), PENDING, plant=plant).count()
-        >= PENDING_LIMIT
-    )
+    return own_pending(membership, plant.pk).count() >= PENDING_LIMIT
 
 
 def former_proposers(tenant_id: int, requests: Iterable[ChangeRequest]) -> set[int]:

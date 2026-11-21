@@ -1389,7 +1389,7 @@ test("a refused request keeps the draft and names the concerned interval", async
     await page.route("**/change-requests/production/", (route) => {
         submissions.push(route.request().postDataJSON());
         if (submissions.length === 1) revision = 8;
-        return route.fulfill(answers[submissions.length - 1]!);
+        return route.fulfill(answers[submissions.length - 1]);
     });
     await openPlant(page, "Production");
     await stage(page, "08:00", "5");

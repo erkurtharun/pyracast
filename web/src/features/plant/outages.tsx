@@ -3,6 +3,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import type { Plant, PlantScope } from "@/lib/api";
 import { useApiList } from "@/lib/api/query";
+import type { components } from "@/lib/schema";
 import { outagesExport } from "@/lib/exports";
 import { useProposalKey } from "@/lib/idempotency";
 import { CsvDownload } from "@/ui/csv-download";
@@ -20,6 +21,7 @@ import { OutageCard } from "./outage/outage-card";
 import { OutageEditor, type Ceilings } from "./outage/outage-editor";
 
 type Configuration = NonNullable<Plant["current_configuration"]>;
+type OutageRow = components["schemas"]["IncidentListOutput"];
 type Editor = { status: "closed" } | { status: "open"; outage?: Outage };
 
 export function Outages({
@@ -80,10 +82,12 @@ export function Outages({
         proposalKey.reset();
         setEditor({ status: "open", outage });
     };
-    const card = (outage: Outage) => (
+    const card = (outage: OutageRow) => (
         <OutageCard
             key={outage.id}
             outage={outage}
+            tenantId={scope.tenant_id}
+            pendingRequestId={outage.pending_request_id}
             timezone={timezone}
             direct={direct}
             configurationChanged={

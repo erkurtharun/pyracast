@@ -4,7 +4,7 @@ import type { Interval } from "../src/features/production/history/model";
 import {
     changedSinceStaged,
     proposalChanges,
-    refusedItems,
+    refusals,
     stageChange,
     unstageChange,
     type StagedChange,
@@ -118,14 +118,17 @@ test("a refusal naming an item by its position names that staged change", () => 
         status: 400,
         code: "invalid_request",
         fields: {
-            "changes.2.energy": "Too large",
+            "changes.2.energy": "Too large.",
+            "changes.2.quality": "Unknown.",
             "changes.9": "Gone",
             reason: "",
         },
     });
-    expect(refusedItems(refusal, items)).toEqual([items[2]!.key]);
+    expect(refusals(refusal, items)).toEqual([
+        { item: items[2], message: "Too large. Unknown." },
+    ]);
     expect(
-        refusedItems(
+        refusals(
             new ApiError("Full", {
                 status: 409,
                 code: "pending_request_limit",
@@ -133,5 +136,5 @@ test("a refusal naming an item by its position names that staged change", () => 
             items,
         ),
     ).toEqual([]);
-    expect(refusedItems(new Error("offline"), items)).toEqual([]);
+    expect(refusals(new Error("offline"), items)).toEqual([]);
 });

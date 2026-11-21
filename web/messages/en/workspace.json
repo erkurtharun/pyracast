@@ -363,7 +363,6 @@
         "formerMember": "Former member",
         "reason": "Reason for correction",
         "optionalReason": "Reason (optional)",
-        "reasonRequired": "Enter a reason for this correction.",
         "send": "Send for approval",
         "approvalHelp": "A workspace administrator reviews this submission before it changes live data.",
         "proposeCorrection": "Suggest correction",
@@ -410,6 +409,23 @@
         "beforeChange": "Before change",
         "withdrawHelp": "To revise a submission, withdraw it and send a new one.",
         "unread": "Unread outcome",
-        "intervals": "{count, plural, one {# interval} other {# intervals}}"
+        "intervals": "{count, plural, one {# interval} other {# intervals}}",
+        "addToRequest": "Add to request",
+        "updateInRequest": "Update in request",
+        "staged": "Added {interval} to the request.",
+        "draftTitle": "Correction request",
+        "draftDayLocked": "Send or discard this request before choosing another day.",
+        "editStaged": "Edit",
+        "editStagedInterval": "Edit staged correction for {interval}",
+        "removeStaged": "Remove",
+        "removeStagedInterval": "Remove staged correction for {interval}",
+        "stagedProviderReading": "Provider reading",
+        "stagedChanged": "This interval changed after you added it. Edit or remove it.",
+        "sending": "Sending…",
+        "discardDraft": "Discard request",
+        "discarded": "Correction request discarded.",
+        "waitingForApproval": "Waiting for approval – view",
+        "waitingForApprovalOf": "Waiting for approval: view the request for {subject}",
+        "linkedRequest": "Linked submission"
     }
 }

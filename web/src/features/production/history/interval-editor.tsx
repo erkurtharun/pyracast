@@ -8,13 +8,14 @@ import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import type { Draft, Editor, Interval } from "./model";
 
-export type DraftChange = Partial<Pick<Draft, "energy" | "quality" | "reason">>;
+export type DraftChange = Partial<Pick<Draft, "energy" | "quality">>;
 
 export function IntervalEditor({
     row,
     editor,
     interval,
     canManage,
+    staged,
     saving,
     onChange,
     onSave,
@@ -25,6 +26,7 @@ export function IntervalEditor({
     editor: Exclude<Editor, { status: "closed" }>;
     interval: string;
     canManage: boolean;
+    staged: boolean;
     saving: boolean;
     onChange: (change: DraftChange) => void;
     onSave: (action: "set" | "revert", confirmImplausible?: boolean) => void;
@@ -78,32 +80,15 @@ export function IntervalEditor({
                     ))}
                 </select>
             </ControlField>
-            {!canManage && (
-                <ControlField
-                    label={proposals("reason")}
-                    hint={proposals("approvalHelp")}
-                >
-                    {(describedBy) => (
-                        <textarea
-                            required
-                            maxLength={500}
-                            aria-describedby={describedBy}
-                            value={editor.reason ?? ""}
-                            disabled={saving}
-                            onChange={(event) =>
-                                onChange({ reason: event.target.value })
-                            }
-                        />
-                    )}
-                </ControlField>
-            )}
             <div className="button-group">
                 <button className="button" type="submit" disabled={blocked}>
                     {saving
                         ? t("saving")
                         : canManage
                           ? t("save")
-                          : proposals("send")}
+                          : staged
+                            ? proposals("updateInRequest")
+                            : proposals("addToRequest")}
                 </button>
                 <button
                     className="button secondary"
