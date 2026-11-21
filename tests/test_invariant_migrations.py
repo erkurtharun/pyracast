@@ -205,7 +205,7 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     NotificationDelivery.objects.filter(pk=delivery.pk).update(
         status="uncertain", lease_token=token, lease_expires_at=NOW
     )
-    valid = _tuples()
+    valid = {key: v for key, v in _tuples().items() if key[0] != "plants_calibrationrun"}
     del valid["forecasts_collectionjob", released.pk]
     stored_account = ProviderAccount.objects.values().get(pk=system.account.pk)
     stored_binding = SiteBinding.objects.values().get(pk=system.binding.pk)

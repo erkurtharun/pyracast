@@ -123,7 +123,7 @@ resource "google_monitoring_alert_policy" "operations" {
 
   documentation {
     mime_type = "text/markdown"
-    content   = "${each.value.event}: ${each.value.description} What to check first and how to recover: the event's row under Alert events in docs/DEPLOYMENT.md. A line with test set to true is a test alert."
+    content   = "${each.value.event}: ${each.value.description} What to check first and how to recover: the event's row under Alert events in DEPLOYMENT.md. A line with test set to true is a test alert."
   }
 }
 
@@ -243,7 +243,7 @@ resource "google_monitoring_alert_policy" "runtime_restarts" {
 
   documentation {
     mime_type = "text/markdown"
-    content   = "pyracast_runtime_restarted: the watchdog restarted containers in at least three runs within one hour and they recovered each time, so one keeps crashing. Test alerts never count. What to check first and how to recover: the event's row under Alert events in docs/DEPLOYMENT.md."
+    content   = "pyracast_runtime_restarted: the watchdog restarted containers in at least three runs within one hour and they recovered each time, so one keeps crashing. Test alerts never count. What to check first and how to recover: the event's row under Alert events in DEPLOYMENT.md."
   }
 }
 
