@@ -203,7 +203,7 @@ def test_archive_preserves_applied_calibration_after_later_outage_and_model_chan
         raise AssertionError("Archive replay must not execute live incident policy.")
 
     monkeypatch.setattr("pyracast.plants.incident_forecasts.incident_scenario", unavailable)
-    monkeypatch.setattr("pyracast.plants.forecasting.transfer_model", unavailable)
+    monkeypatch.setattr("pyracast.plants.forecasting.power_intervals", unavailable)
     archived = plant_outlook(
         *args, target_date=DAY, resolution_minutes=60, source="archived_forecast"
     )
