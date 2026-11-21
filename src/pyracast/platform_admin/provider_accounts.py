@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING, Any, cast
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.models import User
-from django.db.models import Count, F, Q
+from django.db.models import Count, F, IntegerField, OuterRef, QuerySet, Subquery
+from django.db.models.functions import Coalesce
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.utils import timezone
@@ -68,19 +69,25 @@ def _today(now: datetime) -> date:
     return now.astimezone(UTC).date()
 
 
+def _plant_bindings() -> QuerySet[SiteBinding]:
+    """The current binding of every plant outside the trash; an account's plants are the ones
+    whose current binding uses it."""
+    return SiteBinding.objects.filter(
+        active_region("region__"), region__revision=F("region_revision")
+    )
+
+
+def _per_account(rows: QuerySet[Any]) -> Coalesce:
+    counted = rows.order_by().values("provider_account").annotate(count=Count("pk"))
+    return Coalesce(Subquery(counted.values("count"), output_field=IntegerField()), 0)
+
+
 def account_rows(now: datetime) -> list[dict[str, Any]]:
     accounts = ProviderAccount.objects.annotate(
-        used_today=Count(
-            "requestattempt", filter=Q(requestattempt__utc_day=_today(now)), distinct=True
+        used_today=_per_account(
+            RequestAttempt.objects.filter(provider_account=OuterRef("pk"), utc_day=_today(now))
         ),
-        plants=Count(
-            "sitebinding__region",
-            filter=Q(
-                sitebinding__region__deleted_at__isnull=True,
-                sitebinding__region__approved_binding=F("sitebinding"),
-            ),
-            distinct=True,
-        ),
+        plants=_per_account(_plant_bindings().filter(provider_account=OuterRef("pk"))),
     ).order_by("provider", "external_account_id", "pk")
     return [
         {
@@ -98,11 +105,8 @@ def account_rows(now: datetime) -> list[dict[str, Any]]:
 
 def _bindings(account: ProviderAccount) -> list[dict[str, Any]]:
     bindings = (
-        SiteBinding.objects.filter(
-            active_region("region__"),
-            provider_account=account,
-            region__revision=F("region_revision"),
-        )
+        _plant_bindings()
+        .filter(provider_account=account)
         .select_related("region__tenant")
         .order_by("region__tenant__name", "region__name", "pk")
     )
