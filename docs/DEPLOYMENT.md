@@ -471,8 +471,12 @@ fixtures do not establish provider access or inbox delivery.
   cache. Logging is best effort: the API logs in blocking mode, but the gcplogs
   client can still drop entries on overflow or outage; the other containers log
   nonblocking. `pyracast.security` lines, including those of `exec` commands, go to
-  the container stream through `PYRACAST_SECURITY_LOG_PATH`. A sink routes these lines, and
-  only these, to the log bucket `pyracast-security` in the Terraform region, which keeps them
+  the container stream through `PYRACAST_SECURITY_LOG_PATH`. Every record of the application
+  and of Gunicorn starts one line, `DATE TIME LEVEL LOGGER MESSAGE`, and indents every further
+  line (a line break in a message or traceback, or 4000 characters), so text a request carries
+  never starts a line. A sink routes the lines whose logger is `pyracast.security`, and only
+  those of the containers that write them (`api`, `worker`, `notifications`, `dispatcher`,
+  `migrate`), to the log bucket `pyracast-security` in the Terraform region, which keeps them
   365 days; `_Default` keeps its own copy for 30 days, so recent lines are searched as usual.
   For older ones, refine the Logs Explorer scope to that bucket or run `gcloud logging read
   'FILTER' --bucket=pyracast-security --location=REGION --view=_AllLogs --freshness=365d`.
@@ -483,7 +487,7 @@ fixtures do not establish provider access or inbox delivery.
   `monitoring.tf` count them; the release does not apply Terraform, so after a
   change there run the `plan`/`apply` commands above and confirm the policies
   under Monitoring → Alerting. Durable job/audit records remain in PostgreSQL. API logs omit query strings and
-  referrers. A 500 `server_error` answer carries a `request_id`; search the logs for its
+  referrers; an access line is `... INFO gunicorn.access METHOD PATH STATUS SECONDS`. A 500 `server_error` answer carries a `request_id`; search the logs for its
   `api_server_error` traceback. A 503 `request_timeout` reference identifies an
   `api_request_timeout` traceback. Database error detail can appear in either log.
   Inspect `docker compose ... ps`, `logs --tail 100` and

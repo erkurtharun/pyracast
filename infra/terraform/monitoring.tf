@@ -247,14 +247,17 @@ resource "google_monitoring_alert_policy" "runtime_restarts" {
 }
 
 locals {
-  # A container line reaches Cloud Logging as jsonPayload.message, the whole formatted line
-  # "<date> <time> <level> <logger> <message>" (settings.LOGGING "standard"). The anchored pattern
-  # requires the fourth field, the record's own logger, to be pyracast.security: a line of another
-  # logger that quotes the name has its own logger there.
+  # gcplogs writes each container line as jsonPayload.message and the container's name, which
+  # Docker sets and no line can change, as jsonPayload.container.name: Compose names it
+  # /<project>-<service>-<n>, or /<project>-<service>-run-<id> for `compose run`. Only the
+  # services that write security lines count. Their records start one line each with
+  # "<date> <time,ms> <level> <logger> " (pyracast.log_lines; every further line is indented),
+  # so the anchored pattern matches only a record of the pyracast.security logger.
   security_log_filter = join(" AND ", [
     "resource.type=\"gce_instance\"",
     "logName=\"projects/${var.project_id}/logs/gcplogs-docker-driver\"",
-    "jsonPayload.message=~\"^[^ ]+ [^ ]+ [A-Z]+ pyracast[.]security \"",
+    "jsonPayload.container.name=~\"^/pyracast-(api|worker|notifications|dispatcher|migrate)-([0-9]+|run-[0-9a-f]+)$\"",
+    "jsonPayload.message=~\"^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]{3} [A-Z]+ pyracast[.]security \"",
   ])
 }
 
