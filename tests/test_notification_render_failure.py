@@ -2,7 +2,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from django.core.mail import EmailMultiAlternatives
+from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import OperationalError
 
 from pyracast.mail.errors import NotSentError
@@ -11,6 +11,7 @@ from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.scheduler import enqueue_due
+from tests.support.notification_transmission import replying
 from tests.support.notifications import SLOT, configured, ready, saved
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -33,21 +34,23 @@ def test_unexpected_render_failure_sends_a_frozen_plain_unavailable_notice(
         raise RuntimeError("The shared renderer cannot be used.")
 
     monkeypatch.setattr(renderer, broken)
-    messages: list[EmailMultiAlternatives] = []
+    messages: list[EmailMessage] = []
 
-    def first(message: EmailMultiAlternatives) -> None:
+    def refuse_first(message: EmailMessage) -> None:
         messages.append(message)
-        raise NotSentError
+        if len(messages) == 1:
+            raise NotSentError
 
-    assert not jobs.process_notification(delivery.pk, SLOT, sender=first)
-    delivery.refresh_from_db()
-    prepared = delivery.prepared_message
-    assert prepared is not None
-    assert delivery.status == "retry"
-    assert prepared["kind"] == "unavailable"
-    assert prepared["format"] == "plain"
-    assert delivery.snapshot_id is None
-    assert jobs.process_notification(delivery.pk, delivery.available_at, sender=messages.append)
+    with replying(refuse_first):
+        assert not jobs.process_notification(delivery.pk, SLOT)
+        delivery.refresh_from_db()
+        prepared = delivery.prepared_message
+        assert prepared is not None
+        assert delivery.status == "retry"
+        assert prepared["kind"] == "unavailable"
+        assert prepared["format"] == "plain"
+        assert delivery.snapshot_id is None
+        assert jobs.process_notification(delivery.pk, delivery.available_at)
     delivery.refresh_from_db()
     assert delivery.prepared_message == prepared
     assert delivery.status == "sent"

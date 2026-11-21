@@ -25,6 +25,7 @@ from tests.support.delivery_health import NOW, recent_forecast
 from tests.support.domain import FakeAdapter, System, make_system
 from tests.support.invariants import stored_again
 from tests.support.metering import connected
+from tests.support.notifications import store
 
 
 @pytest.mark.django_db(transaction=True)
@@ -38,13 +39,12 @@ def test_health_report_keeps_a_bounded_query_budget(delivery_count: int) -> None
         region=system.region,
         enabled=True,
         effective_from=NOW,
-        recipients=["recipient@example.test"],
     )
+    store(schedule, ["recipient@example.test"])
     for index in range(delivery_count):
         NotificationDelivery.objects.create(
             schedule=schedule,
             binding=system.binding,
-            recipients=["recipient@example.test"],
             scheduled_for=NOW - timedelta(minutes=index),
             preparation_deadline=NOW,
             available_at=NOW,
@@ -127,7 +127,6 @@ def test_incomplete_and_interrupted_deliveries_remain_visible_to_monitoring() ->
         region=system.region,
         enabled=True,
         effective_from=NOW,
-        recipients=["recipient@example.test"],
     )
     delivery = NotificationDelivery.objects.create(
         schedule=schedule,
@@ -136,7 +135,6 @@ def test_incomplete_and_interrupted_deliveries_remain_visible_to_monitoring() ->
         preparation_deadline=NOW,
         available_at=NOW,
         status="sending",
-        recipients=["recipient@example.test"],
         prepared_message={"kind": "current", "tomorrow_complete": True},
         lease_token=uuid.uuid4(),
         lease_expires_at=NOW,
@@ -192,7 +190,6 @@ def test_long_cooldown_stale_forecasts_and_missed_delivery_are_not_healthy() -> 
         available_at=NOW,
         status="skipped",
         last_error="missed_schedule",
-        recipients=["recipient@example.test"],
     )
     report = delivery_health(NOW, timedelta(minutes=5))
     assert report["missed_notifications"] == 1
@@ -215,7 +212,6 @@ def paused_deliveries(system: System, scheduled_for: datetime = NOW) -> None:
             available_at=NOW,
             status="skipped",
             last_error=code,
-            recipients=[],
         )
 
 
@@ -335,14 +331,13 @@ def test_invalid_saved_recipient_is_an_explicit_health_failure_without_disclosur
         region=system.region,
         enabled=True,
         effective_from=NOW,
-        recipients=["private-invalid-recipient"],
     )
+    store(schedule, ["private-invalid-recipient"])
     report = delivery_health(NOW, timedelta(minutes=5))
     assert report["invalid_reminder_recipients"] == 1
     assert report["healthy"] is False
     assert "private-invalid-recipient" not in json.dumps(report)
-    schedule.recipients = ["valid@example.test"]
-    schedule.save(update_fields=("recipients",))
+    store(schedule, ["valid@example.test"])
     assert delivery_health(NOW, timedelta(minutes=5))["healthy"] is True
 
 

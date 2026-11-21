@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from django.contrib.auth.models import User
-from django.core.mail import EmailMultiAlternatives
+from django.core import mail
 from django.db import IntegrityError, transaction
 from django.utils import translation
 
@@ -15,7 +15,7 @@ from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.scheduler import enqueue_due
 from tests.support.domain import NOW
 from tests.support.notification_preparation import complete_saved
-from tests.support.notifications import SLOT, attached_sheet, configured
+from tests.support.notifications import SLOT, attached_sheet, configured, store
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -27,7 +27,7 @@ def test_schedule_pins_explicit_language_for_every_recipient_and_defaults_to_eng
     system, schedule = configured()
     recipient_user = User.objects.create(username="recipient", email="recipient@example.com")
     UserLanguagePreference.objects.create(user=recipient_user, language="tr")
-    schedule.recipients = [recipient_user.email, "external@example.com"]
+    store(schedule, [recipient_user.email, "external@example.com"])
     if language is not None:
         schedule.language = language
     schedule.save()
@@ -66,8 +66,8 @@ def test_missing_saved_data_is_reported_in_the_pinned_language_without_inventing
     schedule.save(update_fields=["language"])
     requests = RequestAttempt.objects.count()
     (delivery_id,) = enqueue_due(SLOT)
-    messages: list[EmailMultiAlternatives] = []
-    assert process_notification(delivery_id, SLOT, sender=messages.append)
+    assert process_notification(delivery_id, SLOT)
+    messages = mail.outbox
     assert missing in messages[0].body
     assert "0.000 kWh/m²" not in messages[0].body
     assert "0,000 kWh/m²" not in messages[0].body
@@ -110,7 +110,6 @@ def test_delivery_language_is_database_constrained() -> None:
             scheduled_for=SLOT,
             preparation_deadline=SLOT,
             available_at=SLOT,
-            recipients=["default@example.com"],
         )
 
 

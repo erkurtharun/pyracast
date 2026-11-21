@@ -18,6 +18,7 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.notifications.models import NotificationDelivery, NotificationSettings, OutboundMail
+from pyracast.notifications.recipients import delivery_addresses
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -93,7 +94,8 @@ class NotificationDeliveryAdmin(ReadOnlyAdmin):
         "sent_at",
     )
     list_filter = ("status",)
-    search_fields = ("recipients", "schedule__region__name")
+    search_fields = ("recipient_rows__key", "schedule__region__name")
+    readonly_fields = ("recipients",)
     fields = (
         "schedule",
         "recipients",
@@ -108,6 +110,13 @@ class NotificationDeliveryAdmin(ReadOnlyAdmin):
         "sent_at",
         "last_error",
     )
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[NotificationDelivery]:
+        return super().get_queryset(request).prefetch_related("recipient_rows")
+
+    @admin.display(description=gettext_lazy("Recipients"))
+    def recipients(self, obj: NotificationDelivery) -> str:
+        return ", ".join(delivery_addresses(obj))
 
 
 class OutboundMailAdmin(ReadOnlyAdmin):

@@ -94,7 +94,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | HistoricalReferenceImport | Authorized source settings, immutable export digest and actual acquisition time |
 | ReferenceCapacityNormalization | Authorized capacity-only copies, original source lineage and conversion availability |
 | ForecastIssuance, PlantEvent | Immutable published electrical forecast and audited plant operations |
-| NotificationSettings, ReminderSchedule, NotificationDelivery, OutboundMail | Shared plant email schedule, explicit recipients and language, pinned saved forecasts, grouped delivery outcomes and account and invitation mail intents |
+| NotificationSettings, ReminderSchedule, ReminderRecipient, ReminderRecipientTie, NotificationDelivery, DeliveryRecipient, OutboundMail | Shared plant email schedule with its revision, explicit recipient rows and their member ties, language, pinned saved forecasts, grouped delivery outcomes with their recipient rows and account and invitation mail intents |
 | AuditEvent | Actor, action, target, the details its action declares and timestamp for privileged changes |
 
 Regions select explicit provider accounts rather than embedding credentials. One canonical record per account spans tenants and credential rotations; duplicate records must not create independent quota budgets.
@@ -677,8 +677,9 @@ The plant-only `archived_forecast` source and explicit `as_of` queries read thes
 
 Each approved plant has one shared reminder schedule with daily local `HH:MM`
 times, extra recipient addresses and an English or Turkish email language. Workspace
-administrators edit it; other members see its settings, recipient counts and delivery
-history but no address. Optional workspace membership inclusion adds active members'
+administrators edit it; a save from a form read before another change is refused,
+and every change is audited. Other members see its settings, recipient counts and
+delivery history but no address. Optional workspace membership inclusion adds active members'
 verified account addresses. Membership changes update this group automatically. An
 enabled schedule needs an address or that option. Extra addresses retain their saved
 value; known member addresses retain their membership identity even after an email
@@ -698,12 +699,13 @@ The current provider plan's daily request limit also caps daily reminder times; 
 The dispatcher pins the approved binding and recipient set for each slot. One durable
 delivery sends one message with all recipients in BCC. Addresses remain private;
 acceptance, uncertainty and retries apply to that message. An existing slot never
-expands to new recipients. Before transmission, the frozen set can only shrink to
-still-authorized recipients, including removal while the mail connection opens.
-Pinned membership IDs and per-delivery address revocations prevent removal and
-rejoining from reviving old slot authority, even when an address was originally
-external. Revocations survive late mail responses and safe retries without changing
-an already authorized envelope. Rejoining restores automatic inclusion in new slots.
+expands to new recipients. The claim and the transmission marker delete the slot's
+recipient rows that are no longer authorized, so the rows only shrink, including on
+removal while the mail connection opens; workspace addresses are read from the current
+memberships each time. Member ties of saved addresses and per-delivery revocations
+prevent removal and rejoining from reviving old slot authority. Revocations survive
+late mail responses and safe retries without changing an already authorized envelope.
+Rejoining restores automatic inclusion in new slots.
 Tenant locking serializes membership changes with the transmission permission marker;
 removal after that marker cannot revoke an already authorized in-flight message, and
 the history of a sent or uncertain delivery names that authorized envelope.

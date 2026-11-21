@@ -16,16 +16,75 @@ from pyracast.forecasts.models import (
 )
 from pyracast.intervals import NormalizedInterval
 from pyracast.notifications.models import (
+    DeliveryRecipient,
     NotificationDelivery,
+    ReminderRecipient,
+    ReminderRecipientTie,
     ReminderSchedule,
 )
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.overview import reminder_overview
+from pyracast.notifications.recipients import recipient_key
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.notifications.serializers import ReminderOutput
 from tests.support.domain import NOW, System, make_system
 
 SLOT = NOW + timedelta(days=1) - timedelta(hours=6)
+
+
+def schedule_addresses(schedule: ReminderSchedule) -> list[str]:
+    return list(
+        ReminderRecipient.objects.filter(schedule=schedule)
+        .order_by("pk")
+        .values_list("address", flat=True)
+    )
+
+
+def ties(schedule: ReminderSchedule) -> dict[str, list[int]]:
+    tied: dict[str, list[int]] = {}
+    for key, membership_id in (
+        ReminderRecipientTie.objects.filter(recipient__schedule=schedule)
+        .order_by("recipient_id", "membership_id")
+        .values_list("recipient__key", "membership_id")
+    ):
+        tied.setdefault(key, []).append(membership_id)
+    return tied
+
+
+def store(
+    schedule: ReminderSchedule, stored: list[str], tied: dict[str, list[int]] | None = None
+) -> None:
+    ReminderRecipient.objects.filter(schedule=schedule).delete()
+    for address in stored:
+        row = ReminderRecipient.objects.create(
+            schedule=schedule, address=address, key=recipient_key(address)
+        )
+        for membership_id in (tied or {}).get(row.key, []):
+            ReminderRecipientTie.objects.create(recipient=row, membership_id=membership_id)
+
+
+def candidates(delivery: NotificationDelivery) -> list[str]:
+    return list(
+        DeliveryRecipient.objects.filter(delivery=delivery)
+        .order_by("pk")
+        .values_list("address", flat=True)
+    )
+
+
+def revoked(delivery: NotificationDelivery) -> list[str]:
+    return list(
+        DeliveryRecipient.objects.filter(delivery=delivery, revoked=True)
+        .order_by("pk")
+        .values_list("key", flat=True)
+    )
+
+
+def freeze(delivery: NotificationDelivery, stored: list[str]) -> None:
+    DeliveryRecipient.objects.filter(delivery=delivery).delete()
+    DeliveryRecipient.objects.bulk_create(
+        DeliveryRecipient(delivery=delivery, address=address, key=recipient_key(address))
+        for address in stored
+    )
 
 
 def attached_sheet(message: EmailMessage) -> Worksheet:

@@ -104,6 +104,7 @@ export function PlantOnboarding({
                         const site = existing
                             ? {
                                   ...existing,
+                                  reminder: null,
                                   plant: await api.post(
                                       "/api/tenants/{tenant_id}/regions/{region_id}/plants/",
                                       {

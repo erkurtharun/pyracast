@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import pytest
@@ -6,25 +6,17 @@ from django.db import IntegrityError, models, transaction
 
 from pyracast.db import violated_constraint
 from pyracast.forecasts.models import CollectionSchedule
-from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.models import (
+    DeliveryRecipient,
+    ReminderRecipient,
+    ReminderRecipientTie,
+    ReminderSchedule,
+)
 from tests.support.notifications import configured, ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 ADDRESS = "member@example.com"
-TEXT_LISTS = [
-    ("not_a_list", ADDRESS),
-    ("object", {ADDRESS: 1}),
-    ("number_item", [ADDRESS, 5]),
-    ("null_item", [None]),
-]
-MEMBERSHIP_MAPS = [
-    ("list", [ADDRESS]),
-    ("scalar_members", {ADDRESS: 3}),
-    ("text_member", {ADDRESS: ["3"]}),
-    ("zero_member", {ADDRESS: [0]}),
-    ("fractional_member", {ADDRESS: [1.5]}),
-]
 TIMES = [
     ("text", "10:00"),
     ("hour_out_of_range", ["24:00"]),
@@ -45,17 +37,8 @@ def cases(field: str, values: Sequence[tuple[str, object]]) -> list[Any]:
     return [pytest.param(field, value, id=f"{field}-{name}") for name, value in values]
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        *cases("recipients", TEXT_LISTS),
-        *cases("recipient_memberships", MEMBERSHIP_MAPS),
-        *cases("times", TIMES),
-    ],
-)
-def test_the_database_refuses_a_reminder_schedule_of_another_shape(
-    field: str, value: object
-) -> None:
+@pytest.mark.parametrize(("field", "value"), cases("times", TIMES))
+def test_the_database_refuses_reminder_times_of_another_shape(field: str, value: object) -> None:
     _, schedule = configured()
     rows = ReminderSchedule.objects.filter(pk=schedule.pk)
 
@@ -74,34 +57,45 @@ def test_the_database_refuses_collection_times_of_another_shape(field: str, valu
     )
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        *cases("recipients", TEXT_LISTS),
-        *cases("revoked_recipients", TEXT_LISTS),
-        *cases("recipient_memberships", MEMBERSHIP_MAPS),
-    ],
-)
-def test_the_database_refuses_a_delivery_of_another_shape(field: str, value: object) -> None:
-    rows = NotificationDelivery.objects.filter(pk=ready().pk)
-
-    assert refusal(rows, **{field: value}) == f"notificationdelivery_{field}_chk"
+def duplicate_refusal(create: Callable[[], object]) -> str | None:
+    with pytest.raises(IntegrityError) as raised, transaction.atomic():
+        create()
+    return violated_constraint(raised.value)
 
 
-def test_empty_and_well_formed_recipients_and_times_are_stored() -> None:
+def test_one_address_key_is_stored_once_per_schedule_delivery_and_member_tie() -> None:
+    delivery = ready()
+    row = ReminderRecipient.objects.get(schedule=delivery.schedule)
+    ReminderRecipientTie.objects.create(recipient=row, membership_id=7)
+
+    refusals = [
+        duplicate_refusal(
+            lambda: ReminderRecipient.objects.create(
+                schedule=delivery.schedule, address=row.address.upper(), key=row.key
+            )
+        ),
+        duplicate_refusal(
+            lambda: DeliveryRecipient.objects.create(
+                delivery=delivery, address=row.address.upper(), key=row.key
+            )
+        ),
+        duplicate_refusal(
+            lambda: ReminderRecipientTie.objects.create(recipient=row, membership_id=7)
+        ),
+    ]
+
+    assert refusals == [
+        "reminderrecipient_schedule_key_uniq",
+        "deliveryrecipient_delivery_key_uniq",
+        "reminderrecipienttie_recipient_membership_uniq",
+    ]
+
+
+def test_empty_and_well_formed_times_are_stored() -> None:
     delivery = ready()
     schedules = ReminderSchedule.objects.filter(pk=delivery.schedule_id)
-    deliveries = NotificationDelivery.objects.filter(pk=delivery.pk)
-    memberships = {ADDRESS: [1, 2]}
 
-    schedules.update(recipients=[], recipient_memberships={}, times=[])
-    schedules.update(
-        recipients=[ADDRESS], recipient_memberships=memberships, times=["00:00", "23:59"]
-    )
-    deliveries.update(recipients=[], recipient_memberships={}, revoked_recipients=[])
-    deliveries.update(
-        recipients=[ADDRESS], recipient_memberships=memberships, revoked_recipients=[ADDRESS]
-    )
+    schedules.update(times=[])
+    schedules.update(times=["00:00", "23:59"])
 
     assert schedules.values_list("times", flat=True).get() == ["00:00", "23:59"]
-    assert deliveries.values_list("recipient_memberships", flat=True).get() == memberships

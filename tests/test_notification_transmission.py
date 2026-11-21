@@ -4,7 +4,7 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
-from django.core.mail import EmailMultiAlternatives
+from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import OperationalError
 from django.test import override_settings
 
@@ -15,24 +15,24 @@ from pyracast.notifications.mail import build_message
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationSettings,
-    ReminderSchedule,
 )
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.scheduler import MAX_LATENESS
 from pyracast.regions.models import Region
-from tests.support.notification_transmission import OpeningBackend
-from tests.support.notifications import SLOT, ready
+from tests.support.notification_transmission import BACKEND, OpeningBackend
+from tests.support.notifications import SLOT, candidates, ready, store
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
 @pytest.fixture(autouse=True)
 def opening_backend() -> Iterator[None]:
-    OpeningBackend.action, OpeningBackend.sent = None, []
-    with override_settings(
-        MAILERS={"default": {"BACKEND": "tests.support.notification_transmission.OpeningBackend"}}
-    ):
-        yield
+    OpeningBackend.action, OpeningBackend.reply, OpeningBackend.sent = None, None, []
+    try:
+        with override_settings(MAILERS={"default": {"BACKEND": BACKEND}}):
+            yield
+    finally:
+        OpeningBackend.action, OpeningBackend.reply = None, None
 
 
 def test_reclaimed_connection_cannot_transmit_after_a_new_lease(
@@ -75,7 +75,7 @@ def test_late_smtp_response_resolves_the_original_uncertain_lease(
         "pyracast.notifications.jobs.time", SimpleNamespace(monotonic=lambda: clock[0])
     )
 
-    def late_response(message: EmailMultiAlternatives) -> None:
+    def late_response(message: EmailMessage) -> None:
         delivery.refresh_from_db()
         token = delivery.lease_token
         assert delivery.transmit_started_at is not None
@@ -87,7 +87,8 @@ def test_late_smtp_response_resolves_the_original_uncertain_lease(
         if failure:
             raise NotSentError("The server explicitly rejected DATA temporarily.")
 
-    assert process_notification(delivery.pk, SLOT, sender=late_response) is not failure
+    OpeningBackend.reply = late_response
+    assert process_notification(delivery.pk, SLOT) is not failure
     delivery.refresh_from_db()
     assert delivery.status == ("retry" if failure else "sent")
     assert delivery.lease_token is None
@@ -125,9 +126,7 @@ def test_open_connection_does_not_authorize_a_changed_delivery(
             delivery.schedule.save(update_fields=("enabled",))
         elif change == "limit":
             NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
-            ReminderSchedule.objects.filter(pk=delivery.schedule_id).update(
-                recipients=[*delivery.recipients, "other@example.com"]
-            )
+            store(delivery.schedule, [*candidates(delivery), "other@example.com"])
         elif change == "deadline":
             clock[0] = 2
         elif change == "deleted":
@@ -167,7 +166,7 @@ def test_expired_connection_is_retried_only_within_its_delivery_budget(
     assert delivery.last_error == "interrupted_connection"
 
 
-def test_injected_sender_also_requires_current_transmission_authority(
+def test_a_lease_that_expires_during_preparation_cannot_transmit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     delivery = ready()
@@ -181,19 +180,18 @@ def test_injected_sender_also_requires_current_transmission_authority(
         return build_message(record)
 
     monkeypatch.setattr(jobs, "build_message", slow_preparation)
-    assert not process_notification(
-        delivery.pk, SLOT, sender=lambda message: OpeningBackend.sent.append(message)
-    )
+    assert not process_notification(delivery.pk, SLOT)
     assert not OpeningBackend.sent
 
 
 def test_mail_authentication_failure_remains_retryable_and_visible() -> None:
     delivery = ready()
 
-    def fail(message: EmailMultiAlternatives) -> None:
+    def fail(message: EmailMessage) -> None:
         raise NotSentError("Authentication failed.", code=MailFailure.CREDENTIALS_REJECTED)
 
-    assert not process_notification(delivery.pk, SLOT, sender=fail)
+    OpeningBackend.reply = fail
+    assert not process_notification(delivery.pk, SLOT)
     delivery.refresh_from_db()
     assert delivery.status == "retry"
     assert delivery.last_error == "mail_credentials_rejected"

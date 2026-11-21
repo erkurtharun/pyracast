@@ -1,16 +1,24 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from pyracast.notifications.eligibility import binding_can_notify
+from pyracast.notifications.eligibility import notifiable_regions
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationDeliveryError,
     ReminderSchedule,
     ReminderState,
 )
-from pyracast.notifications.operations import effective_recipients, recipient_limit
-from pyracast.notifications.recipients import workspace_recipients
-from pyracast.notifications.scheduler import slot_recipients
+from pyracast.notifications.operations import recipient_limit
+from pyracast.notifications.recipients import (
+    Explicit,
+    Workspace,
+    delivery_addresses,
+    effective,
+    explicit_recipients,
+    workspace,
+)
+from pyracast.notifications.scheduler import recipient_refusal
 from pyracast.regions.models import Region, RegionStatus
 
 STATE_OF_PAUSE: dict[str, ReminderState] = {
@@ -47,6 +55,7 @@ class ReminderDelivery:
 class ReminderOverview:
     enabled: bool
     state: ReminderState
+    revision: int
     include_workspace_members: bool
     language: str
     times: list[str]
@@ -59,19 +68,59 @@ class ReminderOverview:
     deliveries: list[ReminderDelivery]
 
 
-def reminder_state(schedule: ReminderSchedule, limit: int) -> ReminderState:
+@dataclass(frozen=True)
+class ReminderOutcome:
+    scheduled_for: datetime
+    status: str
+    last_error: str
+
+
+@dataclass(frozen=True)
+class ReminderSummary:
+    state: ReminderState
+    last_delivery: ReminderOutcome | None
+
+
+@dataclass(frozen=True)
+class Assessment:
+    schedule: ReminderSchedule
+    explicit: list[Explicit]
+    recipients: list[str]
+    state: ReminderState
+
+
+def reminder_state(schedule: ReminderSchedule, *, notifiable: bool, refusal: str) -> ReminderState:
     """The scheduler's own predicates, in its order, applied to the stored schedule."""
     region, binding = schedule.region, schedule.region.approved_binding
     if not schedule.enabled:
         return ReminderState.PAUSED_BY_USER
     if region.status != RegionStatus.APPROVED or binding is None:
         return ReminderState.WAITING_FOR_APPROVAL
-    if not binding_can_notify(binding):
+    if not notifiable:
         account = binding.provider_account
         if not account.enabled or account.authorized_at is None:
             return ReminderState.PROVIDER_ATTENTION
         return ReminderState.WAITING_FOR_APPROVAL
-    return STATE_OF_PAUSE.get(slot_recipients(schedule, limit)[1], ReminderState.SENDING)
+    return STATE_OF_PAUSE.get(refusal, ReminderState.SENDING)
+
+
+def assess(
+    schedules: Sequence[ReminderSchedule], members: Workspace, limit: int
+) -> list[Assessment]:
+    """Recipients and state of schedules of one workspace, in a fixed number of queries."""
+    explicit = explicit_recipients(schedule.pk for schedule in schedules)
+    notifiable = notifiable_regions(schedule.region_id for schedule in schedules)
+    assessed = []
+    for schedule in schedules:
+        rows = explicit.get(schedule.pk, [])
+        recipients = effective(schedule.include_workspace_members, rows, members)
+        state = reminder_state(
+            schedule,
+            notifiable=schedule.region_id in notifiable,
+            refusal=recipient_refusal(recipients, limit),
+        )
+        assessed.append(Assessment(schedule, rows, recipients, state))
+    return assessed
 
 
 def _source_age(delivery: NotificationDelivery, now: datetime) -> float | None:
@@ -96,7 +145,7 @@ def _delivery(
 ) -> ReminderDelivery:
     message = delivery.prepared_message or {}
     age = _source_age(delivery, now)
-    addresses = list(delivery.recipients)
+    addresses = delivery_addresses(delivery)
     return ReminderDelivery(
         id=delivery.pk,
         scheduled_for=delivery.scheduled_for,
@@ -121,42 +170,78 @@ def reminder_overview(
 ) -> ReminderOverview:
     """What the reminder screen shows; viewers get counts, only administrators addresses."""
     limit = recipient_limit()
-    effective = effective_recipients(schedule)
-    members = workspace_recipients(schedule.region.tenant_id)
+    members = workspace(schedule.region.tenant_id)
+    (assessment,) = assess([schedule], members, limit)
     binding = schedule.region.approved_binding
     deliveries = (
         NotificationDelivery.objects.filter(schedule__region_id=schedule.region_id)
         .select_related("snapshot")
+        .prefetch_related("recipient_rows")
         .order_by("-scheduled_for", "-pk")[:20]
     )
     return ReminderOverview(
         enabled=schedule.enabled,
-        state=reminder_state(schedule, limit),
+        state=assessment.state,
+        revision=schedule.revision,
         include_workspace_members=schedule.include_workspace_members,
         language=schedule.language,
         times=list(schedule.times),
         recipient_limit=limit,
-        recipient_count=len(effective),
-        workspace_member_count=len(members),
-        recipient_limit_exceeded=len(effective) > limit,
+        recipient_count=len(assessment.recipients),
+        workspace_member_count=len(members.addresses),
+        recipient_limit_exceeded=len(assessment.recipients) > limit,
         daily_reminder_limit=binding.provider_account.daily_quota if binding else None,
-        addresses=ReminderAddresses(list(schedule.recipients), members) if administrator else None,
+        addresses=ReminderAddresses(
+            [row.address for row in assessment.explicit], list(members.addresses)
+        )
+        if administrator
+        else None,
         deliveries=[
             _delivery(delivery, now, administrator=administrator) for delivery in deliveries
         ],
     )
 
 
+def reminder_summaries(tenant_id: int, region_ids: Sequence[int]) -> dict[int, ReminderSummary]:
+    """Each saved schedule's state and latest delivery outcome, keyed by region."""
+    schedules = list(
+        ReminderSchedule.objects.filter(
+            region_id__in=region_ids, region__tenant_id=tenant_id
+        ).select_related("region__approved_binding__provider_account")
+    )
+    if not schedules:
+        return {}
+    latest = {
+        delivery.schedule_id: ReminderOutcome(
+            delivery.scheduled_for, delivery.status, delivery.last_error
+        )
+        for delivery in NotificationDelivery.objects.filter(schedule__in=schedules)
+        .order_by("schedule_id", "-scheduled_for", "-pk")
+        .distinct("schedule_id")
+        .only("schedule", "scheduled_for", "status", "last_error")
+    }
+    return {
+        assessment.schedule.region_id: ReminderSummary(
+            assessment.state, latest.get(assessment.schedule.pk)
+        )
+        for assessment in assess(schedules, workspace(tenant_id), recipient_limit())
+    }
+
+
 def plants_at_recipient_limit(tenant_id: int) -> int:
     """Plants whose reminders include the members, are sending and already reach the limit, so
     one more member pauses them."""
-    limit = recipient_limit()
-    return sum(
-        reminder_state(schedule, limit) == ReminderState.SENDING
-        and len(effective_recipients(schedule)) == limit
-        for schedule in ReminderSchedule.objects.filter(
+    schedules = list(
+        ReminderSchedule.objects.filter(
             region__in=Region.objects.active().filter(tenant_id=tenant_id),
             enabled=True,
             include_workspace_members=True,
         ).select_related("region__approved_binding__provider_account")
+    )
+    if not schedules:
+        return 0
+    limit = recipient_limit()
+    return sum(
+        assessment.state == ReminderState.SENDING and len(assessment.recipients) == limit
+        for assessment in assess(schedules, workspace(tenant_id), limit)
     )

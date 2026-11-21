@@ -14,6 +14,7 @@ from django.test import Client, override_settings
 from pyracast.notifications.operations import configure_reminders, recipient_limit
 from tests.support.auth_lifecycle import PASSWORD, mailed_code, submit
 from tests.support.domain import NOW, make_system
+from tests.support.notifications import schedule_addresses
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -68,7 +69,7 @@ def test_account_email_confirmation_ignores_notification_lock_and_preserves_save
     user.refresh_from_db()
     assert user.email == "new@example.com"
     schedule.refresh_from_db()
-    assert schedule.recipients == ["old@example.com"]
+    assert schedule_addresses(schedule) == ["old@example.com"]
 
 
 @override_settings(

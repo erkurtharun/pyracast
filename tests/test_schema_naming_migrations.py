@@ -73,6 +73,20 @@ COLUMNS = {
     "plants_productionobservation": {"recorded_at": "created_at"},
 }
 ADDED = {"forecasts_requestattempt": {"http_status": None}}
+# notifications.0007 moves the address lists into recipient rows.
+RECIPIENT_LISTS = {
+    "notifications_reminderschedule": {"recipients", "recipient_memberships"},
+    "notifications_notificationdelivery": {
+        "recipients",
+        "recipient_memberships",
+        "revoked_recipients",
+    },
+}
+RECIPIENT_TABLES = (
+    "notifications_deliveryrecipient",
+    "notifications_reminderrecipient",
+    "notifications_reminderrecipienttie",
+)
 NAME = r'"?\w+"?'
 RENAME = re.compile(
     rf"ALTER TABLE {NAME} RENAME (?:COLUMN|CONSTRAINT) {NAME} TO {NAME}"
@@ -251,12 +265,17 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     migrate(*PREVIOUS)
     assert all(set(renames) <= columns(table) for table, renames in COLUMNS.items())
     assert catalog() != fresh
+    assert all(lists <= columns(table) for table, lists in RECIPIENT_LISTS.items())
+    assert "revision" not in columns("notifications_reminderschedule")
     before = project_rows()
     assert all(before[table] for table in COLUMNS)
+    assert not set(RECIPIENT_TABLES) & before.keys()
 
     forward()
 
     assert catalog() == fresh
+    assert all(not lists & columns(table) for table, lists in RECIPIENT_LISTS.items())
+    assert "revision" in columns("notifications_reminderschedule")
     after = project_rows()
     assert [
         (row["id"], row["calibration_preparation_due_at"] is not None)
@@ -271,4 +290,5 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     for row in after["regions_region"]:
         del row["purge_started_at"]
     assert after.pop("notifications_outboundmail") == []
+    assert [after.pop(table) for table in RECIPIENT_TABLES] == [[], [], []]
     assert after == renamed(before)

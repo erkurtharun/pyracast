@@ -6,16 +6,11 @@ from django.db import models
 
 from pyracast.accounts.models import Language, WorkspaceInvitation
 from pyracast.connections.models import SiteBinding
-from pyracast.db import TEXT_ITEMS, TIME_ITEMS, choices_check, json_shape_check, lease_check
+from pyracast.db import TIME_ITEMS, choices_check, json_shape_check, lease_check
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.mail.errors import MailFailure
 from pyracast.regions.models import Region
 
-# A pinned address maps to the ids of the memberships it belonged to.
-MEMBERSHIP_ITEMS = (
-    'strict $.* ? (@.type() != "array"'
-    ' || exists(@[*] ? (@.type() != "number" || @ < 1 || @.floor() != @)))'
-)
 # Template values an outbound mail may keep: strings only, never a code, key or link.
 MAIL_CONTEXT_KEYS = (
     "from_email",
@@ -63,24 +58,55 @@ class ReminderSchedule(models.Model):
     )
     region = models.ForeignKey(Region, on_delete=models.CASCADE)
     enabled = models.BooleanField(default=False)
-    recipients = models.JSONField(default=list)
     include_workspace_members = models.BooleanField(default=False)
-    recipient_memberships = models.JSONField(default=dict)
     times = models.JSONField(default=list)
     effective_from = models.DateTimeField()
     language = models.CharField(max_length=2, choices=Language, default=Language.EN)
+    revision = models.PositiveIntegerField(default=0)
 
     class Meta:
         constraints = (
             models.UniqueConstraint(fields=("region",), name="%(class)s_region_uniq"),
             choices_check("language", Language),
-            json_shape_check("recipients", "array", TEXT_ITEMS),
-            json_shape_check("recipient_memberships", "object", MEMBERSHIP_ITEMS),
             json_shape_check("times", "array", TIME_ITEMS),
         )
 
     def __str__(self) -> str:
         return f"Reminders of region {self.region_id}"
+
+
+class ReminderRecipient(models.Model):
+    schedule = models.ForeignKey(
+        ReminderSchedule, on_delete=models.CASCADE, related_name="recipient_rows"
+    )
+    address = models.TextField()
+    # `recipients.recipient_key(address)`: the identity used for uniqueness, removal and counts.
+    key = models.TextField()
+
+    class Meta:
+        ordering = ("pk",)
+        constraints = (
+            models.UniqueConstraint(fields=("schedule", "key"), name="%(class)s_schedule_key_uniq"),
+        )
+
+    def __str__(self) -> str:
+        return f"Recipient {self.pk} of schedule {self.schedule_id}"
+
+
+class ReminderRecipientTie(models.Model):
+    recipient = models.ForeignKey(ReminderRecipient, on_delete=models.CASCADE, related_name="ties")
+    # A plain id, not a foreign key: a tie to a removed membership keeps its address ineligible.
+    membership_id = models.PositiveBigIntegerField()
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=("recipient", "membership_id"), name="%(class)s_recipient_membership_uniq"
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"Recipient {self.recipient_id} tied to membership {self.membership_id}"
 
 
 class NotificationDeliveryError(models.TextChoices):
@@ -151,10 +177,6 @@ class NotificationDelivery(models.Model):
     attempts = models.PositiveIntegerField(default=0)
     lease_token = models.UUIDField(null=True)
     lease_expires_at = models.DateTimeField(null=True)
-    recipients = models.JSONField(default=list)
-    recipient_memberships = models.JSONField(default=dict)
-
-    revoked_recipients = models.JSONField(default=list)
     language = models.CharField(max_length=2, choices=Language, default=Language.EN)
     snapshot = models.ForeignKey(ForecastSnapshot, on_delete=models.PROTECT, null=True)
     binding = models.ForeignKey(SiteBinding, on_delete=models.PROTECT)
@@ -195,9 +217,6 @@ class NotificationDelivery(models.Model):
             lease_check(
                 (NotificationDeliveryStatus.SENDING,), kept=(NotificationDeliveryStatus.UNCERTAIN,)
             ),
-            json_shape_check("recipients", "array", TEXT_ITEMS),
-            json_shape_check("recipient_memberships", "object", MEMBERSHIP_ITEMS),
-            json_shape_check("revoked_recipients", "array", TEXT_ITEMS),
         )
         indexes = (
             models.Index(
@@ -215,6 +234,28 @@ class NotificationDelivery(models.Model):
 
     def __str__(self) -> str:
         return f"Delivery {self.pk} of schedule {self.schedule_id}: {self.status}"
+
+
+class DeliveryRecipient(models.Model):
+    """A candidate address of one delivery. The claim and the transmit marker delete the rows they
+    exclude, so after the marker the rows are the envelope; a later member removal only sets
+    `revoked`, which keeps the address out of later attempts."""
+
+    delivery = models.ForeignKey(
+        NotificationDelivery, on_delete=models.CASCADE, related_name="recipient_rows"
+    )
+    address = models.TextField()
+    key = models.TextField()
+    revoked = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ("pk",)
+        constraints = (
+            models.UniqueConstraint(fields=("delivery", "key"), name="%(class)s_delivery_key_uniq"),
+        )
+
+    def __str__(self) -> str:
+        return f"Recipient {self.pk} of delivery {self.delivery_id}"
 
 
 class ReminderState(models.TextChoices):

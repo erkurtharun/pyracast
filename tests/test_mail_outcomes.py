@@ -21,7 +21,7 @@ from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import OutboundMail
 from tests.smtp_server import Script, loopback_smtp
 from tests.support.auth_lifecycle import submit
-from tests.support.notifications import SLOT, ready
+from tests.support.notifications import SLOT, candidates, ready
 from tests.support.outbox import deliver_mail
 
 SMTP_BACKEND = "pyracast.mail.smtp.EmailBackend"
@@ -201,7 +201,7 @@ def test_reminder_stores_the_relay_outcome(
 ) -> None:
     delivery = ready()
     if phase == "rcpt":
-        relay.recipient_replies = dict.fromkeys(delivery.recipients, reply)
+        relay.recipient_replies = dict.fromkeys(candidates(delivery), reply)
     else:
         script_reply(relay, phase, reply)
 

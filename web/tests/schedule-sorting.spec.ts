@@ -1,10 +1,23 @@
 import { expect, test } from "./support/test";
+import { errorBody } from "./support/errors";
 import { mockApi } from "./support/workspace";
 
-test("reminder times are deduplicated and sent in clock order", async ({
+test("reminder times are sent as entered and a repeated time is refused by the server", async ({
     page,
 }) => {
     await mockApi(page);
+    await page.route("**/reminders/", (route) =>
+        route.request().method() === "PUT"
+            ? route.fulfill({
+                  status: 400,
+                  json: errorBody(
+                      "duplicate_reminder_times",
+                      "Use each delivery time once.",
+                      { fields: { times: "Use each delivery time once." } },
+                  ),
+              })
+            : route.fallback(),
+    );
     await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
@@ -33,8 +46,15 @@ test("reminder times are deduplicated and sent in clock order", async ({
     );
     await page.getByRole("button", { name: "Save reminders" }).click();
     expect((await outgoing).postDataJSON().times).toEqual([
+        "10:00",
+        "09:30",
         "09:00",
         "09:30",
-        "10:00",
     ]);
+    await expect(page.locator(".notice[role=alert]")).toContainText(
+        "Use each delivery time once.",
+    );
+    await expect(
+        page.getByLabel("Delivery time 4", { exact: true }),
+    ).toHaveValue("09:30");
 });

@@ -684,6 +684,12 @@ CASES: dict[str, Case] = {
         domain("DomainError", "recipient_limit_exceeded", field="recipients"),
         fields=("recipients",),
     ),
+    "reminder_schedule_changed": Case(
+        409,
+        "The email reminders changed. Reload before saving.",
+        "E-posta hat\u0131rlat\u0131c\u0131lar\u0131 değişti. Kaydetmeden önce yeniden yükleyin.",
+        domain("ConflictError", "reminder_schedule_changed"),
+    ),
     "plant_not_approved": Case(
         400,
         "Reminders can be turned on once the plant is approved.",

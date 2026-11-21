@@ -153,9 +153,6 @@
         "reminderPolicy": "E-postalar en son kayıtlı tahmini, veri toplama zamanını ve verinin yaşını gösterir; sağlayıcıdan yeni veri istemez. Yaz saati geçişindeki eksik saatler atlanır ve tekrarlanan yerel saatlerde bir kez çalışır. Günlük sınır: {limit}.",
         "scheduled": "Planlanan",
         "sourceAge": "{hours, number} sa {minutes, number} dk",
-        "invalidDeliveryTime": "Geçerli bir gönderim saati girin.",
-        "deliveryTimeRequired": "En az bir gönderim saati ekleyin.",
-        "duplicateEmail": "Her e-posta adresini yalnızca bir kez girin.",
         "approvalRequired": "Hatırlatıcılar, santral onaylandıktan sonra etkinleştirilebilir.",
         "quotaCount": "{count, number} / {limit, number}",
         "includeWorkspaceMembers": "Çalışma alanı üyelerini ekle",
@@ -165,7 +162,11 @@
         "otherAddresses": "Diğer adresler",
         "groupPrivacy": "Her gönderim saatinde tek e-posta. Alıcılar birbirini göremez (BCC).",
         "recipientCountOnly": "En fazla {limit, number} alıcıdan {count, number} alıcı. Adresleri yalnızca çalışma alanı yöneticisi görür.",
-        "deliveryRecipientCount": "{count, number} alıcı"
+        "deliveryRecipientCount": "{count, number} alıcı",
+        "dailyEmail": "Günlük e-posta: {state}",
+        "lastEmail": "Son e-posta: {status} (planlanan {scheduled}).",
+        "noEmailYet": "Henüz planlanmış e-posta yok.",
+        "reloadReminders": "Hatırlatıcıları yeniden yükle"
     },
     "Outages": {
         "plantOutages": "Santral kesintileri",

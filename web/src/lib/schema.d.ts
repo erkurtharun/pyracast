@@ -720,6 +720,7 @@ export interface components {
          *     * `region_trashed` - Plant location moved to trash
          *     * `region_restored` - Plant location restored
          *     * `collection_schedule_updated` - Collection schedule updated
+         *     * `reminder_schedule_updated` - Email reminders updated
          *     * `historical_reference_imported` - Historical reference imported
          *     * `reference_capacity_normalized` - Reference capacity normalized
          *     * `provider_account_created` - Provider account created
@@ -742,6 +743,7 @@ export interface components {
             | "region_trashed"
             | "region_restored"
             | "collection_schedule_updated"
+            | "reminder_schedule_updated"
             | "historical_reference_imported"
             | "reference_capacity_normalized"
             | "provider_account_created"
@@ -1362,6 +1364,7 @@ export interface components {
          *     * `recipient_required` - Recipient Required
          *     * `duplicate_recipients` - Duplicate Recipients
          *     * `recipient_limit_exceeded` - Recipient Limit Exceeded
+         *     * `reminder_schedule_changed` - Reminder Schedule Changed
          *     * `plant_not_approved` - Plant Not Approved
          *     * `provider_account_unavailable` - Provider Account Unavailable
          *     * `configuration_changed` - Configuration Changed
@@ -1443,6 +1446,7 @@ export interface components {
             | "recipient_required"
             | "duplicate_recipients"
             | "recipient_limit_exceeded"
+            | "reminder_schedule_changed"
             | "plant_not_approved"
             | "provider_account_unavailable"
             | "configuration_changed"
@@ -2376,10 +2380,20 @@ export interface components {
             language: components["schemas"]["LanguageEnum"];
             recipients: string[];
             times: string[];
+            expected_revision: number;
+        };
+        ReminderOutcomeOutput: {
+            /** Format: date-time */
+            scheduled_for: string;
+            status: components["schemas"]["NotificationDeliveryStatusEnum"];
+            last_error:
+                | components["schemas"]["NotificationDeliveryErrorEnum"]
+                | components["schemas"]["BlankEnum"];
         };
         ReminderOutput: {
             enabled: boolean;
             state: components["schemas"]["ReminderStateEnum"];
+            revision: number;
             include_workspace_members: boolean;
             language: components["schemas"]["LanguageEnum"];
             times: string[];
@@ -2409,6 +2423,11 @@ export interface components {
             | "no_recipients"
             | "invalid_recipient"
             | "over_recipient_limit";
+        ReminderSummaryOutput: {
+            state: components["schemas"]["ReminderStateEnum"];
+            last_delivery:
+                components["schemas"]["ReminderOutcomeOutput"] | null;
+        };
         /**
          * @description * `uncertain` - Uncertain
          *     * `succeeded` - Succeeded
@@ -2509,6 +2528,8 @@ export interface components {
             readonly revision: number;
             readonly status: components["schemas"]["RegionStatusEnum"];
             readonly plant: components["schemas"]["PlantOutput"] | null;
+            readonly reminder:
+                components["schemas"]["ReminderSummaryOutput"] | null;
         };
         /**
          * @description * `daylight` - daylight

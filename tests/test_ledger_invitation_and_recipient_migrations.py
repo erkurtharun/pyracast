@@ -19,7 +19,6 @@ from pyracast.accounts.models import (
 )
 from pyracast.change_requests.models import ChangeRequest, IncidentChange
 from pyracast.change_requests.operations import reject_request
-from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.regions.models import AuditEvent
 from tests.support.change_request_boundaries import (
     RequestCase,
@@ -41,7 +40,7 @@ from tests.support.invariants import (
     REVOKED_RECIPIENTS_RULE,
     violations,
 )
-from tests.support.migrations import constraints, forward, leaf_nodes, migrate
+from tests.support.migrations import constraints, leaf_nodes, migrate
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -143,26 +142,38 @@ def invited(
     return int(row.pk)
 
 
-def schedule_and_delivery(case: RequestCase) -> tuple[ReminderSchedule, NotificationDelivery]:
+def previous_notifications(name: str) -> models.Manager[models.Model]:
+    state = MigrationExecutor(connection).loader.project_state(PREVIOUS["notifications"])
+    model: type[models.Model] = state.apps.get_model("notifications", name)
+    return model._default_manager
+
+
+def schedule_and_delivery(
+    case: RequestCase,
+) -> tuple[models.QuerySet[models.Model], models.QuerySet[models.Model]]:
+    """Rows written at the previous state, where the recipients were lists."""
     pinned = {ADDRESS: [Membership.objects.get(user=case.proposer).pk]}
-    schedule = ReminderSchedule.objects.create(
-        region=case.system.region,
+    schedules, deliveries = (
+        previous_notifications(name) for name in ("ReminderSchedule", "NotificationDelivery")
+    )
+    schedule = schedules.create(
+        region_id=case.system.region.pk,
         effective_from=NOW,
         recipients=[ADDRESS],
         recipient_memberships=pinned,
         times=["06:30", "18:00"],
     )
-    delivery = NotificationDelivery.objects.create(
-        schedule=schedule,
+    delivery = deliveries.create(
+        schedule_id=schedule.pk,
         scheduled_for=NOW,
         available_at=NOW,
-        binding=case.system.binding,
+        binding_id=case.system.binding.pk,
         preparation_deadline=NOW,
         recipients=[ADDRESS],
         recipient_memberships=pinned,
         revoked_recipients=[ADDRESS],
     )
-    return schedule, delivery
+    return schedules.filter(pk=schedule.pk), deliveries.filter(pk=delivery.pk)
 
 
 def stored(rows: models.QuerySet[Any]) -> list[dict[str, Any]]:
@@ -190,7 +201,6 @@ def test_migrations_close_superseded_invitations_and_keep_every_valid_row(
     rejected = production_request(case)
     reject_request(member, case.system.tenant.pk, rejected.pk, reason="Meter replaced")
     incident_request(case)
-    schedule_and_delivery(case)
     WorkspaceAdminChange.objects.create(
         tenant=case.system.tenant,
         actor=case.system.admin,
@@ -202,13 +212,13 @@ def test_migrations_close_superseded_invitations_and_keep_every_valid_row(
         for rows in (
             ChangeRequest.objects.all(),
             IncidentChange.objects.all(),
-            ReminderSchedule.objects.all(),
-            NotificationDelivery.objects.all(),
             WorkspaceAdminChange.objects.all(),
         )
     }
     migrate(*PREVIOUS.values())
     assert all(installed(table) == set() for table in NEW)
+    reminders = schedule_and_delivery(case)
+    reminder_rows = [stored_rows(rows) for rows in reminders]
     # Main's writers end an invitation by moving its deadline, at the latest when a newer
     # invitation of its address, or of the administrator role, is created.
     replaced_at = START + timedelta(days=2)
@@ -242,6 +252,7 @@ def test_migrations_close_superseded_invitations_and_keep_every_valid_row(
         alone: None,
     }
     assert {model: stored(model._default_manager.all()) for model in kept} == kept
+    assert [stored_rows(rows) for rows in reminders] == reminder_rows
     assert AuditEvent.objects.exists()
     assert not AuditEvent.objects.exclude(details={}).exists()
 
@@ -269,13 +280,13 @@ def test_migration_uses_the_earliest_successor_time_in_primary_key_order(
     invitations.filter(pk=other.pk).update(created_at=START + timedelta(days=2))
 
     with pytest.raises(ValueError, match=r"holds 1 row.*still open"):
-        forward()
+        migrate(*through_checks())
 
     assert invitations.values_list("expires_at", flat=True).get(pk=older) == START + timedelta(
         days=4
     )
     invitations.filter(pk=older).update(expires_at=START + timedelta(days=3))
-    forward()
+    migrate(*through_checks())
 
     assert dict(WorkspaceInvitation.objects.values_list("pk", "revoked_at")) == {
         older: START + timedelta(days=3),
@@ -316,8 +327,7 @@ def incident_ending_at_its_start(case: RequestCase) -> models.QuerySet[Any]:
 
 def schedule_shape(**changes: object) -> Callable[[RequestCase], models.QuerySet[Any]]:
     def write(case: RequestCase) -> models.QuerySet[Any]:
-        schedule, _ = schedule_and_delivery(case)
-        rows = ReminderSchedule.objects.filter(pk=schedule.pk)
+        rows, _ = schedule_and_delivery(case)
         rows.update(**changes)
         return rows
 
@@ -326,8 +336,7 @@ def schedule_shape(**changes: object) -> Callable[[RequestCase], models.QuerySet
 
 def delivery_shape(**changes: object) -> Callable[[RequestCase], models.QuerySet[Any]]:
     def write(case: RequestCase) -> models.QuerySet[Any]:
-        _, delivery = schedule_and_delivery(case)
-        rows = NotificationDelivery.objects.filter(pk=delivery.pk)
+        _, rows = schedule_and_delivery(case)
         rows.update(**changes)
         return rows
 
@@ -429,11 +438,11 @@ def test_migrations_refuse_rows_no_writer_stores_and_change_nothing(
     kept = stored_rows(rows)
 
     with pytest.raises(ValueError, match=refusal):
-        forward()
+        migrate(*through_checks())
 
     assert installed(table) == set()
     assert stored_rows(rows) == kept
     rows.update(**correction)
-    forward()
+    migrate(*through_checks())
     assert installed(table) == NEW[table]
     assert broken_rules() == {}
