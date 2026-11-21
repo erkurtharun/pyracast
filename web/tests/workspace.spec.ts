@@ -1,6 +1,6 @@
 import type { Request } from "@playwright/test";
 import { test, expect, type Page } from "./support/test";
-import AxeBuilder from "@axe-core/playwright";
+import { accessibilityViolations } from "./support/accessibility";
 import { parseProduction } from "../src/lib/production";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
@@ -335,9 +335,9 @@ for (const staleRead of ["resolve", "reject"] as const) {
         }) => {
             await page.addInitScript(
                 ({ staleRead }) => {
-                    const read = File.prototype.text;
+                    const read = (file: File) => new Response(file).text();
                     File.prototype.text = function () {
-                        if (this.name !== "old.csv") return read.call(this);
+                        if (this.name !== "old.csv") return read(this);
                         return new Promise<string>((resolve, reject) => {
                             Object.assign(window, {
                                 releaseOldCsv: async () => {
@@ -345,7 +345,7 @@ for (const staleRead of ["resolve", "reject"] as const) {
                                         reject(
                                             new Error("Old file read failed."),
                                         );
-                                    else resolve(await read.call(this));
+                                    else resolve(await read(this));
                                 },
                             });
                         });
@@ -1156,7 +1156,7 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
     await page
         .getByRole("button", { name: "Download CSV", exact: true })
         .click();
-    const bytes = await readFile((await (await download).path())!);
+    const bytes = await readFile(await (await download).path());
     expect([...bytes.subarray(0, 3)]).toEqual([239, 187, 191]);
     const csv = bytes.toString("utf8");
     const parsed = Papa.parse<Record<string, string>>(csv, {
@@ -1275,10 +1275,8 @@ test("mock contract: visible API error, empty state and accessible mobile layout
             () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
     ).toBe(true);
-    const scan = await new AxeBuilder({ page })
-        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-        .analyze();
-    expect(scan.violations).toEqual([]);
+    const scan = await accessibilityViolations(page);
+    expect(scan).toEqual([]);
 });
 test("CSV rejects ambiguous units, offsets, overlaps, invalid energy and oversized batches", () => {
     const header = "starts_at,ends_at,energy,quality,source\n";
@@ -1406,10 +1404,8 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
     await expect(
         page.getByRole("cell", { name: "500", exact: true }),
     ).toBeVisible();
-    const scan = await new AxeBuilder({ page })
-        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-        .analyze();
-    expect(scan.violations).toEqual([]);
+    const scan = await accessibilityViolations(page);
+    expect(scan).toEqual([]);
 });
 async function openJournal(page: Page) {
     await page.goto("/app/");
@@ -1489,7 +1485,7 @@ test("performance hides stale CSV while a selected range is loading", async ({
         "performance-2026-11-01-2026-11-02.csv",
     );
     const records = Papa.parse<Record<string, string>>(
-        await readFile((await exported.path())!, "utf8"),
+        await readFile(await exported.path(), "utf8"),
         { header: true, skipEmptyLines: true },
     ).data;
     expect(records[0]).toMatchObject({
@@ -1590,7 +1586,7 @@ test("forecast performance shows archived metrics, missing days and selected ran
         .last()
         .click();
     const exported = Papa.parse<Record<string, string>>(
-        await readFile((await (await download).path())!, "utf8"),
+        await readFile(await (await download).path(), "utf8"),
         { header: true, skipEmptyLines: true },
     ).data;
     expect(exported).toHaveLength(2);
@@ -1674,7 +1670,7 @@ test("calibration detail explains support, rejection and incumbent comparison", 
         .getByRole("button", { name: "Download calibration details CSV" })
         .click();
     const exported = Papa.parse<Record<string, string>>(
-        await readFile((await (await download).path())!, "utf8"),
+        await readFile(await (await download).path(), "utf8"),
         { header: true, skipEmptyLines: true },
     ).data;
     expect(exported[0]).toMatchObject({
@@ -1845,10 +1841,8 @@ test("recycle bin disables expired records", async ({ page }) => {
             () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
     ).toBe(true);
-    const scan = await new AxeBuilder({ page })
-        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-        .analyze();
-    expect(scan.violations).toEqual([]);
+    const scan = await accessibilityViolations(page);
+    expect(scan).toEqual([]);
 });
 
 test("a failed reload after a restore keeps the remaining plants until a retry loads them", async ({

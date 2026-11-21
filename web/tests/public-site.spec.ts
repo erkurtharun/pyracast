@@ -1,5 +1,5 @@
-import AxeBuilder from "@axe-core/playwright";
 import { test, expect } from "./support/test";
+import { accessibilityViolations } from "./support/accessibility";
 
 const pages = [
     {
@@ -178,10 +178,8 @@ test("public pages meet accessibility checks at mobile and desktop sizes", async
         await page.setViewportSize({ width, height: 900 });
         for (const path of ["/", "/tr/privacy/", "/terms/"]) {
             await page.goto(path);
-            const results = await new AxeBuilder({ page })
-                .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
-                .analyze();
-            expect(results.violations).toEqual([]);
+            const results = await accessibilityViolations(page);
+            expect(results).toEqual([]);
         }
     }
 });

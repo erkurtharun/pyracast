@@ -8,7 +8,7 @@ import { displayMessage } from "@/lib/api/errors";
 import { deviceZone } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
-import { Field } from "@/ui/form";
+import { Field, formText } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import {
     PlantConfigurationFields,
@@ -34,9 +34,7 @@ export function PlantOnboarding({
         value == null || value === "" ? "" : format.number(Number(value), 6);
 
     const [step, setStep] = useState(existing ? 1 : 0);
-    const [review, setReview] = useState<Record<string, FormDataEntryValue>>(
-        {},
-    );
+    const [review, setReview] = useState<Record<string, string>>({});
     const [status, setStatus] = useState<
         | { kind: "idle" }
         | { kind: "saving" }
@@ -79,72 +77,84 @@ export function PlantOnboarding({
             </ol>
             <form
                 noValidate
-                onSubmit={async (event) => {
-                    event.preventDefault();
-                    const form = event.currentTarget;
-                    const section = form.querySelector(`[data-step="${step}"]`);
-                    const invalid = Array.from(
-                        section?.querySelectorAll<
-                            HTMLInputElement | HTMLSelectElement
-                        >("input, select") ?? [],
-                    ).find((field) => !field.checkValidity());
-                    if (invalid) {
-                        invalid.reportValidity();
-                        return;
-                    }
-                    const data = new FormData(form);
-                    if (step < 2) {
-                        setReview(Object.fromEntries(data));
-                        move(step + 1);
-                        return;
-                    }
-                    setStatus({ kind: "saving" });
-                    try {
-                        const body = configurationInput(data);
-                        const site = existing
-                            ? {
-                                  ...existing,
-                                  reminder: null,
-                                  plant: await api.post(
-                                      "/api/tenants/{tenant_id}/regions/{region_id}/plants/",
-                                      {
-                                          path: {
-                                              tenant_id: tenant,
-                                              region_id: existing.id,
+                onSubmit={(event) =>
+                    void (async () => {
+                        event.preventDefault();
+                        const form = event.currentTarget;
+                        const section = form.querySelector(
+                            `[data-step="${step}"]`,
+                        );
+                        const invalid = Array.from(
+                            section?.querySelectorAll<
+                                HTMLInputElement | HTMLSelectElement
+                            >("input, select") ?? [],
+                        ).find((field) => !field.checkValidity());
+                        if (invalid) {
+                            invalid.reportValidity();
+                            return;
+                        }
+                        const data = new FormData(form);
+                        if (step < 2) {
+                            setReview(
+                                Object.fromEntries(
+                                    [...data.keys()].map((key) => [
+                                        key,
+                                        formText(data, key),
+                                    ]),
+                                ),
+                            );
+                            move(step + 1);
+                            return;
+                        }
+                        setStatus({ kind: "saving" });
+                        try {
+                            const body = configurationInput(data);
+                            const site = existing
+                                ? {
+                                      ...existing,
+                                      reminder: null,
+                                      plant: await api.post(
+                                          "/api/tenants/{tenant_id}/regions/{region_id}/plants/",
+                                          {
+                                              path: {
+                                                  tenant_id: tenant,
+                                                  region_id: existing.id,
+                                              },
+                                              body,
                                           },
-                                          body,
+                                      ),
+                                  }
+                                : await api.post(
+                                      "/api/tenants/{tenant_id}/sites/",
+                                      {
+                                          path: { tenant_id: tenant },
+                                          body: {
+                                              ...body,
+                                              latitude: Number(
+                                                  data.get("latitude"),
+                                              ),
+                                              longitude: Number(
+                                                  data.get("longitude"),
+                                              ),
+                                              timezone: formText(
+                                                  data,
+                                                  "timezone",
+                                              ),
+                                          },
                                       },
-                                  ),
-                              }
-                            : await api.post(
-                                  "/api/tenants/{tenant_id}/sites/",
-                                  {
-                                      path: { tenant_id: tenant },
-                                      body: {
-                                          ...body,
-                                          latitude: Number(
-                                              data.get("latitude"),
-                                          ),
-                                          longitude: Number(
-                                              data.get("longitude"),
-                                          ),
-                                          timezone: String(
-                                              data.get("timezone") ?? "",
-                                          ),
-                                      },
-                                  },
-                              );
-                        onCreated(site);
-                    } catch (error) {
-                        setStatus({
-                            kind: "error",
-                            message: displayMessage(
-                                error,
-                                t("unableToSaveThisPlant"),
-                            ),
-                        });
-                    }
-                }}
+                                  );
+                            onCreated(site);
+                        } catch (error) {
+                            setStatus({
+                                kind: "error",
+                                message: displayMessage(
+                                    error,
+                                    t("unableToSaveThisPlant"),
+                                ),
+                            });
+                        }
+                    })()
+                }
             >
                 <fieldset disabled={status.kind === "saving"}>
                     <div data-step="0" hidden={step !== 0}>
@@ -200,11 +210,7 @@ export function PlantOnboarding({
                         <dl className="review-grid">
                             <div>
                                 <dt>{t("plant")}</dt>
-                                <dd>
-                                    {String(
-                                        review.name ?? existing?.name ?? "",
-                                    )}
-                                </dd>
+                                <dd>{review.name ?? existing?.name ?? ""}</dd>
                             </div>
                             <div>
                                 <dt>{t("location")}</dt>
@@ -224,11 +230,9 @@ export function PlantOnboarding({
                             <div>
                                 <dt>{t("timezone")}</dt>
                                 <dd>
-                                    {String(
-                                        review.timezone ??
-                                            existing?.timezone ??
-                                            "",
-                                    )}
+                                    {review.timezone ??
+                                        existing?.timezone ??
+                                        ""}
                                 </dd>
                             </div>
                             <div>

@@ -4,7 +4,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "@/lib/api/errors";
 import { authRequest, type AuthResult } from "@/lib/auth-api";
-import { loadSession, useSessionState } from "@/lib/session-client";
+import { loadSession, signOut, useSessionState } from "@/lib/session-client";
 import { isLanguage } from "@/i18n/language";
 import { publicPath } from "@/lib/public-metadata";
 import { addressWithout, appQuery, callbackParams, routes } from "@/lib/routes";
@@ -16,12 +16,15 @@ import { clearWorkspaceInvitation } from "@/features/workspace/workspace-invitat
 import { AuthFields } from "./steps/auth-fields";
 import { AuthStory } from "./steps/auth-story";
 import {
+    isPending,
     modeForPendingFlow,
     takePasswordChanged,
     type AuthMessage,
     type Mode,
+    type Refusal,
 } from "./steps/modes";
 import { ResendCode } from "./steps/resend-code";
+import { LeaveStage, RefusalStage, StageGuide } from "./steps/stage";
 import { submitAuth } from "./steps/submit";
 
 type ProviderCompletion = "signedIn" | "pending" | "refused";
@@ -66,23 +69,38 @@ export function Auth({
     const [socialError, setSocialError] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [codeSentAt, setCodeSentAt] = useState(0);
+    const [address, setAddress] = useState("");
+    const [refusal, setRefusal] = useState<Refusal | null>(null);
+    const headingRef = useRef<HTMLHeadingElement>(null);
+    const pending = isPending(mode);
+
+    useEffect(() => {
+        if (refusal) headingRef.current?.focus();
+    }, [refusal]);
+
+    function enter(next: Mode, notice: AuthMessage = "") {
+        setMode(next);
+        setMessage(notice);
+        setRefusal(null);
+    }
+
+    async function leave() {
+        await signOut();
+        setAddress("");
+        enter("login");
+    }
 
     async function finish(result: AuthResult) {
         if (result.meta?.is_authenticated) {
             await loadSession();
             return;
         }
-        const pending = modeForPendingFlow(result);
-        if (pending === "socialSignup") {
-            setMode("socialSignup");
-            setMessage("");
-        } else if (pending === "verify") {
-            setMode("verify");
-            setMessage("codeSent");
+        const next = modeForPendingFlow(result);
+        if (next === "socialSignup" || next === "mfa") {
+            enter(next);
+        } else if (next === "verify") {
+            enter("verify");
             setCodeSentAt(Date.now());
-        } else if (pending === "mfa") {
-            setMode("mfa");
-            setMessage("");
         } else {
             throw new ApiError(
                 result.errors?.map((error) => error.message).join(" ") ||
@@ -163,104 +181,131 @@ export function Auth({
                     aria-labelledby="auth-title"
                 >
                     <LanguageSelect />
-                    <nav className="auth-mode-nav" aria-label={t("access")}>
-                        <button
-                            type="button"
-                            aria-current={mode === "login" ? "page" : undefined}
-                            onClick={() => {
-                                setMode("login");
-                                setMessage("");
-                            }}
-                        >
-                            {t("signIn")}
-                        </button>
-                        <button
-                            type="button"
-                            aria-current={
-                                mode === "register" ? "page" : undefined
-                            }
-                            onClick={() => {
-                                setMode("register");
-                                setMessage("");
-                            }}
-                        >
-                            {t("createAccount")}
-                        </button>
-                    </nav>
-                    <h1 id="auth-title">{titles[mode]}</h1>
+                    {!pending && (
+                        <nav className="auth-mode-nav" aria-label={t("access")}>
+                            <button
+                                type="button"
+                                aria-current={
+                                    mode === "login" ? "page" : undefined
+                                }
+                                onClick={() => enter("login")}
+                            >
+                                {t("signIn")}
+                            </button>
+                            <button
+                                type="button"
+                                aria-current={
+                                    mode === "register" ? "page" : undefined
+                                }
+                                onClick={() => enter("register")}
+                            >
+                                {t("createAccount")}
+                            </button>
+                        </nav>
+                    )}
+                    <h1 id="auth-title" ref={headingRef} tabIndex={-1}>
+                        {pending && refusal
+                            ? t(`${refusal}.title`)
+                            : titles[mode]}
+                    </h1>
                     {ended && <Notice>{dashboard("sessionExpired")}</Notice>}
                     {socialError && (
                         <p className="notice error" role="alert">
                             {social("callbackError")}
                         </p>
                     )}
-                    {mode === "socialSignup" && <p>{social("signupHint")}</p>}
                     {(mode === "login" || mode === "register") && (
                         <SocialProviderButtons />
                     )}
                     {message && <p role="status">{t(message)}</p>}
-                    <ActionForm
-                        key={mode}
-                        permitted
-                        success={null}
-                        errorTitle={
-                            {
-                                login: t("signInFailed"),
-                                mfa: t("signInFailed"),
-                                register: t("registrationFailed"),
-                                socialSignup: t("registrationFailed"),
-                                verify: t("verificationFailed"),
-                                forgot: t("resetFailed"),
-                                reset: t("resetFailed"),
-                            }[mode]
-                        }
-                        submit={
-                            {
-                                login: t("signIn"),
-                                register: invitationToken
-                                    ? t("createAccount")
-                                    : t("createCompany"),
-                                verify: t("verifyEmail"),
-                                mfa: t("verifyCode"),
-                                forgot: t("sendReset"),
-                                reset: t("resetPassword"),
-                                socialSignup: social("completeSignup"),
-                            }[mode]
-                        }
-                        onSubmit={async (data) => {
-                            const payload = Object.fromEntries(data);
-                            if (
-                                (mode === "register" ||
-                                    mode === "socialSignup") &&
-                                invitationToken
-                            )
-                                payload.invitation_token = invitationToken;
-                            const step = await submitAuth(mode, payload, t);
-                            if ("result" in step) {
-                                await finish(step.result);
-                                return;
-                            }
-                            setMode(step.mode);
-                            setMessage(step.message);
-                        }}
-                    >
-                        <AuthFields
+                    {pending && refusal ? (
+                        <RefusalStage
+                            refusal={refusal}
                             mode={mode}
-                            invitationToken={invitationToken}
-                            socialEmail={socialEmail}
-                            showPassword={showPassword}
-                            onShowPassword={setShowPassword}
+                            onRetry={() => setRefusal(null)}
+                            onLeave={leave}
                         />
-                    </ActionForm>
-                    {mode === "verify" && (
-                        <ResendCode
-                            key={codeSentAt}
-                            sentAt={codeSentAt}
-                            onSent={() => {
-                                setCodeSentAt(Date.now());
-                                setMessage("codeRequested");
-                            }}
-                        />
+                    ) : (
+                        <>
+                            <StageGuide mode={mode} address={address} />
+                            <ActionForm
+                                key={mode}
+                                permitted
+                                success={null}
+                                errorTitle={
+                                    {
+                                        login: t("signInFailed"),
+                                        mfa: t("signInFailed"),
+                                        register: t("registrationFailed"),
+                                        socialSignup: t("registrationFailed"),
+                                        verify: t("verificationFailed"),
+                                        forgot: t("resetFailed"),
+                                        reset: t("resetFailed"),
+                                    }[mode]
+                                }
+                                submit={
+                                    {
+                                        login: t("signIn"),
+                                        register: invitationToken
+                                            ? t("createAccount")
+                                            : t("createCompany"),
+                                        verify: t("verifyEmail"),
+                                        mfa: t("verifyCode"),
+                                        forgot: t("sendReset"),
+                                        reset: t("resetPassword"),
+                                        socialSignup: social("completeSignup"),
+                                    }[mode]
+                                }
+                                onSubmit={async (data) => {
+                                    const payload = Object.fromEntries(data);
+                                    if (
+                                        (mode === "register" ||
+                                            mode === "socialSignup") &&
+                                        invitationToken
+                                    )
+                                        payload.invitation_token =
+                                            invitationToken;
+                                    if (typeof payload.email === "string")
+                                        setAddress(payload.email);
+                                    const step = await submitAuth(
+                                        mode,
+                                        payload,
+                                        t,
+                                    );
+                                    if ("refusal" in step) {
+                                        setMessage("");
+                                        setRefusal(step.refusal);
+                                        return;
+                                    }
+                                    if ("result" in step) {
+                                        await finish(step.result);
+                                        return;
+                                    }
+                                    enter(step.mode, step.message);
+                                }}
+                            >
+                                <AuthFields
+                                    mode={mode}
+                                    invitationToken={invitationToken}
+                                    socialEmail={socialEmail}
+                                    showPassword={showPassword}
+                                    onShowPassword={setShowPassword}
+                                />
+                            </ActionForm>
+                            {mode === "verify" && (
+                                <ResendCode
+                                    key={codeSentAt}
+                                    sentAt={codeSentAt}
+                                    onSent={() => {
+                                        setCodeSentAt(Date.now());
+                                        setMessage("codeRequested");
+                                    }}
+                                />
+                            )}
+                            {pending && (
+                                <LeaveStage mode={mode} onLeave={leave} />
+                            )}
+                        </>
                     )}
                     {invitationToken && (
                         <button
@@ -278,10 +323,7 @@ export function Auth({
                         <button
                             type="button"
                             className="text-button"
-                            onClick={() => {
-                                setMode("forgot");
-                                setMessage("");
-                            }}
+                            onClick={() => enter("forgot")}
                         >
                             {t("forgotPassword")}
                         </button>

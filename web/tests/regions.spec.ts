@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./support/test";
+import { accessibilityViolations } from "./support/accessibility";
 import { mockApi, paged, plant, region } from "./support/workspace";
-import AxeBuilder from "@axe-core/playwright";
 import { errorBody } from "./support/errors";
 
 test("renames a plant without changing its location", async ({ page }) => {
@@ -115,7 +115,7 @@ test("requests a location change and preserves the current location", async ({
             () => document.documentElement.scrollWidth <= innerWidth,
         ),
     ).toBe(true);
-    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(await accessibilityViolations(page)).toEqual([]);
 });
 
 test("a failed reload after a location request keeps the form until a retry shows the request", async ({

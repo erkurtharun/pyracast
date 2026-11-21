@@ -1,5 +1,5 @@
-import AxeBuilder from "@axe-core/playwright";
 import { test, expect, type Page } from "./support/test";
+import { accessibilityViolations } from "./support/accessibility";
 import { mockApi, user } from "./support/workspace";
 import { allauthErrorBody, errorBody } from "./support/errors";
 
@@ -303,6 +303,390 @@ async function pendingVerification(page: Page) {
         }),
     );
 }
+
+async function pendingStage(page: Page, flow: string) {
+    await mockApi(page, { anonymous: true });
+    await page.route("**/api/auth/browser/v1/auth/provider/signup", (route) =>
+        route.fulfill({ json: { status: 200, data: { email: [] } } }),
+    );
+    let ended = 0;
+    await page.route("**/api/auth/browser/v1/auth/session", (route) => {
+        if (route.request().method() === "DELETE") {
+            ended += 1;
+            return route.fulfill({
+                status: 401,
+                json: {
+                    status: 401,
+                    data: { flows: [{ id: "login" }] },
+                    meta: { is_authenticated: false },
+                },
+            });
+        }
+        return route.fulfill({
+            status: 401,
+            json: {
+                status: 401,
+                data: {
+                    flows: ended ? [] : [{ id: flow, is_pending: true }],
+                },
+                meta: { is_authenticated: false },
+            },
+        });
+    });
+    return { ended: () => ended };
+}
+
+test("the code stage names the address and leaving it ends the pending sign-up on the server", async ({
+    page,
+}) => {
+    const stage = await pendingStage(page, "login");
+    await page.route("**/api/auth/browser/v1/auth/signup", (route) =>
+        route.fulfill({
+            status: 401,
+            json: {
+                status: 401,
+                data: { flows: [{ id: "verify_email", is_pending: true }] },
+                meta: { is_authenticated: false },
+            },
+        }),
+    );
+    await page.goto("/app/?signup=1");
+    await expect(
+        page.getByLabel("Password", { exact: true }),
+    ).toHaveAccessibleDescription("Use at least 15 characters.");
+    await page.getByLabel("Company name").fill("Smart Solar Energy");
+    await page.getByLabel("Email").fill("owner@example.test");
+    await page
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await page
+        .getByRole("button", { name: "Create company account", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Verify your email", exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByText(
+            "We sent a code to owner@example.test. Enter it here to confirm the address.",
+        ),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("navigation", { name: "Account access" }),
+    ).toHaveCount(0);
+    await page
+        .getByRole("button", { name: "Use a different address", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Welcome back", exact: true }),
+    ).toBeVisible();
+    expect(stage.ended()).toBe(1);
+});
+
+for (const [flow, title, guide, leave] of [
+    [
+        "verify_email",
+        "Verify your email",
+        "We sent a code to the address you entered. Enter it here to confirm the address.",
+        "Use a different address",
+    ],
+    [
+        "mfa_authenticate",
+        "Two-factor authentication",
+        "Enter the code from your authenticator app, or one of your recovery codes.",
+        "Use a different account",
+    ],
+    [
+        "password_reset_by_code",
+        "Choose a new password",
+        "If an account uses the address you entered, we sent a code to it. Enter the code and choose a new password.",
+        "Cancel password reset",
+    ],
+    [
+        "provider_signup",
+        "Complete your account",
+        "Confirm your email and company to finish. If you already have an account, sign in first and connect this provider in Account settings.",
+        "Use another sign-in method",
+    ],
+] as const) {
+    test(`the pending ${flow} stage explains itself and its exit ends it on the server`, async ({
+        page,
+    }) => {
+        const stage = await pendingStage(page, flow);
+        await page.goto("/app/");
+        await expect(
+            page.getByRole("heading", { name: title, exact: true }),
+        ).toBeVisible();
+        await expect(page.getByText(guide, { exact: true })).toBeVisible();
+        await expect(
+            page.getByRole("navigation", { name: "Account access" }),
+        ).toHaveCount(0);
+        await page.getByRole("button", { name: leave, exact: true }).click();
+        await expect(
+            page.getByRole("heading", { name: "Welcome back", exact: true }),
+        ).toBeVisible();
+        expect(stage.ended()).toBe(1);
+        await expect(
+            page.getByRole("navigation", { name: "Account access" }),
+        ).toBeVisible();
+    });
+}
+
+test("a verification the server no longer holds shows an ended stage that starts again from sign-in", async ({
+    page,
+}) => {
+    const stage = await pendingStage(page, "verify_email");
+    await page.route("**/api/auth/browser/v1/auth/email/verify", (route) =>
+        route.fulfill({
+            status: 409,
+            json: allauthErrorBody(409, "conflict", [{ message: "Conflict." }]),
+        }),
+    );
+    await page.goto("/app/");
+    await page.getByLabel("Email code").fill("ABCD-EFGH");
+    await page
+        .getByRole("button", { name: "Verify email", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "This step has ended", exact: true }),
+    ).toBeFocused();
+    await expect(
+        page.getByText(
+            "The code can no longer be used here: it expired, it was used, or too many wrong codes were entered. Start again to get a new code.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+    await expect(page.getByLabel("Email code")).toHaveCount(0);
+    await expect(page.getByText("Conflict.")).toHaveCount(0);
+    await page
+        .getByRole("button", { name: "Start again", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Welcome back", exact: true }),
+    ).toBeVisible();
+    expect(stage.ended()).toBe(1);
+});
+
+test("a rate-limited verification shows a wait stage that returns to the code or leaves", async ({
+    page,
+}) => {
+    const stage = await pendingStage(page, "verify_email");
+    await page.route("**/api/auth/browser/v1/auth/email/verify", (route) =>
+        route.fulfill({
+            status: 429,
+            json: allauthErrorBody(429, "throttled", [
+                { message: "Too many requests." },
+            ]),
+        }),
+    );
+    await page.goto("/app/");
+    await page.getByLabel("Email code").fill("ABCD-EFGH");
+    await page
+        .getByRole("button", { name: "Verify email", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Too many attempts", exact: true }),
+    ).toBeFocused();
+    await expect(
+        page.getByText(
+            "Wait a few minutes, then try again. The step stays open until then.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(
+        page.getByRole("heading", { name: "Verify your email", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Email code")).toBeVisible();
+    expect(stage.ended()).toBe(0);
+    await page.getByLabel("Email code").fill("ABCD-EFGH");
+    await page
+        .getByRole("button", { name: "Verify email", exact: true })
+        .click();
+    await page
+        .getByRole("button", { name: "Use a different address", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Welcome back", exact: true }),
+    ).toBeVisible();
+    expect(stage.ended()).toBe(1);
+});
+
+for (const [status, code, title] of [
+    [409, "conflict", "This step has ended"],
+    [429, "throttled", "Too many attempts"],
+] as const) {
+    test(`a ${status} refusal after a resend replaces the resend notice`, async ({
+        page,
+    }) => {
+        await pendingStage(page, "verify_email");
+        await page.route(
+            "**/api/auth/browser/v1/auth/email/verify/resend",
+            (route) => route.fulfill({ json: { status: 200 } }),
+        );
+        await page.route("**/api/auth/browser/v1/auth/email/verify", (route) =>
+            route.fulfill({
+                status,
+                json: allauthErrorBody(status, code, [{ message: "Refused." }]),
+            }),
+        );
+        await page.goto("/app/");
+        await page
+            .getByRole("button", {
+                name: "Resend verification code",
+                exact: true,
+            })
+            .click();
+        await expect(page.getByText("A new code was requested.")).toBeVisible();
+        await page.getByLabel("Email code").fill("ABCD-EFGH");
+        await page
+            .getByRole("button", { name: "Verify email", exact: true })
+            .click();
+        await expect(
+            page.getByRole("heading", { name: title, exact: true }),
+        ).toBeFocused();
+        await expect(page.getByText("A new code was requested.")).toHaveCount(
+            0,
+        );
+    });
+}
+
+for (const [flow, field, value, submit] of [
+    [
+        "mfa_authenticate",
+        "Authenticator or recovery code",
+        "123456",
+        "Verify code",
+    ],
+    [
+        "provider_signup",
+        "Company name",
+        "Solar Company",
+        "Complete your account",
+    ],
+] as const) {
+    test(`an ended ${flow} stage does not speak of an emailed code`, async ({
+        page,
+    }) => {
+        await pendingStage(page, flow);
+        await page.route(
+            /\/api\/auth\/browser\/v1\/auth\/(2fa\/authenticate|provider\/signup)$/,
+            (route) =>
+                route.request().method() === "POST"
+                    ? route.fulfill({
+                          status: 409,
+                          json: allauthErrorBody(409, "conflict", [
+                              { message: "Conflict." },
+                          ]),
+                      })
+                    : route.fallback(),
+        );
+        await page.goto("/app/");
+        await page.getByLabel(field, { exact: true }).fill(value);
+        if (flow === "provider_signup")
+            await page.getByLabel("Email").fill("owner@example.test");
+        await page.getByRole("button", { name: submit, exact: true }).click();
+        await expect(
+            page.getByRole("heading", {
+                name: "This step has ended",
+                exact: true,
+            }),
+        ).toBeFocused();
+        await expect(
+            page.getByText(
+                "This step can no longer be completed. Start again from sign-in.",
+                { exact: true },
+            ),
+        ).toBeVisible();
+        await expect(
+            page.getByText("The code can no longer be used here"),
+        ).toHaveCount(0);
+    });
+}
+
+test("a resend offered again after a wait stage counts from the code that was sent", async ({
+    page,
+}) => {
+    await page.clock.install();
+    await mockApi(page, { anonymous: true });
+    await page.route("**/api/auth/browser/v1/auth/signup", (route) =>
+        route.fulfill({
+            status: 401,
+            json: {
+                status: 401,
+                data: { flows: [{ id: "verify_email", is_pending: true }] },
+                meta: { is_authenticated: false },
+            },
+        }),
+    );
+    await page.route("**/api/auth/browser/v1/auth/email/verify", (route) =>
+        route.fulfill({
+            status: 429,
+            json: allauthErrorBody(429, "throttled", [
+                { message: "Too many requests." },
+            ]),
+        }),
+    );
+    await page.goto("/app/?signup=1");
+    await page.getByLabel("Company name").fill("Solar Company");
+    await page.getByLabel("Email").fill("owner@example.test");
+    await page
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await page
+        .getByRole("button", { name: "Create company account", exact: true })
+        .click();
+    await expect(
+        page.getByRole("button", { name: "Resend code in 60 s", exact: true }),
+    ).toBeDisabled();
+    await page.clock.runFor(45_000);
+    await page.getByLabel("Email code").fill("ABCD-EFGH");
+    await page
+        .getByRole("button", { name: "Verify email", exact: true })
+        .click();
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(
+        page.getByRole("button", { name: "Resend code in 15 s", exact: true }),
+    ).toBeDisabled();
+    await page.clock.runFor(15_000);
+    await page.getByLabel("Email code").fill("ABCD-EFGH");
+    await page
+        .getByRole("button", { name: "Verify email", exact: true })
+        .click();
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(
+        page.getByRole("button", {
+            name: "Resend verification code",
+            exact: true,
+        }),
+    ).toBeEnabled();
+});
+
+test("a failed exit keeps the stage and says the sign-in was not ended", async ({
+    page,
+}) => {
+    await pendingStage(page, "mfa_authenticate");
+    await page.route("**/api/auth/browser/v1/auth/session", (route) =>
+        route.request().method() === "DELETE"
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", "Try again in a moment."),
+              })
+            : route.fallback(),
+    );
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: "Use a different account", exact: true })
+        .click();
+    const alert = page.getByRole("main").getByRole("alert");
+    await expect(alert).toContainText("The sign-in step was not ended");
+    await expect(alert).toContainText("Try again in a moment.");
+    await expect(
+        page.getByRole("heading", {
+            name: "Two-factor authentication",
+            exact: true,
+        }),
+    ).toBeVisible();
+});
 
 test("resend is disabled with a countdown after a code is sent", async ({
     page,
@@ -731,6 +1115,12 @@ test("a completed password reset returns to sign in", async ({ page }) => {
     await expect(
         page.getByRole("heading", { name: "Choose a new password" }),
     ).toBeVisible();
+    await expect(
+        page.getByText(
+            "If an account uses owner@example.test, we sent a code to it. Enter the code and choose a new password.",
+            { exact: true },
+        ),
+    ).toBeVisible();
     await page.getByLabel("Email code").fill("123456");
     await page
         .getByLabel("Password", { exact: true })
@@ -760,5 +1150,5 @@ test("account access reflows on a narrow screen without accessibility violations
             () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
     ).toBe(true);
-    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(await accessibilityViolations(page)).toEqual([]);
 });

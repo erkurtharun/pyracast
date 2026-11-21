@@ -43,7 +43,7 @@ function row(hour: number, fields: Partial<Interval> = {}): Interval {
         can_propose_revert: false,
         proposal_unavailable_reason: null,
         ...fields,
-    } as Interval;
+    };
 }
 
 const history = (intervals: Interval[]) => ({ intervals }) as History;

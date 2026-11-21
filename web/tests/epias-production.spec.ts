@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "./support/test";
 import { createHash } from "node:crypto";
+import { accessibilityViolations } from "./support/accessibility";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
-import AxeBuilder from "@axe-core/playwright";
 import { mockApi, paged, region, user, tenantRow } from "./support/workspace";
 import { errorBody } from "./support/errors";
 
@@ -295,7 +295,7 @@ test("actual production defaults to generation hours and full day restores every
     const download = page.waitForEvent("download");
     await page.getByRole("button", { name: "Download CSV" }).click();
     const records = Papa.parse<Record<string, string>>(
-        await readFile((await (await download).path())!, "utf8"),
+        await readFile(await (await download).path(), "utf8"),
         { header: true, skipEmptyLines: true },
     ).data;
     expect(records).toHaveLength(24);
@@ -1299,10 +1299,9 @@ test("source details keep the cached source with a retry when its refresh fails"
         .filter({ hasText: "Could not refresh" });
     await expect(failure).toContainText("Source details are busy.");
     await expect(details.getByText("G4-BOR-1 GES · Connected")).toBeVisible();
-    expect(
-        (await new AxeBuilder({ page }).include(".production-source").analyze())
-            .violations,
-    ).toEqual([]);
+    expect(await accessibilityViolations(page, ".production-source")).toEqual(
+        [],
+    );
     sourceFails = false;
     await failure
         .getByRole("button", { name: "Try again", exact: true })

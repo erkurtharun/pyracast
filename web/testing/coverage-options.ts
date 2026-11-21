@@ -65,7 +65,7 @@ export const coverageOptions: CoverageReportOptions = {
     all: {
         dir: "src",
         filter: authoredSource,
-        transformer: async (entry: V8CoverageEntry) => {
+        transformer: (entry: V8CoverageEntry) => {
             if (!entry.source) throw new Error(`Missing source: ${entry.url}`);
             const output = ts.transpileModule(entry.source, {
                 fileName: fileURLToPath(entry.url),
@@ -82,6 +82,7 @@ export const coverageOptions: CoverageReportOptions = {
             entry.source = output.outputText;
             entry.sourceMap = JSON.parse(output.sourceMapText);
             entry.sourceMap.sources = [entry.url];
+            return Promise.resolve();
         },
     },
 };

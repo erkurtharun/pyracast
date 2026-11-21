@@ -10,24 +10,30 @@ async function serveConsolePage(page: string) {
         ),
     );
     const posts: string[] = [];
-    const server = createServer(async (request, response) => {
-        if (request.method === "POST") {
-            let body = "";
-            for await (const chunk of request) body += chunk.toString();
-            posts.push(body);
-            await new Promise((resolve) => setTimeout(resolve, 500));
-            response.writeHead(303, { Location: "/admin/plants/7/" });
-            response.end();
-            return;
-        }
-        if (request.url === "/admin-workspace.js") {
-            response.setHeader("Content-Type", "application/javascript");
-            response.end(script);
-            return;
-        }
-        response.setHeader("Content-Type", "text/html");
-        response.end(page);
-    });
+    const server = createServer(
+        (request, response) =>
+            void (async () => {
+                if (request.method === "POST") {
+                    let body = "";
+                    for await (const chunk of request) body += chunk.toString();
+                    posts.push(body);
+                    await new Promise((resolve) => setTimeout(resolve, 500));
+                    response.writeHead(303, { Location: "/admin/plants/7/" });
+                    response.end();
+                    return;
+                }
+                if (request.url === "/admin-workspace.js") {
+                    response.setHeader(
+                        "Content-Type",
+                        "application/javascript",
+                    );
+                    response.end(script);
+                    return;
+                }
+                response.setHeader("Content-Type", "text/html");
+                response.end(page);
+            })(),
+    );
     await new Promise<void>((resolve) =>
         server.listen(0, "127.0.0.1", resolve),
     );

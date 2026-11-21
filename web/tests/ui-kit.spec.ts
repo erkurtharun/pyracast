@@ -1,12 +1,10 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "./support/test";
+import { accessibilityViolations } from "./support/accessibility";
 import { errorBody } from "./support/errors";
 import { mockApi, user } from "./support/workspace";
 
 async function scan(page: Page, selector: string) {
-    const { violations } = await new AxeBuilder({ page })
-        .include(selector)
-        .analyze();
+    const violations = await accessibilityViolations(page, selector);
     expect(violations).toEqual([]);
 }
 
@@ -150,9 +148,7 @@ test("a confirmation moved to another member focuses its safe choice again", asy
 async function membersPage(
     page: Page,
     invite: () => { status?: number; json: unknown },
-    { members = () => ({ status: 200 }) } = {} as {
-        members?: () => { status: number };
-    },
+    { members = () => ({ status: 200 }) } = {},
 ) {
     await mockApi(page);
     await page.route("**/api/tenants/1/members/", (route) => {

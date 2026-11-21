@@ -1,10 +1,10 @@
-import AxeBuilder from "@axe-core/playwright";
 import {
     parse,
     TYPE,
     type MessageFormatElement,
 } from "@formatjs/icu-messageformat-parser";
 import { test, expect, type Page } from "./support/test";
+import { accessibilityViolations } from "./support/accessibility";
 import { mockApi, user, region, plant, paged } from "./support/workspace";
 import { messages } from "../src/i18n/messages";
 import { parseProduction } from "../src/lib/production";
@@ -345,7 +345,7 @@ test("Turkish mobile navigation remains accessible without horizontal overflow",
             () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
     ).toBe(true);
-    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(await accessibilityViolations(page)).toEqual([]);
     await page.screenshot({
         path: testInfo.outputPath("turkish-mobile.png"),
         fullPage: true,

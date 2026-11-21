@@ -82,7 +82,7 @@ export function CalibrationAutomationPanel({
                         label={t("automatic_calibration_enabled")}
                         checked={data.enabled}
                         disabled={!canManage || disabled || pending}
-                        onChange={toggle}
+                        onChange={(enabled) => void toggle(enabled)}
                     />
                 )}
             </div>

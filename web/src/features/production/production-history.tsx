@@ -477,7 +477,7 @@ export function ProductionHistory({
                         scope={scope}
                         configuration={configuration}
                         timezone={timezone}
-                        onSaved={onSaved}
+                        onSaved={() => void onSaved()}
                     />
                 </details>
             )}

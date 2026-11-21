@@ -1,8 +1,8 @@
 import { expect, test, type Page } from "./support/test";
+import { accessibilityViolations } from "./support/accessibility";
 import { tenantRow } from "./support/workspace";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
-import AxeBuilder from "@axe-core/playwright";
 import { errorBody } from "./support/errors";
 
 test.use({ timezoneId: "Europe/Istanbul" });
@@ -11,7 +11,10 @@ async function workspace(
     page: Page,
     unknownImpact = false,
     configurationChanged = false,
-    { configured = true, role = "admin" as "admin" | "viewer" } = {},
+    {
+        configured = true,
+        role = "admin",
+    }: { configured?: boolean; role?: "admin" | "viewer" } = {},
 ) {
     const paged = (results: unknown[]) => ({
         results,
@@ -237,7 +240,7 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
         .click();
     const file = await (await download).path();
     const csv = Papa.parse<Record<string, string>>(
-        await readFile(file!, "utf8"),
+        await readFile(file, "utf8"),
         { header: true, skipEmptyLines: true },
     ).data;
     expect(csv).toHaveLength(3);
@@ -254,8 +257,8 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
     await expect(
         page.getByRole("heading", { name: "Inverter disconnected" }),
     ).toBeVisible();
-    const accessibility = await new AxeBuilder({ page }).analyze();
-    expect(accessibility.violations).toEqual([]);
+    const accessibility = await accessibilityViolations(page);
+    expect(accessibility).toEqual([]);
     await page
         .getByRole("button", { name: "Resolve outage", exact: true })
         .click();

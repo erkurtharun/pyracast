@@ -5,7 +5,7 @@ import { api } from "@/lib/api/client";
 import { useApiQuery, useRefresh } from "@/lib/api/query";
 import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
-import { ActionForm, AsyncButton, Field } from "@/ui/form";
+import { ActionForm, AsyncButton, Field, formText } from "@/ui/form";
 import { Resource } from "@/ui/resource";
 import { StatusTag } from "@/ui/vocabulary";
 
@@ -94,11 +94,13 @@ function LocationRequests({
                                                 longitude: Number(
                                                     data.get("longitude"),
                                                 ),
-                                                timezone: String(
-                                                    data.get("timezone") ?? "",
+                                                timezone: formText(
+                                                    data,
+                                                    "timezone",
                                                 ),
-                                                reason: String(
-                                                    data.get("reason") ?? "",
+                                                reason: formText(
+                                                    data,
+                                                    "reason",
                                                 ),
                                                 expected_revision:
                                                     region.revision,

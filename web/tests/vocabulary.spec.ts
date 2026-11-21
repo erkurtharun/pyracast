@@ -126,7 +126,7 @@ test("screens never show a generated enumeration value or map it to labels thems
                 !(member.flags & (ts.TypeFlags.Null | ts.TypeFlags.Undefined)),
         );
         return members.every((member) => member.isStringLiteral())
-            ? members.map((member) => (member as ts.StringLiteralType).value)
+            ? members.map((member) => member.value)
             : [];
     };
     const labelCall = (node: ts.Node | undefined) =>

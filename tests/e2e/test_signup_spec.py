@@ -11,7 +11,7 @@ from tests.support.browser import PASSWORD, Gateway, run_spec
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
 
-def test_a_new_company_signs_up_verifies_its_email_and_signs_out(
+def test_a_new_company_signs_up_leaves_a_password_reset_and_signs_in_again(
     web_gateway: Gateway, auth_mailbox: Path
 ) -> None:
     email = "signup@example.com"

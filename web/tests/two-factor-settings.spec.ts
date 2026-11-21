@@ -1,6 +1,6 @@
-import AxeBuilder from "@axe-core/playwright";
 import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "./support/test";
+import { accessibilityViolations } from "./support/accessibility";
 import jsQR from "jsqr";
 import { PNG } from "pngjs";
 import { mockApi, paged, user, tenantRow } from "./support/workspace";
@@ -340,9 +340,7 @@ test("MFA setup and recovery codes remain accessible on desktop and a 320px scre
                 () => document.documentElement.scrollWidth <= window.innerWidth,
             ),
         ).toBe(true);
-        expect((await new AxeBuilder({ page }).analyze()).violations).toEqual(
-            [],
-        );
+        expect(await accessibilityViolations(page)).toEqual([]);
         await page.screenshot({
             path: testInfo.outputPath(`mfa-setup-${width}.png`),
             fullPage: true,
@@ -356,7 +354,7 @@ test("MFA setup and recovery codes remain accessible on desktop and a 320px scre
             () => document.documentElement.scrollWidth <= window.innerWidth,
         ),
     ).toBe(true);
-    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(await accessibilityViolations(page)).toEqual([]);
     await page.screenshot({
         path: testInfo.outputPath("mfa-recovery-320.png"),
         fullPage: true,
@@ -612,9 +610,10 @@ test("recovery codes can be copied or downloaded without persisting them in brow
         Object.defineProperty(navigator, "clipboard", {
             configurable: true,
             value: {
-                writeText: async (text: string) => {
+                writeText: (text: string) => {
                     (window as Window & { copiedText?: string }).copiedText =
                         text;
+                    return Promise.resolve();
                 },
             },
         });
@@ -636,7 +635,7 @@ test("recovery codes can be copied or downloaded without persisting them in brow
         .click();
     const download = await downloading;
     expect(download.suggestedFilename()).toBe("pyracast-recovery-codes.txt");
-    expect(await readFile((await download.path())!, "utf8")).toBe(
+    expect(await readFile(await download.path(), "utf8")).toBe(
         "10000001\n10000002\n10000003\n",
     );
     expect(

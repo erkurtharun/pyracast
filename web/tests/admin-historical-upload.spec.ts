@@ -21,29 +21,38 @@ async function withUploadPage(
         ),
     );
     const requests: { pathname: string; body: string }[] = [];
-    const server = createServer(async (request, response) => {
-        if (request.method === "POST") {
-            let body = "";
-            for await (const chunk of request) body += chunk.toString();
-            requests.push({ pathname: request.url!, body });
-            if (request.url !== endpoint) {
-                response.writeHead(404, { "Content-Type": "text/html" });
-                response.end("<h1>Page not found</h1>");
-                return;
-            }
-            const { status, json } = answer(body);
-            response.writeHead(status, { "Content-Type": "application/json" });
-            response.end(JSON.stringify(json));
-            return;
-        }
-        if (request.url === "/admin-historical.js") {
-            response.setHeader("Content-Type", "application/javascript");
-            response.end(script);
-            return;
-        }
-        if (request.url === endpoint) {
-            response.setHeader("Content-Type", "text/html");
-            response.end(`<!doctype html><html lang="en"><title>Upload</title>
+    const server = createServer(
+        (request, response) =>
+            void (async () => {
+                if (request.method === "POST") {
+                    let body = "";
+                    for await (const chunk of request) body += chunk.toString();
+                    requests.push({ pathname: request.url!, body });
+                    if (request.url !== endpoint) {
+                        response.writeHead(404, {
+                            "Content-Type": "text/html",
+                        });
+                        response.end("<h1>Page not found</h1>");
+                        return;
+                    }
+                    const { status, json } = answer(body);
+                    response.writeHead(status, {
+                        "Content-Type": "application/json",
+                    });
+                    response.end(JSON.stringify(json));
+                    return;
+                }
+                if (request.url === "/admin-historical.js") {
+                    response.setHeader(
+                        "Content-Type",
+                        "application/javascript",
+                    );
+                    response.end(script);
+                    return;
+                }
+                if (request.url === endpoint) {
+                    response.setHeader("Content-Type", "text/html");
+                    response.end(`<!doctype html><html lang="en"><title>Upload</title>
               <form ${explicitAction ? `action="${endpoint}"` : ""} method="post" enctype="multipart/form-data" data-historical-upload
                 data-network-error="Request failed" data-saved="Historical data saved"
                 data-checking="Checking" data-saving="Saving" data-intervals="Intervals">
@@ -56,11 +65,12 @@ async function withUploadPage(
                   <button type="submit" name="action" value="save" data-save-button>Save</button>
                 </div><p role="status" data-upload-status></p>
               </form><script src="/admin-historical.js" defer></script></html>`);
-            return;
-        }
-        response.writeHead(404);
-        response.end();
-    });
+                    return;
+                }
+                response.writeHead(404);
+                response.end();
+            })(),
+    );
     await new Promise<void>((resolve) =>
         server.listen(0, "127.0.0.1", resolve),
     );

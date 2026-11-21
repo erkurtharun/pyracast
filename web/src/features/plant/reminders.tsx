@@ -10,7 +10,14 @@ import { MISSING } from "@/lib/format/number";
 import { useFormat } from "@/lib/format/use-format";
 import { isLanguage } from "@/i18n/language";
 import { useApiQuery, useRefresh } from "@/lib/api/query";
-import { ActionForm, AsyncButton, CheckboxField, Select } from "@/ui/form";
+import {
+    ActionForm,
+    AsyncButton,
+    CheckboxField,
+    Select,
+    formText,
+    formTexts,
+} from "@/ui/form";
 import { Resource } from "@/ui/resource";
 import { Empty, Notice } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
@@ -331,9 +338,8 @@ export function Reminders(props: ReminderProps) {
 }
 
 function entered(form: FormData, name: string) {
-    return form
-        .getAll(name)
-        .map((value) => String(value).trim())
+    return formTexts(form, name)
+        .map((value) => value.trim())
         .filter(Boolean);
 }
 
@@ -395,7 +401,7 @@ function ReminderSettings({ scope, region }: ReminderProps) {
                             key={form.generation}
                             submit={t("saveReminders")}
                             onSubmit={async (values) => {
-                                const language = String(values.get("language"));
+                                const language = formText(values, "language");
                                 try {
                                     resource.replace(
                                         await api.put(PATH, {

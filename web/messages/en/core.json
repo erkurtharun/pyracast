@@ -25,7 +25,6 @@
         "verifyCode": "Verify code",
         "sendReset": "Send reset code",
         "resetPassword": "Reset password",
-        "resetSent": "If an account exists for this address, a reset code will be sent.",
         "invalidReset": "This reset code is invalid or expired.",
         "resetDone": "Password reset. Sign in with your new password.",
         "verified": "Email verified. You can sign in now.",
@@ -48,7 +47,34 @@
         "signInFailed": "Sign-in failed",
         "registrationFailed": "The account was not created",
         "verificationFailed": "The email address was not verified",
-        "resetFailed": "The password was not reset"
+        "resetFailed": "The password was not reset",
+        "passwordHint": "Use at least 15 characters.",
+        "guide": {
+            "forgot": "Enter the email of your account. If an account uses it, we send a code to reset the password.",
+            "verify": "We sent a code to {address}. Enter it here to confirm the address.",
+            "verifyUnknown": "We sent a code to the address you entered. Enter it here to confirm the address.",
+            "reset": "If an account uses {address}, we sent a code to it. Enter the code and choose a new password.",
+            "resetUnknown": "If an account uses the address you entered, we sent a code to it. Enter the code and choose a new password.",
+            "mfa": "Enter the code from your authenticator app, or one of your recovery codes."
+        },
+        "leave": {
+            "verify": "Use a different address",
+            "mfa": "Use a different account",
+            "reset": "Cancel password reset",
+            "socialSignup": "Use another sign-in method"
+        },
+        "leaveFailed": "The sign-in step was not ended",
+        "ended": {
+            "title": "This step has ended",
+            "code": "The code can no longer be used here: it expired, it was used, or too many wrong codes were entered. Start again to get a new code.",
+            "step": "This step can no longer be completed. Start again from sign-in.",
+            "action": "Start again"
+        },
+        "limited": {
+            "title": "Too many attempts",
+            "text": "Wait a few minutes, then try again. The step stays open until then.",
+            "retry": "Try again"
+        }
     },
     "Security": {
         "sessionExpired": "Your session has expired. Please sign in again.",

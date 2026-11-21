@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "./support/test";
+import { accessibilityViolations } from "./support/accessibility";
 import { mockApi, paged, user } from "./support/workspace";
 import { nativeProductionHistory } from "./support/native-production";
-import AxeBuilder from "@axe-core/playwright";
 import { errorBody } from "./support/errors";
 
 const reading = {
@@ -535,9 +535,7 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
         path: testInfo.outputPath("inbox-admin-320.png"),
         fullPage: true,
     });
-    expect(
-        (await new AxeBuilder({ page }).include("main").analyze()).violations,
-    ).toEqual([]);
+    expect(await accessibilityViolations(page, "main")).toEqual([]);
     expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(320);
@@ -896,14 +894,9 @@ for (const removal of ["decision", "concurrent"] as const) {
         });
         await page.goto("/app/");
         await page.getByRole("button", { name: "Inbox", exact: true }).click();
-        const secondPage = page.waitForResponse(
-            (response) =>
-                response.url().includes("/change-requests/?") &&
-                response.url().includes("page=2"),
-        );
         await page.getByRole("button", { name: "Next", exact: true }).click();
         await expect(page.getByText("Page 2", { exact: true })).toBeVisible();
-        await secondPage;
+        await expect(page.getByRole("article")).toHaveCount(1);
         if (removal === "decision") {
             await page
                 .getByRole("button", { name: "Review details", exact: true })

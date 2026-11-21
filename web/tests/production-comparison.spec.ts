@@ -1,6 +1,6 @@
 import { expect, test } from "./support/test";
+import { accessibilityViolations } from "./support/accessibility";
 import { mockApi } from "./support/workspace";
-import AxeBuilder from "@axe-core/playwright";
 import { errorBody } from "./support/errors";
 
 test("available historical model days appear without empty grid rows", async ({
@@ -106,10 +106,8 @@ test("available historical model days appear without empty grid rows", async ({
     expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(320);
-    const scan = await new AxeBuilder({ page })
-        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
-        .analyze();
-    expect(scan.violations).toEqual([]);
+    const scan = await accessibilityViolations(page);
+    expect(scan).toEqual([]);
     await comparison.getByLabel("Previous-day cutoff").fill("09:30");
     await comparison.getByRole("button", { name: "Load performance" }).click();
     await expect

@@ -147,49 +147,51 @@ export function ProductionImport({
                 </p>
             </details>
             <form
-                onSubmit={async (event) => {
-                    event.preventDefault();
-                    if (confirming || previewRequest.status === "pending")
-                        return;
-                    if (!ready) {
-                        setPreviewRequest({
-                            status: "failed",
-                            error: t(
-                                "choose_and_validate_a_csv_before_importing",
-                            ),
-                        });
-                        return;
-                    }
-                    const current = ++sequence.current;
-                    setPreviewRequest({ status: "pending" });
-                    try {
-                        const preview = await api.post(
-                            "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/preview/",
-                            {
-                                path: scope,
-                                body: {
-                                    configuration_id: configuration,
-                                    unit,
-                                    observations: selection.observations,
-                                },
-                            },
-                        );
-                        if (current === sequence.current) {
-                            setSelection({
-                                ...selection,
-                                status: "preview",
-                                preview,
-                            });
-                            setPreviewRequest({ status: "idle" });
-                        }
-                    } catch (error) {
-                        if (current === sequence.current)
+                onSubmit={(event) =>
+                    void (async () => {
+                        event.preventDefault();
+                        if (confirming || previewRequest.status === "pending")
+                            return;
+                        if (!ready) {
                             setPreviewRequest({
                                 status: "failed",
-                                error: errorMessage(error),
+                                error: t(
+                                    "choose_and_validate_a_csv_before_importing",
+                                ),
                             });
-                    }
-                }}
+                            return;
+                        }
+                        const current = ++sequence.current;
+                        setPreviewRequest({ status: "pending" });
+                        try {
+                            const preview = await api.post(
+                                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/preview/",
+                                {
+                                    path: scope,
+                                    body: {
+                                        configuration_id: configuration,
+                                        unit,
+                                        observations: selection.observations,
+                                    },
+                                },
+                            );
+                            if (current === sequence.current) {
+                                setSelection({
+                                    ...selection,
+                                    status: "preview",
+                                    preview,
+                                });
+                                setPreviewRequest({ status: "idle" });
+                            }
+                        } catch (error) {
+                            if (current === sequence.current)
+                                setPreviewRequest({
+                                    status: "failed",
+                                    error: errorMessage(error),
+                                });
+                        }
+                    })()
+                }
             >
                 <fieldset
                     disabled={confirming || previewRequest.status === "pending"}

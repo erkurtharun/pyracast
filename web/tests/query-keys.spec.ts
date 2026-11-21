@@ -81,11 +81,12 @@ function json(body: unknown, status = 200) {
 
 function pages(...answers: unknown[]) {
     const urls: string[] = [];
-    globalThis.fetch = async (input) => {
-        urls.push(String(input));
+    globalThis.fetch = (input) => {
+        urls.push(input instanceof Request ? input.url : String(input));
         const answer = answers[urls.length - 1];
-        if (answer === undefined) throw new Error("No page is prepared.");
-        return json(answer);
+        if (answer === undefined)
+            return Promise.reject(new Error("No page is prepared."));
+        return Promise.resolve(json(answer));
     };
     return urls;
 }

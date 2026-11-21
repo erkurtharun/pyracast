@@ -70,7 +70,7 @@ export function PlantSite({
                     existing={site}
                     tenant={tenant.id}
                     onCancel={back}
-                    onCreated={() => refresh.workspace(tenant.id)}
+                    onCreated={() => void refresh.workspace(tenant.id)}
                 />
             ) : (
                 <Notice>{t("plantUnavailable")}</Notice>

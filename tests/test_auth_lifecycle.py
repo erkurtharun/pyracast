@@ -217,6 +217,54 @@ def test_password_reset_is_generic_session_bound_single_use_and_revokes_sessions
     )
 
 
+def pending_flows(client: Client) -> list[str]:
+    flows = client.get(AUTH + "auth/session").json()["data"]["flows"]
+    return [flow["id"] for flow in flows if flow.get("is_pending")]
+
+
+def start_signup(client: Client) -> tuple[str, dict[str, Any]]:
+    details = {"company_name": "Sunfield Energy", "email": "owner@example.com"}
+    submit(client, "auth/signup", {**details, "password": PASSWORD})
+    return "auth/email/verify", {"key": mailed_code()}
+
+
+def start_password_reset(client: Client) -> tuple[str, dict[str, Any]]:
+    submit(client, "auth/password/request", {"email": member().email})
+    return "auth/password/reset", {"key": mailed_code(), "password": PASSWORD + "new"}
+
+
+def start_second_factor(client: Client) -> tuple[str, dict[str, Any]]:
+    user = member()
+    secret = generate_totp_secret()
+    TOTP.activate(user, secret)
+    submit(client, "auth/login", {"email": user.email, "password": PASSWORD})
+    return "auth/2fa/authenticate", {"code": totp_code(secret, time.time())}
+
+
+@pytest.mark.parametrize(
+    ("start", "flow", "refusal"),
+    [
+        (start_signup, "verify_email", 409),
+        (start_password_reset, "password_reset_by_code", 409),
+        (start_second_factor, "mfa_authenticate", 401),
+    ],
+)
+def test_ending_the_session_ends_a_pending_sign_in_stage_on_the_server(
+    start: Any, flow: str, refusal: int
+) -> None:
+    client = Client(enforce_csrf_checks=True)
+    path, completion = start(client)
+    assert pending_flows(client) == [flow]
+
+    token = client.get("/api/session/").json()["csrf_token"]
+    assert client.delete(AUTH + "auth/session", HTTP_X_CSRFTOKEN=token).status_code == 401
+
+    assert pending_flows(client) == []
+    refused = submit(client, path, completion)
+    assert refused.status_code == refusal
+    assert client.get("/api/session/").json()["user"] is None
+
+
 def test_password_reset_requires_at_least_fifteen_characters() -> None:
     user = member()
     client = Client(enforce_csrf_checks=True)

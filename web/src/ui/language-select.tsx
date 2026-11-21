@@ -37,21 +37,23 @@ export function LanguageSelect() {
                     id={id}
                     value={locale}
                     disabled={state.status === "saving"}
-                    onChange={async (event) => {
-                        const language = event.target.value;
-                        if (!isLanguage(language)) return;
-                        setState({ status: "saving" });
-                        try {
-                            adoptSession(
-                                await api.post("/api/session/language/", {
-                                    body: { language },
-                                }),
-                            );
-                            setState({ status: "idle" });
-                        } catch {
-                            setState({ status: "error" });
-                        }
-                    }}
+                    onChange={(event) =>
+                        void (async () => {
+                            const language = event.target.value;
+                            if (!isLanguage(language)) return;
+                            setState({ status: "saving" });
+                            try {
+                                adoptSession(
+                                    await api.post("/api/session/language/", {
+                                        body: { language },
+                                    }),
+                                );
+                                setState({ status: "idle" });
+                            } catch {
+                                setState({ status: "error" });
+                            }
+                        })()
+                    }
                 >
                     <option value="en" lang="en">
                         English

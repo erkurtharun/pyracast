@@ -27,7 +27,7 @@ export function ForecastChart({
     const max = Math.max(
         1,
         ...rows.map((row) =>
-            typeof row[metric] === "number" ? row[metric]! : 0,
+            typeof row[metric] === "number" ? row[metric] : 0,
         ),
     );
     return (
@@ -90,7 +90,7 @@ export function ForecastChart({
                     >
                         <div
                             style={{
-                                height: `${typeof row[metric] === "number" ? (row[metric]! / max) * 100 : 0}%`,
+                                height: `${typeof row[metric] === "number" ? (row[metric] / max) * 100 : 0}%`,
                             }}
                         />
                         {scenario && (

@@ -164,7 +164,7 @@ export function ReauthenticationForm({
               : t("confirmPassword");
 
     return (
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={(event) => void handleSubmit(event)}>
             {error && (
                 <div
                     ref={errorRef}

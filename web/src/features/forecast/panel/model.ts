@@ -120,7 +120,7 @@ export function chartIntervals(
     if (showFullDay) return fullDayIntervals(rows, day.start, day.end);
     const positive = dataIntervalRange(
         rows,
-        (row) => typeof row[metric] === "number" && row[metric]! > 0,
+        (row) => typeof row[metric] === "number" && row[metric] > 0,
     );
     return positive.length
         ? positive
