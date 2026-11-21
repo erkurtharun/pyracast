@@ -274,9 +274,10 @@ def _forget_recipients(
     )
     _count(changes, ReminderRecipient.objects.filter(pk__in=entries).delete())
     _count(changes, ReminderRecipientTie.objects.filter(pk__in=ties).delete())
-    changes["notifications.ReminderSchedule"] += ReminderSchedule.objects.filter(
+    if revised := ReminderSchedule.objects.filter(
         pk__in={*entries.values(), *ties.values()}
-    ).update(revision=F("revision") + 1)
+    ).update(revision=F("revision") + 1):
+        changes["notifications.ReminderSchedule"] += revised
     delivered = _locked(
         _delivered(account_id, addresses).filter(delivery__schedule__region__in=regions)
     )
