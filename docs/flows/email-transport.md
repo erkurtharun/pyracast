@@ -1,16 +1,15 @@
 # Email transport: SMTP and Gmail backends
 
-Every outgoing mail is handed to one entry point, `pyracast.mail.send.send`, which opens the mailer `MAILERS["default"]` selected by `PYRACAST_EMAIL_BACKEND` at settings import. Only the notifications worker sends: account mail, workspace invitations and workspace event mail are stored as `OutboundMail` intents in the requesting transaction and sent by `pyracast.notifications.outbox`; reminders go through `pyracast.notifications.jobs`. The outcome is typed: accepted, `NotSentError` (known not sent, retryable), `PermanentlyNotSentError`, or `DeliveryUncertainError`, each with one `MailFailure` code. Reminders persist the code; an outbound mail ends `sent`, `failed`, `uncertain` or `skipped`, and an invitation mirrors it in `delivery_status`. Nothing verifies delivery after the fact.
+Every outgoing mail is handed to one entry point, `pyracast.mail.send.send`, which opens the mailer `MAILERS["default"]` selected by `PYRACAST_EMAIL_BACKEND` at settings import. Only the notifications worker sends: account mail, workspace invitations and workspace event mail are stored as `OutboundMail` intents in the requesting transaction and sent by `pyracast.notifications.outbox`; reminders go through `pyracast.notifications.jobs`. The outcome is typed: accepted, `NotSentError` (known not sent, retryable), `PermanentlyNotSentError`, or `DeliveryUncertainError`, each with one `MailFailure` code. Reminders persist the code; an outbound mail ends `sent`, `failed`, `uncertain` or `skipped`. Nothing verifies delivery after the fact.
 
 ## Entry points
 
-- Settings `src/pyracast/settings.py` (`_email_backend`, `MAILERS`, `DEFAULT_FROM_EMAIL`): `smtp` (default), `gmail`, or `console` (needs `PYRACAST_DEBUG=1`, otherwise `ImproperlyConfigured` at import). `PYRACAST_EMAIL_SSL=1` alone selects implicit TLS; a non-integer `PYRACAST_EMAIL_PORT` is `ImproperlyConfigured`. The Gmail sender is `PYRACAST_FROM_EMAIL`.
-- Package `src/pyracast/mail/`: entry point, outcome types, wire policy, SMTP and Gmail backends.
-- Intent writers (`pyracast.accounts.mail_intents`): `enqueue_mail` from `AccountAdapter.send_mail` (account mail; flow `account-mail-notifications`), `accounts.invitations.invite_workspace_member` (reached by `POST /api/tenants/{tenant_id}/invitations/`, its `resend` route and the console), `accounts.event_mail` and `purge_warning` (workspace event mail); `enqueue_lock_notice` for the sign-in pause notice.
-- Outbound mail worker: the dispatcher's notifications phase (`notifications.runtime.dispatch_notifications`) and its 2 s ticks between cycles run `publish_outbound_mail`, which ends expired intents and hands each due one to the actor `orchestration.kinds.OUTBOUND_MAIL` (`send_outbound_mail`, queue `notifications`, `max_retries=0`) at most once a minute; `deliver_outbound_mail` calls `outbox.send_outbound_mail`.
+- Settings `src/pyracast/settings.py` (`_email_backend`, `MAILERS`, `DEFAULT_FROM_EMAIL`): `smtp` (default), `gmail`, or `console` (needs `PYRACAST_DEBUG=1`, otherwise `ImproperlyConfigured` at import). `PYRACAST_EMAIL_SSL=1` alone selects implicit TLS. The Gmail sender is `PYRACAST_FROM_EMAIL`.
+- Intent writers (`pyracast.accounts.mail_intents`): `enqueue_mail` from `AccountAdapter.send_mail` (flow `account-mail-notifications`), `accounts.invitations.invite_workspace_member` (reached by `POST /api/tenants/{tenant_id}/invitations/`), `accounts.event_mail` and `purge_warning` (workspace event mail); `enqueue_lock_notice`.
+- Outbound mail worker: the dispatcher's notifications phase (`notifications.runtime.dispatch_notifications`) runs `publish_outbound_mail`, which ends expired intents and hands each due one to the actor `orchestration.kinds.OUTBOUND_MAIL` (queue `notifications`, `max_retries=0`); `deliver_outbound_mail` calls `outbox.send_outbound_mail`.
 - Reminder mail: actor `orchestration.kinds.REMINDER` (`send_forecast_reminder`) to `deliver_notification` to `process_notification` to `send(message, before_send=...)`.
-- Command `pyracast check_mail` (`accounts.management.commands.check_mail`): without arguments opens and closes the transport without sending; `--send-to ADDRESS` sends one reminder-shaped test mail (HTML, text and an XLSX attachment). Exit code per `MailFailure` (`docs/DEPLOYMENT.md`). `deploy/install-release.sh` runs the probe after a healthy release and prints a warning on failure.
-- Deploy check `pyracast.accounts.checks.check_authentication_mail_delivery` (`accounts.E001`), run by `check --deploy` in `deploy/install-release.sh` and `deploy/smoke.sh`. Outcomes are shown in `web/src/features/workspace/members/pending-invitations.tsx` (invitation failed or uncertain hint), on the admin Operations page ("Email delivery" table) and in the console list of outbound mail; the delivery health report counts overdue, failed and uncertain outbound mail.
+- Command `pyracast check_mail`: without arguments opens and closes the transport without sending; `--send-to ADDRESS` sends one reminder-shaped test mail. Exit code per `MailFailure` (`docs/DEPLOYMENT.md`). `deploy/install-release.sh` runs the probe after a healthy release.
+- Deploy check `pyracast.accounts.checks.check_authentication_mail_delivery` (`accounts.E001`), run by `check --deploy` in `deploy/install-release.sh` and `deploy/smoke.sh`. Outcomes are shown in `web/src/features/workspace/members/pending-invitations.tsx` (invitation failed or uncertain hint) and on the admin Operations page ("Email delivery" table).
 
 ## Sequence
 
@@ -51,15 +50,15 @@ sequenceDiagram
 
 | Table | R/W | What |
 |---|---|---|
-| `notifications_outboundmail` | R/W | Written by the request (`pending`); the worker leases it (`lease_token`, `lease_expires_at`, `attempts`), sets `transmit_started_at`, `status`, `last_error`, `finished_at` and erases `sealed_code` on every end. Ended intents are deleted 7 days after `finished_at` |
-| `accounts_workspaceinvitation` | W | `delivery_status` set to `sent`, `failed` or `uncertain` when the intent ends (default `pending`); the token digest is minted at send time |
-| `notifications_notificationdelivery` | R/W | Reminder only: `recipients`, `message_token` (stable `Message-ID`), `transmit_started_at`, `status`, `last_error`, `sent_at`, `available_at`, `attempts`, lease fields (owned by `reminder-delivery`) |
+| `notifications_outboundmail` | R/W | Written by the request (`pending`); the worker leases it, sets `attempts`, `transmit_started_at`, `status`, `last_error`, `finished_at` and erases `sealed_code` on every end. Ended intents are deleted 7 days after `finished_at` |
+| `accounts_workspaceinvitation` | W | `delivery_status` set to `sent`, `failed` or `uncertain` when the intent ends; the token digest is minted at send time |
+| `notifications_notificationdelivery` | R/W | Reminder only: `recipients`, `message_token` (stable `Message-ID`), `transmit_started_at`, `status`, `last_error`, `sent_at`, `attempts` (owned by `reminder-delivery`) |
 | `accounts_tenant`, `notifications_notificationsettings`, `regions_region` | R (row lock) | `_mark_transmit` locks them before writing a reminder's transmit marker |
 
 ## Authorization
 
-- The transport has no caller check: it sends whatever the caller built. Authorization is the caller's: `authorize_workspace_admin` in `invite_workspace_member`, allauth flows for account mail, and at send time the intent's own recheck (`compose_invitation` needs a pending invitation, event mail needs the row and a current member) and, for reminders, the tenant and region lock plus recipient recheck in `_mark_transmit`.
-- Gmail enforces one sender: `_send` refuses a message whose `From` differs from the `DEFAULT_FROM_EMAIL` address and the token response must carry exactly the `gmail.send` scope. Console backend is refused unless `DEBUG` is on.
+- The transport has no caller check: it sends whatever the caller built. Authorization is the caller's: `authorize_workspace_admin` in `invite_workspace_member`, allauth flows for account mail, and at send time the intent's own recheck (an invitation must still be pending, event mail needs a current member) and, for reminders, the tenant and region lock plus recipient recheck in `_mark_transmit`.
+- Gmail enforces one sender: `_send` refuses a message whose `From` differs from the `DEFAULT_FROM_EMAIL` address and the token response must carry exactly the `gmail.send` scope.
 
 ## Failure paths
 
@@ -76,25 +75,23 @@ sequenceDiagram
 | Gmail 401 / 429 or quota 403 / other 403 / other 4xx except 408 | `mail_credentials_rejected` / `mail_rate_limited` (both retryable) / `mail_sender_forbidden` / `mail_rejected` (both permanent) |
 | Gmail connect error; 408, 5xx, read or write timeout, 200 without message id | `NotSentError`; `DeliveryUncertainError` |
 | Message without recipient, or backend count other than 1 | `NotSentError` |
-| Outbound mail: known non-send / permanent refusal / uncertain | `retry` with backoff (at most 8 attempts, only before the intent expires, else `failed`) / `failed` at once / `uncertain`, never sent again and never reopened (a later definite refusal ends it `failed`) |
-| Outbound mail: unclassified exception before / after the transmit marker | `retry` with `mail_not_sent` / `uncertain` with `mail_outcome_uncertain`; warning `outbound_mail_send_failed` |
+| Outbound mail: known non-send / permanent refusal / uncertain | `retry` with backoff (at most 8 attempts, only before the intent expires, else `failed`) / `failed` at once / `uncertain`, never sent again and never reopened |
 | Outbound mail: worker lost before / after the transmit marker | After the lease ends: `retry` (`interrupted_connection`) / `uncertain` (`interrupted_send`) |
-| Outbound mail: expired intent, closed invitation, no account for a sign-in pause notice, reported row gone, recipient left the workspace, anonymous budget spent | `skipped` with `expired`, `invitation_unavailable`, `no_account`, `subject_unavailable`, `recipient_unavailable`, `budget_exhausted`; nothing sent |
-| Outbound mail ends `retry`, `failed` or `skipped` | Logged as `outbound_mail_retry` (warning), `outbound_mail_failed` (error, also for `uncertain`) and `outbound_mail_skipped` with kind, status and error code only |
-| Reminder: unclassified exception before / after the transmit marker | Retry with `mail_not_sent` / `uncertain` with `mail_outcome_uncertain`; error `notification_send_failed` with error type and origin |
-| Invitation intent ends `failed` or `uncertain` | `delivery_status` follows; the API answered 201 when it was stored; the administrator can reissue it at once |
+| Outbound mail: expired intent, closed invitation, no account for a sign-in pause notice, reported row gone, recipient left the workspace, anonymous budget spent | `skipped` with a reason code (`expired`, `invitation_unavailable`, `no_account` and others); nothing sent |
+| Outbound mail or reminder: unclassified exception before / after the transmit marker | Retry with `mail_not_sent` / `uncertain` with `mail_outcome_uncertain`; logged as `outbound_mail_send_failed` or `notification_send_failed` |
+| Invitation intent ends `failed` or `uncertain` | `delivery_status` follows; the API answered 201 when it was stored |
 
 ## Rules and invariants
 
-- `send` builds a fresh backend for every message, so no connection or OAuth token is shared between threads or messages; Gmail refreshes a token for every mail (two HTTP calls).
-- Wire bytes: CRLF line ends; `Content-Type` is never folded into encoded-words (RFC 2047 section 5); non-ASCII subjects use encoded-words of at most 75 characters and attachment names keep RFC 2231. SMTP sends an 8-bit body only to a server that advertises 8BITMIME and declares `BODY=8BITMIME`, else 7-bit transfer encodings. Reminders carry `Message-ID: <reminder.{message_token}@{sender domain}>`.
+- `send` builds a fresh backend for every message, so no connection or OAuth token is shared between threads or messages; Gmail refreshes a token for every mail.
+- Wire bytes: CRLF line ends; `Content-Type` is never folded into encoded-words; non-ASCII subjects use encoded-words of at most 75 characters and attachment names keep RFC 2231. SMTP sends an 8-bit body only to a server that advertises 8BITMIME, else 7-bit transfer encodings. Reminders carry `Message-ID: <reminder.{message_token}@{sender domain}>`.
 - Open-before-authorize: the connection is opened outside any database transaction, then `before_send` rechecks authority under a row lock, renders the message and writes `transmit_started_at`. After that marker an interruption is `uncertain` and never resent; an outbound mail is therefore sent at most once.
-- The mailer claims an intent with a lease and checks the lease and expiry again after the row lock, using the time read after it. Expired or taken-over leases record nothing.
+- The mailer claims an intent with a lease and checks the lease and expiry again after the row lock; expired or taken-over leases record nothing.
 - Reminder recipients travel as BCC: SMTP puts them in the envelope only, Gmail adds a `Bcc` header because it routes by headers.
-- Retry budget for known non-sends (outbound mail and reminders): at most 8 attempts, delay `30 * 2^attempts` seconds (attempts counted after the claim) capped at 1800 plus 0-30 s jitter; a reminder retries only while the retry time is before `scheduled_for + 2 hours`, an outbound mail while it is before `expires_at`. The delivery health check counts recent `failed` or `uncertain` reminders and `mail_credentials_rejected` or `mail_authorization_revoked` as mail authentication failures.
+- Retry budget for known non-sends (outbound mail and reminders): at most 8 attempts, delay `30 * 2^attempts` seconds capped at 1800 plus 0-30 s jitter; a reminder retries only while the retry time is before `scheduled_for + 2 hours`, an outbound mail while it is before `expires_at`.
 - All timeouts are 15 s (SMTP socket, httpx per operation). Requests never wait for a transport.
 
 ## Tests
 
-- `tests/test_mail_wire.py` (bytes on both transports through a loopback SMTP server and a recorded Gmail request: unfolded attachment type, encoded-word length, RFC 2231 name, 8BITMIME negotiation, `check_mail --send-to`), `tests/test_mail_outcomes.py` (outcome per error class and SMTP phase; reminder, invitation and account mail outcomes and their log lines), `tests/test_mail_configuration.py` (deploy check, settings parsing, `check_mail` exit codes), `tests/test_smtp_mail.py`, `tests/test_gmail_mail.py`, `tests/test_outbound_mail.py` (lease, retry bound, permanent refusal, crash and takeover, uncertain, expiry, concurrent workers, purge), `tests/test_account_mail_outbox.py`, `tests/test_account_mail_failures.py`, `tests/test_reminder_message_id.py`, `tests/test_notification_transmission.py`, `tests/test_environment.py`.
+- `tests/test_mail_wire.py` (bytes on both transports), `tests/test_mail_outcomes.py` (outcome per error class and SMTP phase), `tests/test_mail_configuration.py` (deploy check, `check_mail` exit codes), `tests/test_outbound_mail.py` (lease, retry bound, crash and takeover, uncertain, expiry), `tests/test_notification_transmission.py`.
 - Gaps: no live Gmail or provider SMTP; no Playwright test touches mail (browser tests mock the API).
