@@ -717,6 +717,20 @@ def test_a_plant_restored_after_its_accounts_revalidation_is_revalidated_by_the_
     assert due(system) is None
 
 
+def test_a_plant_restored_before_its_approval_queues_no_revalidation() -> None:
+    system = make_system(approved=True)
+    pending = second_plant(system, "Pending site", 31)
+    Region.objects.filter(pk=pending.region_id).update(status="pending", approved_binding=None)
+    trash_region(system.member, system.tenant.pk, pending.region_id)
+    replaced(system)
+    assert revalidate(system, adapters(FakeAdapter())) == RevalidationOutcome.DONE
+
+    restore(system, pending)
+
+    assert due(system) is None
+    assert revision(pending) == 1
+
+
 def test_a_plant_restored_while_a_run_holds_the_lease_is_taken_by_the_next_dispatch() -> None:
     system = make_system(approved=True)
     second = second_plant(system)

@@ -220,13 +220,9 @@ def queue_revalidation(binding_id: int, now: datetime) -> None:
     account's key and no run is due earlier. The caller holds the binding's region lock (lock
     order region, then account); a run holding the lease loses it, and the next dispatch takes
     the plant."""
-    account_id = (
-        SiteBinding.objects.filter(pk=binding_id)
-        .values_list("provider_account_id", flat=True)
-        .first()
+    account_id = SiteBinding.objects.values_list("provider_account_id", flat=True).get(
+        pk=binding_id
     )
-    if account_id is None:
-        return
     with transaction.atomic():
         account = ProviderAccount.objects.select_for_update().get(pk=account_id)
         if stale_bindings(account).filter(pk=binding_id).exists():
