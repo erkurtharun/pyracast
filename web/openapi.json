@@ -3640,13 +3640,12 @@
                 "operationId": "tenants_regions_plants_outages_list",
                 "parameters": [
                     {
-                        "name": "page",
-                        "required": false,
                         "in": "query",
-                        "description": "A page number within the paginated result set.",
+                        "name": "page",
                         "schema": {
                             "type": "integer"
-                        }
+                        },
+                        "description": "A page number within the paginated result set."
                     },
                     {
                         "in": "path",
@@ -3684,7 +3683,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/PaginatedIncidentListOutputList"
+                                    "$ref": "#/components/schemas/IncidentPage"
                                 }
                             }
                         },
@@ -7447,7 +7446,7 @@
                         "type": "string"
                     },
                     "current": {
-                        "$ref": "#/components/schemas/IncidentOutput"
+                        "$ref": "#/components/schemas/IncidentListOutput"
                     }
                 },
                 "required": ["code", "current", "message"]
@@ -7696,6 +7695,45 @@
                     "status",
                     "title",
                     "updated_at"
+                ]
+            },
+            "IncidentPage": {
+                "type": "object",
+                "properties": {
+                    "count": {
+                        "type": "integer"
+                    },
+                    "next": {
+                        "type": "string",
+                        "format": "uri",
+                        "nullable": true
+                    },
+                    "previous": {
+                        "type": "string",
+                        "format": "uri",
+                        "nullable": true
+                    },
+                    "can_propose": {
+                        "type": "boolean"
+                    },
+                    "proposal_unavailable_reason": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/IncidentListOutput"
+                        }
+                    }
+                },
+                "required": [
+                    "can_propose",
+                    "count",
+                    "next",
+                    "previous",
+                    "proposal_unavailable_reason",
+                    "results"
                 ]
             },
             "IncidentRequestInput": {
@@ -8547,34 +8585,6 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/ChangeRequestSummaryOutput"
-                        }
-                    }
-                }
-            },
-            "PaginatedIncidentListOutputList": {
-                "type": "object",
-                "required": ["count", "results"],
-                "properties": {
-                    "count": {
-                        "type": "integer",
-                        "example": 123
-                    },
-                    "next": {
-                        "type": "string",
-                        "nullable": true,
-                        "format": "uri",
-                        "example": "http://api.example.org/accounts/?page=4"
-                    },
-                    "previous": {
-                        "type": "string",
-                        "nullable": true,
-                        "format": "uri",
-                        "example": "http://api.example.org/accounts/?page=2"
-                    },
-                    "results": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/IncidentListOutput"
                         }
                     }
                 }

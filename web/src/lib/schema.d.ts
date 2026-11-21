@@ -1742,7 +1742,7 @@ export interface components {
         IncidentConflict: {
             code: components["schemas"]["ErrorCode"];
             message: string;
-            current: components["schemas"]["IncidentOutput"];
+            current: components["schemas"]["IncidentListOutput"];
         };
         IncidentInput: {
             kind: components["schemas"]["IncidentKindEnum"];
@@ -1815,6 +1815,16 @@ export interface components {
             readonly created_at: string;
             /** Format: date-time */
             readonly updated_at: string;
+        };
+        IncidentPage: {
+            count: number;
+            /** Format: uri */
+            next: string | null;
+            /** Format: uri */
+            previous: string | null;
+            can_propose: boolean;
+            proposal_unavailable_reason: string | null;
+            results: components["schemas"]["IncidentListOutput"][];
         };
         IncidentRequestInput: {
             action: components["schemas"]["IncidentChangeActionEnum"];
@@ -2205,21 +2215,6 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["ChangeRequestSummaryOutput"][];
-        };
-        PaginatedIncidentListOutputList: {
-            /** @example 123 */
-            count: number;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=4
-             */
-            next?: string | null;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=2
-             */
-            previous?: string | null;
-            results: components["schemas"]["IncidentListOutput"][];
         };
         PaginatedLocationChangeOutputList: {
             /** @example 123 */
@@ -5847,7 +5842,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedIncidentListOutputList"];
+                    "application/json": components["schemas"]["IncidentPage"];
                 };
             };
             /** @description Sign-in is required. */

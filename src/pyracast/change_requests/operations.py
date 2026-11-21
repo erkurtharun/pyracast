@@ -24,6 +24,7 @@ from pyracast.change_requests.models import (
 from pyracast.change_requests.policy import (
     is_author,
     is_unread,
+    outage_proposal_refusal,
     pending_limit_reached,
     request_for,
     unread_requests,
@@ -99,6 +100,14 @@ def _create(
         idempotency_key=key,
         payload_sha256=payload_hash,
     )
+
+
+def _refuse_outage_proposal(membership: Membership, plant: Plant) -> None:
+    refusal = outage_proposal_refusal(membership, plant)
+    if refusal == ErrorCode.PENDING_REQUEST_LIMIT:
+        raise ConflictError(refusal)
+    if refusal is not None:
+        raise DomainError(refusal)
 
 
 @transaction.atomic
@@ -199,6 +208,8 @@ def submit_incident(
     if previous is not None:
         return previous
     plant = lock_incident_plant(tenant_id, region_id, plant_id)
+    if action == IncidentChangeAction.CREATE:
+        _refuse_outage_proposal(membership, plant)
     prepared = prepare_incident_change(
         actor,
         plant,

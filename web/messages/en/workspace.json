@@ -175,6 +175,11 @@
     "Outages": {
         "plantOutages": "Plant outages",
         "configurationRequired": "Outages can be reported once the plant configuration is approved.",
+        "proposalUnavailable": "Outages cannot be submitted right now.",
+        "proposalReasons": {
+            "configuration_unavailable": "Outages can be reported once the plant configuration is approved.",
+            "pending_request_limit": "Too many of your requests for this plant await approval. Withdraw one or wait for a decision before submitting another outage."
+        },
         "capacityRequired": "Enter at least one available capacity, or choose unknown impact.",
         "capacityCeiling": "At most {value} MW, the configured capacity.",
         "reportOutage": "Report outage",

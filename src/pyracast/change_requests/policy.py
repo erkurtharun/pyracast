@@ -5,6 +5,7 @@ from django.db.models import Count, Q, QuerySet
 
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.change_requests.models import DECIDED, ChangeRequest, ChangeRequestStatus
+from pyracast.errors import ErrorCode
 from pyracast.plants.models import Plant, active_plant
 
 PENDING = Q(status=ChangeRequestStatus.PENDING)
@@ -89,6 +90,18 @@ def own_pending(membership: Membership, plant_id: int) -> QuerySet[ChangeRequest
 
 def pending_limit_reached(membership: Membership, plant: Plant) -> bool:
     return own_pending(membership, plant.pk).count() >= PENDING_LIMIT
+
+
+def outage_proposal_refusal(membership: Membership, plant: Plant) -> ErrorCode | None:
+    """Why the membership cannot propose a new outage on the plant; submission refuses with
+    this code and the outage list offers the proposal only when it is None."""
+    if membership.role != WorkspaceRole.VIEWER:
+        return ErrorCode.ADMIN_EDITS_DIRECTLY
+    if plant.current_configuration_id is None:
+        return ErrorCode.CONFIGURATION_UNAVAILABLE
+    if pending_limit_reached(membership, plant):
+        return ErrorCode.PENDING_REQUEST_LIMIT
+    return None
 
 
 def former_proposers(tenant_id: int, requests: Iterable[ChangeRequest]) -> set[int]:

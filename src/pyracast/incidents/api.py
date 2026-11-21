@@ -3,13 +3,13 @@ from contextlib import contextmanager
 from typing import Any, cast
 
 from django.contrib.auth.models import User
-from drf_spectacular.utils import extend_schema, extend_schema_field
+from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_field
 from rest_framework import serializers
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from pyracast.api.serializers import FiniteFloat, InputSerializer
-from pyracast.change_requests.queries import own_pending_outages
+from pyracast.change_requests.queries import outage_proposal, own_pending_outages
 from pyracast.errors import ConflictError, ErrorCode
 from pyracast.incidents import operations
 from pyracast.incidents.models import IncidentKind, IncidentStatus, PlantIncident
@@ -113,17 +113,34 @@ def current_on_conflict(actor: User, tenant_id: int) -> Iterator[None]:
         ) from error
 
 
+class IncidentPage(serializers.Serializer[dict[str, Any]]):
+    count = serializers.IntegerField()
+    next = serializers.URLField(allow_null=True)
+    previous = serializers.URLField(allow_null=True)
+    can_propose = serializers.BooleanField()
+    proposal_unavailable_reason = serializers.CharField(allow_null=True)
+    results = IncidentListOutput(many=True)
+
+
 class IncidentsView(ScopedView[PlantIncident]):
     serializer_class = IncidentOutput
 
-    @extend_schema(responses=IncidentListOutput(many=True))
+    @extend_schema(
+        operation_id="tenants_regions_plants_outages_list",
+        parameters=[
+            OpenApiParameter(
+                "page", int, description="A page number within the paginated result set."
+            )
+        ],
+        responses=IncidentPage,
+    )
     def get(self, request: Request, **_kwargs: Any) -> Response:
-        plant = self.plant()
+        plant, actor, tenant_id = self.plant(), cast(User, request.user), self.kwargs["tenant_id"]
         rows = PlantIncident.objects.filter(plant=plant).order_by("-starts_at", "-id")
         page = cast(list[PlantIncident], self.paginate_queryset(rows))
-        return self.get_paginated_response(
-            outage_rows(cast(User, request.user), self.kwargs["tenant_id"], plant.pk, page)
-        )
+        response = self.get_paginated_response(outage_rows(actor, tenant_id, plant.pk, page))
+        response.data.update(outage_proposal(actor, tenant_id, plant))
+        return response
 
     @extend_schema(request=IncidentInput, responses={201: IncidentOutput})
     def post(self, request: Request, **_kwargs: Any) -> Response:

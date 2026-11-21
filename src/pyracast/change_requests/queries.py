@@ -25,6 +25,7 @@ from pyracast.change_requests.policy import (
     former_proposers,
     inbox_requests,
     is_unread,
+    outage_proposal_refusal,
     own_pending,
     request_for,
     visible_requests,
@@ -38,6 +39,7 @@ from pyracast.change_requests.preparation import (
 from pyracast.errors import MESSAGES, ErrorCode
 from pyracast.incidents.models import IncidentRevision
 from pyracast.incidents.operations import lock_incident_plant
+from pyracast.plants.models import Plant
 
 # Submission accepts only 30 or 60 minute production intervals.
 LONGEST_PRODUCTION_ITEM = timedelta(hours=1)
@@ -243,6 +245,11 @@ def own_pending_outages(
         .order_by("request_id")
         .values_list("incident_id", "request_id")
     )
+
+
+def outage_proposal(actor: User, tenant_id: int, plant: Plant) -> dict[str, Any]:
+    refusal = outage_proposal_refusal(tenant_membership(actor, tenant_id), plant)
+    return {"can_propose": refusal is None, "proposal_unavailable_reason": refusal}
 
 
 def request_summary(actor: User, tenant_id: int, request: ChangeRequest) -> dict[str, Any]:
