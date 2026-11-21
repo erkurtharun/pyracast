@@ -1,8 +1,9 @@
 import { test, expect, type Page } from "./support/test";
-import { mockApi, region, user } from "./support/workspace";
+import { mockApi, paged, plant, region, user } from "./support/workspace";
 import type { components } from "../src/lib/schema";
 
 type Schedule = components["schemas"]["CollectionScheduleOutput"];
+type Region = components["schemas"]["RegionOutput"];
 type Language = "en" | "tr";
 
 const navigation = {
@@ -35,8 +36,18 @@ function schedule(overrides: Partial<Schedule>): Schedule {
     };
 }
 
-async function openCollection(page: Page, language: Language, data: Schedule) {
+async function openCollection(
+    page: Page,
+    language: Language,
+    data: Schedule,
+    status: Region["status"] = "approved",
+) {
     await mockApi(page);
+    await page.route(
+        (url) => url.pathname === "/api/tenants/1/regions/",
+        (route) =>
+            route.fulfill({ json: paged([{ ...region, status, plant }]) }),
+    );
     if (language === "tr")
         await page.route("**/api/session/", (route) =>
             route.fulfill({
@@ -98,14 +109,6 @@ const inactive = [
         label: "Duraklatıldı",
         sentence: "Bu santral için veri toplama kapalı.",
         next: "Planlanmadı",
-    },
-    {
-        language: "en",
-        state: "waiting_for_approval",
-        reason: "not_approved",
-        label: "Waiting for approval",
-        sentence: "Collection starts once the plant is approved.",
-        next: "Not scheduled",
     },
     {
         language: "tr",
@@ -175,4 +178,65 @@ for (const item of inactive)
                 )
                 .locator(".."),
         ).toContainText(item.next);
+    });
+
+const contact = (status: string) =>
+    `Plant status: ${status}. Contact Pyracast support at info@pyracast.app to resume collection.`;
+const plantStates = [
+    {
+        status: "pending",
+        state: "waiting_for_approval",
+        reason: "not_approved",
+        label: "Waiting for approval",
+        sentence:
+            "Awaiting administrator approval. Your plant details are saved; forecasts become available after the data connection is approved and collection succeeds.",
+    },
+    {
+        status: "suspended",
+        state: "paused",
+        reason: "not_approved",
+        label: "Paused",
+        sentence: contact("Suspended"),
+    },
+    {
+        status: "rejected",
+        state: "paused",
+        reason: "not_approved",
+        label: "Paused",
+        sentence: contact("Rejected"),
+    },
+    {
+        status: "approved",
+        state: "paused",
+        reason: "not_validated",
+        label: "Paused",
+        sentence:
+            "Collection starts once the provider connection is validated.",
+    },
+    {
+        status: "approved",
+        state: "collecting",
+        reason: null,
+        label: "Collecting",
+        sentence: null,
+    },
+] as const;
+
+for (const item of plantStates)
+    test(`one sentence says why collection is off: ${item.status} plant, ${item.state}`, async ({
+        page,
+    }) => {
+        const status = await openCollection(
+            page,
+            "en",
+            schedule({ state: item.state, inactive_reason: item.reason }),
+            item.status,
+        );
+
+        await expect(
+            status.getByText(item.label, { exact: true }),
+        ).toBeVisible();
+        const notices = page.locator(".notice");
+        if (item.sentence) await expect(notices).toHaveText([item.sentence]);
+        else await expect(notices).toHaveCount(0);
     });

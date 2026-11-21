@@ -9,7 +9,6 @@ import { DisplayError } from "@/lib/api/errors";
 import { useFormat } from "@/lib/format/use-format";
 import { ActionForm, CheckboxField } from "@/ui/form";
 import { Resource } from "@/ui/resource";
-import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import { CollectionStatus } from "./collection-status";
 
@@ -115,9 +114,6 @@ function ScheduleEditor({
                         defaultChecked={data.enabled}
                         disabled={region.status !== "approved"}
                     />
-                    {region.status !== "approved" && (
-                        <Notice>{t("approvalRequired")}</Notice>
-                    )}
                     <p>{t("collectionTimes")}</p>
                     {times.map((time, index) => (
                         <div className="button-group" key={index}>
@@ -172,7 +168,7 @@ function ScheduleEditor({
                     </details>
                 </ActionForm>
             </section>
-            <CollectionStatus data={data} />
+            <CollectionStatus data={data} region={region} />
             {data.recent_jobs?.length > 0 && (
                 <details className="panel">
                     <summary>{t("recentCollectionJobs")}</summary>
