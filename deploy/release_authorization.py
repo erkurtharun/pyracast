@@ -517,7 +517,7 @@ def _authorize(facts_path: Path, environ: Mapping[str, str], root: Path) -> int:
 def _runner_file(
     parser: argparse.ArgumentParser, runner_temp: str | None, requested: Path, name: str
 ) -> Path:
-    if runner_temp is None:
+    if not runner_temp:
         parser.error("RUNNER_TEMP is required")
     expected = Path(runner_temp) / name
     if requested != expected:
