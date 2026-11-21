@@ -181,7 +181,8 @@ export function Portfolio() {
                                     )}
                                     <div className="region-card-bottom">
                                         <span>
-                                            {site.plant
+                                            {site.plant ||
+                                            site.edit_blocked_reason
                                                 ? t("openPlant")
                                                 : canManage
                                                   ? t("completeSetup")

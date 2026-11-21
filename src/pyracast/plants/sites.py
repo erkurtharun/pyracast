@@ -31,13 +31,17 @@ class Site:
 
     @property
     def attention(self) -> SiteAttention | None:
-        """The one reason a customer acts on first, from stored rows only."""
+        """The one reason a customer acts on first, from stored rows only: a block, which no
+        customer edit lifts, then a missing plant, then a rejection. A rejected location
+        without a plant stays incomplete: it needs its plant before it can be resubmitted."""
+        block = self.edit_blocked_reason
+        if block is not None:
+            return SiteAttention(block.value)
         if self.plant is None:
             return SiteAttention.SETUP_INCOMPLETE
         if self.region.status == RegionStatus.REJECTED:
             return SiteAttention.REVIEW_REJECTED
-        block = self.edit_blocked_reason
-        return None if block is None else SiteAttention(block.value)
+        return None
 
 
 def site_queryset(tenant_id: int) -> QuerySet[Region]:
