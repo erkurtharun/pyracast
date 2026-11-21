@@ -49,7 +49,6 @@ class RequestDeferredError(QuotaExceededError):
 
 
 def deferral(account: ProviderAccount, now: datetime) -> RequestDeferredError | None:
-    """Why the provider takes no request of the account now: a rejected key or its delay."""
     if account.authentication_failed_revision == account.credential_revision:
         return RequestDeferredError(None)
     if account.request_blocked_until is not None and account.request_blocked_until > now:

@@ -75,7 +75,6 @@ class Check:
     key: str
     scope: Scope
     condition: Callable[[Window], Q]
-    # An informational check never makes the report unhealthy.
     alarm: bool = True
     # Counted once per provider account, listed for every plant on the account.
     per_account: bool = False

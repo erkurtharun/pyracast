@@ -15,6 +15,12 @@ from pyracast.notifications.models import (
     ReminderSchedule,
 )
 from pyracast.notifications.scheduler import PREPARATION_GRACE
+from pyracast.plants.models import (
+    CalibrationError,
+    CalibrationRun,
+    CalibrationStatus,
+    PlantConfiguration,
+)
 from tests.support.api import verified_admin
 from tests.support.delivery_health import NOW
 from tests.support.metering import connected
@@ -26,6 +32,8 @@ VOCABULARIES: tuple[type[TextChoices], ...] = (
     EpiasJobError,
     NotificationDeliveryStatus,
     NotificationDeliveryError,
+    CalibrationStatus,
+    CalibrationError,
 )
 
 
@@ -49,8 +57,22 @@ def test_every_console_job_status_and_error_has_a_turkish_label(
 def test_the_operations_tables_label_statuses_and_errors_in_turkish(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    system, _, _ = connected(monkeypatch)
+    system, plant, _ = connected(monkeypatch)
     monkeypatch.setattr(timezone, "now", lambda: NOW)
+    for status, error in (("superseded", ""), ("failed", "attempt_limit")):
+        CalibrationRun.objects.create(
+            plant=plant,
+            configuration=PlantConfiguration.objects.get(plant=plant),
+            binding=system.binding,
+            requested_by=system.member,
+            window_start=NOW.date() - timedelta(days=7),
+            window_end=NOW.date() - timedelta(days=1),
+            cutoff_at=NOW - timedelta(days=1),
+            status=status,
+            attempts=3,
+            last_error=error,
+            completed_at=NOW,
+        )
     monkeypatch.setattr("pyracast.background.broker.make_broker", unreachable)
     CollectionJob.objects.filter(binding=system.binding).update(
         status="retry", last_error="provider_unreachable", scheduled_for=NOW
@@ -80,11 +102,15 @@ def test_the_operations_tables_label_statuses_and_errors_in_turkish(
         "EPİAŞ kimlik bilgileri reddedildi",
         "İptal edildi",
         "Ayar değişikliğiyle iptal edildi",
+        "Yerini yenisi ald\u0131",
+        "Deneme s\u0131n\u0131r\u0131na ulaş\u0131ld\u0131",
     ):
         assert turkish in content, turkish
     for english in (
         "Provider unreachable",
         "Epias credentials rejected",
         "Cancelled by settings change",
+        "Superseded",
+        "Attempt limit reached",
     ):
         assert english not in content, english
