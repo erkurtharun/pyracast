@@ -7,15 +7,17 @@ import pytest
 from allauth.account.internal.flows import reauthentication
 from allauth.account.internal.flows.login import AUTHENTICATION_METHODS_SESSION_KEY
 from allauth.account.models import EmailAddress
+from allauth.core.exceptions import ReauthenticationRequired
 from allauth.mfa import signals as mfa_signals
 from allauth.mfa.models import Authenticator
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal.auth import generate_totp_secret
 from django.contrib.auth.models import User
 from django.contrib.sessions.backends.db import SessionStore
-from django.test import Client, override_settings
+from django.test import Client, RequestFactory, override_settings
 
 from pyracast.accounts import middleware, processes, security, sessions
+from pyracast.accounts.mfa_views import ManageTOTPView
 from tests.support.account_sessions import account, session_key, signed_in, totp_clock
 from tests.support.auth_lifecycle import AUTH, PASSWORD, submit, totp_code
 from tests.support.step_up import holds_current_authority
@@ -219,3 +221,15 @@ def test_only_the_session_that_made_a_change_keeps_its_authority() -> None:
     refused = submit(this, "account/password/change", change)
     assert refused.status_code == 401
     assert User.objects.get(pk=user.pk).check_password(PASSWORD)
+
+
+def test_the_activation_handler_refuses_a_request_without_a_judged_confirmation() -> None:
+    user = account("owner")
+    request = RequestFactory().post("/")
+    request.user = user
+    view = ManageTOTPView()
+
+    with pytest.raises(ReauthenticationRequired):
+        view.post(request)
+
+    assert not Authenticator.objects.filter(user=user).exists()
