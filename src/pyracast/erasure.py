@@ -413,15 +413,16 @@ def _erase(account_id: int) -> Erasure:
         )
     ).values("pk")
     # Workspaces before their regions, the order of administrator changes, member removals
-    # and reminder writers: an administrator assignment that commits first is seen below.
-    _locked(
+    # and reminder writers: an administrator assignment that commits first is seen below. A
+    # region is locked only with its workspace.
+    workspaces = _locked(
         Tenant.objects.filter(
             Q(pk__in=Membership.objects.filter(user_id=account_id).values("tenant_id"))
             | Q(pk__in=Region.objects.filter(pk__in=regions).values("tenant_id"))
         )
     )
     _refuse_administrator(account_id)
-    locked_regions = _locked(Region.objects.filter(pk__in=regions))
+    locked_regions = _locked(Region.objects.filter(pk__in=regions, tenant_id__in=list(workspaces)))
     changes: Counter[str] = Counter()
     _forget_recipients(account_id, addresses, list(locked_regions), changes)
     _forget_mail(account_id, addresses, changes)
