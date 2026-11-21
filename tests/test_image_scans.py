@@ -225,8 +225,7 @@ def test_an_exception_no_longer_reported_must_be_removed(reports: Path) -> None:
     assert review.problems == [
         "Image scan exception backend: CVE-2026-124709 in libssl3t64 is no longer reported; "
         "remove it.",
-        "Image scan exception web: CVE-2026-124709 in libssl3t64 is no longer reported; "
-        "remove it.",
+        "Image scan exception web: CVE-2026-124709 in libssl3t64 is no longer reported; remove it.",
     ]
 
 
@@ -330,7 +329,8 @@ def test_main_passes_accepted_findings_and_shows_them_with_their_end_date(
     check_image_scans.main()
 
     assert capsys.readouterr().out.splitlines() == [
-        f"backend: CVE-2026-124709 in libssl3t64 3.5.7-1~deb13u3 (backend) accepted until {expires}",
+        "backend: CVE-2026-124709 in libssl3t64 3.5.7-1~deb13u3 (backend) accepted until "
+        f"{expires}",
         f"web: CVE-2026-124709 in libssl3t64 3.5.7-1~deb13u3 (web) accepted until {expires}",
         "backend: HIGH/CRITICAL=1, accepted=1",
         "web: HIGH/CRITICAL=1, accepted=1",
@@ -377,9 +377,7 @@ def test_main_shows_accepted_findings_and_fails_on_an_expired_or_unneeded_except
     ]
 
 
-@pytest.mark.parametrize(
-    "text", [None, "not json", "{}", json.dumps([{**entry(), "reason": 1}])]
-)
+@pytest.mark.parametrize("text", [None, "not json", "{}", json.dumps([{**entry(), "reason": 1}])])
 def test_main_fails_without_a_readable_well_formed_exceptions_file(
     reports: Path, exceptions_file: Path, monkeypatch: pytest.MonkeyPatch, text: str | None
 ) -> None:

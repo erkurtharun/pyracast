@@ -108,7 +108,10 @@ docker build --target lockfiles --output type=local,dest=deploy/gateway deploy/g
 CI scans the exact backend, web, gateway, RabbitMQ and PostgreSQL images before
 merge, and Release scans them again from the verified archives before any cloud
 credential exists. All HIGH/CRITICAL findings block deployment, including unfixed
-findings; there are no vulnerability exceptions. Every scan must also carry a package
+findings, unless an entry of `deploy/image-scan-exceptions.json`, added by a reviewed
+change, accepts that vulnerability in that package of that one service with a reason and an
+end date. The gate prints every accepted finding with its end date; an expired, reasonless or
+no longer needed entry fails it. Every scan must also carry a package
 inventory and match the selected immutable image identity. Scan results reflect the
 vulnerability database at verification time.
 
