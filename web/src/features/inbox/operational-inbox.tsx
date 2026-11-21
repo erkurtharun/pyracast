@@ -213,7 +213,7 @@ function InboxPage({
     tenantId: number;
     scope: Scope;
     page: number;
-    onChanged: (action: Decision) => void;
+    onChanged: (action: Decision | null) => void;
     onPage: (page: number) => void;
 }) {
     const t = useTranslations("ChangeRequests");
@@ -368,7 +368,7 @@ function RequestDetail({
 }: {
     id: number;
     tenantId: number;
-    onChanged: (action: Decision) => void;
+    onChanged: (action: Decision | null) => void;
 }) {
     const t = useTranslations("ChangeRequests");
     const errorMessage = useErrorMessage();
@@ -384,11 +384,27 @@ function RequestDetail({
         null,
     );
     const heading = useRef<HTMLHeadingElement>(null);
+    const receipt = useRef(false);
     const item = resource.data;
     const reviewBlocked = item !== undefined && blockedContext === item;
     useEffect(() => {
         heading.current?.focus();
     }, []);
+    useEffect(() => {
+        if (!item?.unread || item.status === "pending" || receipt.current)
+            return;
+        // Opening one's own decision is the read receipt; a failed post leaves the manual button.
+        receipt.current = true;
+        api.post(
+            "/api/tenants/{tenant_id}/change-requests/{request_id}/seen/",
+            {
+                path: { tenant_id: tenantId, request_id: id },
+            },
+        ).then(
+            () => onChanged(null),
+            () => {},
+        );
+    }, [item, tenantId, id, onChanged]);
     async function act(action: Decision, run: () => Promise<unknown>) {
         if (state.status === "pending") return;
         setState({ status: "pending" });

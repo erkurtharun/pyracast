@@ -720,7 +720,7 @@ function decidedOwnRequest() {
     };
 }
 
-async function memberWithOutcome(page: Page, seen: () => Promise<number>) {
+async function memberWithOutcome(page: Page, seen: () => number) {
     await member(page);
     let outcome = decidedOwnRequest();
     let unread = 1;
@@ -742,7 +742,7 @@ async function memberWithOutcome(page: Page, seen: () => Promise<number>) {
     );
     await page.route("**/change-requests/2/seen/", async (route) => {
         expect(route.request().method()).toBe("POST");
-        const status = await seen();
+        const status = seen();
         if (status === 200) {
             outcome = { ...outcome, unread: false };
             unread = 0;
@@ -759,7 +759,7 @@ test("opening one's own decided request marks it read once", async ({
     page,
 }) => {
     let posts = 0;
-    await memberWithOutcome(page, async () => {
+    await memberWithOutcome(page, () => {
         posts++;
         return 200;
     });
@@ -790,7 +790,7 @@ test("a failed read receipt keeps the decided request readable", async ({
     page,
 }) => {
     let posts = 0;
-    await memberWithOutcome(page, async () => {
+    await memberWithOutcome(page, () => {
         posts++;
         return 500;
     });
