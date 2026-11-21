@@ -87,8 +87,10 @@ def _create(
     reason: str,
     key: UUID,
     payload_hash: str,
+    *,
+    limit_checked: bool = False,
 ) -> ChangeRequest:
-    if pending_limit_reached(membership, plant):
+    if not limit_checked and pending_limit_reached(membership, plant):
         raise ConflictError(ErrorCode.PENDING_REQUEST_LIMIT)
     return ChangeRequest.objects.create(
         plant=plant,
@@ -208,7 +210,8 @@ def submit_incident(
     if previous is not None:
         return previous
     plant = lock_incident_plant(tenant_id, region_id, plant_id)
-    if action == IncidentChangeAction.CREATE:
+    creating = action == IncidentChangeAction.CREATE
+    if creating:
         _refuse_outage_proposal(membership, plant)
     prepared = prepare_incident_change(
         actor,
@@ -227,6 +230,7 @@ def submit_incident(
         reason,
         idempotency_key,
         payload_hash,
+        limit_checked=creating,
     )
     IncidentChange.objects.create(
         request=request,
