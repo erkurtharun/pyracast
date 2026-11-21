@@ -3,11 +3,10 @@ from datetime import UTC, date, datetime, timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Exists, OuterRef
 
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts.budget import remaining_forecast_requests
+from pyracast.forecasts.budget import forecast_starts, remaining_forecast_requests, started_jobs
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -69,20 +68,9 @@ def _admit_forecast(
     )
     if timing is None:
         raise ScheduleDisabledError
-    if job.pk == timing.first_job_id or RequestAttempt.objects.filter(job=job).exists():
+    if job.pk in started_jobs(timing, [job.pk]):
         return
-    earlier = RequestAttempt.objects.filter(job_id=OuterRef("job_id"), utc_day__lt=utc_day)
-    started = (
-        RequestAttempt.objects.filter(
-            binding=binding, purpose=RequestPurpose.FORECAST, utc_day=utc_day, job__isnull=False
-        )
-        .exclude(job_id=timing.first_job_id)
-        .exclude(Exists(earlier))
-        .values("job_id")
-        .distinct()
-        .count()
-    )
-    if started >= len(timing.times):
+    if forecast_starts(binding.pk, timing, utc_day) >= len(timing.times):
         raise BindingDayExhaustedError
 
 
@@ -93,7 +81,10 @@ def reserve_account_request(
     purpose: RequestPurpose,
     binding: SiteBinding | None = None,
     job: CollectionJob | None = None,
+    keep_forecast_reserve: bool = False,
+    credential_revision: int | None = None,
 ) -> RequestAttempt:
+    """`credential_revision` names the key the caller sends; a replaced key spends nothing."""
     started = time.monotonic()
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
@@ -105,6 +96,8 @@ def reserve_account_request(
         raise ValidationError("The job must belong to the binding.")
     with transaction.atomic():
         account = ProviderAccount.objects.select_for_update().get(pk=account.pk)
+        if credential_revision not in {None, account.credential_revision}:
+            raise ValidationError("Configuration changed during validation.")
         now += timedelta(seconds=time.monotonic() - started)
         if job is not None and job.retry_until is not None and now >= job.retry_until:
             raise HistoryWindowClosedError
@@ -119,10 +112,11 @@ def reserve_account_request(
         if job is not None and binding is not None and purpose == RequestPurpose.FORECAST:
             _admit_forecast(binding, account, job, utc_day)
         if (
-            job is not None
-            and purpose == RequestPurpose.ESTIMATED_ACTUALS
-            and used + 1 + remaining_forecast_requests(account, now) > account.daily_quota
-        ):
+            keep_forecast_reserve
+            or (job is not None and purpose == RequestPurpose.ESTIMATED_ACTUALS)
+        ) and used + 1 + remaining_forecast_requests(
+            account, now, validating=binding if purpose == RequestPurpose.VALIDATION else None
+        ) > account.daily_quota:
             raise ForecastBudgetReservedError
         return RequestAttempt.objects.create(
             provider_account=account,
@@ -140,9 +134,17 @@ def reserve_request(
     *,
     purpose: RequestPurpose,
     job: CollectionJob | None = None,
+    keep_forecast_reserve: bool = False,
+    credential_revision: int | None = None,
 ) -> RequestAttempt:
     return reserve_account_request(
-        binding.provider_account, now, purpose=purpose, binding=binding, job=job
+        binding.provider_account,
+        now,
+        purpose=purpose,
+        binding=binding,
+        job=job,
+        keep_forecast_reserve=keep_forecast_reserve,
+        credential_revision=credential_revision,
     )
 
 

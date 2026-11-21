@@ -43,6 +43,7 @@ SECURE_SSL_REDIRECT = False
 PYRACAST_PUBLIC_ORIGIN = "https://testserver"
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS = 0.0
+PYRACAST_FIXTURE_PROVIDER = True
 SESSION_COOKIE_NAME = "sessionid"
 CSRF_COOKIE_NAME = "csrftoken"
 # auth_cache shares this OPTIONS dict; test sessions skip the WAL flush wait on commit.

@@ -11,6 +11,7 @@ from django.core.management import call_command
 from django.db import connection
 from psycopg import sql
 
+from pyracast.connections.secrets import api_key_fingerprints, decrypt_api_key
 from pyracast.forecasts.models import HistoricalReferenceImport
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.plants.models import MountingType
@@ -296,6 +297,13 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     assert all(row["updated_at"] == row["created_at"] for row in after["plants_plantsubmission"])
     for row in after["plants_plantsubmission"]:
         del row["updated_at"]
+    assert after["connections_provideraccount"]
+    for row in after["connections_provideraccount"]:
+        assert row.pop("revalidation_due_at") is None
+        key = row["encrypted_api_key"]
+        assert row.pop("api_key_fingerprint") == (
+            api_key_fingerprints(decrypt_api_key(key))[0] if key else None
+        )
     assert after.pop("notifications_outboundmail") == []
     assert [after.pop(table) for table in RECIPIENT_TABLES] == [[], [], []]
     revisions = after.pop("metering_epiasconnectionrevision")

@@ -755,6 +755,7 @@ FREE_TEXT = frozenset(
         ("regions.RegionLocationChangeRequest", "decision_reason"),
         ("connections.ProviderAccount", "external_account_id"),
         ("connections.ProviderAccount", "encrypted_api_key"),
+        ("connections.ProviderAccount", "api_key_fingerprint"),
         ("connections.ProviderAccount", "authorization_reference"),
         ("connections.SiteBinding", "site_id"),
         ("connections.SiteBinding", "settings_verification_reference"),

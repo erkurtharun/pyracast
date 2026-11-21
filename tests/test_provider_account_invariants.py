@@ -7,13 +7,14 @@ from django.db.models import F
 
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import create_account, rotate_secret
+from pyracast.connections.operations import create_account
 from pyracast.connections.recovery import clear_provider_cooldown
 from pyracast.forecasts.quota import record_provider_failure
 from pyracast.forecasts.validation import validate_binding
 from pyracast.regions.operations import configure_binding
 from tests.support.domain import NOW, FakeAdapter, make_system, provider_key
 from tests.support.invariants import PROVIDER_ACCOUNT_RULE, SITE_BINDING_RULE, violations
+from tests.support.providers import replace_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -109,7 +110,7 @@ def test_provider_account_and_binding_writers_keep_their_invariants() -> None:
         account.credential_revision,
         expected_blocked_until=account.request_blocked_until,
     )
-    rotate_secret(system.admin, account.pk, provider_key("ROTATED"))
+    replace_key(system.admin, account.pk, provider_key("ROTATED"))
     assert _clean() == (0, 0)
     configure_binding(
         system.admin,

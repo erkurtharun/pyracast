@@ -458,7 +458,7 @@ explicitly associates it with the declared configuration, without backdating tha
 configuration. Do not mix periods with different capacities or meter definitions.
 
 An authorized historical rooftop PV export is another delivery of the same modeled product,
-imported under a settings manifest matching the approved binding. Policy
+imported against the approved binding through the console upload or its command wrapper. Policy
 `native-thirty-days-else-settings-matched-pool-v2` fits on native Hobby days alone once
 thirty complete matched days exist. Until then it pools native days with that export, so a
 new binding does not restart from one week of data; each day still uses exactly one source.
@@ -481,8 +481,9 @@ source-transfer evidence.
 Declared configurations applied to older readings remain an explicit retrospective
 assumption. Neither source supplies measured irradiance labels.
 
-For a confirmed capacity-only change, use `normalize_reference_capacity` with
-explicit source/target binding IDs and an operator authorization reference. Archive
+For a confirmed capacity-only change, use `normalize_reference_capacity` with the
+source binding ID (the target defaults to the approved binding) and an operator
+authorization reference. Archive
 derived copies under the current binding using `P_new = P_old * C_new / C_old`.
 Keep the original snapshots, binding capacities and raw provider payload unchanged;
 the normalization record identifies the raw payload's original capacity, both
@@ -491,7 +492,8 @@ with equal DC/AC ratios: an undeclared value leaves the provider's implicit rati
 effect. Other model inputs must match.
 Never convert Historical Rooftop exports into Hobby records or normalize a copy
 again. Preserve acquisition/issue times, set derived availability/publication to
-the actual conversion time, and recalculate saved results at the target capacity.
+the actual conversion time, and recalculate forecast copies' saved results at the target
+capacity; actuals copies, like native actuals, carry none.
 This does not rewrite previous forecasts, calibrations or metered production.
 Legacy snapshots without an availability timestamp qualify only when an existing
 saved result proves publication before conversion; preserve the unknown original

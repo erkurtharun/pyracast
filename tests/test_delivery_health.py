@@ -9,7 +9,6 @@ from django.core.management import CommandError, call_command
 from django.db import IntegrityError, connection, transaction
 from django.test.utils import CaptureQueriesContext
 
-from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -28,6 +27,7 @@ from tests.support.domain import FakeAdapter, System, make_system
 from tests.support.invariants import stored_again
 from tests.support.metering import connected
 from tests.support.notifications import store
+from tests.support.providers import replace_key
 
 
 @pytest.mark.django_db(transaction=True)
@@ -321,7 +321,7 @@ def test_credential_rotation_requires_validation_before_health_recovers() -> Non
     for phase in DispatcherPhase.values:
         record_dispatch_phase(phase, NOW)
     assert delivery_health(NOW, timedelta(minutes=5)).healthy is True
-    rotate_secret(system.admin, system.account.pk, "test-only-rotated-health-key")
+    replace_key(system.admin, system.account.pk, "test-only-rotated-health-key")
     report = delivery_health(NOW, timedelta(minutes=5))
     assert report.counts["regions_without_recent_forecasts"] == 0
     assert report.counts["unvalidated_provider_credentials"] == 1

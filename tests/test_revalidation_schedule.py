@@ -2,7 +2,6 @@ from datetime import timedelta
 
 import pytest
 
-from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts.jobs.claim import claim
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.scheduler import enqueue_due
@@ -11,6 +10,7 @@ from pyracast.plants.approval import approve_region
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate, collect
+from tests.support.providers import replace_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -25,7 +25,7 @@ def test_revalidation_after_cutoff_recovers_tomorrows_job_without_duplicate_requ
     cutoff = NOW + timedelta(days=1)
     recovery_time = cutoff + timedelta(hours=1)
     existing = enqueue_due(cutoff) if existing_stale_job else []
-    rotate_secret(system.admin, system.account.pk, "test-only-revalidated-key")
+    replace_key(system.admin, system.account.pk, "test-only-revalidated-key")
     assert enqueue_due(cutoff) == []
     if existing:
         assert not collect(existing[0], FakeAdapter(), calculate, cutoff)
@@ -108,7 +108,7 @@ def test_revalidation_does_not_reset_a_failed_jobs_retry_budget() -> None:
     CollectionJob.objects.filter(pk=existing[0]).update(
         status="failed", attempts=3, last_error="provider_failure"
     )
-    rotate_secret(system.admin, system.account.pk, "test-only-revalidated-key")
+    replace_key(system.admin, system.account.pk, "test-only-revalidated-key")
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), cutoff + timedelta(hours=1))
 
     assert enqueue_due(cutoff + timedelta(hours=1)) == existing[:1]

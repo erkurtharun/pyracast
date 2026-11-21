@@ -83,9 +83,12 @@ BACK_EDGES: dict[tuple[str, str], str] = {
     ("forecasts.acquisition", "plants.forecast_sources"): "snapshot replay lives in plants",
     (
         "forecasts.historical_import",
+        "plants.models",
+    ): "an import checks the configurations of the plants it feeds",
+    (
+        "forecasts.historical_import",
         "plants.preparation",
     ): "an import prepares calibrations of its plants",
-    ("forecasts.historical_upload", "plants.models"): "an upload previews the plants it feeds",
     (
         "forecasts.history",
         "plants.forecast_archive",
