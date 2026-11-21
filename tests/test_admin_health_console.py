@@ -16,6 +16,8 @@ from pyracast.forecasts.models import (
     CollectionJob,
     DispatcherPhase,
     DispatcherStatus,
+    ForecastResult,
+    ForecastSnapshot,
     RequestAttempt,
     RequestPurpose,
 )
@@ -44,6 +46,7 @@ TURKISH = {
     "Checked at": "Kontrol zaman\u0131",
     "Why listed": "Listelenme nedeni",
     "No forecast saved yet": "Henüz kaydedilmiş tahmin yok",
+    "Last forecast": "Son tahmin",
     "No plants currently match this check.": "Bu kontrole şu anda uyan santral yok.",
 }
 
@@ -243,6 +246,23 @@ def test_the_plant_drill_down_says_why_each_plant_is_listed(
     content = stale.content.decode()
     assert text(language, "Why listed") in content
     assert text(language, "No forecast saved yet") in content
+
+    last_forecast = NOW - timedelta(hours=27)
+    job = CollectionJob.objects.get(binding=system.binding)
+    CollectionJob.objects.filter(pk=job.pk).update(status="succeeded")
+    snapshot = ForecastSnapshot.objects.create(
+        job=job,
+        binding=system.binding,
+        raw_payload={},
+        normalized_intervals=[],
+        source_kind="forecast",
+        collected_at=last_forecast,
+        available_at=last_forecast,
+    )
+    ForecastResult.objects.create(snapshot=snapshot, payload={}, published_at=last_forecast)
+    old = client.get("/admin/plants/?issue=regions_without_recent_forecasts")
+    assert [plant.issue_time for plant in old.context["plants"]] == [last_forecast]
+    assert text(language, "Last forecast") in old.content.decode()
 
     delayed = client.get("/admin/plants/?issue=provider_cooldowns")
     assert [plant.id for plant in delayed.context["plants"]] == [system.region.pk]
