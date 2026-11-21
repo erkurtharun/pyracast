@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { api } from "@/lib/api/client";
 import { adoptSession } from "@/lib/session-client";
+import { loadCatalogue } from "@/i18n/catalogue";
 import { isLanguage } from "@/i18n/language";
 
 export function LanguageSelect() {
@@ -43,6 +44,7 @@ export function LanguageSelect() {
                             if (!isLanguage(language)) return;
                             setState({ status: "saving" });
                             try {
+                                await loadCatalogue(language);
                                 adoptSession(
                                     await api.post("/api/session/language/", {
                                         body: { language },

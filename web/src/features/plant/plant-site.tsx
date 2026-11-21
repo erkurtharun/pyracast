@@ -1,7 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { cadence, useApiList, useRefresh } from "@/lib/api/query";
 import { isPlantSection, plantAddress, routes } from "@/lib/routes";
 import { PlantOnboarding } from "@/features/portfolio/plant-onboarding";
@@ -38,19 +38,23 @@ export function PlantSite({
         return (
             <>
                 <RefreshFailed resource={sites} />
-                <PlantWorkspace
-                    key={site.plant.id}
-                    plant={site.plant}
-                    scope={{
-                        tenant_id: tenant.id,
-                        region_id: site.id,
-                        plant_id: site.plant.id,
-                    }}
-                    region={site}
-                    timezone={site.timezone}
-                    section={section}
-                    address={address}
-                />
+                {/* A section loaded on demand keeps this pending state on a first render; a tab change is a
+                    transition, so the shown section stays until the next one has loaded. */}
+                <Suspense fallback={<p role="status">{t("loadingPlant")}</p>}>
+                    <PlantWorkspace
+                        key={site.plant.id}
+                        plant={site.plant}
+                        scope={{
+                            tenant_id: tenant.id,
+                            region_id: site.id,
+                            plant_id: site.plant.id,
+                        }}
+                        region={site}
+                        timezone={site.timezone}
+                        section={section}
+                        address={address}
+                    />
+                </Suspense>
                 {children}
             </>
         );
