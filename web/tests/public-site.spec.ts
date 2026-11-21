@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test, expect } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
+import { legalCopy } from "../src/features/public-site/legal-copy";
 
 const pages = [
     {
@@ -281,4 +284,49 @@ test("an unknown path answers a localized not-found page", async ({ page }) => {
         "content",
         /noindex/,
     );
+});
+
+function retentionPeriods() {
+    const source = readFileSync(
+        path.resolve("../src/pyracast/retention.py"),
+        "utf8",
+    ).replaceAll("\r\n", "\n");
+    const table = /^RETENTION = \(\n(.*?)^\)$/ms.exec(source);
+    expect(table, "the RETENTION table").not.toBeNull();
+    return table![1]!
+        .split("\n")
+        .filter((line) => line.trim())
+        .map((line) => {
+            const entry =
+                /^ {4}Retention\("(\w+)", timedelta\((?:0|days=(\d+))\), \w+\),$/.exec(
+                    line,
+                );
+            expect(entry, line).not.toBeNull();
+            return { rows: entry![1]!, days: Number(entry![2] ?? 0) };
+        });
+}
+
+test("the privacy notice names every period of the retention table in both languages", () => {
+    const periods = retentionPeriods();
+    expect(periods.length).toBeGreaterThan(0);
+    const wording = {
+        en: { days: "days", expiry: "when they expire" },
+        tr: { days: "gün", expiry: "süresi dolduğunda" },
+    } as const;
+    for (const language of ["en", "tr"] as const) {
+        const section = legalCopy(language, "privacy").sections.find(
+            ({ id }) => id === "retention",
+        );
+        const text = section!.paragraphs.join(" ");
+        for (const { rows, days } of periods) {
+            if (days === 0)
+                expect(text, `${language} ${rows}`).toContain(
+                    wording[language].expiry,
+                );
+            else
+                expect(text, `${language} ${rows}`).toMatch(
+                    new RegExp(`(?<!\\d)${days} ${wording[language].days}`),
+                );
+        }
+    }
 });
