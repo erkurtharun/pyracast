@@ -307,6 +307,10 @@ def _purge_region(region: Region, plants: list[Plant], budget: _Budget) -> None:
     _delete(Region.objects.filter(pk=region.pk), budget)
 
 
+def trashed_within_retention(now: datetime, remaining: timedelta) -> Q:
+    return Q(deleted_at__lte=now - (RETENTION - remaining), deleted_at__gt=now - RETENTION)
+
+
 def _purgeable(cutoff: datetime) -> Q:
     return Q(deleted_at__lte=cutoff) | Q(purge_started_at__isnull=False)
 
