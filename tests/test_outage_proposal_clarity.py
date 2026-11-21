@@ -111,6 +111,7 @@ def _other_workspace(case: RequestCase) -> tuple[System, Plant]:
         dc_capacity_mw=130,
         export_limit_mw=100,
     )
+    assert plant.current_configuration_id is not None
     PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(
         created_at=NOW - timedelta(days=100)
     )
