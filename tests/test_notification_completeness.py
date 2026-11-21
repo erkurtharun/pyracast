@@ -31,7 +31,7 @@ def test_delivery_completeness_matches_the_electrical_total(
     assert prepare_delivery(delivery, SLOT)
 
     assert delivery.prepared_message is not None
-    assert delivery.prepared_message["tomorrow_complete"] is eligible_configuration
+    assert delivery.forecast_complete is eligible_configuration
     context = cast(dict[str, Any], delivery.prepared_message["report_context"])
     normal = context["days"][1]["normal"]
     if eligible_configuration:
@@ -61,7 +61,7 @@ def test_region_delivery_completeness_uses_delivered_daylight_coverage() -> None
     assert result["complete"] is False
     assert cast(dict[str, Any], result["daylight"])["energy_kwh_m2"] is not None
     assert delivery.prepared_message is not None
-    assert delivery.prepared_message["tomorrow_complete"] is True
+    assert delivery.forecast_complete is True
 
 
 def test_unavailable_delivery_has_no_complete_total() -> None:
@@ -71,4 +71,4 @@ def test_unavailable_delivery_has_no_complete_total() -> None:
     assert prepare_delivery(delivery, SLOT)
 
     assert delivery.prepared_message is not None
-    assert delivery.prepared_message["tomorrow_complete"] is False
+    assert delivery.forecast_complete is False

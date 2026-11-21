@@ -111,14 +111,17 @@ def _freeze(
             build_message(delivery, results, prepared_at=prepared_at, report_context=context)
         )
     )
-    payload.update(
-        prepared_at=prepared_at.isoformat(),
-        kind=kind,
-        results=results,
-        report_context=context,
-        tomorrow_complete=report_summary(result).get(f"energy_{unit}") is not None,
-    )
+    payload.update(results=results, report_context=context)
     delivery.prepared_message = payload
+    delivery.forecast_kind = kind
+    delivery.forecast_complete = report_summary(result).get(f"energy_{unit}") is not None
+    delivery.prepared_at = prepared_at
     NotificationDelivery.objects.filter(
         pk=delivery.pk, prepared_message__isnull=True, attempts=0
-    ).update(snapshot=delivery.snapshot, prepared_message=payload)
+    ).update(
+        snapshot=delivery.snapshot,
+        prepared_message=payload,
+        forecast_kind=kind,
+        forecast_complete=delivery.forecast_complete,
+        prepared_at=prepared_at,
+    )

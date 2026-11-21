@@ -957,6 +957,9 @@ erDiagram
         bigint binding_id FK "references connections_sitebinding.id"
         bigint snapshot_id FK "nullable; references forecasts_forecastsnapshot.id"
         bigint schedule_id FK "references notifications_reminderschedule.id"
+        boolean forecast_complete "nullable"
+        varchar_14 forecast_kind
+        timestamp_with_time_zone prepared_at "nullable"
     }
     notifications_notificationsettings {
         smallint id PK
@@ -1025,11 +1028,12 @@ erDiagram
 #### `notifications_notificationdelivery`
 
 - `notificationdelivery_due_idx`: `INDEX ("available_at", "id") WHERE "status" IN ('pending', 'retry', 'sending')`
+- `notificationdelivery_forecast_kind_chk`: `CHECK ("forecast_kind" IN ('', 'current', 'saved_complete', 'saved_partial', 'unavailable'))`
 - `notificationdelivery_language_chk`: `CHECK ("language" IN ('en', 'tr'))`
 - `notificationdelivery_last_error_chk`: `CHECK ("last_error" IN ('', 'missed_schedule', 'delivery_deadline_exceeded', 'cancelled_by_settings_change', 'schedule_or_authority_changed', 'no_recipients', 'invalid_recipient', 'recipient_limit_exceeded', 'definition_trashed', 'interrupted_send', 'interrupted_connection', 'mail_not_sent', 'mail_configuration_invalid', 'mail_credentials_rejected', 'mail_authorization_revoked', 'mail_rate_limited', 'mail_rejected', 'mail_sender_forbidden', 'mail_preparation_failed', 'mail_outcome_uncertain'))`
 - `notificationdelivery_lease_chk`: `CHECK ((("lease_expires_at" IS NOT NULL AND "lease_token" IS NOT NULL AND "status" IN ('sending', 'uncertain')) OR ("lease_expires_at" IS NULL AND "lease_token" IS NULL AND NOT ("status" IN ('sending')))))`
+- `notificationdelivery_prepared_at_chk`: `CHECK ((("forecast_complete" IS NULL AND "forecast_kind" = '' AND "prepared_at" IS NULL) OR (NOT ("forecast_kind" = '') AND "prepared_at" IS NOT NULL)))`
 - `notificationdelivery_prepared_format_chk`: `CHECK (("prepared_message" -> 'format') IN ('"xlsx"'::jsonb, '"plain"'::jsonb))`
-- `notificationdelivery_prepared_kind_chk`: `CHECK (("prepared_message" -> 'kind') IN ('"current"'::jsonb, '"saved_complete"'::jsonb, '"saved_partial"'::jsonb, '"unavailable"'::jsonb))`
 - `notificationdelivery_prepared_message_chk`: `CHECK ((NOT ("status" = 'sending') OR "prepared_message" IS NOT NULL))`
 - `notificationdelivery_schedule_scheduled_for_uniq`: `UNIQUE ("schedule_id", "scheduled_for")`
 - `notificationdelivery_status_chk`: `CHECK ("status" IN ('pending', 'retry', 'sending', 'sent', 'failed', 'uncertain', 'skipped', 'cancelled'))`

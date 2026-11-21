@@ -7,11 +7,11 @@ from django.db import models
 from pyracast.db import choices_check, json_shape_check, lease_check
 from pyracast.mail.errors import MailFailure
 
+# The template values that hold an address; account mail names only its account's addresses.
+MAIL_ADDRESS_KEYS = ("from_email", "to_email", "deleted_email")
 # Template values an outbound mail may keep: strings only, never a code, key or link.
 MAIL_CONTEXT_KEYS = (
-    "from_email",
-    "to_email",
-    "deleted_email",
+    *MAIL_ADDRESS_KEYS,
     "provider",
     "timestamp",
     "ip",
