@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 # A stale forecast job at the latest slot is opened again unless it was refused for a reason that
 # holds for its slot: the binding's day bound, or a schedule disabled after the claim.
 SLOT_FINAL_ERRORS = (CollectionJobError.QUOTA_EXHAUSTED, CollectionJobError.SCHEDULE_DISABLED)
-# A stale nightly history job ended by these refusals was skipped as planned: the provider day or
-# the binding's day bound outlived its window (claim.retry), so nothing can change before it ends.
+# A stale nightly history job ended by these refusals was skipped as planned: the provider day, or
+# for the budget reserve its retry delay, outlived its window (claim.retry).
 NIGHT_FINAL_ERRORS = (
     CollectionJobError.QUOTA_EXHAUSTED,
     CollectionJobError.HISTORY_BUDGET_RESERVED,
