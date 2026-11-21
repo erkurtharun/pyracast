@@ -67,6 +67,10 @@ for (const [status, reference] of Object.entries({
             return;
         }
         await expect(card).toBeVisible();
+        await expect(card).toContainText(
+            "Intervals normalized; daily energy calculated by Pyracast.",
+        );
+        await expect(card).not.toContainText(attribution.changes);
         await expect(
             card.getByRole("link", { name: "Open-Meteo.com" }),
         ).toHaveAttribute("href", "https://open-meteo.com/");

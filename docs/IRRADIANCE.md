@@ -630,8 +630,8 @@ reported production under the current measurement-selection policy. Preserve
 source snapshot IDs and provisional labels, and retain the same daylight,
 missingness and native clipping rules. This diagnostic compares historical model
 output with production; it is not forecast-accuracy evaluation or calibration
-validation. The frontend opens this mode; the API's default archived replay
-retains the preceding contract.
+validation. The performance screen opens on archived forecast accuracy and offers
+this mode as a secondary model check.
 
 ## Historical irradiance and measured performance
 

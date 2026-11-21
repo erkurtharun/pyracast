@@ -224,7 +224,7 @@ def test_historical_issuance_survives_revision_at_both_resolutions(
     expected = cast(dict[str, Any], original["result"])
     expected["quality_flags"].append("previous_configuration")
     assert historical["result"] == expected
-    assert historical["freshness"] == "stale"
+    assert historical["freshness"] == "archived"
     half_hourly = plant_forecast(
         system.member,
         system.tenant.pk,

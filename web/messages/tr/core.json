@@ -283,7 +283,8 @@
         "Freshness": {
             "fresh": "Güncel",
             "stale": "Güncelliğini yitirmiş",
-            "missing": "Veri yok"
+            "missing": "Veri yok",
+            "archived": "Arşiv"
         },
         "CalibrationStatus": {
             "pending": "Bekliyor",

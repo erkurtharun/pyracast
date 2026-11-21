@@ -46,14 +46,15 @@ def current_forecast_snapshots(
     )
 
 
-def covering_snapshots(
-    snapshots: QuerySet[ForecastSnapshot], start: datetime, end: datetime
-) -> list[ForecastSnapshot]:
+def covering_ids(
+    coverages: Iterable[tuple[int, datetime | None, datetime | None]],
+    start: datetime,
+    end: datetime,
+) -> list[int]:
+    """Identifiers, in the given order, of the coverages that each still cover part of the day."""
     remaining = [(start, end)]
     identifiers = []
-    for identifier, coverage_start, coverage_end in snapshots.values_list(
-        "pk", "coverage_start", "coverage_end"
-    ):
+    for identifier, coverage_start, coverage_end in coverages:
         left, right = cast(datetime, coverage_start), cast(datetime, coverage_end)
         if not any(left < stop and right > begin for begin, stop in remaining):
             continue
@@ -66,6 +67,15 @@ def covering_snapshots(
         ]
         if not remaining:
             break
+    return identifiers
+
+
+def covering_snapshots(
+    snapshots: QuerySet[ForecastSnapshot], start: datetime, end: datetime
+) -> list[ForecastSnapshot]:
+    identifiers = covering_ids(
+        snapshots.values_list("pk", "coverage_start", "coverage_end"), start, end
+    )
     selected = list(snapshots.filter(pk__in=identifiers))
     if {snapshot.pk for snapshot in selected} != set(identifiers):
         raise BusyError(ErrorCode.FORECAST_SOURCES_CHANGED)

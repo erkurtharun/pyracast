@@ -1127,7 +1127,6 @@ export interface components {
         ComparisonEnum: "archived_forecast" | "historical_model";
         ConfigurationOutput: {
             readonly id: number;
-            binding_id: number;
             readonly revision: number;
             /** Format: double */
             readonly dc_capacity_mw: number;
@@ -1165,6 +1164,37 @@ export interface components {
          * @enum {string}
          */
         CurrentCalibrationOutputOriginEnum: "manual" | "automatic";
+        DaylightOutput: {
+            policy?: string;
+            energy_scope?: string;
+            status: components["schemas"]["DaylightStatusEnum"];
+            /** Format: date-time */
+            sunrise?: string | null;
+            /** Format: date-time */
+            sunset?: string | null;
+            windows?: components["schemas"]["TimeWindowOutput"][];
+            /** Format: double */
+            duration_seconds?: number | null;
+            /** Format: double */
+            coverage_seconds?: number | null;
+            /** Format: double */
+            valid_coverage_seconds?: number | null;
+            /** Format: double */
+            coverage_fraction?: number | null;
+            /** Format: double */
+            input_coverage_seconds?: number | null;
+            /** Format: double */
+            input_coverage_fraction?: number | null;
+            complete?: boolean;
+            /** Format: double */
+            energy_mwh?: number | null;
+            /** Format: double */
+            partial_energy_mwh?: number | null;
+            /** Format: double */
+            energy_kwh_m2?: number | null;
+            /** Format: double */
+            partial_energy_kwh_m2?: number | null;
+        };
         /**
          * @description * `normal` - normal
          *     * `polar_day` - polar_day
@@ -1178,6 +1208,29 @@ export interface components {
             /** Format: date-time */
             ends_at: string;
         };
+        DiagnosticDayOutput: {
+            /** Format: date */
+            day: string;
+            /** Format: double */
+            performance_index: number;
+            /** Format: double */
+            hours: number;
+            status: components["schemas"]["DiagnosticDayStatusEnum"];
+            observed_zero: boolean;
+        };
+        /**
+         * @description * `shortfall` - shortfall
+         *     * `within_threshold` - within_threshold
+         * @enum {string}
+         */
+        DiagnosticDayStatusEnum: "shortfall" | "within_threshold";
+        /**
+         * @description * `suspected` - suspected
+         *     * `normal` - normal
+         *     * `insufficient` - insufficient
+         * @enum {string}
+         */
+        DiagnosticStatusEnum: "suspected" | "normal" | "insufficient";
         /**
          * @description * `toggle` - Toggle
          *     * `manual_activation` - Manual Activation
@@ -1458,24 +1511,49 @@ export interface components {
             | "outage_history_changed"
             | "incumbent_changed"
             | "calibration_not_activatable";
+        /**
+         * @description * `current` - current
+         *     * `stale` - stale
+         * @enum {string}
+         */
+        EvidenceStateEnum: "current" | "stale";
         ForecastOutput: {
             /** Format: date */
             date: string;
             timezone: string;
             source_kind: components["schemas"]["ForecastSourceKindEnum"];
             freshness: components["schemas"]["FreshnessEnum"];
+            stale_reason:
+                | (
+                      | components["schemas"]["StaleReasonEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             unavailable_reason:
                 | (
                       | components["schemas"]["UnavailableReasonEnum"]
                       | components["schemas"]["NullEnum"]
                   )
                 | null;
-            result: unknown;
+            result: components["schemas"]["IrradianceResultOutput"] | null;
             /** Format: date-time */
             collected_at: string | null;
             /** Format: date-time */
             issued_at: string | null;
             binding_id: number | null;
+        };
+        ForecastProvenanceOutput: {
+            selection_policy?: string;
+            snapshot_id?: number | null;
+            source_kind?: string;
+            /** Format: date-time */
+            collected_at?: string | null;
+            /** Format: date-time */
+            published_at?: string | null;
+            /** Format: date-time */
+            selection_cutoff?: string | null;
+            source_snapshot_ids?: number[];
+            source_snapshots?: components["schemas"]["SourceSnapshotOutput"][];
         };
         /**
          * @description * `forecast` - forecast
@@ -1485,12 +1563,13 @@ export interface components {
          */
         ForecastSourceKindEnum: "forecast" | "estimated_actuals" | "mixed";
         /**
-         * @description * `fresh` - fresh
-         *     * `stale` - stale
-         *     * `missing` - missing
+         * @description * `fresh` - Fresh
+         *     * `stale` - Stale
+         *     * `missing` - Missing
+         *     * `archived` - Archived
          * @enum {string}
          */
-        FreshnessEnum: "fresh" | "stale" | "missing";
+        FreshnessEnum: "fresh" | "stale" | "missing" | "archived";
         IncidentBeforeOutput: {
             kind: components["schemas"]["IncidentKindEnum"];
             title: string;
@@ -1632,6 +1711,79 @@ export interface components {
             readonly expires_at: string;
             readonly delivery_status: components["schemas"]["InvitationDeliveryStatusEnum"];
         };
+        IrradianceConfigurationOutput: {
+            /** Format: double */
+            capacity_kw?: number | null;
+            /** Format: double */
+            dc_capacity_kw?: number | null;
+            power_basis?: string;
+            capacity_basis?: string;
+            capacity_semantics_verified?: boolean;
+            /** Format: double */
+            tilt_degrees?: number | null;
+            /** Format: double */
+            azimuth_degrees?: number | null;
+            /** Format: double */
+            efficiency_factor_percent?: number | null;
+        };
+        IrradianceIntervalOutput: {
+            /** Format: date-time */
+            start: string;
+            /** Format: date-time */
+            end: string;
+            /** Format: double */
+            ghi_wm2?: number | null;
+            quality_flags?: string[];
+            source_snapshot_ids?: number[];
+            source_kinds?: string[];
+        };
+        /** @description Global horizontal irradiation in kWh/m2 for the local day. */
+        IrradianceResultOutput: {
+            /** Format: double */
+            energy_kwh_m2?: number | null;
+            /** Format: double */
+            partial_energy_kwh_m2?: number | null;
+            complete?: boolean;
+            quality_flags?: string[];
+            region_id?: number;
+            /** Format: date */
+            local_date?: string;
+            timezone?: string;
+            surface?: string;
+            /** Format: date-time */
+            start?: string;
+            /** Format: date-time */
+            end?: string;
+            /** Format: double */
+            energy_mj_m2?: number | null;
+            /** Format: double */
+            partial_energy_mj_m2?: number | null;
+            /** Format: double */
+            coverage_seconds?: number | null;
+            /** Format: double */
+            valid_coverage_seconds?: number | null;
+            /** Format: double */
+            coverage_fraction?: number | null;
+            model_version?: string;
+            daylight?: components["schemas"]["DaylightOutput"];
+            intervals?: components["schemas"]["IrradianceIntervalOutput"][];
+            vintage?: components["schemas"]["VintageOutput"];
+            configuration?: components["schemas"]["IrradianceConfigurationOutput"];
+            provenance?: components["schemas"]["ForecastProvenanceOutput"];
+            reference_capacity_normalization?: {
+                [key: string]: unknown;
+            } | null;
+            weather_reference?: components["schemas"]["WeatherReferenceOutput"];
+        };
+        /** @description Global horizontal irradiation in kWh/m2 for the local day. */
+        IrradianceSummaryOutput: {
+            /** Format: double */
+            energy_kwh_m2?: number | null;
+            /** Format: double */
+            partial_energy_kwh_m2?: number | null;
+            complete?: boolean;
+            quality_flags?: string[];
+        };
         /**
          * @description * `en` - English
          *     * `tr` - Türkçe
@@ -1641,6 +1793,15 @@ export interface components {
         LanguageInput: {
             language: components["schemas"]["LanguageEnum"];
         };
+        /**
+         * @description * `shortfall` - shortfall
+         *     * `within_threshold` - within_threshold
+         *     * `insufficient` - insufficient
+         *     * `unavailable` - unavailable
+         * @enum {string}
+         */
+        LatestDayStatusEnum:
+            "shortfall" | "within_threshold" | "insufficient" | "unavailable";
         LocationChangeInput: {
             expected_revision: number;
             /** Format: double */
@@ -1806,6 +1967,22 @@ export interface components {
             quality: components["schemas"]["ObservationQualityEnum"];
             source: string;
         };
+        OutageScenarioOutput: {
+            /** Format: date-time */
+            evaluated_at: string;
+            status: components["schemas"]["OutageScenarioStatusEnum"];
+            incident_revision_ids: number[];
+            incidents: {
+                [key: string]: unknown;
+            }[];
+            result: components["schemas"]["PlantForecastResultOutput"];
+        };
+        /**
+         * @description * `estimated` - estimated
+         *     * `unknown_impact` - unknown_impact
+         * @enum {string}
+         */
+        OutageScenarioStatusEnum: "estimated" | "unknown_impact";
         PaginatedCalibrationSummaryOutputList: {
             /** @example 123 */
             count: number;
@@ -1933,11 +2110,22 @@ export interface components {
             /** Format: date */
             date: string;
             status: components["schemas"]["PerformanceDayStatusEnum"];
-            reason: string | null;
+            reason:
+                | (
+                      | components["schemas"]["PerformanceDayReasonEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            selection_policy:
+                | (
+                      | components["schemas"]["PerformanceSelectionPolicyEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             snapshot_id: number | null;
-            issuance_id?: number | null;
-            configuration_id?: number | null;
-            model_version?: string | null;
+            issuance_id: number | null;
+            configuration_id: number | null;
+            model_version: string | null;
             source_snapshot_ids?: number[];
             reference_provenance?: unknown;
             /** Format: date-time */
@@ -1947,6 +2135,7 @@ export interface components {
             /** Format: date-time */
             selection_cutoff: string | null;
             calibration_id: number | null;
+            calibration_in_sample: boolean | null;
             /** Format: double */
             factor: number | null;
             /** Format: double */
@@ -1964,6 +2153,20 @@ export interface components {
             historical_configuration_assumed: boolean;
             provisional_production: boolean;
         };
+        /**
+         * @description * `configuration_not_comparable` - Configuration Not Comparable
+         *     * `forecast_not_available` - Forecast Not Available
+         *     * `estimated_actuals_not_available` - Estimated Actuals Not Available
+         *     * `invalid_forecast_data` - Invalid Forecast Data
+         *     * `incomplete_or_invalid_day` - Incomplete Or Invalid Day
+         * @enum {string}
+         */
+        PerformanceDayReasonEnum:
+            | "configuration_not_comparable"
+            | "forecast_not_available"
+            | "estimated_actuals_not_available"
+            | "invalid_forecast_data"
+            | "incomplete_or_invalid_day";
         /**
          * @description * `matched` - matched
          *     * `missing` - missing
@@ -1992,8 +2195,7 @@ export interface components {
             end_date: string;
             /** Format: date-time */
             evaluated_at: string;
-            evaluation_kind: string;
-            selection_policy: string;
+            selection_policy: components["schemas"]["PerformanceSelectionPolicyEnum"];
             comparison: components["schemas"]["ComparisonEnum"];
             /** Format: time */
             issuance_cutoff: string | null;
@@ -2010,12 +2212,33 @@ export interface components {
             scored_intervals: number;
             /** Format: double */
             scored_hours: number;
+            /**
+             * Format: double
+             * @description Sum of absolute daily errors over measured energy.
+             */
+            relative_error: number | null;
+            /**
+             * Format: double
+             * @description One minus the absolute daily error over that of the uncalibrated reference, on days the calibration did not train on.
+             */
+            skill_score: number | null;
+            skill_days: number;
             metrics: components["schemas"]["PerformanceMetrics"] | null;
             baseline_metrics:
                 components["schemas"]["PerformanceMetrics"] | null;
             days: components["schemas"]["PerformanceDay"][];
             uncertainty: string;
         };
+        /**
+         * @description * `latest-published-pre-daylight-issuance-v1` - Archived Issuance
+         *     * `native-then-authorized-scale-complete-actuals-v4` - Estimated Actuals
+         *     * `native-estimated-actuals-coverage-v1` - Composed Estimated Actuals
+         * @enum {string}
+         */
+        PerformanceSelectionPolicyEnum:
+            | "latest-published-pre-daylight-issuance-v1"
+            | "native-then-authorized-scale-complete-actuals-v4"
+            | "native-estimated-actuals-coverage-v1";
         /**
          * @description * `submission_saved` - Submission saved
          *     * `configuration_created` - Configuration created
@@ -2058,13 +2281,18 @@ export interface components {
             timezone: string;
             source_kind: components["schemas"]["ForecastSourceKindEnum"];
             freshness: components["schemas"]["FreshnessEnum"];
+            stale_reason:
+                | (
+                      | components["schemas"]["StaleReasonEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             unavailable_reason:
                 | (
                       | components["schemas"]["UnavailableReasonEnum"]
                       | components["schemas"]["NullEnum"]
                   )
                 | null;
-            result: unknown;
             plant_id: number;
             /** Format: date-time */
             as_of: string;
@@ -2072,9 +2300,39 @@ export interface components {
             calibration_id: number | null;
             issuance_id?: number | null;
             snapshot_id?: number | null;
-            regional_irradiance: unknown;
-            outage_scenario?: unknown;
-            production_diagnostic?: unknown;
+            result: components["schemas"]["PlantForecastResultOutput"] | null;
+            regional_irradiance:
+                components["schemas"]["IrradianceSummaryOutput"] | null;
+            outage_scenario?:
+                components["schemas"]["OutageScenarioOutput"] | null;
+            production_diagnostic?:
+                components["schemas"]["ProductionDiagnosticOutput"] | null;
+        };
+        /** @description Energy in MWh and mean power in MW on the measurement basis of the plant. */
+        PlantForecastResultOutput: {
+            /** Format: date-time */
+            start?: string;
+            /** Format: date-time */
+            end?: string;
+            resolution_minutes?: number;
+            /** Format: double */
+            limit_mw?: number | null;
+            /** Format: double */
+            factor?: number;
+            /** Format: double */
+            energy_mwh?: number | null;
+            /** Format: double */
+            partial_energy_mwh?: number | null;
+            /** Format: double */
+            coverage_fraction?: number | null;
+            complete?: boolean;
+            model_version?: string;
+            quality_flags?: string[];
+            daylight?: components["schemas"]["DaylightOutput"];
+            intervals?: components["schemas"]["PowerIntervalOutput"][];
+            configuration?: components["schemas"]["PlantResultConfigurationOutput"];
+            provenance?: components["schemas"]["ForecastProvenanceOutput"];
+            weather_reference?: components["schemas"]["WeatherReferenceOutput"];
         };
         PlantInput: {
             name: string;
@@ -2103,6 +2361,17 @@ export interface components {
             /** Format: date-time */
             readonly created_at: string;
         };
+        PlantResultConfigurationOutput: {
+            id: number;
+            revision: number;
+            /** Format: double */
+            dc_capacity_mw: number | null;
+            /** Format: double */
+            inverter_capacity_mw: number | null;
+            /** Format: double */
+            export_limit_mw: number | null;
+            measurement_basis: string;
+        };
         PlantSubmissionOutput: {
             readonly id: number;
             /** Format: double */
@@ -2126,6 +2395,24 @@ export interface components {
          * @enum {string}
          */
         PowerBasisEnum: "ac" | "dc";
+        PowerIntervalOutput: {
+            /** Format: date-time */
+            start: string;
+            /** Format: date-time */
+            end: string;
+            /** Format: double */
+            mean_power_mw?: number | null;
+            /** Format: double */
+            energy_mwh?: number | null;
+            /** Format: double */
+            partial_energy_mwh?: number | null;
+            /** Format: double */
+            coverage_fraction?: number | null;
+            complete?: boolean;
+            quality_flags?: string[];
+            source_snapshot_ids?: number[];
+            source_kinds?: string[];
+        };
         /**
          * @description * `xlsx` - Workbook
          *     * `plain` - Plain text
@@ -2192,6 +2479,23 @@ export interface components {
             /** Format: double */
             total_mwh: number | null;
             complete: boolean;
+        };
+        ProductionDiagnosticOutput: {
+            status: components["schemas"]["DiagnosticStatusEnum"];
+            /** Format: double */
+            performance_ratio: number | null;
+            reference_kind: components["schemas"]["ReferenceKindEnum"];
+            /** Format: date */
+            window_start: string | null;
+            /** Format: date */
+            window_end: string | null;
+            days: components["schemas"]["DiagnosticDayOutput"][];
+            /** Format: date */
+            latest_matched_day: string | null;
+            latest_day_status: components["schemas"]["LatestDayStatusEnum"];
+            /** Format: double */
+            latest_performance_index: number | null;
+            evidence_state: components["schemas"]["EvidenceStateEnum"];
         };
         ProductionHistoryOutput: {
             plant_id: number;
@@ -2326,6 +2630,12 @@ export interface components {
             quality: string;
             source_kind: string;
         };
+        /**
+         * @description * `active_calibration` - active_calibration
+         *     * `uncalibrated_reference` - uncalibrated_reference
+         * @enum {string}
+         */
+        ReferenceKindEnum: "active_calibration" | "uncalibrated_reference";
         RegionOutput: {
             readonly id: number;
             readonly name: string;
@@ -2577,12 +2887,30 @@ export interface components {
             | "weather_request_failed"
             | "weather_acquisition_failed"
             | "weather_acquisition_interrupted";
+        SourceSnapshotOutput: {
+            snapshot_id: number;
+            /** Format: date-time */
+            collected_at: string;
+            source_kind?: string;
+        };
+        /**
+         * @description * `collection_overdue` - Collection Overdue
+         *     * `connection_inactive` - Connection Inactive
+         * @enum {string}
+         */
+        StaleReasonEnum: "collection_overdue" | "connection_inactive";
         TenantOutput: {
             readonly id: number;
             readonly name: string;
             readonly role: components["schemas"]["WorkspaceRoleEnum"];
             readonly pending_review_count: number | null;
             readonly unread_outcome_count: number;
+        };
+        TimeWindowOutput: {
+            /** Format: date-time */
+            start: string;
+            /** Format: date-time */
+            end: string;
         };
         TrashedRegionOutput: {
             readonly id: number;
@@ -2618,6 +2946,33 @@ export interface components {
             id: number;
             name: string;
         };
+        VintageOutput: {
+            provider?: string;
+            source_kind?: string;
+            scope?: string;
+            /** Format: date-time */
+            collected_at?: string;
+            /** Format: date-time */
+            issued_at?: string | null;
+            binding_revision?: string | null;
+        };
+        WeatherReferenceOutput: {
+            status: components["schemas"]["WeatherReferenceStatusEnum"];
+            /** Format: double */
+            energy_kwh_m2?: number | null;
+            /** Format: double */
+            partial_energy_kwh_m2?: number | null;
+            /** Format: double */
+            coverage_fraction?: number | null;
+            quality_flags?: string[];
+        };
+        /**
+         * @description * `ready` - ready
+         *     * `partial` - partial
+         *     * `unavailable` - unavailable
+         * @enum {string}
+         */
+        WeatherReferenceStatusEnum: "ready" | "partial" | "unavailable";
         WorkspaceInvitationsOutput: {
             invitations: components["schemas"]["InvitationOutput"][];
         };
@@ -3769,8 +4124,13 @@ export interface operations {
                  * @description * `auto` - auto
                  *     * `forecast` - forecast
                  *     * `estimated_actuals` - estimated_actuals
+                 *     * `archived_forecast` - archived_forecast
                  */
-                data_source?: "auto" | "forecast" | "estimated_actuals";
+                data_source?:
+                    | "auto"
+                    | "forecast"
+                    | "estimated_actuals"
+                    | "archived_forecast";
                 date: string;
             };
             header?: never;

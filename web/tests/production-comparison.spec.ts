@@ -1,23 +1,30 @@
 import { expect, test } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { mockApi } from "./support/workspace";
+import { answer, mockApi } from "./support/workspace";
 import { errorBody } from "./support/errors";
+
+const day = (index: number) =>
+    `2026-${index < 20 ? "10" : "11"}-${String(index < 20 ? index + 12 : index - 19).padStart(2, "0")}`;
 
 test("available historical model days appear without empty grid rows", async ({
     page,
 }) => {
+    await page.clock.setFixedTime(new Date("2026-11-11T12:00:00Z"));
     await page.setViewportSize({ width: 320, height: 844 });
     await mockApi(page);
     let query = "";
     await page.route("**/plants/21/performance/**", async (route) => {
         query = new URL(route.request().url()).search;
         await route.fulfill({
-            json: {
+            json: answer("PerformanceOutput", {
                 comparison: "historical_model",
                 start_date: "2026-10-12",
                 end_date: "2026-11-10",
                 matched_days: 8,
                 requested_days: 30,
+                relative_error: 0.2,
+                skill_score: 0.125,
+                skill_days: 3,
                 missing_days: 21,
                 excluded_days: 1,
                 scored_intervals: 64,
@@ -29,7 +36,7 @@ test("available historical model days appear without empty grid rows", async ({
                 },
                 baseline_metrics: { daily_mae_mwh: 2 },
                 days: Array.from({ length: 30 }, (_, index) => ({
-                    date: `2026-${index < 20 ? "10" : "11"}-${String(index < 20 ? index + 12 : index - 19).padStart(2, "0")}`,
+                    date: day(index),
                     status: index < 22 ? "missing" : "matched",
                     reason:
                         index === 0
@@ -43,7 +50,7 @@ test("available historical model days appear without empty grid rows", async ({
                     provisional_production: index >= 22,
                     historical_configuration_assumed: index >= 22,
                 })),
-            },
+            }),
         });
     });
     await page.goto("/app/");
@@ -58,12 +65,27 @@ test("available historical model days appear without empty grid rows", async ({
             exact: true,
         }),
     });
-    await expect(
-        comparison.getByRole("combobox", { name: /^Comparison/ }),
-    ).toHaveValue("historical_model");
+    await expect.poll(() => query).toContain("comparison=archived_forecast");
+    await comparison.getByRole("button", { name: "Model check" }).click();
     await expect.poll(() => query).toContain("comparison=historical_model");
-    await expect(comparison.getByLabel("Previous-day cutoff")).toHaveCount(0);
+    expect(query).toContain("start_date=2026-10-12&end_date=2026-11-10");
+    await expect(comparison.getByText("Advanced", { exact: true })).toHaveCount(
+        0,
+    );
     await expect(comparison.getByRole("row")).toHaveCount(9);
+    await expect(
+        comparison.locator(".stat").filter({ hasText: "Relative error" }),
+    ).toContainText("20 %");
+    await expect(
+        comparison
+            .locator(".stat")
+            .filter({ hasText: "Skill vs uncalibrated model" }),
+    ).toContainText("12.5 %");
+    await expect(
+        comparison.getByText(
+            "Skill uses 3 days outside the calibration's training period.",
+        ),
+    ).toBeVisible();
     await expect(
         comparison.locator(".stat").filter({ hasText: "Missing days" }),
     ).toContainText("21");
@@ -94,13 +116,13 @@ test("available historical model days appear without empty grid rows", async ({
         .getByText("Unavailable dates (22)", { exact: true })
         .click();
     await expect(comparison.getByRole("listitem")).toHaveText([
-        "Saved reference data is invalid: 1 day",
-        "Historical weather estimates are not available: 21 days",
+        `Saved reference data is invalid: ${day(0)}`,
+        `Historical weather estimates are not available: ${Array.from(
+            { length: 21 },
+            (_, index) => day(index + 1),
+        ).join(", ")}`,
     ]);
-    await comparison
-        .getByRole("combobox", { name: /^Comparison/ })
-        .selectOption("archived_forecast");
-    await comparison.getByRole("button", { name: "Load performance" }).click();
+    await comparison.getByRole("button", { name: "Forecast accuracy" }).click();
     await expect.poll(() => query).toContain("comparison=archived_forecast");
     expect(query).not.toContain("issuance_cutoff");
     expect(
@@ -108,16 +130,16 @@ test("available historical model days appear without empty grid rows", async ({
     ).toBeLessThanOrEqual(320);
     const scan = await accessibilityViolations(page);
     expect(scan).toEqual([]);
+    await comparison.getByText("Advanced", { exact: true }).click();
     await comparison.getByLabel("Previous-day cutoff").fill("09:30");
+    await comparison.getByLabel("Start date").fill("2026-10-22");
     await comparison.getByRole("button", { name: "Load performance" }).click();
     await expect
         .poll(() => new URLSearchParams(query).get("issuance_cutoff"))
         .toBe("09:30");
-    await comparison
-        .getByRole("combobox", { name: /^Comparison/ })
-        .selectOption("historical_model");
-    await comparison.getByRole("button", { name: "Load performance" }).click();
+    await comparison.getByRole("button", { name: "Model check" }).click();
     await expect.poll(() => query).toContain("comparison=historical_model");
+    expect(query).toContain("start_date=2026-10-22");
     expect(query).not.toContain("issuance_cutoff");
     expect(
         await page.evaluate(() => document.documentElement.scrollWidth),
@@ -128,23 +150,26 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
     await mockApi(page);
     await page.route("**/plants/21/performance/**", async (route) => {
         await route.fulfill({
-            json: {
+            json: answer("PerformanceOutput", {
                 comparison: "archived_forecast",
                 start_date: "2026-10-12",
                 end_date: "2026-11-10",
                 matched_days: 0,
                 requested_days: 30,
+                relative_error: null,
+                skill_score: null,
+                skill_days: 0,
                 metrics: null,
                 baseline_metrics: null,
                 days: Array.from({ length: 30 }, (_, index) => ({
                     date: String(index),
                     status: "missing",
-                    reason: "configuration_not_available",
+                    reason: "forecast_not_available",
                     measured_energy_mwh: null,
                     predicted_energy_mwh: null,
                     error_mwh: null,
                 })),
-            },
+            }),
         });
     });
     await page.goto("/app/");
@@ -170,7 +195,10 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
         .getByText("Unavailable dates (30)", { exact: true })
         .click();
     await expect(comparison.getByRole("listitem")).toHaveText([
-        "Configuration was not available before this day: 30 days",
+        `No forecast was archived for this day: ${Array.from(
+            { length: 30 },
+            (_, index) => String(index),
+        ).join(", ")}`,
     ]);
 });
 

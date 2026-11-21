@@ -121,6 +121,10 @@
             "provider_error": "Sağlayıcı hatası",
             "missing": "Eksik",
             "unknown": "Diğer kalite notu ({value})"
+        },
+        "stale_reason": {
+            "collection_overdue": "Sağlayıcıdan alınan en yeni veri bir günden eski.",
+            "connection_inactive": "Bu sahanın sağlayıcı bağlantısı artık etkin değil."
         }
     },
     "ForecastIntervals": {
@@ -146,9 +150,6 @@
         "how_comparison_is_measured": "Karşılaştırma nasıl hesaplanır?",
         "historical_model_uses_saved_weather_estimates_and": "Geçmiş model, kaydedilmiş hava durumu tahminlerini ve mevcut yapılandırmayı kullanır. Kalibrasyon, eğitim döneminden itibaren uygulanır. Bu geriye dönük karşılaştırma geçici üretim verilerini içerebilir. Tahmin doğruluğunu ölçmez.",
         "archived_forecast_description": "Gün ışığı başlamadan kaydedilen son tahmini, o zamanki kalibrasyonuyla karşılaştırır. Daha erken bir tahmin için önceki günün kesim saatini seçin.",
-        "comparison": "Karşılaştırma",
-        "historical_model": "Geçmiş model",
-        "archived_forecast_performance": "Arşivlenmiş tahmin performansı",
         "previousday_cutoff": "Önceki günün kesim saati (isteğe bağlı)",
         "start_date": "Başlangıç tarihi",
         "end_date": "Bitiş tarihi",
@@ -185,7 +186,6 @@
         "daily_comparison": "Günlük karşılaştırma ({count} gün)",
         "date_range": ": {start} – {end}",
         "unavailable_dates": "Verisi olmayan tarihler ({count})",
-        "reason_count": "{reason}: {count} gün",
         "reasons": {
             "estimated_actuals_not_available": "Geçmiş hava durumu tahminleri mevcut değil",
             "configuration_not_available": "Bu günün öncesinde yapılandırma mevcut değildi",
@@ -193,7 +193,15 @@
             "configuration_not_comparable": "Ölçüm esası veya saat dilimi değişmiş",
             "incomplete_or_invalid_day": "Üretim veya referans veri kapsamı eksik ya da geçersiz",
             "invalid_forecast_data": "Kaydedilmiş referans verisi geçersiz"
-        }
+        },
+        "performance_views": "Performans görünümleri",
+        "forecast_accuracy": "Tahmin doğruluğu",
+        "model_check": "Model kontrolü",
+        "advanced": "Gelişmiş",
+        "relative_error": "Göreli hata",
+        "skill_score": "Kalibre edilmemiş modele göre başarı",
+        "skill_days": "Başarı, kalibrasyonun eğitim dönemi dışındaki {count, plural, one {# günü} other {# günü}} kullanır.",
+        "reason_dates": "{reason}: {dates}"
     },
     "Calibrations": {
         "calibration_history": "Kalibrasyon geçmişi",

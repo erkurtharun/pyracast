@@ -28,7 +28,6 @@ async function workspace(
     const configuration = {
         id: 31,
         revision: 1,
-        binding_id: 1,
         created_at: "2026-01-01T00:00:00Z",
         dc_capacity_mw: 5,
         inverter_capacity_mw: 4,
@@ -122,7 +121,7 @@ async function workspace(
             data = incident;
         } else if (path.endsWith("/forecast/")) {
             const intervals = [0, 2, 0].map((power, index) => ({
-                start: `2026-11-12T0${index + 8}:00:00Z`,
+                start: `2026-11-12T${String(index + 8).padStart(2, "0")}:00:00Z`,
                 end: `2026-11-12T${String(index + 9).padStart(2, "0")}:00:00Z`,
                 mean_power_mw: power,
                 energy_mwh: power,

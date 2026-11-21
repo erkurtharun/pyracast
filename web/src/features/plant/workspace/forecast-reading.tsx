@@ -57,7 +57,7 @@ function IrradianceForecast({ scope, date, source, poll }: ForecastQuery) {
             },
             query: {
                 date,
-                data_source: source === "archived_forecast" ? "auto" : source,
+                data_source: source,
             },
         },
         { poll },

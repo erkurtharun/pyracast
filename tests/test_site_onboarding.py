@@ -8,6 +8,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.test import Client
 from django.utils import timezone
+from rest_framework.serializers import ListSerializer
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.forecasts.models import CollectionJob
@@ -15,7 +16,7 @@ from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import approve_region
 from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
 from pyracast.plants.operations import create_plant, revise_plant
-from pyracast.plants.sites import site_queryset, submit_site
+from pyracast.plants.sites import site_queryset, sites, submit_site
 from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import (
     configure_binding,
@@ -110,7 +111,8 @@ def test_site_list_prepares_plants_without_per_row_queries(django_assert_num_que
     from pyracast.plants.site_api import SiteOutput
 
     with django_assert_num_queries(2):
-        rows = SiteOutput(site_queryset(system.tenant.pk), many=True).data
+        page = sites(list(site_queryset(system.tenant.pk)))
+        rows = ListSerializer(page, child=SiteOutput()).data
     assert len(rows) == 5
 
 

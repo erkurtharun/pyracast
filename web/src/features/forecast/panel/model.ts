@@ -1,4 +1,5 @@
 import { dataIntervalRange } from "@/lib/intervals";
+import type { components } from "@/lib/schema";
 import type { ForecastInterval as Interval } from "../forecast-intervals";
 
 export type DaylightSummary = {
@@ -12,33 +13,9 @@ export type DaylightSummary = {
     partial_energy_kwh_m2?: number;
 };
 
-export type OutageScenario = {
-    evaluated_at: string;
-    status: "estimated" | "unknown_impact";
-    incident_revision_ids: number[];
-    incidents: Record<string, unknown>[];
-    result: Record<string, unknown>;
-};
-
-export type ProductionDiagnostic = {
-    status: "suspected" | "normal" | "insufficient";
-    performance_ratio: number | null;
-    reference_kind: "active_calibration" | "uncalibrated_reference";
-    window_start: string | null;
-    window_end: string | null;
-    days: {
-        day: string;
-        performance_index: number;
-        hours: number;
-        status: "shortfall" | "within_threshold";
-        observed_zero: boolean;
-    }[];
-    latest_matched_day: string | null;
-    latest_day_status:
-        "shortfall" | "within_threshold" | "insufficient" | "unavailable";
-    latest_performance_index: number | null;
-    evidence_state: "current" | "stale";
-};
+export type OutageScenario = components["schemas"]["OutageScenarioOutput"];
+export type ProductionDiagnostic =
+    components["schemas"]["ProductionDiagnosticOutput"];
 
 export type ForecastResult = Record<string, unknown>;
 

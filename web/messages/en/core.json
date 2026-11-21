@@ -283,7 +283,8 @@
         "Freshness": {
             "fresh": "Fresh",
             "stale": "Stale",
-            "missing": "No data"
+            "missing": "No data",
+            "archived": "Archived"
         },
         "CalibrationStatus": {
             "pending": "Waiting",

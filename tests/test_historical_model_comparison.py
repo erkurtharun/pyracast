@@ -103,7 +103,6 @@ def test_historical_model_applies_the_calibration_fitted_for_that_period(
     response = client.get(url, query)
     assert response.status_code == 200
     result = response.json()
-    assert result["evaluation_kind"] == "retrospective_model_comparison"
     assert result["matched_days"] == 1
     day = result["days"][0]
     assert day["factor"] == 0.8

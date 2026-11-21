@@ -1,4 +1,5 @@
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from math import isfinite
 from typing import Any, cast
@@ -12,6 +13,7 @@ from django.utils.translation import gettext
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.capacity_normalization import normalization_provenance
+from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.forecasts.projections import saved_day_payload
@@ -80,9 +82,7 @@ def power_intervals(
     return tuple(result)
 
 
-def _usable(run: CalibrationRun, configuration: PlantConfiguration, as_of: datetime) -> bool:
-    from pyracast.plants.incident_policy import incidents_unchanged
-
+def _fits(run: CalibrationRun, configuration: PlantConfiguration, as_of: datetime) -> bool:
     return (
         run.configuration_id == configuration.pk
         and run.binding_id == configuration.binding_id
@@ -94,13 +94,20 @@ def _usable(run: CalibrationRun, configuration: PlantConfiguration, as_of: datet
         and run.cutoff_at <= as_of
         and run.created_at <= as_of
         and calibration_matches_transfer(run, configuration)
-        and incidents_unchanged(run, as_of)
     )
+
+
+def _usable(run: CalibrationRun, configuration: PlantConfiguration, as_of: datetime) -> bool:
+    from pyracast.plants.incident_policy import incidents_unchanged
+
+    return _fits(run, configuration, as_of) and incidents_unchanged(run, as_of)
 
 
 def calibration_at(configuration: PlantConfiguration, as_of: datetime) -> CalibrationRun | None:
     activation = (
-        CalibrationActivation.objects.select_related("calibration")
+        CalibrationActivation.objects.select_related(
+            "calibration__binding", "calibration__configuration"
+        )
         .filter(configuration=configuration, created_at__lte=as_of)
         .order_by("-created_at", "-pk")
         .first()
@@ -121,27 +128,48 @@ def _fitted_start(run: CalibrationRun) -> date | None:
         return None
 
 
-def calibration_for_day(
-    configuration: PlantConfiguration, day: date, as_of: datetime
-) -> CalibrationRun | None:
-    """Activated calibration whose training period had begun by a completed `day`.
+def fitted_on(run: CalibrationRun, day: date) -> bool:
+    days = run.result.get("training_day_dates")
+    return isinstance(days, list) and day.isoformat() in days
 
-    A factor describes its training period onward, not earlier seasons. The newest
-    qualifying activation wins, and a baseline reset ends the search.
-    """
+
+@dataclass(frozen=True)
+class CalibrationTimeline:
+    """Usable activated runs, newest activation first, up to the newest baseline reset."""
+
+    runs: tuple[tuple[date, CalibrationRun], ...]
+
+    def for_day(self, day: date) -> CalibrationRun | None:
+        """A factor describes its training period onward, not earlier seasons."""
+        return next((run for start, run in self.runs if start <= day), None)
+
+
+def calibration_timeline(configuration: PlantConfiguration, as_of: datetime) -> CalibrationTimeline:
+    from pyracast.plants.incident_policy import runs_with_unchanged_incidents
+
     activations = (
-        CalibrationActivation.objects.select_related("calibration")
+        CalibrationActivation.objects.select_related(
+            "calibration__binding", "calibration__configuration"
+        )
+        .defer("calibration__dataset_manifest")
         .filter(configuration=configuration, created_at__lte=as_of)
         .order_by("-created_at", "-pk")[:RETROSPECTIVE_ACTIVATIONS]
     )
+    fitted: list[tuple[date, CalibrationRun]] = []
     for activation in activations:
         run = activation.calibration
         if run is None:
-            return None
+            break
         start = _fitted_start(run)
-        if start is not None and start <= day and _usable(run, configuration, as_of):
-            return run
-    return None
+        if start is not None and _fits(run, configuration, as_of):
+            fitted.append((start, run))
+    return CalibrationTimeline(tuple(runs_with_unchanged_incidents(configuration, fitted, as_of)))
+
+
+def calibration_for_day(
+    configuration: PlantConfiguration, day: date, as_of: datetime
+) -> CalibrationRun | None:
+    return calibration_timeline(configuration, as_of).for_day(day)
 
 
 def forecast_daylight(
@@ -311,6 +339,7 @@ def _issued_forecast(
             "calibration_id": None,
             "source_kind": "forecast",
             "freshness": "missing",
+            "stale_reason": None,
             "unavailable_reason": "forecast_unavailable"
             if configuration is not None
             else "configuration_unavailable",
@@ -319,12 +348,14 @@ def _issued_forecast(
             "outage_scenario": None,
         }
     configuration, snapshot = issuance.configuration, issuance.snapshot
-    result = deepcopy(issuance.payloads[str(resolution_minutes)])
-    flags = cast(list[str], result["quality_flags"])
-    flags.append("archived_forecast")
-    if configuration.pk != plant.current_configuration_id:
-        flags.append("previous_configuration")
-    regional = saved_day_payload(snapshot, target_date)
+    with stored_data("plant", plant.pk, target_date, "archived_forecast", FROZEN_PAYLOAD_FAULTS):
+        result = deepcopy(issuance.payloads[str(resolution_minutes)])
+        flags = cast(list[str], result["quality_flags"])
+        flags.append("archived_forecast")
+        if configuration.pk != plant.current_configuration_id:
+            flags.append("previous_configuration")
+        regional = saved_day_payload(snapshot, target_date)
+        scenario = deepcopy(issuance.outage_scenarios.get(str(resolution_minutes)))
     return {
         "plant_id": plant.pk,
         "date": target_date.isoformat(),
@@ -335,7 +366,8 @@ def _issued_forecast(
         "issuance_id": issuance.pk,
         "calibration_id": issuance.calibration_id,
         "source_kind": "forecast",
-        "freshness": "fresh" if configuration.pk == plant.current_configuration_id else "stale",
+        "freshness": "archived",
+        "stale_reason": None,
         "unavailable_reason": None,
         "result": result,
         "regional_irradiance": {
@@ -344,7 +376,7 @@ def _issued_forecast(
         }
         if regional is not None
         else None,
-        "outage_scenario": deepcopy(issuance.outage_scenarios.get(str(resolution_minutes))),
+        "outage_scenario": scenario,
     }
 
 

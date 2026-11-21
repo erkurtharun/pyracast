@@ -1,8 +1,9 @@
+from copy import deepcopy
 from datetime import date, datetime, timedelta
 from typing import Literal, cast
 from zoneinfo import ZoneInfo
 
-from django.db.models import Case, IntegerField, Q, Value, When
+from django.db.models import F, Q
 
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
@@ -12,22 +13,25 @@ from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.actuals import (
     ACTUAL_COMPOSITION_POLICY,
     archived_actual_irradiance,
+    first_complete_actuals,
+    legacy_actual_queryset,
     select_archived_actual_source,
 )
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.coverage import history_day_complete
+from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
 from pyracast.forecasts.intraday import (
     apply_intraday_source,
     prepare_intraday_source,
     preserve_forecast_weather,
 )
 from pyracast.forecasts.models import (
-    CollectionEndpoint,
     CollectionJobStatus,
     ForecastResult,
     ForecastSnapshot,
     SnapshotSourceKind,
 )
+from pyracast.forecasts.projections import saved_day_payload
 from pyracast.forecasts.sources import (
     current_forecast_snapshots,
     mark_forecast_fallback,
@@ -39,6 +43,27 @@ from pyracast.plants.forecast_sources import apply_composition, compose_snapshot
 from pyracast.regions.models import Region
 
 HISTORY_SELECTION_POLICY = "native-then-authorized-scale-complete-actuals-v4"
+COLLECTION_OVERDUE_AFTER = timedelta(hours=24)
+
+type ResultState = tuple[Literal["fresh", "stale", "archived"], str | None]
+ARCHIVED: ResultState = ("archived", None)
+
+
+def live_state(
+    *, connection_current: bool, oldest_collected_at: datetime | None, now: datetime
+) -> ResultState:
+    """A result of a day still running: stale behind an inactive connection or an overdue
+    collection."""
+    if not connection_current:
+        return "stale", "connection_inactive"
+    if oldest_collected_at is not None and oldest_collected_at < now - COLLECTION_OVERDUE_AFTER:
+        return "stale", "collection_overdue"
+    return "fresh", None
+
+
+def result_state(available: bool, state: ResultState) -> dict[str, str | None]:
+    freshness, stale_reason = state if available else ("missing", None)
+    return {"freshness": freshness, "stale_reason": stale_reason}
 
 
 def regional_envelope(
@@ -48,14 +73,14 @@ def regional_envelope(
     snapshot: ForecastSnapshot | None,
     result: dict[str, object] | None,
     *,
-    fresh: bool,
+    state: ResultState,
     unavailable_reason: str,
 ) -> dict[str, object]:
     return {
         "date": target_date,
         "timezone": zone,
         "source_kind": source_kind,
-        "freshness": "missing" if snapshot is None else "fresh" if fresh else "stale",
+        **result_state(snapshot is not None, state),
         "unavailable_reason": unavailable_reason if snapshot is None else None,
         "result": result,
         "collected_at": snapshot.collected_at if snapshot else None,
@@ -68,45 +93,11 @@ def select_actual_snapshot(
     binding: SiteBinding, target_date: date, as_of: datetime
 ) -> ForecastSnapshot | None:
     start, end = local_day_bounds(target_date, binding.timezone)
-    candidates = (
-        ForecastSnapshot.objects.select_related("job__binding__provider_account")
-        .defer("raw_payload", "weather_payload")
-        .filter(
-            binding=binding,
-            job__status=CollectionJobStatus.SUCCEEDED,
-            source_kind=SnapshotSourceKind.ESTIMATED_ACTUALS,
-            coverage_start__lt=end,
-            coverage_end__gt=start,
-            collected_at__gte=end,
-            collected_at__lte=as_of,
-            available_at__lte=as_of,
-        )
-        .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=as_of))
-        .alias(
-            source_priority=Case(
-                When(
-                    job__endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
-                    job__reference_import__isnull=True,
-                    then=Value(0),
-                ),
-                When(
-                    job__endpoint=CollectionEndpoint.SCALED_ESTIMATED_ACTUALS,
-                    capacity_normalization__source_snapshot__job__endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
-                    then=Value(1),
-                ),
-                default=Value(2),
-                output_field=IntegerField(),
-            )
-        )
-        .order_by("source_priority", "-collected_at", "-available_at", "-pk")
+    return first_complete_actuals(
+        legacy_actual_queryset(binding, start, end, collected_from=end, as_of=as_of).iterator(),
+        target_date,
+        binding.timezone,
     )
-    latest = None
-    for snapshot in candidates.iterator():
-        if latest is None:
-            latest = snapshot
-        if history_day_complete(snapshot, target_date, binding.timezone):
-            return snapshot
-    return latest
 
 
 def historical_irradiance(snapshot: ForecastSnapshot, target_date: date) -> dict[str, object]:
@@ -143,16 +134,18 @@ def regional_history(
     region: Region, target_date: date, as_of: datetime, *, fallback_forecast: bool = False
 ) -> dict[str, object]:
     binding = region.approved_binding
-    source = select_archived_actual_source(binding, target_date, as_of) if binding else None
-    snapshot = source.snapshot if source else None
-    result = (
-        archived_actual_irradiance(binding, target_date, source)
-        if source is not None and source.composition is not None and binding is not None
-        else historical_irradiance(snapshot, target_date)
-        if snapshot is not None
-        else None
-    )
-    if fallback_forecast and (result is None or not actuals_ready(snapshot, target_date, result)):
+    with stored_data("region", region.pk, target_date, "estimated_actuals"):
+        source = select_archived_actual_source(binding, target_date, as_of) if binding else None
+        snapshot = source.snapshot if source else None
+        result = (
+            archived_actual_irradiance(binding, target_date, source)
+            if source is not None and source.composition is not None and binding is not None
+            else historical_irradiance(snapshot, target_date)
+            if snapshot is not None
+            else None
+        )
+        ready = result is not None and actuals_ready(snapshot, target_date, result)
+    if fallback_forecast and not ready:
         fallback = _regional_saved_forecast(region, target_date, as_of)
         if fallback["result"] is not None:
             return fallback
@@ -162,7 +155,7 @@ def regional_history(
         "estimated_actuals",
         snapshot,
         result,
-        fresh=binding is not None and binding_is_current(binding),
+        state=ARCHIVED,
         unavailable_reason="estimated_actuals_unavailable",
     )
 
@@ -170,7 +163,7 @@ def regional_history(
 def regional_outlook(
     region: Region,
     target_date: date,
-    source: Literal["auto", "forecast", "estimated_actuals"],
+    source: Literal["auto", "forecast", "estimated_actuals", "archived_forecast"],
     now: datetime,
 ) -> dict[str, object]:
     today = now.astimezone(ZoneInfo(region.timezone)).date()
@@ -178,50 +171,91 @@ def regional_outlook(
         raise DomainError(ErrorCode.DATE_OUT_OF_RANGE)
     if source == "estimated_actuals" and target_date > today:
         raise DomainError(ErrorCode.COMPLETED_DAY_REQUIRED)
+    if (source == "archived_forecast" and target_date > today) or (
+        source == "forecast" and target_date < today
+    ):
+        raise DomainError(ErrorCode.DATE_OUT_OF_RANGE)
+    binding = region.approved_binding
+    if source == "archived_forecast":
+        return saved_region_forecast(region, target_date, now)
     if source == "estimated_actuals" and target_date == today:
         return _regional_composed_forecast(
-            region, target_date, now, now, region.approved_binding, actuals_only=True
+            region, target_date, now, now, binding, actuals_only=True
         )
     if source == "estimated_actuals":
         return regional_history(region, target_date, now)
     if source == "auto" and target_date < today:
         return regional_history(region, target_date, now, fallback_forecast=True)
-    if target_date >= today:
-        if source == "auto" and target_date == today:
-            return _regional_composed_forecast(
-                region, target_date, now, now, region.approved_binding, include_actuals=True
+    return _regional_composed_forecast(
+        region,
+        target_date,
+        now,
+        now,
+        binding,
+        include_actuals=source == "auto" and target_date == today,
+    )
+
+
+def saved_region_forecast(region: Region, target_date: date, now: datetime) -> dict[str, object]:
+    """The forecast published before the day's first daylight, as the plant archive selects
+    its issuances; the payload is the one saved at publication."""
+    from pyracast.plants.forecast_archive import ARCHIVE_SELECTION_POLICY, forecast_cutoff
+
+    cutoffs = {
+        binding.pk: forecast_cutoff(target_date, binding)
+        for binding in SiteBinding.objects.filter(region=region)
+    }
+    zone = region.approved_binding.timezone if region.approved_binding else region.timezone
+    start, end = local_day_bounds(target_date, zone)
+    eligible = Q(pk__in=[])
+    for binding_id, cutoff in cutoffs.items():
+        eligible |= Q(
+            snapshot__binding_id=binding_id,
+            snapshot__collected_at__lt=cutoff,
+            published_at__lt=cutoff,
+        ) & (
+            Q(snapshot__issued_at__isnull=True)
+            | Q(
+                snapshot__issued_at__lt=cutoff,
+                snapshot__issued_at__lte=F("snapshot__collected_at"),
             )
-        return _regional_current_forecast(region, target_date, now)
+        )
     saved = (
-        ForecastResult.objects.select_related("snapshot__job__binding__provider_account")
+        ForecastResult.objects.select_related("snapshot__binding")
+        .defer("snapshot__raw_payload", "snapshot__weather_payload")
         .filter(
-            snapshot__job__binding__region=region,
-            snapshot__job__target_date=target_date,
+            eligible,
             snapshot__source_kind=SnapshotSourceKind.FORECAST,
-            snapshot__collected_at__lte=now,
+            snapshot__job__status=CollectionJobStatus.SUCCEEDED,
+            snapshot__coverage_start__lt=end,
+            snapshot__coverage_end__gt=start,
             published_at__lte=now,
         )
-        .filter(Q(snapshot__issued_at__isnull=True) | Q(snapshot__issued_at__lte=now))
-        .order_by("-snapshot__collected_at", "-published_at", "-pk")
+        .order_by("-snapshot__collected_at", "-pk")
         .first()
     )
+    snapshot = saved.snapshot if saved is not None else None
+    with stored_data("region", region.pk, target_date, "archived_forecast"):
+        payload = saved_day_payload(snapshot, target_date) if snapshot is not None else None
+    result = None
+    if saved is not None and snapshot is not None and payload is not None:
+        result = deepcopy(payload)
+        result["provenance"] = {
+            "selection_policy": ARCHIVE_SELECTION_POLICY,
+            "snapshot_id": snapshot.pk,
+            "collected_at": snapshot.collected_at.isoformat(),
+            "published_at": saved.published_at.isoformat(),
+            "selection_cutoff": cutoffs[snapshot.binding_id].isoformat(),
+        }
     return regional_envelope(
         target_date,
-        saved.snapshot.job.binding.timezone if saved else region.timezone,
+        snapshot.binding.timezone if snapshot is not None else zone,
         "forecast",
-        saved.snapshot if saved else None,
-        saved.payload if saved else None,
-        fresh=saved is not None
-        and binding_is_current(saved.snapshot.job.binding)
-        and saved.snapshot.collected_at >= now - timedelta(hours=24),
+        snapshot if result is not None else None,
+        result,
+        state=ARCHIVED,
         unavailable_reason="forecast_unavailable",
     )
-
-
-def _regional_current_forecast(
-    region: Region, target_date: date, now: datetime
-) -> dict[str, object]:
-    return _regional_composed_forecast(region, target_date, now, now, region.approved_binding)
 
 
 def _regional_saved_forecast(region: Region, target_date: date, now: datetime) -> dict[str, object]:
@@ -286,7 +320,7 @@ def _regional_composed_forecast(
             binding_id=binding.pk, start=start, end=end, as_of=cutoff
         )
     forecasts = snapshots
-    try:
+    with stored_data("region", region.pk, target_date, "actuals", FROZEN_PAYLOAD_FAULTS):
         source = (
             prepare_intraday_source(
                 binding,
@@ -299,8 +333,6 @@ def _regional_composed_forecast(
             if binding is not None and (include_actuals or actuals_only)
             else None
         )
-    except (ValueError, ArithmeticError, KeyError, TypeError) as exc:
-        raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from exc
     source_kind = "estimated_actuals" if actuals_only else "forecast"
     if source is not None:
         snapshots = source.snapshots
@@ -311,7 +343,7 @@ def _regional_composed_forecast(
     result = None
     used_snapshots: list[ForecastSnapshot] = []
     if snapshot is not None and binding is not None:
-        try:
+        with stored_data("region", region.pk, target_date, "irradiance"):
             composition = (
                 source.composition
                 if source is not None
@@ -334,20 +366,20 @@ def _regional_composed_forecast(
                 preserve_forecast_weather(result, binding, target_date, forecasts)
             else:
                 apply_composition(result, snapshots, composition)
-            used_snapshots = [
-                source for source in snapshots if source.pk in composition.snapshot_ids
-            ]
-        except (ValueError, ArithmeticError) as exc:
-            raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from exc
+            used_snapshots = [row for row in snapshots if row.pk in composition.snapshot_ids]
     return regional_envelope(
         target_date,
         binding.timezone if binding else region.timezone,
         source_kind,
         snapshot,
         result,
-        fresh=binding is not None
-        and binding_is_current(binding)
-        and all(source.collected_at >= now - timedelta(hours=24) for source in used_snapshots),
+        state=ARCHIVED
+        if end <= now
+        else live_state(
+            connection_current=binding is not None and binding_is_current(binding),
+            oldest_collected_at=min((row.collected_at for row in used_snapshots), default=None),
+            now=now,
+        ),
         unavailable_reason="estimated_actuals_unavailable"
         if actuals_only
         else "forecast_unavailable",

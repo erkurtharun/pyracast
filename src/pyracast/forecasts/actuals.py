@@ -1,9 +1,10 @@
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, cast
 
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, QuerySet, Value, When
 
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
@@ -20,6 +21,7 @@ from pyracast.forecasts.intraday import (
     actual_coverage_complete,
     apply_intraday_source,
     completed_actual_intervals,
+    native_actual_queryset,
     native_actual_snapshots,
 )
 from pyracast.forecasts.models import (
@@ -28,6 +30,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     SnapshotSourceKind,
 )
+from pyracast.forecasts.sources import covering_ids
 from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
 from pyracast.solar import daylight_window
@@ -64,14 +67,138 @@ class ArchivedActualSource:
         }
 
 
+def legacy_actual_queryset(
+    binding: SiteBinding,
+    start: datetime,
+    end: datetime,
+    *,
+    collected_from: datetime,
+    as_of: datetime,
+) -> QuerySet[ForecastSnapshot]:
+    return (
+        ForecastSnapshot.objects.select_related("job__binding__provider_account")
+        .defer("raw_payload", "weather_payload")
+        .filter(
+            binding=binding,
+            job__status=CollectionJobStatus.SUCCEEDED,
+            source_kind=SnapshotSourceKind.ESTIMATED_ACTUALS,
+            coverage_start__lt=end,
+            coverage_end__gt=start,
+            collected_at__gte=collected_from,
+            collected_at__lte=as_of,
+            available_at__lte=as_of,
+        )
+        .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=as_of))
+        .alias(
+            source_priority=Case(
+                When(
+                    job__endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
+                    job__reference_import__isnull=True,
+                    then=Value(0),
+                ),
+                When(
+                    job__endpoint=CollectionEndpoint.SCALED_ESTIMATED_ACTUALS,
+                    capacity_normalization__source_snapshot__job__endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
+                    then=Value(1),
+                ),
+                default=Value(2),
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("source_priority", "-collected_at", "-available_at", "-pk")
+    )
+
+
+def first_complete_actuals(
+    candidates: Iterable[ForecastSnapshot], target_date: date, zone: str
+) -> ForecastSnapshot | None:
+    """The first candidate covering the whole day, else the first candidate."""
+    latest = None
+    for snapshot in candidates:
+        if latest is None:
+            latest = snapshot
+        if history_day_complete(snapshot, target_date, zone):
+            return snapshot
+    return latest
+
+
 def select_archived_actual_source(
     binding: SiteBinding, target_date: date, cutoff: datetime
 ) -> ArchivedActualSource | None:
     from pyracast.forecasts.history import select_actual_snapshot
 
-    legacy = select_actual_snapshot(binding, target_date, cutoff)
     start, end = local_day_bounds(target_date, binding.timezone)
-    snapshots = native_actual_snapshots(binding, start, end, cutoff)
+    return _archived_actual_source(
+        binding,
+        target_date,
+        cutoff,
+        select_actual_snapshot(binding, target_date, cutoff),
+        native_actual_snapshots(binding, start, end, cutoff),
+    )
+
+
+@dataclass(frozen=True)
+class ActualCandidates:
+    """Every estimated-actual acquisition a range of days can select, read once; `select` makes
+    the per-day choice of `select_archived_actual_source` from them."""
+
+    binding: SiteBinding
+    cutoff: datetime
+    legacy: tuple[ForecastSnapshot, ...]
+    native: tuple[ForecastSnapshot, ...]
+
+    def select(self, target_date: date) -> ArchivedActualSource | None:
+        start, end = local_day_bounds(target_date, self.binding.timezone)
+        legacy = first_complete_actuals(
+            (row for row in self.legacy if _overlaps(row, start, end) and row.collected_at >= end),
+            target_date,
+            self.binding.timezone,
+        )
+        overlapping = [row for row in self.native if _overlaps(row, start, end)]
+        covering = set(
+            covering_ids(
+                ((row.pk, row.coverage_start, row.coverage_end) for row in overlapping),
+                start,
+                end,
+            )
+        )
+        return _archived_actual_source(
+            self.binding,
+            target_date,
+            self.cutoff,
+            legacy,
+            [row for row in overlapping if row.pk in covering],
+        )
+
+
+def _overlaps(snapshot: ForecastSnapshot, start: datetime, end: datetime) -> bool:
+    return (
+        cast(datetime, snapshot.coverage_start) < end
+        and cast(datetime, snapshot.coverage_end) > start
+    )
+
+
+def actual_candidates(
+    binding: SiteBinding, first: date, last: date, cutoff: datetime
+) -> ActualCandidates:
+    start, first_end = local_day_bounds(first, binding.timezone)
+    _, end = local_day_bounds(last, binding.timezone)
+    return ActualCandidates(
+        binding,
+        cutoff,
+        tuple(legacy_actual_queryset(binding, start, end, collected_from=first_end, as_of=cutoff)),
+        tuple(native_actual_queryset(binding, start, end, cutoff)),
+    )
+
+
+def _archived_actual_source(
+    binding: SiteBinding,
+    target_date: date,
+    cutoff: datetime,
+    legacy: ForecastSnapshot | None,
+    snapshots: list[ForecastSnapshot],
+) -> ArchivedActualSource | None:
+    start, end = local_day_bounds(target_date, binding.timezone)
     if not snapshots:
         return ArchivedActualSource(legacy, [legacy], None, cutoff) if legacy is not None else None
     source = _compose_native_source(binding, target_date, cutoff, snapshots)
@@ -110,6 +237,10 @@ def select_archived_actual_source(
 def _valid_actual_intervals(snapshot: ForecastSnapshot) -> tuple[dict[str, Any], ...]:
     intervals = []
     for row in snapshot.normalized_intervals:
+        if not isinstance(row, dict) or not all(
+            isinstance(row.get(key), str) for key in ("start", "end")
+        ):
+            raise ValueError("Saved estimated-actual timestamps must be ISO strings.")
         start, end = (datetime.fromisoformat(row[key]) for key in ("start", "end"))
         if start.utcoffset() is None or end.utcoffset() is None or end <= start:
             continue

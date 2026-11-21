@@ -3,6 +3,7 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.http import HttpRequest
 from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
@@ -59,16 +60,23 @@ def _expires_at(request: Request) -> datetime | None:
     return datetime.fromtimestamp(started + settings.PYRACAST_SESSION_ABSOLUTE_SECONDS, UTC)
 
 
+def http_request(request: Request) -> HttpRequest:
+    """The Django request behind a DRF request: the language middleware reads its
+    `LANGUAGE_CODE` after the view, and Django helpers expect it."""
+    return request._request
+
+
 def session_output(request: Request) -> dict[str, Any]:
     user = request.user
+    django_request = http_request(request)
     return {
         "user": (
-            SessionUserOutput(user, context={"request": request._request}).data
+            SessionUserOutput(user, context={"request": django_request}).data
             if user.is_authenticated
             else None
         ),
-        "csrf_token": get_token(request._request),
-        "language": request._request.LANGUAGE_CODE,
+        "csrf_token": get_token(django_request),
+        "language": django_request.LANGUAGE_CODE,
         "expires_at": _expires_at(request),
     }
 
@@ -96,7 +104,7 @@ class SessionLanguageView(APIView):
         language = payload.validated_data["language"]
         if request.user.is_authenticated:
             save_user_language(request.user, language)
-        request._request.LANGUAGE_CODE = language
+        http_request(request).LANGUAGE_CODE = language
         response = Response(session_output(request))
         set_language_cookie(response, language)
         return response
