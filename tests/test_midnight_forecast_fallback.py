@@ -12,6 +12,7 @@ from pyracast.forecasts.models import ForecastResult, ForecastSnapshot, RequestA
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
 from tests.support.automatic_forecast_selection import reference_transition
@@ -222,9 +223,7 @@ def test_saved_fallback_keeps_day_end_configuration_and_tenant_scope(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Revised plant",
-        dc_capacity_mw=260,
-        export_limit_mw=100,
+        PlantParameters(name="Revised plant", dc_capacity_mw=260, export_limit_mw=100),
     )
     Region.objects.filter(pk=system.region.pk).update(timezone="UTC")
     monkeypatch.setattr(timezone, "now", lambda: end + timedelta(hours=4))

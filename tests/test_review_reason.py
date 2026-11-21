@@ -270,7 +270,7 @@ def test_a_rejected_plant_accepts_edits_of_its_declaration() -> None:
 
     response = client.put(
         plant_url(system, plant.pk),
-        {"name": plant.name, "dc_capacity_mw": 5.5},
+        {"name": plant.name, "dc_capacity_mw": 5.5, "expected_revision": plant.parameters_revision},
         content_type="application/json",
     )
 
@@ -439,7 +439,12 @@ def test_reject_read_edit_resubmit_and_approve_through_the_real_api() -> None:
     read = site_row(customer, system)
     edited = customer.put(
         plant_url(system, plant.pk),
-        {"name": plant.name, "dc_capacity_mw": 3.9, "inverter_capacity_mw": 3.5},
+        {
+            "name": plant.name,
+            "dc_capacity_mw": 3.9,
+            "inverter_capacity_mw": 3.5,
+            "expected_revision": read["plant"]["parameters_revision"],
+        },
         content_type="application/json",
     )
     resubmitted = customer.post(

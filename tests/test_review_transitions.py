@@ -1,11 +1,13 @@
 import itertools
 import time
 from concurrent.futures import ThreadPoolExecutor
+from math import copysign
 
 import pytest
 from django.core.exceptions import ValidationError
 from django.db import connection, connections, transaction
-from django.db.models import Field
+from django.db.models import Field, FloatField, Value
+from django.db.models.functions import Cast
 
 from pyracast.errors import ConflictError
 from pyracast.forecasts.validation import validate_binding
@@ -97,6 +99,27 @@ def test_a_change_of_any_declared_field_changes_the_declaration(field: str) -> N
 
     assert field in DECLARED_FIELDS
     assert declaration_fingerprint(system.region.pk) != before
+
+
+def test_a_stored_negative_zero_angle_approves_as_the_zero_the_page_showed() -> None:
+    system = make_system()
+    plant = submitted_plant(system)
+    zero = {"surface_tilt_degrees": 0.0, "surface_azimuth_degrees": 0.0}
+    submission = PlantSubmission.objects.filter(plant=plant)
+    submission.update(mounting_type="fixed", **zero)
+    validate_binding(system.admin, system.binding.pk, FakeAdapter(), NOW)
+    seen = review_snapshot(system.region.pk)
+
+    # A -0.0 parameter reaches PostgreSQL as a numeric literal and is stored as 0; only a typed
+    # value such as this cast stores a negative zero.
+    submission.update(**{field: Cast(Value("-0"), FloatField()) for field in zero})
+
+    assert all(copysign(1, value) == -1 for value in submission.values_list(*zero).get())
+    assert declaration_fingerprint(system.region.pk) == seen.declaration
+    assert approve_region(system.admin, system.region.pk, system.binding.pk, NOW, seen=seen).changed
+    configuration = PlantConfiguration.objects.get(plant=plant)
+    angles = (configuration.surface_tilt_degrees, configuration.surface_azimuth_degrees)
+    assert all(value is not None and copysign(1, value) == 1 for value in angles)
 
 
 def test_a_decision_to_the_current_status_writes_no_second_audit_row() -> None:

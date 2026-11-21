@@ -100,7 +100,10 @@
         "deletionHelp": "Move this plant, its location and associated history to the recycle bin for 30 days.",
         "calibrationUnavailable": "Calibration becomes available after administrator approval and matched production history.",
         "actuals": "Actuals",
-        "plantTime": "Times on this plant are in plant time: {zone}."
+        "plantTime": "Times on this plant are in plant time: {zone}.",
+        "serverChanges": "Changed by someone else meanwhile:",
+        "editKept": "(your entry {value} is kept)",
+        "editDropped": "{field}: your entry {value} no longer applies and was dropped."
     },
     "RegionSettings": {
         "plantLocation": "Plant location",
@@ -229,7 +232,6 @@
         "staleEdit": "Someone changed this outage after you opened it. Your entries are kept.",
         "staleApply": "Changed meanwhile (now revision {revision}). Save again to apply your change to this version, or discard it.",
         "staleClosed": "This outage is now {status}, so your change cannot be applied.",
-        "changedField": "{field}: {before} → {after}",
         "discardEdit": "Discard my change",
         "status": "Status",
         "cancelledOutages": "{count, plural, one {# cancelled entry} other {# cancelled entries}}"

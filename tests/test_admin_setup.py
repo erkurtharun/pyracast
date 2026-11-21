@@ -18,6 +18,7 @@ from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from pyracast.connections.setup import SetupOutcome, save_provider_setup
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.plants.models import Plant, PlantConfiguration
+from pyracast.plants.parameters import PlantParameters
 from pyracast.platform_admin.forms import BindingActionForm, ProviderSetupForm
 from pyracast.provider_retry import retryable_status
 from pyracast.providers import SolcastProvider
@@ -535,7 +536,12 @@ def approved_admin_system() -> tuple[System, list[int]]:
     system.binding.installation_date = date(2020, 1, 1)
     system.binding.settings_verification_reference = "Verified synthetic site settings"
     system.binding.save(update_fields=("installation_date", "settings_verification_reference"))
-    create_plant(system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1)
+    create_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=1),
+    )
     Plant.objects.update(
         automatic_calibration_enabled=True,
         automatic_calibration_enabled_by=system.member,
