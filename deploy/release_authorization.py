@@ -19,7 +19,7 @@ SONAR_JOB = "Sonar quality gate"
 CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
 RELEASED_EVENTS = frozenset({"push", "workflow_dispatch"})
 # What the workflows execute or read to reach a verdict, beyond product and test code.
-PIPELINE_DIRECTORIES = (".github/", "deploy/", "infra/", "scripts/", "web/testing/")
+PIPELINE_DIRECTORIES = (".github/", "deploy/", "infra/", "scripts/", "web/eslint/", "web/testing/")
 PIPELINE_FILES = frozenset(
     {
         ".dockerignore",
@@ -43,6 +43,7 @@ PIPELINE_FILES = frozenset(
         "web/package.json",
         "web/playwright.config.ts",
         "web/playwright.integration.config.ts",
+        "web/tests/support/server.ts",
         "web/tsconfig.json",
     }
 )
@@ -112,9 +113,12 @@ def _newest_state(statuses: Sequence[Mapping[str, Any]]) -> object:
     return newest["state"]
 
 
-def released_since(records: object, sha: str, since: object, states: Collection[str]) -> bool:
+def _released_state(
+    records: object, sha: str, since: object, states: Collection[str]
+) -> bool | None:
+    # None: the records or the start of the window are unreadable, so the answer is unknown.
     if not isinstance(records, list):
-        return False
+        return None
     try:
         start = _instant(since)
         return any(
@@ -124,7 +128,11 @@ def released_since(records: object, sha: str, since: object, states: Collection[
             for record in records
         )
     except (KeyError, TypeError, ValueError):
-        return False
+        return None
+
+
+def released_since(records: object, sha: str, since: object, states: Collection[str]) -> bool:
+    return _released_state(records, sha, since, states) is True
 
 
 def _repository_ci(run: Mapping[str, Any] | None, facts: Mapping[str, Any]) -> bool:
@@ -157,12 +165,36 @@ def decide(facts: Mapping[str, Any]) -> Authorized | Superseded | Deferred:
         if candidate and candidate != main:
             return _superseded(str(candidate), main)
     if facts["event"] == "workflow_dispatch" and facts.get("requested_run") is not None:
+        ended = run is not None and run.get("status") == "completed"
+        _refuse_a_lookup_failure_without_a_later_release(facts, ended)
         # A start judged after its run ended, such as a re-run of a failed early release, takes
         # the rule of the whole run: it releases or it is refused, never deferred.
-        if facts.get("run_error") is None and run is not None and run.get("status") == "completed":
+        if facts.get("run_error") is None and ended:
             return _decide_whole_run(facts, main, run, automatic=True)
         return _decide_early(facts, main, run)
     return _decide_whole_run(facts, main, run, automatic=facts["event"] == "workflow_run")
+
+
+def _refuse_a_lookup_failure_without_a_later_release(facts: Mapping[str, Any], ended: bool) -> None:
+    # Deferring hands the decision to the release after the whole run, which only the first
+    # attempt of a start whose run is still going can count on; anything else fails visibly.
+    proof = facts.get("proof")
+    detail = facts.get("run_error")
+    if detail is None and not ended and isinstance(proof, Mapping):
+        detail = proof.get("error")
+    if detail is not None and (ended or _release_attempt(facts) != 1):
+        identifier = (facts["run"] or facts["requested_run"])["id"]
+        raise RefusedError(
+            f"A lookup of CI run {identifier} failed ({detail}) after that run ended or in a "
+            "later attempt of this release; re-run all jobs of this release."
+        )
+
+
+def _release_attempt(facts: Mapping[str, Any]) -> int | None:
+    attempt = facts.get("release_attempt")
+    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+        return None
+    return attempt
 
 
 def _decide_whole_run(
@@ -467,6 +499,7 @@ def _authorize(facts_path: Path, environ: Mapping[str, str], root: Path) -> int:
         ("artifact_id", decision.artifact_id),
         ("ci_started_at", decision.ci_started_at),
         ("proven", str(decision.pull_request is not None).lower()),
+        ("release_attempt", _release_attempt(facts) or ""),
     ):
         _append(output, f"{key}={value}")
     message = f"Authorized main commit {decision.sha} using CI run {decision.ci_run_id}"
@@ -509,7 +542,8 @@ def _current(
         _append(summary, f"Superseded: {_superseded(release, main).reason}")
         return 0
     # Deploy jobs are serialized, so a success recorded here belongs to another, finished release.
-    if released_since(_read_records(deployments), release, since, {"success"}):
+    released = _released_state(_read_records(deployments), release, since, {"success"})
+    if released:
         _append(output, "current=false")
         _append(
             summary,
@@ -518,6 +552,8 @@ def _current(
         )
         return 0
     _append(output, "current=true")
+    if deployments is not None:
+        _append(output, f"deployments={'unknown' if released is None else 'read'}")
     return 0
 
 

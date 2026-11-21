@@ -412,6 +412,8 @@ Retry a failed Release while its artifact remains available; otherwise run
 Release automatically, so nothing else is needed after a failed deployment.
 A re-run of an early Release whose CI run has ended deploys only when that whole run
 succeeded and fails visibly otherwise.
+Retry an early Release with **Re-run all jobs**: a partial re-run of it is refused, because
+its scan and deploy would act on the authorization of the earlier attempt.
 To redeploy `main`:
 
 1. Run CI on `main`. Its automatic Release deploys unless the classification

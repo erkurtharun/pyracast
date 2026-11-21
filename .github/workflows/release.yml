@@ -40,6 +40,7 @@ jobs:
       artifact_id: ${{ steps.decision.outputs.artifact_id }}
       ci_started_at: ${{ steps.decision.outputs.ci_started_at }}
       proven: ${{ steps.decision.outputs.proven }}
+      release_attempt: ${{ steps.decision.outputs.release_attempt }}
       release: ${{ steps.classify.outputs.release }}
     steps:
       # The default ref is main (workflow_run, or a dispatch on main), never a fork's code. A main
@@ -178,6 +179,7 @@ jobs:
               deployments,
               proof,
               sonar_enabled: process.env.SONAR_ENABLED === 'true',
+              release_attempt: Number(process.env.GITHUB_RUN_ATTEMPT),
             };
             fs.writeFileSync(`${process.env.RUNNER_TEMP}/release-facts.json`, JSON.stringify(facts));
       - name: Authorize the current main commit against its exact CI run
@@ -239,11 +241,23 @@ jobs:
     permissions:
       contents: read
       actions: read
+      deployments: read
     env:
       RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
     outputs:
       current: ${{ steps.current.outputs.current }}
     steps:
+      # Re-running only failed jobs keeps the outputs of an authorize job that did not run again,
+      # so an early release would go on with a decision made before its CI run ended.
+      - name: Refuse an early release authorized in an earlier attempt of this run
+        if: inputs.ci_run_id != ''
+        env:
+          AUTHORIZED_IN: ${{ needs.authorize.outputs.release_attempt }}
+        run: |
+          if [[ "$AUTHORIZED_IN" != "$GITHUB_RUN_ATTEMPT" ]]; then
+            echo "::error::This early release was authorized in attempt ${AUTHORIZED_IN:-unknown}, not in attempt $GITHUB_RUN_ATTEMPT; re-run all jobs so that it is judged again."
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.authorize.outputs.sha }}
@@ -339,11 +353,17 @@ jobs:
           CI_STARTED_AT: ${{ needs.authorize.outputs.ci_started_at }}
         run: *decide-current
       # Images vanish only through the cleanup after a successful deployment of this commit; any
-      # other failed download stays a failed release.
+      # other failed download stays a failed release. Unreadable deployments are named as such.
       - name: Refuse images that vanished without a release of this commit
         if: steps.download.outcome == 'failure' && steps.current.outputs.current == 'true'
+        env:
+          DEPLOYMENTS: ${{ steps.current.outputs.deployments }}
         run: |
-          echo '::error::The image artifact could not be downloaded and no release of this commit has succeeded.'
+          if [[ "$DEPLOYMENTS" == unknown ]]; then
+            echo '::error::The image artifact could not be downloaded and the production deployments of this commit could not be read, so a finished release of it may have removed the images.'
+          else
+            echo '::error::The image artifact could not be downloaded and no release of this commit has succeeded.'
+          fi
           exit 1
 
   deploy:
@@ -369,6 +389,17 @@ jobs:
       GCP_MIGRATION_SECRET: ${{ vars.GCP_MIGRATION_SECRET }}
       GCP_MIGRATION_SECRET_VERSION: ${{ vars.GCP_MIGRATION_SECRET_VERSION }}
     steps:
+      # Re-running only failed jobs keeps the outputs of an authorize job that did not run again,
+      # so an early release would go on with a decision made before its CI run ended.
+      - name: Refuse an early release authorized in an earlier attempt of this run
+        if: inputs.ci_run_id != ''
+        env:
+          AUTHORIZED_IN: ${{ needs.authorize.outputs.release_attempt }}
+        run: |
+          if [[ "$AUTHORIZED_IN" != "$GITHUB_RUN_ATTEMPT" ]]; then
+            echo "::error::This early release was authorized in attempt ${AUTHORIZED_IN:-unknown}, not in attempt $GITHUB_RUN_ATTEMPT; re-run all jobs so that it is judged again."
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: erkurtharun/pyracast
@@ -412,6 +443,7 @@ jobs:
             await new Promise(resolve => setTimeout(resolve, 300000));
             core.setFailed('The release was not cancelled; nothing was transferred.');
       - name: Download images from the exact authorized CI run
+        id: download
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.authorize.outputs.artifact_id }}
@@ -420,6 +452,9 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ needs.authorize.outputs.ci_run_id }}
           digest-mismatch: error
+      - name: Explain a failed download while the deployments are unknown
+        if: failure() && steps.download.outcome == 'failure' && steps.before.outputs.deployments == 'unknown'
+        run: echo '::error::The production deployments of this commit could not be read before the download, so a finished release of it may have removed the images.'
       - name: Verify source, run and immutable archive contents before cloud authentication
         env:
           CI_RUN_ID: ${{ needs.authorize.outputs.ci_run_id }}
