@@ -6,7 +6,7 @@ from django.db import DatabaseError
 from django.test import Client, override_settings
 
 from pyracast.accounts import session_cookie
-from pyracast.notifications.models import OutboundMail
+from pyracast.accounts.models import OutboundMail
 from tests.support.account_sessions import account, browser, session_key, session_row_held
 from tests.support.auth_lifecycle import PASSWORD, submit
 from tests.support.company_registration import signup
