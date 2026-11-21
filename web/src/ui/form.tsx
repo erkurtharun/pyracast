@@ -8,7 +8,6 @@ import {
     useRef,
     useState,
     type ChangeEventHandler,
-    type InputHTMLAttributes,
     type ReactNode,
     type RefObject,
 } from "react";
@@ -119,7 +118,6 @@ export function Field({
     step?: string;
     pattern?: string;
     title?: string;
-    inputMode?: InputHTMLAttributes<HTMLInputElement>["inputMode"];
     placeholder?: string;
     autoComplete?: string;
     hint?: string;

@@ -21,7 +21,6 @@ export function CoordinateField({
         <Field
             label={label}
             name={axis}
-            inputMode="decimal"
             pattern={coordinatePattern(axis)}
             title={t(axis)}
             defaultValue={defaultValue}
