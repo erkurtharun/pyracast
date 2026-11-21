@@ -25,6 +25,7 @@ from pyracast.forecasts.models import (
     ReferenceCapacityNormalization,
     RequestAttempt,
 )
+from pyracast.forecasts.revalidation import queue_revalidation
 from pyracast.forecasts.timing import default_times
 from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.metering.models import (
@@ -173,6 +174,8 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
             raise DomainError(blocker)
         region.deleted_at = region.purge_warning_sent_at = None
         region.save(update_fields=("deleted_at", "purge_warning_sent_at"))
+        if region.approved_binding_id is not None:
+            queue_revalidation(region.approved_binding_id, now)
         CollectionSchedule.objects.get_or_create(
             region=region,
             defaults={
