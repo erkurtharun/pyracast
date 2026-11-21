@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
 
@@ -8,15 +8,19 @@ from django.test import Client
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts.jobs.claim import claim
+from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import CollectionJob, RequestAttempt, RequestPurpose
 from pyracast.forecasts.quota import RequestDeferredError, reserve_request
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.operations import configure_binding, submit_region
+from tests.support.collection_schedule import HistoricalFixture, no_calculation
 from tests.support.domain import NOW, System, make_system
+from tests.support.jobs import collect
 
 pytestmark = pytest.mark.django_db(transaction=True)
 # Europe/Istanbul is UTC+3: its nightly history window of local day D runs from 21:00 UTC on
@@ -24,6 +28,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 EVENING = NOW + timedelta(hours=1)
 WINDOW_START = datetime(2026, 11, 9, 21, tzinfo=UTC)
 WINDOW_END = datetime(2026, 11, 10, 6, tzinfo=UTC)
+NIGHT = datetime(2026, 11, 10, tzinfo=UTC)
 NEXT_SLOT = datetime(2026, 11, 10, 13, tzinfo=UTC)
 TICK = timedelta(microseconds=1)
 
@@ -238,6 +243,109 @@ def test_a_forecast_ended_for_a_passing_reason_is_collected_again_now() -> None:
     latest.refresh_from_db()
     assert (latest.status, latest.available_at) == ("pending", EVENING)
     assert claim(latest.pk, EVENING) is not None
+
+
+def night_history(system: System) -> CollectionJob:
+    return CollectionJob.objects.get(
+        binding=system.binding,
+        endpoint="estimated_actuals",
+        scheduled_for=WINDOW_START,
+        retry_until=WINDOW_END,
+    )
+
+
+def test_reenabled_collection_names_a_partial_history_retry_at_its_own_wait() -> None:
+    system = collected(make_system(approved=True))
+    enqueue_due(NIGHT)
+    parent = night_history(system)
+
+    class Empty(HistoricalFixture):
+        def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
+            return ProviderData({}, (), collected_at=NIGHT, source_kind="estimated_actuals")
+
+    assert collect(parent.pk, Empty(NIGHT), no_calculation, NIGHT)
+    retry = CollectionJob.objects.get(binding=system.binding, status="pending")
+    waits_until = retry.available_at
+    assert waits_until >= NIGHT + timedelta(minutes=30)
+    reenabled = NIGHT + timedelta(minutes=15)
+    for enabled, moment in ((False, NIGHT + timedelta(minutes=10)), (True, reenabled)):
+        configure_schedule(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            enabled=enabled,
+            times=["16:00"] if enabled else [],
+            now=moment,
+        )
+
+    assert at(read(system, reenabled)["next_collection_at"]) == waits_until
+    enqueue_due(reenabled)
+    retry.refresh_from_db()
+    assert (retry.status, retry.available_at) == ("pending", waits_until)
+    assert at(read(system, reenabled)["next_collection_at"]) == waits_until
+    assert claim(retry.pk, waits_until - TICK) is None
+    assert claim(retry.pk, waits_until) is not None
+
+
+@pytest.mark.parametrize(
+    "moment",
+    [NIGHT + timedelta(hours=1), WINDOW_END - timedelta(minutes=10)],
+    ids=["inside-the-window", "at-the-window-end"],
+)
+def test_a_history_job_skipped_for_the_provider_day_is_not_collected_again_in_its_window(
+    moment: datetime,
+) -> None:
+    system = collected(make_system(approved=True))
+    enqueue_due(WINDOW_START)
+    history = night_history(system)
+    system.account.refresh_from_db()
+    for _ in range(system.account.daily_quota):
+        RequestAttempt.objects.create(
+            provider_account=system.account,
+            utc_day=moment.date(),
+            created_at=moment,
+            purpose=RequestPurpose.FORECAST,
+        )
+    assert not collect(history.pk, HistoricalFixture(moment), no_calculation, moment)
+    history.refresh_from_db()
+    assert (history.status, history.last_error) == ("stale", "quota_exhausted")
+    later = moment + timedelta(minutes=1)
+
+    assert at(read(system, later)["next_collection_at"]) == NEXT_SLOT
+    assert created_jobs(later) == set()
+    history.refresh_from_db()
+    assert (history.status, history.last_error) == ("stale", "quota_exhausted")
+    assert at(read(system, later)["next_collection_at"]) == NEXT_SLOT
+    assert claim(history.pk, history.available_at) is None
+
+
+def test_a_forecast_job_whose_lease_ended_is_collected_now() -> None:
+    system = make_system(approved=True)
+    job = CollectionJob.objects.get(binding=system.binding)
+    assert claim(job.pk, EVENING) is not None
+    job.refresh_from_db()
+    assert job.lease_expires_at is not None
+    later = job.lease_expires_at + timedelta(minutes=10)
+
+    assert at(read(system, later)["next_collection_at"]) == later
+    assert job.pk in pending_job_ids(later)
+    assert claim(job.pk, later) is not None
+
+
+def test_an_interrupted_history_job_is_collected_at_its_retry_time() -> None:
+    system = collected(make_system(approved=True))
+    enqueue_due(WINDOW_START)
+    history = night_history(system)
+    assert claim(history.pk, NIGHT) is not None
+    history.refresh_from_db()
+    assert history.lease_expires_at is not None
+    retry_at = history.available_at
+    assert history.lease_expires_at < retry_at
+
+    assert at(read(system, history.lease_expires_at)["next_collection_at"]) == retry_at
+    assert history.pk not in pending_job_ids(retry_at - TICK)
+    assert claim(history.pk, retry_at - TICK) is None
+    assert claim(history.pk, retry_at) is not None
 
 
 def test_usage_counts_only_the_plants_own_requests_of_the_utc_day() -> None:

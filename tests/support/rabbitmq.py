@@ -6,10 +6,13 @@ import pytest
 
 class FakeRabbitmq:
     """A RabbitMQ server behind pika.BlockingConnection: it can drop its connections or only their
-    channels, after which a dropped channel refuses every call, and it can stay unreachable."""
+    channels, after which a dropped channel refuses every call, and it can stay unreachable. As
+    RabbitMQ does, it closes only the channel that passively declares a queue nobody declared, or
+    every passive declaration's channel with the refusal code set."""
 
     def __init__(self) -> None:
         self.reachable = True
+        self.refusal: int | None = None
         self.queues: dict[str, list[bytes]] = {}
         self.channels: list[FakeChannel] = []
         self.attempts = 0
@@ -26,6 +29,10 @@ class FakeRabbitmq:
             channel.is_open = False
             if loss == "connection":
                 channel.connection.is_open = False
+
+    def declare(self, *queues: str) -> None:
+        for queue in queues:
+            self.queues.setdefault(queue, [])
 
     def published(self, queue: str) -> int:
         return len(self.queues.get(queue, []))
@@ -60,13 +67,24 @@ class FakeChannel:
             if self.refused == 1:
                 raise pika.exceptions.StreamLostError("lost")
             raise pika.exceptions.ChannelWrongStateError("closed")
+        if not self.is_open:
+            raise pika.exceptions.ChannelWrongStateError("closed")
 
     def confirm_delivery(self) -> None:
         self._check()
 
-    def queue_declare(self, queue: str, **_options: object) -> SimpleNamespace:
+    def queue_declare(
+        self, queue: str, passive: bool = False, **_options: object
+    ) -> SimpleNamespace:
         self._check()
-        messages = self.connection.server.queues.setdefault(queue, [])
+        server = self.connection.server
+        queues = server.queues
+        if passive and (server.refusal is not None or queue not in queues):
+            self.is_open = False
+            raise pika.exceptions.ChannelClosedByBroker(
+                server.refusal or 404, f"refused passive declaration of '{queue}'"
+            )
+        messages = queues.setdefault(queue, [])
         return SimpleNamespace(
             method=SimpleNamespace(message_count=len(messages), consumer_count=0)
         )

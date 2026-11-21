@@ -12,6 +12,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management import CommandError, call_command
 from dramatiq.brokers.rabbitmq import RabbitmqBroker
+from dramatiq.common import xq_name
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
@@ -23,6 +24,7 @@ from pyracast.forecasts.models import (
     RequestPurpose,
 )
 from pyracast.notifications.models import ReminderSchedule
+from pyracast.orchestration.kinds import QUEUES
 from pyracast.plants.calibration_runs import requeue_run, start_run
 from pyracast.plants.models import CalibrationError, CalibrationRun, Plant, PlantConfiguration
 from pyracast.plants.training import LEASE_DURATION as LEASE
@@ -315,13 +317,14 @@ def test_the_broker_section_reports_each_queue_and_its_counts_never_decide_healt
     report, failed = printed(monkeypatch, broker=lambda: cast(RabbitmqBroker, broker))
 
     assert failed is False
+    declared = {"missing": False, "dead_letters_missing": False}
     assert report["broker"] == {
         "reachable": True,
         "queues": {
-            "default": {"messages": 3, "consumers": 1, "dead_letters": 0},
-            "calibration": {"messages": 0, "consumers": 0, "dead_letters": 2},
-            "notifications": {"messages": 1, "consumers": 1, "dead_letters": 0},
-            "epias": {"messages": 0, "consumers": 1, "dead_letters": 5},
+            "default": {"messages": 3, "consumers": 1, "dead_letters": 0, **declared},
+            "calibration": {"messages": 0, "consumers": 0, "dead_letters": 2, **declared},
+            "notifications": {"messages": 1, "consumers": 1, "dead_letters": 0, **declared},
+            "epias": {"messages": 0, "consumers": 1, "dead_letters": 5, **declared},
         },
     }
     assert all(passive for _, passive in channel.declared)
@@ -357,6 +360,7 @@ def test_the_broker_section_reads_a_lost_connection_again_on_a_fresh_one(
     recent_forecast(system)
     dispatched()
     rabbitmq = install_fake_rabbitmq(monkeypatch)
+    rabbitmq.declare(*QUEUES, *(xq_name(queue) for queue in QUEUES))
     broker = RabbitmqBroker(url="amqp://broker.invalid/", confirm_delivery=True)
     assert broker.channel.is_open
     rabbitmq.drop()
@@ -376,6 +380,82 @@ def test_the_broker_section_reads_a_lost_connection_again_on_a_fresh_one(
     assert failed is True
     assert report["broker"] == {"reachable": False, "queues": {}}
     assert rabbitmq.attempts == 4
+
+
+def fake_broker_report(
+    monkeypatch: pytest.MonkeyPatch, *declared: str, refusal: int | None = None
+) -> tuple[dict[str, Any], bool, int]:
+    system = make_system(approved=True)
+    recent_forecast(system)
+    dispatched()
+    rabbitmq = install_fake_rabbitmq(monkeypatch)
+    rabbitmq.declare(*declared)
+    rabbitmq.refusal = refusal
+    rabbitmq.queues["default"].extend([b"waiting"] * 2)
+    report, failed = printed(
+        monkeypatch,
+        broker=lambda: RabbitmqBroker(url="amqp://broker.invalid/", confirm_delivery=True),
+    )
+    return report, failed, rabbitmq.attempts
+
+
+def test_a_work_queue_no_worker_declared_fails_the_report_and_keeps_the_other_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    declared = [queue for queue in QUEUES if queue != "notifications"]
+
+    report, failed, connections = fake_broker_report(
+        monkeypatch, *declared, *(xq_name(queue) for queue in declared)
+    )
+
+    assert failed is True
+    assert report["unhealthy_dispatch_phases"] == []
+    assert report["broker"]["reachable"] is True
+    assert report["broker"]["queues"]["notifications"] == {
+        "messages": None,
+        "consumers": None,
+        "dead_letters": None,
+        "missing": True,
+        "dead_letters_missing": True,
+    }
+    assert report["broker"]["queues"]["default"] == {
+        "messages": 2,
+        "consumers": 0,
+        "dead_letters": 0,
+        "missing": False,
+        "dead_letters_missing": False,
+    }
+    assert connections == 1
+
+
+def test_a_missing_dead_letter_queue_of_a_declared_queue_leaves_the_report_healthy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report, failed, connections = fake_broker_report(
+        monkeypatch, *QUEUES, *(xq_name(queue) for queue in QUEUES if queue != "epias")
+    )
+
+    assert failed is False
+    assert report["broker"]["reachable"] is True
+    assert report["broker"]["queues"]["epias"] == {
+        "messages": 0,
+        "consumers": 0,
+        "dead_letters": None,
+        "missing": False,
+        "dead_letters_missing": True,
+    }
+    assert report["broker"]["queues"]["default"]["messages"] == 2
+    assert connections == 1
+
+
+def test_a_queue_read_the_broker_refuses_for_another_reason_is_a_broker_that_does_not_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report, failed, connections = fake_broker_report(monkeypatch, *QUEUES, refusal=403)
+
+    assert failed is True
+    assert report["broker"] == {"reachable": False, "queues": {}}
+    assert connections == 2
 
 
 def test_a_new_plant_waits_for_its_open_first_collection_before_it_is_stale(

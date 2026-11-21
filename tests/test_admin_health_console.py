@@ -8,6 +8,8 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ImproperlyConfigured
 from django.test import Client
 from django.utils import timezone
+from dramatiq.brokers.rabbitmq import RabbitmqBroker
+from dramatiq.common import xq_name
 
 from pyracast.accounts.models import UserLanguagePreference
 from pyracast.forecasts.models import (
@@ -17,11 +19,13 @@ from pyracast.forecasts.models import (
     RequestAttempt,
     RequestPurpose,
 )
+from pyracast.orchestration.kinds import QUEUES
 from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration
 from tests.support.api import verified_admin
 from tests.support.delivery_health import NOW, recent_forecast
 from tests.support.domain import System, make_system
 from tests.support.plant_operations import make_plant
+from tests.support.rabbitmq import install_fake_rabbitmq
 
 pytestmark = pytest.mark.django_db(transaction=True)
 TURKISH = {
@@ -35,6 +39,8 @@ TURKISH = {
         "Mesaj kuyruğu okunamad\u0131; kuyruk say\u0131lar\u0131 gösterilmiyor."
     ),
     "Message broker not answering": "Mesaj kuyru\u011fu yan\u0131t vermiyor",
+    "Missing message queues": "Eksik mesaj kuyruklar\u0131",
+    "Not declared": "Tan\u0131mlanmam\u0131\u015f",
     "Checked at": "Kontrol zaman\u0131",
     "Why listed": "Listelenme nedeni",
     "No forecast saved yet": "Henüz kaydedilmiş tahmin yok",
@@ -180,6 +186,43 @@ def test_the_workers_panel_shows_phase_timing_queues_and_provider_requests(
     )
     assert [check.key for check in page.context["health_summary"].checks] == ["broker"]
     assert text(language, "Message broker not answering") in content
+
+
+@pytest.mark.parametrize("language", ["en", "tr"])
+def test_a_queue_no_worker_declared_is_named_while_the_other_queues_show_their_counts(
+    monkeypatch: pytest.MonkeyPatch, language: str
+) -> None:
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    rabbitmq = install_fake_rabbitmq(monkeypatch)
+    declared = [queue for queue in QUEUES if queue != "epias"]
+    rabbitmq.declare(*declared, *(xq_name(queue) for queue in declared))
+    rabbitmq.queues["default"].append(b"waiting")
+    monkeypatch.setattr(
+        "pyracast.background.broker.make_broker",
+        lambda: RabbitmqBroker(url="amqp://broker.invalid/", confirm_delivery=True),
+    )
+    system = make_system(approved=True)
+    recent_forecast(system)
+    dispatched()
+
+    page = console(language).get("/admin/operations/")
+
+    content = page.content.decode()
+    checks = page.context["health_summary"].checks
+    assert [(check.key, check.count) for check in checks] == [("missing_queues", 1)]
+    assert "epias" in checks[0].help
+    assert text(language, "Missing message queues") in content
+    assert text(language, "Not declared") in content
+    assert [
+        (queue.queue, queue.messages, queue.dead_letters, queue.missing)
+        for queue in page.context["broker"].queues
+    ] == [
+        ("default", 1, 0, False),
+        ("calibration", 0, 0, False),
+        ("notifications", 0, 0, False),
+        ("epias", None, None, True),
+    ]
+    assert rabbitmq.attempts == 1
 
 
 @pytest.mark.parametrize("language", ["en", "tr"])
