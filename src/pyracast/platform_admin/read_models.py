@@ -408,7 +408,6 @@ def _collection_row(row: Any) -> dict[str, Any]:
 
 
 def _delivery_row(row: Any) -> dict[str, Any]:
-    prepared = row.prepared_message or {}
     return {
         "id": row.pk,
         "plant_name": row.display_plant_name,
@@ -427,9 +426,9 @@ def _delivery_row(row: Any) -> dict[str, Any]:
         "review_url": reverse("admin:workspace_plant", args=(row.schedule.region_id,)),
         "forecast_status": (
             _("Forecast unavailable")
-            if prepared.get("kind") == PreparedMessageKind.UNAVAILABLE
+            if row.forecast_kind == PreparedMessageKind.UNAVAILABLE
             else _("Partial forecast")
-            if prepared.get("tomorrow_complete") is False
+            if row.forecast_complete is False
             else ""
         ),
     }

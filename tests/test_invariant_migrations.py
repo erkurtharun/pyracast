@@ -207,6 +207,8 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     )
     valid = {key: v for key, v in _tuples().items() if key[0] != "plants_calibrationrun"}
     del valid["forecasts_collectionjob", released.pk]
+    # The delivery's preparation metadata moves into typed columns at the leaf.
+    del valid["notifications_notificationdelivery", delivery.pk]
     stored_account = ProviderAccount.objects.values().get(pk=system.account.pk)
     stored_binding = SiteBinding.objects.values().get(pk=system.binding.pk)
     assert set(audit()) == {f"forecasts_collectionjob: {LEASE_RULES['forecasts_collectionjob']}"}
@@ -231,6 +233,7 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
         token,
         NOW,
     )
+    assert (delivery.forecast_kind, delivery.prepared_at) == ("unavailable", NOW)
     assert ProviderAccount.objects.values().get(pk=system.account.pk) == stored_account
     assert SiteBinding.objects.values().get(pk=system.binding.pk) == stored_binding
     assert violations("connections_provideraccount", PROVIDER_ACCOUNT_RULE) == 0

@@ -106,6 +106,7 @@ MIGRATION = frozenset(
         "test_calibration_wait_migration",
         "test_collection_outcome_migration",
         "test_collection_times_migration",
+        "test_delivery_metadata_migration",
         "test_epias_revision_migration",
         "test_invariant_migrations",
         "test_invitation_lifecycle_migration",

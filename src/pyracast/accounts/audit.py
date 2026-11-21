@@ -64,6 +64,7 @@ class SecurityEvent(StrEnum):
     SOCIAL_ACCOUNT_DISCONNECTED = "social_account_disconnected"
     ADMIN_MFA_PROVISIONED = "admin_mfa_provisioned"
     MFA_RESET_BY_OPERATOR = "mfa_reset_by_operator"
+    ACCOUNT_ERASED = "account_erased"
     INVALID_PROXY_HEADERS = "invalid_proxy_headers"
     AUTHENTICATION_REQUEST_THROTTLED = "authentication_request_throttled"
     API_REQUEST_THROTTLED = "api_throttled"
@@ -106,6 +107,7 @@ CHANGE_EVENTS = frozenset(
         SecurityEvent.SOCIAL_ACCOUNT_DISCONNECTED,
         SecurityEvent.ADMIN_MFA_PROVISIONED,
         SecurityEvent.MFA_RESET_BY_OPERATOR,
+        SecurityEvent.ACCOUNT_ERASED,
         SecurityEvent.INVITATION_SENT,
         SecurityEvent.INVITATION_REVOKED,
         SecurityEvent.INVITATION_ACCEPTED,
@@ -178,6 +180,7 @@ SECURITY_EVENT_DETAILS: Mapping[SecurityEvent, frozenset[str]] = {
     SecurityEvent.SOCIAL_LOGIN_REFUSED: frozenset({"provider", "reason"}),
     SecurityEvent.ADMIN_MFA_PROVISIONED: frozenset({"reason"}),
     SecurityEvent.MFA_RESET_BY_OPERATOR: frozenset({"reason", "count"}),
+    SecurityEvent.ACCOUNT_ERASED: frozenset({"target_id"}),
     SecurityEvent.INVALID_PROXY_HEADERS: frozenset(),
     SecurityEvent.AUTHENTICATION_REQUEST_THROTTLED: frozenset(),
     SecurityEvent.API_REQUEST_THROTTLED: frozenset({"scope"}),
