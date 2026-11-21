@@ -92,6 +92,8 @@ class Erasure:
     changes: dict[str, int]
     already_erased: bool = False
     platform_administrator: bool = False
+    # Addresses of the account that another account holds now; their rows were kept.
+    addresses_left_out: int = 0
     staff: bool = False
 
 
@@ -143,28 +145,47 @@ def _normalized(values: Collection[object]) -> set[str]:
     return {value.strip().lower() for value in values if isinstance(value, str) and value.strip()}
 
 
-def _addresses(account: User) -> set[str]:
+def _held_elsewhere(account_id: int, addresses: Collection[str]) -> set[str]:
+    return {
+        address
+        for rows in (
+            User.objects.exclude(pk=account_id),
+            EmailAddress.objects.exclude(user_id=account_id),
+        )
+        for address in rows.annotate(address=Lower("email"))
+        .filter(address__in=addresses)
+        .values_list("address", flat=True)
+    }
+
+
+def _addresses(account: User) -> tuple[set[str], int]:
     """The account's current addresses, the earlier ones its reminder entries still tie to its
-    memberships, and every address the outbox names as changed or removed for one of them. Each
-    round adds at least one address the outbox names, so the rounds are bounded by those."""
-    found = _normalized(
+    memberships, and every address the outbox names as changed or removed for one of them, with
+    how many were left out. An address another account holds now is left out and not followed:
+    its rows stay and age out by the retention periods. Each round adds at least one address the
+    outbox names, so the rounds are bounded by those."""
+    found: set[str] = set()
+    held: set[str] = set()
+    new = _normalized(
         [account.email, *EmailAddress.objects.filter(user=account).values_list("email", flat=True)]
     ) | _normalized(
         ReminderRecipient.objects.filter(
             ties__membership_id__in=Membership.objects.filter(user=account).values("pk")
         ).values_list("address", flat=True)
     )
-    while True:
-        named = set(found)
+    while new:
+        held |= _held_elsewhere(account.pk, new)
+        new -= held
+        found |= new
+        named: set[str] = set()
         for recipient, context in (
             _mail()
-            .filter(_naming(found), kind__in=ADDRESS_HISTORY_MAIL)
+            .filter(_naming(new), kind__in=ADDRESS_HISTORY_MAIL)
             .values_list("recipient", "context")
         ):
             named |= _normalized([recipient, *(context.get(key) for key in MAIL_ADDRESS_KEYS)])
-        if named == found:
-            return found
-        found = named
+        new = named - found - held
+    return found, len(held)
 
 
 def _refuse_administrator(account_id: int) -> None:
@@ -293,7 +314,7 @@ def _erase(account_id: int) -> Erasure:
         .exists()
     ):
         raise LastPlatformAdministratorError(account_id)
-    addresses = _addresses(account)
+    addresses, left_out = _addresses(account)
     keys = {recipient_key(address) for address in addresses}
     recipients = ReminderRecipient.objects.filter(key__in=keys)
     delivered = DeliveryRecipient.objects.filter(key__in=keys)
@@ -321,16 +342,20 @@ def _erase(account_id: int) -> Erasure:
     changes["auth.User"] += 1
     record_security_event(SecurityEvent.ACCOUNT_ERASED, target_id=account_id)
     return Erasure(
-        account_id, dict(sorted(changes.items())), platform_administrator=administrator, staff=staff
+        account_id,
+        dict(sorted(changes.items())),
+        platform_administrator=administrator,
+        staff=staff,
+        addresses_left_out=left_out,
     )
 
 
 def erase_account(account_id: int, *, execute: bool) -> Erasure:
     """Anonymizes the account in place: its credentials, second factors, sessions, provider
     identities and addresses go, as do the invitations, mail, cache entries, pending flows and
-    recipient entries that name those addresses; history that points at the account keeps
-    pointing at it. Without `execute` the same work is rolled back, so the result reports what
-    erasure would change."""
+    recipient entries that name those addresses, except an address another account holds now;
+    history that points at the account keeps pointing at it. Without `execute` the same work is
+    rolled back, so the result reports what erasure would change."""
     if is_erased(User.objects.get(pk=account_id)):
         return Erasure(account_id, {}, already_erased=True)
     # Refused before any lock: workspace writers lock the workspace before its administrator.

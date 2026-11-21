@@ -42,6 +42,10 @@ class Command(BaseCommand):
             )
         for label, count in erasure.changes.items():
             self.stdout.write(f"  {label}: {count}")
+        self.stdout.write(
+            "Addresses left out because another account holds them now: "
+            f"{erasure.addresses_left_out}"
+        )
         if not execute:
             self.stdout.write(
                 "Nothing was changed. Erasure cannot be undone: take a backup, then run again "
