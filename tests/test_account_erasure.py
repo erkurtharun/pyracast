@@ -702,6 +702,98 @@ def test_erasure_follows_the_earlier_addresses_of_the_account_everywhere() -> No
     assert list(Session.objects.values_list("session_key", flat=True)) == ["bystander-reset"]
 
 
+def address_rows(address: str, tag: str, tenant: Tenant, inviter: User) -> dict[str, set[Any]]:
+    schedule = ReminderSchedule.objects.create(
+        region=Region.objects.create(
+            tenant=tenant,
+            name=f"Site {tag}",
+            latitude=38 + Region.objects.count() / 100,
+            longitude=27,
+            timezone="Europe/Istanbul",
+        ),
+        effective_from=NOW,
+    )
+    session(f"pending-{tag}", {PASSWORD_RESET_VERIFICATION_SESSION_KEY: {"email": address}})
+    return {
+        "mail": {
+            outbound(
+                OutboundMailKind.PASSWORD_CHANGED, address, {"to_email": address}, finished=False
+            ).pk
+        },
+        "invitations": {
+            WorkspaceInvitation.objects.create(
+                tenant=tenant,
+                email=address.lower(),
+                created_by=inviter,
+                expires_at=NOW + timedelta(days=7),
+            ).pk
+        },
+        "cache": {
+            AuthenticationCacheEntry.objects.create(
+                cache_key=f"provider-login:{tag}", value={"email": address}, expires=None
+            ).cache_key
+        },
+        "recipients": {
+            ReminderRecipient.objects.create(
+                schedule=schedule, address=address, key=recipient_key(address)
+            ).pk
+        },
+        "sessions": {f"pending-{tag}"},
+    }
+
+
+def address_rows_left() -> dict[str, set[Any]]:
+    return {
+        **bystanders_left(),
+        "recipients": set(ReminderRecipient.objects.values_list("pk", flat=True)),
+    }
+
+
+@pytest.mark.parametrize("holds", ["account_address", "address_row"])
+@pytest.mark.parametrize("spelling", [str.lower, str.upper], ids=["same_case", "other_case"])
+def test_an_earlier_address_another_account_holds_now_keeps_its_rows(
+    holds: str, spelling: Any
+) -> None:
+    earlier, current = "Moved.From@example.com", "moved.to@example.com"
+    person = person_with(current)
+    held = spelling(earlier)
+    holder = User.objects.create_user(
+        username="holder", email=held if holds == "account_address" else "holder@example.com"
+    )
+    if holds == "address_row":
+        EmailAddress.objects.create(user=holder, email=held, primary=False, verified=True)
+    session("holder-session", {"_auth_user_id": str(holder.pk)})
+    tenant, inviter = administered_workspace()
+    outbound(
+        OutboundMailKind.EMAIL_CHANGED,
+        earlier,
+        {"from_email": earlier, "to_email": current},
+        finished=True,
+    )
+    kept = address_rows(earlier, "held", tenant, inviter)
+    erased = address_rows(current, "own", tenant, inviter)
+    kept["sessions"].add("holder-session")
+    holder_rows = (
+        User.objects.filter(pk=holder.pk).values().get(),
+        list(EmailAddress.objects.filter(user=holder).values()),
+    )
+
+    dry_run = erase_account(person.pk, execute=False)
+    reports = [erase_command("--account", str(person.pk), *flag) for flag in ((), ("--execute",))]
+
+    assert address_rows_left() == kept
+    assert (
+        User.objects.filter(pk=holder.pk).values().get(),
+        list(EmailAddress.objects.filter(user=holder).values()),
+    ) == holder_rows
+    # The mail of its own address and the address change that names it.
+    assert dry_run.changes["notifications.OutboundMail"] == len(erased["mail"]) + 1
+    left_out = "Addresses left out because another account holds them now: 1"
+    assert [left_out in report.splitlines() for report in reports] == [True, True]
+    assert not [report for report in reports if earlier.casefold() in report.casefold()]
+    assert dry_run.addresses_left_out == 1
+
+
 def test_erasure_refuses_an_account_that_administers_a_workspace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1092,6 +1184,7 @@ def test_the_command_is_a_dry_run_unless_execution_is_asked_for(
     assert database() == before
     assert output.splitlines()[0] == f"Dry run: erasing account {account} would change:"
     assert "  account.EmailAddress: 2" in output.splitlines()
+    assert "Addresses left out because another account holds them now: 0" in output.splitlines()
     assert output.splitlines()[-1] == (
         "Nothing was changed. Erasure cannot be undone: take a backup, then run again "
         "with --execute."
