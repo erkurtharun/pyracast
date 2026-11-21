@@ -479,7 +479,7 @@ backup.upload_backup = upload
 rehearsal.download = download
 host.LAST_BACKUP = temporary / 'last-backup.json'
 host.LAST_REHEARSAL = temporary / 'last-rehearsal.json'
-rehearsal.LOCK = temporary / 'rehearsal.lock'
+host.REHEARSAL_LOCK = temporary / 'rehearsal.lock'
 if not Path('/proc/uptime').exists():
     host.boot_clock = lambda: ('smoke', 1.0)
 if importlib.util.find_spec('fcntl') is None:
