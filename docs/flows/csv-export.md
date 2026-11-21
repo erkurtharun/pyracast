@@ -4,12 +4,12 @@ A workspace administrator or viewer presses a download button on a plant screen.
 
 ## Entry points
 
-- `web/src/components/csv-download.tsx` `CsvDownload`: the only button; its click handler calls `csvDocument` in `web/src/lib/csv.ts`. No other CSV download exists in `web/src`.
-- Forecast tab, Generation and Irradiance views: `forecast-panel.tsx` `ForecastPanel` inside `plant-workspace.tsx` `PlantForecast` (label "Download CSV", or "Download both scenarios CSV" when the generation forecast carries an outage scenario).
-- Production tab, Comparison view: `forecast-performance.tsx` `PerformanceResults` (default label from the `CsvDownload` namespace).
-- Production tab, Actuals view: `production-history.tsx` `ProductionHistory`, shown only once the day has loaded.
-- Calibration tab (only when the plant has a current configuration): `calibrations.tsx` `Calibrations` (list of all runs, and the details of one run opened with "View details").
-- Outages tab: `outages.tsx` `Outages`. Settings tab: `plant-workspace.tsx`, inside the Location disclosure, always rendered.
+- `web/src/ui/csv-download.tsx` `CsvDownload`: the only button; its click handler calls the export builder it was given (`build`, one per export in `web/src/lib/exports.ts`) and encodes the result with `csvDocument` in `web/src/lib/csv.ts`. No other CSV download exists in `web/src`. The plant that names every export comes from `ui/export-plant.tsx` (`ExportPlant`, provided by `PlantWorkspace`).
+- Forecast tab, Generation and Irradiance views: `features/forecast/panel/forecast-summary.tsx` `ForecastSummary` -> `forecastExport` (label "Download CSV", or "Download both scenarios CSV" when the generation forecast carries an outage scenario).
+- Production tab, Comparison view: `features/forecast/forecast-performance.tsx` `PerformanceResults` -> `performanceExport`.
+- Production tab, Actuals view: `features/production/production-history.tsx` `ProductionHistory` -> `productionExport`, shown once the day has loaded.
+- Calibration tab (only when the plant has a current configuration): `features/calibration/calibrations.tsx` `Calibrations` -> `calibrationsExport` (list of all runs) and `calibration-run-detail.tsx` -> `calibrationExport` (one run opened with "View details").
+- Outages tab: `features/plant/outages.tsx` `Outages` -> `outagesExport`. Settings tab, Location view: `features/plant/workspace/settings-section.tsx` -> `plantExport`, always rendered.
 - Actors: workspace administrator and viewer alike. No button is gated by `useCanManageWorkspace`.
 
 ## Sequence
@@ -19,24 +19,26 @@ sequenceDiagram
     actor U as User
     participant S as Screen
     participant B as CsvDownload
+    participant X as Export builder
     participant C as csvDocument
     participant W as Browser
     S->>S: "load records through the API (other flows)"
-    alt "still loading, or load failed with no data kept"
+    alt "still loading, or first load failed"
         S-->>U: "status or error notice, no button"
-    else "records ready, or production refresh failed with data kept"
-        S-->>U: "render button with records and metadata"
+    else "records ready, or a refresh failed with data kept"
+        S-->>U: "render button, disabled while records reload"
     end
     U->>B: click
-    B->>C: "records, metadata"
-    C->>C: "shallow-merge metadata into every row, flatten, union headers"
-    C->>C: "quote text, prefix formula-like text, add BOM and CRLF"
+    B->>X: "build()"
+    X-->>B: "file name, header, rows"
+    B->>C: "header, rows"
+    C->>C: "quote text, neutralise formula-like text, add BOM and CRLF"
     C-->>B: CSV string
     B->>W: "Blob, createObjectURL, hidden anchor click"
     W-->>U: file saved
     B->>W: "revokeObjectURL after 1 s"
     opt exception while building
-        C--xB: "uncaught error, no message, no download"
+        X--xB: "uncaught error, no message, no download"
     end
 ```
 
@@ -50,36 +52,34 @@ sequenceDiagram
 
 - None in this flow. Each screen shows data fetched through tenant-scoped, authenticated endpoints owned by other flows (`forecast-view`, `irradiance-forecast-view`, `forecast-performance`, `production-history`, `calibration-activation`, `outage-management`, and `plant-portfolio` for the plant record); the CSV is a client-side copy of what the user may already see.
 - No server-side check or audit entry exists for the export itself.
-- No general allow-list: the forecast metadata and plain forecast rows, performance, calibration, outages and plant CSVs export the API response verbatim apart from fields a call site sets to `undefined`, including ids, revisions and provenance. The production CSV builds rows from named fields only, and outage-scenario forecast rows are an explicit field selection.
+- Every export is an explicit column list in `lib/exports.ts`: response metadata, provenance, snapshot ids and provider data are not exported.
 
 ## Failure paths
 
 | Condition | Result |
 | --- | --- |
-| Forecast, performance, production, outages or calibration list loading or failed (production: no ready data kept for the same query) | Button not rendered; a status line or error notice shows instead |
-| Production 30 s refresh of the same query fails | Previous data kept with a `refresh_failed` warning; the button stays and exports that data |
-| Forecast 30 s refresh fails | `useResource` drops the loaded data, so the forecast button disappears until a refresh succeeds |
+| Forecast, performance, production, outages or calibration list loading, or its first load failed | Button not rendered; a status line or error notice shows instead |
+| A later refresh of the same query fails | Previous data kept with a "Could not refresh" alert; the button stays and exports that data |
 | No forecast result for the day | Forecast panel shows an empty state, no button |
-| Empty `records` | One row holding only the metadata columns; with no metadata (calibration list) the file is a BOM and two empty lines |
-| Exception in `csvDocument` or Blob creation | Uncaught error in the synchronous click handler: no message, no file |
-| Filename contains characters outside `[a-zA-Z0-9_.-]` | Each replaced by `-`, then `.csv` appended |
+| A list reloads after a save or a stale edit (outages), a request (calibration runs), a save (production) | Button disabled and labelled "Working…" until the reload ends |
+| No rows | Header line only, no fabricated row |
+| Exception in a builder, `csvDocument` or Blob creation | Uncaught error in the synchronous click handler: no message, no file |
+| File name part contains a character Windows refuses in file names, or a control character | Each replaced by `-`; `.csv` appended |
 
 ## Rules and invariants
 
-- Every row carries every metadata column (`flatten({ ...metadata, ...row })`). The merge is shallow: a row key equal to a top-level metadata key replaces that whole metadata value, nested fields included.
-- Nested objects become dotted columns (`result.provenance.supplier`); arrays are JSON text in one cell. Headers are the union of keys in first-seen order and `undefined` values are dropped, so a field set to `undefined` is how a caller removes a column.
-- Numbers and booleans are written bare via `String(value)`, so precision and negative values survive. Strings and JSON text are always double-quoted with doubled inner quotes. `null` and `undefined` become an empty unquoted cell, while an empty string becomes `""`.
-- Formula neutralisation applies only to text: a string whose first character after any white space or control characters is `=`, `+`, `-` or `@` gets a leading apostrophe. A numeric string such as `"-1.5"` is therefore altered.
-- Headers pass through the same cell encoder. Header names are raw API keys and never translated, so CSV content is independent of language.
-- The file starts with a UTF-8 BOM, uses CRLF line ends and ends with CRLF.
-- Forecast CSV uses the full interval list, not the cropped table, and omits the synthetic `missing_source_interval` gap rows of the full-day view. With an outage scenario it emits paired `normal_*` and `affected_*` columns per interval.
-- Forecast metadata is the whole forecast response with `result.intervals` and `result.weather_reference` removed (and `outage_scenario.result.intervals` when a scenario exists). The generation response also carries `regional_irradiance` and `production_diagnostic`, which are exported unchanged on every row, so the generation CSV still contains `regional_irradiance.weather_reference.*` and an intervals JSON cell; only the irradiance CSV is free of weather reference data.
-- Production CSV is built from all of `history.intervals` (not the cropped table) with fixed `unit: MWh` and the plant `timezone`; provider originals are joined with `"; "`.
-- Outages CSV metadata `timezone` is the browser's device timezone; the plant timezone is in `plant_timezone`. The plant CSV exports the whole current plant object with the plant timezone.
-- The object URL is revoked after one second.
+- Each builder lists its columns once (`table` in `lib/exports.ts`): header names are the column names, one row per record. Header names are fixed English keys and never translated, so CSV content is independent of language. Units are in the names (`energy_mwh`, `mean_power_mw`, `ghi_wm2`); times are `plantTimestamp` values, ISO 8601 on the plant's wall clock with its UTC offset.
+- Plant context: every export except production starts with `plant_id`, `plant_name` and `timezone` (the plant zone); the production file has `timezone` last and names the plant only in its file name. File names are the export kind, the plant name and, where the export has one, the date, range, run or source (`csvFilename`): each part has characters Windows refuses and control characters replaced by `-`, edge spaces, dots and hyphens trimmed, empty parts dropped, the whole cut at 150 characters.
+- Numbers are written bare via `String(value)`, so precision and negative values survive; a non-finite number is empty. Booleans are bare. `null` becomes an empty unquoted cell. Strings are always double-quoted with doubled inner quotes; lists such as quality flags and interval sources are joined with `"; "`.
+- Formula neutralisation applies only to text: a string whose first character after any white space, control or format characters is `=`, `+`, `-` or `@` gets a leading apostrophe, unless the whole string is a plain signed number such as `-1.5`.
+- The file starts with a UTF-8 BOM, uses CRLF line ends and ends with CRLF. The object URL is revoked after one second.
+- Forecast CSV uses the full interval list of the loaded result, not the cropped table, and has no synthetic `missing_source_interval` gap rows. Columns: `starts_at`, `ends_at`, then `mean_power_mw`, `energy_mwh`, `quality_flags` (generation) or `ghi_wm2`, `quality_flags` (irradiance), `date`, `source_kind`, and `interval_source` when the source kind is `mixed`. With an outage scenario it emits paired `normal_*` and `affected_*` columns per interval. The weather reference, `regional_irradiance` and `production_diagnostic` are not exported.
+- Production CSV has one row per interval with an effective value (`history.intervals`, not the cropped table): `starts_at`, `ends_at`, `energy_mwh`, `quality`, `source`, `timezone`; it is the import format.
+- Performance CSV has one row per requested day (`comparison`, `date`, `status`, `reason`, `source_kind`, measured, predicted and error energy, `provisional_production`, `calibration_in_sample`). Calibration list CSV has one row per run; the detail CSV adds the cutoff, the activation blocker and the training, holdout and validity counts and errors read from the run result (numbers and booleans only). Outage CSV has one row per outage including cancelled ones. Plant CSV has one row: location, configuration revision, capacities, measurement basis and mounting geometry.
 
 ## Tests
 
-- Playwright `web/tests/workspace.spec.ts`: full safe CSV (BOM bytes, quoting, formula prefix, bare negative number, missing values, dotted columns); performance CSV hidden while loading, then filename; performance CSV content; calibration details CSV.
-- `forecast-coverage.spec.ts` (gap rows excluded, source snapshot ids, `production_diagnostic` columns, outage scenario CSV), `forecast-intervals.spec.ts` (interval source kinds, 30-minute rows, both scenarios CSV), `weather-reference.spec.ts` (irradiance CSV excludes weather reference), `outages.spec.ts` (both scenarios CSV with incidents), `epias-production.spec.ts` (24-row production CSV, no button while loading or after an error).
-- Gaps: no unit test of `csvDocument` alone; no test of the calibration list CSV, the outages list CSV, the plant CSV, the Turkish button labels, the generation CSV's weather reference content, exception handling or very large exports.
+- `web/tests/csv.spec.ts`: encoder (BOM, CRLF, quoting, empty missing values, formula characters with plain signed numbers kept, non-finite numbers, header-only output).
+- `web/tests/exports.spec.ts`: file names, and every builder (production import columns in plant time and re-import, outages, calibrations, performance, forecast, plant), empty list gives the header only.
+- Playwright downloads: `web/tests/workspace.spec.ts` (full safe forecast CSV, performance CSV hidden while loading and its content, calibration details CSV), `forecast-coverage.spec.ts` (outage scenario CSV without provenance, production diagnostic keeps one forecast), `forecast-intervals.spec.ts` (interval sources, both scenarios), `weather-reference.spec.ts` (irradiance CSV), `outages.spec.ts` (both scenarios, the outage export waits for the reloaded list), `calibrations.spec.ts` (exports wait for the reloaded runs), `epias-production.spec.ts` and `production-export.spec.ts` (production CSV, hidden or disabled while the day reloads, header-only empty day).
+- Gaps: no test of the plant CSV button, the Turkish button labels, exception handling or very large exports.
