@@ -9,6 +9,11 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from deploy import host
+
 STATE = Path("/var/lib/pyracast/release-state.json")
 RELEASES = Path("/opt/pyracast/releases")
 SECRETS = Path("/run/pyracast/releases")
@@ -76,6 +81,15 @@ def prune(
     return problems
 
 
+def rehearsal_running(lock: Path) -> bool:
+    # The look takes the lock for a moment; a rehearsal that starts then waits for it briefly.
+    try:
+        with host.open_lock(lock) as stream:
+            return not host.try_lock(stream)
+    except OSError:
+        return False
+
+
 def remove_image(reference: str) -> None:
     subprocess.run(["docker", "image", "rm", reference], check=True, capture_output=True)
 
@@ -93,6 +107,9 @@ def main(arguments: list[str]) -> int:
     options = parser.parse_args(arguments)
     if options.command == "record":
         record(STATE, options.current, options.previous)
+        return 0
+    if rehearsal_running(host.REHEARSAL_LOCK):
+        print("A restore rehearsal is running, so nothing was pruned; the next release prunes.")
         return 0
     problems = prune(STATE, RELEASES, SECRETS, CURRENT, remove_image)
     for problem in problems:

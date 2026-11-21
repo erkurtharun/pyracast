@@ -9,6 +9,7 @@ from typing import IO
 CURRENT_RELEASE = Path("/opt/pyracast/current")
 RELEASE_BLOCKED = Path("/var/lib/pyracast/release-blocked")
 RELEASE_LOCK = Path("/var/lib/pyracast/release.lock")
+REHEARSAL_LOCK = Path("/var/lib/pyracast/rehearsal.lock")
 LAST_BACKUP = Path("/var/lib/pyracast/last-backup.json")
 LAST_REHEARSAL = Path("/var/lib/pyracast/last-rehearsal.json")
 # The recovery helper's archives and session, on the data disk beside PostgreSQL.
@@ -79,13 +80,16 @@ def minimum_age(mark: object) -> float:
     return uptime
 
 
+def wait_for_lock(stream: IO[str], wait_seconds: float) -> bool:
+    deadline = time.monotonic() + wait_seconds
+    while not try_lock(stream):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(1)
+    return True
+
+
 @contextmanager
 def release_lock(wait_seconds: float) -> Iterator[bool]:
-    deadline = time.monotonic() + wait_seconds
     with open_lock(RELEASE_LOCK) as stream:
-        while not try_lock(stream):
-            if time.monotonic() >= deadline:
-                yield False
-                return
-            time.sleep(1)
-        yield True
+        yield wait_for_lock(stream, wait_seconds)

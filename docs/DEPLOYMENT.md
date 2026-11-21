@@ -383,8 +383,9 @@ successful `main` CI runs trigger it automatically. The workflow:
    verify the public certificate, routing and database health, then installs the
    release's watchdog, backup and restore rehearsal units. Each build has its own release directory;
    a redeploy never edits the live one. It records the serving and the previous
-   release in `/var/lib/pyracast/release-state.json` and removes every other release
-   directory, its staged secrets and the images no kept release uses.
+   release in `/var/lib/pyracast/release-state.json` and, unless a restore rehearsal
+   runs, removes every other release directory, its staged secrets and the images no
+   kept release uses.
 
 Image artifacts expire after one day and are deleted after successful deployment.
 Retry a failed Release while its artifact remains available; otherwise run
@@ -570,8 +571,9 @@ fixtures do not establish provider access or inbox delivery.
   pinned Docker/Compose/PostgreSQL versions during planned maintenance. PostgreSQL
   major upgrades need a separately rehearsed dump/restore or `pg_upgrade` procedure.
   Each release keeps the serving and the previous release with their images and
-  removes the rest; never run volume pruning in production. Monitor registry/backup/log
-  retention and adjust deliberately to control cost.
+  removes the rest (the next one does while a rehearsal runs); never run volume
+  pruning in production. Monitor registry/backup/log retention and adjust
+  deliberately to control cost.
 
 ## Database reset and restore
 

@@ -23,7 +23,8 @@ if __package__ in (None, ""):
 from deploy import backup, host, reset_database
 from deploy.operations_log import access_token, report
 
-LOCK = Path("/var/lib/pyracast/rehearsal.lock")
+# A release's prune holds the rehearsal lock for a moment to see whether a rehearsal runs.
+LOCK_WAIT_SECONDS = 5
 MEMINFO = Path("/proc/meminfo")
 LABEL = "pyracast.rehearsal"
 DEADLINE_SECONDS = 3600
@@ -374,8 +375,8 @@ def main(arguments: list[str] | None = None) -> int:
     options = parser.parse_args(arguments)
     # systemd stops a unit with SIGTERM; unwinding removes the throwaway database.
     signal.signal(signal.SIGTERM, terminate)
-    with host.open_lock(LOCK) as lock:
-        if not host.try_lock(lock):
+    with host.open_lock(host.REHEARSAL_LOCK) as lock:
+        if not host.wait_for_lock(lock, LOCK_WAIT_SECONDS):
             print("Another restore rehearsal holds its lock; nothing was changed.", file=sys.stderr)
             return 2
         return run_rehearsal(options.host_config)
