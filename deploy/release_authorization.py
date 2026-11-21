@@ -571,12 +571,13 @@ def main(
     current.add_argument("release_sha")
     current.add_argument("--deployments", type=Path)
     current.add_argument("--since")
+    # An operator's dispatch looks up no deployments, so it reports no deployment state.
+    current.add_argument("--deployment-lookup", choices=("true", "false"), default="true")
     options = parser.parse_args(arguments)
     if options.command == "authorize":
         return _authorize(options.facts, environ, root or Path.cwd())
-    return _current(
-        options.main_sha, options.release_sha, environ, options.deployments, options.since
-    )
+    deployments = options.deployments if options.deployment_lookup == "true" else None
+    return _current(options.main_sha, options.release_sha, environ, deployments, options.since)
 
 
 if __name__ == "__main__":

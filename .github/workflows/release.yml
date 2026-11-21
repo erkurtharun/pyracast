@@ -244,6 +244,7 @@ jobs:
       deployments: read
     env:
       RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
+      DEPLOYMENT_LOOKUP: ${{ github.event_name == 'workflow_run' || inputs.ci_run_id != '' }}
     outputs:
       current: ${{ steps.current.outputs.current }}
     steps:
@@ -300,11 +301,12 @@ jobs:
         env:
           MAIN_SHA: ${{ steps.main-before.outputs.sha }}
           CI_STARTED_AT: ${{ needs.authorize.outputs.ci_started_at }}
-        run: &decide-current python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA" --deployments "$RUNNER_TEMP/release-deployments.json" --since "$CI_STARTED_AT"
+        run: &decide-current python3 deploy/release_authorization.py current "$MAIN_SHA" "$RELEASE_SHA" --deployments "$RUNNER_TEMP/release-deployments.json" --since "$CI_STARTED_AT" --deployment-lookup "$DEPLOYMENT_LOOKUP"
       - name: Download images from the exact authorized CI run
         id: download
         if: steps.before.outputs.current == 'true'
-        continue-on-error: true
+        # An operator's dispatch looks up no deployments, so its failed download fails here.
+        continue-on-error: ${{ github.event_name == 'workflow_run' || inputs.ci_run_id != '' }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.authorize.outputs.artifact_id }}
@@ -382,6 +384,7 @@ jobs:
       deployments: read
     env:
       RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
+      DEPLOYMENT_LOOKUP: ${{ github.event_name == 'workflow_run' || inputs.ci_run_id != '' }}
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       GCP_ZONE: ${{ vars.GCP_ZONE }}
       GCP_INSTANCE: ${{ vars.GCP_INSTANCE }}

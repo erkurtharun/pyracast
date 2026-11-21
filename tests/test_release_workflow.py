@@ -953,19 +953,32 @@ def test_every_repository_file_a_workflow_step_names_is_a_pipeline_path() -> Non
         assert release_authorization.changes_pipeline(name), name
 
 
+def relative_package(directory: Path, level: int) -> Path:
+    # Level 1 is the importing file's own package; each further level is one package up.
+    package = directory
+    for _ in range(level - 1):
+        package = package.parent
+    return package
+
+
 def python_imports(
     source: str, directory: Path, files: frozenset[str], root: Path = ROOT
 ) -> set[str]:
-    modules: list[str] = []
+    absolute = (root, directory)
+    modules: list[tuple[str, Sequence[Path]]] = []
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
-            modules.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            modules.extend([node.module, *(f"{node.module}.{alias.name}" for alias in node.names)])
+            modules.extend((alias.name, absolute) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            bases = absolute if node.level == 0 else (relative_package(directory, node.level),)
+            prefix = f"{node.module}." if node.module else ""
+            if node.module:
+                modules.append((node.module, bases))
+            modules.extend((f"{prefix}{alias.name}", bases) for alias in node.names)
     return {
         name
-        for module in modules
-        if (name := module_file(module, (root, directory), files, root)) is not None
+        for module, bases in modules
+        if (name := module_file(module, bases, files, root)) is not None
     }
 
 
