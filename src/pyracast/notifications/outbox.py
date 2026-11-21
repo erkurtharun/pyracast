@@ -13,6 +13,7 @@ from django.views.decorators.debug import sensitive_variables
 from pyracast.accounts.account_mail import compose_account_mail
 from pyracast.accounts.invitations import compose_invitation
 from pyracast.accounts.models import InvitationDeliveryStatus, WorkspaceInvitation
+from pyracast.background.deadlines import ACTORS, PUBLISH_BATCH
 from pyracast.encryption import secret_cipher
 from pyracast.mail.errors import (
     DeliveryUncertainError,
@@ -33,7 +34,7 @@ from pyracast.notifications.models import (
 
 logger = logging.getLogger(__name__)
 
-LEASE_DURATION = timedelta(minutes=5)
+LEASE_DURATION = ACTORS["send_outbound_mail"].lease
 MAX_ATTEMPTS = 8
 REPUBLISH_AFTER = timedelta(minutes=1)
 RETENTION = timedelta(days=7)
@@ -55,7 +56,7 @@ def _due(now: datetime) -> Q:
     )
 
 
-def pending_mail_ids(now: datetime, limit: int = 100) -> list[int]:
+def pending_mail_ids(now: datetime, limit: int = PUBLISH_BATCH) -> list[int]:
     return list(
         OutboundMail.objects.filter(_due(now))
         .order_by("available_at", "pk")
@@ -63,7 +64,9 @@ def pending_mail_ids(now: datetime, limit: int = 100) -> list[int]:
     )
 
 
-def publish_due_mail(publish: Callable[[int], object], now: datetime, limit: int = 100) -> int:
+def publish_due_mail(
+    publish: Callable[[int], object], now: datetime, limit: int = PUBLISH_BATCH
+) -> int:
     """Hand each due intent to the mailer at most once a minute; a lost message is published
     again by a later call."""
     with transaction.atomic():

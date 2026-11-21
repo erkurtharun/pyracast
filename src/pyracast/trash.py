@@ -4,7 +4,6 @@ from functools import partial
 from itertools import takewhile
 from typing import Any, cast
 
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -26,8 +25,14 @@ from pyracast.forecasts.models import (
     ReferenceCapacityNormalization,
     RequestAttempt,
 )
+from pyracast.forecasts.timing import default_times
 from pyracast.incidents.models import IncidentRevision, PlantIncident
-from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
+from pyracast.metering.models import (
+    EpiasCollectionJob,
+    EpiasConnection,
+    EpiasConnectionRevision,
+    EpiasSnapshot,
+)
 from pyracast.notifications.models import (
     DeliveryRecipient,
     NotificationDelivery,
@@ -169,7 +174,7 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
             region=region,
             defaults={
                 "enabled": True,
-                "times": [settings.PYRACAST_CUTOFF_LOCAL.strftime("%H:%M")],
+                "times": default_times(),
                 "effective_from": now,
             },
         )
@@ -229,6 +234,7 @@ def _detach(queryset: QuerySet[Any], budget: _Budget, **values: object) -> None:
 def _purge_epias_history(plant: Plant, budget: _Budget) -> None:
     _delete(EpiasSnapshot.objects.filter(connection__plant=plant), budget)
     _delete(EpiasCollectionJob.objects.filter(connection__plant=plant), budget)
+    _delete(EpiasConnectionRevision.objects.filter(connection__plant=plant), budget)
     _delete(EpiasConnection.objects.filter(plant=plant), budget)
 
 

@@ -6,7 +6,8 @@ from django.conf import settings
 from django.db import close_old_connections, connections
 from dramatiq import Actor, Broker
 
-from pyracast.background.failures import PhaseOutcome, log_failure
+from pyracast.background.deadlines import time_limit_ms
+from pyracast.background.failures import PhaseOutcome, log_failure, queue_full
 from pyracast.calculation import calculate
 from pyracast.forecasts.jobs import collect, pending_job_ids
 from pyracast.forecasts.models import CollectionEndpoint, CollectionJob
@@ -42,7 +43,12 @@ def deliver(job_id: int) -> None:
 
 
 def make_actor(broker: Broker) -> Actor[[int], None]:
-    return dramatiq.actor(broker=broker, actor_name="collect_forecast", max_retries=0)(deliver)
+    return dramatiq.actor(
+        broker=broker,
+        actor_name="collect_forecast",
+        max_retries=0,
+        time_limit=time_limit_ms("collect_forecast"),
+    )(deliver)
 
 
 def dispatch_collections(actor: Actor[[int], None]) -> PhaseOutcome:
@@ -59,7 +65,7 @@ def dispatch_collections(actor: Actor[[int], None]) -> PhaseOutcome:
         close_old_connections()
     published = 0
     try:
-        for job_id in pending_job_ids(now):
+        for job_id in [] if queue_full(actor, logger) else pending_job_ids(now):
             actor.send(job_id)
             published += 1
     except Exception as exc:

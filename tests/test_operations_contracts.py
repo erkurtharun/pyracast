@@ -1047,6 +1047,13 @@ def test_postgresql_admits_the_superuser_only_over_its_local_socket() -> None:
     assert "-h" not in postgres["healthcheck"]["test"]
 
 
+def test_smoke_refusals_without_a_broker_name_their_cause() -> None:
+    smoke = text(DEPLOY / "smoke.sh")
+
+    assert "[[ $refused != 0 && $deploy_check == *background.E001* ]]" in smoke
+    assert "[[ $refused != 0 && $missing_broker == *PYRACAST_RABBITMQ_URL* ]]" in smoke
+
+
 def test_smoke_proves_the_maintenance_notice_and_the_restricted_roles() -> None:
     smoke = text(DEPLOY / "smoke.sh")
 

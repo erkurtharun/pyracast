@@ -305,9 +305,12 @@ def test_http_errors_are_redacted_and_never_follow_redirects_or_retry(
             return httpx.Response(201, text=TICKET)
         return httpx.Response(status, text=PASSWORD, headers={"Location": "https://wrong.invalid"})
 
+    rejected = login and status in (401, 403)
     with httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True) as client:
         adapter = EpiasClient(client, username=USERNAME, password=PASSWORD)
-        with pytest.raises(EpiasError, match="request_failed") as error:
+        with pytest.raises(
+            EpiasError, match="credentials_rejected" if rejected else "request_failed"
+        ) as error:
             adapter.list_plants()
     assert PASSWORD not in str(error.value)
     assert error.value.__cause__ is None

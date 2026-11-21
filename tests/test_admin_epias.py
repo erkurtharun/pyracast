@@ -7,7 +7,12 @@ from django.test import Client
 from django.urls import reverse
 
 from pyracast.accounts.models import Membership
-from pyracast.epias import EpiasError
+from pyracast.epias import (
+    CREDENTIALS_MISSING,
+    CREDENTIALS_REJECTED,
+    EpiasCredentialsError,
+    EpiasError,
+)
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection
 from pyracast.plants.models import Plant, PlantEvent
 from tests.support.admin_setup import admin_system, submitted_plant
@@ -104,18 +109,24 @@ def test_invalid_epias_fields_never_reach_provider(
 
 
 @pytest.mark.parametrize(
-    "error", ["provider", "credentials", "mismatch", "configuration", "missing"]
+    "error", ["provider", "credentials", "rejected", "mismatch", "configuration", "missing"]
 )
 def test_connection_errors_are_safe_and_preserve_input(
     monkeypatch: pytest.MonkeyPatch, error: str
 ) -> None:
     system, _ = make_plant(monkeypatch)
     provider_detail = "private-password-and-provider-response"
+    raised = {
+        "credentials": EpiasCredentialsError(CREDENTIALS_MISSING),
+        "rejected": EpiasCredentialsError(CREDENTIALS_REJECTED),
+    }
 
     def unavailable() -> None:
-        raise EpiasError("credentials_unavailable" if error == "credentials" else provider_detail)
+        raise raised.get(error, EpiasError(provider_detail))
 
-    provider = FixtureClient(unavailable if error in {"provider", "credentials"} else lambda: None)
+    provider = FixtureClient(
+        unavailable if error in {"provider", "credentials", "rejected"} else lambda: None
+    )
     monkeypatch.setattr("pyracast.metering.operations.get_epias_client", lambda: provider)
     if error == "missing":
 
@@ -135,6 +146,7 @@ def test_connection_errors_are_safe_and_preserve_input(
     expected = {
         "provider": "EPİAŞ is currently unavailable",
         "credentials": "EPİAŞ service credentials are unavailable",
+        "rejected": "EPİAŞ service credentials are unavailable",
         "mismatch": "plant ID and EIC did not match",
         "configuration": "plant configuration is unavailable or changed",
         "missing": "plant configuration is unavailable or changed",

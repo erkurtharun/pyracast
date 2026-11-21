@@ -12,7 +12,13 @@ from django.utils import timezone
 
 from pyracast.accounts.retention import sweep_accounts
 from pyracast.background.broker import make_broker
-from pyracast.background.failures import ItemsFailedError, PhaseOutcome, log_failure
+from pyracast.background.deadlines import DISPATCH_POLL_SECONDS
+from pyracast.background.failures import (
+    ItemsFailedError,
+    PhaseOutcome,
+    broker_answers,
+    log_failure,
+)
 from pyracast.forecasts.monitoring import record_dispatch_phase
 from pyracast.forecasts.runtime import dispatch_collections, make_actor
 from pyracast.metering.runtime import dispatch_epias, make_epias_actor
@@ -71,7 +77,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: Any) -> None:
         parser.add_argument("--loop", action="store_true")
-        parser.add_argument("--poll-seconds", type=float, default=60.0)
+        parser.add_argument("--poll-seconds", type=float, default=DISPATCH_POLL_SECONDS)
         parser.add_argument("--stop-file", type=Path)
         parser.add_argument("--heartbeat-file", type=Path)
 
@@ -101,7 +107,9 @@ class Command(BaseCommand):
                     ("metering", _published(partial(dispatch_epias, epias_actor))),
                 )
                 while not shutdown.requested:
-                    if heartbeat is not None:
+                    # Without a broker answer the heartbeat ages, so the container turns unhealthy
+                    # within BROKER_OUTAGE_RESTART and the watchdog restarts it.
+                    if heartbeat is not None and broker_answers(actor, logger):
                         heartbeat.touch()
                     failures = []
                     for name, operation in phases:

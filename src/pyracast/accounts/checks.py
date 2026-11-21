@@ -9,11 +9,13 @@ from django.core.checks import CheckMessage, Error, Tags, register
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.validators import validate_email
 
+from pyracast.background.broker import check_broker_url
 from pyracast.mail.errors import NotSentError
 from pyracast.mail.send import configured_mailer
 
 SMTP_BACKEND = "pyracast.mail.smtp.EmailBackend"
 PRODUCTION_BACKENDS = {SMTP_BACKEND, "pyracast.mail.gmail.EmailBackend"}
+register(Tags.compatibility, deploy=True)(check_broker_url)
 
 
 def validate_public_origin() -> None:

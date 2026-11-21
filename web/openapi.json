@@ -6439,11 +6439,13 @@
                     "retry_window_expired",
                     "attempts_exhausted",
                     "epias_provider_failure",
+                    "epias_credentials_missing",
+                    "epias_credentials_rejected",
                     "unpublished_data",
                     "partial_data"
                 ],
                 "type": "string",
-                "description": "* `retry_window_expired` - Retry window expired\n* `attempts_exhausted` - Attempts exhausted\n* `epias_provider_failure` - Epias provider failure\n* `unpublished_data` - Unpublished data\n* `partial_data` - Partial data"
+                "description": "* `retry_window_expired` - Retry window expired\n* `attempts_exhausted` - Attempts exhausted\n* `epias_provider_failure` - Epias provider failure\n* `epias_credentials_missing` - EPIAS credentials missing\n* `epias_credentials_rejected` - EPIAS credentials rejected\n* `unpublished_data` - Unpublished data\n* `partial_data` - Partial data"
             },
             "EpiasJobStatusEnum": {
                 "enum": [

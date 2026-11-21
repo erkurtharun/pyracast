@@ -29,6 +29,7 @@ PURGED = frozenset(
         "incidents.PlantIncident",
         "metering.EpiasCollectionJob",
         "metering.EpiasConnection",
+        "metering.EpiasConnectionRevision",
         "metering.EpiasSnapshot",
         "notifications.DeliveryRecipient",
         "notifications.NotificationDelivery",

@@ -14,6 +14,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
+from pyracast.background.deadlines import ACTORS
 from pyracast.background.failures import log_failure
 from pyracast.connections.models import ProviderAccount
 from pyracast.plants.automation import attempt_promotion
@@ -44,7 +45,7 @@ from pyracast.plants.operations import configuration_is_current
 from pyracast.plants.preparation import request_preparation
 from pyracast.regions.models import Region
 
-LEASE_DURATION = timedelta(minutes=5)
+LEASE_DURATION = ACTORS["calibrate_plant"].lease
 MAX_ATTEMPTS = 3
 
 logger = logging.getLogger(__name__)

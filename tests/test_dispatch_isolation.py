@@ -1,5 +1,6 @@
 import contextlib
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -186,11 +187,18 @@ def test_a_purge_beyond_its_budget_resumes_next_run_and_later_phases_still_run(
     assert not ForecastSnapshot.objects.exists()
 
 
+@pytest.mark.parametrize(
+    ("moment", "bounded"), [(NOW, False), (NEXT_NIGHT + timedelta(days=11), True)]
+)
 def test_a_failing_connection_does_not_stop_other_connections_or_publication(
-    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+    monkeypatch: pytest.MonkeyPatch,
+    pyracast_logs: pytest.LogCaptureFixture,
+    moment: datetime,
+    bounded: bool,
 ) -> None:
     system, _, failing = connected(monkeypatch)
     healthy = connect(sibling_plant(system), system.admin)
+    monkeypatch.setattr("pyracast.metering.runtime.datetime", SimpleNamespace(now=lambda _: moment))
     original = metering_scheduler.enqueue_connection
 
     def enqueue(connection: EpiasConnection, now: datetime, *, initial: bool = False) -> list[int]:
@@ -202,11 +210,13 @@ def test_a_failing_connection_does_not_stop_other_connections_or_publication(
     EpiasCollectionJob.objects.filter(connection=failing).delete()
     broker = dispatch_once(monkeypatch)
 
-    assert sorted(published(broker, "epias")) == sorted(
-        EpiasCollectionJob.objects.filter(connection=healthy, status="pending").values_list(
-            "pk", flat=True
-        )
+    pending = list(
+        EpiasCollectionJob.objects.filter(connection=healthy, status="pending")
+        .order_by("available_at", "pk")
+        .values_list("pk", flat=True)
     )
+    assert (len(pending) > 100) is bounded
+    assert published(broker, "epias") == pending[:100]
     assert DispatcherStatus.objects.get(phase="metering").last_error == "items_failed:1"
     assert f"item=connection:{failing.pk}" in pyracast_logs.text
     assert "private metering detail" not in pyracast_logs.text

@@ -87,6 +87,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0002_epias_vocabulary_choices",
             "0003_lease_check_and_snapshot_trigger",
             "0004_schema_naming_convention",
+            "0005_epias_connection_revisions",
         ),
         "notifications": (
             "0002_delivery_vocabulary_checks",
@@ -325,3 +326,41 @@ def test_migration_rejects_django_connection_pool(
         migration_session(connection, lock_timeout=2, statement_timeout=45),
     ):
         pytest.fail("Session lock cannot migrate through a pool")
+
+
+def idle_in_transaction_setting() -> str:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT current_setting('idle_in_transaction_session_timeout')")
+        return cast(tuple[str], cursor.fetchone())[0]
+
+
+def test_runtime_sessions_end_a_transaction_left_idle() -> None:
+    assert idle_in_transaction_setting() == "2min"
+
+
+def test_migration_session_sets_its_own_idle_transaction_bound_and_restores_it() -> None:
+    with migration_session(connection, lock_timeout=2, statement_timeout=45):
+        assert idle_in_transaction_setting() == "0"
+    assert idle_in_transaction_setting() == "2min"
+    observed: list[str] = []
+
+    def fail_after_reading() -> None:
+        observed.append(idle_in_transaction_setting())
+        raise RuntimeError("migration failed")
+
+    with (
+        pytest.raises(RuntimeError, match="migration failed"),
+        migration_session(
+            connection, lock_timeout=2, statement_timeout=45, idle_in_transaction_timeout=30
+        ),
+    ):
+        fail_after_reading()
+    assert observed == ["30s"]
+    assert idle_in_transaction_setting() == "2min"
+
+
+def test_migrate_command_takes_an_idle_transaction_bound() -> None:
+    call_command("migrate", idle_in_transaction_timeout_seconds=0, verbosity=0)
+    with pytest.raises(CommandError, match="timeouts must be"):
+        call_command("migrate", idle_in_transaction_timeout_seconds=-1, verbosity=0)
+    assert idle_in_transaction_setting() == "2min"

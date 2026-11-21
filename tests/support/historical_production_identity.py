@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 from django.utils import timezone
 
-from pyracast.metering.models import EpiasConnection
+from pyracast.metering.models import EpiasConnection, EpiasConnectionRevision
 from pyracast.plants.models import PlantEvent
 
 
@@ -12,6 +12,13 @@ def record_identity(
 ) -> PlantEvent:
     monkeypatch.setattr(timezone, "now", lambda: stamp)
     connection.save()
+    EpiasConnectionRevision.objects.create(
+        connection=connection,
+        revision=connection.revision,
+        provider_plant_id=connection.provider_plant_id,
+        eic=connection.eic,
+        connected_at=stamp,
+    )
     return PlantEvent.objects.create(
         plant=connection.plant,
         actor=connection.connected_by,

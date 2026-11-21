@@ -13,14 +13,36 @@ from django.db.migrations.recorder import MigrationRecorder
 
 # Session locks survive the commits between atomic and non-atomic migrations.
 MIGRATION_LOCK = (0x50595241, 0x4D494752)
+READ_TIMEOUTS = (
+    "SELECT current_setting('lock_timeout'), current_setting('statement_timeout'), "
+    "current_setting('idle_in_transaction_session_timeout')"
+)
+SET_TIMEOUTS = (
+    "SELECT set_config('lock_timeout', %s, false), set_config('statement_timeout', %s, false), "
+    "set_config('idle_in_transaction_session_timeout', %s, false)"
+)
+RESTORE_TIMEOUTS = (
+    "SELECT set_config('lock_timeout', %s, false), set_config('statement_timeout', %s, false), "
+    "set_config('idle_in_transaction_session_timeout', %s, false), pg_advisory_unlock(%s, %s)"
+)
 
 
 @contextmanager
 def migration_session(
-    connection: BaseDatabaseWrapper, *, lock_timeout: int, statement_timeout: int
+    connection: BaseDatabaseWrapper,
+    *,
+    lock_timeout: int,
+    statement_timeout: int,
+    idle_in_transaction_timeout: int = 0,
 ) -> Iterator[None]:
-    if any(value < 1 or value > 2_147_483 for value in (lock_timeout, statement_timeout)):
-        raise CommandError("Migration timeouts must be between 1 and 2147483 seconds.")
+    """A data migration may compute between statements, so 0 (no idle bound) is the default."""
+    if (
+        any(value < 1 or value > 2_147_483 for value in (lock_timeout, statement_timeout))
+        or not 0 <= idle_in_transaction_timeout <= 2_147_483
+    ):
+        raise CommandError(
+            "Migration timeouts must be between 1 and 2147483 seconds; the idle bound may be 0."
+        )
     if connection.settings_dict["OPTIONS"].get("pool") not in (None, False):
         raise CommandError("Run migrations through a direct connection without connection pooling.")
     if connection.vendor != "postgresql" or cast(DatabaseWrapper, connection).pg_version < 180000:
@@ -30,9 +52,7 @@ def migration_session(
             "Run migrations outside a transaction, using a direct database connection."
         )
     with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT current_setting('lock_timeout'), current_setting('statement_timeout')"
-        )
+        cursor.execute(READ_TIMEOUTS)
         previous = cursor.fetchone()
         cursor.execute("SELECT pg_try_advisory_lock(%s, %s)", MIGRATION_LOCK)
         if not cursor.fetchone()[0]:
@@ -49,9 +69,8 @@ def migration_session(
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT set_config('lock_timeout', %s, false), "
-                "set_config('statement_timeout', %s, false)",
-                [f"{lock_timeout}s", f"{statement_timeout}s"],
+                SET_TIMEOUTS,
+                [f"{lock_timeout}s", f"{statement_timeout}s", f"{idle_in_transaction_timeout}s"],
             )
         with connection.execute_wrapper(require_locked_connection):
             yield
@@ -61,11 +80,7 @@ def migration_session(
         try:
             if connection.connection is locked_connection and connection.is_usable():
                 with connection.cursor() as cursor:
-                    cursor.execute(
-                        "SELECT set_config('lock_timeout', %s, false), "
-                        "set_config('statement_timeout', %s, false), pg_advisory_unlock(%s, %s)",
-                        [*previous, *MIGRATION_LOCK],
-                    )
+                    cursor.execute(RESTORE_TIMEOUTS, [*previous, *MIGRATION_LOCK])
             else:
                 connection.close()
         except BaseException:
@@ -98,12 +113,14 @@ class Command(DjangoMigrateCommand):
         super().add_arguments(parser)
         parser.add_argument("--lock-timeout-seconds", type=int, default=5)
         parser.add_argument("--statement-timeout-seconds", type=int, default=900)
+        parser.add_argument("--idle-in-transaction-timeout-seconds", type=int, default=0)
 
     def handle(self, *args: Any, **options: Any) -> str | None:
         with migration_session(
             connections[options["database"]],
             lock_timeout=options["lock_timeout_seconds"],
             statement_timeout=options["statement_timeout_seconds"],
+            idle_in_transaction_timeout=options["idle_in_transaction_timeout_seconds"],
         ):
             refuse_replaced_history(connections[options["database"]])
             return super().handle(*args, **options)

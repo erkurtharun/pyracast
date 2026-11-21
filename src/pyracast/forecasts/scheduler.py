@@ -1,9 +1,8 @@
 import logging
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, transaction
 from django.db.models.functions import Greatest
@@ -19,14 +18,13 @@ from pyracast.forecasts.models import (
     CollectionJobStatus,
     CollectionSchedule,
 )
-from pyracast.forecasts.timing import (
-    approval_job,
-    effective_forecast_schedule,
-    latest_forecast_slot,
-)
+from pyracast.forecasts.timing import forecast_timing, latest_forecast_slot
 from pyracast.regions.models import Region
 
 logger = logging.getLogger(__name__)
+# A stale forecast job at the latest slot is opened again unless it was refused for a reason that
+# holds for its slot: the binding's day bound, or a schedule disabled after the claim.
+SLOT_FINAL_ERRORS = (CollectionJobError.QUOTA_EXHAUSTED, CollectionJobError.SCHEDULE_DISABLED)
 
 
 class CollectionSchedulingError(RuntimeError):
@@ -116,7 +114,9 @@ def _schedule_forecast_slot(context: _RegionContext, slot: datetime) -> int:
             "available_at": now,
         },
     )
-    CollectionJob.objects.filter(pk=job.pk, status=CollectionJobStatus.STALE).update(
+    CollectionJob.objects.filter(pk=job.pk, status=CollectionJobStatus.STALE).exclude(
+        last_error__in=SLOT_FINAL_ERRORS
+    ).update(
         status=CollectionJobStatus.PENDING,
         available_at=now,
         last_error="",
@@ -142,7 +142,7 @@ def _schedule_paired_actuals(context: _RegionContext, slot: datetime) -> int | N
     return history.pk
 
 
-def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
+def _enqueue_region(region_id: int, now: datetime) -> list[int]:
     with transaction.atomic():
         region = (
             Region.objects.select_for_update(of=("self",))
@@ -155,13 +155,7 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
         binding = region.approved_binding
         if binding is None or binding.validated_at is None or not binding_is_current(binding):
             return []
-        _, first_slot = approval_job(binding.pk) or (None, None)
-        timing = effective_forecast_schedule(
-            first_slot=first_slot,
-            schedule=CollectionSchedule.objects.filter(region=region).first(),
-            daily_quota=binding.provider_account.daily_quota,
-            cutoff=cutoff,
-        )
+        timing = forecast_timing(binding, CollectionSchedule.objects.filter(region=region).first())
         if timing is None:
             return []
         context = _RegionContext(binding, region.timezone, now)
@@ -174,15 +168,14 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
         return jobs if paired is None else [*jobs, paired]
 
 
-def enqueue_due(now: datetime, cutoff_hour: int | None = None) -> list[int]:
-    if now.tzinfo is None or (cutoff_hour is not None and not 0 <= cutoff_hour <= 23):
-        raise ValidationError("An aware timestamp and valid cutoff hour are required.")
-    cutoff: time = settings.PYRACAST_CUTOFF_LOCAL if cutoff_hour is None else time(cutoff_hour)
+def enqueue_due(now: datetime) -> list[int]:
+    if now.tzinfo is None:
+        raise ValidationError("An aware timestamp is required.")
     jobs: list[int] = []
     failed_region_ids: list[int] = []
     for region_id in Region.objects.active().filter(status="approved").values_list("pk", flat=True):
         try:
-            jobs.extend(_enqueue_region(region_id, now, cutoff))
+            jobs.extend(_enqueue_region(region_id, now))
         except Exception as exc:
             failed_region_ids.append(region_id)
             log_failure(logger, "collection_region_scheduling_failed", exc, region_id=region_id)

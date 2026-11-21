@@ -13,6 +13,7 @@ from django.db.models import Case, F, Q, Value, When
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
+from pyracast.background.deadlines import ACTORS
 from pyracast.background.failures import log_failure
 from pyracast.mail.errors import (
     DeliveryUncertainError,
@@ -35,7 +36,7 @@ from pyracast.notifications.recipients import narrow_recipients
 from pyracast.notifications.scheduler import MAX_LATENESS, slot_recipients
 from pyracast.regions.models import Region, active_region
 
-LEASE_DURATION = timedelta(minutes=5)
+LEASE_DURATION = ACTORS["send_forecast_reminder"].lease
 logger = logging.getLogger(__name__)
 
 

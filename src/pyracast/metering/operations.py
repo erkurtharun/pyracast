@@ -10,6 +10,7 @@ from pyracast.metering.client import get_epias_client
 from pyracast.metering.models import (
     EpiasCollectionJob,
     EpiasConnection,
+    EpiasConnectionRevision,
     EpiasJobStatus,
     EpiasSnapshot,
     EpiasSourceKind,
@@ -59,6 +60,14 @@ def connect_epias(
         ):
             raise DomainError(ErrorCode.CONFIGURATION_UNAVAILABLE)
         connection = EpiasConnection.objects.select_for_update().filter(plant=plant).first()
+        settlement_id = settlement.id if settlement else None
+        if connection is not None and (
+            connection.enabled,
+            connection.provider_plant_id,
+            connection.eic,
+            connection.settlement_plant_id,
+        ) == (True, selected.id, selected.eic, settlement_id):
+            return connection
         if connection is None:
             connection = EpiasConnection(plant=plant, connected_by=actor)
         else:
@@ -68,14 +77,14 @@ def connect_epias(
                 status__in=(EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING),
             ).update(status=EpiasJobStatus.SUPERSEDED, lease_token=None, lease_expires_at=None)
         connection.provider_plant_id = selected.id
-        connection.settlement_plant_id = settlement.id if settlement else None
+        connection.settlement_plant_id = settlement_id
         connection.settlement_checked_at = timezone.now()
         connection.eic = selected.eic
         connection.name = selected.name
         connection.connected_by = actor
         connection.enabled = True
         connection.save()
-        record_plant_event(
+        event = record_plant_event(
             plant_id=plant.pk,
             actor=actor,
             action=PlantEventAction.EPIAS_CONNECTED,
@@ -84,6 +93,13 @@ def connect_epias(
                 "eic": connection.eic,
                 "revision": connection.revision,
             },
+        )
+        EpiasConnectionRevision.objects.create(
+            connection=connection,
+            revision=connection.revision,
+            provider_plant_id=connection.provider_plant_id,
+            eic=connection.eic,
+            connected_at=event.created_at,
         )
         from pyracast.metering.scheduler import enqueue_connection
 
@@ -99,7 +115,7 @@ def disconnect_epias(plant_id: int, *, actor: User) -> None:
         Plant.objects.select_for_update().get(pk=plant.pk)
         require_platform_admin(User.objects.select_for_update().get(pk=actor.pk))
         connection = EpiasConnection.objects.select_for_update().filter(plant=plant).first()
-        if connection is None:
+        if connection is None or not connection.enabled:
             return
         connection.enabled = False
         connection.save(update_fields=("enabled", "updated_at"))

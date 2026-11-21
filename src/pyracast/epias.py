@@ -5,17 +5,22 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from threading import Lock
-from typing import Literal
+from typing import Literal, NoReturn
 from zoneinfo import ZoneInfo
 
 import httpx
 
 from pyracast import provider_retry
+from pyracast.outbound import TIMEOUT, UnboundedResponseError, read_bounded
 
 AUTH_URL = "https://giris.epias.com.tr/cas/v1/tickets"
+# A plant list holds up to 100,000 plants.
+MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 BASE_URL = "https://seffaflik.epias.com.tr/electricity-service/v1/generation/data"
 TIMEZONE = ZoneInfo("Europe/Istanbul")
 SourceKind = Literal["realtime_generation", "settlement_injection"]
+CREDENTIALS_MISSING = "epias_credentials_missing"
+CREDENTIALS_REJECTED = "epias_credentials_rejected"
 
 
 class EpiasError(Exception):
@@ -25,6 +30,14 @@ class EpiasError(Exception):
         super().__init__(code)
         self.retry_after_seconds = retry_after_seconds
         self.retryable = retryable
+
+
+class EpiasCredentialsError(EpiasError):
+    """Missing or rejected credentials: no data request was sent, and none can succeed until
+    the process restarts with other credentials."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code, retryable=False)
 
 
 @dataclass(frozen=True)
@@ -62,6 +75,11 @@ class EpiasDay:
     unit: str = "MWh"
     source_kind: SourceKind = "realtime_generation"
     end_day: date | None = None
+
+
+def _before(deadline: float | None) -> None:
+    if deadline is not None and time.monotonic() >= deadline:
+        raise EpiasError("epias_deadline_exceeded")
 
 
 def _has_secret(value: object, secrets: tuple[str, ...]) -> bool:
@@ -146,7 +164,7 @@ class EpiasClient:
         self, client: httpx.Client, *, username: str, password: str, page_size: int = 100
     ) -> None:
         if not username or not password:
-            raise EpiasError("missing_epias_credentials")
+            raise EpiasCredentialsError(CREDENTIALS_MISSING)
         if isinstance(page_size, bool) or not 1 <= page_size <= 100:
             raise EpiasError("invalid_epias_page_size")
         self._client = client
@@ -156,6 +174,7 @@ class EpiasClient:
         self._ticket = ""
         self._ticket_expires = 0.0
         self._ticket_lock = Lock()
+        self._rejected = False
 
     def _request(
         self,
@@ -166,63 +185,82 @@ class EpiasClient:
         body: dict[str, object] | None = None,
         form: dict[str, str] | None = None,
         expected_status: int = 200,
-    ) -> httpx.Response:
+    ) -> bytes:
+        started = time.monotonic()
         try:
-            response = self._client.request(
+            with self._client.stream(
                 method,
                 url,
                 headers=headers,
                 json=body,
                 data=form,
-                timeout=httpx.Timeout(20, connect=5),
+                timeout=TIMEOUT,
                 follow_redirects=False,
                 auth=None,
-            )
+            ) as response:
+                if response.status_code != expected_status:
+                    self._refuse(url, response)
+                return read_bounded(response, started, limit=MAX_RESPONSE_BYTES)
+        except UnboundedResponseError as error:
+            raise EpiasError(
+                "epias_response_too_large" if error.too_large else "epias_request_failed",
+                retryable=not error.too_large,
+            ) from None
         except httpx.HTTPError:
             raise EpiasError("epias_request_failed") from None
-        if response.status_code != expected_status:
-            if response.status_code in (401, 403):
-                self._ticket = ""
-            raise EpiasError(
-                "epias_request_failed",
-                retryable=provider_retry.retryable_status(response.status_code)
-                or (response.status_code == 401 and url != AUTH_URL),
-                retry_after_seconds=(
-                    provider_retry.retry_after_seconds(response.headers.get("Retry-After"))
-                    if response.status_code in (429, 503)
-                    else None
-                ),
-            )
-        return response
+
+    def _refuse(self, url: str, response: httpx.Response) -> NoReturn:
+        if response.status_code in (401, 403):
+            self._ticket = ""
+            if url == AUTH_URL:
+                self._rejected = True
+                raise EpiasCredentialsError(CREDENTIALS_REJECTED)
+        raise EpiasError(
+            "epias_request_failed",
+            retryable=provider_retry.retryable_status(response.status_code)
+            or response.status_code == 401,
+            retry_after_seconds=(
+                provider_retry.retry_after_seconds(response.headers.get("Retry-After"))
+                if response.status_code in (429, 503)
+                else None
+            ),
+        )
 
     def _tgt(self) -> str:
         with self._ticket_lock:
+            if self._rejected:
+                raise EpiasCredentialsError(CREDENTIALS_REJECTED)
             if self._ticket and time.monotonic() < self._ticket_expires:
                 return self._ticket
-            response = self._request(
+            answer = self._request(
                 "POST",
                 AUTH_URL,
                 headers={"Accept": "text/plain"},
                 form={"username": self._username, "password": self._password},
                 expected_status=201,
             )
-            ticket = response.text.strip()
+            ticket = answer.decode("utf-8", "replace").strip()
             if not re.fullmatch(r"TGT-[A-Za-z0-9._-]{1,4090}", ticket):
                 raise EpiasError("invalid_epias_ticket")
             self._ticket = ticket
             self._ticket_expires = time.monotonic() + 7140
             return ticket
 
-    def _data(self, endpoint: str, body: dict[str, object] | None = None) -> dict[str, object]:
+    def _data(
+        self, endpoint: str, body: dict[str, object] | None = None, deadline: float | None = None
+    ) -> dict[str, object]:
+        """``deadline`` is a ``time.monotonic()`` value after which no request is sent."""
+        _before(deadline)
         ticket = self._tgt()
-        response = self._request(
+        _before(deadline)
+        answer = self._request(
             "GET" if body is None else "POST",
             f"{BASE_URL}/{endpoint}",
             headers={"TGT": ticket, "Accept": "application/json"},
             body=body,
         )
         try:
-            payload: object = json.loads(response.content)
+            payload: object = json.loads(answer)
         except ValueError, UnicodeDecodeError:
             raise EpiasError("invalid_epias_schema") from None
         if _has_secret(payload, (self._username, self._password, ticket)):
@@ -262,13 +300,15 @@ class EpiasClient:
             result.append(plant)
         return tuple(result)
 
-    def fetch_day(self, plant: EpiasPlant, day: date) -> EpiasDay:
-        return self._fetch_period(plant, day, day, "realtime_generation")
+    def fetch_day(self, plant: EpiasPlant, day: date, *, deadline: float | None = None) -> EpiasDay:
+        return self._fetch_period(plant, day, day, "realtime_generation", deadline)
 
-    def fetch_settlement(self, plant: EpiasPlant, start_day: date, end_day: date) -> EpiasDay:
+    def fetch_settlement(
+        self, plant: EpiasPlant, start_day: date, end_day: date, *, deadline: float | None = None
+    ) -> EpiasDay:
         if end_day < start_day or (end_day - start_day).days > 30:
             raise EpiasError("invalid_epias_period")
-        return self._fetch_period(plant, start_day, end_day, "settlement_injection")
+        return self._fetch_period(plant, start_day, end_day, "settlement_injection", deadline)
 
     def _fetch_period(
         self,
@@ -276,6 +316,7 @@ class EpiasClient:
         day: date,
         end_day: date,
         source_kind: SourceKind,
+        deadline: float | None,
     ) -> EpiasDay:
         if _integer(plant.id) == 0:
             raise EpiasError("invalid_epias_plant")
@@ -297,6 +338,7 @@ class EpiasClient:
                     "powerplantId" if settlement else "powerPlantId": plant.id,
                     "page": {"number": number, "size": self._page_size},
                 },
+                deadline,
             )
             page = _object(payload.get("page"))
             if (

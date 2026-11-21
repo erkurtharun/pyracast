@@ -141,6 +141,13 @@ database_log=$("${compose[@]}" logs --no-log-prefix postgres)
 "${compose[@]}" run --rm --no-deps migrate
 "${bootstrap[@]}" converge "$temporary" "$temporary"
 "${compose[@]}" run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING
+no_broker=("${compose[@]}" run --rm -T --no-deps --env PYRACAST_RABBITMQ_URL=)
+refused=0
+deploy_check=$("${no_broker[@]}" migrate pyracast check --deploy --fail-level WARNING 2>&1) || refused=$?
+[[ $refused != 0 && $deploy_check == *background.E001* ]]
+refused=0
+missing_broker=$("${no_broker[@]}" worker 2>&1) || refused=$?
+[[ $refused != 0 && $missing_broker == *PYRACAST_RABBITMQ_URL* ]]
 "${compose[@]}" up -d --wait --wait-timeout 180
 # The ephemeral CA has no revocation service; Schannel still verifies its chain and hostname.
 tls_curl=(curl --silent --show-error --ssl-revoke-best-effort --cacert "$temporary/ca.pem")
@@ -449,7 +456,12 @@ dump_database(release, release / 'database.dump')
 restore_archive(release, release / 'database.dump', 'local-smoke')
 PY
 "${compose[@]}" exec -T api pyracast dispatch
-"${compose[@]}" stop -t 30 dispatcher worker notifications
+"${compose[@]}" stop -t 30 dispatcher
+"${compose[@]}" stop -t 30 worker notifications
+# Each drained and exited by itself; a container stopped by SIGKILL exits with 137.
+for service in dispatcher worker notifications; do
+  [[ $(docker inspect --format '{{.State.ExitCode}}' "$("${compose[@]}" ps -aq "$service")") == 0 ]]
+done
 
 # The smoke substitutes bucket upload, runtime secrets, systemctl, public readiness and Windows locking.
 "${compose[@]}" exec -T api python - <<'PY'
@@ -661,4 +673,4 @@ observed=$("${probe_origin_pull[@]}" --attempts 3 --interval 1 2>&1) || refused=
 refused_handshake "${edge[@]}"
 "${compose[@]}" up -d --no-deps --wait --wait-timeout 120 gateway
 ready
-echo 'Production containers, TLS routing, exact gateway headers, body, rate and in-flight limits, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles and access rules, fixture queue publication, graceful idle shutdown, the maintenance notice, database reset and restore, and Authenticated Origin Pulls with an accepted and a rejected authority passed.'
+echo 'Production containers, TLS routing, exact gateway headers, body, rate and in-flight limits, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles and access rules, fixture queue publication, the broker URL refusal, graceful idle shutdown with a clean exit, the maintenance notice, database reset and restore, and Authenticated Origin Pulls with an accepted and a rejected authority passed.'

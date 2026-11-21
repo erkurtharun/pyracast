@@ -15,7 +15,12 @@ from pyracast.forecasts.intraday import completed_actual_intervals
 from pyracast.forecasts.models import CollectionEndpoint
 from pyracast.incidents.evidence import pinned_incidents, select_incidents
 from pyracast.irradiance import local_day_bounds
-from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
+from pyracast.metering.models import (
+    EpiasCollectionJob,
+    EpiasConnection,
+    EpiasConnectionRevision,
+    EpiasSnapshot,
+)
 from pyracast.plants.forecast_sources import compose_snapshots
 from pyracast.plants.measurement_policy import (
     LEGACY_MEASUREMENT_POLICY as LEGACY_MEASUREMENT_POLICY,
@@ -27,8 +32,6 @@ from pyracast.plants.models import (
     CalibrationRun,
     Plant,
     PlantConfiguration,
-    PlantEvent,
-    PlantEventAction,
     ProductionObservation,
 )
 from pyracast.plants.observations import observation_heads
@@ -473,23 +476,14 @@ def production_identity_current(run: CalibrationRun) -> bool:
 def production_identity_at(run: CalibrationRun, as_of: datetime) -> bool:
     if not run.production_snapshot_ids:
         return True
-    event = (
-        PlantEvent.objects.filter(
-            plant_id=run.plant_id, action=PlantEventAction.EPIAS_CONNECTED, created_at__lte=as_of
+    identity = (
+        EpiasConnectionRevision.objects.filter(
+            connection__plant_id=run.plant_id, connected_at__lte=as_of
         )
-        .order_by("-created_at", "-pk")
+        .order_by("-connected_at", "-revision")
         .first()
     )
-    if event is None:
-        return False
-    identity = event.details
-    revision = _provider_identifier(identity.get("revision"))
-    if (
-        revision is None
-        or _provider_identifier(identity.get("provider_plant_id")) is None
-        or not isinstance(identity.get("eic"), str)
-        or not identity["eic"]
-    ):
+    if identity is None:
         return False
     snapshots = list(
         EpiasSnapshot.objects.filter(
@@ -513,7 +507,7 @@ def production_identity_at(run: CalibrationRun, as_of: datetime) -> bool:
             EpiasCollectionJob.objects.filter(
                 connection__plant_id=run.plant_id,
                 plant_id=run.plant_id,
-                connection_revision=revision,
+                connection_revision=identity.revision,
                 source_kind="settlement_injection",
                 created_at__lte=as_of,
             ).values_list("provider_plant", flat=True)
@@ -529,20 +523,20 @@ def production_identity_at(run: CalibrationRun, as_of: datetime) -> bool:
 
 def _historical_provider_matches(
     snapshot: EpiasSnapshot,
-    identity: dict[str, Any],
+    identity: EpiasConnectionRevision,
     settlement_providers: list[dict[str, Any]],
 ) -> bool:
     provider = snapshot.provider_plant
     if (
         _provider_identifier(provider.get("id")) is None
-        or provider.get("eic") != identity.get("eic")
+        or provider.get("eic") != identity.eic
         or snapshot.job.source_kind != snapshot.source_kind
         or snapshot.normalization_policy != "hour-start-istanbul-v1"
     ):
         return False
     if snapshot.source_kind == "realtime_generation":
-        return bool(provider.get("id") == identity.get("provider_plant_id"))
-    # Settlement IDs occupy a separate namespace and are absent from connection events.
+        return bool(provider.get("id") == identity.provider_plant_id)
+    # Settlement IDs occupy a separate namespace and are absent from connection revisions.
     return bool(settlement_providers) and all(
         _provider_identifier(row.get("id")) == provider.get("id")
         and row.get("eic") == provider.get("eic")

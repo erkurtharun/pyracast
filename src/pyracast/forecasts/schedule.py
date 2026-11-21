@@ -1,7 +1,6 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -27,17 +26,15 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
 )
 from pyracast.forecasts.timing import (
-    approval_job,
-    effective_forecast_schedule,
+    HISTORY_REQUESTS_PER_DAY,
+    default_times,
+    forecast_time_limit,
+    forecast_timing,
     next_forecast_slot,
 )
 from pyracast.local_time import CLOCK_PATTERN
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region
-
-
-def forecast_time_limit(daily_quota: int) -> int:
-    return max(daily_quota - 1, 0)
 
 
 def get_schedule(tenant_id: int, region_id: int, now: datetime) -> CollectionSchedule:
@@ -49,7 +46,7 @@ def get_schedule(tenant_id: int, region_id: int, now: datetime) -> CollectionSch
     return CollectionSchedule.objects.filter(region=region).first() or CollectionSchedule(
         region=region,
         enabled=True,
-        times=[settings.PYRACAST_CUTOFF_LOCAL.strftime("%H:%M")],
+        times=default_times(),
         effective_from=now,
     )
 
@@ -133,12 +130,7 @@ def _next_collection_at(schedule: CollectionSchedule, now: datetime) -> datetime
         or not binding_is_current(binding, schedule.region)
     ):
         return None
-    _, first_slot = approval_job(binding.pk) or (None, None)
-    timing = effective_forecast_schedule(
-        first_slot=first_slot,
-        schedule=schedule,
-        daily_quota=binding.provider_account.daily_quota,
-    )
+    timing = forecast_timing(binding, schedule)
     if timing is None:
         return None
     queued = CollectionJob.objects.filter(
@@ -182,7 +174,7 @@ def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, o
         )
         if binding
         else [],
-        "history_requests_reserved_per_day": 1,
+        "history_requests_reserved_per_day": HISTORY_REQUESTS_PER_DAY,
         "history_local_time": HISTORY_CLOCK,
         "history_retry_until_local": HISTORY_END_CLOCK,
         "history_retry_minutes": int(NIGHT_RETRY_DELAY.total_seconds() / 60),

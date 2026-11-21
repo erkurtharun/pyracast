@@ -6,6 +6,7 @@ import dramatiq
 from django.db import close_old_connections, connections
 from dramatiq import Actor, Broker
 
+from pyracast.background.deadlines import time_limit_ms
 from pyracast.background.failures import ItemsFailedError, publish_after
 from pyracast.plants.automation import prepare_due_calibrations
 from pyracast.plants.preparation import prepare_requested_calibrations
@@ -24,7 +25,11 @@ def deliver_calibration(run_id: int) -> None:
 
 def make_calibration_actor(broker: Broker) -> Actor[[int], None]:
     return dramatiq.actor(
-        broker=broker, actor_name="calibrate_plant", queue_name="calibration", max_retries=0
+        broker=broker,
+        actor_name="calibrate_plant",
+        queue_name="calibration",
+        max_retries=0,
+        time_limit=time_limit_ms("calibrate_plant"),
     )(deliver_calibration)
 
 

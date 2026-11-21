@@ -291,4 +291,12 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
         del row["purge_started_at"]
     assert after.pop("notifications_outboundmail") == []
     assert [after.pop(table) for table in RECIPIENT_TABLES] == [[], [], []]
+    revisions = after.pop("metering_epiasconnectionrevision")
+    assert [
+        (row["connection_id"], row["revision"], row["provider_plant_id"], row["eic"])
+        for row in revisions
+    ] == [
+        (row["id"], 1, row["provider_plant_id"], row["eic"])
+        for row in before["metering_epiasconnection"]
+    ]
     assert after == renamed(before)
