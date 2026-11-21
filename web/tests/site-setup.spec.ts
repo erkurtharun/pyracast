@@ -413,7 +413,7 @@ test("a pending plant lists its next steps instead of an empty forecast", async 
             plant: { ...plant, current_configuration: null },
         },
     ]);
-    await page.goto("/app/w/1/plants/11/");
+    await page.goto("/app/w/1/plants/11/forecast/");
     const steps = page.getByRole("list", { name: "Next steps" });
     await expect(steps.getByRole("listitem")).toHaveCount(3);
     await expect(page.getByText("No forecast for this day yet")).toHaveCount(0);
@@ -511,9 +511,11 @@ test("a refused field no step holds stays on the review with its message", async
     await page
         .getByRole("button", { name: "Submit plant for approval" })
         .click();
-    await expect(page.getByRole("alert")).toContainText(
-        "The serial number is unknown.",
-    );
+    await expect(
+        page
+            .getByRole("alert")
+            .filter({ hasText: "The serial number is unknown." }),
+    ).toBeVisible();
     await expect(
         page
             .getByRole("list", { name: "Plant setup progress" })

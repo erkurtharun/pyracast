@@ -129,8 +129,8 @@ test("one plant request saves location and technical details before approval", a
     await expect(
         page.getByText(/Awaiting administrator approval/),
     ).toBeVisible();
-    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-29");
-    await expect(page.getByLabel("Resolution")).toHaveValue("60");
+    await expect(page.getByRole("list", { name: "Next steps" })).toBeVisible();
+    await expect(page.getByLabel("Forecast date")).toHaveCount(0);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
         "130",

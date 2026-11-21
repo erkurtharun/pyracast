@@ -201,7 +201,7 @@ function Wizard({
     async function restore(found: Found) {
         if (running.current) return;
         running.current = true;
-        setOffer({ kind: "restoring", ...found });
+        setOffer({ ...found, kind: "restoring" });
         try {
             await api.post(
                 "/api/tenants/{tenant_id}/regions/{region_id}/restore/",
@@ -210,8 +210,8 @@ function Wizard({
         } catch (error) {
             running.current = false;
             setOffer({
-                kind: "failed",
                 ...found,
+                kind: "failed",
                 message: displayMessage(error, t("unableToRestore")),
             });
             return;
