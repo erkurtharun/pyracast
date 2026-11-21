@@ -3,7 +3,7 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
-from pyracast.accounts.erasure import ErasureError, erase_account
+from pyracast.erasure import ErasureError, erase_account
 
 
 class Command(BaseCommand):

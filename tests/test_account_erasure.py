@@ -32,10 +32,9 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import int_to_base36
 
-from pyracast.accounts import erasure
+from pyracast import erasure
 from pyracast.accounts import retention as account_retention
 from pyracast.accounts.authorization import is_platform_admin
-from pyracast.accounts.erasure import AdministersWorkspaceError, erase_account
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import (
     AuthenticationCacheEntry,
@@ -53,6 +52,7 @@ from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.accounts.processes import PROVIDER_SIGNUP_SESSION_KEY
 from pyracast.change_requests.models import ChangeRequest
 from pyracast.change_requests.operations import submit_production
+from pyracast.erasure import AdministersWorkspaceError, erase_account
 from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.notifications import outbox
 from pyracast.notifications.models import (
