@@ -1087,6 +1087,142 @@ def test_erasure_compares_addresses_by_one_case_rule_beyond_ascii_letters() -> N
     assert erased.addresses_left_out == 1
 
 
+# U+A7CE, a capital Python 3.15 lower-cases (Unicode 17) and PostgreSQL 18 does not (Unicode 16).
+NEWER_CAPITAL = chr(0xA7CE)
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_a_password_reset_typed_with_a_capital_the_database_cannot_lower_is_erased() -> None:
+    typed = f"Reset.Person@{NEWER_CAPITAL}.com"
+    person = person_with(typed.lower())
+
+    with override_settings(MAILERS=LOCMEM):
+        submit(Client(enforce_csrf_checks=True), "auth/password/request", {"email": typed})
+    queued = list(OutboundMail.objects.values_list("recipient", flat=True))
+    erase_account(person.pk, execute=True)
+
+    assert queued == [typed.lower()]
+    assert not OutboundMail.objects.exists()
+
+
+def test_a_reminder_entry_typed_with_such_a_capital_that_another_account_verifies_is_kept() -> None:
+    earlier, current = f"held.later@{NEWER_CAPITAL}.com", "moved.on@example.com"
+    person = person_with(current)
+    tenant, _inviter = administered_workspace()
+    Membership.objects.create(tenant=tenant, user=person)
+    newcomer = User.objects.create_user(username="newcomer", email="newcomer@example.com")
+    outbound(
+        OutboundMailKind.EMAIL_CHANGED,
+        earlier.lower(),
+        {"from_email": earlier.lower(), "to_email": current},
+        finished=True,
+    )
+    schedule = ReminderSchedule.objects.create(
+        region=Region.objects.create(
+            tenant=tenant, name="Site", latitude=38, longitude=27, timezone="Europe/Istanbul"
+        ),
+        effective_from=NOW,
+    )
+    # An administrator's entry keeps the address as typed; its key is folded by Python.
+    entry = ReminderRecipient.objects.create(
+        schedule=schedule, address=earlier, key=recipient_key(earlier)
+    )
+    revision = ReminderSchedule.objects.get(pk=schedule.pk).revision
+
+    def verify() -> None:
+        Tenant.objects.select_for_update().get(pk=tenant.pk)
+        EmailAddress.objects.create(
+            user=newcomer, email=earlier.lower(), primary=True, verified=True
+        )
+
+    behind_open_transaction(verify, lambda: erase_account(person.pk, execute=True))
+
+    assert list(ReminderRecipient.objects.values_list("pk", "address")) == [(entry.pk, earlier)]
+    assert ReminderSchedule.objects.get(pk=schedule.pk).revision == revision
+
+
+def test_a_reminder_entry_committed_in_another_workspace_after_the_workspace_locks_is_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    address = "between.locks@example.com"
+    person = person_with(address)
+    tenant, inviter = administered_workspace()
+    Membership.objects.create(tenant=tenant, user=person)
+    address_rows(address, "own", tenant, inviter)
+    elsewhere = Tenant.objects.create(name="Other workspace")
+    region = Region.objects.create(
+        tenant=elsewhere, name="Other", latitude=37, longitude=27, timezone="Europe/Istanbul"
+    )
+    schedule = ReminderSchedule.objects.create(region=region, effective_from=NOW)
+    revision = ReminderSchedule.objects.get(pk=schedule.pk).revision
+    locking = erasure._locked
+    later: list[int] = []
+    locked_regions: list[int] = []
+
+    def commit_after_the_workspace_lock(rows: models.QuerySet[Any], *fields: str) -> Any:
+        locked = locking(rows, *fields)
+        if rows.model is Tenant and not later:
+            later.append(
+                committed_elsewhere(
+                    lambda: (
+                        ReminderRecipient.objects.create(
+                            schedule=schedule, address=address, key=recipient_key(address)
+                        ).pk
+                    )
+                )
+            )
+        if rows.model is Region:
+            locked_regions.extend(locked)
+        return locked
+
+    monkeypatch.setattr(erasure, "_locked", commit_after_the_workspace_lock)
+
+    erase_account(person.pk, execute=True)
+
+    assert later
+    assert region.pk not in locked_regions
+    assert list(ReminderRecipient.objects.values_list("pk", flat=True)) == later
+    assert ReminderSchedule.objects.get(pk=schedule.pk).revision == revision
+
+
+def test_a_mail_row_held_by_another_client_while_another_account_verifies_its_address_is_kept() -> (
+    None
+):
+    earlier, current = "was.mailed@example.com", "mailed.now@example.com"
+    person = person_with(current)
+    newcomer = User.objects.create_user(username="newcomer", email="newcomer@example.com")
+    outbound(
+        OutboundMailKind.EMAIL_CHANGED,
+        earlier,
+        {"from_email": earlier, "to_email": current},
+        finished=True,
+    )
+    held = outbound(
+        OutboundMailKind.PASSWORD_CHANGED, earlier, {"to_email": earlier}, finished=False
+    )
+
+    def hold_and_verify() -> None:
+        OutboundMail.objects.select_for_update().get(pk=held.pk)
+        EmailAddress.objects.create(user=newcomer, email=earlier, primary=True, verified=True)
+
+    behind_open_transaction(hold_and_verify, lambda: erase_account(person.pk, execute=True))
+
+    assert list(OutboundMail.objects.values_list("pk", flat=True)) == [held.pk]
+
+
+def test_erasure_reports_only_the_tables_it_changes() -> None:
+    person = person_with("plain.person@example.com")
+
+    dry_run = erase_account(person.pk, execute=False)
+    report = erase_command("--account", str(person.pk))
+
+    assert dry_run.changes
+    assert [label for label, count in dry_run.changes.items() if not count] == []
+    assert [
+        line for line in report.splitlines() if line.startswith("  ") and line.endswith(": 0")
+    ] == []
+
+
 def test_erasure_refuses_an_account_that_administers_a_workspace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

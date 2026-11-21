@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, cast
 
 from django import forms
@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db.models import QuerySet
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.template.response import TemplateResponse
 from django.utils import timezone
@@ -356,15 +356,24 @@ def _render(request: HttpRequest, site: PlatformAdminSite, page: PlantPage) -> T
     binding = page.binding
     plant = page.plant
     blockers = approval_blockers(binding, binding.provider_account) if binding else []
-    # One read feeds what the page shows and the hash its approval sends.
+    # One read feeds what the page shows, the plant name its headings carry and the hash its
+    # approval sends.
     shown = declarations(page.region.pk)
     page.action_form.show_declaration(fingerprint_of(shown))
+    try:
+        review = review_context(page.region.pk)
+    except Region.DoesNotExist as missing:
+        raise Http404 from missing
+    review["plant_summary"] = replace(
+        review["plant_summary"],
+        plant_name=next((plant.name for plant, _ in shown), page.region.name),
+    )
     return TemplateResponse(
         request,
         "admin/regions/region/setup.html",
         {
             **site.each_context(request),
-            **review_context(page.region.pk),
+            **review,
             "workspace_section": "plants",
             "title": _("Review and set up %(name)s") % {"name": page.region.name},
             "region": page.region,

@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 from math import copysign
@@ -14,7 +15,12 @@ from django.test import Client
 
 from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.validation import validate_binding
-from pyracast.plants.approval import approve_region, decide_review, resubmit_region
+from pyracast.plants.approval import (
+    approve_region,
+    decide_review,
+    fingerprint_of,
+    resubmit_region,
+)
 from pyracast.plants.management.commands.configure_plant import Command as ConfigurePlant
 from pyracast.plants.models import Plant, PlantConfiguration, PlantEvent, PlantSubmission
 from pyracast.plants.operations import create_plant, revise_plant
@@ -399,6 +405,55 @@ def test_a_negative_zero_angle_is_the_same_value_as_zero(field: str) -> None:
     assert signed == PlantParameters(**positive)
 
 
+FIXED: dict[str, Any] = {"name": "P", "dc_capacity_mw": 1, "mounting_type": "fixed"}
+NUMERIC_FIELDS = (
+    "dc_capacity_mw",
+    "inverter_capacity_mw",
+    "export_limit_mw",
+    "surface_tilt_degrees",
+    "surface_azimuth_degrees",
+)
+
+
+def _declared_hash(**values: Any) -> str:
+    return fingerprint_of([(Plant(pk=1, name="P"), PlantSubmission(**values))])
+
+
+@pytest.mark.parametrize(
+    ("field", "integer", "number"),
+    [
+        ("dc_capacity_mw", 100, 100.0),
+        ("inverter_capacity_mw", 4, 4.0),
+        ("export_limit_mw", 3, 3.0),
+        ("surface_tilt_degrees", 0, 0.0),
+        ("surface_tilt_degrees", 0, -0.0),
+        ("surface_azimuth_degrees", 180, 180.0),
+    ],
+    ids=repr,
+)
+def test_an_integer_and_the_equal_float_are_one_plant_value_and_one_hash(
+    field: str, integer: int, number: float
+) -> None:
+    typed = PlantParameters(**{**FIXED, field: integer})
+    value = getattr(typed, field)
+
+    assert type(value) is float
+    assert copysign(1, value) == 1
+    assert json.dumps(typed.declared()) == json.dumps(
+        PlantParameters(**{**FIXED, field: number}).declared()
+    )
+    assert _declared_hash(**{field: integer}) == _declared_hash(**{field: number})
+
+
+@pytest.mark.parametrize("field", NUMERIC_FIELDS)
+def test_a_boolean_stays_refused_as_a_plant_number_and_hashes_apart_from_one(field: str) -> None:
+    with pytest.raises(DomainError) as refused:
+        PlantParameters(**{**FIXED, field: True})
+
+    assert refused.value.field == field
+    assert _declared_hash(**{field: True}) != _declared_hash(**{field: 1.0})
+
+
 DECLARED = {
     "dc_capacity_mw": 1,
     "inverter_capacity_mw": None,
@@ -409,13 +464,16 @@ DECLARED = {
     "surface_azimuth_degrees": None,
 }
 PROBES: list[dict[str, Any]] = [
-    *({"dc_capacity_mw": value} for value in (-1, 0, 1e-9, 1e300, INF, NAN)),
-    *({"inverter_capacity_mw": value} for value in (None, 0, 1e-9, INF)),
-    *({"export_limit_mw": value} for value in (None, -1, 1e-9, NAN)),
+    *({"dc_capacity_mw": value} for value in (-1, 0, 0.0, 1e-9, 100, 100.0, 1e300, INF, NAN)),
+    *({"inverter_capacity_mw": value} for value in (None, 0, 1e-9, 4, 4.0, INF)),
+    *({"export_limit_mw": value} for value in (None, -1, 1e-9, 3, 3.0, NAN)),
     *({"measurement_basis": value} for value in ("net_export", "ac_generation", "dc")),
     *({"mounting_type": value} for value in ("unknown", "fixed", "tracking", "dual_axis")),
-    *({"surface_tilt_degrees": value} for value in (-1e-9, -0.0, 0, 90, 90.000001, NAN)),
-    *({"surface_azimuth_degrees": value} for value in (-1e-9, -0.0, 0, 359.999999, 360, INF)),
+    *({"surface_tilt_degrees": value} for value in (-1e-9, -0.0, 0, 0.0, 90, 90.0, 90.000001, NAN)),
+    *(
+        {"surface_azimuth_degrees": value}
+        for value in (-1e-9, -0.0, 0, 0.0, 180, 180.0, 359.999999, 360, INF)
+    ),
     {"mounting_type": "tracking", "surface_tilt_degrees": 10},
     {"mounting_type": "unknown", "surface_azimuth_degrees": 10},
 ]

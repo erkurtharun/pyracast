@@ -17,7 +17,7 @@ from pyracast.plants.approval import ReviewDecision, approve_region, review_snap
 from pyracast.plants.models import PlantSubmission
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 from pyracast.regions.operations import configure_binding, submit_region
-from tests.support.admin_setup import admin_system, submitted_plant
+from tests.support.admin_setup import admin_system, form_fields, submitted_plant
 from tests.support.api import verified_admin
 from tests.support.concurrency import behind_open_transaction
 from tests.support.domain import FakeAdapter, System, make_system
@@ -95,12 +95,8 @@ def console_notices(client: Client, url: str, data: dict[str, object]) -> list[s
 
 
 def approval_post(client: Client, region: Region) -> dict[str, object]:
-    form = client.get(reverse("admin:workspace_plant", args=(region.pk,))).context["action_form"]
-    values = {name: form[name].value() for name in form.fields}
-    return {
-        **{name: value for name, value in values.items() if value is not None},
-        "action": "approve",
-    }
+    page = client.get(reverse("admin:workspace_plant", args=(region.pk,)))
+    return {**form_fields(page.content, "validate"), "action": "approve"}
 
 
 def status_of(region: Region) -> str:

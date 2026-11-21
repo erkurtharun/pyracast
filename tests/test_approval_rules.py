@@ -1,4 +1,5 @@
 import re
+from collections.abc import Mapping
 from typing import Any
 
 import pytest
@@ -17,7 +18,7 @@ from pyracast.plants.parameters import PlantParameters
 from pyracast.platform_admin import plant_review
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 from pyracast.regions.operations import configure_binding, request_location_change
-from tests.support.admin_setup import admin_system, submitted_plant
+from tests.support.admin_setup import admin_system, form_fields, submitted_plant
 from tests.support.api import verified_admin
 from tests.support.domain import NOW, FakeAdapter, System, make_system
 from tests.support.plant_operations import make_plant
@@ -58,10 +59,13 @@ def validated(system: System) -> System:
     return system
 
 
-def page_actions(client: Client, region: Region) -> dict[str, object]:
-    form = client.get(plant_url(region)).context["action_form"]
-    values = {name: form[name].value() for name in form.fields}
-    return {name: value for name, value in values.items() if value is not None}
+def actions_of(response: Any) -> dict[str, str]:
+    """The hidden inputs of the form that holds the validate and approve buttons."""
+    return form_fields(response.content, "validate")
+
+
+def page_actions(client: Client, region: Region) -> dict[str, str]:
+    return actions_of(client.get(plant_url(region)))
 
 
 def review_decision(region: Region, action: str) -> dict[str, object]:
@@ -74,7 +78,7 @@ def review_decision(region: Region, action: str) -> dict[str, object]:
     }
 
 
-def notices(client: Client, url: str, data: dict[str, object]) -> tuple[int, list[str]]:
+def notices(client: Client, url: str, data: Mapping[str, object]) -> tuple[int, list[str]]:
     response = client.post(url, data, follow=True)
     status = response.redirect_chain[0][1] if response.redirect_chain else response.status_code
     return status, [str(message) for message in response.context["messages"]]
@@ -319,12 +323,6 @@ def test_an_edit_after_the_review_page_opened_refuses_the_approval(edit: dict[st
     assert activated(plant) == (system.binding.pk, 2, 150)
 
 
-def actions_of(response: Any) -> dict[str, object]:
-    form = response.context["action_form"]
-    values = {name: form[name].value() for name in form.fields}
-    return {name: value for name, value in values.items() if value is not None}
-
-
 def shown_capacity(response: Any) -> float:
     shown = re.findall(r"<dd>([0-9.]+) MW</dd>", response.content.decode())
     assert len(shown) == 1, shown
@@ -378,6 +376,12 @@ def test_a_page_refused_for_changed_values_approves_the_values_it_shows() -> Non
     assert activated(plant) == (replacement.pk, 3, 175)
 
 
+def test_a_page_refused_for_changed_values_carries_the_form_a_fresh_page_carries() -> None:
+    system, _, _, client, refused = refused_after_an_edit_to_175()
+
+    assert actions_of(refused) == page_actions(client, system.region)
+
+
 def test_a_page_refused_for_changed_values_refuses_when_they_change_again() -> None:
     system, plant, _, client, refused = refused_after_an_edit_to_175()
     customer_edit(system, plant, dc_capacity_mw=180)
@@ -400,3 +404,58 @@ def test_values_edited_away_and_back_after_the_review_page_opened_are_approved()
 
     assert notices(client, plant_url(system.region), seen) == (302, [APPROVED])
     assert activated(plant) == (replacement.pk, 3, 150)
+
+
+def trash(region: Region) -> None:
+    Region.objects.filter(pk=region.pk).update(deleted_at=timezone.now())
+
+
+def test_a_review_page_whose_location_moved_to_the_trash_before_it_rendered_is_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _, _ = edited_while_approved_then_back_in_review()
+    client, _ = verified_admin()
+
+    def trashed_after_the_page_loaded(region_id: int) -> Any:
+        trash(system.region)
+        return approval.declarations(region_id)
+
+    monkeypatch.setattr(plant_review, "declarations", trashed_after_the_page_loaded)
+
+    assert client.get(plant_url(system.region)).status_code == 404
+
+
+def test_an_approval_whose_location_moved_to_the_trash_while_it_waited_is_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, _ = edited_while_approved_then_back_in_review()
+    client, _ = verified_admin()
+    seen = {**page_actions(client, system.region), "action": "approve"}
+
+    def trashed_while_waiting(*arguments: Any, **keywords: Any) -> Any:
+        trash(system.region)
+        return approval.approve_region(*arguments, **keywords)
+
+    monkeypatch.setattr(plant_review, "approve_region", trashed_while_waiting)
+
+    assert client.post(plant_url(system.region), seen).status_code == 404
+    assert activated(plant) == (system.binding.pk, 2, 150)
+
+
+def test_the_review_page_names_the_plant_from_the_read_its_values_and_hash_come_from(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, _ = edited_while_approved_then_back_in_review()
+    client, _ = verified_admin()
+
+    def renamed_after_the_read(region_id: int) -> Any:
+        rows = approval.declarations(region_id)
+        customer_edit(system, plant, name="Renamed array", dc_capacity_mw=150)
+        return rows
+
+    monkeypatch.setattr(plant_review, "declarations", renamed_after_the_read)
+    page = client.get(plant_url(system.region)).content.decode()
+
+    assert "<h1>East array</h1>" in page
+    assert "<title>East array " in page
+    assert "Renamed array" not in page

@@ -22,6 +22,13 @@ TILT_MAX_DEGREES = 90
 AZIMUTH_LIMIT_DEGREES = 360
 CAPACITY_REFUSED = _("Capacities must be finite and positive.")
 ANGLE_REFUSED = _("Surface angles must be finite and inside the allowed bounds.")
+NUMBERS = (
+    "dc_capacity_mw",
+    "inverter_capacity_mw",
+    "export_limit_mw",
+    "surface_tilt_degrees",
+    "surface_azimuth_degrees",
+)
 
 
 def _refuse(field: str, message: StrOrPromise) -> NoReturn:
@@ -29,8 +36,11 @@ def _refuse(field: str, message: StrOrPromise) -> NoReturn:
 
 
 def without_negative_zero[T](value: T) -> T | float:
-    """A negative zero is zero; PostgreSQL keeps its sign when one is stored."""
-    return 0.0 if isinstance(value, float) and value == 0 else value
+    """A number is its float, as PostgreSQL returns a stored double precision, and a negative
+    zero is zero, whose sign PostgreSQL keeps when one is stored. A boolean is not a number."""
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return 0.0 if value == 0 else float(value)
+    return value
 
 
 def _finite(value: object) -> TypeIs[float]:
@@ -72,8 +82,8 @@ class PlantParameters:
             _refuse("surface_azimuth_degrees", ANGLE_REFUSED)
         if self.mounting_type != MountingType.FIXED and (tilt is not None or azimuth is not None):
             _refuse("mounting_type", _("Only fixed mounting permits surface angles."))
-        object.__setattr__(self, "surface_tilt_degrees", without_negative_zero(tilt))
-        object.__setattr__(self, "surface_azimuth_degrees", without_negative_zero(azimuth))
+        for field in NUMBERS:
+            object.__setattr__(self, field, without_negative_zero(getattr(self, field)))
 
     def declared(self) -> dict[str, object]:
         return {field: getattr(self, field) for field in CONFIGURATION_PARAMETERS}

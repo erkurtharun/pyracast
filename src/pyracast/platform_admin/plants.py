@@ -271,7 +271,7 @@ def plant_details_page(
             parameters_changed, location_changed = save_plant_details(
                 cast(User, request.user), region.pk, form
             )
-        except (Region.DoesNotExist, Plant.DoesNotExist) as missing:
+        except (Tenant.DoesNotExist, Region.DoesNotExist, Plant.DoesNotExist) as missing:
             raise Http404 from missing
         if location_changed:
             messages.success(

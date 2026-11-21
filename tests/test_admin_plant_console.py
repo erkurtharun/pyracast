@@ -288,12 +288,14 @@ def test_a_refused_location_correction_saves_none_of_the_changed_details() -> No
     )
     client, _ = verified_admin()
     url = f"/admin/plants/{system.region.pk}/details/"
-    refused = client.post(
-        url,
-        details(client, system.region, name="Renamed plant", latitude="40.5", dc_capacity_mw="140"),
+    opened = details(
+        client, system.region, name="Renamed plant", latitude="40.5", dc_capacity_mw="140"
     )
+    refused = client.post(url, opened)
     assert refused.status_code == 400
     assert "This workspace already has a plant at this location." in refused.content.decode()
+    version = f'name="expected_version" value="{opened["expected_version"]}"'
+    assert version in refused.content.decode()
     region = Region.objects.get(pk=system.region.pk)
     assert (region.name, region.latitude, region.revision, region.status) == (
         system.region.name,
@@ -369,7 +371,8 @@ def trash_while_the_save_waits(monkeypatch: pytest.MonkeyPatch, region: Region) 
             return tenants.select_for_update()
 
     monkeypatch.setattr(
-        "pyracast.platform_admin.plants.Tenant", SimpleNamespace(objects=TrashedWhileWaiting)
+        "pyracast.platform_admin.plants.Tenant",
+        SimpleNamespace(objects=TrashedWhileWaiting, DoesNotExist=Tenant.DoesNotExist),
     )
 
 
@@ -392,6 +395,31 @@ def test_a_details_page_saved_after_its_location_moved_to_the_trash_answers_not_
     client, _ = verified_admin()
     opened = details(client, system.region, dc_capacity_mw="140")
     trash_while_the_save_waits(monkeypatch, system.region)
+
+    response = client.post(f"/admin/plants/{system.region.pk}/details/", opened)
+
+    assert response.status_code == 404
+    configuration = PlantConfiguration.objects.get(plant=plant)
+    assert (configuration.revision, configuration.dc_capacity_mw) == (1, 130)
+
+
+def test_a_details_page_saved_after_its_workspace_was_removed_answers_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = approved_plant()
+    client, _ = verified_admin()
+    opened = details(client, system.region, dc_capacity_mw="140")
+    tenants = Tenant.objects
+
+    class RemovedWhileWaiting:
+        @staticmethod
+        def select_for_update() -> QuerySet[Tenant]:
+            return tenants.select_for_update().exclude(pk=system.tenant.pk)
+
+    monkeypatch.setattr(
+        "pyracast.platform_admin.plants.Tenant",
+        SimpleNamespace(objects=RemovedWhileWaiting, DoesNotExist=Tenant.DoesNotExist),
+    )
 
     response = client.post(f"/admin/plants/{system.region.pk}/details/", opened)
 
