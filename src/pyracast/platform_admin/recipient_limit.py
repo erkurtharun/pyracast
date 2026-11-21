@@ -3,7 +3,13 @@ from dataclasses import dataclass
 from django.urls import reverse
 
 from pyracast.notifications.models import ReminderSchedule
-from pyracast.notifications.recipients import effective_recipients
+from pyracast.notifications.recipients import (
+    NO_MEMBERS,
+    effective,
+    explicit_recipients,
+    needs_members,
+    workspaces,
+)
 from pyracast.plants.models import Plant
 
 
@@ -18,17 +24,31 @@ class CrowdedPlant:
 
 def crowded_plants(limit: int) -> list[CrowdedPlant]:
     """Enabled reminder schedules of live plants whose recipients exceed `limit`: their
-    reminders pause at that limit, counted as the scheduler counts them."""
+    reminders pause at that limit, counted as the scheduler counts them, in a fixed number
+    of queries."""
     names = dict(Plant.objects.values_list("region_id", "name"))
-    crowded = []
-    for schedule in (
+    schedules = list(
         ReminderSchedule.objects.filter(enabled=True, region__deleted_at__isnull=True)
         .select_related("region__tenant")
         .order_by("region__tenant__name", "region_id")
-    ):
-        count = len(effective_recipients(schedule))
+    )
+    explicit = explicit_recipients(schedule.pk for schedule in schedules)
+    members = workspaces(
+        schedule.region.tenant_id
+        for schedule in schedules
+        if needs_members(schedule.include_workspace_members, explicit.get(schedule.pk, []))
+    )
+    crowded = []
+    for schedule in schedules:
+        region = schedule.region
+        count = len(
+            effective(
+                schedule.include_workspace_members,
+                explicit.get(schedule.pk, []),
+                members.get(region.tenant_id, NO_MEMBERS),
+            )
+        )
         if count > limit:
-            region = schedule.region
             crowded.append(
                 CrowdedPlant(
                     region.pk,
