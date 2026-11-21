@@ -9,6 +9,8 @@ from django.db.migrations.operations.base import Operation
 
 KINDS = ("current", "saved_complete", "saved_partial", "unavailable")
 METADATA = ("kind", "tomorrow_complete", "prepared_at")
+# Deliveries read per round trip: a rendered message can hold a whole workbook.
+CHUNK = 100
 
 
 def deliveries(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> models.QuerySet[Any]:
@@ -27,13 +29,16 @@ def _prepared_at(value: object) -> datetime | None:
 
 
 def move_metadata(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
-    """A message without a known kind and an aware preparation time keeps its message and gets
-    no columns; it is counted."""
+    """A message that is not an object or has no known kind and aware preparation time keeps
+    its message and gets no columns; it is counted."""
     rows = deliveries(apps, schema_editor)
     skipped = 0
     prepared = rows.filter(prepared_message__isnull=False).order_by("pk")
-    for delivery in prepared.iterator(chunk_size=100):
+    for delivery in prepared.iterator(chunk_size=CHUNK):
         message = delivery.prepared_message
+        if not isinstance(message, dict):
+            skipped += 1
+            continue
         kind, prepared_at = message.get("kind"), _prepared_at(message.get("prepared_at"))
         if kind not in KINDS or prepared_at is None:
             skipped += 1
@@ -54,7 +59,8 @@ def move_metadata(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
 
 def restore_metadata(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     rows = deliveries(apps, schema_editor)
-    for delivery in rows.exclude(forecast_kind="").filter(prepared_message__isnull=False):
+    prepared = rows.exclude(forecast_kind="").filter(prepared_message__isnull=False).order_by("pk")
+    for delivery in prepared.iterator(chunk_size=CHUNK):
         metadata: dict[str, object] = {
             "kind": delivery.forecast_kind,
             "prepared_at": delivery.prepared_at.isoformat(),
