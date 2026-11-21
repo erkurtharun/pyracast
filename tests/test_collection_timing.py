@@ -12,6 +12,7 @@ from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.jobs import collect, pending_job_ids
 from pyracast.forecasts.models import (
     CollectionJob,
+    CollectionJobError,
     CollectionSchedule,
     RequestAttempt,
     RequestPurpose,
@@ -202,7 +203,61 @@ def test_clock_edits_spend_no_more_forecast_requests_than_the_saved_clocks() -> 
         }
 
 
-def test_a_job_past_the_daily_bound_is_skipped_and_the_next_day_collects_on_time() -> None:
+def dispatch_round(moment: datetime) -> list[int]:
+    """One dispatcher round as forecasts.runtime runs it, with the worker collecting each job."""
+    enqueue_due(moment)
+    published = pending_job_ids(moment)
+    for job_id in published:
+        collect(job_id, HistoricalFixture(moment), calculate, moment)
+    return published
+
+
+def rounds_from(start: datetime, count: int) -> list[datetime]:
+    return [start + timedelta(seconds=30 * step) for step in range(count)]
+
+
+def assert_rests_for_its_slot(
+    system: System, refused: CollectionJob, moments: list[datetime]
+) -> None:
+    for moment in moments:
+        enqueue_due(moment)
+        refused.refresh_from_db()
+        assert (refused.status, refused.last_error, refused.attempts) == (
+            "stale",
+            "quota_exhausted",
+            0,
+        ), moment
+        account = ProviderAccount.objects.get(pk=system.account.pk)
+        next_day_slot = 0 if moment.date() == refused.scheduled_for.date() else 1
+        assert remaining_forecast_requests(account, moment) == next_day_slot, moment
+        published = pending_job_ids(moment)
+        assert refused.pk not in published, moment
+        for job_id in published:
+            collect(job_id, HistoricalFixture(moment), calculate, moment)
+        assert not RequestAttempt.objects.filter(job=refused).exists(), moment
+
+
+def forecast_requests_on(binding: SiteBinding, moment: datetime) -> int:
+    return RequestAttempt.objects.filter(
+        binding=binding, purpose="forecast", utc_day=moment.date()
+    ).count()
+
+
+def assert_next_slot_collects(system: System, slot: datetime) -> None:
+    published = dispatch_round(slot)
+    job = CollectionJob.objects.get(
+        binding=system.binding, endpoint="forecasts", scheduled_for=slot
+    )
+    assert job.pk in published
+    assert (job.status, job.target_date) == (
+        "succeeded",
+        slot.astimezone(ISTANBUL).date() + timedelta(days=1),
+    )
+    assert RequestAttempt.objects.filter(job=job, utc_day=slot.date()).count() == 1
+    assert forecast_requests_on(system.binding, slot) == 1
+
+
+def test_a_job_past_the_daily_bound_rests_for_its_slot_after_an_edited_clock() -> None:
     system = make_system(approved=True)
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=10)
     edit_clock_and_collect(system, NOW + timedelta(minutes=10))
@@ -210,13 +265,106 @@ def test_a_job_past_the_daily_bound_is_skipped_and_the_next_day_collects_on_time
     refused = edit_clock_and_collect(system, NOW + timedelta(minutes=20))
 
     assert (refused.status, refused.last_error, refused.attempts) == ("stale", "quota_exhausted", 0)
-    assert refused.pk not in pending_job_ids(next_provider_day(NOW))
-    tomorrow = refused.scheduled_for + timedelta(days=1)
-    enqueue_due(tomorrow)
-    job = CollectionJob.objects.get(
-        binding=system.binding, endpoint="forecasts", scheduled_for=tomorrow
+    midnight = next_provider_day(NOW)
+    assert_rests_for_its_slot(
+        system,
+        refused,
+        [
+            *rounds_from(refused.scheduled_for + timedelta(seconds=30), 6),
+            *rounds_from(midnight - timedelta(seconds=60), 5),
+        ],
     )
-    assert collect(job.pk, HistoricalFixture(tomorrow), calculate, tomorrow)
+    assert forecast_requests_on(system.binding, midnight) == 0
+    assert_next_slot_collects(system, refused.scheduled_for + timedelta(days=1))
+
+
+def test_a_job_past_the_daily_bound_rests_for_its_slot_under_one_clock() -> None:
+    system = make_system(approved=True)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=10)
+    CollectionSchedule.objects.create(
+        region=system.region, times=["02:50"], effective_from=NOW - timedelta(days=1)
+    )
+    late_slot = datetime(2026, 11, 9, 23, 50, tzinfo=UTC)
+    late = CollectionJob.objects.create(
+        binding=system.binding,
+        endpoint="forecasts",
+        scheduled_for=late_slot,
+        target_date=late_slot.astimezone(ISTANBUL).date() + timedelta(days=1),
+        available_at=late_slot,
+    )
+    delayed = next_provider_day(late_slot) + timedelta(minutes=5)
+    reserve_request(system.binding, delayed, purpose=RequestPurpose.FORECAST, job=late)
+    CollectionJob.objects.filter(pk=late.pk).update(status="succeeded")
+    slot = late_slot + timedelta(days=1)
+
+    dispatch_round(slot)
+
+    refused = CollectionJob.objects.get(
+        binding=system.binding, endpoint="forecasts", scheduled_for=slot
+    )
+    assert (refused.status, refused.last_error, refused.attempts) == ("stale", "quota_exhausted", 0)
+    midnight = next_provider_day(slot)
+    assert_rests_for_its_slot(
+        system,
+        refused,
+        [
+            *rounds_from(slot + timedelta(seconds=30), 6),
+            *rounds_from(midnight - timedelta(seconds=60), 5),
+        ],
+    )
+    assert forecast_requests_on(system.binding, midnight) == 0
+    assert_next_slot_collects(system, slot + timedelta(days=1))
+
+
+SLOT_FINAL = {CollectionJobError.QUOTA_EXHAUSTED, CollectionJobError.SCHEDULE_DISABLED}
+SLOT_REVIVABLE = {
+    "",
+    CollectionJobError.HISTORY_WINDOW_CLOSED,
+    CollectionJobError.ATTEMPTS_EXHAUSTED,
+    CollectionJobError.FORECAST_SUPERSEDED,
+    CollectionJobError.BINDING_NOT_CURRENT,
+    CollectionJobError.SLOT_NOT_CONFIGURED,
+    CollectionJobError.SCHEDULE_CHANGED,
+    CollectionJobError.HISTORY_INCOMPLETE,
+    CollectionJobError.HISTORY_ALREADY_ARCHIVED,
+    CollectionJobError.PROVIDER_AUTHENTICATION_FAILED,
+    CollectionJobError.PROVIDER_ALLOWANCE_EXHAUSTED,
+    CollectionJobError.PROVIDER_ACCESS_DENIED,
+    CollectionJobError.PROVIDER_SITE_NOT_FOUND,
+    CollectionJobError.PROVIDER_THROTTLED,
+    CollectionJobError.PROVIDER_SERVER_ERROR,
+    CollectionJobError.PROVIDER_UNREACHABLE,
+    CollectionJobError.PROVIDER_INVALID_RESPONSE,
+    CollectionJobError.PROVIDER_CONFIGURATION_INVALID,
+    CollectionJobError.ACCOUNT_UNAVAILABLE,
+    CollectionJobError.HISTORY_BUDGET_RESERVED,
+    CollectionJobError.PROVIDER_FAILURE,
+    CollectionJobError.PROVIDER_UNEXPECTED_FAILURE,
+    CollectionJobError.INVALID_SOURCE_KIND,
+    CollectionJobError.CALCULATION_FAILURE,
+    CollectionJobError.LOCK_CONTENTION,
+    CollectionJobError.PUBLICATION_FAILURE,
+}
+
+
+def test_the_scheduler_reopens_a_stale_latest_slot_unless_its_refusal_holds_for_the_slot() -> None:
+    make_system(approved=True)
+    job = CollectionJob.objects.get()
+    assert SLOT_FINAL.isdisjoint(SLOT_REVIVABLE)
+    assert {"", *CollectionJobError.values} == SLOT_FINAL | SLOT_REVIVABLE
+
+    reopened = set()
+    for code in sorted(SLOT_FINAL | SLOT_REVIVABLE):
+        CollectionJob.objects.filter(pk=job.pk).update(status="stale", last_error=code)
+        enqueue_due(NOW + timedelta(minutes=1))
+        job.refresh_from_db()
+        if job.status == "pending":
+            assert job.last_error == ""
+            reopened.add(code)
+        else:
+            assert (job.status, job.last_error) == ("stale", code)
+
+    assert reopened == SLOT_REVIVABLE
 
 
 def test_a_retry_after_utc_midnight_leaves_the_next_day_its_collection() -> None:

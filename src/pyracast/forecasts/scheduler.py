@@ -22,6 +22,9 @@ from pyracast.forecasts.timing import forecast_timing, latest_forecast_slot
 from pyracast.regions.models import Region
 
 logger = logging.getLogger(__name__)
+# A stale forecast job at the latest slot is opened again unless it was refused for a reason that
+# holds for its slot: the binding's day bound, or a schedule disabled after the claim.
+SLOT_FINAL_ERRORS = (CollectionJobError.QUOTA_EXHAUSTED, CollectionJobError.SCHEDULE_DISABLED)
 
 
 class CollectionSchedulingError(RuntimeError):
@@ -111,7 +114,9 @@ def _schedule_forecast_slot(context: _RegionContext, slot: datetime) -> int:
             "available_at": now,
         },
     )
-    CollectionJob.objects.filter(pk=job.pk, status=CollectionJobStatus.STALE).update(
+    CollectionJob.objects.filter(pk=job.pk, status=CollectionJobStatus.STALE).exclude(
+        last_error__in=SLOT_FINAL_ERRORS
+    ).update(
         status=CollectionJobStatus.PENDING,
         available_at=now,
         last_error="",
