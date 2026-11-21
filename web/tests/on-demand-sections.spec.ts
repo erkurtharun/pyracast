@@ -1,7 +1,99 @@
+import { cadence } from "../src/lib/api/query";
 import { expect, test, type Page } from "./support/test";
-import { mockApi, paged, user } from "./support/workspace";
+import { mockApi, paged, plant, region, user } from "./support/workspace";
 
 const chunks = "**/_next/static/**/*.js";
+const englishCatalogue = (body: string) => body.includes("Calibration history");
+const turkishCatalogue = (body: string) => body.includes("Kalibrasyon geçmişi");
+const registering = (name: string) => (body: string) =>
+    new RegExp(`[\\w$]\\.s\\(\\[(?:[^\\]]*?,)?"${name}",`).test(body);
+
+// Every script is answered from the server; one that matches is held until `release` or aborted,
+// and after `release` none is.
+async function interceptScript(
+    page: Page,
+    matches: (body: string) => boolean,
+    outcome: "held" | "aborted",
+) {
+    let reach!: () => void;
+    const reached = new Promise<void>((resolve) => (reach = resolve));
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let active = true;
+    await page.route(chunks, async (route) => {
+        const response = await route.fetch();
+        const body = await response.text();
+        if (active && matches(body)) {
+            reach();
+            if (outcome === "aborted")
+                return route.abort("internetdisconnected");
+            await released;
+        }
+        await route.fulfill({ response, body });
+    });
+    return {
+        reached,
+        release: () => {
+            active = false;
+            release();
+        },
+    };
+}
+
+function scriptBodies(page: Page) {
+    const bodies: Promise<string>[] = [];
+    page.on("response", (response) => {
+        if (response.request().resourceType() === "script")
+            bodies.push(response.text());
+    });
+    return bodies;
+}
+
+async function recordHeadings(page: Page) {
+    await page.addInitScript(() => {
+        const seen: string[] = [];
+        Object.assign(window, { seenHeadings: seen });
+        new MutationObserver(() => {
+            for (const heading of document.querySelectorAll("h1, h2"))
+                seen.push(heading.textContent ?? "");
+        }).observe(document, {
+            childList: true,
+            subtree: true,
+            characterData: true,
+        });
+    });
+}
+
+const seenHeadings = (page: Page) =>
+    page.evaluate(
+        () => (window as unknown as { seenHeadings: string[] }).seenHeadings,
+    );
+
+async function guestSession(page: Page, cookie?: string, baseURL?: string) {
+    if (cookie)
+        await page
+            .context()
+            .addCookies([
+                { name: "pyracast_language", value: cookie, url: baseURL! },
+            ]);
+    await mockApi(page, { anonymous: true });
+    let language = "en";
+    let writes = 0;
+    const session = () => ({
+        user: null,
+        csrf_token: "anonymous-token",
+        language,
+    });
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({ json: session() }),
+    );
+    await page.route("**/api/session/language/", async (route) => {
+        writes += 1;
+        language = route.request().postDataJSON().language as string;
+        await route.fulfill({ json: session() });
+    });
+    return { writes: () => writes };
+}
 
 async function mockPlant(page: Page) {
     await mockApi(page);
@@ -173,6 +265,246 @@ test("a language changed in another tab replaces the whole screen once its catal
     await expect(page.getByLabel("Tahmin tarihi")).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("lang", "tr");
     await expect(tab(page, "Kalibrasyon")).toBeVisible();
+});
+
+test("a tab change keeps the outgoing section and marks the tabs busy until the next section's code arrives", async ({
+    page,
+}) => {
+    await openForecast(page);
+    const section = await interceptScript(page, () => true, "held");
+    await tab(page, "Calibration").click();
+    await section.reached;
+    await expect(page.getByLabel("Forecast date")).toBeVisible();
+    await expect(
+        page.getByRole("navigation", { name: "Plant sections" }),
+    ).toHaveAttribute("aria-busy", "true");
+    await expect(tab(page, "Forecast")).toHaveAttribute("aria-current", "page");
+    await expect(page.getByText("Loading section…")).toHaveCount(0);
+    section.release();
+    await expect(
+        page.getByRole("heading", { name: "Calibration history" }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("navigation", { name: "Plant sections" }),
+    ).not.toHaveAttribute("aria-busy", "true");
+});
+
+test("a link into an on-demand section keeps the plant header, tabs and back button and announces one loading state", async ({
+    page,
+}) => {
+    await mockPlant(page);
+    const section = await interceptScript(page, registering("Outages"), "held");
+    await page.goto("/app/w/1/plants/11/outages/");
+    await section.reached;
+    await expect(
+        page.getByRole("heading", { name: "East array", level: 1 }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "← All plants", exact: true }),
+    ).toBeVisible();
+    await expect(tab(page, "Outages")).toHaveAttribute("aria-current", "page");
+    await expect(
+        page.getByRole("status").filter({ hasText: "Loading section…" }),
+    ).toHaveCount(1);
+    await expect(page.getByText("Loading plant...")).toHaveCount(0);
+    section.release();
+    await expect(
+        page.getByRole("heading", { name: "Plant outages", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Loading section…")).toHaveCount(0);
+});
+
+test("a refresh that brings an on-demand section replaces only the section slot", async ({
+    page,
+}) => {
+    await page.clock.install();
+    await mockPlant(page);
+    let configured = false;
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.fulfill({
+            json: paged([
+                {
+                    ...region,
+                    reminder: null,
+                    plant: configured
+                        ? plant
+                        : { ...plant, current_configuration: null },
+                },
+            ]),
+        }),
+    );
+    await page.goto("/app/w/1/plants/11/calibration/");
+    await expect(
+        page.getByText(
+            "Calibration becomes available after administrator approval and matched production history.",
+        ),
+    ).toBeVisible();
+    const section = await interceptScript(page, () => true, "held");
+    configured = true;
+    await page.clock.runFor(cadence.background);
+    await section.reached;
+    await expect(
+        page.getByRole("heading", { name: "East array", level: 1 }),
+    ).toBeVisible();
+    await expect(tab(page, "Calibration")).toHaveAttribute(
+        "aria-current",
+        "page",
+    );
+    await expect(
+        page.getByRole("status").filter({ hasText: "Loading section…" }),
+    ).toHaveCount(1);
+    section.release();
+    await expect(
+        page.getByRole("heading", { name: "Calibration history" }),
+    ).toBeVisible();
+});
+
+for (const visit of [
+    { name: "in English", cookie: undefined, turkish: false },
+    { name: "in Turkish", cookie: "tr", turkish: true },
+    {
+        name: "when the language cookie and the session disagree",
+        cookie: "en",
+        turkish: true,
+    },
+])
+    test(`the app renders without a page or hydration error ${visit.name}`, async ({
+        page,
+        baseURL,
+    }) => {
+        const errors: string[] = [];
+        page.on("pageerror", (error) => errors.push(error.message));
+        page.on("console", (message) => {
+            if (
+                message.type() === "error" &&
+                /hydrat|react\.dev\/errors\/4(18|19|21|22|23|25)\b/i.test(
+                    message.text(),
+                )
+            )
+                errors.push(message.text());
+        });
+        if (visit.cookie)
+            await page.context().addCookies([
+                {
+                    name: "pyracast_language",
+                    value: visit.cookie,
+                    url: baseURL!,
+                },
+            ]);
+        await mockApi(page);
+        if (visit.turkish) await routeTurkishSession(page);
+        await page.goto("/app/");
+        await expect(
+            page.getByRole("heading", {
+                name: visit.turkish ? "Santraller" : "Plants",
+                exact: true,
+            }),
+        ).toBeVisible();
+        expect(errors).toEqual([]);
+    });
+
+test("a language hand-off shows no other language before the wanted catalogue arrives", async ({
+    page,
+    baseURL,
+}) => {
+    await guestSession(page, "en", baseURL);
+    await recordHeadings(page);
+    const bodies = scriptBodies(page);
+    const turkish = await interceptScript(page, turkishCatalogue, "held");
+    await page.goto("/app/?language=tr&signup=1");
+    await turkish.reached;
+    await expect(
+        page.getByRole("heading", { name: "Create your company account" }),
+    ).toHaveCount(0);
+    await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
+    turkish.release();
+    await expect(
+        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+    ).toBeVisible();
+    expect(await seenHeadings(page)).not.toContain(
+        "Create your company account",
+    );
+    expect((await Promise.all(bodies)).some(englishCatalogue)).toBe(false);
+});
+
+test("a language hand-off whose catalogue cannot be loaded offers the retry that loads the page again", async ({
+    page,
+    baseURL,
+}) => {
+    await guestSession(page, "en", baseURL);
+    const turkish = await interceptScript(page, turkishCatalogue, "aborted");
+    await page.goto("/app/?language=tr&signup=1");
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+        "Bu sayfa gösterilirken bir sorun oluştu. Tekrar deneyin; sorun sürerse sayfayı yenileyin.",
+    );
+    await expect(
+        page.getByRole("heading", { name: "Create your company account" }),
+    ).toHaveCount(0);
+    turkish.release();
+    await page
+        .getByRole("button", { name: "Tekrar dene", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+    ).toBeVisible();
+});
+
+test("a language whose catalogue cannot be loaded is not saved and offers a reload", async ({
+    page,
+}) => {
+    const session = await guestSession(page);
+    const turkish = await interceptScript(page, turkishCatalogue, "aborted");
+    await page.goto("/app/");
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    await page.getByLabel("Language", { exact: true }).selectOption("tr");
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+        "The language could not be loaded. Reload the page to try again.",
+    );
+    await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
+        "en",
+    );
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    expect(session.writes()).toBe(0);
+    turkish.release();
+    await page
+        .getByRole("button", { name: "Reload page", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+    await page.getByLabel("Language", { exact: true }).selectOption("tr");
+    await expect(
+        page.getByRole("heading", { name: "Tekrar hoş geldiniz" }),
+    ).toBeVisible();
+    expect(session.writes()).toBe(1);
+});
+
+test("a language changed in another tab whose catalogue cannot be loaded is reported with a reload", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const turkish = await interceptScript(page, turkishCatalogue, "aborted");
+    await page.goto("/app/w/1/plants/11/forecast/");
+    await expect(page.getByLabel("Forecast date")).toBeVisible();
+    await routeTurkishSession(page);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(
+        page
+            .getByRole("alert")
+            .filter({ hasText: "The language could not be loaded." }),
+    ).toHaveText(
+        "The language could not be loaded. Reload the page to try again.",
+    );
+    await expect(page.getByLabel("Forecast date")).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    turkish.release();
+    await page
+        .getByRole("button", { name: "Reload page", exact: true })
+        .click();
+    await expect(page.getByLabel("Tahmin tarihi")).toBeVisible();
 });
 
 test("a catalogue that cannot be loaded offers a retry that loads the page again", async ({

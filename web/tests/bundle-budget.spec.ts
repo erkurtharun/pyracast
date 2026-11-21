@@ -129,3 +129,72 @@ test("each chunk counts once: in a first load, in the entry of the export it reg
         rmSync(dist, { recursive: true, force: true });
     }
 });
+
+const onDemandOnly = (chunks: Record<string, string>) =>
+    buildOutput({
+        ...page("/app", ["static/chunks/app.js"]),
+        "static/chunks/polyfill.js": "p",
+        "static/chunks/main.js": "m",
+        "static/chunks/app.js": "a",
+        ...Object.fromEntries(
+            Object.entries(chunks).map(([name, content]) => [
+                `static/chunks/${name}`,
+                content,
+            ]),
+        ),
+    });
+
+const entries = (onDemand: Record<string, number>) => ({
+    tolerancePercent: 1,
+    firstLoad: {},
+    onDemand,
+    otherOnDemand: 0,
+});
+
+test("an on-demand entry is found by its exact name at any position of its chunk's registration", () => {
+    const dist = onDemandOnly({
+        "section.js": sized('e.s(["helper",0,h,"Calibrations",0,c]);', 50),
+        "panel.js": sized('e.s(["$Panel",0,p]);', 30),
+        "near.js": sized('e.s(["xPanel",0,q,"CalibrationsView",0,v]);', 60),
+    });
+    try {
+        expect(
+            measure(dist, entries({ Calibrations: 50, $Panel: 30 })),
+        ).toEqual([
+            { name: "Calibrations", bytes: 50, limit: 50 },
+            { name: "$Panel", bytes: 30, limit: 30 },
+            { name: "other on-demand chunks", bytes: 60, limit: 0 },
+        ]);
+    } finally {
+        rmSync(dist, { recursive: true, force: true });
+    }
+});
+
+test("two chunks registering one export name fail the measurement", () => {
+    const dist = onDemandOnly({
+        "first.js": 'e.s(["Outages",0,o]);',
+        "second.js": 'e.s(["other",0,x,"Outages",0,o]);',
+    });
+    try {
+        expect(() => measure(dist, entries({ Outages: 1 }))).toThrow(
+            "Expected one on-demand chunk exporting Outages, found 2.",
+        );
+    } finally {
+        rmSync(dist, { recursive: true, force: true });
+    }
+});
+
+test("two on-demand entries that resolve to one chunk fail the measurement", () => {
+    const dist = onDemandOnly({
+        "merged.js": 'e.s(["Calibrations",0,c,"Outages",0,o]);',
+    });
+    try {
+        expect(() =>
+            measure(dist, entries({ Calibrations: 1, Outages: 1 })),
+        ).toThrow(
+            "Outages resolves to static/chunks/merged.js, which Calibrations already counts.",
+        );
+    } finally {
+        rmSync(dist, { recursive: true, force: true });
+    }
+});

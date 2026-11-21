@@ -43,20 +43,56 @@ function resolved(file: string, specifier: string) {
     return name.endsWith(".json") ? name : `${name}.ts`;
 }
 
-test("only the server configuration reaches both full catalogues", async () => {
+const moduleReferences = [
+    /^(?:import|export) (?!type )[^;]*? from "([^"]+)";$/gms,
+    /^import "([^"]+)";$/gm,
+    /\bimport\(\s*["'`]([^"'`]+)["'`]\s*\)/g,
+];
+
+function referenced(source: string) {
+    const text = source.replace(/^\uFEFF/, "");
+    return moduleReferences.flatMap((pattern) =>
+        [...text.matchAll(pattern)].map(([, specifier]) => specifier!),
+    );
+}
+
+test("the module scan sees static imports, re-exports and dynamic imports", () => {
+    expect(
+        referenced(
+            [
+                'import { a } from "./static";',
+                'import type { b } from "./types-only";',
+                'import "./side-effect";',
+                'export { messages } from "@/i18n/messages";',
+                'export * from "./everything";',
+                'export type { c } from "./types-only";',
+                'const d = () => import("./later");',
+            ].join("\n"),
+        ).sort(),
+    ).toEqual(
+        [
+            "./static",
+            "./side-effect",
+            "@/i18n/messages",
+            "./everything",
+            "./later",
+        ].sort(),
+    );
+});
+
+test("only the server configuration and the active-language loader reach the full catalogues", async () => {
     const importers: Record<string, string[]> = {};
     for (const file of await sources(path.join(web, "src"))) {
         const source = await readFile(file, "utf8");
-        const reached = [
-            ...source.matchAll(/^import (?!type )[^;]*? from "([^"]+)";$/gms),
-        ]
-            .map(([, specifier]) => resolved(file, specifier!))
+        const reached = referenced(source)
+            .map((specifier) => resolved(file, specifier))
             .filter((target) => full.includes(target));
         if (reached.length)
             importers[path.relative(web, file).replaceAll(path.sep, "/")] =
                 reached.sort();
     }
     expect(importers).toEqual({
+        "src/i18n/catalogue.ts": ["src/i18n/en.ts", "src/i18n/tr.ts"],
         "src/i18n/en.ts": [
             "messages/en/core.json",
             "messages/en/forecast.json",
@@ -83,6 +119,16 @@ test("each full catalogue holds every namespace of its parts exactly once", () =
             namespaces.sort(),
         );
     }
+});
+
+test("the shell catalogue holds only the texts shown before or outside a full catalogue", () => {
+    for (const shell of [enShell, trShell])
+        expect(Object.keys(shell).sort()).toEqual([
+            "AppError",
+            "Bootstrap",
+            "Errors",
+            "Language",
+        ]);
 });
 
 test("a catalogue loads once and resolves to the full messages of its language", async () => {
