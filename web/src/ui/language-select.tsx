@@ -3,17 +3,27 @@
 import { useId, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { api } from "@/lib/api/client";
-import { adoptSession } from "@/lib/session-client";
-import { loadCatalogue } from "@/i18n/catalogue";
+import { reloadPage } from "@/lib/on-demand";
+import { adoptSession, useSessionState } from "@/lib/session-client";
+import { loadCatalogue, useCatalogues } from "@/i18n/catalogue";
 import { isLanguage } from "@/i18n/language";
 
 export function LanguageSelect() {
     const t = useTranslations("Language");
     const locale = useLocale();
     const id = useId();
-    const [state, setState] = useState<{ status: "idle" | "saving" | "error" }>(
-        { status: "idle" },
-    );
+    const chosen = useSessionState().session?.language;
+    const catalogues = useCatalogues();
+    const [state, setState] = useState<{
+        status: "idle" | "saving" | "error" | "unavailable";
+    }>({ status: "idle" });
+    // A failed catalogue stays failed for the life of the document, so only a reload can show it:
+    // one chosen here, or one another tab chose for this session.
+    const unavailable =
+        state.status === "unavailable" ||
+        (isLanguage(chosen) &&
+            chosen !== locale &&
+            catalogues[chosen]?.status === "failed");
 
     return (
         <div className="language-control">
@@ -45,6 +55,11 @@ export function LanguageSelect() {
                             setState({ status: "saving" });
                             try {
                                 await loadCatalogue(language);
+                            } catch {
+                                setState({ status: "unavailable" });
+                                return;
+                            }
+                            try {
                                 adoptSession(
                                     await api.post("/api/session/language/", {
                                         body: { language },
@@ -69,6 +84,18 @@ export function LanguageSelect() {
                 <span role="status">{t("saving")}</span>
             )}
             {state.status === "error" && <p role="alert">{t("failed")}</p>}
+            {unavailable && (
+                <>
+                    <p role="alert">{t("unavailable")}</p>
+                    <button
+                        className="text-button"
+                        type="button"
+                        onClick={reloadPage}
+                    >
+                        {t("reload")}
+                    </button>
+                </>
+            )}
         </div>
     );
 }
