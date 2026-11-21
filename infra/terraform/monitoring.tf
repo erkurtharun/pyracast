@@ -76,33 +76,27 @@ resource "google_monitoring_alert_policy" "readiness" {
 }
 
 locals {
-  # Every alerted operations event with the family whose policy matches it by default.
+  # Every operations event a log-match policy alerts on, each with its own policy. A key names an
+  # existing policy (backup, runtime, host, certificate, secrets and origin_pull existed first):
+  # renaming one replaces that policy.
   operations_alerts = {
-    backup            = { family = "backup", event = "pyracast_backup_failed", description = "A database backup failed or the last verified one is older than 90 minutes." }
-    backup_setting    = { family = "backup", event = "pyracast_backup_setting_invalid", description = "daily_backups in the host configuration is neither true nor false; an hourly backup run ends failed." }
-    backup_daily_copy = { family = "backup", event = "pyracast_backup_daily_copy_failed", description = "The hourly backup succeeded, but its daily copy failed." }
-    rehearsal         = { family = "backup", event = "pyracast_rehearsal_unhealthy", description = "The restore rehearsal failed or none passed within eight days." }
-    runtime           = { family = "runtime", event = "pyracast_runtime_unhealthy", description = "A container stays unhealthy after the watchdog's restart, PostgreSQL or RabbitMQ is unhealthy, or pyracast.service is stopped outside a release." }
-    delivery          = { family = "runtime", event = "pyracast_delivery_unhealthy", description = "The delivery health check failed; the line names the failing checks with their counts." }
-    watchdog_step     = { family = "runtime", event = "pyracast_watchdog_step_failed", description = "One watchdog check could not run; the line names the step." }
-    release_blocked   = { family = "runtime", event = "pyracast_release_blocked", description = "A release has kept the site in maintenance for more than an hour." }
-    host              = { family = "host", event = "pyracast_host_capacity", description = "The VM has less than 15 percent disk space or 10 percent available memory." }
-    certificate       = { family = "certificate", event = "pyracast_certificate_expiring", description = "The origin certificate has less than a quarter of its lifetime left, so its renewal is failing." }
-    secrets           = { family = "secrets", event = "pyracast_secrets_failed", description = "The runtime secret helper could not prepare a release's environment files; the line names the category." }
-    origin_pull       = { family = "origin_pull", event = "pyracast_origin_pull_unenforced", description = "Origin pulls are required, but port 443 no longer refuses a handshake without the edge's certificate." }
-  }
-  # Each family's key is also the key of one per-event policy, so switching modes updates those
-  # six in place and replaces none; per event adds a billable log-match policy for each other event.
-  operations_policies = var.alert_policy_per_event ? {
-    for key, alert in local.operations_alerts : key => [alert]
-    } : {
-    for family in distinct([for alert in values(local.operations_alerts) : alert.family]) :
-    family => [for alert in values(local.operations_alerts) : alert if alert.family == family]
+    backup            = { event = "pyracast_backup_failed", description = "A database backup failed or the last verified one is older than 90 minutes." }
+    backup_setting    = { event = "pyracast_backup_setting_invalid", description = "daily_backups in the host configuration is neither true nor false; an hourly backup run ends failed." }
+    backup_daily_copy = { event = "pyracast_backup_daily_copy_failed", description = "The hourly backup succeeded, but its daily copy failed." }
+    rehearsal         = { event = "pyracast_rehearsal_unhealthy", description = "The restore rehearsal failed or none passed within eight days." }
+    runtime           = { event = "pyracast_runtime_unhealthy", description = "A container stays unhealthy after the watchdog's restart, PostgreSQL or RabbitMQ is unhealthy, or pyracast.service is stopped outside a release." }
+    delivery          = { event = "pyracast_delivery_unhealthy", description = "The delivery health check failed; the line names the failing checks with their counts." }
+    watchdog_step     = { event = "pyracast_watchdog_step_failed", description = "One watchdog check could not run; the line names the step." }
+    release_blocked   = { event = "pyracast_release_blocked", description = "A release has kept the site in maintenance for more than an hour." }
+    host              = { event = "pyracast_host_capacity", description = "The VM has less than 15 percent disk space or 10 percent available memory." }
+    certificate       = { event = "pyracast_certificate_expiring", description = "The origin certificate has less than a quarter of its lifetime left, so its renewal is failing." }
+    secrets           = { event = "pyracast_secrets_failed", description = "The runtime secret helper could not prepare a release's environment files; the line names the category." }
+    origin_pull       = { event = "pyracast_origin_pull_unenforced", description = "Origin pulls are required, but port 443 no longer refuses a handshake without the edge's certificate." }
   }
 }
 
 resource "google_monitoring_alert_policy" "operations" {
-  for_each              = local.operations_policies
+  for_each              = local.operations_alerts
   display_name          = "${var.name} ${each.key} failure"
   combiner              = "OR"
   enabled               = true
@@ -115,7 +109,7 @@ resource "google_monitoring_alert_policy" "operations" {
       filter = join(" AND ", [
         "resource.type=\"gce_instance\"",
         "logName=\"projects/${var.project_id}/logs/pyracast-operations\"",
-        length(each.value) == 1 ? "jsonPayload.event=\"${each.value[0].event}\"" : "(${join(" OR ", [for alert in each.value : "jsonPayload.event=\"${alert.event}\""])})",
+        "jsonPayload.event=\"${each.value.event}\"",
       ])
     }
   }
@@ -129,7 +123,7 @@ resource "google_monitoring_alert_policy" "operations" {
 
   documentation {
     mime_type = "text/markdown"
-    content   = "${join(" ", [for alert in each.value : "${alert.event}: ${alert.description}"])} What to check first and how to recover: the event's row under Alert events in docs/DEPLOYMENT.md. A line with test set to true is a test alert."
+    content   = "${each.value.event}: ${each.value.description} What to check first and how to recover: the event's row under Alert events in docs/DEPLOYMENT.md. A line with test set to true is a test alert."
   }
 }
 
