@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 from django.db.models import Exists, F, OuterRef, Q, QuerySet
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.forecasts.jobs.claim import claimable_from
 from pyracast.forecasts.jobs.ready import WAITING
 from pyracast.forecasts.models import (
     CollectionEndpoint,
@@ -89,7 +90,7 @@ def _jobs_still_sent(
             binding=binding,
             endpoint=CollectionEndpoint.FORECASTS,
             reference_import__isnull=True,
-        )
+        ).annotate(claimable=claimable_from(now))
     )
     attempted = set(
         RequestAttempt.objects.filter(job__binding=binding, utc_day=day_start.date()).values_list(
@@ -104,7 +105,7 @@ def _jobs_still_sent(
         for job in jobs
         if job.status in OPEN
         and job.pk not in attempted
-        and job.available_at < day_end
+        and job.__dict__["claimable"] < day_end
         and not (job.status in WAITING and due is not None and job.scheduled_for < due)
     }
     zone = ZoneInfo(binding.region.timezone)

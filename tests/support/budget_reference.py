@@ -14,8 +14,9 @@ REOPENS_NOT = {"quota_exhausted", "schedule_disabled"}
 def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
     """The forecast budget as computed before collection timing had one function, with the due
     slot the scheduler opens again, the starts per UTC day claim admits, no job older than the
-    due slot that claim ends unsent, and a job refused for the key counted only where the
-    current schedule collects it."""
+    due slot that claim ends unsent, a job refused for the key counted only where the current
+    schedule collects it, and a throttled job taken at once when its account's delay was
+    cleared."""
     day_start = datetime.combine(now.astimezone(UTC).date(), datetime.min.time(), UTC)
     day_end = day_start + timedelta(days=1)
     attempted = set(
@@ -66,10 +67,13 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         needed: dict[datetime, CollectionJob | None] = {}
         for job in jobs:
             superseded = due is not None and job.scheduled_for < due
+            released = (job.status, job.last_error) == ("retry", "provider_throttled") and (
+                account.request_blocked_until is None
+            )
             if (
                 (job.status == "running" or (job.status in {"pending", "retry"} and not superseded))
                 and job.pk not in attempted
-                and job.available_at < day_end
+                and (released or job.available_at < day_end)
             ):
                 needed[job.scheduled_for] = job
         day = day_start.astimezone(zone).date()
