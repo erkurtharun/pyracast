@@ -37,7 +37,6 @@
         "dcNameplate": "DC nameplate",
         "acGeneration": "AC generation",
         "approvalNotice": "Your plant will wait for administrator approval. Approval and forecast availability are shown separately.",
-        "pasteHint": "Paste a pair such as 41.0082, 28.9784 into Latitude to fill both.",
         "rejectedSetup": "Pyracast did not approve this location yet. Add its technical details, then resubmit the plant for review from its page.",
         "keptLocation": "Location: {latitude}°, {longitude}° · {timezone}",
         "inBin": "{name} is in the recycle bin",
@@ -433,6 +432,7 @@
     },
     "CoordinateField": {
         "latitude": "A latitude from -90 to 90, such as 41.0082 or 41,0082.",
-        "longitude": "A longitude from -180 to 180, such as 28.9784 or 28,9784."
+        "longitude": "A longitude from -180 to 180, such as 28.9784 or 28,9784.",
+        "pasteHint": "Paste a pair such as 41.0082, 28.9784 into Latitude to fill both."
     }
 }

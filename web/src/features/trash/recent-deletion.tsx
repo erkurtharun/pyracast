@@ -65,14 +65,15 @@ export function DeletedNotice({ tenant }: { tenant: number }) {
     );
     if (outcome.kind === "restored")
         return (
-            <div className="notice" role="status">
-                <p>{t("restored", { name: outcome.name })}</p>
+            <div className="notice">
+                <p role="status">{t("restored", { name: outcome.name })}</p>
                 {dismiss}
             </div>
         );
+    // The status holds only the sentence, so the Undo button's failure alert is not inside it.
     return (
-        <div className="notice" role="status">
-            <p>{t("movedToBin", { name: outcome.name })}</p>
+        <div className="notice">
+            <p role="status">{t("movedToBin", { name: outcome.name })}</p>
             <div className="button-group">
                 <AsyncButton
                     variant="secondary"

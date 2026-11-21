@@ -7,6 +7,7 @@ import { isPlantSection, plantAddress, routes } from "@/lib/routes";
 import { PlantOnboarding } from "@/features/portfolio/plant-onboarding";
 import { PlantWorkspace } from "./plant-workspace";
 import { Notice, RefreshFailed } from "@/ui/ui";
+import { useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { useWorkspace } from "@/features/workspace/workspace-shell";
 
@@ -21,6 +22,7 @@ export function PlantSite({
     const router = useRouter();
     const refresh = useRefresh();
     const canManage = useCanManageWorkspace();
+    const label = useLabel();
     const { tenant } = useWorkspace();
     const params = useParams<{ section?: string }>();
     const section = isPlantSection(params.section)
@@ -66,6 +68,10 @@ export function PlantSite({
                 <Notice error>{sites.error}</Notice>
             ) : !site ? (
                 <Notice>{t("siteUnavailable")}</Notice>
+            ) : site.edit_blocked_reason ? (
+                <Notice>
+                    {label("PlantEditBlock", site.edit_blocked_reason)}
+                </Notice>
             ) : canManage ? (
                 <PlantOnboarding
                     existing={site}

@@ -37,7 +37,6 @@
         "dcNameplate": "DC kurulu güç",
         "acGeneration": "AC üretim",
         "approvalNotice": "Santraliniz yönetici onayını bekleyecek. Onay durumu ve tahminlerin kullanılabilirliği ayrı gösterilir.",
-        "pasteHint": "İkisini birden doldurmak için 41.0082, 28.9784 gibi bir çifti Enlem alanına yapıştırın.",
         "rejectedSetup": "Pyracast bu konumu henüz onaylamadı. Teknik bilgilerini ekleyin, ardından santrali kendi sayfasından yeniden incelemeye gönderin.",
         "keptLocation": "Konum: {latitude}°, {longitude}° · {timezone}",
         "inBin": "{name} geri dönüşüm kutusunda",
@@ -433,6 +432,7 @@
     },
     "CoordinateField": {
         "latitude": "-90 ile 90 arasında bir enlem; örneğin 41,0082 veya 41.0082.",
-        "longitude": "-180 ile 180 arasında bir boylam; örneğin 28,9784 veya 28.9784."
+        "longitude": "-180 ile 180 arasında bir boylam; örneğin 28,9784 veya 28.9784.",
+        "pasteHint": "İkisini birden doldurmak için 41.0082, 28.9784 gibi bir çifti Enlem alanına yapıştırın."
     }
 }

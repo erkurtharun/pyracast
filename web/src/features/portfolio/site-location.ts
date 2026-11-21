@@ -1,17 +1,20 @@
 type Point = { latitude: number; longitude: number };
 
-const coordinateNumber = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
-
-// A pair needs a separator that a decimal comma cannot be: a semicolon, white space, or a comma
-// followed by white space; a bare comma only when a part has a decimal point. "41,0082" is
-// one Turkish-style number, never 41 and 82.
+// The console's admin-workspace.js keeps the same pair rule; one table of pasted texts pins both.
+// A pair is split at a semicolon, at a comma followed by white space or at white space; a bare
+// comma only when both parts hold a decimal point or the second starts with a minus, so
+// "41,0082", "1.234,5" and "1,234.5" are never split there.
 function pairParts(input: string): string[] {
     if (input.includes(";")) return input.split(";").map((part) => part.trim());
     if (/,\s/.test(input))
         return input.split(/,\s+/).map((part) => part.trim());
     if (/\s/.test(input)) return input.split(/\s+/);
     const parts = input.split(",");
-    return parts.some((part) => part.includes(".")) ? parts : [input];
+    const [, second = ""] = parts;
+    return parts.length === 2 &&
+        (parts.every((part) => part.includes(".")) || second.startsWith("-"))
+        ? parts
+        : [input];
 }
 
 export type CoordinateAxis = "latitude" | "longitude";
@@ -34,13 +37,14 @@ export function coordinateValue(axis: CoordinateAxis, text: string): number {
         : Number.NaN;
 }
 
+// Both parts must be values the latitude and the longitude field accept.
 export function coordinatePair(text: string): [string, string] | null {
     const [latitude, longitude, ...rest] = pairParts(text.trim());
     return latitude !== undefined &&
         longitude !== undefined &&
         !rest.length &&
-        coordinateNumber.test(latitude) &&
-        coordinateNumber.test(longitude)
+        !Number.isNaN(coordinateValue("latitude", latitude)) &&
+        !Number.isNaN(coordinateValue("longitude", longitude))
         ? [latitude, longitude]
         : null;
 }

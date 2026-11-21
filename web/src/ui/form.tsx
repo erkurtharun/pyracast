@@ -8,6 +8,7 @@ import {
     useRef,
     useState,
     type ChangeEventHandler,
+    type ClipboardEventHandler,
     type ReactNode,
     type RefObject,
 } from "react";
@@ -124,6 +125,7 @@ export function Field({
     maxLength?: number;
     minLength?: number;
     onChange?: ChangeEventHandler<HTMLInputElement>;
+    onPaste?: ClipboardEventHandler<HTMLInputElement>;
 }) {
     const control = useControl(name, hint);
     return (

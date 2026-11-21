@@ -10,7 +10,6 @@ import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
 import { Field, FieldErrors, formText } from "@/ui/form";
 import { Notice } from "@/ui/ui";
-import { useLabel } from "@/ui/vocabulary";
 import { useForgetDeletion } from "@/features/trash/recent-deletion";
 import {
     onboardingSteps,
@@ -24,7 +23,6 @@ import {
 import { CoordinateField } from "./coordinate-field";
 import {
     binnedAt,
-    coordinatePair,
     coordinateValue,
     type CoordinateAxis,
 } from "./site-location";
@@ -79,21 +77,6 @@ export function PlantOnboarding({
     onCancel: () => void;
     onOpen: (site: number) => void;
 }) {
-    const t = useTranslations("PlantOnboarding");
-    const label = useLabel();
-    const blocked = existing?.edit_blocked_reason;
-    if (existing && blocked)
-        return (
-            <section className="panel onboarding">
-                <div className="section-heading">
-                    <h2>{t("completePlantSetup")}</h2>
-                    <button className="button secondary" onClick={onCancel}>
-                        {t("cancel")}
-                    </button>
-                </div>
-                <Notice>{label("PlantEditBlock", blocked)}</Notice>
-            </section>
-        );
     const props = { tenant, onCreated, onCancel, onOpen };
     return existing ? (
         <Wizard {...props} existing={existing} trashed={[]} />
@@ -155,10 +138,20 @@ function Wizard({
     const title = useRef<HTMLHeadingElement>(null);
     const form = useRef<HTMLFormElement>(null);
     const restoreButton = useRef<HTMLButtonElement>(null);
-    const offered = offer.kind === "offered";
+    const errorAlert = useRef<HTMLDivElement>(null);
+    // A disabled control loses focus: the restore button while it restores, the submit button
+    // while it saves.
     useEffect(() => {
-        if (offered) restoreButton.current?.focus();
-    }, [offered]);
+        if (offer.kind === "offered" || offer.kind === "failed")
+            restoreButton.current?.focus();
+    }, [offer.kind]);
+    useEffect(() => {
+        if (
+            status.kind === "error" &&
+            !refusalTarget(Object.keys(status.fields), !!existing)
+        )
+            errorAlert.current?.focus();
+    }, [status, existing]);
     const saving = status.kind === "saving";
     const busy = saving || offer.kind === "restoring";
     const fields = status.kind === "error" ? status.fields : {};
@@ -352,29 +345,6 @@ function Wizard({
                             <div
                                 data-step={at("location")}
                                 hidden={step !== at("location")}
-                                onPaste={(event) => {
-                                    const target = event.target;
-                                    if (
-                                        !(target instanceof HTMLInputElement) ||
-                                        target.name !== "latitude"
-                                    )
-                                        return;
-                                    const pair = coordinatePair(
-                                        event.clipboardData.getData("text"),
-                                    );
-                                    const longitude =
-                                        target.form?.elements.namedItem(
-                                            "longitude",
-                                        );
-                                    if (
-                                        !pair ||
-                                        !(longitude instanceof HTMLInputElement)
-                                    )
-                                        return;
-                                    event.preventDefault();
-                                    target.value = pair[0];
-                                    longitude.value = pair[1];
-                                }}
                             >
                                 <div className="form-grid">
                                     <Field
@@ -391,7 +361,6 @@ function Wizard({
                                     <CoordinateField
                                         axis="latitude"
                                         label={t("latitude")}
-                                        hint={t("pasteHint")}
                                     />
                                     <CoordinateField
                                         axis="longitude"
@@ -587,11 +556,18 @@ function Wizard({
                     </fieldset>
                 </FieldErrors>
                 {status.kind === "error" && (
-                    <Notice error>
+                    <div
+                        className="notice error"
+                        role="alert"
+                        tabIndex={-1}
+                        ref={errorAlert}
+                    >
                         <p>{status.message}</p>
-                        {unplacedFields(fields, !!existing).map((message) => (
-                            <p key={message}>{message}</p>
-                        ))}
+                        {unplacedFields(fields, !!existing, status.message).map(
+                            ([field, message]) => (
+                                <p key={field}>{message}</p>
+                            ),
+                        )}
                         {holder !== null && (
                             <button
                                 className="button secondary"
@@ -601,7 +577,7 @@ function Wizard({
                                 {t("openExisting")}
                             </button>
                         )}
-                    </Notice>
+                    </div>
                 )}
             </form>
         </section>

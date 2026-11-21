@@ -46,13 +46,15 @@ export function refusalTarget(
     return null;
 }
 
-// Messages for refused fields no step shows; they belong in the general message.
+// Refused fields no step shows, with their messages, for the general message; a message that
+// repeats the general one is left out.
 export function unplacedFields(
     refused: Readonly<Record<string, string>>,
     existing: boolean,
-): string[] {
+    general: string,
+): [string, string][] {
     const shown = new Set(Object.values(stepFields(existing)).flat());
-    return Object.entries(refused)
-        .filter(([field]) => !shown.has(field))
-        .map(([, message]) => message);
+    return Object.entries(refused).filter(
+        ([field, message]) => !shown.has(field) && message !== general,
+    );
 }
