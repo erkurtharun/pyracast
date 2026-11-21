@@ -1,45 +1,48 @@
 # Accept a workspace invitation
 
-An invitee opens the mailed link `/app/#token=...`, signs up (password or Google/Microsoft) with the invited address or signs in, proves ownership of that address and presses accept. The outcome is a `viewer` membership in the inviting workspace and a consumed invitation. Signup never grants access by itself; `member-invitation` issues the token.
+An invitee opens the mailed link `/app/invitation/#token=...`, sees the workspace, role and inviter, signs up (password or Google/Microsoft) with the invited address or signs in, proves ownership of that address and presses accept. The outcome is a membership in the inviting workspace with the invited role (`viewer`, or `admin` for an administrator invitation) and a consumed invitation. Signup never grants access by itself; `member-invitation` issues the token.
 
 ## Entry points
 
-- Screen: `web/src/components/dashboard.tsx` `DashboardView` routes on `web/src/components/workspace-invitation.ts` `useWorkspaceInvitation` (token from fragment or `?token=`, kept in `sessionStorage` key `pyracast.workspaceInvitation`, stripped from the URL): anonymous goes to `web/src/components/auth.tsx` `Auth` (prop `invitationToken`), signed in goes to `web/src/components/workspace-members.tsx` `AcceptInvitation`.
-- `/invitations/accept/` (`web/src/app/invitations/accept/page.tsx` `InvitationPage`, layout re-exports the app layout) renders the same `Dashboard`; the mail never links to it.
-- `POST /api/invitations/accept/` -> `pyracast.api.workspaces.InvitationAcceptanceView` -> `pyracast.accounts.invitations.accept_workspace_invitation`. Actor: any authenticated user.
-- Signup branch: `POST /api/auth/browser/v1/auth/signup` (`pyracast.accounts.signup.CompanySignupView`) and `.../auth/provider/signup` (`pyracast.accounts.social_views.ProviderSignupView`) validate the token in `pyracast.accounts.forms.CompanySignupForm.clean` through `pending_invitation`; the token is not consumed there and `CompanySignupForm.signup` skips tenant and membership creation. No command, script or Dramatiq job.
+- Screen: `web/src/app/app/invitation/page.tsx` -> `web/src/features/workspace/invitation-entry.tsx` `InvitationEntry`. `takeFragmentToken` moves the token from the address fragment into `sessionStorage` (key `pyracast.workspaceInvitation`, or memory for this page load when storage is blocked; see `workspace-invitation.ts`) and strips it from the address. An empty token clears the stored one. `useInvitationPreview` reads `POST /api/invitations/preview/`. Anonymous visitors see the preview banner and `web/src/features/auth/auth.tsx` `Auth` (prop `invitationToken`, a cancel button that drops the token); signed-in users get `web/src/features/workspace/accept-invitation.tsx` `AcceptInvitation`. A stored token also sends `Entry` at `/app/` here, ahead of the platform-staff redirect to `/admin/`.
+- `POST /api/invitations/preview/` -> `pyracast.api.workspaces.InvitationPreviewView` -> `pyracast.accounts.invitations.preview_workspace_invitation`. Public, throttled under `invitation` (60 an hour per user or client address).
+- `POST /api/invitations/accept/` -> `InvitationAcceptanceView` -> `accept_workspace_invitation`. Actor: any authenticated user; an `ACCOUNT` route of the route policy throttled under `submission` (30 an hour per user).
+- Signup branch: `POST /api/auth/browser/v1/auth/signup` (`pyracast.accounts.signup.CompanySignupView`) and `.../auth/provider/signup` (`pyracast.accounts.social_views.ProviderSignupView`) validate the token in `pyracast.accounts.forms.AccountSignupForm.clean` through `pending_invitation`. The token is not consumed there, `clean_company_name` ignores a company name, and `AccountSignupForm.signup` (`register_account`) creates no tenant or membership. No command, script or Dramatiq job.
 
 ## Sequence
 
 ```mermaid
 sequenceDiagram
     actor I as Invitee
-    participant UI as Dashboard
+    participant UI as InvitationEntry
     participant S as Signup views
-    participant V as AcceptanceView
+    participant V as Invitation views
     participant Op as accept_workspace_invitation
     participant DB as PostgreSQL
-    I->>UI: "open /app/ with the token in the fragment, kept in sessionStorage, URL stripped"
+    I->>UI: "open /app/invitation/ with the token in the fragment, kept in sessionStorage, URL stripped"
+    UI->>V: "POST preview with the token"
+    V->>DB: "one lookup by SHA-256 hash"
+    V-->>UI: "200 workspace, role, inviter, email, deadline, or one identical 400 invitation_unavailable"
     opt anonymous
         UI->>S: "POST signup with email and invitation_token, no company name"
-        S->>DB: "read invitation by hash, email, unused, unexpired, else 400"
+        S->>DB: "read pending invitation by hash and email, else 400"
         S->>DB: "insert user and email address only, no tenant or membership"
         S-->>UI: "401 pending email code, or 200 when the provider verified the address"
     end
     I->>UI: "Accept invitation"
-    UI->>V: "POST token with X-CSRFToken"
-    V->>V: "session auth, CSRF, IsAuthenticated, token max 128 chars"
+    UI->>V: "POST accept with token and X-CSRFToken"
+    V->>V: "session auth, CSRF, route policy, token max 128 chars"
     V->>Op: "actor, token"
-    Op->>DB: "BEGIN, unlocked read of invitation by SHA-256 hash"
-    Op->>DB: "if found, lock tenant, then lock invitation row and re-read it"
-    alt unknown (before any lock), accepted or expired
-        V-->>UI: "400 invalid or expired"
-    else inactive user or no verified address equal to invited email
-        V-->>UI: "403 verify the invited email"
-    else valid
-        Op->>DB: "get_or_create viewer membership, set accepted_at, COMMIT"
+    Op->>DB: "BEGIN, lock the actor's account rows, find the invitation by hash"
+    Op->>DB: "lock tenant, then lock the invitation row and re-read it"
+    alt "unknown, closed, expired or another account's"
+        V-->>UI: "400 invitation_unavailable"
+    else "inactive user or no verified address equal to invited email"
+        V-->>UI: "403 invitation_email_unverified"
+    else "valid"
+        Op->>DB: "get_or_create membership, raise to admin for an administrator invitation, set accepted_at and accepted_by, COMMIT"
         V-->>UI: "200 tenant_id, role"
-        UI->>UI: "clear sessionStorage, reload /app/?workspace=customer"
+        UI->>UI: "clear sessionStorage, reload /app/w/"
     end
 ```
 
@@ -47,44 +50,49 @@ sequenceDiagram
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `accounts_workspaceinvitation` | R/W | Lookup by unique `token_hash`; `FOR UPDATE`; sets `accepted_at`. Signup only reads (`pending_invitation`). |
+| `accounts_workspaceinvitation` | R/W | Lookup by unique `token_hash`; `FOR UPDATE`; sets `accepted_at` and `accepted_by`. Preview and signup only read. |
 | `accounts_tenant` | R (`FOR UPDATE`) | Tenant lock before the invitation row. |
-| `accounts_membership` | R/W | `get_or_create` on (`tenant`, `user`) with role `viewer`; constraints `unique_tenant_membership`, `one_workspace_admin`. |
+| `accounts_membership` | R/W | `get_or_create` on (`tenant`, `user`) with the invited role; an administrator invitation sets `admin`; constraints `membership_tenant_user_uniq`, `membership_tenant_administrator_uniq`. |
+| `accounts_workspaceadminchange` | W | Administrator invitations only: `actor` is the issuer, no previous administrator. |
 | `account_emailaddress` | R/W | Accept reads a verified address equal (case-insensitive) to `invitation.email`; signup inserts it, unverified unless a Google provider vouches for it. |
-| `auth_user`, `accounts_userlanguagepreference`, `socialaccount_socialaccount` | R/W | Accept re-reads `is_active`; signup inserts the user, a language preference from the cookie and, on social signup, the provider link. |
+| `auth_user`, `socialaccount_socialaccount`, `mfa_authenticator`, `accounts_userlanguagepreference` | R/W | Accept locks these rows of the actor (`lock_account`) and re-reads `is_active`; signup inserts the user, a language preference and, on social signup, the provider link. |
 | `django_session` | R | Session authentication. |
 
 ## Authorization
 
-- View: `SessionAuthentication` (CSRF enforced) and `IsAuthenticated` from `REST_FRAMEWORK`; `WorkspaceWritePermission` passes because the URL has no `tenant_id`. No role check: the token is the capability.
-- Operation: the invitation must be unaccepted and unexpired; the actor must be active and own a verified `EmailAddress` matching the invitation. The check is on the verified address list, not on `User.email`.
+- View: `SessionAuthentication` (CSRF enforced) and `RoutePolicy`: the accept route needs any signed-in user, the preview route is public. No role check: the token is the capability.
+- Operation: the invitation must be pending (`state_at`); the actor must be active and own a verified `EmailAddress` matching the invitation. The check is on the verified address list, not on `User.email`. An administrator invitation is refused once the workspace has an administrator.
 - Signup: `pending_invitation` requires the submitted email to equal the invitation email; the later accept re-checks ownership through a verified address (`ACCOUNT_EMAIL_VERIFICATION = "mandatory"`; only Gmail or Google Workspace provider addresses arrive verified).
-- Database: `unique_tenant_membership` and `one_workspace_admin`; nothing ties the accepting user to the invitation row.
+- Database: `membership_tenant_user_uniq`, `membership_tenant_administrator_uniq`, `workspaceinvitation_accepted_by_chk` (`accepted_by` needs `accepted_at`) and `workspaceinvitation_revoked_at_chk` (an accepted invitation is never revoked).
 
 ## Failure paths
 
 | Condition | Result |
 | --- | --- |
-| Not signed in, or missing or wrong CSRF token | 403 `http_403` |
-| Unknown field, missing or over-long token | 400 field or "Unknown fields are not accepted." |
-| Unknown token, already accepted, expired, cancelled, superseded, or expired by member removal or administrator transfer | 400 "The invitation is invalid or expired." (identical for all) |
-| Actor inactive or without a verified address equal to the invited one (including a different signed-in account) | 403 "Verify the invited email address before accepting."; the screen offers "Use another account", which signs out and keeps the token |
-| Tenant or invitation lock not obtained within 5 s | 503 `workspace_busy`, `Retry-After: 1` |
-| Signup with an invalid token or another email, or over the signup limit (5 per hour per IP, password and provider) | 400 non-field "The invitation is invalid or expired.", no account created; 429 for the limit |
+| Not signed in | 401 `not_authenticated` with `WWW-Authenticate: Session` |
+| Missing or wrong CSRF token | 403 `csrf_failed` |
+| Unknown field, missing or over-long token | 400 `invalid_request` with a field error or "Unknown fields are not accepted." |
+| Unknown token, expired, cancelled, superseded, closed by member removal or administrator change, accepted by another account (or by one that has left), administrator invitation while an administrator exists | 400 `invitation_unavailable` (identical for all; the screen explains the link can no longer be used) |
+| Actor inactive or without a verified address equal to the invited one (including a different signed-in account) | 403 `invitation_email_unverified`; the screen offers "Use another account", which signs out and keeps the token |
+| Tenant or invitation lock not obtained within 5 s; same-session request still running | 503 `busy` / 429 `session_busy`, both `Retry-After: 1` |
+| More than 30 acceptances an hour, or 60 previews an hour | 429 `throttled` |
+| Signup with an invalid token or another email, or over the signup limit (5 per hour per IP, password and provider) | 400 non-field `invitation_unavailable` text, no account created; 429 for the limit |
+| Preview of an unusable or malformed token | 400 `invitation_unavailable` after the same single lookup; a failed preview still lets the invitee accept |
 | `sessionStorage` unavailable | Token lives only in the current page load; lost on reload |
 
 ## Rules and invariants
 
-- Lock order is tenant row, then invitation row, the same as reissue, revoke, removal and transfer, so acceptance serializes with them. The first lookup is unlocked and only finds the tenant id; state is re-read after the lock.
-- Single use: `accepted_at` is set under the row lock, so concurrent accepts yield one success and one 400.
-- Role is always `viewer`. A user who is already a member keeps the existing membership and role (an administrator stays administrator) and the invitation is still consumed.
-- Signup and acceptance are separate steps: an invited signup creates only a user, so an invitation that expires between them leaves an account without any workspace.
-- Expiry is the only revocation (7 days, cancel, reissue, member removal, administrator transfer); rows are never deleted and no accepting user is recorded.
-- The token lives in a URL fragment so it is not sent to the server; the `?token=` query form is still read and stripped client-side. `?account=security` hides the token without clearing it. A token also suppresses the platform-staff redirect to `/admin/`.
+- Lock order is the actor's account rows (`lock_account`: addresses, provider identities, user, authenticators), tenant row, invitation row. The first lookup is unlocked and only finds the ids; state is re-read after the locks. Removal and administrator reassignment lock the tenant too, so acceptance serializes with them, and an address verified meanwhile is among those checked.
+- Single use: `accepted_at` and `accepted_by` are set under the row lock. A retry by the accepting account while it is still a member answers like the first call (the existing membership); every other account gets 400.
+- Role: the invitation's. A user who is already a member keeps the existing membership and role for a viewer invitation (an administrator stays administrator) and the invitation is still consumed. An administrator invitation raises the account to `admin` and writes a `WorkspaceAdminChange`.
+- Signup and acceptance are separate steps: an invited signup creates only a user, so an invitation that closes between them leaves an account without any workspace.
+- Closed invitations stay as rows: cancelling stores `revoked_at` beside the unmoved deadline (see `member-invitation`). No code path of this flow deletes them.
+- Security log: acceptance writes `invitation_accepted` (and `workspace_admin_reassigned` for an administrator invitation). A refusal of a known invitation writes `invitation_denied` with the reason (`expired`, `revoked`, `superseded`, `accepted`, `administrator_exists`, `email_unverified`), at most once a minute per actor, invitation and reason; an unknown token writes none.
+- The token lives in a URL fragment so it is not sent to the server; the query form is not read. After acceptance or dismissal the user lands on `/app/w/`, which opens the remembered or first workspace.
+- The preview names the inviter only while that account is an active member, and shows an accepted invitation only to the account that accepted it while it is still a member, so it does not reveal whether an address has an account.
 
 ## Tests
 
-- `tests/test_workspaces.py`: verified-matching-email, inactive user, other account and single use; reissue revokes the old secret; two concurrent accepts; invited signup then verify then accept; API accept after cancel and with an invalid token; administrator transfer revokes the grant; invalid signup creates no account.
-- `tests/test_social_accounts.py` (social signup with invalid then valid token, then explicit accept), `tests/test_workspace_member_removal.py` (removal expires invitations for every known address; removal, transfer and acceptance serialize, where an existing viewer accepts successfully at operation level), `tests/test_transactional_mail.py` (`#token=` link).
-- `web/tests/workspace-roles.spec.ts` (mocked API): token hand-off and URL strip, accept success and error, dismiss, account switch, expired signup; `web/tests/social-auth.spec.ts` (social signup restores the token).
-- Gaps: no real-backend Playwright run (`web/integration/` has no invitation spec); mocked error strings are not the backend's; no test for signup with a different email or an expired token, acceptance by an existing administrator (role kept), acceptance by an existing member over HTTP, unauthenticated or CSRF-less accept, or unavailable `sessionStorage`.
+- `tests/test_invitation_acceptance.py` (retry after a lost response, other accounts and a removed acceptor, existing member keeps role, concurrent accepts, concurrent account change), `tests/test_workspaces.py` (verified matching address, inactive user, single use, invited signup then verify then accept, invalid signup creates no account), `tests/test_signup_invitation_token.py`, `tests/test_invitation_preview.py` (answers, identical refusals, throttle), `tests/test_workspace_admin_invitations.py`, `tests/test_invitation_limits.py` (refusal log lines), `tests/test_social_accounts.py` (social signup, then explicit accept), `tests/test_workspace_member_removal.py` (removal, transfer and acceptance serialize), `tests/test_workspace_http_failures.py`.
+- `web/tests/workspace-invitations.spec.ts` (preview, accept, unusable links, failed preview), `web/tests/workspace-roles.spec.ts` (signup keeps the token, accept errors, dismiss, account switch, expired signup), `web/tests/app-routes.spec.ts` (link opens the screen and drops the token, blocked storage, no legacy entry path), `web/tests/social-auth.spec.ts` (social signup restores the token); all mocked API.
+- Gaps: no real-backend Playwright run (`web/integration/` has no invitation spec); no test for signup with a different email or an expired token over HTTP, or for unauthenticated or CSRF-less accept.
