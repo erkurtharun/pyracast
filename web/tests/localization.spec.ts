@@ -442,8 +442,8 @@ test("Turkish plant search and capacity formatting follow the selected language"
                     plant: {
                         ...plant,
                         name: "IŞIK GES",
-                        current_configuration: {
-                            ...plant.current_configuration,
+                        parameters: {
+                            ...plant.parameters,
                             dc_capacity_mw: 1234.5,
                         },
                     },
