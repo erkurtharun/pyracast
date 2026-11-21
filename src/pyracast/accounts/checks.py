@@ -134,6 +134,19 @@ def check_origin_alignment(**_kwargs: Any) -> list[CheckMessage]:
     return [Error(problem, id="accounts.E005")]
 
 
+@register(Tags.security, deploy=True)
+def check_fixture_provider(**_kwargs: Any) -> list[CheckMessage]:
+    if settings.DEBUG or not settings.PYRACAST_FIXTURE_PROVIDER:
+        return []
+    return [
+        Error(
+            "The fixture provider is on outside debug.",
+            hint="Set PYRACAST_FIXTURE_PROVIDER=0; only the container smoke turns it on.",
+            id="accounts.E006",
+        )
+    ]
+
+
 def _mail_problem() -> str | None:
     mailer = cast(dict[str, Any], settings.MAILERS["default"])
     options = cast(dict[str, Any], mailer.get("OPTIONS", {}))
