@@ -171,7 +171,7 @@ def _fail(lease: _Lease, now: datetime) -> None:
         if not _holds_lease(run, lease, now):
             return
         if not CALIBRATION.exhausted(run.attempts):
-            requeue_run(run, CalibrationError.INVALID_CALIBRATION_DATA)
+            requeue_run(run, CalibrationError.INVALID_CALIBRATION_DATA, now)
             return
         finish_run(run, CalibrationStatus.FAILED, now, CalibrationError.INVALID_CALIBRATION_DATA)
         _follow_up(plant, run, now)

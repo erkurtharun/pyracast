@@ -3,9 +3,13 @@ import dataclasses
 import io
 import ipaddress
 import itertools
+import json
+import logging
+import logging.config
 import os
 import re
 import runpy
+import urllib.request
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,6 +29,7 @@ from deploy import (
     backup,
     host,
     host_contract,
+    operations_log,
     probe_origin_pull,
     rehearsal,
     release_state,
@@ -33,6 +38,8 @@ from deploy import (
     watchdog,
 )
 from pyracast import maintenance
+from pyracast.accounts.audit import SecurityEvent, record_security_event
+from pyracast.accounts.audit import logger as security_logger
 from pyracast.accounts.authentication import login_identity
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.forecasts.historical_upload import MAX_UPLOAD_BYTES
@@ -43,6 +50,7 @@ from pyracast.orchestration.management.commands.check_delivery_health import (
 )
 from pyracast.orchestration.management.commands.worker import Command as WorkerCommand
 from pyracast.urls import urlpatterns
+from tests.support.container_logs import container_entry as shipped_entry
 from tests.support.gateway_routes import (
     backend_route,
     middleware,
@@ -51,6 +59,7 @@ from tests.support.gateway_routes import (
     routers,
     routes,
 )
+from tests.support.log_filters import filter_of, matches, resources
 from tests.support.workflows import ci_job_names, ci_jobs, job_names
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -264,21 +273,171 @@ def test_host_service_stops_within_every_compose_stop_grace_period() -> None:
     assert int(unit["TimeoutStopSec"]) > int(stop_timeout[1])
 
 
-def test_every_alert_policy_matches_a_reported_event_and_every_error_is_alerted() -> None:
-    policies = set(re.findall(r'event = "(pyracast_[a-z_]+)"', text(TERRAFORM / "monitoring.tf")))
-    events = reported_events()
-
-    assert policies
-    assert policies <= {event for group in events.values() for event in group}
-    assert events["ERROR"] <= policies
-
-
 def test_the_api_writes_its_security_lines_through_a_blocking_log_path() -> None:
     logging = compose_services()["api"]["logging"]
 
     assert logging["driver"] == "gcplogs"
     assert logging["options"]["mode"] == "blocking"
     assert compose_environment()["PYRACAST_SECURITY_LOG_PATH"] == "/proc/1/fd/1"
+
+
+def formatted(record: logging.LogRecord, handler: str) -> str:
+    """A record as the formatter a handler of settings.LOGGING names writes it."""
+    configuration: dict[str, Any] = settings.LOGGING
+    formatter = configuration["formatters"][configuration["handlers"][handler]["formatter"]]
+    return (
+        logging.config.DictConfigurator(configuration).configure_formatter(formatter).format(record)
+    )
+
+
+def container_entry(record: logging.LogRecord, handler: str) -> dict[str, Any]:
+    """One line of the API container's stream, written by a configured handler."""
+    return shipped_entry(formatted(record, handler), "/pyracast-api-1")
+
+
+def operations_entry(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    bodies: list[dict[str, Any]] = []
+
+    def urlopen(request: Any, timeout: float) -> io.BytesIO:
+        bodies.append(json.loads(request.data))
+        return io.BytesIO(b"{}")
+
+    monkeypatch.setattr(
+        operations_log, "log_resource", lambda: ("project", {"type": "gce_instance"})
+    )
+    monkeypatch.setattr(operations_log, "access_token", lambda: "token")
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    assert operations_log.report(
+        "pyracast_backup_failed", "ERROR", reason="last_verified_backup_older_than_90_minutes"
+    )
+    (body,) = bodies
+    (line,) = body["entries"]
+    return {"logName": body["logName"], "resource": body["resource"], **line}
+
+
+def test_the_security_bucket_receives_exactly_the_lines_of_the_security_logger(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(security_logger, "handlers", [caplog.handler])
+    caplog.set_level(logging.INFO, logger="pyracast.security")
+    record_security_event(
+        SecurityEvent.LOGIN_LOCKED, address="someone@example.com", client_ip="203.0.113.7"
+    )
+    (security,) = caplog.records
+    quoting = logging.getLogger("pyracast").makeRecord(
+        "pyracast",
+        logging.INFO,
+        __file__,
+        1,
+        "pyracast.security %s",
+        (security.getMessage(),),
+        None,
+    )
+    monitoring = text(TERRAFORM / "monitoring.tf")
+    sink = resources(monitoring, "google_logging_project_sink")["security"]
+    metric = resources(monitoring, "google_logging_metric")["security_events"]
+    terms = filter_of(sink, monitoring, {"var.project_id": "project"})
+
+    assert security.name == "pyracast.security"
+    assert matches(terms, container_entry(security, "security"))
+    assert not matches(terms, container_entry(quoting, "console"))
+    assert not matches(terms, operations_entry(monkeypatch))
+    assert filter_of(metric, monitoring, {"var.project_id": "project"}) == terms
+    assert "filter = local.security_log_filter" in " ".join(sink.split())
+    assert "filter = local.security_log_filter" in " ".join(metric.split())
+
+
+def test_only_the_lines_of_the_containers_that_run_the_application_count_as_security_lines(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(security_logger, "handlers", [caplog.handler])
+    caplog.set_level(logging.INFO, logger="pyracast.security")
+    record_security_event(
+        SecurityEvent.LOGIN_LOCKED, address="someone@example.com", client_ip="203.0.113.7"
+    )
+    (security,) = caplog.records
+    line = formatted(security, "security")
+    monitoring = text(TERRAFORM / "monitoring.tf")
+    terms = filter_of(
+        resources(monitoring, "google_logging_project_sink")["security"],
+        monitoring,
+        {"var.project_id": "project"},
+    )
+    project = yaml.safe_load(text(DEPLOY / "compose.yaml"))["name"]
+    application = {
+        name
+        for name, service in compose_services().items()
+        if "PYRACAST_SECURITY_LOG_PATH" in service.get("environment", {})
+    }
+    counted = {
+        name
+        for name in compose_services()
+        for container in (f"/{project}-{name}-1", f"/{project}-{name}-run-0123456789ab")
+        if matches(terms, shipped_entry(line, container))
+    }
+
+    assert application == {"api", "worker", "notifications", "dispatcher", "migrate"}
+    assert counted == application
+    for container in ("/pyracast-api", "/pyracast-api-1x", "/other-api-1", "/pyracast-api-run-"):
+        assert not matches(terms, shipped_entry(line, container))
+    assert not matches(terms, {**shipped_entry(line, "/pyracast-api-1"), "jsonPayload": {}})
+
+
+def counter_threshold_policies() -> dict[str, str]:
+    """Alert policies whose threshold condition reads a log-based (user) metric."""
+    policies = resources(text(TERRAFORM / "monitoring.tf"), "google_monitoring_alert_policy")
+    return {
+        name: " ".join(block.split())
+        for name, block in policies.items()
+        if "condition_threshold" in block and "logging.googleapis.com/user/" in block
+    }
+
+
+def test_every_alert_on_a_count_of_log_lines_is_known() -> None:
+    assert set(counter_threshold_policies()) == {"runtime_restarts", "security"}
+
+
+@pytest.mark.parametrize("policy", ["runtime_restarts", "security"])
+def test_an_alert_on_a_count_of_log_lines_closes_once_its_window_holds_no_line(
+    policy: str,
+) -> None:
+    block = counter_threshold_policies()[policy]
+    period = re.search(r'conditions \{ display_name = "[^"]* (?:within|in) ([a-z ]+)"', block)
+    retest = re.search(r'duration = "(\d+s)"', block)
+    window = re.search(r'alignment_period = "(\d+s)"', block)
+    closing = re.search(r'auto_close = "(\d+s)"', block)
+
+    assert 'evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE"' in block
+    assert period
+    assert retest
+    assert window
+    assert closing
+    # The condition must hold for the retest duration, so the window keeps a line that long more.
+    assert seconds(retest[1]) == 60
+    assert seconds(window[1]) == {"one hour": 3600, "ten minutes": 600}[period[1]] + 60
+    assert seconds(closing[1]) >= seconds(window[1])
+
+
+def test_security_lines_are_kept_a_year_in_their_own_unlocked_bucket_beside_the_default() -> None:
+    bucket = terraform_block(
+        TERRAFORM / "monitoring.tf", 'resource "google_logging_project_bucket_config" "security"'
+    )
+    sink = terraform_block(
+        TERRAFORM / "monitoring.tf", 'resource "google_logging_project_sink" "security"'
+    )
+    configuration = "".join(text(path) for path in TERRAFORM.glob("*.tf"))
+
+    assert "project = var.project_id location = var.region" in bucket
+    assert "retention_days = 365" in bucket
+    assert "locked" not in bucket
+    assert (
+        'destination = "logging.googleapis.com/projects/${var.project_id}/locations/'
+        "${google_logging_project_bucket_config.security.location}/buckets/"
+        '${google_logging_project_bucket_config.security.bucket_id}"'
+    ) in sink
+    assert "exclusions" not in sink
+    assert "_Default" not in configuration
+    assert "writer_identity" not in configuration
 
 
 def test_origin_firewall_admits_exactly_the_gateway_trusted_ipv4_ranges() -> None:
@@ -614,7 +773,7 @@ def test_the_host_copies_daily_backups_only_when_the_daily_tier_keeps_them() -> 
         "}, { for key, value in { daily_backups = true } : key => value if var.backup_daily_tier })"
     ) in main
     assert backup.DAILY_PREFIX == "daily/"
-    assert 'config.get("daily_backups") is True' in text(DEPLOY / "backup.py")
+    assert 'config.get("daily_backups", False)' in text(DEPLOY / "backup.py")
 
 
 def test_watchdog_unit_outlasts_its_deadline_and_runs_while_a_release_is_blocked() -> None:
@@ -673,7 +832,7 @@ def test_host_paths_agree_between_scripts_units_and_helpers() -> None:
     assert application["UMask"] == "0077"
     assert f"['/usr/bin/flock', '{lock}', " in harness
     assert "/run/lock" not in installer + harness + template
-    assert f"touch {blocked}" in installer
+    assert f"mv -T {blocked}.next {blocked}" in installer
     assert application["ConditionPathExists"] == f"!{blocked}"
     for name in (
         "pyracast-backup.service",
@@ -791,10 +950,34 @@ def test_a_silent_watchdog_is_alerted() -> None:
 
     assert metric
     assert r"jsonPayload.event=\"pyracast_watchdog_heartbeat\"" in metric[1]
+    assert '"NOT jsonPayload.test=true"' in metric[1]
     assert policy
     assert "condition_absent" in policy[1]
     assert "google_logging_metric.watchdog_heartbeat.name" in policy[1]
     assert "pyracast_watchdog_heartbeat" in reported_events()["INFO"]
+
+
+def test_a_service_restarted_three_times_within_an_hour_is_alerted() -> None:
+    metric = terraform_block(
+        TERRAFORM / "monitoring.tf", 'resource "google_logging_metric" "runtime_restarts"'
+    )
+    policy = terraform_block(
+        TERRAFORM / "monitoring.tf", 'resource "google_monitoring_alert_policy" "runtime_restarts"'
+    )
+
+    assert r'"jsonPayload.event=\"pyracast_runtime_restarted\""' in metric
+    assert '"NOT jsonPayload.test=true"' in metric
+    assert "google_logging_metric.runtime_restarts.name" in policy
+    # The window's length follows from this name: see the test of alerts on counts of log lines.
+    assert 'display_name = "Three watchdog restarts within one hour"' in policy
+    assert re.search(
+        r'comparison = "COMPARISON_GT" threshold_value = 2 duration = "60s" '
+        r'evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE" aggregations \{ '
+        r'alignment_period = "\d+s" per_series_aligner = "ALIGN_SUM" '
+        r'cross_series_reducer = "REDUCE_SUM" \}',
+        policy,
+    )
+    assert "pyracast_runtime_restarted" in reported_events()["WARNING"]
 
 
 def test_release_drains_producers_and_workers_while_the_site_still_serves() -> None:
@@ -1094,6 +1277,22 @@ def test_a_failure_before_migrate_resumes_the_previous_release() -> None:
     assert script.rindex("recorded=1", 0, migrate) > script.index('"${compose[@]}" up -d rabbitmq')
     assert re.findall(r"recorded=\d", script) == ["recorded=0", "recorded=1"]
     assert "if [[ -e /var/lib/pyracast/release-blocked ]]; then blocked_before=1; fi" in script
+
+
+def test_only_the_attempt_that_creates_the_marker_records_when_the_block_began() -> None:
+    body = installer().split("begin_maintenance() {\n", 1)[1].split("\n}\n", 1)[0]
+    created = body.index("if [[ ! -e /var/lib/pyracast/release-blocked ]]; then\n")
+    recorded = body.index(
+        """printf '{"revision": "%s", "started_at": "%s"}\\n' "$revision" """
+        '"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'
+    )
+    replaced = body.index(
+        "mv -T /var/lib/pyracast/release-blocked.next /var/lib/pyracast/release-blocked"
+    )
+
+    assert "touch" not in body
+    assert created < recorded < replaced < body.index("  fi\n")
+    assert body.endswith("  sync -f /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast")
 
 
 def test_pruning_runs_after_promotion_and_never_fails_the_release() -> None:
