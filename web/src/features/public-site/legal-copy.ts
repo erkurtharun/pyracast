@@ -38,7 +38,7 @@ function privacyEnglish(operator: PublicOperator): LegalContent {
         kind: "privacy",
         title: "Privacy policy",
         intro: "How Pyracast handles your account and solar forecasting data.",
-        updated: "2026-11-15",
+        updated: "2026-11-21",
         sections: [
             {
                 id: "operator",
@@ -101,8 +101,8 @@ function privacyEnglish(operator: PublicOperator): LegalContent {
                 id: "retention",
                 title: "Retention and deletion",
                 paragraphs: [
-                    "Records are kept as needed for the service, shared workspaces, security and legal obligations. Deleted plants and locations have a 30-day restore period; backups are configured to expire after seven days. Cleanup is not immediate across all copies.",
-                    `Request account deletion at ${operator.email}. We may verify identity and workspace ownership. Removing membership or connections preserves shared records. We explain any required retention.`,
+                    "Records are kept as needed for the service, shared workspaces, security and legal obligations, within these limits: sign-in sessions are removed when they expire; a sign-up that was never completed is removed after 7 days; copies of outgoing mail are removed 7 days after they are sent or fail; invitations are removed 90 days after they are accepted, cancelled or expire; the text of reminder messages is cleared after 90 days; security records are kept for up to 365 days. Deleted plants and locations have a 30-day restore period. Backups are configured to expire after seven days; data removed from the live system remains in backups until they expire.",
+                    `Request account erasure at ${operator.email}. We may verify identity and workspace ownership. Erasure anonymizes the account: its sign-in details, name, addresses, two-factor authentication, connected sign-ins, sessions, memberships and preferences are removed, as are the invitations, mail and reminder recipient entries that name its addresses. Records shared with a workspace and the audit trail remain, linked only to the anonymized account. Removing membership or connections preserves shared records. We explain any required retention.`,
                 ],
             },
             {
@@ -122,7 +122,7 @@ function privacyTurkish(operator: PublicOperator): LegalContent {
         kind: "privacy",
         title: "Gizlilik politikası",
         intro: "Pyracast hesap bilgilerinizi ve güneş enerjisi tahmin verilerini nasıl işler?",
-        updated: "2026-11-15",
+        updated: "2026-11-21",
         sections: [
             {
                 id: "operator",
@@ -185,8 +185,8 @@ function privacyTurkish(operator: PublicOperator): LegalContent {
                 id: "retention",
                 title: "Saklama ve silme",
                 paragraphs: [
-                    "Kayıtlar; hizmet, paylaşılan çalışma alanları, güvenlik ve hukuki yükümlülükler için gerektiği sürece saklanır. Silinen santral ve konumlar 30 gün içinde geri yüklenebilir; yedekler yedi gün sonra temizlenecek şekilde ayarlanır. Tüm kopyalardan silme anında gerçekleşmez.",
-                    `Hesap silme talebinizi ${operator.email} adresine iletin. Kimliğinizi ve çalışma alanı sahipliğini doğrulamamız gerekebilir. Üyeliği veya bağlantıları kaldırmak ortak kayıtları silmez. Saklanması gereken bilgilerin nedenlerini açıklarız.`,
+                    "Kayıtlar; hizmet, paylaşılan çalışma alanları, güvenlik ve hukuki yükümlülükler için gerektiği sürece ve şu sınırlar içinde saklanır: giriş oturumları süresi dolduğunda silinir; tamamlanmamış hesap kayıtları 7 gün sonra silinir; giden e-postaların kopyaları gönderildikten veya gönderilemedikten 7 gün sonra silinir; davetler kabul edildikten, iptal edildikten veya süresi dolduktan 90 gün sonra silinir; hatırlatma mesajlarının metni 90 gün sonra silinir; güvenlik kayıtları en fazla 365 gün saklanır. Silinen santral ve konumlar 30 gün içinde geri yüklenebilir. Yedekler yedi gün sonra temizlenecek şekilde ayarlanır; canlı sistemden silinen veriler yedeklerin süresi dolana kadar yedeklerde kalır.",
+                    `Hesabınızın anonim hale getirilmesi talebinizi ${operator.email} adresine iletin. Kimliğinizi ve çalışma alanı sahipliğini doğrulamamız gerekebilir. Anonim hale getirmede hesabın giriş bilgileri, adı, adresleri, iki adımlı doğrulaması, bağlı giriş hesapları, oturumları, üyelikleri ve tercihleri; bu adresleri içeren davetler, e-postalar ve hatırlatma alıcısı kayıtları da silinir. Çalışma alanıyla paylaşılan kayıtlar ve denetim kayıtları yalnızca anonim hale getirilmiş hesaba bağlı olarak kalır. Üyeliği veya bağlantıları kaldırmak ortak kayıtları silmez. Saklanması gereken bilgilerin nedenlerini açıklarız.`,
                 ],
             },
             {
@@ -206,7 +206,7 @@ function termsEnglish(operator: PublicOperator): LegalContent {
         kind: "terms",
         title: "Terms of use",
         intro: "Using Pyracast and understanding its solar forecasts.",
-        updated: "2026-11-15",
+        updated: "2026-11-21",
         sections: [
             {
                 id: "service",
@@ -229,7 +229,7 @@ function termsEnglish(operator: PublicOperator): LegalContent {
                 title: "Accounts and workspaces",
                 paragraphs: [
                     "Protect your sign-in methods and promptly report suspected unauthorized access. Workspace administrators manage membership, shared settings and reminder recipients. Only add recipients authorized to receive the messages and plant information.",
-                    "Removing a member preserves shared records. Manage security and notifications in the application; contact us to request account deletion.",
+                    "Removing a member preserves shared records. Manage security and notifications in the application; contact us to request account erasure.",
                 ],
             },
             {
@@ -257,7 +257,7 @@ function termsTurkish(operator: PublicOperator): LegalContent {
         kind: "terms",
         title: "Kullanım koşulları",
         intro: "Pyracast kullanımı ve güneş enerjisi tahminlerinin değerlendirilmesi.",
-        updated: "2026-11-15",
+        updated: "2026-11-21",
         sections: [
             {
                 id: "service",
@@ -280,7 +280,7 @@ function termsTurkish(operator: PublicOperator): LegalContent {
                 title: "Hesaplar ve çalışma alanları",
                 paragraphs: [
                     "Giriş yöntemlerinizi koruyun; izinsiz erişim şüphenizi gecikmeden bildirin. Çalışma alanı yöneticileri üyelikleri, ortak ayarları ve hatırlatma alıcılarını yönetir. Yalnızca mesajları ve santral bilgilerini almaya yetkili alıcıları ekleyin.",
-                    "Bir üyenin çıkarılması ortak kayıtları silmez. Güvenlik ve bildirim ayarlarını uygulamadan yönetin; hesap silme talepleri için bize ulaşın.",
+                    "Bir üyenin çıkarılması ortak kayıtları silmez. Güvenlik ve bildirim ayarlarını uygulamadan yönetin; hesabınızın anonim hale getirilmesi için bize ulaşın.",
                 ],
             },
             {
