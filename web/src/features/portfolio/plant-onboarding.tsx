@@ -164,15 +164,19 @@ function Wizard({
     const fields = status.kind === "error" ? status.fields : {};
     const holder = status.kind === "error" ? status.holder : null;
     const at = (name: (typeof steps)[number]) => steps.indexOf(name);
+    // Focus only after the commit that shows the step and re-enables its fields.
+    const [focusRequest, setFocusRequest] = useState<{ field?: string }>();
+    useEffect(() => {
+        if (!focusRequest) return;
+        const field = focusRequest.field
+            ? form.current?.elements.namedItem(focusRequest.field)
+            : null;
+        const control = field instanceof RadioNodeList ? field[0] : field;
+        (control instanceof HTMLElement ? control : title.current)?.focus();
+    }, [focusRequest]);
     const move = (next: number, focus?: string) => {
         setStep(next);
-        requestAnimationFrame(() => {
-            const field = focus
-                ? form.current?.elements.namedItem(focus)
-                : null;
-            const control = field instanceof RadioNodeList ? field[0] : field;
-            (control instanceof HTMLElement ? control : title.current)?.focus();
-        });
+        setFocusRequest({ field: focus });
     };
     const advance = () => {
         if (!form.current) return;
