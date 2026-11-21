@@ -1110,6 +1110,7 @@ API_SCOPES = {
 ACTION_SCOPES = {
     "actions/checkout@": ("contents", "read"),
     "google-github-actions/auth@": ("id-token", "write"),
+    "github/codeql-action/analyze@": ("security-events", "write"),
 }
 LEVELS = {"none": 0, "read": 1, "write": 2}
 GITHUB_CALL = re.compile(r"github\.rest\.(\w+\.\w+)")
