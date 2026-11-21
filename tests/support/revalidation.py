@@ -120,11 +120,11 @@ def assert_current_plants_keep_their_forecasts(system: System, moment: datetime)
     assert used(system, moment) + need <= quota, moment
 
 
-def dispatch_round(moment: datetime) -> None:
+def dispatch_round(moment: datetime, provider: HistoricalFixture | None = None) -> None:
     """One dispatcher round as forecasts.runtime runs it, with the worker collecting each job."""
     enqueue_due(moment)
     for job_id in pending_job_ids(moment):
-        collect(job_id, HistoricalFixture(moment), calculate, moment)
+        collect(job_id, provider or HistoricalFixture(moment), calculate, moment)
 
 
 @dataclass(frozen=True)
