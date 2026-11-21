@@ -56,12 +56,27 @@ def latest_forecast_job(binding_id: int, moment: datetime) -> QuerySet[Collectio
     ).order_by("-scheduled_for", "-pk")
 
 
-def armed_again_by_validation(job: CollectionJob, due: datetime | None) -> bool:
-    """A successful validation reopens its binding's latest forecast job refused for the key;
-    one older than the due slot stays ended, as the scheduler opens the due slot instead."""
+def on_the_schedule(job: CollectionJob, timing: ForecastTiming, timezone: str) -> bool:
+    """Claim collects a slot-bound job only at one of the schedule's clocks or as the approval
+    job (jobs.claim._stale_reason)."""
+    clock = job.scheduled_for.astimezone(ZoneInfo(timezone)).strftime("%H:%M")
+    return clock in timing.times or (
+        job.pk == timing.first_job_id and job.scheduled_for >= timing.effective_from
+    )
+
+
+def armed_again_by_validation(
+    job: CollectionJob, timing: ForecastTiming, timezone: str, due: datetime | None
+) -> bool:
+    """A successful validation reopens its binding's latest forecast job refused for the key
+    while the schedule in force still collects it. One from before the schedule took effect (a
+    restore, an edit) stays ended, and so does one older than the due slot, which the scheduler
+    opens instead."""
     return (
         job.status == CollectionJobStatus.FAILED
         and job.last_error == CollectionJobError.PROVIDER_AUTHENTICATION_FAILED
+        and job.scheduled_for >= timing.effective_from
+        and on_the_schedule(job, timing, timezone)
         and (due is None or job.scheduled_for >= due)
     )
 

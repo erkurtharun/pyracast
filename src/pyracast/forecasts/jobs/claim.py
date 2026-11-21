@@ -26,7 +26,12 @@ from pyracast.forecasts.models import (
     CollectionJobStatus,
     CollectionSchedule,
 )
-from pyracast.forecasts.timing import ForecastTiming, forecast_timing, latest_forecast_slot
+from pyracast.forecasts.timing import (
+    ForecastTiming,
+    forecast_timing,
+    latest_forecast_slot,
+    on_the_schedule,
+)
 from pyracast.provider_retry import next_provider_day, next_retry_at
 from pyracast.regions.models import Region
 
@@ -106,19 +111,7 @@ def _stale_reason(
         job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
         and job.target_date == job.scheduled_for.astimezone(ZoneInfo(binding.timezone)).date()
     )
-    clock = job.scheduled_for.astimezone(ZoneInfo(binding.region.timezone)).strftime("%H:%M")
-    # Approval creates one immediate acquisition outside existing clocks.
-    approval_acquisition = (
-        job.endpoint == CollectionEndpoint.FORECASTS
-        and job.scheduled_for >= schedule.effective_from
-        and timing is not None
-        and job.pk == timing.first_job_id
-    )
-    if (
-        slot_bound
-        and clock not in (timing.times if timing is not None else ())
-        and not approval_acquisition
-    ):
+    if slot_bound and (timing is None or not on_the_schedule(job, timing, binding.region.timezone)):
         return CollectionJobError.SLOT_NOT_CONFIGURED
     return None
 

@@ -131,7 +131,9 @@ def _jobs_still_sent(
         ):
             sent.setdefault(due, job)
     latest = latest_forecast_job(binding.pk, now).first()
-    if latest is not None and armed_again_by_validation(latest, due):
+    if latest is not None and armed_again_by_validation(
+        latest, timing, binding.region.timezone, due
+    ):
         sent[latest.scheduled_for] = latest
     return sent
 

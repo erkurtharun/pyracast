@@ -158,15 +158,11 @@ def _record_refusal(binding: SiteBinding) -> None:
 
 def _rearm_after_validation(binding: SiteBinding, region: Region, recovered_at: datetime) -> None:
     timing = forecast_timing(binding, CollectionSchedule.objects.filter(region=region).first())
-    due = (
-        None
-        if timing is None
-        else latest_forecast_slot(
-            recovered_at, region.timezone, timing.times, timing.effective_from
-        )
-    )
+    if timing is None:
+        return
+    due = latest_forecast_slot(recovered_at, region.timezone, timing.times, timing.effective_from)
     latest = latest_forecast_job(binding.pk, recovered_at).select_for_update().first()
-    if latest is not None and armed_again_by_validation(latest, due):
+    if latest is not None and armed_again_by_validation(latest, timing, region.timezone, due):
         latest.status = CollectionJobStatus.PENDING
         latest.available_at = recovered_at
         latest.attempts = 0

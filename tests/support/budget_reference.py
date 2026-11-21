@@ -13,8 +13,9 @@ REOPENS_NOT = {"quota_exhausted", "schedule_disabled"}
 
 def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
     """The forecast budget as computed before collection timing had one function, with the due
-    slot the scheduler opens again, the starts per UTC day claim admits, and no job older than
-    the due slot that claim ends unsent."""
+    slot the scheduler opens again, the starts per UTC day claim admits, no job older than the
+    due slot that claim ends unsent, and a job refused for the key counted only where the
+    current schedule collects it."""
     day_start = datetime.combine(now.astimezone(UTC).date(), datetime.min.time(), UTC)
     day_end = day_start + timedelta(days=1)
     attempted = set(
@@ -99,6 +100,11 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         if (
             latest is not None
             and (latest.status, latest.last_error) == ("failed", "provider_authentication_failed")
+            and latest.scheduled_for >= effective
+            and (
+                latest.pk == first_id
+                or latest.scheduled_for.astimezone(zone).strftime("%H:%M") in clocks
+            )
             and (due is None or latest.scheduled_for >= due)
         ):
             needed[latest.scheduled_for] = latest
