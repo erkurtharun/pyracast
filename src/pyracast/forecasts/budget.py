@@ -28,12 +28,12 @@ def remaining_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         .values_list("job_id", flat=True)
     )
     needed: set[tuple[int, datetime]] = set()
+    # A plant still validated with an earlier key collects again once it is revalidated.
     bindings = SiteBinding.objects.filter(
         active_region("region__"),
         provider_account=account,
         region__approved_binding_id__isnull=False,
         region__status="approved",
-        validated_credential_revision=account.credential_revision,
     ).select_related("region", "provider_account")
     for binding in bindings:
         if binding.region.approved_binding_id != binding.pk:
