@@ -415,10 +415,11 @@ LOGGING = {
         "standard": {"class": "pyracast.log_lines.LineFormatter", "format": LINE_FORMAT}
     },
     "handlers": {
+        # stdout belongs to what a command prints, such as the health check's JSON document.
         "console": {
             "class": "pyracast.log_lines.LineHandler",
             "formatter": "standard",
-            "stream": "ext://sys.stdout",
+            "stream": "ext://sys.stderr",
         },
         "discard": {"class": "logging.NullHandler"},
         "security": (

@@ -471,7 +471,10 @@ fixtures do not establish provider access or inbox delivery.
   cache. Logging is best effort: the API logs in blocking mode, but the gcplogs
   client can still drop entries on overflow or outage; the other containers log
   nonblocking. `pyracast.security` lines, including those of `exec` commands, go to
-  the container stream through `PYRACAST_SECURITY_LOG_PATH`. Every record of the application
+  the container stream through `PYRACAST_SECURITY_LOG_PATH`. The other application records and
+  warnings, and Gunicorn's error records, go to stderr, Gunicorn's access lines to stdout, so a
+  command's stdout carries only what it prints, such as the health check's JSON document that
+  the watchdog reads. Every record of the application
   and of Gunicorn starts one line, `DATE TIME LEVEL LOGGER MESSAGE`, and indents every further
   line (a line break in a message or traceback, or about 4 KiB of UTF-8), so text a request
   carries never starts a line. Each line, at most 4096 bytes with its line break, is written by a
