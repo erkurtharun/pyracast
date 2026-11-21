@@ -24,7 +24,10 @@ from pyracast.accounts.models import (
     WorkspaceInvitation,
     WorkspaceRole,
 )
-from pyracast.accounts.operations import reassign_workspace_admin
+from pyracast.accounts.operations import (
+    invitations_closed_by_reassignment,
+    reassign_workspace_admin,
+)
 from pyracast.errors import ConflictError, ErrorCode
 from pyracast.plants.automation import automated_plants
 from pyracast.plants.models import Plant
@@ -222,7 +225,9 @@ def reassignment_impact(tenant: Tenant) -> dict[str, Any]:
         "administrator": administrator and administrator.user,
         "plants": list(automated_plants(tenant.pk).values_list("name", flat=True)),
         "invitations": list(
-            pending_invitations(tenant.pk).order_by("email").values_list("email", flat=True)
+            invitations_closed_by_reassignment(tenant.pk, timezone.now())
+            .order_by("email")
+            .values_list("email", flat=True)
         ),
     }
 
