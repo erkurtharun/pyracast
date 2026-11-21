@@ -1,5 +1,12 @@
 import { test, expect, type Page } from "./support/test";
-import { mockApi, paged, plant, region, user } from "./support/workspace";
+import {
+    answer,
+    mockApi,
+    paged,
+    plant,
+    region,
+    user,
+} from "./support/workspace";
 import type { components } from "../src/lib/schema";
 
 type Schedule = components["schemas"]["CollectionScheduleOutput"];
@@ -46,20 +53,25 @@ async function openCollection(
     await page.route(
         (url) => url.pathname === "/api/tenants/1/regions/",
         (route) =>
-            route.fulfill({ json: paged([{ ...region, status, plant }]) }),
+            route.fulfill({
+                json: answer(
+                    "PaginatedSiteOutputList",
+                    paged([{ ...region, status, plant, reminder: null }]),
+                ),
+            }),
     );
     if (language === "tr")
         await page.route("**/api/session/", (route) =>
             route.fulfill({
-                json: {
+                json: answer("SessionOutput", {
                     user: { ...user, language_preference: "tr" },
                     csrf_token: "signed-token",
                     language: "tr",
-                },
+                }),
             }),
         );
     await page.route("**/collection-schedule/", (route) =>
-        route.fulfill({ json: data }),
+        route.fulfill({ json: answer("CollectionScheduleOutput", data) }),
     );
     await page.goto("/app/");
     const labels = navigation[language];
