@@ -10,12 +10,13 @@ from django.urls import reverse
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.connections.models import SiteBinding
 from pyracast.errors import ConflictError
 from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import ReviewDecision, approve_region, review_snapshot
 from pyracast.plants.models import PlantSubmission
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
-from pyracast.regions.operations import submit_region
+from pyracast.regions.operations import configure_binding, submit_region
 from tests.support.admin_setup import admin_system, submitted_plant
 from tests.support.api import verified_admin
 from tests.support.concurrency import behind_open_transaction
@@ -476,3 +477,28 @@ def test_a_rolled_back_resubmission_leaves_the_plant_rejected() -> None:
 
     assert status_of(system.region) == RegionStatus.REJECTED
     assert not AuditEvent.objects.filter(action=AuditAction.REGION_RESUBMITTED).exists()
+
+
+def test_a_resubmitted_plant_whose_revision_moves_keeps_no_earlier_approved_binding() -> None:
+    system = make_system(approved=True)
+    # The schema admits a rejected row that still names an approved binding.
+    Region.objects.filter(pk=system.region.pk).update(status=RegionStatus.REJECTED)
+
+    assert resubmit(system.member, system) is True
+    resubmitted = Region.objects.get(pk=system.region.pk)
+    replacement = configure_binding(
+        system.admin,
+        system.region.pk,
+        provider_account_id=system.account.pk,
+        site_id="replacement",
+        capacity_kw=1,
+        capacity_semantics_verified=True,
+    )
+    moved = Region.objects.get(pk=system.region.pk)
+
+    assert (resubmitted.status, resubmitted.approved_binding_id) == (RegionStatus.PENDING, None)
+    assert (moved.revision, replacement.region_revision) == (resubmitted.revision + 1,) * 2
+    assert (moved.status, moved.approved_binding_id) == (RegionStatus.PENDING, None)
+    with pytest.raises(SiteBinding.DoesNotExist):
+        approve_region(system.admin, system.region.pk, system.binding.pk, timezone.now())
+    assert status_of(system.region) == RegionStatus.PENDING
