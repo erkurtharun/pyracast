@@ -1,21 +1,32 @@
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.budget import remaining_forecast_requests
-from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
-from pyracast.forecasts.quota import ForecastBudgetReservedError
+from pyracast.forecasts.models import (
+    CollectionJob,
+    CollectionSchedule,
+    RequestAttempt,
+    RequestPurpose,
+)
+from pyracast.forecasts.quota import ForecastBudgetReservedError, reserve_request
 from pyracast.forecasts.revalidation import RevalidationOutcome, revalidate_account
+from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import approve_region
 from pyracast.platform_admin.provider_accounts import account_context
 from pyracast.regions.operations import configure_binding, submit_region
 from tests.support.domain import NOW, FakeAdapter, System, make_system, provider_key
+from tests.support.jobs import calculate, collect
 from tests.support.providers import replace_key
+from tests.support.revalidation import collecting_account, spend_until, used, utc
 
 pytestmark = pytest.mark.django_db(transaction=True)
 NEXT_UTC_DAY = datetime.combine(NOW.date() + timedelta(days=1), datetime.min.time(), UTC)
+DAY = NEXT_UTC_DAY.date()
 
 
 def collecting_system() -> System:
@@ -125,6 +136,106 @@ def test_revalidating_a_collecting_plant_spends_what_the_forecasts_leave() -> No
 
     system.binding.refresh_from_db()
     assert system.binding.validated_credential_revision == 2
+
+
+def rejected() -> None:
+    raise ProviderError("provider_request_failed", status_code=401, retryable=False)
+
+
+def waiting_plant_with_slots_to_come() -> tuple[System, SiteBinding, datetime]:
+    system, (current, _waiting) = collecting_account([["16:00"], ["15:00"]])
+    validate_binding(system.admin, current.pk, FakeAdapter(), utc(DAY, 10))
+    return system, current, utc(DAY, 11)
+
+
+def waiting_plant_whose_slot_passed() -> tuple[System, SiteBinding, datetime]:
+    system, (current, _waiting) = collecting_account([["16:00"], ["15:00"]])
+    validate_binding(system.admin, current.pk, FakeAdapter(), utc(DAY, 10))
+    return system, current, utc(DAY, 12, 30)
+
+
+def waiting_plant_with_a_job_ended_as_not_current() -> tuple[System, SiteBinding, datetime]:
+    system, (current, waiting) = collecting_account([["16:00"], ["15:00"]], replaced=False)
+    enqueue_due(utc(DAY, 12))
+    job = CollectionJob.objects.get(
+        binding=waiting, endpoint="forecasts", scheduled_for=utc(DAY, 12)
+    )
+    replace_key(system.admin, system.account.pk, provider_key("NEW"))
+    validate_binding(system.admin, current.pk, FakeAdapter(), utc(DAY, 12, 5))
+    assert not collect(job.pk, FakeAdapter(), calculate, utc(DAY, 12, 10))
+    job.refresh_from_db()
+    assert (job.status, job.last_error) == ("stale", "binding_not_current")
+    return system, current, utc(DAY, 12, 30)
+
+
+def waiting_plant_with_a_job_its_validation_arms_again() -> tuple[System, SiteBinding, datetime]:
+    system, (current, waiting) = collecting_account([["16:00"], ["15:00"]], replaced=False)
+    enqueue_due(utc(DAY, 12))
+    job = CollectionJob.objects.get(
+        binding=waiting, endpoint="forecasts", scheduled_for=utc(DAY, 12)
+    )
+    assert not collect(job.pk, FakeAdapter(rejected), calculate, utc(DAY, 12))
+    job.refresh_from_db()
+    assert (job.status, job.last_error) == ("failed", "provider_authentication_failed")
+    replace_key(system.admin, system.account.pk, provider_key("NEW"))
+    validate_binding(system.admin, current.pk, FakeAdapter(), utc(DAY, 12, 5))
+    return system, current, utc(DAY, 12, 30)
+
+
+@pytest.mark.parametrize(
+    "arrange",
+    [
+        waiting_plant_with_slots_to_come,
+        waiting_plant_whose_slot_passed,
+        waiting_plant_with_a_job_ended_as_not_current,
+        waiting_plant_with_a_job_its_validation_arms_again,
+    ],
+)
+def test_a_history_request_leaves_the_forecast_a_waiting_plant_needs_once_revalidated(
+    arrange: Callable[[], tuple[System, SiteBinding, datetime]],
+) -> None:
+    system, current, moment = arrange()
+    spend_until(system, moment, 8)
+    history = history_job(current, moment)
+
+    assert remaining_forecast_requests(account(system), moment) == 2
+    with pytest.raises(ForecastBudgetReservedError):
+        reserve_request(current, moment, purpose=RequestPurpose.ESTIMATED_ACTUALS, job=history)
+
+    assert used(system, moment) == 8
+
+
+def history_job(binding: SiteBinding, moment: datetime) -> CollectionJob:
+    return CollectionJob.objects.create(
+        binding=binding,
+        endpoint="estimated_actuals",
+        scheduled_for=moment,
+        target_date=moment.date(),
+        available_at=moment,
+        retry_until=moment + timedelta(hours=1),
+    )
+
+
+def test_the_due_slot_of_a_current_plant_is_kept_before_its_job_is_created() -> None:
+    system, (current, waiting) = collecting_account([["16:00"], ["15:00"]])
+    CollectionSchedule.objects.filter(region_id=waiting.region_id).update(enabled=False)
+    validate_binding(system.admin, current.pk, FakeAdapter(), utc(DAY, 10))
+    moment = utc(DAY, 13, 5)
+    spend_until(system, moment, 9)
+
+    assert not CollectionJob.objects.filter(binding=current, scheduled_for=utc(DAY, 13)).exists()
+    assert remaining_forecast_requests(account(system), moment) == 1
+    with pytest.raises(ForecastBudgetReservedError):
+        reserve_request(
+            current,
+            moment,
+            purpose=RequestPurpose.ESTIMATED_ACTUALS,
+            job=history_job(current, moment),
+        )
+    with pytest.raises(ForecastBudgetReservedError):
+        validate_binding(system.admin, waiting.pk, FakeAdapter(), moment)
+
+    assert used(system, moment) == 9
 
 
 def test_the_first_validation_of_a_waiting_plant_is_not_held_back_by_the_reserve() -> None:
