@@ -17,6 +17,8 @@ RELEASE_START_JOB = "Start the release of a proven merge"
 TESTED_TREE_JOB = "Record the tested tree"
 SONAR_JOB = "Sonar quality gate"
 CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
+FACTS_FILE = "release-facts.json"
+DEPLOYMENTS_FILE = "release-deployments.json"
 RELEASED_EVENTS = frozenset({"push", "workflow_dispatch"})
 # What the workflows execute or read to reach a verdict, beyond product and test code.
 PIPELINE_DIRECTORIES = (".github/", "deploy/", "infra/", "scripts/", "web/eslint/", "web/testing/")
@@ -512,8 +514,15 @@ def _authorize(facts_path: Path, environ: Mapping[str, str], root: Path) -> int:
     return 0
 
 
-def _runner_file(runner_temp: str, requested: Path) -> Path:
-    return Path(runner_temp) / requested.name
+def _runner_file(
+    parser: argparse.ArgumentParser, runner_temp: str | None, requested: Path, name: str
+) -> Path:
+    if runner_temp is None:
+        parser.error("RUNNER_TEMP is required")
+    expected = Path(runner_temp) / name
+    if requested != expected:
+        parser.error(f"only {expected} is read")
+    return expected
 
 
 def _read_records(path: Path | None) -> object:
@@ -580,14 +589,11 @@ def main(
     options = parser.parse_args(arguments)
     runner_temp = environ.get("RUNNER_TEMP")
     if options.command == "authorize":
-        if runner_temp is None:
-            parser.error("RUNNER_TEMP is required")
-        return _authorize(_runner_file(runner_temp, options.facts), environ, root or Path.cwd())
+        facts = _runner_file(parser, runner_temp, options.facts, FACTS_FILE)
+        return _authorize(facts, environ, root or Path.cwd())
     deployments = None
     if options.deployment_lookup == "true" and options.deployments is not None:
-        if runner_temp is None:
-            parser.error("RUNNER_TEMP is required")
-        deployments = _runner_file(runner_temp, options.deployments)
+        deployments = _runner_file(parser, runner_temp, options.deployments, DEPLOYMENTS_FILE)
     return _current(options.main_sha, options.release_sha, environ, deployments, options.since)
 
 

@@ -28,6 +28,7 @@ REPOSITORY = "owner/pyracast"
 FORK = "fork/pyracast"
 WORKFLOW = 41
 STARTED = "2026-11-21T05:00:00Z"
+DEPLOYMENTS = "release-deployments.json"
 BEFORE_RUN = "2026-11-21T04:00:00Z"
 AFTER_START = "2026-11-21T05:10:00Z"
 SECOND_LATER = "2026-11-21T05:10:01Z"
@@ -937,7 +938,7 @@ def run_command(
 def run_main(
     tmp_path: Path, value: dict[str, Any], root: Path | None = None
 ) -> tuple[int, dict[str, str], str]:
-    path = tmp_path / "facts.json"
+    path = tmp_path / "release-facts.json"
     path.write_text(json.dumps(value), encoding="utf-8")
     return run_command(tmp_path, "authorize", str(path), root=root)
 
@@ -1179,7 +1180,7 @@ def test_the_currency_check_refuses_an_unreadable_commit(tmp_path: Path, value: 
 def current_after(
     tmp_path: Path, records: object, since: str = STARTED
 ) -> tuple[int, dict[str, str], str]:
-    deployments = tmp_path / "deployments.json"
+    deployments = tmp_path / DEPLOYMENTS
     deployments.write_text(json.dumps(records), encoding="utf-8")
     arguments = ("--deployments", str(deployments), "--since", since)
     return run_command(tmp_path, "current", MAIN, MAIN, *arguments)
@@ -1238,11 +1239,11 @@ def test_the_serialized_deploy_goes_on_and_says_the_deployments_are_unknown_when
 def test_the_serialized_deploy_goes_on_when_the_deployment_lookup_wrote_nothing(
     tmp_path: Path,
 ) -> None:
-    missing = tmp_path / "absent.json"
-    corrupt = tmp_path / "corrupt.json"
-    corrupt.write_text("{", encoding="utf-8")
+    path = tmp_path / DEPLOYMENTS
 
-    for path in (missing, corrupt):
+    for content in (None, "{"):
+        if content is not None:
+            path.write_text(content, encoding="utf-8")
         status = run_command(
             tmp_path, "current", MAIN, MAIN, "--deployments", str(path), "--since", STARTED
         )
@@ -1260,14 +1261,15 @@ def current_with_lookup(
 def test_a_decision_without_a_deployment_lookup_reports_no_deployment_state(
     tmp_path: Path,
 ) -> None:
-    missing = tmp_path / "absent.json"
-    released = tmp_path / "released.json"
-    released.write_text(json.dumps([deployment()]), encoding="utf-8")
+    path = tmp_path / DEPLOYMENTS
 
-    for path in (missing, released):
+    for content in (None, json.dumps([deployment()])):
+        if content is not None:
+            path.write_text(content, encoding="utf-8")
         assert current_with_lookup(tmp_path, path, "false") == (0, {"current": "true"}, "")
         (tmp_path / "output").unlink()
-    status, outputs, summary = current_with_lookup(tmp_path, missing, "false", main=OLDER)
+    path.unlink()
+    status, outputs, summary = current_with_lookup(tmp_path, path, "false", main=OLDER)
     assert (status, outputs) == (0, {"current": "false"})
     assert summary.startswith("Superseded: ")
 
@@ -1275,16 +1277,15 @@ def test_a_decision_without_a_deployment_lookup_reports_no_deployment_state(
 def test_a_decision_after_an_asked_deployment_lookup_reports_what_it_read(
     tmp_path: Path,
 ) -> None:
-    missing = tmp_path / "absent.json"
-    empty = tmp_path / "empty.json"
-    empty.write_text("[]", encoding="utf-8")
+    path = tmp_path / DEPLOYMENTS
 
-    assert current_with_lookup(tmp_path, missing, "true")[:2] == (
+    assert current_with_lookup(tmp_path, path, "true")[:2] == (
         0,
         {"current": "true", "deployments": "unknown"},
     )
     (tmp_path / "output").unlink()
-    assert current_with_lookup(tmp_path, empty, "true")[:2] == (
+    path.write_text("[]", encoding="utf-8")
+    assert current_with_lookup(tmp_path, path, "true")[:2] == (
         0,
         {"current": "true", "deployments": "read"},
     )
@@ -1295,7 +1296,7 @@ def test_a_decision_refuses_an_unreadable_deployment_lookup_flag(
     tmp_path: Path, lookup: str
 ) -> None:
     with pytest.raises(SystemExit) as refused:
-        current_with_lookup(tmp_path, tmp_path / "absent.json", lookup)
+        current_with_lookup(tmp_path, tmp_path / DEPLOYMENTS, lookup)
 
     assert refused.value.code == 2
 
@@ -1305,35 +1306,45 @@ def test_outside_a_workflow_the_decision_needs_no_step_output_files() -> None:
     assert release_authorization.main(["current", "HEAD", MAIN], {}) == 1
 
 
-def test_a_facts_path_outside_the_runner_temp_directory_is_never_read(tmp_path: Path) -> None:
-    runner = tmp_path / "runner"
-    runner.mkdir()
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    (elsewhere / "facts.json").write_text(json.dumps(facts()), encoding="utf-8")
-
-    with pytest.raises(FileNotFoundError):
-        release_authorization.main(
-            ["authorize", str(elsewhere / "facts.json")], {"RUNNER_TEMP": str(runner)}
-        )
-
-
-def test_the_deployment_records_path_outside_the_runner_temp_directory_is_never_read(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("directory", "name"),
+    [("elsewhere", "release-facts.json"), ("runner", "other.json")],
+)
+def test_the_authorization_refuses_any_file_but_the_runner_temp_facts(
+    tmp_path: Path, directory: str, name: str
 ) -> None:
-    runner = tmp_path / "runner"
-    runner.mkdir()
-    environ = {"RUNNER_TEMP": str(runner), "GITHUB_OUTPUT": str(tmp_path / "output")}
-    elsewhere = tmp_path / "records.json"
-    elsewhere.write_text(json.dumps([deployment()]), encoding="utf-8")
+    (tmp_path / "runner").mkdir()
+    requested = tmp_path / directory / name
+    requested.parent.mkdir(exist_ok=True)
+    requested.write_text(json.dumps(facts()), encoding="utf-8")
+    environ = {"RUNNER_TEMP": str(tmp_path / "runner"), "GITHUB_OUTPUT": str(tmp_path / "output")}
 
-    status = release_authorization.main(
-        ["current", MAIN, MAIN, "--deployments", str(elsewhere), "--since", STARTED], environ
-    )
+    with pytest.raises(SystemExit) as refused:
+        release_authorization.main(["authorize", str(requested)], environ)
 
-    assert status == 0
-    written = (tmp_path / "output").read_text(encoding="utf-8")
-    assert written == "current=true\ndeployments=unknown\n"
+    assert refused.value.code == 2
+    assert not (tmp_path / "output").exists()
+
+
+@pytest.mark.parametrize(
+    ("directory", "name"),
+    [("elsewhere", DEPLOYMENTS), ("runner", "records.json")],
+)
+def test_the_release_decision_refuses_any_deployment_records_but_the_runner_temp_file(
+    tmp_path: Path, directory: str, name: str
+) -> None:
+    (tmp_path / "runner").mkdir()
+    requested = tmp_path / directory / name
+    requested.parent.mkdir(exist_ok=True)
+    requested.write_text(json.dumps([deployment()]), encoding="utf-8")
+    environ = {"RUNNER_TEMP": str(tmp_path / "runner"), "GITHUB_OUTPUT": str(tmp_path / "output")}
+    arguments = ["current", MAIN, MAIN, "--deployments", str(requested), "--since", STARTED]
+
+    with pytest.raises(SystemExit) as refused:
+        release_authorization.main(arguments, environ)
+
+    assert refused.value.code == 2
+    assert not (tmp_path / "output").exists()
 
 
 @pytest.mark.parametrize(
