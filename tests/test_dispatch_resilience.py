@@ -9,10 +9,11 @@ from django.db import OperationalError
 
 from pyracast.background.failures import ItemsFailedError, PhaseOutcome
 from pyracast.forecasts import runtime, scheduler
-from pyracast.forecasts.management.commands import dispatch as command
 from pyracast.forecasts.scheduler import CollectionSchedulingError
+from pyracast.orchestration import dispatcher as command
 from pyracast.shutdown import ShutdownRequest
 from tests.support.domain import make_system
+from tests.support.kinds import stub_actors
 
 
 @pytest.fixture(autouse=True)
@@ -31,14 +32,7 @@ def test_dispatch_failure_does_not_suppress_email_and_one_shot_reports_failure(
 ) -> None:
     broker = MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
-    for factory in (
-        "make_actor",
-        "make_calibration_actor",
-        "make_notification_actor",
-        "make_outbound_mail_actor",
-        "make_epias_actor",
-    ):
-        monkeypatch.setattr(command, factory, MagicMock())
+    stub_actors(monkeypatch)
     monkeypatch.setattr(command, "purge_finished_mail", MagicMock())
     operations = {}
     for name in (
@@ -70,14 +64,7 @@ def test_dispatch_monitoring_failure_does_not_skip_other_phases(
 ) -> None:
     broker = MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
-    for factory in (
-        "make_actor",
-        "make_calibration_actor",
-        "make_notification_actor",
-        "make_outbound_mail_actor",
-        "make_epias_actor",
-    ):
-        monkeypatch.setattr(command, factory, MagicMock())
+    stub_actors(monkeypatch)
     notifications = MagicMock()
     monkeypatch.setattr(command, "dispatch_notifications", notifications)
     for name in (
@@ -101,14 +88,7 @@ def test_dispatch_loop_recovers_after_a_failed_cycle(
 ) -> None:
     broker = MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
-    for factory in (
-        "make_actor",
-        "make_calibration_actor",
-        "make_notification_actor",
-        "make_outbound_mail_actor",
-        "make_epias_actor",
-    ):
-        monkeypatch.setattr(command, factory, MagicMock())
+    stub_actors(monkeypatch)
     for name in (
         "purge_expired",
         "sweep_accounts",
@@ -137,14 +117,7 @@ def test_dispatch_loop_recovers_after_a_failed_cycle(
 
 def mock_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "make_broker", MagicMock())
-    for factory in (
-        "make_actor",
-        "make_calibration_actor",
-        "make_notification_actor",
-        "make_outbound_mail_actor",
-        "make_epias_actor",
-    ):
-        monkeypatch.setattr(command, factory, MagicMock())
+    stub_actors(monkeypatch)
 
 
 def recorded_phases(record: MagicMock) -> dict[str, tuple[str, int | None, int]]:

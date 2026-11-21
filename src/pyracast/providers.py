@@ -16,6 +16,7 @@ from pyracast.connections.contracts import (
     ProviderAdapter,
     ProviderData,
     ProviderError,
+    WindowHistoryAdapter,
 )
 from pyracast.connections.models import SITE_ID_PATTERN, SiteBinding
 from pyracast.connections.secrets import decrypt_api_key
@@ -151,7 +152,7 @@ class FixtureProvider(ProviderAdapter, HistoryAdapter):
         )
 
 
-class SolcastProvider(ProviderAdapter, HistoryAdapter):
+class SolcastProvider(ProviderAdapter, WindowHistoryAdapter):
     def __init__(
         self,
         transport: httpx.BaseTransport | None = None,
@@ -180,12 +181,6 @@ class SolcastProvider(ProviderAdapter, HistoryAdapter):
         end, _ = local_day_bounds(today + timedelta(days=3), binding.timezone)
         hours = max(1, math.ceil((end - now).total_seconds() / 3600))
         return clip_provider_data(self._request(binding, "forecasts", hours), start, end)
-
-    def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
-        now = self.clock()
-        start, _ = local_day_bounds(target_date - timedelta(days=days - 1), binding.timezone)
-        _, end = local_day_bounds(target_date, binding.timezone)
-        return self.fetch_history_window(binding, start, min(end, now), now)
 
     def fetch_history_window(
         self, binding: SiteBinding, start: datetime, end: datetime, now: datetime

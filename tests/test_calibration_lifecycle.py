@@ -5,6 +5,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import OperationalError
 
+from pyracast.background.retry_policy import CALIBRATION
 from pyracast.plants import training
 from pyracast.plants.automation import set_calibration_automation
 from pyracast.plants.management.commands import calibrate_plant
@@ -73,7 +74,7 @@ def test_a_run_failed_at_its_attempt_limit_records_its_reason(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     run = request_run(system, plant)
-    CalibrationRun.objects.filter(pk=run.pk).update(attempts=training.MAX_ATTEMPTS)
+    CalibrationRun.objects.filter(pk=run.pk).update(attempts=CALIBRATION.max_attempts)
 
     assert training.run_calibration(run.pk, NOW) is False
 

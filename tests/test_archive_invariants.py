@@ -15,7 +15,6 @@ from pyracast.accounts.models import Membership
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import SiteBinding
-from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import (
     CollectionJob,
     ForecastSnapshot,
@@ -39,6 +38,7 @@ from tests.support.invariants import (
     superseded_revisions,
     violations,
 )
+from tests.support.jobs import collect
 from tests.support.metering import connected, day_data
 from tests.support.plant_operations import make_plant, saved_actuals
 from tests.support.plant_training import actual_snapshot_for

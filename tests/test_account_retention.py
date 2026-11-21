@@ -28,8 +28,8 @@ from pyracast.accounts.models import (
     WorkspaceRole,
 )
 from pyracast.background import failures
-from pyracast.forecasts.management.commands import dispatch
 from pyracast.forecasts.models import DispatcherStatus
+from pyracast.orchestration import dispatcher as dispatch
 from pyracast.plants.models import Plant
 from pyracast.regions.models import Region
 from pyracast.trash import RETENTION, trash_region

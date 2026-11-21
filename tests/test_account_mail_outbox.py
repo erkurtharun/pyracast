@@ -85,7 +85,7 @@ def request_reset(index: int, email: str) -> Any:
 
 
 def intents() -> list[tuple[str, str]]:
-    from pyracast.notifications.models import OutboundMail
+    from pyracast.accounts.models import OutboundMail
 
     return list(OutboundMail.objects.order_by("pk").values_list("kind", "recipient"))
 
@@ -126,7 +126,7 @@ def test_a_password_reset_request_answers_alike_and_mails_only_from_the_worker(
 
 def test_every_account_notice_is_a_kind_of_outbound_mail() -> None:
     from pyracast.accounts.account_mail import NOTICES
-    from pyracast.notifications.models import OutboundMailKind
+    from pyracast.accounts.models import OutboundMailKind
 
     assert set(NOTICES) - set(OutboundMailKind.values) == set()
 
@@ -134,7 +134,7 @@ def test_every_account_notice_is_a_kind_of_outbound_mail() -> None:
 def test_a_mailed_code_rests_only_sealed_and_is_erased_once_sent(
     transport: type[Transport],
 ) -> None:
-    from pyracast.notifications.models import OutboundMail
+    from pyracast.accounts.models import OutboundMail
     from pyracast.notifications.outbox import unseal_code
 
     user = member()
@@ -160,7 +160,7 @@ def mailed_code(message: EmailMessage) -> str:
 def test_an_uncertain_code_mail_holds_no_code_and_a_new_code_is_mailed_at_once(
     transport: type[Transport],
 ) -> None:
-    from pyracast.notifications.models import OutboundMail
+    from pyracast.accounts.models import OutboundMail
 
     user = member()
     client = visitor(0)
@@ -204,7 +204,7 @@ def end_mails(transport: type[Transport], outcome: str) -> None:
 def test_a_verification_code_whose_mail_failed_or_ended_uncertain_is_asked_again_after_a_minute(
     transport: type[Transport], clock: Clock, outcome: str
 ) -> None:
-    from pyracast.notifications.models import OutboundMail
+    from pyracast.accounts.models import OutboundMail
 
     client = Client(enforce_csrf_checks=True)
     assert signup(client).status_code == 401
@@ -327,7 +327,7 @@ def test_a_second_resend_after_undelivered_codes_answers_alike_with_and_without_
 def test_a_first_resend_after_a_notice_skipped_by_the_anonymous_budget_answers_alike(
     transport: type[Transport], clock: Clock, outcome: str
 ) -> None:
-    from pyracast.notifications.models import OutboundMail
+    from pyracast.accounts.models import OutboundMail
 
     spend_anonymous_budget()
     taken = registered("taken@example.com")
@@ -367,9 +367,9 @@ def store_writes(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_the_worker_writes_no_resend_window_even_when_a_late_refusal_ends_an_uncertain_code(
     transport: type[Transport], clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from pyracast.accounts.models import OutboundMail
     from pyracast.mail.errors import NotSentError
     from pyracast.notifications import outbox
-    from pyracast.notifications.models import OutboundMail
 
     writes = store_writes(monkeypatch)
     client = Client(enforce_csrf_checks=True)
@@ -473,9 +473,9 @@ def test_an_address_change_is_checked_against_the_sessions_authority_before_its_
 def test_a_late_refusal_never_reopens_an_intent_recovered_as_uncertain(
     transport: type[Transport], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from pyracast.accounts.models import OutboundMail
     from pyracast.mail.errors import NotSentError
     from pyracast.notifications import outbox
-    from pyracast.notifications.models import OutboundMail
 
     request_reset(0, member().email)
     mail_id = OutboundMail.objects.get().pk
@@ -496,7 +496,7 @@ def test_a_late_refusal_never_reopens_an_intent_recovered_as_uncertain(
 
 
 def test_an_unsent_code_is_erased_when_it_expires(transport: type[Transport]) -> None:
-    from pyracast.notifications.models import OutboundMail
+    from pyracast.accounts.models import OutboundMail
     from pyracast.notifications.outbox import end_expired_mail
 
     request_reset(0, member().email)
@@ -512,7 +512,7 @@ def test_an_unsent_code_is_erased_when_it_expires(transport: type[Transport]) ->
 
 
 def test_the_database_keeps_codes_out_of_ended_intents_and_their_context() -> None:
-    from pyracast.notifications.models import OutboundMail
+    from pyracast.accounts.models import OutboundMail
 
     request_reset(0, member().email)
     request_reset(1, "absent@example.com")
@@ -587,7 +587,7 @@ def test_concurrent_workers_keep_the_anonymous_budget(transport: type[Transport]
 
 
 def test_a_code_claimed_after_its_expiry_is_skipped_and_erased(transport: type[Transport]) -> None:
-    from pyracast.notifications.models import OutboundMail
+    from pyracast.accounts.models import OutboundMail
     from pyracast.notifications.outbox import send_outbound_mail
 
     request_reset(0, member().email)

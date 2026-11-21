@@ -27,12 +27,11 @@ from pyracast.accounts.login_limits import (
     reserve_address_failure,
     reserve_client_failure,
 )
-from pyracast.accounts.models import Language
+from pyracast.accounts.mail_intents import enqueue_lock_notice, enqueue_mail
+from pyracast.accounts.models import MAIL_CONTEXT_KEYS, Language, OutboundMailKind
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.accounts.social import record_social_refusal
 from pyracast.db import violated_constraint
-from pyracast.notifications.intents import enqueue_lock_notice, enqueue_mail
-from pyracast.notifications.models import MAIL_CONTEXT_KEYS, OutboundMailKind
 
 NOTICE_LIFETIME = timedelta(days=1)
 TOTP_ACTIVATED = "mfa/email/totp_activated"

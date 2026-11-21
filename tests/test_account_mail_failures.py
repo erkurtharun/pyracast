@@ -17,9 +17,8 @@ from django.core.mail import EmailMessage
 from django.core.mail.backends.base import BaseEmailBackend
 from django.test import Client, override_settings
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, OutboundMail, Tenant
 from pyracast.mail.errors import NotSentError
-from pyracast.notifications.models import OutboundMail
 from tests.support.admin_recovery_security import RECOVERY, authenticated_account
 from tests.support.admin_recovery_security import submit as submit_to
 from tests.support.auth_lifecycle import PASSWORD, member, submit

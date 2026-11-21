@@ -231,8 +231,8 @@ def test_a_failing_schedule_is_logged_with_its_origin_and_the_others_are_publish
 def test_a_failing_schedule_leaves_the_mail_publication_and_code_erasure_of_its_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from pyracast.notifications.intents import enqueue_mail
-    from pyracast.notifications.models import OutboundMail, OutboundMailKind
+    from pyracast.accounts.mail_intents import enqueue_mail
+    from pyracast.accounts.models import OutboundMail, OutboundMailKind
 
     system, broken = configured()
     healthy = another_tenant_schedule(system)

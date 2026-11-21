@@ -6,12 +6,13 @@ import httpx
 import pytest
 from django.conf import LazySettings
 
+from pyracast.background import clock as monotonic_clock
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.secrets import encrypt_secret
-from pyracast.forecasts import jobs, runtime
-from pyracast.forecasts.jobs import LEASE_DURATION, collect
+from pyracast.forecasts import runtime
+from pyracast.forecasts.jobs.claim import LEASE_DURATION
 from pyracast.forecasts.models import (
     CollectionJob,
     ForecastResult,
@@ -20,10 +21,12 @@ from pyracast.forecasts.models import (
     SnapshotWeatherError,
 )
 from pyracast.forecasts.sources import snapshot_data
+from pyracast.orchestration.kinds import COLLECTION
 from pyracast.providers import FixtureProvider
 from pyracast.weather import OpenMeteoProvider
 from pyracast.weather_data import WeatherData
 from tests.support.domain import NOW, FakeAdapter, make_system
+from tests.support.jobs import collect
 from tests.support.weather_collection import WeatherFixture
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -84,7 +87,7 @@ def test_interrupted_weather_preserves_hobby_acquisition_and_rejects_stale_attac
     weather = WeatherFixture()
     original = weather.fetch
     elapsed = 0.0
-    monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: elapsed))
+    monkeypatch.setattr(monotonic_clock, "time", SimpleNamespace(monotonic=lambda: elapsed))
     recovery_at = NOW + LEASE_DURATION + timedelta(seconds=1)
 
     def fetch(latitude: float, longitude: float, start: datetime, end: datetime) -> WeatherData:
@@ -207,7 +210,7 @@ def test_runtime_only_enriches_enabled_hobby_forecasts(
         return weather
 
     monkeypatch.setattr(runtime, "OpenMeteoProvider", provider)
-    runtime.deliver(job.pk)
+    COLLECTION.deliver(job.pk)
     snapshot = ForecastSnapshot.objects.get()
     assert (snapshot.weather_payload is not None) is has_weather
     assert weather.calls == int(has_weather)

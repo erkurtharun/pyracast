@@ -110,7 +110,9 @@ def test_forecast_published_during_claim_lock_wait_is_available_to_preparation(
     newer.job.save(update_fields=("scheduled_for",))
     delivery_id = enqueue_due(SLOT)[0]
     clock = [0.0]
-    monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(
+        "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: clock[0])
+    )
 
     def wait_for_lock(*, lock: bool = False) -> int:
         clock[0] = 120

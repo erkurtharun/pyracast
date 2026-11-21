@@ -24,7 +24,7 @@ from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.actuals import select_archived_actual_source
 from pyracast.forecasts.coverage import intervals_cover_day
 from pyracast.forecasts.intraday import native_actual_snapshots
-from pyracast.forecasts.jobs import claim
+from pyracast.forecasts.jobs.claim import claim
 from pyracast.forecasts.management.commands.restore_provider_snapshots import Command
 from pyracast.forecasts.models import (
     CollectionJob,

@@ -8,22 +8,16 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.db import OperationalError, close_old_connections, connection, transaction
 
+from pyracast.background import clock as monotonic_clock
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import rotate_secret
-from pyracast.forecasts import jobs
-from pyracast.forecasts.jobs import (
-    LEASE_DURATION,
-    Failure,
-    Lease,
-    claim,
-    collect,
-    pending_job_ids,
-    persist_snapshot,
-    publish,
-    retry,
-)
+from pyracast.forecasts.jobs import collect as jobs
+from pyracast.forecasts.jobs import publish as publication
+from pyracast.forecasts.jobs.claim import LEASE_DURATION, Failure, Lease, claim, retry
+from pyracast.forecasts.jobs.collect import persist_snapshot
+from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionJobError,
@@ -37,7 +31,7 @@ from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.plants.approval import ReviewDecision, approve_region, decide_review
 from pyracast.regions.models import AuditEvent, Region
 from tests.support.domain import NOW, FakeAdapter, make_system
-from tests.support.jobs import calculate
+from tests.support.jobs import calculate, collect, publish
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -135,7 +129,7 @@ def test_collection_reserves_quota_after_time_spent_claiming(
     make_system(approved=True)
     job = CollectionJob.objects.get()
     clock = [0.0]
-    original_claim = jobs.claim
+    original_claim = claim
 
     def delayed_claim(job_id: int, now: object) -> Lease | None:
         assert isinstance(now, type(NOW))
@@ -143,7 +137,7 @@ def test_collection_reserves_quota_after_time_spent_claiming(
         clock[0] = 2.0
         return lease
 
-    monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(monotonic_clock, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     monkeypatch.setattr(jobs, "claim", delayed_claim)
     before_midnight = NOW.replace(hour=23, minute=59, second=59)
     assert collect(job.pk, FakeAdapter(), calculate, before_midnight)
@@ -191,7 +185,7 @@ def test_quota_retry_after_midnight_waits_for_the_following_utc_day(
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=1)
     reserve_request(system.binding, after_midnight, purpose=RequestPurpose.VALIDATION)
     clock = [0.0]
-    original_claim = jobs.claim
+    original_claim = claim
 
     def delayed_claim(job_id: int, now: datetime) -> Lease | None:
         lease = original_claim(job_id, now)
@@ -201,7 +195,7 @@ def test_quota_retry_after_midnight_waits_for_the_following_utc_day(
     def reject_request() -> None:
         pytest.fail("An exhausted UTC-day budget must prevent provider access")
 
-    monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(monotonic_clock, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     monkeypatch.setattr(jobs, "claim", delayed_claim)
 
     assert not collect(job.pk, FakeAdapter(reject_request), calculate, before_midnight)
@@ -220,7 +214,7 @@ def test_failure_backoff_starts_after_the_failed_operation_finishes(
     make_system(approved=True)
     job = CollectionJob.objects.get()
     clock = [0.0]
-    monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(monotonic_clock, "time", SimpleNamespace(monotonic=lambda: clock[0]))
 
     def fail_provider() -> None:
         if failure == "provider":
@@ -445,7 +439,7 @@ def test_publication_holds_account_lock_against_credential_rotation(
         assert rotation_blocked.wait(timeout=10)
         return current
 
-    monkeypatch.setattr(jobs, "binding_is_current", checked)
+    monkeypatch.setattr(publication, "binding_is_current", checked)
 
     def publish_result() -> bool:
         close_old_connections()
@@ -486,6 +480,6 @@ def test_lease_expiration_includes_time_waiting_for_publication_locks(
     snapshot = persist_snapshot(lease, ProviderData({}, ()), NOW)
     assert snapshot is not None
     ticks = iter([0.0, LEASE_DURATION.total_seconds() + 1])
-    monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    monkeypatch.setattr(monotonic_clock, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
     assert not publish(lease, snapshot, {}, NOW)
     assert not ForecastResult.objects.exists()

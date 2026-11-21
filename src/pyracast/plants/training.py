@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import cast
 from zoneinfo import ZoneInfo
 
@@ -14,8 +14,11 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
+from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS
 from pyracast.background.failures import log_failure
+from pyracast.background.lease import claimable, held, owns
+from pyracast.background.retry_policy import CALIBRATION
 from pyracast.connections.models import ProviderAccount
 from pyracast.plants.automation import attempt_promotion
 from pyracast.plants.calibration_data import build_calibration_dataset, current_source_validation
@@ -46,7 +49,6 @@ from pyracast.plants.preparation import request_preparation
 from pyracast.regions.models import Region
 
 LEASE_DURATION = ACTORS["calibrate_plant"].lease
-MAX_ATTEMPTS = 3
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +81,7 @@ def _supersede_reason(
 
 
 def _claim(run_id: int, now: datetime) -> _Lease | None:
-    started = time.monotonic()
+    clock = Clock(now)
     identity = CalibrationRun.objects.select_related("plant__region").filter(pk=run_id).first()
     if identity is None:
         return None
@@ -90,12 +92,8 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
             return None
         plant = Plant.objects.select_for_update().get(pk=identity.plant_id)
         run = CalibrationRun.objects.select_for_update().get(pk=run_id)
-        now += timedelta(seconds=time.monotonic() - started)
-        if run.status not in OPEN_STATUSES or (
-            run.status == CalibrationStatus.RUNNING
-            and run.lease_expires_at is not None
-            and run.lease_expires_at > now
-        ):
+        now = clock.now()
+        if run.status not in OPEN_STATUSES or held(run, CalibrationStatus.RUNNING, now):
             return None
         configuration = PlantConfiguration.objects.select_related("binding__provider_account").get(
             pk=run.configuration_id
@@ -103,10 +101,10 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
         reason = _supersede_reason(run, configuration, now)
         if reason is not None:
             finish_run(run, CalibrationStatus.SUPERSEDED, now, reason)
-        elif run.attempts >= MAX_ATTEMPTS or run.cutoff_at > now + LEASE_DURATION:
+        elif CALIBRATION.exhausted(run.attempts) or run.cutoff_at > now + LEASE_DURATION:
             error = (
                 CalibrationError.ATTEMPT_LIMIT
-                if run.attempts >= MAX_ATTEMPTS
+                if CALIBRATION.exhausted(run.attempts)
                 else CalibrationError.INVALID_CUTOFF
             )
             logger.warning("calibration_run_failed run=%s reason=%s", run.pk, error)
@@ -128,25 +126,20 @@ def _lock_calibration_records(lease: _Lease) -> tuple[Plant, CalibrationRun]:
 
 
 def _holds_lease(run: CalibrationRun, lease: _Lease, now: datetime) -> bool:
-    if (
-        run.status == CalibrationStatus.RUNNING
-        and run.lease_token == lease.token
-        and run.lease_expires_at is not None
-        and run.lease_expires_at > now
-    ):
+    if owns(run, lease.token, CalibrationStatus.RUNNING, now):
         return True
     logger.warning("calibration_lease_lost run=%s", run.pk)
     return False
 
 
 def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now: datetime) -> bool:
-    started = time.monotonic()
+    clock = Clock(now)
     with transaction.atomic():
         plant, run = _lock_calibration_records(lease)
         ProviderAccount.objects.select_for_update().get(
             pk=lease.configuration.binding.provider_account_id
         )
-        now += timedelta(seconds=time.monotonic() - started)
+        now = clock.now()
         if not _holds_lease(run, lease, now):
             return False
         configuration = PlantConfiguration.objects.select_related("binding__provider_account").get(
@@ -170,13 +163,13 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
 
 
 def _fail(lease: _Lease, now: datetime) -> None:
-    started = time.monotonic()
+    clock = Clock(now)
     with transaction.atomic():
         plant, run = _lock_calibration_records(lease)
-        now += timedelta(seconds=time.monotonic() - started)
+        now = clock.now()
         if not _holds_lease(run, lease, now):
             return
-        if run.attempts < MAX_ATTEMPTS:
+        if not CALIBRATION.exhausted(run.attempts):
             requeue_run(run, CalibrationError.INVALID_CALIBRATION_DATA)
             return
         finish_run(run, CalibrationStatus.FAILED, now, CalibrationError.INVALID_CALIBRATION_DATA)
@@ -184,11 +177,8 @@ def _fail(lease: _Lease, now: datetime) -> None:
 
 
 def run_calibration(run_id: int, now: datetime | None = None) -> bool:
-    start = time.monotonic()
-    now = timezone.now() if now is None else now
-    if now.utcoffset() is None:
-        raise ValidationError("An aware timestamp is required.")
-    lease = _claim(run_id, now)
+    clock = Clock(timezone.now() if now is None else now)
+    lease = _claim(run_id, clock.entered)
     if lease is None:
         return False
     try:
@@ -227,9 +217,7 @@ def run_calibration(run_id: int, now: datetime | None = None) -> bool:
             day < declared_day
             for day in cast(list[str], result.report.get("included_day_dates", []))
         )
-        return _publish(
-            lease, result, dataset.manifest, now + timedelta(seconds=time.monotonic() - start)
-        )
+        return _publish(lease, result, dataset.manifest, clock.now())
     except (ValueError, ArithmeticError, TypeError, KeyError) as error:
         log_failure(
             logger,
@@ -238,7 +226,7 @@ def run_calibration(run_id: int, now: datetime | None = None) -> bool:
             run=run_id,
             attempt=lease.run.attempts,
         )
-        _fail(lease, now + timedelta(seconds=time.monotonic() - start))
+        _fail(lease, clock.now())
         return False
 
 
@@ -248,8 +236,7 @@ def pending_calibration_ids(now: datetime, limit: int = 100) -> list[int]:
     return list(
         CalibrationRun.objects.filter(
             active_plant("plant__"),
-            Q(status=CalibrationStatus.PENDING)
-            | Q(status=CalibrationStatus.RUNNING, lease_expires_at__lte=now),
+            Q(status=CalibrationStatus.PENDING) | claimable(CalibrationStatus.RUNNING, now),
         )
         .order_by("created_at", "pk")
         .values_list("pk", flat=True)[:limit]

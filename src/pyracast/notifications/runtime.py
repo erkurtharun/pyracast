@@ -3,11 +3,9 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import partial
 
-import dramatiq
-from django.db import close_old_connections, connections
-from dramatiq import Actor, Broker
+from dramatiq import Actor
 
-from pyracast.background.deadlines import time_limit_ms
+from pyracast.background.actor import fresh_connections
 from pyracast.background.failures import ItemsFailedError, publish_after, queue_full
 from pyracast.notifications.jobs import pending_notification_ids, process_notification
 from pyracast.notifications.outbox import end_expired_mail, publish_due_mail, send_outbound_mail
@@ -16,40 +14,14 @@ from pyracast.notifications.scheduler import enqueue_due
 logger = logging.getLogger(__name__)
 
 
+@fresh_connections
 def deliver_notification(delivery_id: int) -> None:
-    close_old_connections()
-    try:
-        process_notification(delivery_id, datetime.now(UTC))
-    finally:
-        connections.close_all()
+    process_notification(delivery_id, datetime.now(UTC))
 
 
+@fresh_connections
 def deliver_outbound_mail(mail_id: int) -> None:
-    close_old_connections()
-    try:
-        send_outbound_mail(mail_id, datetime.now(UTC))
-    finally:
-        connections.close_all()
-
-
-def make_notification_actor(broker: Broker) -> Actor[[int], None]:
-    return dramatiq.actor(
-        broker=broker,
-        actor_name="send_forecast_reminder",
-        queue_name="notifications",
-        max_retries=0,
-        time_limit=time_limit_ms("send_forecast_reminder"),
-    )(deliver_notification)
-
-
-def make_outbound_mail_actor(broker: Broker) -> Actor[[int], None]:
-    return dramatiq.actor(
-        broker=broker,
-        actor_name="send_outbound_mail",
-        queue_name="notifications",
-        max_retries=0,
-        time_limit=time_limit_ms("send_outbound_mail"),
-    )(deliver_outbound_mail)
+    send_outbound_mail(mail_id, datetime.now(UTC))
 
 
 def publish_outbound_mail(actor: Actor[[int], None], now: datetime | None = None) -> int:

@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     "pyracast.notifications",
     "pyracast.metering",
     "pyracast.change_requests",
+    "pyracast.orchestration",
 ]
 MIDDLEWARE = [
     "pyracast.proxy.TrustedProxyHeaders",

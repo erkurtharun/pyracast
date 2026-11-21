@@ -4,7 +4,23 @@ from typing import Self
 from django.conf import settings
 from django.db import models
 
-from pyracast.db import choices_check
+from pyracast.db import choices_check, json_shape_check, lease_check
+from pyracast.mail.errors import MailFailure
+
+# Template values an outbound mail may keep: strings only, never a code, key or link.
+MAIL_CONTEXT_KEYS = (
+    "from_email",
+    "to_email",
+    "deleted_email",
+    "provider",
+    "timestamp",
+    "ip",
+    "user_agent",
+)
+CONTEXT_ITEMS = (
+    'strict $.keyvalue() ? (@.value.type() != "string"'
+    f' || !(@.key like_regex "^({"|".join(MAIL_CONTEXT_KEYS)})$"))'
+)
 
 
 class Language(models.TextChoices):
@@ -199,3 +215,136 @@ class UserLanguagePreference(models.Model):
 
     class Meta:
         constraints = (choices_check("language", Language),)
+
+
+class OutboundMailKind(models.TextChoices):
+    WORKSPACE_INVITATION = "workspace_invitation", "Workspace invitation"
+    EMAIL_CONFIRMATION_SIGNUP = "account/email/email_confirmation_signup", "Sign-up code"
+    EMAIL_CONFIRMATION = "account/email/email_confirmation", "Verification code"
+    PASSWORD_RESET_CODE = "account/email/password_reset_code", "Password reset code"
+    LOGIN_CODE = "account/email/login_code", "Confirmation code"
+    PASSWORD_CHANGED = "account/email/password_changed", "Password changed"
+    PASSWORD_SET = "account/email/password_set", "Password set"
+    PASSWORD_RESET = "account/email/password_reset", "Password reset"
+    EMAIL_CHANGED = "account/email/email_changed", "Email address changed"
+    EMAIL_CONFIRM = "account/email/email_confirm", "Email address verified"
+    EMAIL_DELETED = "account/email/email_deleted", "Email address removed"
+    TOTP_ACTIVATED = "mfa/email/totp_activated", "Two-factor authentication on"
+    TOTP_DEACTIVATED = "mfa/email/totp_deactivated", "Two-factor authentication off"
+    SECOND_FACTOR_RESET = "account/email/second_factor_reset", "Second factor reset"
+    RECOVERY_CODES_GENERATED = "mfa/email/recovery_codes_generated", "Recovery codes generated"
+    ACCOUNT_CONNECTED = "socialaccount/email/account_connected", "Sign-in provider connected"
+    ACCOUNT_DISCONNECTED = (
+        "socialaccount/email/account_disconnected",
+        "Sign-in provider disconnected",
+    )
+    UNKNOWN_ACCOUNT = "account/email/unknown_account", "Account not found"
+    ACCOUNT_ALREADY_EXISTS = "account/email/account_already_exists", "Account already exists"
+    LOGIN_LOCKED = "account/email/login_locked", "Password sign-in paused"
+
+
+CODED_MAIL = (
+    OutboundMailKind.EMAIL_CONFIRMATION_SIGNUP,
+    OutboundMailKind.EMAIL_CONFIRMATION,
+    OutboundMailKind.PASSWORD_RESET_CODE,
+    OutboundMailKind.LOGIN_CODE,
+)
+# Anyone can trigger these for any address, so the worker sends them within one shared budget.
+ANONYMOUS_MAIL = (OutboundMailKind.UNKNOWN_ACCOUNT, OutboundMailKind.ACCOUNT_ALREADY_EXISTS)
+
+
+class OutboundMailStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    RETRY = "retry", "Retry"
+    SENDING = "sending", "Sending"
+    SENT = "sent", "Sent"
+    FAILED = "failed", "Failed"
+    UNCERTAIN = "uncertain", "Uncertain"
+    SKIPPED = "skipped", "Skipped"
+
+
+OPEN_MAIL = (OutboundMailStatus.PENDING, OutboundMailStatus.RETRY, OutboundMailStatus.SENDING)
+
+
+class OutboundMailError(models.TextChoices):
+    EXPIRED = "expired", "Expired before sending"
+    BUDGET_EXHAUSTED = "budget_exhausted", "Hourly budget exhausted"
+    INVITATION_UNAVAILABLE = "invitation_unavailable", "Invitation closed"
+    NO_ACCOUNT = "no_account", "No account"
+    INTERRUPTED_SEND = "interrupted_send", "Interrupted during sending"
+    INTERRUPTED_CONNECTION = "interrupted_connection", "Interrupted before sending"
+    MAIL_NOT_SENT = MailFailure.NOT_SENT, "Mail not sent"
+    MAIL_CONFIGURATION_INVALID = MailFailure.CONFIGURATION_INVALID, "Mail configuration invalid"
+    MAIL_CREDENTIALS_REJECTED = MailFailure.CREDENTIALS_REJECTED, "Mail credentials rejected"
+    MAIL_AUTHORIZATION_REVOKED = MailFailure.AUTHORIZATION_REVOKED, "Mail authorization revoked"
+    MAIL_RATE_LIMITED = MailFailure.RATE_LIMITED, "Mail rate limited"
+    MAIL_REJECTED = MailFailure.REJECTED, "Mail rejected"
+    MAIL_SENDER_FORBIDDEN = MailFailure.SENDER_FORBIDDEN, "Mail sender forbidden"
+    MAIL_PREPARATION_FAILED = MailFailure.PREPARATION_FAILED, "Mail preparation failed"
+    MAIL_OUTCOME_UNCERTAIN = MailFailure.OUTCOME_UNCERTAIN, "Mail outcome uncertain"
+
+
+class OutboundMail(models.Model):
+    kind = models.CharField(max_length=48, choices=OutboundMailKind)
+    # The address the request named; the daily-lock notice goes to its account's primary one.
+    # As long as the account inputs accept (Django's `EmailValidator`), longer than an account's.
+    recipient = models.EmailField(max_length=320)
+    invitation = models.ForeignKey(WorkspaceInvitation, on_delete=models.CASCADE, null=True)
+    language = models.CharField(max_length=2, choices=Language)
+    # Set when no signed-in account asked for the mail: the worker then uses the language of the
+    # address's account, so the request never looks the account up.
+    owner_language = models.BooleanField(default=False)
+    context = models.JSONField(default=dict)
+    # A one-time code sealed by `accounts.mail_intents.seal_code`; erased when the intent ends.
+    sealed_code = models.TextField(blank=True, default="")
+    status = models.CharField(
+        max_length=9, choices=OutboundMailStatus, default=OutboundMailStatus.PENDING
+    )
+    created_at = models.DateTimeField()
+    available_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    published_at = models.DateTimeField(null=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    lease_token = models.UUIDField(null=True)
+    lease_expires_at = models.DateTimeField(null=True)
+    transmit_started_at = models.DateTimeField(null=True)
+    finished_at = models.DateTimeField(null=True)
+    last_error = models.CharField(max_length=30, choices=OutboundMailError, blank=True, default="")
+
+    class Meta:
+        # The notifications app keeps this table and its migrations; account flows write the
+        # intents in their own transactions, so the model is defined beside them.
+        app_label = "notifications"
+        constraints = (
+            choices_check("kind", OutboundMailKind),
+            choices_check("status", OutboundMailStatus),
+            choices_check("language", Language),
+            choices_check("last_error", OutboundMailError, blank=True),
+            lease_check((OutboundMailStatus.SENDING,), kept=(OutboundMailStatus.UNCERTAIN,)),
+            models.CheckConstraint(
+                condition=models.Q(sealed_code="")
+                | models.Q(kind__in=CODED_MAIL, status__in=OPEN_MAIL),
+                name="%(class)s_sealed_code_chk",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    kind=OutboundMailKind.WORKSPACE_INVITATION, invitation__isnull=False
+                )
+                | (
+                    ~models.Q(kind=OutboundMailKind.WORKSPACE_INVITATION)
+                    & models.Q(invitation__isnull=True)
+                ),
+                name="%(class)s_invitation_chk",
+            ),
+            json_shape_check("context", "object", CONTEXT_ITEMS),
+        )
+        indexes = (
+            models.Index(
+                fields=("available_at", "id"),
+                condition=models.Q(status__in=OPEN_MAIL),
+                name="%(class)s_due_idx",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"Outbound mail {self.pk} ({self.kind}): {self.status}"

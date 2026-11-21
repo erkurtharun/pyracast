@@ -14,7 +14,13 @@ from rest_framework import serializers
 
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.language import save_user_language
-from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceInvitation
+from pyracast.accounts.models import (
+    Membership,
+    OutboundMail,
+    Tenant,
+    UserLanguagePreference,
+    WorkspaceInvitation,
+)
 from pyracast.api.session import LanguageInput
 from pyracast.change_requests.models import ChangeRequest, IncidentChange, ProductionChangeItem
 from pyracast.change_requests.operations import submit_incident, submit_production
@@ -34,7 +40,6 @@ from pyracast.incidents.operations import save_incident
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.notifications.models import (
     NotificationDelivery,
-    OutboundMail,
     PreparedMessageFormat,
     PreparedMessageKind,
     ReminderSchedule,

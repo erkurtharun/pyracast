@@ -9,7 +9,7 @@ from django.utils.safestring import SafeString
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 
-from pyracast.accounts.models import Tenant
+from pyracast.accounts.models import OutboundMail, Tenant
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -17,7 +17,7 @@ from pyracast.forecasts.models import (
     ForecastResult,
     RequestAttempt,
 )
-from pyracast.notifications.models import NotificationDelivery, NotificationSettings, OutboundMail
+from pyracast.notifications.models import NotificationDelivery, NotificationSettings
 from pyracast.notifications.recipients import delivery_addresses
 from pyracast.plants.models import (
     CalibrationActivation,

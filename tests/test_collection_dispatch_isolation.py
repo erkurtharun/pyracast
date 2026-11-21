@@ -12,7 +12,6 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.background.failures import PhaseOutcome
 from pyracast.connections.contracts import ProviderError
 from pyracast.forecasts import runtime
-from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.forecasts.scheduler import CollectionSchedulingError, enqueue_due
 from pyracast.forecasts.validation import validate_binding
@@ -21,7 +20,7 @@ from pyracast.providers import normalize_payload
 from pyracast.regions.models import Region
 from pyracast.regions.operations import configure_binding, submit_region
 from tests.support.domain import NOW, FakeAdapter, make_system
-from tests.support.jobs import calculate
+from tests.support.jobs import calculate, collect
 
 
 def test_existing_pending_collections_are_dispatched_after_scheduler_failure(
@@ -113,7 +112,7 @@ def test_five_minute_provider_outage_recovers_with_the_third_quota_accounted_att
     make_system(approved=True)
     job = CollectionJob.objects.get()
     moment = NOW
-    monkeypatch.setattr("pyracast.forecasts.jobs.time", SimpleNamespace(monotonic=lambda: 0.0))
+    monkeypatch.setattr("pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: 0.0))
     monkeypatch.setattr("pyracast.provider_retry.secrets.randbelow", lambda _: 0)
 
     def provider() -> None:

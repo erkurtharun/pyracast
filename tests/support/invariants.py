@@ -5,15 +5,11 @@ from typing import Any
 from django.db import connection, models, transaction
 from psycopg import sql
 
+from pyracast.accounts.models import CODED_MAIL, OPEN_MAIL, OutboundMailStatus
 from pyracast.change_requests.models import ChangeRequestStatus
 from pyracast.forecasts.models import CollectionJobStatus
 from pyracast.metering.models import EpiasJobStatus
-from pyracast.notifications.models import (
-    CODED_MAIL,
-    OPEN_MAIL,
-    NotificationDeliveryStatus,
-    OutboundMailStatus,
-)
+from pyracast.notifications.models import NotificationDeliveryStatus
 from pyracast.plants.models import CalibrationStatus
 
 

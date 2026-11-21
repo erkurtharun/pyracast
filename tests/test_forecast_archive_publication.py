@@ -6,7 +6,7 @@ import pytest
 from django.db import OperationalError, close_old_connections, connection, connections
 
 from pyracast.calculation import calculate
-from pyracast.forecasts.jobs import Lease, claim, collect, publish
+from pyracast.forecasts.jobs.claim import Lease, claim
 from pyracast.forecasts.models import (
     CollectionJob,
     ForecastResult,
@@ -18,6 +18,7 @@ from pyracast.plants.models import ForecastIssuance, Plant
 from pyracast.plants.operations import revise_plant
 from tests.support.domain import NOW, FakeAdapter, System
 from tests.support.invariants import stored_again
+from tests.support.jobs import collect, publish
 from tests.support.plant_operations import make_plant, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)

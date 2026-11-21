@@ -8,12 +8,12 @@ import pytest
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, ForecastResult, ForecastSnapshot
 from pyracast.forecasts.projections import prepare_daily_payloads, saved_day_payload
 from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
 from tests.support.domain import NOW, FakeAdapter, make_system
+from tests.support.jobs import collect
 
 
 def source_data() -> ProviderData:

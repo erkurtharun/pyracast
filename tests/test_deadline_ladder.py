@@ -18,11 +18,13 @@ from dramatiq.brokers.stub import StubBroker
 from pyracast import outbound
 from pyracast.background import broker as broker_module
 from pyracast.background import deadlines
-from pyracast.forecasts import jobs as collection_jobs
-from pyracast.forecasts.management.commands import dispatch, worker
+from pyracast.forecasts.jobs import claim as collection_jobs
+from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.metering import jobs as metering_jobs
 from pyracast.notifications import jobs as notification_jobs
 from pyracast.notifications import outbox
+from pyracast.orchestration.kinds import register_actors
+from pyracast.orchestration.management.commands import dispatch, worker
 from pyracast.plants import training
 from pyracast.plants.training import pending_calibration_ids
 from scripts import dev as launcher
@@ -46,7 +48,7 @@ def duration(value: str) -> timedelta:
 
 def registered_actors() -> dict[str, Any]:
     broker = StubBroker()
-    worker.register_actors(broker)
+    register_actors(broker)
     return dict(broker.actors)
 
 
@@ -280,7 +282,7 @@ def test_mail_sockets_use_the_ladder_timeout(monkeypatch: pytest.MonkeyPatch, ba
 
 def test_publication_stops_ten_batches_deep() -> None:
     for pending in (
-        collection_jobs.pending_job_ids,
+        pending_job_ids,
         metering_jobs.pending_epias_ids,
         notification_jobs.pending_notification_ids,
         pending_calibration_ids,

@@ -680,7 +680,7 @@ def test_provider_signup_without_a_pending_signup_leaves_the_signup_quota(clock:
 
 
 def lock_notices() -> list[tuple[str, str]]:
-    from pyracast.notifications.models import OutboundMail
+    from pyracast.accounts.models import OutboundMail
 
     return list(
         OutboundMail.objects.filter(kind="account/email/login_locked")
@@ -888,7 +888,7 @@ def advisory_waiters(space: int, expected: int) -> int:
 def test_two_failures_that_finish_a_lock_at_once_store_one_notice(
     clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from pyracast.notifications.intents import LOCK_NOTICE_LOCK_SPACE
+    from pyracast.accounts.mail_intents import LOCK_NOTICE_LOCK_SPACE
 
     address = "absent@example.com"
     fail_daily(Client(enforce_csrf_checks=True), address, 98, clock)
@@ -1019,7 +1019,7 @@ def test_a_reservation_that_never_finished_stops_counting_once_older_than_any_re
 def test_a_lock_whose_notice_was_not_stored_gets_it_at_the_next_refusal(
     clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from pyracast.notifications.intents import enqueue_lock_notice as store
+    from pyracast.accounts.mail_intents import enqueue_lock_notice as store
 
     user = member()
     client = Client(enforce_csrf_checks=True)
@@ -1113,8 +1113,8 @@ def test_a_failure_in_flight_beside_a_refusal_announces_the_lock_once_it_finishe
 def test_a_lock_notice_is_stamped_once_its_address_lock_is_granted(
     clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from pyracast.notifications.intents import LOCK_NOTICE_LOCK_SPACE
-    from pyracast.notifications.models import OutboundMail
+    from pyracast.accounts.mail_intents import LOCK_NOTICE_LOCK_SPACE
+    from pyracast.accounts.models import OutboundMail
 
     asked = timezone.now()
     moment = [asked]

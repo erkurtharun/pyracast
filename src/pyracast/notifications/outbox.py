@@ -1,6 +1,4 @@
 import logging
-import secrets
-import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -12,8 +10,20 @@ from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.account_mail import compose_account_mail
 from pyracast.accounts.invitations import compose_invitation
-from pyracast.accounts.models import InvitationDeliveryStatus, WorkspaceInvitation
+from pyracast.accounts.mail_intents import CODE_CONTEXT
+from pyracast.accounts.models import (
+    ANONYMOUS_MAIL,
+    OPEN_MAIL,
+    InvitationDeliveryStatus,
+    OutboundMail,
+    OutboundMailError,
+    OutboundMailStatus,
+    WorkspaceInvitation,
+)
+from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS, PUBLISH_BATCH
+from pyracast.background.lease import carries, claimable, expired, release, take
+from pyracast.background.retry_policy import MAIL
 from pyracast.encryption import secret_cipher
 from pyracast.mail.errors import (
     DeliveryUncertainError,
@@ -23,19 +33,10 @@ from pyracast.mail.errors import (
     SendCancelledError,
 )
 from pyracast.mail.send import send
-from pyracast.notifications.intents import CODE_CONTEXT
-from pyracast.notifications.models import (
-    ANONYMOUS_MAIL,
-    OPEN_MAIL,
-    OutboundMail,
-    OutboundMailError,
-    OutboundMailStatus,
-)
 
 logger = logging.getLogger(__name__)
 
 LEASE_DURATION = ACTORS["send_outbound_mail"].lease
-MAX_ATTEMPTS = 8
 REPUBLISH_AFTER = timedelta(minutes=1)
 RETENTION = timedelta(days=7)
 ANONYMOUS_MAIL_PER_HOUR = 20
@@ -51,9 +52,7 @@ def unseal_code(sealed: str) -> str:
 
 
 def _due(now: datetime) -> Q:
-    return Q(status__in=WAITING, available_at__lte=now) | Q(
-        status=OutboundMailStatus.SENDING, lease_expires_at__lte=now
-    )
+    return Q(status__in=WAITING, available_at__lte=now) | claimable(OutboundMailStatus.SENDING, now)
 
 
 def pending_mail_ids(now: datetime, limit: int = PUBLISH_BATCH) -> list[int]:
@@ -105,7 +104,7 @@ def _report(mail: OutboundMail) -> None:
 def _finish(mail: OutboundMail, status: OutboundMailStatus, error: str, now: datetime) -> None:
     mail.status, mail.last_error, mail.finished_at, mail.sealed_code = status, error, now, ""
     if status != OutboundMailStatus.UNCERTAIN:
-        mail.lease_token = mail.lease_expires_at = None
+        release(mail)
     mail.save()
     if mail.invitation_id is not None and status in (OutboundMailStatus.SENT, *UNDELIVERED):
         WorkspaceInvitation.objects.filter(pk=mail.invitation_id).update(
@@ -116,9 +115,10 @@ def _finish(mail: OutboundMail, status: OutboundMailStatus, error: str, now: dat
 
 def _retry_or_fail(mail: OutboundMail, now: datetime, error: str, delay: timedelta) -> None:
     retry_at = now + delay
-    if mail.attempts < MAX_ATTEMPTS and retry_at < mail.expires_at:
+    if not MAIL.exhausted(mail.attempts) and retry_at < mail.expires_at:
         mail.status, mail.last_error, mail.available_at = OutboundMailStatus.RETRY, error, retry_at
-        mail.lease_token = mail.lease_expires_at = mail.transmit_started_at = None
+        release(mail)
+        mail.transmit_started_at = None
         mail.save()
         logger.warning(
             "outbound_mail_retry mail_id=%s kind=%s attempts=%s error_code=%s",
@@ -129,10 +129,6 @@ def _retry_or_fail(mail: OutboundMail, now: datetime, error: str, delay: timedel
         )
     else:
         _finish(mail, OutboundMailStatus.FAILED, error, now)
-
-
-def _backoff(attempts: int) -> timedelta:
-    return timedelta(seconds=min(60 * 2 ** (attempts - 1), 1800) + secrets.randbelow(31))
 
 
 def _recover(mail: OutboundMail, now: datetime) -> None:
@@ -149,7 +145,7 @@ def _claim(mail_id: int, now: datetime) -> tuple[OutboundMail, uuid.UUID] | None
         if mail is None or mail.status not in OPEN_MAIL:
             return None
         if mail.status == OutboundMailStatus.SENDING:
-            if mail.lease_expires_at is not None and mail.lease_expires_at <= now:
+            if expired(mail, now):
                 _recover(mail, now)
             return None
         if mail.available_at > now:
@@ -157,11 +153,8 @@ def _claim(mail_id: int, now: datetime) -> tuple[OutboundMail, uuid.UUID] | None
         if mail.expires_at <= now:
             _finish(mail, OutboundMailStatus.SKIPPED, OutboundMailError.EXPIRED, now)
             return None
-        token = uuid.uuid4()
-        mail.status, mail.lease_token = OutboundMailStatus.SENDING, token
-        mail.lease_expires_at = now + LEASE_DURATION
+        token = take(mail, OutboundMailStatus.SENDING, now, LEASE_DURATION)
         mail.transmit_started_at = None
-        mail.attempts += 1
         mail.save()
         return mail, token
 
@@ -191,9 +184,9 @@ def _authorize(
     with transaction.atomic():
         mail = OutboundMail.objects.select_for_update().filter(pk=mail_id).first()
         now = clock()
-        if mail is None or mail.status != OutboundMailStatus.SENDING or mail.lease_token != token:
+        if mail is None or not carries(mail, token, OutboundMailStatus.SENDING):
             return False
-        if mail.lease_expires_at is not None and mail.lease_expires_at <= now:
+        if expired(mail, now):
             _recover(mail, now)
             return False
         if mail.expires_at <= now:
@@ -233,18 +226,14 @@ def _record(
             # Its code was erased when it became uncertain, and an uncertain intent never reopens.
             _finish(mail, OutboundMailStatus.FAILED, error, now)
         elif outcome == OutboundMailStatus.RETRY:
-            _retry_or_fail(mail, now, error, _backoff(mail.attempts))
+            _retry_or_fail(mail, now, error, MAIL.delay(mail.attempts))
         else:
             _finish(mail, outcome, error, now)
         return outcome == OutboundMailStatus.SENT
 
 
 def send_outbound_mail(mail_id: int, now: datetime) -> bool:
-    started = time.monotonic()
-
-    def clock() -> datetime:
-        return now + timedelta(seconds=time.monotonic() - started)
-
+    clock = Clock(now).now
     claimed = _claim(mail_id, now)
     if claimed is None:
         return False

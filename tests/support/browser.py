@@ -27,7 +27,6 @@ from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.mfa import MFAAdapter
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.calculation import calculate
-from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob
 from pyracast.forecasts.validation import validate_binding
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
@@ -38,6 +37,7 @@ from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import configure_binding, request_location_change, submit_region
 from tests.support.domain import FakeAdapter, System, make_system
 from tests.support.gateway_routes import SITE, backend_route
+from tests.support.jobs import collect
 from tests.support.notifications import freeze, store
 from tests.support.plant_operations import publish_snapshot, snapshot_for
 

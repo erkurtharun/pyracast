@@ -8,7 +8,8 @@ from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import rotate_secret
 from pyracast.epias import AUTH_URL, EpiasClient, EpiasDay, EpiasError, EpiasPlant
-from pyracast.forecasts.jobs import LEASE_DURATION, claim, collect, persist_snapshot, publish
+from pyracast.forecasts.jobs.claim import LEASE_DURATION, claim
+from pyracast.forecasts.jobs.collect import persist_snapshot
 from pyracast.forecasts.models import (
     CollectionJob,
     ForecastResult,
@@ -31,7 +32,7 @@ from pyracast.provider_retry import retry_delay
 from pyracast.providers import SolcastProvider
 from pyracast.weather_data import WeatherData
 from tests.support.domain import NOW, FakeAdapter, make_system
-from tests.support.jobs import calculate
+from tests.support.jobs import calculate, collect, publish
 from tests.support.metering import connected
 from tests.support.providers import TARGET, binding_for
 from tests.support.weather_collection import WeatherFixture

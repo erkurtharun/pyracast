@@ -14,7 +14,7 @@ from django.test import Client, override_settings
 
 from pyracast.accounts import processes
 from pyracast.accounts.audit import logger
-from pyracast.notifications.models import OutboundMail, OutboundMailKind
+from pyracast.accounts.models import OutboundMail, OutboundMailKind
 from tests.support.account_sessions import (
     account,
     browser,

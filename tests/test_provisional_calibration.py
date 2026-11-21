@@ -10,7 +10,8 @@ from django.utils import timezone
 
 from pyracast.connections.contracts import ProviderData
 from pyracast.epias import TIMEZONE, EpiasDay, EpiasPlant, EpiasReading
-from pyracast.forecasts.jobs import claim, persist_snapshot, publish
+from pyracast.forecasts.jobs.claim import claim
+from pyracast.forecasts.jobs.collect import persist_snapshot
 from pyracast.forecasts.models import CollectionJob
 from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import local_day_bounds
@@ -25,6 +26,7 @@ from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
 from tests.support.domain import NOW, System
 from tests.support.historical_production_identity import record_identity
+from tests.support.jobs import publish
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 from tests.support.plant_training import actual_snapshot_for
 from tests.support.settlement_calibration import settlement

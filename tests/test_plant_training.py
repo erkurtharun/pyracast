@@ -11,6 +11,7 @@ from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection
 from django.utils import timezone
 
+from pyracast.background import clock as monotonic_clock
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.plants import training
@@ -347,7 +348,7 @@ def test_publication_and_failure_include_elapsed_lock_wait(
     lease = training._claim(run.pk, NOW)
     assert lease is not None
     ticks = iter([0.0, LEASE_DURATION.total_seconds() + 1])
-    monkeypatch.setattr(training, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    monkeypatch.setattr(monotonic_clock, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
     assert not training._publish(
         lease, FitResult("insufficient", None, "insufficient", {}), {}, NOW
     )

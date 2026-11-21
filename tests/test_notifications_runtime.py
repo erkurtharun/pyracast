@@ -14,6 +14,7 @@ from pyracast.background.broker import make_broker
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.notifications import runtime
 from pyracast.notifications.models import NotificationDelivery
+from pyracast.orchestration.kinds import OUTBOUND_MAIL, REMINDER
 from tests.support.notifications import SLOT, ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -23,7 +24,7 @@ def test_notification_queue_delivers_idempotently(monkeypatch: pytest.MonkeyPatc
     delivery = ready()
     monkeypatch.setattr(runtime, "datetime", SimpleNamespace(now=lambda _: SLOT))
     broker = StubBroker()
-    actor = runtime.make_notification_actor(broker)
+    actor = REMINDER.make_actor(broker)
     worker = Worker(broker, worker_threads=1, worker_timeout=100)
     worker.start()
     try:
@@ -43,8 +44,8 @@ def test_dispatch_recovers_pending_and_uses_injected_clock(monkeypatch: pytest.M
     delivery = ready()
     monkeypatch.setattr(runtime, "datetime", SimpleNamespace(now=lambda _: SLOT))
     broker = StubBroker()
-    actor = runtime.make_notification_actor(broker)
-    mail_actor = runtime.make_outbound_mail_actor(broker)
+    actor = REMINDER.make_actor(broker)
+    mail_actor = OUTBOUND_MAIL.make_actor(broker)
     try:
         assert runtime.dispatch_notifications(actor, mail_actor, SLOT) == 1
         assert runtime.dispatch_notifications(actor, mail_actor) == 1
@@ -58,7 +59,7 @@ def test_notification_runtime_closes_connections_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     closed = MagicMock()
-    monkeypatch.setattr(runtime, "connections", SimpleNamespace(close_all=closed))
+    monkeypatch.setattr("pyracast.background.actor.connections", SimpleNamespace(close_all=closed))
     failed = MagicMock(side_effect=RuntimeError("database unavailable"))
     monkeypatch.setattr(runtime, "process_notification", failed)
     with pytest.raises(RuntimeError, match="database unavailable"):
@@ -77,7 +78,7 @@ def test_rabbitmq_duplicate_reminder_sends_one_mail_without_provider_requests(
     requests, jobs = RequestAttempt.objects.count(), CollectionJob.objects.count()
     monkeypatch.setattr(runtime, "datetime", SimpleNamespace(now=lambda _: SLOT))
     broker = make_broker()
-    original = runtime.make_notification_actor(broker)
+    original = REMINDER.make_actor(broker)
     queue = f"test_reminders_{uuid.uuid4().hex}"
     actor = dramatiq.actor(broker=broker, actor_name=queue, queue_name=queue, max_retries=0)(
         original.fn

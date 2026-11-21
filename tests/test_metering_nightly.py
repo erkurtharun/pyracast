@@ -67,7 +67,7 @@ def test_initial_yesterday_partial_data_can_recover_after_three_attempts(
     system, plant = unconnected(monkeypatch)
     now = NEXT_NIGHT + timedelta(minutes=93)
     monkeypatch.setattr("django.utils.timezone.now", lambda: now)
-    monkeypatch.setattr("pyracast.metering.jobs.time.monotonic", lambda: 0.0)
+    monkeypatch.setattr("pyracast.background.clock.time.monotonic", lambda: 0.0)
     linked = connect(plant, system.admin)
     job = EpiasCollectionJob.objects.get(
         connection=linked,
@@ -196,7 +196,7 @@ def test_nightly_missing_data_retries_every_half_hour_through_morning(
     monkeypatch: pytest.MonkeyPatch, empty: bool
 ) -> None:
     job = nightly_job(monkeypatch)
-    monkeypatch.setattr("pyracast.metering.jobs.time.monotonic", lambda: 0.0)
+    monkeypatch.setattr("pyracast.background.clock.time.monotonic", lambda: 0.0)
 
     def partial(plant: EpiasPlant, day: date) -> EpiasDay:
         data = day_data(plant, day)
@@ -222,7 +222,7 @@ def test_nightly_transport_failures_honor_half_hour_and_longer_retry_after(
     monkeypatch: pytest.MonkeyPatch, retry_after: int | None
 ) -> None:
     job = nightly_job(monkeypatch)
-    monkeypatch.setattr("pyracast.metering.jobs.time.monotonic", lambda: 0.0)
+    monkeypatch.setattr("pyracast.background.clock.time.monotonic", lambda: 0.0)
 
     def fail(plant: EpiasPlant, day: date) -> EpiasDay:
         raise EpiasError("private credential", retry_after_seconds=retry_after)
@@ -246,7 +246,7 @@ def test_older_daily_reconciliation_retains_three_attempt_cap(
         scheduled_for=NEXT_NIGHT - timedelta(hours=3),
         target_date=job.target_date - timedelta(days=1),
     )
-    monkeypatch.setattr("pyracast.metering.jobs.time.monotonic", lambda: 0.0)
+    monkeypatch.setattr("pyracast.background.clock.time.monotonic", lambda: 0.0)
 
     def fetch(plant: EpiasPlant, day: date) -> EpiasDay:
         if transport:
@@ -332,7 +332,9 @@ def test_deadline_reached_after_claim_prevents_provider_io(
     assert job.retry_until is not None
     elapsed = 0.0
     requested = False
-    monkeypatch.setattr("pyracast.metering.jobs.time", SimpleNamespace(monotonic=lambda: elapsed))
+    monkeypatch.setattr(
+        "pyracast.background.clock.time", SimpleNamespace(monotonic=lambda: elapsed)
+    )
 
     def claim_then_delay(job_id: int, now: datetime) -> EpiasLease | None:
         nonlocal elapsed
@@ -365,7 +367,7 @@ def test_response_started_before_deadline_can_archive_after_nine(
     job = nightly_job(monkeypatch)
     assert job.retry_until is not None
     elapsed = 0.0
-    monkeypatch.setattr("pyracast.metering.jobs.time.monotonic", lambda: elapsed)
+    monkeypatch.setattr("pyracast.background.clock.time.monotonic", lambda: elapsed)
 
     def fetch(plant: EpiasPlant, day: date) -> EpiasDay:
         nonlocal elapsed

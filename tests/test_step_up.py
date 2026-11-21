@@ -33,8 +33,8 @@ from django.test.utils import CaptureQueriesContext
 from pyracast.accounts import adapters, processes, security, social_views, step_up
 from pyracast.accounts import middleware as account_middleware
 from pyracast.accounts.audit import refusal_throttle
+from pyracast.accounts.models import OutboundMail
 from pyracast.accounts.sessions import end_sessions
-from pyracast.notifications.models import OutboundMail
 from tests.support import account_sessions
 from tests.support.account_sessions import (
     alongside,

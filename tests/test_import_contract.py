@@ -47,20 +47,10 @@ HTTP_MODULES = (
     "proxy",
 )
 PROJECT_MODULES = {"settings", "urls", "wsgi", "cli", "production"}
-ORCHESTRATION_MODULES = {
-    "forecasts.monitoring",
-    "forecasts.management.commands.check_delivery_health",
-    "forecasts.management.commands.dispatch",
-    "forecasts.management.commands.worker",
-}
+ORCHESTRATION_MODULES = {"forecasts.monitoring"}
 
 # Each entry is an import against the layer order that is not resolved yet, with its reason.
 BACK_EDGES: dict[tuple[str, str], str] = {
-    ("accounts.account_mail", "notifications.models"): "account mail goes through the outbox",
-    ("accounts.adapters", "notifications.intents"): "account mail goes through the outbox",
-    ("accounts.adapters", "notifications.models"): "account mail goes through the outbox",
-    ("accounts.invitations", "notifications.intents"): "account mail goes through the outbox",
-    ("accounts.invitations", "notifications.models"): "account mail goes through the outbox",
     (
         "accounts.operations",
         "notifications.recipients",
@@ -99,18 +89,6 @@ BACK_EDGES: dict[tuple[str, str], str] = {
     ("forecasts.history", "plants.forecast_sources"): "snapshot replay lives in plants",
     ("forecasts.intraday", "plants.forecast_sources"): "snapshot replay lives in plants",
     (
-        "forecasts.jobs",
-        "plants.forecast_archive",
-    ): "publication archives plant issuances and requests calibration",
-    (
-        "forecasts.jobs",
-        "plants.models",
-    ): "publication archives plant issuances and requests calibration",
-    (
-        "forecasts.jobs",
-        "plants.preparation",
-    ): "publication archives plant issuances and requests calibration",
-    (
         "forecasts.snapshot_restore",
         "plants.preparation",
     ): "a restore prepares calibrations of its plants",
@@ -148,14 +126,6 @@ FUNCTION_IMPORTS: dict[tuple[str, str], str] = {
         "forecasts.historical_import",
         "plants.preparation",
     ): "an import prepares calibrations of its plants",
-    (
-        "forecasts.jobs",
-        "plants.forecast_archive",
-    ): "publication archives plant issuances and requests calibration",
-    (
-        "forecasts.jobs",
-        "plants.preparation",
-    ): "publication archives plant issuances and requests calibration",
     ("metering.jobs", "plants.preparation"): "breaks an import cycle",
     ("metering.operations", "metering.scheduler"): "breaks an import cycle",
     ("plants.current_forecast", "plants.automatic_forecast"): "breaks an import cycle",

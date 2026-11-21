@@ -47,6 +47,7 @@ def test_shutdown_finishes_active_work_and_closes_broker(
             import sys
             import time
             from pathlib import Path
+            from types import SimpleNamespace
             from unittest.mock import MagicMock
 
             import django
@@ -54,23 +55,30 @@ def test_shutdown_finishes_active_work_and_closes_broker(
             from dramatiq.brokers.stub import StubBroker
 
             django.setup()
-            from pyracast.forecasts.management.commands import dispatch, worker
+            from pyracast.orchestration import dispatcher, kinds
+            from pyracast.orchestration.management.commands import dispatch, worker
 
             root = Path(sys.argv[1])
             role = sys.argv[2]
-            command = worker if role == "worker" else dispatch
+            command = worker if role == "worker" else dispatcher
 
             def record(event):
                 with (root / "events").open("a", encoding="utf-8") as output:
                     output.write(event + "\\n")
 
+            def stub_actors(**made):
+                kinds.KINDS = tuple(
+                    SimpleNamespace(
+                        actor=kind.actor,
+                        queue=kind.queue,
+                        make_actor=made.get(kind.actor, MagicMock()),
+                    )
+                    for kind in kinds.KINDS
+                )
+
             broker = StubBroker()
             broker.close = lambda: record("closed")
             command.make_broker = lambda: broker
-            command.make_calibration_actor = MagicMock()
-            command.make_notification_actor = MagicMock()
-            command.make_outbound_mail_actor = MagicMock()
-            command.make_epias_actor = MagicMock()
             if role == "dispatch":
                 command.record_dispatch_phase = MagicMock()
 
@@ -85,7 +93,7 @@ def test_shutdown_finishes_active_work_and_closes_broker(
                         time.sleep(0.01)
                     record("finished")
 
-                command.make_actor = lambda _: active_job
+                stub_actors(collect_forecast=lambda _: active_job)
                 active_job.send()
 
                 class ObservedWorker(dramatiq.Worker):
@@ -97,7 +105,7 @@ def test_shutdown_finishes_active_work_and_closes_broker(
                 command.Worker = ObservedWorker
                 command.Command().handle(threads=1, queues=["default"], stop_file=root / "stop")
             else:
-                command.make_actor = MagicMock()
+                stub_actors()
                 command.purge_expired = lambda now: record("ready")
                 command.sweep_accounts = MagicMock()
                 command.dispatch_collections = MagicMock()
@@ -106,7 +114,7 @@ def test_shutdown_finishes_active_work_and_closes_broker(
                 command.dispatch_epias = MagicMock()
                 command.purge_finished_mail = MagicMock()
                 command.publish_outbound_mail = MagicMock()
-                command.Command().handle(loop=True, poll_seconds=60, stop_file=root / "stop")
+                dispatch.Command().handle(loop=True, poll_seconds=60, stop_file=root / "stop")
             """
         ),
         encoding="utf-8",
