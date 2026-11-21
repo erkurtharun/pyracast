@@ -20,6 +20,8 @@ import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { CollectionSchedule } from "../collection-schedule";
 import { RegionSettings } from "../region-settings";
 import { Reminders } from "../reminders";
+import { ParameterConflict } from "./parameter-conflict";
+import { conflictDraft, loadedDraft } from "./parameters-draft";
 
 export function SettingsSection({
     plant,
@@ -111,28 +113,6 @@ export function SettingsSection({
     );
 }
 
-type Values = Configuration & { name: string };
-// The fields show `values` of revision `base` and remount when `key` changes; once the
-// person edits them they keep what was typed until a save settles.
-type Draft = { key: number; base: number; values: Values; edited: boolean };
-
-function loaded(plant: Plant, parameters: Configuration, key: number): Draft {
-    return {
-        key,
-        base: plant.parameters_revision,
-        values: { ...parameters, name: plant.name },
-        edited: false,
-    };
-}
-
-function keepEdits(draft: Draft, typed: Values, current: Values): Values {
-    const values = { ...current };
-    for (const field of Object.keys(draft.values) as (keyof Values)[])
-        if (typed[field] !== draft.values[field])
-            Object.assign(values, { [field]: typed[field] });
-    return values;
-}
-
 function isPlant(value: unknown): value is Plant {
     return (
         !!value &&
@@ -201,9 +181,9 @@ function TechnicalDetails({
     onChanged: () => Promise<unknown>;
 }) {
     const t = useTranslations("PlantWorkspace");
-    const [draft, setDraft] = useState(() => loaded(plant, parameters, 0));
+    const [draft, setDraft] = useState(() => loadedDraft(plant, parameters, 0));
     if (!draft.edited && draft.base !== plant.parameters_revision)
-        setDraft(loaded(plant, parameters, draft.key + 1));
+        setDraft(loadedDraft(plant, parameters, draft.key + 1));
     return (
         <ActionForm
             submit={t("saveConfiguration")}
@@ -221,21 +201,24 @@ function TechnicalDetails({
                         },
                     );
                     setDraft(
-                        loaded(saved, saved.parameters ?? typed, draft.key + 1),
+                        loadedDraft(
+                            saved,
+                            saved.parameters ?? typed,
+                            draft.key + 1,
+                        ),
                     );
                     onSaved(saved);
                 } catch (error) {
                     const current = conflictPlant(error, plant.id);
                     if (current?.parameters) {
-                        setDraft({
-                            key: draft.key + 1,
-                            base: current.parameters_revision,
-                            values: keepEdits(draft, typed, {
-                                ...current.parameters,
-                                name: current.name,
-                            }),
-                            edited: true,
-                        });
+                        setDraft(
+                            conflictDraft(
+                                draft,
+                                typed,
+                                current,
+                                current.parameters,
+                            ),
+                        );
                         onSaved(current);
                     }
                     throw error;
@@ -243,6 +226,7 @@ function TechnicalDetails({
                 await onChanged();
             }}
         >
+            {draft.conflict && <ParameterConflict conflict={draft.conflict} />}
             <PlantConfigurationFields
                 key={draft.key}
                 name={draft.values.name}

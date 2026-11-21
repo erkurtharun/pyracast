@@ -223,7 +223,8 @@
         "refreshFailed": "Could not refresh; showing data from {time}.",
         "retry": "Try again",
         "actionFailed": "The action could not be completed",
-        "working": "Working…"
+        "working": "Working…",
+        "changedField": "{field}: {before} → {after}"
     },
     "AppError": {
         "title": "This page could not be displayed",
