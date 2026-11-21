@@ -38,35 +38,87 @@ def host_with(key: str, value: object) -> dict[str, Any]:
     return host(**{key: value})
 
 
-def terraform_host_keys() -> set[str]:
+# The keys of the host.json that Terraform wrote before the optional daily tier existed.
+BEFORE_DAILY_TIER = frozenset(HOST)
+REQUIRED = frozenset(setting.key for setting in host_contract.SETTINGS if setting.required)
+OPTIONAL = host_contract.KEYS - REQUIRED
+
+
+def terraform_host_config() -> tuple[set[str], dict[str, bool]]:
     written = re.search(
-        r"host_config_base64 = base64encode\(jsonencode\(\{(.*?)\}\)\)",
+        r"host_config_base64 = base64encode\(jsonencode\(merge\(\{(.*?)\}, "
+        r"\{ for key, value in \{(.*?)\} : key => value if var\.[a-z_]+ \}\)\)\)",
         (TERRAFORM / "main.tf").read_text(encoding="utf-8"),
         re.S,
     )
     assert written
-    return set(re.findall(r"^\s*([a-z_]+)\s*=", written[1], re.M))
+    always = set(re.findall(r"^\s*([a-z_]+)\s*=", written[1], re.M))
+    conditional = {
+        key: value == "true" for key, value in re.findall(r"([a-z_]+) = (true|false)", written[2])
+    }
+    return always, conditional
 
 
 def test_the_host_configuration_terraform_writes_is_the_host_contract() -> None:
-    assert terraform_host_keys() == {setting.key for setting in host_contract.SETTINGS}
+    always, conditional = terraform_host_config()
+
+    assert always | set(conditional) == host_contract.KEYS
+    assert always >= REQUIRED
+    assert conditional
+    assert set(conditional) <= OPTIONAL
+    assert host_contract.parse({**HOST, **conditional}).daily_backups is True
+
+
+def test_without_the_daily_tier_terraform_writes_the_keys_the_host_holds_today() -> None:
+    always, _ = terraform_host_config()
+
+    assert always == BEFORE_DAILY_TIER
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [
+        pytest.param(BEFORE_DAILY_TIER, id="today"),
+        pytest.param(BEFORE_DAILY_TIER - {"origin_pull_ca"}, id="before-origin-pulls"),
+    ],
+)
+def test_a_host_configuration_written_before_the_daily_tier_passes_the_contract(
+    keys: frozenset[str],
+) -> None:
+    config = host_contract.parse({key: HOST[key] for key in keys})
+
+    assert config.daily_backups is False
+    assert config.origin_pull_ca == ""
+
+
+def host_reads() -> tuple[set[str], set[str]]:
+    indexed: set[str] = set()
+    defaulted: set[str] = set()
+    for path in [*(ROOT / "deploy").glob("*.py"), ROOT / "deploy" / "install-release.sh"]:
+        source = path.read_text(encoding="utf-8")
+        if "host_config" not in source and "config_path" not in source:
+            continue
+        indexed |= set(re.findall(r"\bconfig\[[\"']([a-z_]+)[\"']\]", source))
+        defaulted |= set(re.findall(r"\bconfig\.get\([\"']([a-z_]+)[\"']", source))
+    return indexed, defaulted
 
 
 def test_every_key_a_host_helper_reads_is_a_host_setting() -> None:
-    read = {
-        key
-        for path in [*(ROOT / "deploy").glob("*.py"), ROOT / "deploy" / "install-release.sh"]
-        for key in re.findall(r"config\[[\"']([a-z_]+)[\"']\]", path.read_text(encoding="utf-8"))
-    }
+    indexed, defaulted = host_reads()
 
-    assert read
-    assert read <= {setting.key for setting in host_contract.SETTINGS}
+    assert {"backup_bucket", "runtime_secret_version"} <= indexed <= REQUIRED
+    assert {"daily_backups"} <= defaulted <= OPTIONAL
 
 
 def test_only_optional_settings_have_a_default() -> None:
     assert {
         setting.key: setting.default for setting in host_contract.SETTINGS if not setting.required
-    } == {"origin_pull_ca": ""}
+    } == {"origin_pull_ca": "", "daily_backups": False}
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_the_daily_tier_is_a_json_boolean(value: bool) -> None:
+    assert host_contract.parse(host(daily_backups=value)).daily_backups is value
 
 
 def test_a_complete_host_configuration_loads_typed(tmp_path: Path) -> None:
@@ -75,7 +127,7 @@ def test_a_complete_host_configuration_loads_typed(tmp_path: Path) -> None:
 
     config = host_contract.load(path)
 
-    assert config == host_contract.HostConfig(**HOST)
+    assert config == host_contract.HostConfig(**HOST, daily_backups=False)
 
 
 def test_a_named_origin_pull_authority_is_kept_as_certificates() -> None:
@@ -239,6 +291,21 @@ def test_an_edge_authority_that_is_not_only_x509_certificates_is_refused(value: 
             {**HOST, "domain": None},
             "Host setting domain must be a lowercase DNS hostname.",
             id="null",
+        ),
+        pytest.param(
+            host(daily_backups="true"),
+            "Host setting daily_backups must be a JSON boolean.",
+            id="daily-backups-text",
+        ),
+        pytest.param(
+            host(daily_backups=1),
+            "Host setting daily_backups must be a JSON boolean.",
+            id="daily-backups-number",
+        ),
+        pytest.param(
+            {**HOST, "daily_backups": None},
+            "Host setting daily_backups must be a JSON boolean.",
+            id="daily-backups-null",
         ),
         pytest.param(
             {**HOST, "region\nX": "europe-west1"},

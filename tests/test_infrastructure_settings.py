@@ -156,6 +156,7 @@ def test_ci_runs_the_boot_script_twice_and_more_on_a_stubbed_host() -> None:
     assert deployment["steps"].index(boot) < step_index(deployment, "terraform validate")
     assert re.findall(r"^echo 'Boot regression passed: (.*)'$", harness, re.M) == [
         "first boot",
+        "a boot with a release installs its units",
         "unchanged boot",
         "changed host configuration",
         "upgrade of a host the earlier script set up",

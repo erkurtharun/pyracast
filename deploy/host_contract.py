@@ -4,6 +4,7 @@ import re
 import ssl
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 CERTIFICATE = r"-----BEGIN CERTIFICATE-----\n[A-Za-z0-9+/=\n]+-----END CERTIFICATE-----\n"
 CERTIFICATES = re.compile(rf"(?:{CERTIFICATE}\n?)+")
@@ -32,6 +33,10 @@ def _matching(pattern: str) -> Callable[[object], str | None]:
     return lambda value: value if isinstance(value, str) and compiled.fullmatch(value) else None
 
 
+def _flag(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
 def _authority(value: object) -> str | None:
     if value == "":
         return ""
@@ -49,15 +54,16 @@ def _authority(value: object) -> str | None:
 class Setting:
     key: str
     expectation: str
-    parse: Callable[[object], str | None]
-    default: str | None = None
+    parse: Callable[[object], str | bool | None]
+    default: str | bool | None = None
 
     @property
     def required(self) -> bool:
         return self.default is None
 
 
-# /etc/pyracast/host.json, which the Terraform boot script writes; every host setting is a string.
+# /etc/pyracast/host.json, which the Terraform boot script writes. Readers outside load() read only
+# these keys and an optional one with its default.
 SETTINGS = (
     Setting("project_id", "a Google Cloud project ID", _matching(r"[a-z][a-z0-9-]{4,28}[a-z0-9]")),
     Setting("runtime_secret_id", "a Secret Manager secret name", _matching(MANAGED_NAME)),
@@ -82,6 +88,7 @@ SETTINGS = (
         _authority,
         default="",
     ),
+    Setting("daily_backups", "a JSON boolean", _flag, default=False),
 )
 BY_KEY = {setting.key: setting for setting in SETTINGS}
 KEYS = frozenset(BY_KEY)
@@ -97,6 +104,7 @@ class HostConfig:
     domain: str
     acme_email: str
     origin_pull_ca: str
+    daily_backups: bool
 
 
 def _refusal(setting: Setting) -> str:
@@ -114,7 +122,7 @@ def parse(values: object) -> HostConfig:
         raise HostConfigError(
             f"Host setting {name} is unknown; remove it or add it to deploy/host_contract.py."
         )
-    parsed: dict[str, str] = {}
+    parsed: dict[str, Any] = {}
     for setting in SETTINGS:
         if setting.key in values:
             value = values[setting.key]

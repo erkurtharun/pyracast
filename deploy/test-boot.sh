@@ -104,6 +104,10 @@ cat >/stub-bin/systemctl <<'SH'
 #!/bin/bash
 echo "systemctl $*" >>/calls
 SH
+cat >/stub-bin/systemd-analyze <<'SH'
+#!/bin/bash
+echo "systemd-analyze $*" >>/calls
+SH
 chmod 755 /stub-bin/*
 export PATH=/stub-bin:$PATH
 
@@ -135,10 +139,19 @@ absent() {
     return 1
   fi
 }
+release_units=()
+for unit in /source/systemd/*; do release_units+=("/etc/systemd/system/${unit##*/}"); done
 inodes() {
   stat -c '%n %i' /etc/pyracast/host.json /etc/docker/daemon.json \
     /etc/systemd/system/docker.service.d/pyracast-data.conf /etc/systemd/system/pyracast.service \
     /usr/local/sbin/pyracast-network-guard /etc/fstab /var/lib/pyracast/release.lock
+}
+release_inodes() {
+  stat -c '%n %i %a' "${release_units[@]}" /var/lib/pyracast/rehearsal.lock \
+    /var/lib/pyracast/last-rehearsal.json
+}
+timers_enabled() {
+  grep -Fxq 'systemctl enable --now pyracast-backup.timer pyracast-rehearsal.timer pyracast-watchdog.timer' /calls
 }
 no_downloaded_key() {
   [[ -z $(find /tmp -maxdepth 1 -name 'tmp.*' -print -quit) ]]
@@ -173,16 +186,33 @@ echo 'Boot regression passed: first boot'
 
 mkdir -p /opt/pyracast/current/deploy
 touch /opt/pyracast/current/deploy/compose.yaml
+cp -R /source/install-units.sh /source/systemd /opt/pyracast/current/deploy/
+boot
+[[ $status == 0 ]]
+for unit in /source/systemd/*; do cmp "$unit" "/etc/systemd/system/${unit##*/}"; done
+[[ $(grep -c '^systemctl daemon-reload$' /calls) == 1 ]]
+timers_enabled
+absent 'systemctl restart'
+echo 'Boot regression passed: a boot with a release installs its units'
+
+(umask 077 && : >>/var/lib/pyracast/rehearsal.lock)
+printf '{"status": "passed"}\n' >/var/lib/pyracast/last-rehearsal.json
 before=$(inodes)
+rehearsal=$(release_inodes)
 boot
 [[ $status == 0 ]]
 [[ $(inodes) == "$before" ]]
+[[ $(release_inodes) == "$rehearsal" ]]
+[[ $(stat -c %a /var/lib/pyracast/rehearsal.lock) == 600 ]]
+grep -Fxq '{"status": "passed"}' /var/lib/pyracast/last-rehearsal.json
 absent mkfs
 absent apt-get
 absent curl
 absent daemon-reload
 absent 'systemctl restart'
+absent 'systemctl stop'
 absent network-guard
+timers_enabled
 [[ $(tail -n 1 /calls) == 'systemctl start pyracast.service' ]]
 echo 'Boot regression passed: unchanged boot'
 
@@ -192,6 +222,14 @@ boot
 grep -q origin_pull_ca /etc/pyracast/host.json
 absent daemon-reload
 absent 'systemctl restart'
+render '{"domain":"example.com","acme_email":"ops@example.com","origin_pull_ca":"","daily_backups":true}'
+boot
+[[ $status == 0 ]]
+grep -q '"daily_backups":true' /etc/pyracast/host.json
+[[ $(release_inodes) == "$rehearsal" ]]
+absent daemon-reload
+absent 'systemctl restart'
+absent 'systemctl stop'
 echo 'Boot regression passed: changed host configuration'
 
 installed_host

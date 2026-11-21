@@ -900,8 +900,8 @@ periods, alert event names,
 Cloudflare ranges, the gateway trust anchor, router prefixes, limits and header
 owners, timeouts, the CI result job and Gmail constants, and
 `tests/test_host_contract.py` holds `deploy/host_contract.py` to the `host.json` keys
-Terraform writes, the variables `compose.yaml` reads and the settings the runtime secret
-carries. Change those values together with these tests; `tests/test_deployment_checks.py`
+Terraform writes and the host scripts read, the variables `compose.yaml` reads and the
+settings the runtime secret carries. Change those values together with these tests; `tests/test_deployment_checks.py`
 runs every deployment check against the shipped Compose environment.
 It does not prove GCP IAM, backup upload/restore, the metadata firewall itself (each
 release probes it before maintenance), public
