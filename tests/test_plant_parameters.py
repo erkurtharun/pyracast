@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
+from math import copysign
 from threading import Barrier
 from typing import Any
 
@@ -23,6 +24,7 @@ from pyracast.plants.sites import submit_site
 from pyracast.platform_admin.read_models import recent_activity_context
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.regions.operations import configure_binding, request_location_change
+from tests.support.concurrency import behind_open_transaction
 from tests.support.domain import NOW, FakeAdapter, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -305,6 +307,98 @@ def test_the_plant_command_prints_the_revision_before_and_after(expected: dict[s
     )
 
 
+def test_the_plant_command_says_when_a_revision_changed_nothing() -> None:
+    system, plant = declared_plant(approved=True)
+    revise_by_command(system, plant)
+
+    printed = revise_by_command(system, plant, expected_revision=2)
+
+    plant.refresh_from_db()
+    assert plant.parameters_revision == 2
+    assert printed == (
+        f"Plant {plant.pk}, configuration {plant.current_configuration_id}, "
+        "parameters revision 2 unchanged."
+    )
+
+
+@pytest.mark.parametrize(
+    ("export_limit_mw", "printed"),
+    [(100, "parameters revision 2 unchanged."), (90, "parameters revision 2 to 3.")],
+    ids=["same_values_saved_meanwhile", "other_values_saved_meanwhile"],
+)
+def test_the_plant_command_prints_the_revision_it_started_from_under_the_plant_lock(
+    export_limit_mw: float, printed: str
+) -> None:
+    system, plant = declared_plant(approved=True)
+
+    def save_meanwhile() -> None:
+        revise_plant(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            plant.pk,
+            PlantParameters(name="Plant", dc_capacity_mw=140, export_limit_mw=export_limit_mw),
+        )
+
+    _, output = behind_open_transaction(save_meanwhile, lambda: revise_by_command(system, plant))
+
+    plant.refresh_from_db()
+    assert output == (
+        f"Plant {plant.pk}, configuration {plant.current_configuration_id}, {printed}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"expected_revision": 1}, "--expected-revision requires --plant-id"),
+        ({"expected_revision": 0, "with_plant": True}, "--expected-revision must be at least 1"),
+        ({"expected_revision": -1, "with_plant": True}, "--expected-revision must be at least 1"),
+    ],
+    ids=["without_a_plant", "zero", "negative"],
+)
+def test_the_plant_command_refuses_an_unusable_expected_revision_before_writing(
+    options: dict[str, Any], message: str
+) -> None:
+    system = make_system(approved=True)
+    plant_id = None
+    if options.pop("with_plant", False):
+        plant_id = create_plant(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            PlantParameters(name="Plant", dc_capacity_mw=140, export_limit_mw=100),
+        ).pk
+    events = PlantEvent.objects.count()
+
+    with pytest.raises(CommandError, match=message):
+        call_command(
+            "configure_plant",
+            username="member",
+            region_id=system.region.pk,
+            plant_id=plant_id,
+            name="Plant",
+            dc_capacity_mw=140.0,
+            export_limit_mw=100.0,
+            **options,
+        )
+
+    assert Plant.objects.count() == (0 if plant_id is None else 1)
+    assert PlantEvent.objects.count() == events
+    assert all(plant.parameters_revision == 1 for plant in Plant.objects.all())
+
+
+@pytest.mark.parametrize("field", ["surface_tilt_degrees", "surface_azimuth_degrees"])
+def test_a_negative_zero_angle_is_the_same_value_as_zero(field: str) -> None:
+    fixed: dict[str, Any] = {"name": "P", "dc_capacity_mw": 1, "mounting_type": "fixed"}
+    negative: dict[str, Any] = {**fixed, field: -0.0}
+    positive: dict[str, Any] = {**fixed, field: 0.0}
+    signed = PlantParameters(**negative)
+
+    assert copysign(1, getattr(signed, field)) == 1
+    assert signed == PlantParameters(**positive)
+
+
 DECLARED = {
     "dc_capacity_mw": 1,
     "inverter_capacity_mw": None,
@@ -320,8 +414,8 @@ PROBES: list[dict[str, Any]] = [
     *({"export_limit_mw": value} for value in (None, -1, 1e-9, NAN)),
     *({"measurement_basis": value} for value in ("net_export", "ac_generation", "dc")),
     *({"mounting_type": value} for value in ("unknown", "fixed", "tracking", "dual_axis")),
-    *({"surface_tilt_degrees": value} for value in (-1e-9, 0, 90, 90.000001, NAN)),
-    *({"surface_azimuth_degrees": value} for value in (-1e-9, 0, 359.999999, 360, INF)),
+    *({"surface_tilt_degrees": value} for value in (-1e-9, -0.0, 0, 90, 90.000001, NAN)),
+    *({"surface_azimuth_degrees": value} for value in (-1e-9, -0.0, 0, 359.999999, 360, INF)),
     {"mounting_type": "tracking", "surface_tilt_degrees": 10},
     {"mounting_type": "unknown", "surface_azimuth_degrees": 10},
 ]

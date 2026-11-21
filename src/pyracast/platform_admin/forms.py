@@ -320,6 +320,14 @@ class BindingActionForm(forms.Form):
         label=gettext_lazy("The provider has confirmed that this account can make requests again"),
     )
 
+    def show_declaration(self, fingerprint: str) -> None:
+        """Carries the hash of the declarations the page shows, also on a page shown again after
+        a refused action, so an approval from the page approves the values on the screen."""
+        if self.is_bound:
+            self.data = {**self.data, "declaration": fingerprint}
+        else:
+            self.initial = {**self.initial, "declaration": fingerprint}
+
     def current_binding(self, region: Region) -> SiteBinding:
         data = self.cleaned_data
         binding = SiteBinding.objects.select_related("provider_account").get(

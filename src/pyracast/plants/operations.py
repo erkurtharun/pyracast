@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
@@ -190,12 +191,43 @@ def revise_plant(
     """`expected_revision` is the parameter revision the change was made from; a different
     change saved since then refuses it. None overwrites, as the operator command does unless
     it is given a revision."""
+    return revise_plant_outcome(
+        actor,
+        tenant_id,
+        region_id,
+        plant_id,
+        parameters,
+        expected_revision=expected_revision,
+        platform=platform,
+    ).plant
+
+
+@dataclass(frozen=True)
+class PlantRevision:
+    """`before` is the parameters revision the save started from under the plant's lock."""
+
+    plant: Plant
+    before: int
+    changed: bool
+
+
+def revise_plant_outcome(
+    actor: User,
+    tenant_id: int,
+    region_id: int,
+    plant_id: int,
+    parameters: PlantParameters,
+    *,
+    expected_revision: int | None = None,
+    platform: bool = False,
+) -> PlantRevision:
     with transaction.atomic():
         authorize_workspace_admin(actor, tenant_id, platform=platform)
         region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         plant = _locked_plant(pk=plant_id, region=region)
-        _save_plant_parameters(actor, plant, region, parameters, expected_revision)
-        return plant
+        before = plant.parameters_revision
+        changed = _save_plant_parameters(actor, plant, region, parameters, expected_revision)
+        return PlantRevision(plant, before, changed)
 
 
 def _save_plant_parameters(
@@ -204,7 +236,8 @@ def _save_plant_parameters(
     region: Region,
     parameters: PlantParameters,
     expected_revision: int | None,
-) -> None:
+) -> bool:
+    """Returns whether the save wrote anything."""
     binding = _editable_binding(region)
     current = declared_parameters(plant)
     configuration = plant.current_configuration
@@ -212,7 +245,7 @@ def _save_plant_parameters(
         configuration is None or configuration.binding_id != binding.pk
     )
     if current == parameters and not rebound:
-        return
+        return False
     if current != parameters and expected_revision not in (None, plant.parameters_revision):
         raise StaleParametersError(plant)
     _rename(actor, plant, region, parameters.name)
@@ -224,6 +257,7 @@ def _save_plant_parameters(
     if current is not None and current != parameters:
         plant.parameters_revision += 1
         plant.save(update_fields=("parameters_revision",))
+    return True
 
 
 def _submit(actor: User, plant: Plant, parameters: PlantParameters) -> None:

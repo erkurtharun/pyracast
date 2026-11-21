@@ -9,7 +9,7 @@ from rest_framework.generics import GenericAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from pyracast.errors import ConflictError
+from pyracast.api.errors import current_on_conflict
 from pyracast.plants import operations
 from pyracast.plants.activation import (
     activate_calibration,
@@ -115,16 +115,14 @@ class PlantView(ScopedView[Plant]):
         scope = self.scope()
         data = PlantRevisionInput(data=request.data)
         data.is_valid(raise_exception=True)
-        try:
+        with current_on_conflict(
+            operations.StaleParametersError, lambda stale: PlantOutput(stale.current).data
+        ):
             plant = operations.revise_plant(
                 *scope,
                 data.parameters(),
                 expected_revision=data.validated_data["expected_revision"],
             )
-        except operations.StaleParametersError as error:
-            raise ConflictError(
-                error.code, details={"current": PlantOutput(error.current).data}
-            ) from error
         return Response(PlantOutput(plant).data)
 
 

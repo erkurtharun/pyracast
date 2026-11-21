@@ -28,6 +28,11 @@ def _refuse(field: str, message: StrOrPromise) -> NoReturn:
     raise DomainError(ErrorCode.INVALID_REQUEST, message, field=field)
 
 
+def without_negative_zero[T](value: T) -> T | float:
+    """A negative zero is zero; PostgreSQL keeps its sign when one is stored."""
+    return 0.0 if isinstance(value, float) and value == 0 else value
+
+
 def _finite(value: object) -> TypeIs[float]:
     return isinstance(value, int | float) and not isinstance(value, bool) and isfinite(value)
 
@@ -67,6 +72,8 @@ class PlantParameters:
             _refuse("surface_azimuth_degrees", ANGLE_REFUSED)
         if self.mounting_type != MountingType.FIXED and (tilt is not None or azimuth is not None):
             _refuse("mounting_type", _("Only fixed mounting permits surface angles."))
+        object.__setattr__(self, "surface_tilt_degrees", without_negative_zero(tilt))
+        object.__setattr__(self, "surface_azimuth_degrees", without_negative_zero(azimuth))
 
     def declared(self) -> dict[str, object]:
         return {field: getattr(self, field) for field in CONFIGURATION_PARAMETERS}

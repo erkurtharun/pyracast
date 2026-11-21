@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 import pytest
@@ -8,10 +9,12 @@ from django.utils import timezone
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.validation import validate_binding
+from pyracast.plants import approval
 from pyracast.plants.approval import ReviewDecision, approve_region, decide_review
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.operations import create_plant, revise_plant
 from pyracast.plants.parameters import PlantParameters
+from pyracast.platform_admin import plant_review
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 from pyracast.regions.operations import configure_binding, request_location_change
 from tests.support.admin_setup import admin_system, submitted_plant
@@ -25,7 +28,8 @@ REASON = "The declared capacity does not match the grid licence."
 APPROVED = "Plant approved. The first saved forecast is being prepared."
 ALREADY_APPROVED = "This plant is already approved."
 DECLARATION_CHANGED = (
-    "The declared plant details changed after this page opened. Review them again before approving."
+    "The declared plant details changed after this page opened. "
+    "The details shown now are the current ones; review them before approving."
 )
 STATUS_CHANGED = (
     "The review status changed after this page opened. Reload the plant and review it again."
@@ -312,6 +316,77 @@ def test_an_edit_after_the_review_page_opened_refuses_the_approval(edit: dict[st
     assert response.status_code == 400
     assert DECLARATION_CHANGED in response.content.decode()
     assert status_of(system.region) == RegionStatus.PENDING
+    assert activated(plant) == (system.binding.pk, 2, 150)
+
+
+def actions_of(response: Any) -> dict[str, object]:
+    form = response.context["action_form"]
+    values = {name: form[name].value() for name in form.fields}
+    return {name: value for name, value in values.items() if value is not None}
+
+
+def shown_capacity(response: Any) -> float:
+    shown = re.findall(r"<dd>([0-9.]+) MW</dd>", response.content.decode())
+    assert len(shown) == 1, shown
+    return float(shown[0])
+
+
+def test_the_values_a_review_page_shows_are_the_values_its_approval_activates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, replacement = edited_while_approved_then_back_in_review()
+    client, _ = verified_admin()
+    read = approval.declarations
+    edits = iter([175])
+
+    def edited_after_the_read(region_id: int) -> Any:
+        rows = read(region_id)
+        for capacity in edits:
+            customer_edit(system, plant, dc_capacity_mw=capacity)
+        return rows
+
+    with monkeypatch.context() as patched:
+        patched.setattr(approval, "declarations", edited_after_the_read)
+        patched.setattr(plant_review, "declarations", edited_after_the_read)
+        page = client.get(plant_url(system.region))
+
+    shown = shown_capacity(page)
+    customer_edit(system, plant, dc_capacity_mw=shown)
+    approved = {**actions_of(page), "action": "approve"}
+    assert notices(client, plant_url(system.region), approved) == (302, [APPROVED])
+    assert activated(plant) == (replacement.pk, 3, shown)
+
+
+def refused_after_an_edit_to_175() -> tuple[System, Plant, SiteBinding, Client, Any]:
+    system, plant, replacement = edited_while_approved_then_back_in_review()
+    client, _ = verified_admin()
+    seen = page_actions(client, system.region)
+    customer_edit(system, plant, dc_capacity_mw=175)
+    refused = client.post(plant_url(system.region), {**seen, "action": "approve"})
+    assert refused.status_code == 400
+    assert DECLARATION_CHANGED in refused.content.decode()
+    assert shown_capacity(refused) == 175
+    return system, plant, replacement, client, refused
+
+
+def test_a_page_refused_for_changed_values_approves_the_values_it_shows() -> None:
+    system, plant, replacement, client, refused = refused_after_an_edit_to_175()
+
+    again = {**actions_of(refused), "action": "approve"}
+
+    assert notices(client, plant_url(system.region), again) == (302, [APPROVED])
+    assert activated(plant) == (replacement.pk, 3, 175)
+
+
+def test_a_page_refused_for_changed_values_refuses_when_they_change_again() -> None:
+    system, plant, _, client, refused = refused_after_an_edit_to_175()
+    customer_edit(system, plant, dc_capacity_mw=180)
+
+    again = client.post(plant_url(system.region), {**actions_of(refused), "action": "approve"})
+
+    assert again.status_code == 400
+    assert DECLARATION_CHANGED in again.content.decode()
+    assert shown_capacity(again) == 180
     assert activated(plant) == (system.binding.pk, 2, 150)
 
 

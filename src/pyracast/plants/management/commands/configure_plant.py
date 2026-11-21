@@ -5,8 +5,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
-from pyracast.plants.models import Plant
-from pyracast.plants.operations import create_plant, revise_plant
+from pyracast.plants.operations import create_plant, revise_plant_outcome
 from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 
@@ -44,10 +43,19 @@ class Command(BaseCommand):
         parser.add_argument(
             "--expected-revision",
             type=int,
-            help="With --plant-id: the parameters revision the change was made from.",
+            help="With --plant-id: the parameters revision the change was made from, 1 or more.",
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
+        expected = options["expected_revision"]
+        if expected is not None and options["plant_id"] is None:
+            raise CommandError(
+                "Plant configuration failed: --expected-revision requires --plant-id."
+            )
+        if expected is not None and expected < 1:
+            raise CommandError(
+                "Plant configuration failed: --expected-revision must be at least 1."
+            )
         try:
             actor = User.objects.get(username=options["username"])
             region = Region.objects.get(pk=options["region_id"])
@@ -58,16 +66,20 @@ class Command(BaseCommand):
                 plant = create_plant(actor, region.tenant_id, region.pk, parameters)
                 revisions = str(plant.parameters_revision)
             else:
-                before = Plant.objects.get(pk=options["plant_id"], region=region)
-                plant = revise_plant(
+                outcome = revise_plant_outcome(
                     actor,
                     region.tenant_id,
                     region.pk,
-                    before.pk,
+                    options["plant_id"],
                     parameters,
-                    expected_revision=options["expected_revision"],
+                    expected_revision=expected,
                 )
-                revisions = f"{before.parameters_revision} to {plant.parameters_revision}"
+                plant = outcome.plant
+                revisions = (
+                    f"{outcome.before} to {plant.parameters_revision}"
+                    if outcome.changed
+                    else f"{plant.parameters_revision} unchanged"
+                )
         except ValidationError as exc:
             raise CommandError(f"Plant configuration failed: {'; '.join(exc.messages)}") from exc
         except (ObjectDoesNotExist, PermissionDenied) as exc:
