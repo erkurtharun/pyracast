@@ -14,6 +14,7 @@ from pyracast.background.deadlines import (
 )
 from pyracast.environment import load_environment
 from pyracast.local_time import CLOCK_PATTERN
+from pyracast.log_lines import LINE_FORMAT
 
 load_environment()
 
@@ -406,10 +407,13 @@ MAILERS = {"default": _mailer}
 # A command run through `docker compose exec` writes to its own stream, which the log driver
 # never sees; deployments point this at PID 1's stdout so every security line is shipped.
 _security_log_path = os.environ.get("PYRACAST_SECURITY_LOG_PATH")
+LOGGING_CONFIG = "pyracast.log_lines.configure"
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {"standard": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"}},
+    "formatters": {
+        "standard": {"class": "pyracast.log_lines.LineFormatter", "format": LINE_FORMAT}
+    },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
@@ -432,6 +436,8 @@ LOGGING = {
             }
         ),
     },
+    # Records of loggers configured nowhere else, which Python would print without a format.
+    "root": {"handlers": ["console"], "level": "WARNING"},
     "loggers": {
         "pyracast": {
             "handlers": ["console"],
