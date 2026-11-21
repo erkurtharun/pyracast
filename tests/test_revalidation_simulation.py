@@ -124,7 +124,13 @@ def assert_no_forecast_was_refused_for_a_used_up_quota(
     system: System, moment: datetime, checked: set[int]
 ) -> None:
     """A forecast refused for the used-up quota is allowed only where its plant's starts of the
-    day are used up as well (claim's day bound refuses it anyway)."""
+    day are used up as well (claim's day bound refuses it anyway); none is refused for the
+    reserve, which holds back other requests only."""
+    assert not CollectionJob.objects.filter(
+        binding__provider_account=system.account,
+        endpoint="forecasts",
+        last_error="history_budget_reserved",
+    ).exists(), moment
     refused = CollectionJob.objects.filter(
         binding__provider_account=system.account,
         endpoint="forecasts",

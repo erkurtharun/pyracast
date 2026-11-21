@@ -1,11 +1,16 @@
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
+from django.core.exceptions import ValidationError
 
+from pyracast import trash
+from pyracast.background import clock as monotonic_clock
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.budget import remaining_forecast_requests
+from pyracast.forecasts.jobs.claim import claim
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.quota import ForecastBudgetReservedError
 from pyracast.forecasts.revalidation import (
@@ -14,17 +19,21 @@ from pyracast.forecasts.revalidation import (
     RevalidationOutcome,
     revalidate_account,
 )
+from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.forecasts.validation import validate_binding
 from pyracast.platform_admin.provider_accounts import account_context
-from tests.support.domain import NOW, FakeAdapter, provider_key
+from pyracast.trash import restore_region, trash_region
+from tests.support.domain import NOW, FakeAdapter, System, provider_key
 from tests.support.jobs import calculate, collect
 from tests.support.providers import replace_key
 from tests.support.revalidation import (
+    ROUND_OFFSETS,
     Run,
     account,
     assert_current_plants_keep_their_forecasts,
     collecting_account,
+    dispatch_round,
     run_revalidations,
     slots_of,
     spend_until,
@@ -230,6 +239,94 @@ def test_nine_clocks_on_quota_ten_revalidate_a_plant_refused_for_the_old_key() -
     )
 
 
+def assert_the_refused_job_stays_ended_at_validation_and_claim(
+    system: System, plant: SiteBinding, refused: CollectionJob, moment: datetime, need: int
+) -> None:
+    assert remaining_forecast_requests(account(system), moment, validating=plant) == need
+    validate_binding(system.admin, plant.pk, FakeAdapter(), moment)
+    assert_current_plants_keep_their_forecasts(system, moment)
+    attempts = RequestAttempt.objects.count()
+    refused.refresh_from_db()
+    assert (refused.status, refused.last_error) == ("failed", "provider_authentication_failed")
+
+    assert claim(refused.pk, moment) is None
+
+    refused.refresh_from_db()
+    assert (refused.status, refused.last_error) == ("failed", "provider_authentication_failed")
+    assert RequestAttempt.objects.count() == attempts
+
+
+def collect_the_slot(slot: datetime) -> None:
+    for offset in ROUND_OFFSETS:
+        dispatch_round(slot + offset)
+
+
+def trash_clock_at(monkeypatch: pytest.MonkeyPatch, moment: datetime) -> None:
+    monkeypatch.setattr(trash, "timezone", SimpleNamespace(now=lambda: moment))
+
+
+@pytest.mark.parametrize("quota", [2, 10])
+def test_a_job_refused_for_the_key_before_the_trash_stays_ended_after_the_restore(
+    monkeypatch: pytest.MonkeyPatch, quota: int
+) -> None:
+    system, (plant,) = collecting_account([["16:00"]], replaced=False)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=quota)
+    refused = refused_for_the_key(plant, utc(D1, 13))
+    trash_clock_at(monkeypatch, utc(D1, 14))
+    trash_region(system.member, system.tenant.pk, plant.region_id)
+    replace_key(system.admin, system.account.pk, provider_key("NEW"))
+    trash_clock_at(monkeypatch, utc(D2, 11))
+    restore_region(system.member, system.tenant.pk, plant.region_id)
+
+    # D2 11:00, nothing used: the restored schedule sends only the slot of D2 13:00, so the
+    # validation fits 0 + 1 + 1 = 2 even on quota 2; the job of D1 13:00 is from before the restore.
+    assert_the_refused_job_stays_ended_at_validation_and_claim(
+        system, plant, refused, utc(D2, 11), need=1
+    )
+    collect_the_slot(utc(D2, 13))
+    assert_the_due_slot_was_collected_once_and_the_older_job_stays_ended(
+        plant, refused, utc(D2, 13)
+    )
+
+
+def test_a_job_refused_for_the_key_at_a_clock_taken_off_the_schedule_stays_ended() -> None:
+    system, (plant,) = collecting_account([["16:00"]], replaced=False)
+    refused = refused_for_the_key(plant, utc(D1, 13))
+    configure_schedule(
+        system.member,
+        system.tenant.pk,
+        plant.region_id,
+        enabled=True,
+        times=["18:00"],
+        now=utc(D1, 13, 30),
+    )
+    replace_key(system.admin, system.account.pk, provider_key("NEW"))
+
+    # Claim ends a 16:00 job unsent, and the refused request took the plant's one start of D1,
+    # so the new clock's slot of D1 15:00 UTC is refused by the day bound: nothing is sent.
+    assert_the_refused_job_stays_ended_at_validation_and_claim(
+        system, plant, refused, utc(D1, 14), need=0
+    )
+
+
+def test_a_job_refused_for_the_key_stays_ended_while_collection_is_off() -> None:
+    system, (plant,) = collecting_account([["16:00"]], replaced=False)
+    refused = refused_for_the_key(plant, utc(D1, 13))
+    configure_schedule(
+        system.member,
+        system.tenant.pk,
+        plant.region_id,
+        enabled=False,
+        times=["16:00"],
+        now=utc(D1, 13, 30),
+    )
+    replace_key(system.admin, system.account.pk, provider_key("NEW"))
+
+    assert_the_refused_job_stays_ended_at_validation_and_claim(
+        system, plant, refused, utc(D1, 14), need=0
+    )
+
+
 def recording(asked: list[int]) -> Callable[[SiteBinding], ProviderAdapter]:
     def adapter_for(binding: SiteBinding) -> ProviderAdapter:
         asked.append(binding.pk)
@@ -314,3 +411,45 @@ def test_plants_with_a_clock_late_in_the_utc_day_are_revalidated_right_after_it(
         Run(utc(D3, 23, 45) + after, DONE, None, 5),
     ]
     assert [revision(plant) for plant in plants] == [2] * 5
+
+
+class SlowlyFailingPreparation(FakeAdapter):
+    """Takes six seconds to prepare and fails before any request."""
+
+    def __init__(self, ticks: list[float]) -> None:
+        super().__init__()
+        self.ticks = ticks
+
+    def prepare(self, binding: SiteBinding) -> None:
+        self.ticks[0] += 6
+        raise ValidationError("Configuration changed during validation.")
+
+
+def test_a_run_refused_for_the_reserve_is_due_after_the_slot_following_its_first_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plants = collecting_account([["16:00"]] * 11)
+    *current, refused, slow = plants
+    SiteBinding.objects.filter(pk__in=[binding.pk for binding in current]).update(
+        validated_credential_revision=2
+    )
+    lease = account(system).revalidation_due_at
+    assert lease is not None
+    ticks = [0.0]
+    monkeypatch.setattr(monotonic_clock, "time", SimpleNamespace(monotonic=lambda: ticks[0]))
+
+    # The first waiting plant is refused at 12:59:55 (0 + 1 + 9 + 1 = 11 > 10); the second ends
+    # at 13:00:01 without a request, after the slot of 13:00 UTC.
+    outcome = revalidate_account(
+        system.account.pk,
+        utc(D1, 12, 59) + timedelta(seconds=55),
+        claim=lease,
+        adapter_for=lambda binding: (
+            SlowlyFailingPreparation(ticks) if binding.pk == slow.pk else FakeAdapter()
+        ),
+    )
+
+    assert outcome == WAITING
+    assert account(system).revalidation_due_at == utc(D1, 13) + AFTER_THE_SLOT
+    assert [revision(refused), revision(slow)] == [1, 1]
+    assert used(system, utc(D1, 13)) == 0
