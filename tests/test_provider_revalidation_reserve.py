@@ -13,7 +13,11 @@ from pyracast.forecasts.models import (
     RequestPurpose,
 )
 from pyracast.forecasts.quota import ForecastBudgetReservedError, reserve_request
-from pyracast.forecasts.revalidation import RevalidationOutcome, revalidate_account
+from pyracast.forecasts.revalidation import (
+    RevalidationOutcome,
+    revalidate_account,
+    stale_bindings,
+)
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import approve_region
@@ -22,7 +26,13 @@ from pyracast.regions.operations import configure_binding, submit_region
 from tests.support.domain import NOW, FakeAdapter, System, make_system, provider_key
 from tests.support.jobs import calculate, collect
 from tests.support.providers import replace_key
-from tests.support.revalidation import collecting_account, spend_until, used, utc
+from tests.support.revalidation import (
+    assert_current_plants_keep_their_forecasts,
+    collecting_account,
+    spend_until,
+    used,
+    utc,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 NEXT_UTC_DAY = datetime.combine(NOW.date() + timedelta(days=1), datetime.min.time(), UTC)
@@ -203,6 +213,31 @@ def test_a_history_request_leaves_the_forecast_a_waiting_plant_needs_once_revali
         reserve_request(current, moment, purpose=RequestPurpose.ESTIMATED_ACTUALS, job=history)
 
     assert used(system, moment) == 8
+
+
+def test_a_history_request_leaves_a_waiting_plant_the_request_of_its_revalidation() -> None:
+    system, current, moment = waiting_plant_with_slots_to_come()
+    spend_until(system, moment, 7)
+
+    with pytest.raises(ForecastBudgetReservedError):
+        reserve_request(
+            current,
+            moment,
+            purpose=RequestPurpose.ESTIMATED_ACTUALS,
+            job=history_job(current, moment),
+        )
+    assert used(system, moment) == 7
+
+    claim = account(system).revalidation_due_at
+    assert claim is not None
+    outcome = revalidate_account(
+        system.account.pk, moment, claim=claim, adapter_for=lambda binding: FakeAdapter()
+    )
+
+    assert outcome == RevalidationOutcome.DONE
+    assert used(system, moment) == 8
+    assert not stale_bindings(account(system)).exists()
+    assert_current_plants_keep_their_forecasts(system, moment)
 
 
 def history_job(binding: SiteBinding, moment: datetime) -> CollectionJob:
