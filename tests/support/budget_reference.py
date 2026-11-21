@@ -8,9 +8,12 @@ from pyracast.forecasts.models import CollectionJob, CollectionSchedule, Request
 from pyracast.local_time import local_slot
 from pyracast.regions.models import active_region
 
+REOPENS_NOT = {"quota_exhausted", "schedule_disabled"}
+
 
 def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
-    """The forecast budget as computed before collection timing had one function."""
+    """The forecast budget as computed before collection timing had one function, with the due
+    slot the scheduler opens again and the starts per UTC day claim admits."""
     day_start = datetime.combine(now.astimezone(UTC).date(), datetime.min.time(), UTC)
     day_end = day_start + timedelta(days=1)
     attempted = set(
@@ -18,7 +21,7 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         .exclude(job_id=None)
         .values_list("job_id", flat=True)
     )
-    needed: set[tuple[int, datetime]] = set()
+    total = 0
     bindings = SiteBinding.objects.filter(
         active_region("region__"),
         provider_account=account,
@@ -30,30 +33,33 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         if binding.region.approved_binding_id != binding.pk:
             continue
         schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
-        first_slot = (
+        first = (
             CollectionJob.objects.filter(binding=binding, endpoint="forecasts")
             .order_by("created_at", "pk")
-            .values_list("scheduled_for", flat=True)
+            .values_list("pk", "scheduled_for")
             .first()
         )
-        if first_slot is None or (schedule is not None and not schedule.enabled):
+        if first is None or (schedule is not None and not schedule.enabled):
             continue
+        first_id, first_slot = first
         clocks = schedule.times if schedule else [settings.PYRACAST_CUTOFF_LOCAL.strftime("%H:%M")]
         clocks = clocks[: max(account.daily_quota - 1, 0)]
         effective = max(first_slot, schedule.effective_from) if schedule else first_slot
         jobs = list(CollectionJob.objects.filter(binding=binding, endpoint="forecasts"))
+        by_slot = {job.scheduled_for: job for job in jobs}
         paid_or_terminal = {
             job.scheduled_for
             for job in jobs
             if job.pk in attempted or job.status in {"succeeded", "failed", "stale"}
         }
+        needed: dict[datetime, CollectionJob | None] = {}
         for job in jobs:
             if (
                 job.status in {"pending", "retry", "running"}
                 and job.pk not in attempted
                 and job.available_at < day_end
             ):
-                needed.add((binding.pk, job.scheduled_for))
+                needed[job.scheduled_for] = job
         zone = ZoneInfo(binding.region.timezone)
         day = day_start.astimezone(zone).date()
         last = (day_end - timedelta(microseconds=1)).astimezone(zone).date()
@@ -65,6 +71,49 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
                     and max(now, effective, day_start) <= slot < day_end
                     and slot not in paid_or_terminal
                 ):
-                    needed.add((binding.pk, slot))
+                    needed.setdefault(slot, None)
             day += timedelta(days=1)
-    return len(needed)
+        local_today = now.astimezone(zone).date()
+        passed = [
+            slot
+            for day in (local_today - timedelta(days=1), local_today)
+            for clock in clocks
+            if (slot := local_slot(day, clock, zone)) is not None and effective <= slot <= now
+        ]
+        if passed:
+            due_job = by_slot.get(max(passed))
+            if due_job is None or (
+                due_job.status == "stale"
+                and due_job.last_error not in REOPENS_NOT
+                and due_job.pk not in attempted
+            ):
+                needed.setdefault(max(passed), due_job)
+        latest = max(
+            (job for job in jobs if job.scheduled_for <= now),
+            key=lambda job: (job.scheduled_for, job.pk),
+            default=None,
+        )
+        if latest is not None and (latest.status, latest.last_error) == (
+            "failed",
+            "provider_authentication_failed",
+        ):
+            needed[latest.scheduled_for] = latest
+        ever_sent = set(
+            RequestAttempt.objects.filter(job__binding=binding).values_list("job_id", flat=True)
+        )
+        starts = sum(
+            1
+            for job in needed.values()
+            if job is None or (job.pk != first_id and job.pk not in ever_sent)
+        )
+        started = {
+            attempt.job_id
+            for attempt in RequestAttempt.objects.filter(
+                binding=binding, purpose="forecast", utc_day=day_start.date(), job__isnull=False
+            ).exclude(job_id=first_id)
+            if not RequestAttempt.objects.filter(
+                job_id=attempt.job_id, utc_day__lt=day_start.date()
+            ).exists()
+        }
+        total += len(needed) - starts + min(starts, max(len(clocks) - len(started), 0))
+    return total
