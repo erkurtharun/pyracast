@@ -5,6 +5,7 @@ import ipaddress
 import itertools
 import json
 import logging
+import logging.config
 import os
 import re
 import runpy
@@ -49,6 +50,7 @@ from pyracast.orchestration.management.commands.check_delivery_health import (
 )
 from pyracast.orchestration.management.commands.worker import Command as WorkerCommand
 from pyracast.urls import urlpatterns
+from tests.support.container_logs import container_entry as shipped_entry
 from tests.support.gateway_routes import (
     backend_route,
     middleware,
@@ -279,18 +281,18 @@ def test_the_api_writes_its_security_lines_through_a_blocking_log_path() -> None
     assert compose_environment()["PYRACAST_SECURITY_LOG_PATH"] == "/proc/1/fd/1"
 
 
-def container_entry(record: logging.LogRecord, handler: str) -> dict[str, Any]:
-    """One line of a container stream, formatted by a configured handler, as gcplogs ships it."""
+def formatted(record: logging.LogRecord, handler: str) -> str:
+    """A record as the formatter a handler of settings.LOGGING names writes it."""
     configuration: dict[str, Any] = settings.LOGGING
     formatter = configuration["formatters"][configuration["handlers"][handler]["formatter"]]
-    return {
-        "logName": "projects/project/logs/gcplogs-docker-driver",
-        "resource": {"type": "gce_instance"},
-        "jsonPayload": {
-            "message": logging.Formatter(formatter["format"]).format(record),
-            "container": {"name": "/pyracast-api-1"},
-        },
-    }
+    return (
+        logging.config.DictConfigurator(configuration).configure_formatter(formatter).format(record)
+    )
+
+
+def container_entry(record: logging.LogRecord, handler: str) -> dict[str, Any]:
+    """One line of the API container's stream, written by a configured handler."""
+    return shipped_entry(formatted(record, handler), "/pyracast-api-1")
 
 
 def operations_entry(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
@@ -343,6 +345,71 @@ def test_the_security_bucket_receives_exactly_the_lines_of_the_security_logger(
     assert filter_of(metric, monitoring, {"var.project_id": "project"}) == terms
     assert "filter = local.security_log_filter" in " ".join(sink.split())
     assert "filter = local.security_log_filter" in " ".join(metric.split())
+
+
+def test_only_the_lines_of_the_containers_that_run_the_application_count_as_security_lines(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(security_logger, "handlers", [caplog.handler])
+    caplog.set_level(logging.INFO, logger="pyracast.security")
+    record_security_event(
+        SecurityEvent.LOGIN_LOCKED, address="someone@example.com", client_ip="203.0.113.7"
+    )
+    (security,) = caplog.records
+    line = formatted(security, "security")
+    monitoring = text(TERRAFORM / "monitoring.tf")
+    terms = filter_of(
+        resources(monitoring, "google_logging_project_sink")["security"],
+        monitoring,
+        {"var.project_id": "project"},
+    )
+    project = yaml.safe_load(text(DEPLOY / "compose.yaml"))["name"]
+    application = {
+        name
+        for name, service in compose_services().items()
+        if "PYRACAST_SECURITY_LOG_PATH" in service.get("environment", {})
+    }
+    counted = {
+        name
+        for name in compose_services()
+        for container in (f"/{project}-{name}-1", f"/{project}-{name}-run-0123456789ab")
+        if matches(terms, shipped_entry(line, container))
+    }
+
+    assert application == {"api", "worker", "notifications", "dispatcher", "migrate"}
+    assert counted == application
+    for container in ("/pyracast-api", "/pyracast-api-1x", "/other-api-1", "/pyracast-api-run-"):
+        assert not matches(terms, shipped_entry(line, container))
+    assert not matches(terms, {**shipped_entry(line, "/pyracast-api-1"), "jsonPayload": {}})
+
+
+def counter_threshold_policies() -> dict[str, str]:
+    """Alert policies whose threshold condition reads a log-based (user) metric."""
+    policies = resources(text(TERRAFORM / "monitoring.tf"), "google_monitoring_alert_policy")
+    return {
+        name: " ".join(block.split())
+        for name, block in policies.items()
+        if "condition_threshold" in block and "logging.googleapis.com/user/" in block
+    }
+
+
+def test_every_alert_on_a_count_of_log_lines_is_known() -> None:
+    assert set(counter_threshold_policies()) == {"runtime_restarts", "security"}
+
+
+@pytest.mark.parametrize("policy", ["runtime_restarts", "security"])
+def test_an_alert_on_a_count_of_log_lines_closes_once_its_window_holds_no_line(
+    policy: str,
+) -> None:
+    block = counter_threshold_policies()[policy]
+    window = re.search(r'alignment_period = "(\d+s)"', block)
+    closing = re.search(r'auto_close = "(\d+s)"', block)
+
+    assert 'evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE"' in block
+    assert 'duration = "60s"' in block
+    assert window
+    assert closing
+    assert seconds(window[1]) <= seconds(closing[1]) == 3600
 
 
 def test_security_lines_are_kept_a_year_in_their_own_unlocked_bucket_beside_the_default() -> None:
@@ -896,7 +963,8 @@ def test_a_service_restarted_three_times_within_an_hour_is_alerted() -> None:
     assert '"NOT jsonPayload.test=true"' in metric
     assert "google_logging_metric.runtime_restarts.name" in policy
     assert (
-        'comparison = "COMPARISON_GT" threshold_value = 2 duration = "0s" aggregations { '
+        'comparison = "COMPARISON_GT" threshold_value = 2 duration = "60s" '
+        'evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE" aggregations { '
         'alignment_period = "3600s" per_series_aligner = "ALIGN_SUM" '
         'cross_series_reducer = "REDUCE_SUM" }'
     ) in policy

@@ -14,6 +14,7 @@ LAYERS: tuple[tuple[str, ...], ...] = (
         "irradiance",
         "languages",
         "local_time",
+        "log_lines",
         "provider_retry",
         "shutdown",
         "solar",
