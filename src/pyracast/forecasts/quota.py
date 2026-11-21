@@ -86,7 +86,9 @@ def reserve_account_request(
     binding: SiteBinding | None = None,
     job: CollectionJob | None = None,
     keep_forecast_reserve: bool = False,
+    credential_revision: int | None = None,
 ) -> RequestAttempt:
+    """`credential_revision` names the key the caller sends; a replaced key spends nothing."""
     started = time.monotonic()
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
@@ -98,6 +100,8 @@ def reserve_account_request(
         raise ValidationError("The job must belong to the binding.")
     with transaction.atomic():
         account = ProviderAccount.objects.select_for_update().get(pk=account.pk)
+        if credential_revision not in {None, account.credential_revision}:
+            raise ValidationError("Configuration changed during validation.")
         now += timedelta(seconds=time.monotonic() - started)
         if job is not None and job.retry_until is not None and now >= job.retry_until:
             raise HistoryWindowClosedError
@@ -135,6 +139,7 @@ def reserve_request(
     purpose: RequestPurpose,
     job: CollectionJob | None = None,
     keep_forecast_reserve: bool = False,
+    credential_revision: int | None = None,
 ) -> RequestAttempt:
     return reserve_account_request(
         binding.provider_account,
@@ -143,6 +148,7 @@ def reserve_request(
         binding=binding,
         job=job,
         keep_forecast_reserve=keep_forecast_reserve,
+        credential_revision=credential_revision,
     )
 
 

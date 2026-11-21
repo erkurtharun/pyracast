@@ -83,6 +83,7 @@ def validate_binding(
             now,
             purpose=RequestPurpose.VALIDATION,
             keep_forecast_reserve=current.status == RegionStatus.APPROVED,
+            credential_revision=binding.provider_account.credential_revision,
         )
     try:
         adapter.validate(binding)
@@ -98,7 +99,7 @@ def validate_binding(
             outcome=RequestOutcome.FAILED, http_status=exc.status_code
         )
         if refuses_binding(exc):
-            SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
+            _record_refusal(binding)
         record_provider_failure(
             binding.provider_account, exc, now + timedelta(seconds=time.monotonic() - started)
         )
@@ -132,6 +133,14 @@ def validate_binding(
             details={"binding_id": binding.pk},
         )
     return binding
+
+
+def _record_refusal(binding: SiteBinding) -> None:
+    # A refusal of a superseded key never overwrites the health a newer key established.
+    with transaction.atomic():
+        account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
+        if account.credential_revision == binding.provider_account.credential_revision:
+            SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
 
 
 def _rearm_after_validation(binding: SiteBinding, recovered_at: datetime) -> None:
