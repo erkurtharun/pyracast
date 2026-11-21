@@ -17,7 +17,7 @@ from pyracast.collection_window import (
     next_nightly_start,
 )
 from pyracast.connections.models import MAX_DAILY_QUOTA
-from pyracast.forecasts.jobs.claim import open_at_claim
+from pyracast.forecasts.jobs.claim import claimable_from, open_at_claim
 from pyracast.forecasts.jobs.ready import WAITING
 from pyracast.forecasts.models import (
     CollectionEndpoint,
@@ -139,7 +139,7 @@ def _next_collection_at(collecting: Collecting, timezone: str, now: datetime) ->
     """The scheduler's next act: a due nightly history job, a queued job claim takes, a slot."""
     night = open_night_window(now, timezone)
     jobs = CollectionJob.objects.filter(binding=collecting.binding).aggregate(
-        queued=Min("available_at", filter=Q(status__in=WAITING) & open_at_claim(now)),
+        queued=Min(claimable_from(now), filter=Q(status__in=WAITING) & open_at_claim(now)),
         **(
             {
                 "history": Count("pk", filter=night.history()),

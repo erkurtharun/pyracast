@@ -12,6 +12,7 @@ from pyracast.background.failures import log_failure
 from pyracast.collection_window import INTRADAY_HISTORY_WINDOW, nightly_window
 from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.jobs.ready import WAITING
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionInactiveReason,
@@ -145,7 +146,7 @@ def _schedule_forecast_slot(context: _RegionContext, slot: datetime) -> int:
         binding=binding,
         endpoint=CollectionEndpoint.FORECASTS,
         scheduled_for__lt=slot,
-        status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY),
+        status__in=WAITING,
     ).update(
         status=CollectionJobStatus.STALE,
         last_error=CollectionJobError.FORECAST_SUPERSEDED,

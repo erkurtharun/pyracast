@@ -194,6 +194,23 @@ def test_a_queued_job_whose_window_closed_is_not_the_next_collection() -> None:
     assert (history.status, history.last_error) == ("failed", "history_window_closed")
 
 
+@pytest.mark.parametrize(
+    "available_at",
+    [WINDOW_END - timedelta(hours=1), WINDOW_END + timedelta(hours=1)],
+    ids=["before-the-window-end", "after-the-window-end"],
+)
+def test_a_throttled_job_whose_cooldown_was_cleared_is_due_now(available_at: datetime) -> None:
+    system = collected(make_system(approved=True))
+    moment = WINDOW_START + timedelta(hours=2)
+    history = CollectionJob.objects.get(pk__in=created_jobs(WINDOW_START))
+    CollectionJob.objects.filter(pk=history.pk).update(
+        status="retry", last_error="provider_throttled", available_at=available_at, attempts=1
+    )
+
+    assert at(read(system, moment)["next_collection_at"]) == moment
+    assert claim(history.pk, moment) is not None
+
+
 def test_usage_counts_only_the_plants_own_requests_of_the_utc_day() -> None:
     system = collected(make_system(approved=True))
     other_region = submit_region(

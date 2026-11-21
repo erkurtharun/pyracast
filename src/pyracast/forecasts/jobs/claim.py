@@ -5,7 +5,7 @@ from enum import StrEnum
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
-from django.db.models import DateTimeField, Q, Value
+from django.db.models import Case, DateTimeField, F, Q, Value, When
 from django.db.models.functions import Greatest
 
 from pyracast.background.clock import Clock
@@ -15,6 +15,7 @@ from pyracast.background.retry_policy import PROVIDER_JOB
 from pyracast.collection_window import INTRADAY_HISTORY_WINDOW, NIGHT_RETRY_DELAY
 from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.jobs.ready import cleared_cooldown
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
@@ -123,10 +124,18 @@ def window_closed(job: CollectionJob, now: datetime) -> bool:
     return job.retry_until is not None and now >= job.retry_until
 
 
+def claimable_from(now: datetime) -> Case:
+    """The moment from which claim takes a waiting job."""
+    return Case(
+        When(cleared_cooldown(), then=Value(now, output_field=DateTimeField())),
+        default=F("available_at"),
+    )
+
+
 def open_at_claim(now: datetime) -> Q:
     """Waiting jobs whose window is still open when they can first be claimed (window_closed)."""
     return Q(retry_until__isnull=True) | Q(
-        retry_until__gt=Greatest("available_at", Value(now, output_field=DateTimeField()))
+        retry_until__gt=Greatest(claimable_from(now), Value(now, output_field=DateTimeField()))
     )
 
 
@@ -144,18 +153,16 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         if job is None:
             return None
         now = clock.now()
-        cleared_cooldown = (
+        ready_early = (
             job.status == CollectionJobStatus.RETRY
             and job.last_error == CollectionJobError.PROVIDER_THROTTLED
-            and CollectionJob.objects.filter(
-                pk=job.pk, binding__provider_account__request_blocked_until__isnull=True
-            ).exists()
+            and CollectionJob.objects.filter(cleared_cooldown(), pk=job.pk).exists()
         )
         if job.status in {
             CollectionJobStatus.SUCCEEDED,
             CollectionJobStatus.STALE,
             CollectionJobStatus.FAILED,
-        } or (job.available_at > now and not cleared_cooldown):
+        } or (job.available_at > now and not ready_early):
             return None
         if window_closed(job, now):
             _end_unclaimed(
@@ -189,7 +196,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             _end_unclaimed(job, CollectionJobStatus.STALE, reason)
             return None
         token = take(job, CollectionJobStatus.RUNNING, now, LEASE_DURATION)
-        if cleared_cooldown:
+        if ready_early:
             job.available_at = now
         if job.retry_until is not None:
             job.available_at = now + (LEASE_DURATION if _is_intraday(job) else NIGHT_RETRY_DELAY)
