@@ -402,14 +402,20 @@ def test_an_alert_on_a_count_of_log_lines_closes_once_its_window_holds_no_line(
     policy: str,
 ) -> None:
     block = counter_threshold_policies()[policy]
+    period = re.search(r'conditions \{ display_name = "[^"]* (?:within|in) ([a-z ]+)"', block)
+    retest = re.search(r'duration = "(\d+s)"', block)
     window = re.search(r'alignment_period = "(\d+s)"', block)
     closing = re.search(r'auto_close = "(\d+s)"', block)
 
     assert 'evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE"' in block
-    assert 'duration = "60s"' in block
+    assert period
+    assert retest
     assert window
     assert closing
-    assert seconds(window[1]) <= seconds(closing[1]) == 3600
+    # The condition must hold for the retest duration, so the window keeps a line that long more.
+    assert seconds(retest[1]) == 60
+    assert seconds(window[1]) == {"one hour": 3600, "ten minutes": 600}[period[1]] + 60
+    assert seconds(closing[1]) >= seconds(window[1])
 
 
 def test_security_lines_are_kept_a_year_in_their_own_unlocked_bucket_beside_the_default() -> None:
@@ -962,12 +968,15 @@ def test_a_service_restarted_three_times_within_an_hour_is_alerted() -> None:
     assert r'"jsonPayload.event=\"pyracast_runtime_restarted\""' in metric
     assert '"NOT jsonPayload.test=true"' in metric
     assert "google_logging_metric.runtime_restarts.name" in policy
-    assert (
-        'comparison = "COMPARISON_GT" threshold_value = 2 duration = "60s" '
-        'evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE" aggregations { '
-        'alignment_period = "3600s" per_series_aligner = "ALIGN_SUM" '
-        'cross_series_reducer = "REDUCE_SUM" }'
-    ) in policy
+    # The window's length follows from this name: see the test of alerts on counts of log lines.
+    assert 'display_name = "Three watchdog restarts within one hour"' in policy
+    assert re.search(
+        r'comparison = "COMPARISON_GT" threshold_value = 2 duration = "60s" '
+        r'evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE" aggregations \{ '
+        r'alignment_period = "\d+s" per_series_aligner = "ALIGN_SUM" '
+        r'cross_series_reducer = "REDUCE_SUM" \}',
+        policy,
+    )
     assert "pyracast_runtime_restarted" in reported_events()["WARNING"]
 
 

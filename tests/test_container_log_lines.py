@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -105,13 +106,39 @@ for pad in range(16 * 1024 - 120, 16 * 1024):
     logging.getLogger("pyracast.forecasts").warning("%s%s", "x" * pad, FORGED)
 """
 )
+# Mostly characters of two to four bytes; the security line at every offset around 4096 bytes of a
+# record's first line and of a further line.
+LONG_RECORDS = (
+    DJANGO
+    + r"""
+import logging
+filler = ("ğ€😀a" * 1500).encode()
+for end in range(4000, 4100):
+    text = filler[:end].decode(errors="ignore")
+    logging.getLogger("pyracast.forecasts").warning("%s%s\n%s%s", text, FORGED, text, FORGED)
+"""
+)
+LONG_RECORDS_EACH = 100
+RECORD_START = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]{3} WARNING pyracast[.]forecasts "
+)
+
+
+def writer_environment(script: str, forged: str) -> dict[str, str]:
+    environment = {
+        key: value for key, value in os.environ.items() if key != "PYRACAST_SECURITY_LOG_PATH"
+    }
+    return environment | {
+        "DJANGO_SETTINGS_MODULE": "tests.settings",
+        "PYRACAST_LOG_LEVEL": "INFO",
+        "PYTHONIOENCODING": "utf-8",
+        "LOG_WRITER": script,
+        "FORGED_LINE": forged,
+    }
 
 
 def container_output(script: str, forged: str = "") -> tuple[str, str]:
     """stdout and stderr of a process whose logging is configured as in the application."""
-    environment = {
-        key: value for key, value in os.environ.items() if key != "PYRACAST_SECURITY_LOG_PATH"
-    }
     result = subprocess.run(
         # The child reads its program and the text a caller would send from the environment.
         [
@@ -120,14 +147,7 @@ def container_output(script: str, forged: str = "") -> tuple[str, str]:
             "import os; FORGED = os.environ['FORGED_LINE']; exec(os.environ['LOG_WRITER'])",
         ],
         cwd=ROOT,
-        env=environment
-        | {
-            "DJANGO_SETTINGS_MODULE": "tests.settings",
-            "PYRACAST_LOG_LEVEL": "INFO",
-            "PYTHONIOENCODING": "utf-8",
-            "LOG_WRITER": script,
-            "FORGED_LINE": forged,
-        },
+        env=writer_environment(script, forged),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -193,3 +213,39 @@ def test_a_record_longer_than_a_docker_line_starts_no_further_entry(security_lin
     assert counted(stdout, stderr) == []
     assert max(len(line.encode()) for line in stdout.split("\n")) < 16 * 1024
     assert stdout.replace(CONTINUATION, "").count(security_line) == 120
+
+
+def test_records_of_processes_sharing_one_pipe_start_no_line_but_their_own(
+    security_line: str,
+) -> None:
+    read_end, write_end = os.pipe()
+    writers = [
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import os; FORGED = os.environ['FORGED_LINE']; exec(os.environ['LOG_WRITER'])",
+            ],
+            cwd=ROOT,
+            env=writer_environment(LONG_RECORDS, security_line),
+            stdout=write_end,
+            stderr=write_end,
+        )
+        for _ in range(3)
+    ]
+    os.close(write_end)
+    received = bytearray()
+    # Small reads keep the pipe close to full while the writers write.
+    while chunk := os.read(read_end, 1024):
+        received += chunk
+    os.close(read_end)
+
+    assert [writer.wait() for writer in writers] == [0, 0, 0]
+    lines = bytes(received).split(b"\n")
+    assert lines.pop() == b""
+    assert max(len(line) + len(b"\n") for line in lines) <= 4096
+    texts = [line.decode().removesuffix("\r") for line in lines]
+    starts = [text for text in texts if not text.startswith(CONTINUATION.removeprefix("\n"))]
+    assert len(starts) == 3 * LONG_RECORDS_EACH
+    assert [text for text in starts if not RECORD_START.match(text)] == []
+    assert counted("\n".join(texts) + "\n", "") == []
