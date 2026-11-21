@@ -1,12 +1,12 @@
 # Host watchdog, health probes and alerts
 
-A systemd timer runs `deploy/watchdog.py` about once a minute on the production VM. It restarts failed Compose services, runs the delivery health command, flags a stale backup and low disk or memory, and writes structured events to Cloud Logging. Cloud Monitoring turns those events into rate-limited operator emails and runs an independent HTTPS uptime check on `/health/ready/`.
+A systemd timer runs `deploy/watchdog.py` about once a minute on the production VM. Its independent steps check capacity, the age of the last backup and of the last restore rehearsal, restart failed Compose services, run the delivery health command, and check the origin certificate and origin pulls; each ends with a heartbeat event. The watchdog writes structured events to Cloud Logging. Cloud Monitoring turns those events into rate-limited operator emails, alerts when the heartbeat stops, and runs an independent HTTPS uptime check on `/health/ready/`.
 
 ## Entry points
 
-- `pyracast-watchdog.timer` and `.service` run `deploy/watchdog.py` `main`, then `supervise`. `pyracast.service` (oneshot, `RemainAfterExit`) starts Compose and drains it on stop. The startup script `infra/terraform/templates/startup.sh.tftpl` rewrites all units on every VM boot.
-- `GET /health/live/` and `GET /health/ready/`: `pyracast.health.live` and `pyracast.health.ready` in `pyracast.urls`. Real consumers all use `ready`: Compose `api` healthcheck, `deploy/install-release.sh`, `deploy/smoke.sh`, the uptime check.
-- `deploy/operations_log.py` `report` (the only event writer, also used by `deploy/backup.py`) and `infra/terraform/monitoring.tf` (notification channel, uptime check, four alert policies). No frontend screen.
+- `pyracast-watchdog.timer` (`OnBootSec=180`, `OnUnitInactiveSec=60`) and `.service` (`TimeoutStartSec=300`) run `deploy/watchdog.py` `main`, which takes no arguments but `--help`. The unit files come from `deploy/systemd/` through `deploy/install-units.sh`, run by each release and at boot. `pyracast.service` (oneshot, `RemainAfterExit`) starts Compose and drains it on stop; only it and the Docker drop-in are written by the startup script `infra/terraform/templates/startup.sh.tftpl` on every VM boot.
+- `GET /health/live/` and `GET /health/ready/`: `pyracast.health.live` and `pyracast.health.ready` in `pyracast.urls`. The Compose `api` healthcheck uses `live` (no database), so a database outage does not restart `api`; `deploy/install-release.sh`, `deploy/smoke.sh` and the uptime check use `ready`.
+- `deploy/operations_log.py` `report` (the only event writer, also used by `deploy/backup.py`, `deploy/rehearsal.py` and `deploy/runtime_secrets.py`) and `infra/terraform/monitoring.tf` (notification channel, uptime check, readiness policy, six log-match operations policies, the heartbeat absence policy and seven security policies on the `pyracast.security` lines of the API log). No frontend screen.
 
 ## Sequence
 
@@ -19,35 +19,38 @@ sequenceDiagram
     participant M as Cloud Monitoring
     participant H as health.ready
     participant O as Operator
-    T->>W: 180 s after boot, then 60 s after each run ends
-    opt release lock held, release-blocked, no release dir or pyracast.service not active
-        W-->>T: return, nothing checked
-    end
-    W->>C: ps --all --quiet, then docker inspect
-    alt a service is not running, healthy or starting
-        W->>C: restart failed, then up -d --wait 180 s
-        alt up --wait fails or a service is still not running or healthy
-            W->>L: ERROR pyracast_runtime_unhealthy, then exit 1
-        else recovered
-            W->>L: WARNING pyracast_runtime_restarted
+    T->>W: "180 s after boot, then 60 s after each run ends"
+    W->>L: "WARNING pyracast_host_capacity when disk free under 15 percent or memory under 10 percent"
+    alt release-blocked exists
+        W->>L: "heartbeat state blocked, nothing else checked"
+    else
+        W->>L: "ERROR pyracast_backup_failed when the pointer's mark is over 90 min of uptime old"
+        W->>L: "WARNING pyracast_rehearsal_unhealthy when failed or overdue"
+        opt pyracast.service not active
+            W->>L: "heartbeat state unit_failed, nothing more checked"
         end
+        W->>C: "ps --all --quiet, then docker inspect"
+        opt an application service is not running or healthy, or missing
+            W->>C: "release lock without waiting, restart failed, then up --no-deps --wait"
+            alt still not healthy
+                W->>L: "ERROR pyracast_runtime_unhealthy with the states"
+            else recovered
+                W->>L: "WARNING pyracast_runtime_restarted"
+            end
+        end
+        W->>C: "exec -T api pyracast check_delivery_health, at most every 5 min"
+        opt exit code not zero
+            W->>L: "ERROR pyracast_runtime_unhealthy reason delivery_health"
+        end
+        W->>L: "WARNING pyracast_certificate_expiring, ERROR pyracast_origin_pull_unenforced"
+        W->>L: "INFO pyracast_watchdog_heartbeat state ok, lock_busy or unit_failed"
     end
-    W->>C: exec -T api pyracast check_delivery_health
-    opt exit code not zero
-        W->>L: ERROR pyracast_runtime_unhealthy reason delivery_health
-    end
-    opt last-backup.json older than 90 minutes
-        W->>L: ERROR pyracast_backup_failed
-    end
-    opt disk free under 15 percent or memory available under 10 percent
-        W->>L: WARNING pyracast_host_capacity
-    end
-    L->>M: log-match policy backup, runtime or host
-    M->>O: email, at most one per hour per policy
-    M->>H: GET /health/ready/ via Cloudflare and gateway, every 5 min
+    L->>M: "log-match policy per event; absence policy on the heartbeat metric"
+    M->>O: "email, at most one per hour per policy"
+    M->>H: "GET /health/ready/ via Cloudflare and gateway, every 5 min"
     alt SELECT 1 raises DatabaseError
         H-->>M: 503 unavailable
-        M->>O: email when more than 1 checker location fails for 5 min
+        M->>O: "email when more than 1 checker location fails for 5 min"
     else ok
         H-->>M: 200 ok
     end
@@ -57,9 +60,10 @@ sequenceDiagram
 
 | Table or file | R/W | What |
 |---|---|---|
-| `forecasts_dispatcherstatus` | R | Phase freshness, read by `check_delivery_health` through `forecasts.monitoring.delivery_health`. Written by the dispatcher, not by this flow |
-| `CollectionJob`, `NotificationDelivery`, `EpiasCollectionJob`, `ProviderAccount`, `Region`, `ForecastSnapshot`, `ReminderSchedule` and their joins | R | Same command, backlog and failure counters (flow `delivery-health-check`) |
-| `/var/lib/pyracast/release-blocked`, `last-backup.json`, `/proc/meminfo`, disk usage of `/` and `/var/lib/pyracast` | R | Release block, backup recency (marker mtime, else `release.env` mtime), capacity |
+| `forecasts_dispatcherstatus` and the job, mail, account and region tables | R | Read by `check_delivery_health` (flow `delivery-health-check`); written by the dispatcher, not by this flow |
+| `/var/lib/pyracast/release-blocked`, `last-backup.json`, `last-rehearsal.json`, `/proc/meminfo`, `/proc/uptime`, disk usage of `/` and `/var/lib/pyracast`, `deploy/release.env` of the current release | R | Release block, backup and rehearsal age (clock mark: boot id and uptime), capacity, site address and origin-pull mode |
+| `/var/lib/pyracast/last-rehearsal.json` | W | Only when missing: `{"status": "scheduled", "mark": ...}`, linked so a record written meanwhile is never replaced |
+| `/var/lib/pyracast/delivery-checked` | W | Touched before each delivery check |
 | Cloud Logging log `pyracast-operations` | W | One `entries:write` per event (`gce_instance`, `jsonPayload.event`); the payload also goes to stderr |
 
 ## Authorization
@@ -71,21 +75,26 @@ sequenceDiagram
 
 | Condition | Result |
 |---|---|
-| Database unreachable | `ready` 503 `unavailable`, no detail, `no-store`. Compose marks `api` unhealthy; the watchdog restarts it, `up --wait` fails and the generic runtime event repeats each run. The uptime alert fires after 5 min |
-| Services not recovered, or a Compose command fails or times out (240 s) | `up --wait` failure gives only the generic `pyracast_runtime_unhealthy`; if it succeeds but a service is still down, a detailed event precedes the generic one. Exit 1, retried next run. A run past `TimeoutStartSec=300` is killed by systemd with no event |
+| Database unreachable | `ready` 503 `unavailable`, no detail, `no-store`; `api` stays live. A PostgreSQL container that is unhealthy is reported as `pyracast_runtime_unhealthy` and left to Docker; the uptime alert fires after 5 min |
+| Application services not recovered | `pyracast_runtime_unhealthy` with the service states; retried next run |
+| A step times out (the run shares one 210 s deadline) or raises | `pyracast_runtime_unhealthy` with `step=<name>` and `outcome=timeout` or `error` (and `error_type`); the other steps still run; exit 1. A run past `TimeoutStartSec=300` is killed by systemd with no heartbeat |
 | `check_delivery_health` exits non-zero | `pyracast_runtime_unhealthy` with `reason=delivery_health`, output discarded, no remediation |
-| `check_delivery_health` exceeds 60 s | `TimeoutExpired`, generic event, backup and capacity checks skipped that run |
+| Release lock busy during a restart | Heartbeat state `lock_busy`; nothing restarted this run |
+| `pyracast.service` not active | Heartbeat state `unit_failed` with `unit_state`; no further check, nothing restarted |
+| Rehearsal record failed, or older than eight days of uptime (a host without one starts the window at the first check) | `pyracast_rehearsal_unhealthy` (warning) with `state` `failed` and `step`, or `overdue` |
+| Certificate below a quarter of its lifetime (read on loopback port 8443) | `pyracast_certificate_expiring` with `days_remaining` |
+| Origin pulls required and the host's port 443 accepts a handshake without the edge's certificate | `pyracast_origin_pull_unenforced` |
 | Metadata server or Logging API unreachable | stderr `pyracast_operations_log_failed`, the alert is lost, the run continues. Other exceptions from `report` propagate |
 
 ## Rules and invariants
 
-- One lock, `/run/lock/pyracast-release.lock`. The watchdog takes it non-blocking and exits 0 when busy. Backup also exits 0 on conflict, so a collision silently skips an hourly backup. `install-release.sh` waits 300 s and `ExecStop` waits for it, then drains with `compose stop --timeout 660` inside `TimeoutStopSec=960`.
-- The release block is honoured twice: `ConditionPathExists=!` on the units and in `supervise`. While blocked or stopped, every watchdog check is off and only the uptime alert remains.
-- Before recovery `starting` counts as healthy, afterwards only `running` and `healthy`; `restarting` counts as failed. `SERVICES` is a fixed list without `migrate`. Failed existing containers are restarted first to reset the `on-failure:5` budget, then `up -d` recreates missing ones.
-- Event names are the contract with `monitoring.tf`: one notification per 3600 s per policy, auto-close after 86400 s, while events repeat every minute. `pyracast_runtime_restarted` and `pyracast_backup_succeeded` match no policy. The readiness policy counts failing checker locations (more than 1 for 300 s).
+- One lock, `/var/lib/pyracast/release.lock`. The watchdog takes it without waiting and only to restart application containers; the hourly backup waits for it up to 600 s; `install-release.sh` waits 300 s and `ExecStop` waits for it, then drains with `compose stop --timeout 660` inside `TimeoutStopSec=960`.
+- Only `pyracast.service` carries `ConditionPathExists=!release-blocked`; the watchdog and backup units run while a release is blocked, and the watchdog then checks capacity and sends the heartbeat only. The watchdog never recovers while blocked, stopped or locked.
+- Before recovery `starting` counts as healthy, afterwards only `running` and `healthy`; `restarting` counts as failed. `SERVICES` is a fixed list (PostgreSQL, RabbitMQ and the application services including `maintenance`) without `migrate`. Failed existing application containers are restarted first to reset the `on-failure:5` budget, then `up -d --no-deps` starts only the failed services, so a stopped PostgreSQL or RabbitMQ stays stopped and only missing containers are recreated.
+- Backup age and rehearsal age are uptime since the pointer's mark; a pointer of an earlier boot, or none, counts as old as this boot.
+- Event names are the contract with `monitoring.tf`: one notification per 3600 s per policy, auto-close after 86400 s, while events repeat every minute. `pyracast_runtime_restarted`, `pyracast_rehearsal_unhealthy`, `pyracast_backup_skipped` and `pyracast_backup_succeeded` match no policy. The heartbeat feeds a log metric whose policy alerts when none arrives for fifteen minutes. The readiness policy counts failing checker locations (more than 1 for 300 s).
 
 ## Tests
 
-- `tests/test_health.py` (live, ready, 503 body, 405), `tests/test_deployment_watchdog.py` (capacity thresholds, recovery only while `pyracast.service` is `active`, release-blocked no-op), `tests/test_deployment_backup.py` (`report` fallback and propagation), `tests/test_deployment_helpers.py` (Python 3.12 syntax), `deploy/smoke.sh` (`ready` through the gateway), `deploy/test-release.sh` (installer lock wait and readiness gate).
-- `tests/test_operations_contracts.py`: `watchdog.SERVICES` equals the long-running Compose services; every `monitoring.tf` policy event is reported by a host script and every `ERROR` event has a policy; the `pyracast.service` stop timeouts cover the Compose stop grace periods.
-- Gaps: `inspect_services`, delivery failure event, backup staleness, unrecovered services, `main` locking and the `report` payload are untested; the watchdog unit's `TimeoutStartSec` is not asserted against its subprocess timeouts.
+- `tests/test_health.py` (live, ready, 503 body, 405), `tests/test_deployment_watchdog.py` (capacity thresholds, recovery only under the lock with the marker and unit checked again inside it, blocked and inactive-unit heartbeats, only failed services started, step timeouts and the shared deadline, delivery interval, backup and rehearsal age in uptime, certificate, origin pull), `tests/test_deployment_backup.py` (`report` fallback and propagation), `deploy/smoke.sh` (`ready` through the gateway), `deploy/test-release.sh` (installer lock wait and readiness gate).
+- `tests/test_operations_contracts.py`: `watchdog.SERVICES` equals the long-running Compose services; every `monitoring.tf` policy event is reported by a host script and every `ERROR` event has a policy; the `pyracast.service` stop timeouts cover the Compose stop grace periods; the watchdog unit outlasts its deadline and runs while a release is blocked; a silent watchdog is alerted; `api` restarts on liveness.

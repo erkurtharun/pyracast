@@ -4,11 +4,12 @@ A single long-running `pyracast dispatch --loop` process, started by Docker Comp
 
 ## Entry points
 
-- Command: `pyracast dispatch [--loop] [--poll-seconds N] [--stop-file PATH]` (`src/pyracast/forecasts/management/commands/dispatch.py` `Command.handle`; the `pyracast` script is `pyracast.cli.main`, a Django management entry). Without `--loop` it runs one cycle and raises `CommandError` if any phase failed.
-- Production actor: `deploy/compose.yaml` service `dispatcher` runs `pyracast dispatch --loop --poll-seconds 30` (`restart: on-failure:5`, `stop_grace_period: 660s`, waits for healthy `postgres` and `rabbitmq`, no healthcheck of its own). `deploy/install-release.sh` stops it after gateway, api and web and before the workers; `deploy/smoke.sh` runs one-shot `pyracast dispatch` in the api container while the dispatcher service is also running.
-- Development actor: `scripts/dev.py` role `dispatcher` runs `django dispatch --loop` with the 60 s default and appends `--stop-file .dev/dispatcher.stop`.
-- Phase operations: `pyracast.notifications.runtime.dispatch_notifications`, `pyracast.runtime.dispatch`, `pyracast.plants.runtime.dispatch_calibrations`, `pyracast.trash.purge_expired`, `pyracast.metering.runtime.dispatch_epias`.
-- Status write: `pyracast.forecasts.monitoring.record_dispatch_phase`. Readers (other flows): `delivery_health` via `check_delivery_health` (run by `deploy/watchdog.py`) and via the admin Overview, `admin_workspace.operations_context`, read-only `DispatcherStatusAdmin`.
+- Command: `pyracast dispatch [--loop] [--poll-seconds N] [--stop-file PATH] [--heartbeat-file PATH]` (`src/pyracast/orchestration/management/commands/dispatch.py` `Command.handle`; the `pyracast` script is `pyracast.cli.main`, a Django management entry). The default interval is `background.deadlines.DISPATCH_POLL_SECONDS` (30 s). Without `--loop` it runs one cycle and raises `CommandError` if any phase failed.
+- Cycle: `pyracast.orchestration.dispatcher.run`, with phases built from the job kinds of `orchestration.kinds` (`dispatcher.phases`).
+- Production actor: `deploy/compose.yaml` service `dispatcher` runs `pyracast dispatch --loop --poll-seconds 30 --heartbeat-file /tmp/dispatcher-heartbeat` (`restart: on-failure:5`, `stop_grace_period: 660s`, waits for healthy `postgres` and `rabbitmq`). Its healthcheck turns unhealthy when the heartbeat file is older than 300 s (60 s interval, 3 retries). `deploy/install-release.sh` stops it first, before the workers, api and web; `deploy/smoke.sh` runs one-shot `pyracast dispatch` in the api container while the dispatcher service is also running.
+- Development actor: `scripts/dev.py` role `dispatcher` runs `django dispatch --loop` and appends `--stop-file .dev/dispatcher.stop`.
+- Phase operations: `pyracast.notifications.runtime.dispatch_notifications`, `pyracast.forecasts.runtime.dispatch_collections`, `pyracast.plants.runtime.dispatch_calibrations`, the retention steps in `dispatcher._retention`, `pyracast.metering.runtime.dispatch_epias`.
+- Status write: `orchestration.dispatcher.record_dispatch_phase`. Readers (other flows): `orchestration.delivery_health` via `check_delivery_health` (run by `deploy/watchdog.py`) and via the admin Overview and Operations screens (`pyracast.platform_admin.read_models`), read-only `DispatcherStatusAdmin`.
 - Screen: none. No HTTP endpoint triggers or controls the dispatcher.
 
 ## Sequence
@@ -18,36 +19,39 @@ flowchart TD
     Start["handle: validate --poll-seconds"] -->|"not finite or not positive"| Err["CommandError"]
     Start --> Sig["shutdown_control: SIGINT, SIGTERM, stop file"]
     Sig -->|"already requested"| Exit["return"]
-    Sig --> Broker["make_broker (lazy, no connection yet) and four actors"]
+    Sig --> Broker["make_broker (lazy, no connection yet) and register_actors"]
     Broker --> Loop{"shutdown requested?"}
     Loop -->|yes| Close["finally: broker.close"]
-    Loop -->|no| N["notifications: enqueue_due per schedule, then send pending delivery ids in finally"]
-    N --> C["collection: enqueue_due per region, send pending job ids, then raise if scheduling failed"]
-    C --> K["calibration: prepare_due_calibrations, then send pending run ids"]
-    K --> R["retention: purge_expired, nothing published"]
-    R --> M["metering: settlement lookup, enqueue_due_epias_jobs, expire, send pending ids"]
+    Loop -->|no| HB["heartbeat file touched when a queue-depth read answers"]
+    HB --> N["notifications: enqueue_due per schedule, publish pending reminder ids, then outbound mail"]
+    N --> C["collection: enqueue_due per region, publish pending job ids"]
+    C --> K["calibration: due checks and requested preparations, publish pending run ids"]
+    K --> R["retention: purge_expired, warn_before_purge, sweep_accounts, purge_finished_mail"]
+    R --> M["metering: settlement lookup, enqueue_due_epias_jobs, expire, publish pending ids"]
     M --> Done{"--loop?"}
     Done -->|"no, failures"| Fail["CommandError: Failed dispatch phase(s)"]
     Done -->|"no, clean"| Close
     Fail --> Close
-    Done -->|yes| Wait["shutdown.wait(poll seconds)"]
+    Done -->|yes| Wait["wait poll seconds, publishing due mail every 2 s"]
     Wait -->|timeout| Loop
     Wait -->|"stop requested"| Close
     subgraph Each["around every phase"]
         P1["close_old_connections"] --> P2["run operation"]
         P2 -->|exception| P3["log dispatch_phase_failed, error = class name"]
+        P2 -->|"items failed"| P7["error = items_failed:n, published kept"]
         P2 -->|ok| P4["error = empty"]
         P3 --> P5["close_old_connections, record_dispatch_phase"]
+        P7 --> P5
         P4 --> P5
         P5 -->|exception| P6["log dispatch_monitoring_failed, failure monitoring"]
     end
     N -.-> Each
     Q[("RabbitMQ queues: notifications, default, calibration, epias")]
-    N -.->|send_forecast_reminder| Q
+    N -.->|"send_forecast_reminder, send_outbound_mail"| Q
     C -.->|collect_forecast| Q
     K -.->|calibrate_plant| Q
     M -.->|collect_epias| Q
-    M -.->|"login and settlement plant list, while the id is unknown, once a day per connection per dispatcher"| E["EPIAS API"]
+    M -.->|"settlement plant list, at most one request per run, while an id is unknown"| E["EPIAS API"]
 ```
 
 ## Data
@@ -57,21 +61,22 @@ flowchart TD
 | `forecasts_dispatcherstatus` | W | One row per phase, upserted after the phase: `attempted_at`, `succeeded_at` only on success, `last_error` = failure code or empty, `duration_ms`, `published` (ids sent; null for retention or a raising phase) |
 | `notifications_reminderschedule`, `connections_sitebinding`, `connections_provideraccount`, `accounts_membership`, `account_emailaddress`, `forecasts_forecastsnapshot` | R | Enabled schedules, binding eligibility, effective recipients, latest published snapshot pinned to a new delivery |
 | `accounts_tenant`, `notifications_notificationsettings`, `regions_region` | lock | Per slot: tenant, recipient-limit row (pk 1, created if missing), region |
-| `notifications_notificationdelivery` | R/W | One delivery per schedule slot created (`skipped`/`missed_schedule` when over 2 h late); ready ids selected |
+| `notifications_notificationdelivery`, `notifications_deliveryrecipient` | R/W | One delivery per schedule slot created with its frozen recipients (`skipped` with the refusal code when recipients are invalid, missing or over the limit, or `missed_schedule` when over 2 h late); ready ids selected |
+| `notifications_outboundmail` | R/W | Expired mail ended as `skipped`/`expired`; due mail selected and stamped `published_at` (again only after a minute); finished mail purged by retention |
 | `regions_region`, `forecasts_collectionschedule`, `connections_sitebinding`, `connections_provideraccount` | R / lock | Collection eligibility and timing; the region row is locked per region |
-| `forecasts_collectionjob` | R/W | Forecast and estimated-actuals jobs created or re-armed (`stale` to `pending`), older pending forecasts marked `stale`/`forecast_superseded`; ready ids selected |
-| `plants_plant`, `plants_calibrationrun`, `plants_plantevent` | R/W | `next_calibration_check_at` advanced; run and `calibration_scheduled` event created, or `calibration_automatic_skipped` event; pending or lease-expired run ids selected. Inputs read: see `calibration-automation` |
+| `forecasts_collectionjob` | R/W | Forecast and estimated-actuals jobs created or re-armed (`stale` to `pending`), older waiting forecasts marked `stale`/`forecast_superseded`; ready ids selected |
+| `plants_plant`, `plants_calibrationrun`, `plants_plantevent` | R/W | `next_calibration_check_at` and `calibration_preparation_due_at` advanced or cleared; run and `calibration_scheduled` event created, or `calibration_automatic_skipped` event; pending or lease-expired run ids selected. Inputs read: see `calibration-automation` |
 | `accounts_tenant`, `regions_region`, `auth_user`, `accounts_membership` | lock | Calibration: tenant, region, plant, then the enabling user and their admin membership |
-| `metering_epiasconnection`, `metering_epiascollectionjob` | R/W | `settlement_plant_id` and `settlement_checked_at` stored, jobs created; jobs past `retry_until` set `failed`/`retry_window_expired`; ready ids selected |
+| `metering_epiasconnection`, `metering_epiascollectionjob` | R/W | `settlement_plant_id` and `settlement_checked_at` stored, jobs created (including repair of terminal slots); jobs past `retry_until` set `failed`/`retry_window_expired`; ready ids selected |
 | `regions_region`, `plants_plant`, `plants_plantconfiguration`, `forecasts_collectionschedule` | R / lock | Metering eligibility and night window; region and plant rows locked per connection |
-| region and plant archives | W | Hard delete by the retention phase, see `trash-retention-purge` |
+| Trashed regions and their plants, sessions, abandoned sign-ups | W | Hard delete by the retention phase (trash purge, see `trash-retention-purge`; abandoned sign-ups that never signed in, with their own empty workspaces); `regions_region.purge_warning_sent_at` stamped with warning mail enqueued for the workspace administrators |
 
 ## Authorization
 
 - No user or HTTP boundary: the process runs with the application database role (`pyracast_app` in production) and touches all tenants. It trusts only database state.
-- Eligibility is rechecked inside each phase under row locks: approved, current and validated binding for collection (`forecasts.jobs.binding_is_current`), `binding_can_notify` and recipient limits for reminders, `_authorized` for calibration (otherwise `authorization_revoked` skip), `configuration_is_current` and `enabled` for metering.
-- Trashed regions are excluded from the collection and notification pending-id queries, trashed plants and regions from the calibration one. `pending_epias_ids` has no trash filter: jobs of a trashed plant are still published and the worker supersedes them at claim.
-- Viewing `DispatcherStatus` requires the platform admin site (active staff superuser with verified MFA: `DispatcherStatusAdmin`, Overview, Operations); the admin is read-only and no write path exists outside the command.
+- Eligibility is rechecked inside each phase under row locks: approved, current and validated binding for collection (`connections.currency.binding_is_current`), `binding_can_notify` and recipient limits for reminders, `_authorized` for calibration (otherwise `authorization_revoked` skip), `configuration_is_current` and `enabled` for metering.
+- A plant has no trash of its own; its region (location) is the boundary. Regions in the trash are excluded from the collection, notification and calibration pending-id queries and from scheduling. `pending_epias_ids` has no trash filter: the worker's claim decides whether a published job is still current.
+- Viewing `DispatcherStatus` requires the platform admin site (active staff superuser with MFA evidence: `DispatcherStatusAdmin`, Overview, Operations); the admin is read-only and no write path exists outside the command.
 
 ## Failure paths
 
@@ -81,12 +86,15 @@ flowchart TD
 | Stop requested before start | Returns immediately; nothing scheduled or published |
 | SIGINT, SIGTERM or stop file during a cycle | Flag only; the cycle finishes its remaining phases, then the loop ends, the broker is closed and the process exits 0 |
 | Any phase raises | Log `dispatch_phase_failed phase=<name> error_type=<class> origin=<module>:<line>:<function>`; `last_error=<class>`, `succeeded_at` kept; later phases still run |
-| One region or reminder schedule fails to schedule | Other regions or schedules continue; pending ids still sent; the collection phase records `collection_regions_failed:<count>` with its published count, the notification phase `NotificationSchedulingError` |
-| Calibration or metering scheduling raises | Nothing is published to that queue this cycle; the first failing plant or connection also stops the rest |
-| EPIAS lookup fails, EIC unknown or ambiguous, or EPIAS credentials missing | `EpiasError` swallowed without a log; `settlement_checked_at` is still stamped, so the next lookup is a day later; phase succeeds |
-| RabbitMQ unreachable | Startup still succeeds (connection opens on first send). A phase with ids to send records `ConnectionClosed`; a phase with nothing to send records success |
+| Items of a phase fail (a region, reminder schedule, calibration plant, connection, purged region, reclaimed account) | The failure is logged as `<event> item=<kind>:<id> error_type origin` and the item backed off (process-local 15 minutes for schedules, connections and regions, a stored later check for calibration plants, none for collection regions); other items and pending-id publication continue; the phase records `items_failed:<n>` with its published count, collection `collection_regions_failed:<n>` |
+| A retention step or the reminder step raises something other than item failures | The phase ends there (later retention steps, or the mail step, do not run); the failure code is the exception class |
+| Pending-id read or send fails | Collection logs `collection_publish_failed` and keeps its scheduling error as the recorded error, else the exception class. After a scheduling failure the other phases log `<phase>_publish_failed` and record the scheduling error with a null published count |
+| EPIAS settlement list fails or credentials are missing | Logged as `epias_settlement_lookup_failed code=<code>`; the next lookup is an hour later; the phase succeeds |
+| EIC unknown or ambiguous | `settlement_plant_id` stays null and `settlement_checked_at` is stamped, so the next lookup is a day later |
+| RabbitMQ unreachable | Startup still succeeds (connection opens on first send). The heartbeat is not touched, so the container is unhealthy within `BROKER_OUTAGE_RESTART` (8 minutes) and the watchdog restarts it. An unreadable queue depth publishes anyway (`queue_depth_unavailable`): the send reconnects or fails the phase, and a phase with nothing to send records success |
+| Queue holds 1,000 or more messages | Publication to it is skipped (`publication_skipped queue=... depth=...`); ids stay in the database |
 | Broker send fails mid-phase | Remaining ids of that phase unsent; rows stay ready and are re-sent next cycle |
-| PostgreSQL session lost | Phase records `OperationalError`, or its scheduling error class when the loss hit a per-item step; `close_old_connections` reconnects before the status write and the next phase |
+| PostgreSQL session lost | Phase records `OperationalError`, or `items_failed:<n>` when the loss hit a per-item step; `close_old_connections` reconnects before the status write and the next phase |
 | Status write fails | Log `dispatch_monitoring_failed`; counted as failure `monitoring`; nothing persisted |
 | One-shot run with any failure | All five phases run, broker closed, then `CommandError` "Failed dispatch phase(s): ..." |
 | Loop with persistent failures | Process never exits; only `DispatcherStatus` and logs show it; `check_delivery_health` fails |
@@ -94,24 +102,26 @@ flowchart TD
 
 ## Rules and invariants
 
-- Fixed phase order with email first, so provider, calibration or purge work never delays reminder publication within a cycle; a slow cycle still delays the next cycle's reminders.
-- Publishing is not a state change: every cycle re-sends up to 100 oldest ready ids per queue, whether or not they are already queued. Delivery is at-least-once; workers deduplicate through `claim` leases. No queue TTL or max length bounds the duplicates. The only write in a pending-id query is the metering expiry.
-- Ready means due (`available_at`, `next_attempt_at`) and waiting, or running with an expired lease; collection also includes throttled retries whose provider cooldown was cleared.
-- No singleton lock: concurrent dispatchers are tolerated through row locks (`select_for_update` on tenant, region, plant, connection) and unique keys `unique_collection_slot`, `unique_reminder_group_slot`, `plant_one_pending_calibration`, `epias_unique_collection_slot`. The settlement lookup decision and EPIAS call happen before the connection lock and `settlement_checked_at` is stamped only afterwards under it, so concurrent dispatchers can each call EPIAS for the same connection in the same cycle.
+- Fixed phase order with email first, so provider, calibration or purge work never delays reminder publication within a cycle; a slow cycle still delays the next cycle's reminders. Outbound mail, which waits for a code in an open browser, is also published every 2 s between cycles; a failure there is logged (`mail_publication_failed`) and the wait goes on.
+- Publishing is not a state change: every cycle re-sends up to 100 oldest ready ids per queue, whether or not they are already queued, except mail, which is stamped `published_at` and re-sent after a minute. Delivery is at-least-once; workers deduplicate through `claim` leases. A queue at 1,000 messages receives nothing until it drains. The writes in the publishing steps are the metering expiry and the mail expiry and stamp.
+- Ready means due (`available_at`) and waiting (`pending` or `retry`), or running or sending with an expired lease; collection also includes throttled retries whose provider cooldown was cleared. EPIAS jobs have no `retry` status.
+- The scheduler re-arms a stale forecast job of the latest slot unless its `last_error` is `quota_exhausted` (the binding's day bound) or `schedule_disabled`; those end the slot.
+- No singleton lock: concurrent dispatchers are tolerated through row locks (`select_for_update` on tenant, region, plant, connection) and unique keys `collectionjob_binding_endpoint_scheduled_for_uniq`, `notificationdelivery_schedule_scheduled_for_uniq`, `calibrationrun_plant_uniq` (one pending or running run per plant) and `epiascollectionjob_slot_uniq`. The settlement lookup happens before the connection lock and `settlement_checked_at` is stamped only afterwards under it, so concurrent dispatchers can each call EPIAS for the same connection in the same cycle.
 - Lock orders: notifications tenant, recipient-limit row, region; calibration tenant, region, plant, enabling user, membership; collection region; metering region, plant, connection; retention region, plants, provider accounts.
-- Per-item isolation exists only in collection (per region) and notifications (per schedule); calibration, metering and retention abort the phase on the first failing item.
 - Shutdown is checked only between cycles and while waiting (0.1 s polling): a started cycle completes all five phases. Compose allows 660 s.
-- Recorded `attempted_at` is the phase end time, not its start; error codes are class names or `collection_regions_failed:<n>` (number of regions whose scheduling failed), never messages (provider responses and broker URLs are not logged).
-- Bounds per cycle: 100 ids per queue, 100 due calibration plants, 100 regions plus 100 plants purged. Collection, notification and metering scheduling scan every approved region, enabled schedule and enabled connection with no batch limit.
-- Database sessions use `lock_timeout=5s` and `statement_timeout=60s`. The metering settlement lookup is an EPIAS call outside any transaction (5 s connect, 20 s read per request) and is not recorded in any request ledger.
+- Recorded `attempted_at` is the phase end time, not its start; error codes are class names, `items_failed:<n>` or `collection_regions_failed:<n>`, never messages (provider responses and broker URLs are not logged).
+- Bounds per cycle: 100 ids per queue, 100 due calibration plants and 100 requested preparations, 100 regions purged within a 200-statement budget (a region over it resumes first next cycle), 100 purge warnings, 500 sessions and 500 sign-ups swept. Collection, notification and metering scheduling scan every approved region, enabled schedule and enabled connection with no batch limit.
+- Database sessions use `lock_timeout=5s` and `statement_timeout=60s`. The metering settlement lookup is an EPIAS call outside any transaction (5 s connect, 20 s read per request, 30 s body) and is not recorded in any request ledger.
 - The health check's 5-minute lag must exceed a full cycle plus the poll interval; a slow cycle marks every phase stale.
 
 ## Tests
 
-- `tests/test_dispatch_resilience.py`: phase failure does not suppress later phases and one-shot raises; monitoring failure; loop recovers after a failed cycle; error messages not logged.
-- `tests/test_dispatch_recovery.py`: real PostgreSQL session termination and reconnection, `DispatcherStatus` rows written.
-- `tests/test_runtime.py`: `dispatch` schedules before sending and repeats pending ids; command modes; non-finite interval; SIGTERM during a cycle; shutdown or existing stop file before the first cycle; repeat until stop. `tests/test_trash_boundaries.py`: phase order.
+- `tests/test_dispatch_resilience.py`: phase failure does not suppress later phases and one-shot raises; monitoring failure; loop recovers after a failed cycle; duration and published count; the mail purge beside failing retention steps; region count and first cause of a collection failure; mail published between cycles.
+- `tests/test_dispatch_isolation.py`: real phases against PostgreSQL and a stub broker; a failing plant, region purge or connection does not stop the others or publication and is backed off; the purge budget resumes; one settlement list request per run and a short retry after a failed lookup.
+- `tests/test_dispatch_heartbeat.py`: the heartbeat is renewed only after the broker answers. `tests/test_dispatch_recovery.py`: real PostgreSQL session termination and reconnection, `DispatcherStatus` rows written.
+- `tests/test_runtime.py`: `dispatch` schedules before sending and repeats pending ids; command modes; non-finite interval; SIGTERM during a cycle; shutdown or existing stop file before the first cycle; repeat until stop. `tests/test_job_kinds.py`: phase order and one stored phase per job kind.
+- `tests/test_worker_runtime.py`: queue depth limit, unreadable depth, lost broker connection. `tests/test_operations_contracts.py`: the dispatcher heartbeat age against the delivery lag.
 - `tests/test_shutdown_process.py` (dispatch by signal on POSIX, by stop file everywhere), `tests/test_shutdown.py`, `tests/test_dev_launcher.py`.
 - Phase publication against a stub broker: `tests/test_notifications_runtime.py`, `tests/test_calibration_runtime.py`, `tests/test_metering_runtime.py`.
 - Phase internals: `tests/test_collection_dispatch_isolation.py`, `tests/test_notification_schedule_isolation.py`, `tests/test_notification_recipient_validation.py`, `tests/test_calibration_automation.py` (concurrent dispatchers), `tests/test_plant_training.py`, `tests/test_metering_nightly.py`; status reading in `tests/test_delivery_health.py`.
-- Gaps: every command test mocks all or most phases; no test runs the five real phases against PostgreSQL and a stub broker. Untested: calibration or metering scheduling failure suppressing publication, one failing plant or connection blocking the rest, an unreachable broker (including success recorded with nothing to send), publication of EPIAS jobs for trashed plants, duplicate amplification while workers are down, cycle duration versus health lag. No Playwright coverage (no UI).
+- Gaps: no test covers duplicate amplification while workers are down or cycle duration against the health lag. No Playwright coverage (no UI).

@@ -1,45 +1,46 @@
 # Scan code, dependencies and images
 
-GitHub Actions runs the scans: CI on every push to `main`, pull request, merge group and manual dispatch, and Release again for the images it publishes. Dependabot opens weekly update pull requests that go through the same CI. A red scan fails its CI run (whether that blocks a merge depends on branch protection, which is outside the repository) and keeps Release from deploying; no scan result is stored or shown anywhere in the product.
+GitHub Actions runs the scans: CI on every push to `main`, pull request, merge group and manual dispatch, Release again for the images it publishes, and a daily rescan of the release images. Dependabot opens weekly update pull requests that go through the same CI. A red scan fails its CI run (whether that blocks a merge depends on branch protection, which is outside the repository) and keeps Release from deploying; no scan result is stored or shown anywhere in the product.
 
 ## Entry points
 
-- No screen, endpoint, table or application permission. Actors: CI, the release workflow, Dependabot and a developer.
+- No screen, endpoint, table or application permission. Actors: CI, the release workflow, the rescan workflow, Dependabot and a developer.
 - `.github/workflows/ci.yml` job `audit` (display name "Dependency audit"): `uv export` then `pip-audit --strict --no-deps --disable-pip`.
-- `.github/workflows/ci.yml` jobs `web_ubuntu` and `web_windows` (shared `*web-steps` anchor): step `npm audit --audit-level=low` in `web/`, after `npm run check` (Windows) or `check:coverage` (Linux) and before the browser test.
-- `.github/workflows/ci.yml` job `deployment`, step "Scan gateway, RabbitMQ and PostgreSQL": `deploy/scan-support.sh`, which ends in `deploy/check_support_images.py`.
-- `.github/workflows/ci.yml` job `sonar` with `sonar-project.properties`: Sonar quality gate over Python and TypeScript, only when `vars.SONAR_ENABLED == 'true'`.
-- `.github/workflows/release.yml` job `deploy`: two `aquasecurity/trivy-action` steps (backend, web), then `deploy/scan-support.sh` again. Job `authorize` re-checks the CI scan jobs.
-- `.github/dependabot.yml`: ten weekly ecosystems (uv, github-actions, four docker directories, docker-compose, gomod, terraform, npm).
-- `scripts/check.py` lint runs Ruff with the bandit rules (`S` in `pyproject.toml`, `S101` allowed in tests), so `verify_ubuntu` and both `verify_windows_shards` jobs also do static security linting of Python; `verify_windows` runs `check.py --combine-shards`, which replaces the command list with coverage combine, report and xml and runs no Ruff.
-- Qodana is local-only (no workflow, script or hook runs it): `qodana scan --config qodana.yaml` for Python and `qodana scan --only-directory web --config qodana-js.yaml` for `web/`, both native, with `QODANA_TOKEN` in the environment. A developer runs the two README `pip-audit` commands or `bash deploy/scan-support.sh GATEWAY_IMAGE POSTGRES_IMAGE`.
+- `.github/workflows/ci.yml` job `web_ubuntu` (shared `*web-steps` anchor with `web_windows`): step `scripts/npm_audit.py web`, after `check:coverage` and before the browser scenarios; the Windows job skips it.
+- `.github/workflows/ci.yml` job `deployment`, step "Scan every image; block every high or critical vulnerability": `deploy/scan-images.sh` for the backend, web, gateway, RabbitMQ and PostgreSQL images, which ends in `deploy/check_image_scans.py`.
+- `.github/workflows/ci.yml` job `sonar` with `sonar-project.properties`: Sonar quality gate over Python, TypeScript, deployment code and Dockerfiles, only when `vars.SONAR_ENABLED == 'true'`.
+- `.github/workflows/release.yml` job `scan`: downloads the CI image archives, verifies and loads them and runs `deploy/scan-images.sh` again before job `deploy` authenticates to the cloud. Job `authorize` (`deploy/release_authorization.py`) accepts a CI run only when its `CI result` job succeeded.
+- `.github/workflows/image-rescan.yml` job `rescan` ("Image rescan", daily and on dispatch): with the repository variable `GCP_IMAGE_RESCAN` (Terraform's `image_rescan_setting`, read by `deploy/image_rescan.py`) it logs in to the registry with a read-only workload identity and scans the five deployed `production` images; without it, it rebuilds the five images from `main` and scans those.
+- `.github/dependabot.yml`: six weekly ecosystems (uv, github-actions, docker with five directories, gomod, terraform, npm), Monday 05:00 Europe/Istanbul, each with a cooldown (5 days; 14 for uv and npm majors), groups for uv, npm and actions, and ignores for the `python` and `node` base-image majors (python minors too), `uv-build` and `typescript` 6 and later.
+- `scripts/check.py` lint runs Ruff with the bandit rules (`S` in `pyproject.toml`, `S101` allowed in tests), so `verify_ubuntu` and Windows shard 1 of `verify_windows_shards` also do static security linting of Python; shards 2 to 4 run `--tests-only` and `verify_windows` runs `check.py --combine-shards`, which run no Ruff.
+- Qodana is local-only (no workflow, script or hook runs it): `qodana scan --config qodana.yaml` for Python and `qodana scan --only-directory web --config qodana-js.yaml` for `web/`, both native, both failing on a critical or high finding, with `QODANA_TOKEN` in the environment. A developer runs the README `pip-audit` commands or `bash deploy/scan-images.sh BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE RABBITMQ_IMAGE`.
 
 ## Sequence
 
 ```mermaid
 flowchart TD
   trig["push, pull_request, merge_group, dispatch"] --> aud["audit: pip-audit on audit-requirements.txt"]
-  trig --> web["web_ubuntu, web_windows: check, then npm audit"]
+  trig --> web["web_ubuntu: check, then npm_audit.py web"]
   trig --> ver["verify_ubuntu: check.py incl. Ruff S rules"]
-  trig --> dep["deployment: build 4 images, load, scan"]
+  trig --> dep["deployment: build 5 images, load, scan"]
   dbot["Dependabot weekly"] -->|"opens PR"| trig
-  dep --> ss["scan-support.sh: Trivy JSON for gateway, rabbitmq, postgres"]
-  ss --> chk{"check_support_images.py"}
-  chk -->|"identity, inventory or any HIGH, CRITICAL finding"| red["job fails"]
+  dep --> ss["scan-images.sh: Trivy JSON for all five images"]
+  ss --> chk{"check_image_scans.py"}
+  chk -->|"identity, inventory, unaccepted HIGH or CRITICAL finding, or exception problem"| red["job fails"]
   ver -->|"coverage.xml"| son
   web -->|"web_ubuntu lcov only"| son{"sonar: enabled, not merge_group, not Dependabot, not fork"}
   son -->|"skipped"| skip["no analysis"]
   son -->|"runs"| qg["quality gate, wait up to 300 s"]
-  aud --> ok["CI green on main"]
+  aud --> ok["CI result green"]
   chk --> ok
   qg --> ok
-  ok -->|"workflow_run, GCP_DEPLOY_ENABLED"| auth["Release authorize: named CI jobs all success"]
-  auth --> pub["publish exact CI images to Artifact Registry"]
-  pub --> tr["trivy-action: backend and web, exit 1 on HIGH or CRITICAL"]
-  tr --> ss2["scan-support.sh on registry digests"]
-  ss2 --> smoke["smoke test, then deploy over IAP"]
-  tr -->|"finding"| stop["release stops, artifact kept for retry"]
-  ss2 -->|"finding"| stop
+  web --> ok
+  ok -->|"workflow_run or early dispatch, GCP_DEPLOY_ENABLED"| auth["Release authorize: CI result job success"]
+  auth --> rs["scan: download, verify and load CI archives, scan-images.sh"]
+  rs -->|"finding"| stop["release stops, nothing published"]
+  rs --> pub["deploy: publish exact CI images to Artifact Registry, deploy over IAP"]
+  daily["Image rescan, daily"] --> ss2["scan-images.sh on the deployed production digests, or on images rebuilt from main"]
+  ss2 -->|"finding"| red2["rescan run fails"]
 ```
 
 ## Data
@@ -50,41 +51,42 @@ No database table is read or written. Artifacts:
 | --- | --- | --- |
 | `audit-requirements.txt` | W (CI, git-ignored) | Fully pinned export of every group and extra, input to `pip-audit` |
 | `coverage.xml`, `web/coverage/lcov.info` | W then R | Produced by the Linux test jobs, uploaded, consumed by `sonar` (paths in `sonar-project.properties`) |
-| `compose.json`, `<service>.json`, `<service>.image` in a temp dir; Docker volume `pyracast-trivy-<run>-<pid>` | W then R | Resolved compose file, Trivy report and image id per support image, Trivy DB cache; all removed by the `scan-support.sh` trap |
-| Artifact `release-images-<sha>-<attempt>`; `BACKEND_IMAGE` ... `POSTGRES_IMAGE` in `$GITHUB_ENV` | R; W then R | Release reads the CI image archives; `oci-images.sh publish` writes the registry digest refs that the Trivy steps and `scan-support.sh` read; job `cleanup` deletes the artifact only after `deploy` succeeds |
+| `compose.json`, `<service>.json`, `<service>.image` in a temp dir; Docker volume `pyracast-trivy-<run>-<pid>` | W then R | Resolved compose file, Trivy report and image id per image, Trivy DB cache; all removed by the `scan-images.sh` trap |
+| Artifact `release-images-<sha>-<attempt>` | W (CI `deployment`), R | Release `scan` and `deploy` read the CI image archives; job `cleanup` deletes the artifact only after `deploy` succeeds |
 
 ## Authorization
 
 - Sonar: `SONAR_TOKEN` secret plus `SONAR_PROJECT_KEY` and `SONAR_ORGANIZATION` variables, validated by the "Validate Sonar configuration" step. The job `if:` skips fork pull requests and `dependabot[bot]` runs (which get no Actions secrets) and every `merge_group` run.
-- Release: `authorize` runs only with `vars.GCP_DEPLOY_ENABLED == 'true'` on `main` after a successful CI `workflow_run` (or a dispatch), and accepts only the current `main` SHA with a successful `push`/`workflow_dispatch` `ci.yml` run of this repository and one unexpired image artifact. `deploy` runs in environment `production` with a workload-identity token. The Trivy steps run after registry login and publication and before any production change.
+- Release: `authorize` runs only with `vars.GCP_DEPLOY_ENABLED == 'true'` on `main` after a successful CI `workflow_run` or a dispatch, and accepts only the current `main` SHA with a successful `push`/`workflow_dispatch` `ci.yml` run of this repository whose `CI result` job passed, and one unexpired image artifact. `scan` holds read permissions only and no cloud credential; `deploy` runs in environment `production` with a workload-identity token.
+- Rescan: only the read-only registry identity named by `GCP_IMAGE_RESCAN`; a run without the variable has no cloud access.
 
 ## Failure paths
 
 | Condition | Result |
 | --- | --- |
 | Any Python advisory in any group or extra, or a pin pip-audit cannot collect (`--strict`) | Job `audit` fails |
-| Any npm advisory of any severity, including dev dependencies | Step fails in both web jobs; the browser test after it does not run |
-| Support image has a HIGH or CRITICAL finding, fixed or not | `check_support_images.py` exits "Support image gate failed: ..." naming the first finding; CI `deployment` or Release `deploy` fails |
-| Report is for another or non-`sha256:` image id, has no OS family, an empty `Results` list or no packages | Same gate: "scan does not match the selected immutable image", "image inventory is missing" or "package inventory is missing" |
-| Wrong argument count, failed pull, Trivy error, or a report without `Results` (`jq '.Results[]'` aborts) | `scan-support.sh` exits non-zero under `set -e` (usage: exit 2) before the checker runs |
-| Non-gateway compose image not pinned by digest | `scan-support.sh` exits 1 "Pin the <service> image to an immutable digest." |
-| Backend or web image has HIGH or CRITICAL finding | Release `deploy` fails at the `trivy-action` step; images stay in the registry, production untouched |
-| Sonar quality gate red or timeout (300 s) | Job `sonar` fails, so the CI run fails and `authorize` is skipped (or, on dispatch, finds no successful run) |
+| An npm advisory (any severity, dev dependencies included) that `web/audit-exceptions.json` does not accept for its package, an exception without a reason, past its expiry date or no longer reported, or a malformed file or report | `npm_audit.py` prints each failure and exits 1; the browser scenarios after it do not run |
+| An image has a HIGH or CRITICAL finding, fixed or not, that `deploy/image-scan-exceptions.json` does not accept for exactly that service, id and package until the end date (UTC day) | `check_image_scans.py` prints every unaccepted finding and exits "Image scan gate failed: N high or critical findings and M exception problems."; CI `deployment`, Release `scan` or the rescan fails |
+| Exception without a reason, expired, no longer reported, malformed, duplicated or the file missing | Same gate, "Image scan gate failed: ..." |
+| Report is for another or non-`sha256:` image id, has no OS family, an empty `Results` list or no packages, or a service report is missing | Same gate: "scan does not match the selected immutable image", "image inventory is missing" or "package inventory is missing" |
+| Wrong argument count, Trivy error, or a report without `Results` (`jq` aborts) | `scan-images.sh` exits non-zero under `set -e` (usage: exit 2) before the checker runs |
+| Sonar quality gate red or timeout (300 s) | Job `sonar` fails, so the CI run fails and `authorize` finds no passing `CI result` |
 | Sonar variables missing | "Missing Sonar configuration: ..." |
-| Required job missing or not `success` (including skipped) at authorize | "Every required CI job must pass for this run" |
+| `CI result` job missing or not `success` at authorize | "The CI result job of CI run N did not pass" |
 
 ## Rules and invariants
 
-- No vulnerability exceptions: `--ignore-unfixed=false`, `--ignorefile /dev/null` in `scan-support.sh`, no `.trivyignore` tracked. Trivy itself never sets a failing exit code in `scan-support.sh`; the Python checker is the gate, and it trusts Trivy's `--severity` filter.
-- A scan only counts for the image it names: Trivy scans the local image id, and the checker compares `Metadata.ImageID` with the recorded id. The gateway alone may be a mutable tag (`pyracast-gateway:ci` in CI).
-- Backend and web images are scanned only at Release, after publication. CI never scans them.
-- Results depend on today's advisory databases, so an unchanged SHA can turn red. Release re-runs only the image scans: a Python or npm advisory published after the green CI run does not stop the release.
-- Release matches CI job display names as strings (`Dependency audit`, `Web (ubuntu-latest)`, `Sonar quality gate`, ...). Renaming a job in `ci.yml` breaks authorization until `release.yml` is changed.
-- Trivy 0.76.2 is written in three places (`release.yml` twice as an action input, `scan-support.sh` as an image digest). No Dependabot entry covers action inputs or shell scripts.
-- Sonar analyses only `src,scripts,.agents/hooks.py,.github,web/src,web/testing`; `deploy/`, `infra/` and Dockerfiles are outside. Coverage comes from the Linux jobs only.
+- Image scan exceptions exist only as entries of `deploy/image-scan-exceptions.json` (`service`, `vulnerability`, `package`, `reason`, `expires`), which `check_image_scans.py` reads from the `deploy/` tree mounted beside it; Trivy keeps `--ignore-unfixed=false` and `--ignorefile /dev/null`, and no `.trivyignore` is tracked. Every accepted finding is printed with its end date and each service line reads `HIGH/CRITICAL=N, accepted=N`. Trivy itself never sets a failing exit code; the Python checker is the gate, and it trusts Trivy's `--severity` filter. npm advisories follow the same discipline in `web/audit-exceptions.json`.
+- A scan only counts for the image it names: `scan-images.sh` scans each image by the id of the image the release built (`docker image inspect`), pulls nothing, and the checker compares `Metadata.ImageID` with the recorded id. CI and Release scan the archives they built or downloaded; the rescan pulls the deployed tags itself before the script runs.
+- Results depend on today's advisory databases, so an unchanged SHA can turn red. Release re-runs only the image scans: a Python or npm advisory published after the green CI run does not stop the release, and the daily rescan reports image advisories published after a deploy.
+- Release authorizes by the display name `CI result` (and names a few other CI jobs). Renaming a job in `ci.yml` breaks authorization until `deploy/release_authorization.py` is changed.
+- Trivy is pinned once, as an image digest in `deploy/scan-images.sh`; `tests/test_version_pins.py` checks every location of each pinned version, image digest and action commit. No Dependabot entry covers shell scripts.
+- Sonar analyses `src`, `scripts`, `deploy`, `infra`, both Dockerfiles, `.agents/hooks.py`, `.github`, `web/src` and `web/testing`; coverage comes from the Linux jobs only and excludes `scripts`, `.github` and `web/testing`.
 
 ## Tests
 
-- `tests/test_support_images.py` pins `check_support_images`: clean reports, any vulnerability per service, mismatched id, missing OS, results or packages, missing report file.
+- `tests/test_image_scans.py` pins `check_image_scans` and the script text: five images, no pull, no ignore file, every finding and report defect, and every exception rule (exact match, end date, reason, unneeded, malformed, duplicate, missing file).
+- `tests/test_npm_audit.py`: advisory identity, exceptions by package, expiry, reason and removal, malformed files and reports, npm statuses.
+- `tests/test_version_pins.py`: one version, digest and action commit everywhere; Dependabot coverage and cooldown. `tests/test_release_workflow.py` and `tests/test_release_authorization.py`: the release `scan` job, the rescan workflow, authorization by `CI result`.
 - CI validates the workflows and shell scripts (`actionlint`, `shellcheck deploy/*.sh` in job `deployment`).
-- Gaps: `deploy/check_support_images.py main`, `scan-support.sh`, `.github/dependabot.yml`, `sonar-project.properties`, the two Qodana configurations and the `authorize` script have no automated test. `deploy/` is outside the coverage source and outside Sonar. No Playwright test applies.
+- Gaps: `scan-images.sh` and the rescan workflow's scan steps are checked by text only, `sonar-project.properties` and the two Qodana configurations have no automated test. No Playwright test applies.

@@ -5,7 +5,7 @@ A developer or operator runs `scripts/calibrate_irradiance.py` from the reposito
 ## Entry points
 
 - Command: `uv run --locked python scripts/calibrate_irradiance.py --power P --weather W --capacity-kw C [--timezone TZ] --output DIR` (`main`). `--timezone` defaults to `Europe/Istanbul`.
-- Library: `pyracast.irradiance.calibration.calibrate`, `pyracast.irradiance.pairs.load_pairs`, `pyracast.irradiance.fitting.fit_quadratic`, `pyracast.irradiance.inverse.reconstruct_ghi`. Outside tests, only the script imports `calibrate` and `load_pairs`, and only `calibrate` imports `fit_quadratic` and `reconstruct_ghi`.
+- Library: `pyracast.irradiance.calibration.calibrate`, `pyracast.irradiance.pairs.load_pairs`, `pyracast.irradiance.fitting.fit_quadratic`, `pyracast.irradiance.inverse.reconstruct_ghi`. Outside tests, only the script imports `calibrate` and `load_pairs`, and only `calibrate` imports `fit_quadratic` and `reconstruct_ghi`. The loaders `load_json_file` and `load_power` and the power types of `pairs.py` are shared with the historical reference import and upload, which this flow does not cover.
 - Actor: a person at a shell. No screen, endpoint, worker, scheduler or CI job calls it. Runtime on the 40 MB reference case is about 4 s.
 
 ## Sequence
