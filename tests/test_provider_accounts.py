@@ -5,18 +5,21 @@ from datetime import date, timedelta
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.db import connection
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone, translation
 
 from pyracast.connections import operations
-from pyracast.connections.models import ProviderAccount
+from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.recovery import clear_provider_cooldown
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.forecasts.validation import validate_binding
-from pyracast.plants.approval import approve_region
+from pyracast.plants.approval import approve_region, decide_review
+from pyracast.platform_admin.provider_accounts import account_context, account_rows
 from pyracast.regions.models import AuditEvent
-from pyracast.regions.operations import configure_binding
+from pyracast.regions.operations import configure_binding, submit_region
 from tests.support.admin_setup import setup_input, setup_url
 from tests.support.api import verified_admin
 from tests.support.domain import FakeAdapter, System, make_system, provider_key
@@ -301,3 +304,54 @@ def test_a_new_account_with_a_stored_key_is_refused_next_to_the_key_field() -> N
     assert "solar-owner" in response.content.decode()
     assert provider_key("CURRENT").encode() not in response.content
     assert not ProviderAccount.objects.filter(external_account_id="another-owner").exists()
+
+
+def plant_on(system: System, name: str, latitude: float) -> SiteBinding:
+    region = submit_region(
+        system.member,
+        system.tenant.pk,
+        name=name,
+        latitude=latitude,
+        longitude=30,
+        timezone="Europe/Istanbul",
+    )
+    return configure_binding(
+        system.admin,
+        region.pk,
+        provider_account_id=system.account.pk,
+        site_id=name,
+        capacity_kw=1,
+        capacity_semantics_verified=True,
+        installation_date=date(2020, 1, 1),
+        settings_verification_reference="Verified site settings",
+    )
+
+
+def test_the_account_list_counts_the_plants_its_page_lists() -> None:
+    system = solcast_system()
+    decide_review(system.admin, system.region.pk, "suspend")
+    plant_on(system, "pending-site", 41)
+    now = timezone.now()
+
+    row = next(row for row in account_rows(now) if row["account"] == system.account)
+
+    listed = account_context(ProviderAccount.objects.get(pk=system.account.pk), now)["bindings"]
+    assert row["plants"] == len(listed) == 2
+
+
+def test_the_account_list_is_one_statement_however_many_attempts_and_plants() -> None:
+    system = solcast_system()
+    now = timezone.now()
+    with CaptureQueriesContext(connection) as few:
+        account_rows(now)
+    spend(system.account, "forecast", "succeeded", 5)
+    for index in range(3):
+        plant_on(system, f"more-site-{index}", 41 + index)
+
+    with CaptureQueriesContext(connection) as many:
+        rows = account_rows(now)
+
+    assert len(few.captured_queries) == len(many.captured_queries) == 1
+    assert 'JOIN "forecasts_requestattempt"' not in many.captured_queries[0]["sql"]
+    row = next(row for row in rows if row["account"] == system.account)
+    assert (row["plants"], row["used_today"]) == (4, 6)

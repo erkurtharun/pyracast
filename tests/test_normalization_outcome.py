@@ -9,7 +9,10 @@ from django.test.utils import CaptureQueriesContext
 from psycopg.errors import LockNotAvailable
 
 from pyracast.connections.models import SiteBinding
-from pyracast.forecasts.capacity_normalization import normalize_reference_capacity
+from pyracast.forecasts.capacity_normalization import (
+    normalization_provenance,
+    normalize_reference_capacity,
+)
 from pyracast.forecasts.management.commands import normalize_reference_capacity as command
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -17,10 +20,12 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     ReferenceCapacityNormalization,
 )
+from pyracast.forecasts.projections import saved_day_payload
+from pyracast.irradiance import local_day_bounds
 from pyracast.regions.models import AuditEvent, Region
 from tests.support.capacity_normalization import normalize, scaled_system
 from tests.support.domain import System
-from tests.support.plant_operations import publish_snapshot, snapshot_for
+from tests.support.plant_operations import half_hours, publish_snapshot, snapshot_for
 from tests.support.plant_training import actual_snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -211,3 +216,27 @@ def test_a_plant_without_an_approved_binding_names_its_missing_target(
 
     with pytest.raises(CommandError, match="no approved connection"):
         run(system)
+
+
+def test_every_saved_day_of_a_forecast_copy_names_its_normalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, target = scaled_system(monkeypatch)
+    day = date(2026, 11, 9)
+    start, _ = local_day_bounds(day, system.binding.timezone)
+    _, end = local_day_bounds(day + timedelta(days=1), system.binding.timezone)
+    forecast = publish_snapshot(
+        snapshot_for(system, day, normalized_intervals=half_hours(start, end, 0.6))
+    )
+
+    normalize(system, target)
+
+    copy = ReferenceCapacityNormalization.objects.get(source_snapshot=forecast).snapshot
+    days = (day, day + timedelta(days=1))
+    provenance = normalization_provenance(copy)
+    assert provenance is not None
+    assert set(copy.forecastresult.daily_payloads) == {saved.isoformat() for saved in days}
+    for saved in days:
+        payload = saved_day_payload(copy, saved)
+        assert payload is not None
+        assert payload["reference_capacity_normalization"] == provenance

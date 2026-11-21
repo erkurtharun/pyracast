@@ -1,19 +1,24 @@
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Barrier
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.db import connections
 from django.utils import timezone
+from dramatiq import Message
 from dramatiq.brokers.stub import StubBroker
 
 from pyracast.background import clock as monotonic_clock
-from pyracast.background.deadlines import LAST_REQUEST_START
+from pyracast.background.deadlines import LAST_REQUEST_START, QUEUE_DEPTH_LIMIT
 from pyracast.background.failures import PhaseOutcome
 from pyracast.connections import operations
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts import quota, revalidation
+from pyracast.forecasts import revalidation
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.forecasts.revalidation import (
     RevalidationOutcome,
@@ -68,6 +73,44 @@ def adapters(adapter: ProviderAdapter) -> MagicMock:
     return MagicMock(return_value=adapter)
 
 
+def due(system: System) -> datetime | None:
+    return ProviderAccount.objects.get(pk=system.account.pk).revalidation_due_at
+
+
+def revalidate(
+    system: System,
+    adapter_for: Callable[[SiteBinding], ProviderAdapter],
+    *,
+    claim: datetime | None = None,
+) -> RevalidationOutcome:
+    lease = claim or due(system)
+    assert lease is not None
+    return revalidate_account(system.account.pk, NOW, claim=lease, adapter_for=adapter_for)
+
+
+def from_another_client(action: Callable[[], object]) -> None:
+    def run() -> None:
+        try:
+            action()
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(run).result(timeout=30)
+
+
+def another_due_account(system: System) -> ProviderAccount:
+    account = operations.create_account(
+        system.admin, provider="fixture", external_account_id="second-customer", api_key=""
+    )
+    ProviderAccount.objects.filter(pk=account.pk).update(revalidation_due_at=NOW)
+    return account
+
+
+def validation_attempts(binding: SiteBinding) -> int:
+    return RequestAttempt.objects.filter(binding=binding, purpose="validation").count()
+
+
 def test_a_key_replacement_queues_the_accounts_plants_once() -> None:
     system = make_system(approved=True)
     account = replaced(system)
@@ -83,34 +126,15 @@ def test_revalidation_validates_every_stale_plant_as_the_replacing_operator() ->
     second = second_plant(system)
     replaced(system)
 
-    outcome = revalidate_account(system.account.pk, NOW, adapter_for=adapters(FakeAdapter()))
+    outcome = revalidate(system, adapters(FakeAdapter()))
 
     assert outcome == RevalidationOutcome.DONE
     for binding in (system.binding, second):
         binding.refresh_from_db()
         assert binding.validated_credential_revision == 2
-    assert ProviderAccount.objects.get(pk=system.account.pk).revalidation_due_at is None
+    assert due(system) is None
     validated = AuditEvent.objects.filter(action="connection_validated", revision__gte=1)
     assert set(validated.values_list("actor_id", flat=True)) == {system.admin.pk}
-
-
-def test_revalidation_keeps_the_forecast_reserve_and_continues_the_next_utc_day(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    system = make_system(approved=True)
-    replaced(system)
-    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=2)
-    monkeypatch.setattr(quota, "remaining_forecast_requests", lambda account, now: 1)
-    attempts = RequestAttempt.objects.count()
-
-    outcome = revalidate_account(system.account.pk, NOW, adapter_for=adapters(FakeAdapter()))
-
-    assert outcome == RevalidationOutcome.WAITING
-    account = ProviderAccount.objects.get(pk=system.account.pk)
-    assert account.revalidation_due_at == NEXT_UTC_DAY
-    assert RequestAttempt.objects.count() == attempts
-    system.binding.refresh_from_db()
-    assert system.binding.validated_credential_revision == 1
 
 
 def test_a_rejected_new_key_stops_revalidation_of_the_other_plants() -> None:
@@ -121,9 +145,7 @@ def test_a_rejected_new_key_stops_revalidation_of_the_other_plants() -> None:
     def rejected() -> None:
         raise ProviderError("provider_request_failed", retryable=False, status_code=401)
 
-    outcome = revalidate_account(
-        system.account.pk, NOW, adapter_for=adapters(FakeAdapter(rejected))
-    )
+    outcome = revalidate(system, adapters(FakeAdapter(rejected)))
 
     assert outcome == RevalidationOutcome.KEY_REJECTED
     account = ProviderAccount.objects.get(pk=system.account.pk)
@@ -143,7 +165,7 @@ def test_a_site_the_new_key_cannot_read_does_not_stop_the_other_plants() -> None
     def adapter(binding: SiteBinding) -> ProviderAdapter:
         return FakeAdapter(missing_site if binding.pk == system.binding.pk else lambda: None)
 
-    outcome = revalidate_account(system.account.pk, NOW, adapter_for=adapter)
+    outcome = revalidate(system, adapter)
 
     assert outcome == RevalidationOutcome.DONE
     second.refresh_from_db()
@@ -159,16 +181,14 @@ def test_an_unreachable_provider_retries_revalidation_later() -> None:
     def unreachable() -> None:
         raise ProviderError("provider_request_failed")
 
-    outcome = revalidate_account(
-        system.account.pk, NOW, adapter_for=adapters(FakeAdapter(unreachable))
-    )
+    outcome = revalidate(system, adapters(FakeAdapter(unreachable)))
 
     assert outcome == RevalidationOutcome.WAITING
-    due = ProviderAccount.objects.get(pk=system.account.pk).revalidation_due_at
-    assert due is not None
+    retry = due(system)
+    assert retry is not None
     assert (
         NOW + revalidation.RETRY_DELAY
-        <= due
+        <= retry
         < NOW + revalidation.RETRY_DELAY + timedelta(seconds=5)
     )
 
@@ -190,13 +210,13 @@ def test_a_revalidation_past_its_last_request_start_leaves_the_rest_to_the_next_
 
         return FakeAdapter(spend_the_ladder)
 
-    outcome = revalidate_account(system.account.pk, NOW, adapter_for=adapter)
+    outcome = revalidate(system, adapter)
 
     assert outcome == RevalidationOutcome.WAITING
     assert len(validated) == 1
-    due = NOW + LAST_REQUEST_START
-    assert ProviderAccount.objects.get(pk=system.account.pk).revalidation_due_at == due
-    assert claim_due_revalidations(due) == [system.account.pk]
+    next_due = NOW + LAST_REQUEST_START
+    assert due(system) == next_due
+    assert claim_due_revalidations(next_due) == [system.account.pk]
     revisions = (
         SiteBinding.objects.filter(pk__in=(system.binding.pk, second.pk))
         .order_by("validated_credential_revision")
@@ -212,11 +232,10 @@ def test_a_provider_delay_postpones_revalidation_until_it_ends() -> None:
         request_blocked_until=NOW + timedelta(hours=2)
     )
 
-    outcome = revalidate_account(system.account.pk, NOW, adapter_for=adapters(FakeAdapter()))
+    outcome = revalidate(system, adapters(FakeAdapter()))
 
     assert outcome == RevalidationOutcome.WAITING
-    due = ProviderAccount.objects.get(pk=system.account.pk).revalidation_due_at
-    assert due == NOW + timedelta(hours=2)
+    assert due(system) == NOW + timedelta(hours=2)
 
 
 def test_an_operator_who_lost_platform_access_ends_the_revalidation() -> None:
@@ -225,30 +244,41 @@ def test_an_operator_who_lost_platform_access_ends_the_revalidation() -> None:
     system.admin.is_superuser = False
     system.admin.save(update_fields=("is_superuser",))
 
-    outcome = revalidate_account(system.account.pk, NOW, adapter_for=adapters(FakeAdapter()))
+    outcome = revalidate(system, adapters(FakeAdapter()))
 
     assert outcome == RevalidationOutcome.STOPPED
-    assert ProviderAccount.objects.get(pk=system.account.pk).revalidation_due_at is None
+    assert due(system) is None
     assert not RequestAttempt.objects.filter(created_at=NOW).exists()
 
 
 def test_an_account_without_a_replacement_is_left_alone() -> None:
     system = make_system(approved=True)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(revalidation_due_at=NOW)
 
-    outcome = revalidate_account(system.account.pk, NOW, adapter_for=adapters(FakeAdapter()))
+    outcome = revalidate(system, adapters(FakeAdapter()))
 
     assert outcome == RevalidationOutcome.DONE
     assert RequestAttempt.objects.filter(created_at=NOW).count() == 0
+    assert due(system) is None
 
 
-def test_the_dispatcher_sends_each_due_account_to_the_worker() -> None:
+def test_the_dispatcher_sends_each_due_account_with_its_lease_to_the_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     system = make_system(approved=True)
     replaced(system)
-    actor = MagicMock()
+    broker = StubBroker()
+    actor = REVALIDATION.make_actor(broker)
+    monkeypatch.setattr("pyracast.providers.adapter_for", adapters(FakeAdapter()))
 
     assert dispatch_revalidations(actor) == 1
 
-    actor.send.assert_called_once_with(system.account.pk)
+    message = Message.decode(broker.queues[actor.queue_name].get_nowait())
+    assert message.args == (system.account.pk,)
+    actor.fn(*message.args, **message.kwargs)
+    system.binding.refresh_from_db()
+    assert system.binding.validated_credential_revision == 2
+    assert due(system) is None
 
 
 def test_the_worker_revalidates_with_the_configured_provider(
@@ -257,12 +287,28 @@ def test_the_worker_revalidates_with_the_configured_provider(
     system = make_system(approved=True)
     replaced(system)
     monkeypatch.setattr("pyracast.providers.adapter_for", adapters(FakeAdapter()))
+    lease = due(system)
+    assert lease is not None
 
-    deliver_revalidation(system.account.pk)
+    deliver_revalidation(system.account.pk, lease.isoformat())
 
     system.binding.refresh_from_db()
     assert system.binding.validated_credential_revision == 2
     assert f"account_id={system.account.pk} outcome=done" in pyracast_logs.text
+
+
+def test_a_message_without_a_lease_runs_nothing(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    system = make_system(approved=True)
+    replaced(system)
+    adapter_for = adapters(FakeAdapter())
+    monkeypatch.setattr("pyracast.providers.adapter_for", adapter_for)
+
+    deliver_revalidation(system.account.pk)
+
+    adapter_for.assert_not_called()
+    assert f"account_id={system.account.pk} outcome=lease_lost" in pyracast_logs.text
 
 
 def test_the_revalidation_actor_listens_on_the_default_queue() -> None:
@@ -295,10 +341,10 @@ def test_without_a_recorded_replacement_nobody_revalidates() -> None:
         credential_revision=2, revalidation_due_at=NOW
     )
 
-    outcome = revalidate_account(system.account.pk, NOW, adapter_for=adapters(FakeAdapter()))
+    outcome = revalidate(system, adapters(FakeAdapter()))
 
     assert outcome == RevalidationOutcome.STOPPED
-    assert ProviderAccount.objects.get(pk=system.account.pk).revalidation_due_at is None
+    assert due(system) is None
 
 
 def test_a_key_already_rejected_stops_revalidation_before_any_request() -> None:
@@ -307,7 +353,7 @@ def test_a_key_already_rejected_stops_revalidation_before_any_request() -> None:
     ProviderAccount.objects.filter(pk=system.account.pk).update(authentication_failed_revision=2)
     attempts = RequestAttempt.objects.count()
 
-    outcome = revalidate_account(system.account.pk, NOW, adapter_for=adapters(FakeAdapter()))
+    outcome = revalidate(system, adapters(FakeAdapter()))
 
     assert outcome == RevalidationOutcome.KEY_REJECTED
     assert RequestAttempt.objects.count() == attempts
@@ -322,7 +368,7 @@ def test_a_plant_changed_meanwhile_is_skipped(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(revalidation, "validate_binding", changed)
 
-    outcome = revalidate_account(system.account.pk, NOW, adapter_for=adapters(FakeAdapter()))
+    outcome = revalidate(system, adapters(FakeAdapter()))
 
     assert outcome == RevalidationOutcome.DONE
 
@@ -334,8 +380,161 @@ def test_a_replacement_during_revalidation_keeps_its_own_due_time() -> None:
     def replaced_again() -> None:
         replace_key(system.admin, system.account.pk, provider_key("NEWER"))
 
-    revalidate_account(system.account.pk, NOW, adapter_for=adapters(FakeAdapter(replaced_again)))
+    revalidate(system, adapters(FakeAdapter(replaced_again)))
 
     account = ProviderAccount.objects.get(pk=system.account.pk)
     assert account.credential_revision == 3
     assert account.revalidation_due_at is not None
+
+
+def test_a_key_replaced_during_one_plants_validation_ends_the_run() -> None:
+    system = make_system(approved=True)
+    second = second_plant(system)
+    replaced(system)
+    attempts = {binding.pk: validation_attempts(binding) for binding in (system.binding, second)}
+    seen: list[int] = []
+
+    def adapter(binding: SiteBinding) -> ProviderAdapter:
+        def validate() -> None:
+            seen.append(binding.pk)
+            if len(seen) == 1:
+                from_another_client(
+                    lambda: replace_key(system.admin, system.account.pk, provider_key("NEWER"))
+                )
+
+        return FakeAdapter(validate)
+
+    outcome = revalidate(system, adapter)
+
+    assert outcome == RevalidationOutcome.STOPPED
+    assert len(seen) == 1
+    later = next(b for b in (system.binding, second) if b.pk != seen[0])
+    later.refresh_from_db()
+    assert later.validated_credential_revision == 1
+    assert validation_attempts(later) == attempts[later.pk]
+    account = ProviderAccount.objects.get(pk=system.account.pk)
+    assert account.credential_revision == 3
+    assert account.revalidation_due_at is not None
+    assert account.revalidation_due_at <= timezone.now()
+
+
+def test_a_key_replaced_between_two_plants_ends_the_run() -> None:
+    system = make_system(approved=True)
+    second = second_plant(system)
+    replaced(system)
+    attempts = {binding.pk: validation_attempts(binding) for binding in (system.binding, second)}
+    asked: list[int] = []
+
+    def adapter(binding: SiteBinding) -> ProviderAdapter:
+        asked.append(binding.pk)
+        if len(asked) == 2:
+            from_another_client(
+                lambda: replace_key(system.admin, system.account.pk, provider_key("NEWER"))
+            )
+        return FakeAdapter()
+
+    outcome = revalidate(system, adapter)
+
+    assert outcome == RevalidationOutcome.STOPPED
+    first, later = (SiteBinding.objects.get(pk=pk) for pk in asked)
+    assert {first.pk, later.pk} == {system.binding.pk, second.pk}
+    assert first.validated_credential_revision == 2
+    assert later.validated_credential_revision == 1
+    assert validation_attempts(later) == attempts[later.pk]
+
+
+def test_the_worker_takes_the_lease_when_it_starts() -> None:
+    system = make_system(approved=True)
+    replaced(system)
+    during: list[datetime | None] = []
+
+    outcome = revalidate(system, adapters(FakeAdapter(lambda: during.append(due(system)))))
+
+    assert outcome == RevalidationOutcome.DONE
+    assert during == [NOW + revalidation.LEASE]
+
+
+def test_a_message_whose_lease_the_dispatcher_took_again_runs_nothing() -> None:
+    system = make_system(approved=True)
+    replaced(system)
+    first_dispatch = timezone.now()
+    assert claim_due_revalidations(first_dispatch) == [system.account.pk]
+    stale = due(system)
+    assert claim_due_revalidations(first_dispatch + revalidation.LEASE) == [system.account.pk]
+    adapter_for = adapters(FakeAdapter())
+
+    assert revalidate(system, adapter_for, claim=stale) == RevalidationOutcome.LEASE_LOST
+    adapter_for.assert_not_called()
+    assert revalidate(system, adapter_for) == RevalidationOutcome.DONE
+    assert validation_attempts(system.binding) == 2
+
+
+def test_a_duplicate_message_after_a_back_off_runs_nothing() -> None:
+    system = make_system(approved=True)
+    replaced(system)
+    claim = due(system)
+    assert claim is not None
+
+    def unreachable() -> None:
+        raise ProviderError("provider_request_failed")
+
+    assert revalidate(system, adapters(FakeAdapter(unreachable))) == RevalidationOutcome.WAITING
+    backed_off = due(system)
+    adapter_for = adapters(FakeAdapter())
+
+    assert revalidate(system, adapter_for, claim=claim) == RevalidationOutcome.LEASE_LOST
+    adapter_for.assert_not_called()
+    assert due(system) == backed_off
+
+
+def test_two_workers_given_the_same_lease_run_it_once() -> None:
+    system = make_system(approved=True)
+    replaced(system)
+    claim = due(system)
+    assert claim is not None
+    barrier = Barrier(2)
+
+    def worker() -> RevalidationOutcome:
+        try:
+            barrier.wait(timeout=10)
+            return revalidate_account(
+                system.account.pk, NOW, claim=claim, adapter_for=adapters(FakeAdapter())
+            )
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = sorted(pool.map(lambda _: worker(), range(2)))
+
+    assert outcomes == sorted([RevalidationOutcome.DONE, RevalidationOutcome.LEASE_LOST])
+    assert validation_attempts(system.binding) == 2
+
+
+def test_a_full_queue_publishes_nothing_and_claims_nothing() -> None:
+    system = make_system(approved=True)
+    replaced(system)
+    broker = StubBroker()
+    actor = REVALIDATION.make_actor(broker)
+    for _ in range(QUEUE_DEPTH_LIMIT):
+        actor.send(0)
+    before = due(system)
+
+    assert dispatch_revalidations(actor) == 0
+
+    assert due(system) == before
+    assert broker.queues[actor.queue_name].qsize() == QUEUE_DEPTH_LIMIT
+
+
+def test_a_failed_publish_leaves_the_account_due_for_the_next_dispatch() -> None:
+    system = make_system(approved=True)
+    second = another_due_account(system)
+    replaced(system)
+    actor = MagicMock()
+    actor.send_with_options.side_effect = [MagicMock(), ConnectionError("broker down")]
+
+    with pytest.raises(ConnectionError):
+        dispatch_revalidations(actor)
+
+    sent = actor.send_with_options.call_args_list[0].kwargs["args"][0]
+    unsent = ({system.account.pk, second.pk} - {sent}).pop()
+    assert claim_due_revalidations(timezone.now()) == [unsent]

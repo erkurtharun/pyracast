@@ -1,6 +1,8 @@
 import json
+import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -123,3 +125,26 @@ def test_invalid_capacity_or_timezone_is_refused_before_reading_inputs(
 def test_a_timezone_whose_midnight_is_off_the_half_hour_grid_is_named() -> None:
     with pytest.raises(ValueError, match="half-hour"):
         calibrate(dataset(), capacity_kw=1000, timezone="Asia/Kathmandu")
+
+
+def test_an_output_named_by_a_relative_path_is_staged_beside_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    staged: list[Path] = []
+    make = tempfile.mkdtemp
+
+    def recorded(*args: Any, **kwargs: Any) -> str:
+        path = make(*args, **kwargs)
+        staged.append(Path(path).resolve())
+        return path
+
+    monkeypatch.setattr(tempfile, "mkdtemp", recorded)
+
+    assert main([*inputs(work), "--capacity-kw", "1000", "--output", "."]) == 0
+
+    assert [path.parent for path in staged] == [tmp_path.resolve()]
+    assert staged[0].name.startswith(".work-")
+    assert (work / "model.json").is_file()

@@ -10,6 +10,7 @@ from django.db import IntegrityError, close_old_connections, connection, transac
 
 from pyracast.accounts.models import Tenant
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts import capacity_normalization
 from pyracast.forecasts.capacity_normalization import (
     _scaled_intervals,
     normalize_reference_capacity,
@@ -28,7 +29,7 @@ from pyracast.plants.training import run_calibration
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.trash import RETENTION, purge_expired, trash_region
 from tests.support.capacity_normalization import normalize, scaled_system
-from tests.support.domain import NOW
+from tests.support.domain import NOW, System
 from tests.support.invariants import stored_again
 from tests.support.plant_operations import publish_snapshot, snapshot_for
 from tests.support.plant_training import actual_snapshot_for
@@ -303,3 +304,35 @@ def test_normalization_records_do_not_block_authorized_region_purge(
     trash_region(system.member, system.tenant.pk, system.region.pk)
     assert purge_expired(NOW + RETENTION) == {"regions": 1, "plants": 1}
     assert not ReferenceCapacityNormalization.objects.exists()
+
+
+def test_a_copy_written_by_another_writer_after_preparation_is_reused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, target = scaled_system(monkeypatch)
+    actual_snapshot_for(system, date(2026, 11, 7))
+    prepare = capacity_normalization._prepared
+    other: list[tuple[int, ...]] = []
+
+    def prepared_then_overtaken(*args: Any) -> Any:
+        prepared = prepare(*args)
+        if not other:
+            other.append(())
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                other[0] = pool.submit(lambda: invoke_elsewhere(system, target)).result(10)
+        return prepared
+
+    monkeypatch.setattr(capacity_normalization, "_prepared", prepared_then_overtaken)
+
+    ids = normalize(system, target)
+
+    assert ids == other[0]
+    assert ReferenceCapacityNormalization.objects.count() == 1
+    assert AuditEvent.objects.filter(action="reference_capacity_normalized").count() == 1
+
+
+def invoke_elsewhere(system: System, target: SiteBinding) -> tuple[int, ...]:
+    try:
+        return normalize(system, target)
+    finally:
+        connection.close()

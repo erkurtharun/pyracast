@@ -2,7 +2,7 @@ import datetime
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -400,4 +400,50 @@ def test_the_runtime_secret_carries_only_settings_the_application_reads() -> Non
     assert all(
         name.startswith(host_contract.APPLICATION_PREFIXES)
         for name in host_contract.RUNTIME_SETTINGS - {"RABBITMQ_DEFAULT_PASS"}
+    )
+
+
+class ComposeLoader(yaml.SafeLoader):
+    pass
+
+
+def _tagged(loader: yaml.SafeLoader, suffix: str, node: yaml.Node) -> object:
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    return loader.construct_scalar(cast(yaml.ScalarNode, node))
+
+
+ComposeLoader.add_multi_constructor("!", _tagged)
+
+
+def compose_document(name: str) -> dict[str, Any]:
+    loader = ComposeLoader((ROOT / "deploy" / name).read_text(encoding="utf-8"))
+    try:
+        return cast(dict[str, Any], loader.get_single_data())
+    finally:
+        loader.dispose()
+
+
+def test_compose_pins_the_fixture_provider_off_and_only_the_smoke_turns_it_on() -> None:
+    services = compose_document("compose.yaml")["services"]
+    smoke = compose_document("compose.smoke.yaml")["services"]
+    application = {
+        name
+        for name, service in services.items()
+        if service.get("environment", {}).get("DJANGO_SETTINGS_MODULE") == "pyracast.production"
+    }
+
+    assert {"api", "worker", "dispatcher", "notifications", "migrate"} <= application
+    assert {services[name]["environment"]["PYRACAST_FIXTURE_PROVIDER"] for name in application} == {
+        "0"
+    }
+    assert {
+        name: service["environment"]["PYRACAST_FIXTURE_PROVIDER"]
+        for name, service in smoke.items()
+        if "PYRACAST_FIXTURE_PROVIDER" in (service.get("environment") or {})
+    } == {"api": "1", "worker": "1"}
+    assert "PYRACAST_FIXTURE_PROVIDER" not in (ROOT / "deploy" / "smoke.sh").read_text(
+        encoding="utf-8"
     )
