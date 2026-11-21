@@ -16,8 +16,14 @@ from pyracast.accounts.event_mail import enqueue_review_mail
 from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.forecasts.models import CollectionJob
-from pyracast.plants.models import CONFIGURATION_PARAMETERS, Plant, PlantSubmission
+from pyracast.plants.models import (
+    CONFIGURATION_PARAMETERS,
+    Plant,
+    PlantConfiguration,
+    PlantSubmission,
+)
 from pyracast.plants.operations import activate_submitted_plants
+from pyracast.plants.parameters import declaration
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus
 from pyracast.regions.review import SETUP_CHANGED, require_seen_status, set_review_status
@@ -99,13 +105,23 @@ def approval_blockers(binding: SiteBinding, account: ProviderAccount) -> list[Ap
     return [blocker for blocker, blocked in checks.items() if blocked]
 
 
-def declaration_fingerprint(region_id: int) -> str:
-    rows = (
-        PlantSubmission.objects.filter(plant__region_id=region_id)
-        .order_by("plant_id")
-        .values_list("plant_id", *sorted(DECLARED_FIELDS))
+def declarations(region_id: int) -> list[tuple[Plant, PlantSubmission | PlantConfiguration | None]]:
+    """Each plant of the region with the record its approval activates."""
+    plants = (
+        Plant.objects.filter(region_id=region_id)
+        .select_related("submission__submitted_by", "current_configuration")
+        .order_by("pk")
     )
-    return hashlib.sha256(json.dumps([list(row) for row in rows]).encode()).hexdigest()
+    return [(plant, declaration(plant)) for plant in plants]
+
+
+def declaration_fingerprint(region_id: int) -> str:
+    """Hashes the values, not the rows holding them: equal values are an equal declaration."""
+    rows = [
+        [plant.pk, plant.name, *(getattr(record, field, None) for field in sorted(DECLARED_FIELDS))]
+        for plant, record in declarations(region_id)
+    ]
+    return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 
 def review_snapshot(region_id: int) -> ReviewSnapshot:

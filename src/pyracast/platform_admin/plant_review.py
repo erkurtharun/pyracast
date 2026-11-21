@@ -35,6 +35,7 @@ from pyracast.plants.approval import (
     approve_region,
     decide_review,
     declaration_fingerprint,
+    declarations,
 )
 from pyracast.plants.models import Plant, PlantSubmission
 from pyracast.plants.operations import configuration_is_current
@@ -366,9 +367,10 @@ def _render(request: HttpRequest, site: PlatformAdminSite, page: PlantPage) -> T
             "title": _("Review and set up %(name)s") % {"name": page.region.name},
             "region": page.region,
             "plants": page.plants,
-            "submissions": PlantSubmission.objects.filter(plant__in=page.plants).select_related(
-                "plant", "submitted_by"
-            ),
+            "declarations": [
+                (plant, record, isinstance(record, PlantSubmission))
+                for plant, record in declarations(page.region.pk)
+            ],
             "binding": binding,
             "active_provider_delay": bool(
                 binding
