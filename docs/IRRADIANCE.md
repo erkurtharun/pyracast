@@ -198,8 +198,14 @@ Hay–Davies `get_total_irradiance` with pvlib's extraterrestrial irradiance (so
 zenith. The stored gains are that chain's values rounded to four decimals.
 `scripts/check_scientific.py` recomputes both chains in CI on Windows and Ubuntu and requires
 the stored gains within 0.0001 of them and the pure-Python gain within 0.012; the unit tests
-hold the model to the stored gains with the same 0.012, and v1 bit for bit to the outputs the
-code gave before the versions existed (`tests/fixtures/tracking_v1_golden.json`).
+hold the model to the stored gains with the same 0.012. v1 is held to the outputs the code gave
+before the versions existed (`tests/fixtures/tracking_v1_golden.json`: 400 gains, 192 interval
+gains and 25 reference powers, including night, twilight and the 87° edge) within a relative
+1e-12 on every platform, not bit for bit, because the platforms' maths libraries differ in the
+last bits. That catches any change that moves a sampled output by more than one part in 10¹²;
+a change in the last written digit of a coefficient moves outputs by about 10⁻⁷. Regrouping
+floating-point operations (about 10⁻¹⁶) and paths outside the sampled cases are not caught.
+Stored results are never recomputed in place, so such differences cannot alter a stored value.
 
 `scripts/evaluate_tracker_geometry.py` decides the default on an archive database, read-only,
 and prints aggregates per plant ordinal only. It compares the hourly EPIAS readings of the
