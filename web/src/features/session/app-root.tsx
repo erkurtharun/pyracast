@@ -31,7 +31,10 @@ export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
     const { session, failure, fail, clear, retry } = useSessionBootstrap();
     const handoff = useLanguageHandoff(session);
-    const language = useSessionLanguage(session?.language);
+    const language = useSessionLanguage(
+        session?.language,
+        handoff.status !== "ready",
+    );
     const ready =
         session !== undefined &&
         handoff.status === "ready" &&

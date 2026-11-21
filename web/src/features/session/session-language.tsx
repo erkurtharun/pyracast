@@ -16,9 +16,14 @@ export type SessionLanguageState = {
     status: "ready" | "loading" | "failed";
 };
 
-// `language` is undefined until the first session read. After a catalogue was shown for a session,
-// a change keeps it until the next one arrives, so a screen never shows two languages at once.
-export function useSessionLanguage(language?: string): SessionLanguageState {
+// `language` is undefined until the first session read, and a pending language hand-off may still
+// change it: until both have settled only the shell shows, and a hand-off starts no catalogue. After a
+// catalogue was shown, a change keeps it until the next one arrives, so a screen never shows two
+// languages at once.
+export function useSessionLanguage(
+    language: string | undefined,
+    handoff: boolean,
+): SessionLanguageState {
     const initialLocale = useLocale();
     const wanted = isLanguage(language)
         ? language
@@ -29,12 +34,14 @@ export function useSessionLanguage(language?: string): SessionLanguageState {
     const [shown, setShown] = useState<Language>();
     const entry = catalogues[wanted];
     useEffect(() => {
-        if (!entry) loadCatalogue(wanted).catch(() => {});
-    }, [entry, wanted]);
-    if (language !== undefined && entry?.status === "ready" && shown !== wanted)
-        setShown(wanted);
-    if (entry?.status === "ready")
+        if (!handoff && !entry) loadCatalogue(wanted).catch(() => {});
+    }, [handoff, entry, wanted]);
+    if (language === undefined || handoff)
+        return { locale: wanted, messages: shell[wanted], status: "loading" };
+    if (entry?.status === "ready") {
+        if (shown !== wanted) setShown(wanted);
         return { locale: wanted, messages: entry.messages, status: "ready" };
+    }
     const previous = shown && catalogues[shown];
     if (shown && previous?.status === "ready")
         return { locale: shown, messages: previous.messages, status: "ready" };
