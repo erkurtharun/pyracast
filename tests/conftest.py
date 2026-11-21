@@ -79,6 +79,7 @@ SUBPROCESS = frozenset(
         "test_agent_graph",
         "test_api_schema_generation",
         "test_ci_images",
+        "test_container_log_lines",
         "test_deployment_helpers",
         "test_deployment_previous_helper",
         "test_deployment_reset",
