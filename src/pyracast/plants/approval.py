@@ -34,7 +34,8 @@ UNDECLARED_FIELDS = frozenset(
 )
 
 DECLARATION_CHANGED = gettext_lazy(
-    "The declared plant details changed after this page opened. Review them again before approving."
+    "The declared plant details changed after this page opened. "
+    "The details shown now are the current ones; review them before approving."
 )
 NOT_RESUBMITTABLE = gettext_lazy("Only a rejected plant can be resubmitted for review.")
 REVIEW_REASON_MAX_LENGTH = 500
@@ -105,7 +106,10 @@ def approval_blockers(binding: SiteBinding, account: ProviderAccount) -> list[Ap
     return [blocker for blocker, blocked in checks.items() if blocked]
 
 
-def declarations(region_id: int) -> list[tuple[Plant, PlantSubmission | PlantConfiguration | None]]:
+type Declarations = list[tuple[Plant, PlantSubmission | PlantConfiguration | None]]
+
+
+def declarations(region_id: int) -> Declarations:
     """Each plant of the region with the record its approval activates."""
     plants = (
         Plant.objects.filter(region_id=region_id)
@@ -115,13 +119,21 @@ def declarations(region_id: int) -> list[tuple[Plant, PlantSubmission | PlantCon
     return [(plant, declaration(plant)) for plant in plants]
 
 
-def declaration_fingerprint(region_id: int) -> str:
+def fingerprint_of(rows: Declarations) -> str:
     """Hashes the values, not the rows holding them: equal values are an equal declaration."""
-    rows = [
-        [plant.pk, plant.name, *(getattr(record, field, None) for field in sorted(DECLARED_FIELDS))]
-        for plant, record in declarations(region_id)
+    values = [
+        [
+            plant.pk,
+            plant.name,
+            *(getattr(record, field, None) for field in sorted(DECLARED_FIELDS)),
+        ]
+        for plant, record in rows
     ]
-    return hashlib.sha256(json.dumps(rows).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(values).encode()).hexdigest()
+
+
+def declaration_fingerprint(region_id: int) -> str:
+    return fingerprint_of(declarations(region_id))
 
 
 def review_snapshot(region_id: int) -> ReviewSnapshot:
