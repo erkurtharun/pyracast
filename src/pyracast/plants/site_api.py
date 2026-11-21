@@ -8,6 +8,7 @@ from rest_framework.generics import GenericAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from pyracast.api.schema import LOCATION_REFUSAL
 from pyracast.api.serializers import RegionInput
 from pyracast.notifications.overview import reminder_summaries
 from pyracast.notifications.serializers import ReminderSummaryOutput
@@ -72,7 +73,7 @@ class SitesView(GenericAPIView[Region]):
         )
         return self.get_paginated_response(rows.data)
 
-    @extend_schema(request=SiteInput, responses={201: SiteOutput})
+    @extend_schema(request=SiteInput, responses={201: SiteOutput, 400: LOCATION_REFUSAL})
     def post(self, request: Request, tenant_id: int) -> Response:
         data = SiteInput(data=request.data)
         data.is_valid(raise_exception=True)

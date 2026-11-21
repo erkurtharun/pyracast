@@ -2012,6 +2012,11 @@ export interface components {
          */
         LocationChangeStatusEnum:
             "pending" | "approved" | "rejected" | "withdrawn";
+        /** @description A refusal that can name the plant already at the requested location. */
+        LocationRefusal: components["schemas"]["Error"] & {
+            /** @description With location_already_exists: the workspace's plant that holds the location. */
+            region_id?: number;
+        };
         /**
          * @description * `net_export` - Net export
          *     * `ac_generation` - AC generation
@@ -4759,7 +4764,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Error"];
+                    "application/json": components["schemas"]["LocationRefusal"];
                 };
             };
             /** @description Sign-in is required. */
@@ -7098,7 +7103,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Error"];
+                    "application/json": components["schemas"]["LocationRefusal"];
                 };
             };
             /** @description Sign-in is required. */

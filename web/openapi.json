@@ -1997,7 +1997,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/Error"
+                                    "$ref": "#/components/schemas/LocationRefusal"
                                 }
                             }
                         }
@@ -5449,7 +5449,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/Error"
+                                    "$ref": "#/components/schemas/LocationRefusal"
                                 }
                             }
                         }
@@ -8165,6 +8165,23 @@
                 "enum": ["pending", "approved", "rejected", "withdrawn"],
                 "type": "string",
                 "description": "* `pending` - Awaiting review\n* `approved` - Approved\n* `rejected` - Rejected\n* `withdrawn` - Withdrawn"
+            },
+            "LocationRefusal": {
+                "description": "A refusal that can name the plant already at the requested location.",
+                "allOf": [
+                    {
+                        "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "region_id": {
+                                "type": "integer",
+                                "description": "With location_already_exists: the workspace's plant that holds the location."
+                            }
+                        }
+                    }
+                ]
             },
             "MeasurementBasisEnum": {
                 "enum": ["net_export", "ac_generation"],
