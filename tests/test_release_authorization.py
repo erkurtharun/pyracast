@@ -33,6 +33,9 @@ AFTER_START = "2026-11-21T05:10:00Z"
 SECOND_LATER = "2026-11-21T05:10:01Z"
 RERUN_STARTED = "2026-11-21T05:20:00Z"
 PULL_RUN_CREATED = "2026-11-21T04:30:00Z"
+RECORD_STARTED = "2026-11-21T04:50:00Z"
+RECORDED = "2026-11-21T04:50:30Z"
+RECORD_ENDED = "2026-11-21T04:51:00Z"
 GIT = shutil.which("git")
 
 
@@ -407,7 +410,7 @@ def early(
         "jobs": (
             tested_jobs
             if tested_jobs is not None
-            else [{"name": name, "conclusion": "success"} for name in PULL_REQUEST_JOBS]
+            else [pull_request_job(name, "success") for name in PULL_REQUEST_JOBS]
         ),
         "artifacts": (
             evidence
@@ -431,7 +434,21 @@ def evidence_artifact(
     base: str = PARENT, tree: str = TREE, attempt: int = 1, number: int = 82, **changes: Any
 ) -> dict[str, Any]:
     name = f"pr-tested-{number}-{base}-{tree}-{attempt}"
-    return {"id": 52, "name": name, "expired": False, "head_sha": HEAD, **changes}
+    return {
+        "id": 52,
+        "name": name,
+        "expired": False,
+        "head_sha": HEAD,
+        "created_at": RECORDED,
+        **changes,
+    }
+
+
+def pull_request_job(name: str, conclusion: str | None, **changes: Any) -> dict[str, Any]:
+    job: dict[str, Any] = {"name": name, "conclusion": conclusion}
+    if name == RECORD:
+        job |= {"started_at": RECORD_STARTED, "completed_at": RECORD_ENDED}
+    return job | changes
 
 
 def proven() -> Authorized:
@@ -452,8 +469,7 @@ def test_a_squash_merge_whose_pull_request_run_tested_the_same_tree_is_released_
 
 def jobs_with(name: str, conclusion: str | None) -> list[dict[str, Any]]:
     return [
-        {"name": job, "conclusion": conclusion if job == name else "success"}
-        for job in PULL_REQUEST_JOBS
+        pull_request_job(job, conclusion if job == name else "success") for job in PULL_REQUEST_JOBS
     ]
 
 
@@ -479,6 +495,42 @@ def test_a_pull_request_run_that_skipped_sonar_while_it_is_on_is_no_proof(enable
 
 def test_a_pull_request_run_whose_tree_record_failed_is_no_proof() -> None:
     deferred(early(tested_jobs=jobs_with(RECORD, "failure")), "did not pass every job")
+
+
+def record_job(**changes: Any) -> list[dict[str, Any]]:
+    others = [pull_request_job(name, "success") for name in PULL_REQUEST_JOBS if name != RECORD]
+    return [*others, pull_request_job(RECORD, "success", **changes)]
+
+
+@pytest.mark.parametrize(
+    ("value", "reason"),
+    [
+        (early(evidence=[evidence_artifact(created_at="2026-11-21T04:49:59Z")]), "not recorded"),
+        (early(evidence=[evidence_artifact(created_at="2026-11-21T04:51:01Z")]), "not recorded"),
+        (early(evidence=[evidence_artifact(created_at=None)]), "not recorded"),
+        (early(tested_jobs=record_job(completed_at=None)), "not recorded"),
+        (early(tested_jobs=record_job(started_at="soon")), "not recorded"),
+        (
+            early(tested_jobs=[*jobs_with(RECORD, "success"), pull_request_job(RECORD, "success")]),
+            "not recorded",
+        ),
+        (
+            early(
+                tested_jobs=[job for job in jobs_with(RECORD, "success") if job["name"] != RECORD]
+            ),
+            "not recorded",
+        ),
+    ],
+)
+def test_only_a_record_made_while_the_record_job_ran_is_evidence(
+    value: dict[str, Any], reason: str
+) -> None:
+    deferred(value, f"{reason} by its Record the tested tree job")
+
+
+def test_a_record_made_at_the_first_or_last_second_of_the_record_job_is_evidence() -> None:
+    for at in (RECORD_STARTED, RECORD_ENDED):
+        assert decide(early(evidence=[evidence_artifact(created_at=at)])) == proven()
 
 
 @pytest.mark.parametrize(

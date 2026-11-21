@@ -653,6 +653,14 @@ def test_the_release_judges_a_ci_run_its_dispatch_names_through_the_same_gate() 
         "per_page: 100, });"
     ) in script
     assert "data.workflow_runs.reduce" not in script
+    assert (
+        ".map(job => ({ name: job.name, conclusion: job.conclusion, "
+        "started_at: job.started_at, completed_at: job.completed_at }))"
+    ) in script
+    assert (
+        "head_sha: artifact.workflow_run?.head_sha ?? null, created_at: artifact.created_at,"
+        in (script)
+    )
     assert "if (requested) {" in script
     assert collect["env"] == {"SONAR_ENABLED": "${{ vars.SONAR_ENABLED }}"}
     assert "sonar_enabled: process.env.SONAR_ENABLED === 'true'," in script
