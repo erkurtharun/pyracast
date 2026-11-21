@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from threading import Barrier, Event
@@ -63,7 +64,7 @@ def test_connection_scope_identity_and_missing_configuration(
     with pytest.raises(PermissionDenied):
         disconnect_epias(plant.pk, actor=stranger)
     assert client.calls == 0
-    assert get_epias_status(plant.pk, actor=system.member)["connected"] is False
+    assert get_epias_status(plant.pk, actor=system.member).connected is False
     disconnect_epias(plant.pk, actor=system.admin)
     for kwargs, error in (
         ({"provider_plant_id": 0}, "invalid_epias_plant"),
@@ -157,11 +158,11 @@ def test_daily_reconciliation_preserves_acquisitions_and_history(
         "sun_mwh": None,
     }
     status = get_epias_status(plant.pk, actor=system.member)
-    assert status["archived_days"] == 1
-    assert status["last_success_at"] is not None
+    assert status.archived_days == 1
+    assert status.last_success_at is not None
     assert RequestAttempt.objects.count() == requests
     disconnect_epias(plant.pk, actor=system.admin)
-    assert get_epias_status(plant.pk, actor=system.member)["connected"] is False
+    assert get_epias_status(plant.pk, actor=system.member).connected is False
     event = PlantEvent.objects.get(plant=plant, action="epias_disconnected")
     assert event.actor_id == system.admin.pk
     assert event.details == {"provider_plant_id": 7, "eic": linked.eic, "revision": 1}
@@ -352,7 +353,7 @@ def test_provider_failures_are_redacted_bounded_and_honor_retry_after(
     assert job.status == "failed"
     assert not run_epias_job(job.pk, fetch=fail, now=now)
     assert not EpiasSnapshot.objects.exists()
-    assert get_epias_status(linked.plant_id, actor=system.member)["last_success_at"] is None
+    assert get_epias_status(linked.plant_id, actor=system.member).last_success_at is None
 
 
 def test_identity_mismatch_and_unexpected_errors_cannot_publish(
@@ -455,9 +456,9 @@ def test_reconnection_same_clock_starts_new_jobs_and_hides_previous_mapping(
     reconnected = connect(plant, system.admin)
     assert reconnected.revision == linked.revision + 1
     assert EpiasCollectionJob.objects.filter(status="pending").count() == 90
-    assert get_epias_status(plant.pk, actor=system.member)["archived_days"] == 1
+    assert get_epias_status(plant.pk, actor=system.member).archived_days == 1
     EpiasConnection.objects.filter(pk=linked.pk).update(provider_plant_id=100, eic="new-eic")
-    assert get_epias_status(plant.pk, actor=system.member)["archived_days"] == 0
+    assert get_epias_status(plant.pk, actor=system.member).archived_days == 0
     assert EpiasSnapshot.objects.count() == 1
 
 
@@ -492,8 +493,13 @@ def test_missing_connection_status_is_complete(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     status = get_epias_status(plant.pk, actor=system.member)
-    assert status == {
+    assert asdict(status) == {
+        "state": "never_connected",
         "connected": False,
+        "disconnected_at": None,
+        "health": None,
+        "complete_through": None,
+        "failed_days": 0,
         "provider_plant_id": None,
         "settlement_plant_id": None,
         "first_settlement_date": None,

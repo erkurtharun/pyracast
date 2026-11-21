@@ -9,8 +9,8 @@ import { DisplayError } from "@/lib/api/errors";
 import { useFormat } from "@/lib/format/use-format";
 import { ActionForm, CheckboxField } from "@/ui/form";
 import { Resource } from "@/ui/resource";
-import { Notice, Stat } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
+import { CollectionStatus } from "./collection-status";
 
 type Schedule = components["schemas"]["CollectionScheduleOutput"];
 
@@ -60,8 +60,6 @@ function ScheduleEditor({
     const label = useLabel();
 
     const [times, setTimes] = useState(data.times);
-    const moment = (value: string | null, missing: string) =>
-        value ? format.time(value, data.timezone) : missing;
     return (
         <>
             <section className="panel">
@@ -116,9 +114,6 @@ function ScheduleEditor({
                         defaultChecked={data.enabled}
                         disabled={region.status !== "approved"}
                     />
-                    {region.status !== "approved" && (
-                        <Notice>{t("approvalRequired")}</Notice>
-                    )}
                     <p>{t("collectionTimes")}</p>
                     {times.map((time, index) => (
                         <div className="button-group" key={index}>
@@ -173,22 +168,7 @@ function ScheduleEditor({
                     </details>
                 </ActionForm>
             </section>
-            <section className="panel">
-                <h3>{t("collectionStatus")}</h3>
-                <div className="stats">
-                    <Stat
-                        label={t("lastSuccess")}
-                        value={moment(data.last_success_at, t("notYet"))}
-                    />
-                    <Stat
-                        label={t("nextCollection")}
-                        value={moment(
-                            data.next_collection_at,
-                            t("notScheduled"),
-                        )}
-                    />
-                </div>
-            </section>
+            <CollectionStatus data={data} region={region} />
             {data.recent_jobs?.length > 0 && (
                 <details className="panel">
                     <summary>{t("recentCollectionJobs")}</summary>

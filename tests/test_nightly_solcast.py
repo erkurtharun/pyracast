@@ -156,6 +156,40 @@ def test_history_deadline_and_quota_are_terminal_without_dispatch_busy_loop() ->
     assert job.pk not in pending_job_ids(NIGHT + timedelta(minutes=29))
 
 
+@pytest.mark.parametrize(
+    "moment",
+    [NIGHT + timedelta(hours=1), NIGHT + timedelta(hours=6, minutes=-10)],
+    ids=["inside-the-window", "at-the-window-end"],
+)
+def test_history_skipped_for_the_provider_day_is_not_opened_again_in_its_window(
+    moment: datetime,
+) -> None:
+    system = make_system(approved=True)
+    job = history_job()
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=1)
+    RequestAttempt.objects.create(
+        provider_account=system.account,
+        utc_day=moment.date(),
+        created_at=moment,
+        purpose="validation",
+        outcome="uncertain",
+    )
+    assert not collect(job.pk, HistoricalFixture(moment), no_calculation, moment)
+    job.refresh_from_db()
+    assert (job.status, job.last_error) == ("stale", "quota_exhausted")
+    retry_at = job.available_at
+
+    enqueue_due(moment + timedelta(minutes=1))
+
+    job.refresh_from_db()
+    assert (job.status, job.last_error) == ("stale", "quota_exhausted")
+    assert job.pk not in pending_job_ids(retry_at)
+    assert claim(job.pk, retry_at) is None
+    job.refresh_from_db()
+    assert (job.status, job.last_error) == ("stale", "quota_exhausted")
+    assert not RequestAttempt.objects.filter(job=job).exists()
+
+
 def test_forecast_time_edit_preserves_history_and_global_disable_cancels_it() -> None:
     system = make_system(approved=True)
     job = history_job()

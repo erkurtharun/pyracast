@@ -48,6 +48,14 @@ class RequestDeferredError(QuotaExceededError):
         self.available_at = available_at
 
 
+def deferral(account: ProviderAccount, now: datetime) -> RequestDeferredError | None:
+    if account.authentication_failed_revision == account.credential_revision:
+        return RequestDeferredError(None)
+    if account.request_blocked_until is not None and account.request_blocked_until > now:
+        return RequestDeferredError(account.request_blocked_until)
+    return None
+
+
 def _admit_forecast(
     binding: SiteBinding, account: ProviderAccount, job: CollectionJob, utc_day: date
 ) -> None:
@@ -100,10 +108,8 @@ def reserve_account_request(
         now += timedelta(seconds=time.monotonic() - started)
         if job is not None and job.retry_until is not None and now >= job.retry_until:
             raise HistoryWindowClosedError
-        if account.authentication_failed_revision == account.credential_revision:
-            raise RequestDeferredError(None)
-        if account.request_blocked_until is not None and account.request_blocked_until > now:
-            raise RequestDeferredError(account.request_blocked_until)
+        if (deferred := deferral(account, now)) is not None:
+            raise deferred
         if not account.enabled or account.authorized_at is None:
             raise AccountUnavailableError
         utc_day = now.astimezone(UTC).date()

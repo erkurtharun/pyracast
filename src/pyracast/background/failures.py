@@ -12,6 +12,7 @@ from dramatiq.brokers.stub import StubBroker
 from pika.exceptions import (  # type: ignore[import-untyped]
     AMQPChannelError,
     AMQPConnectionError,
+    ChannelClosedByBroker,
 )
 
 from pyracast.background.deadlines import QUEUE_DEPTH_LIMIT
@@ -19,6 +20,12 @@ from pyracast.background.deadlines import QUEUE_DEPTH_LIMIT
 _PACKAGE = Path(__file__).resolve().parents[1]
 BACK_OFF = timedelta(minutes=15)
 BROKER_ERRORS = (AMQPConnectionError, AMQPChannelError)
+NOT_FOUND = 404
+
+
+def missing_queue(error: BaseException) -> bool:
+    """RabbitMQ answers a passive declaration of a queue nobody declared by closing that channel."""
+    return isinstance(error, ChannelClosedByBroker) and error.reply_code == NOT_FOUND
 
 
 class ItemsFailedError(Exception):
@@ -118,18 +125,22 @@ class Deferrals:
         self._until[key] = now + self._delay
 
 
-def _rabbitmq_depth(broker: RabbitmqBroker, queue_name: str) -> int:
+def broker_read[T](broker: RabbitmqBroker, read: Callable[[RabbitmqBroker], T]) -> T:
     # Dramatiq drops a dead connection only inside enqueue and queue declaration, not here, so a
     # lost connection or channel is dropped before a second attempt on a fresh one.
     try:
-        return int(broker.get_queue_message_counts(queue_name)[0])
+        return read(broker)
     except BROKER_ERRORS:
         del broker.connection
     try:
-        return int(broker.get_queue_message_counts(queue_name)[0])
+        return read(broker)
     except BROKER_ERRORS:
         del broker.connection
         raise
+
+
+def _rabbitmq_depth(broker: RabbitmqBroker, queue_name: str) -> int:
+    return broker_read(broker, lambda live: int(live.get_queue_message_counts(queue_name)[0]))
 
 
 def queue_depth(actor: Actor[[int], None]) -> int | None:

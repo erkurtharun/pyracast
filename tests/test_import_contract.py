@@ -47,7 +47,6 @@ HTTP_MODULES = (
     "proxy",
 )
 PROJECT_MODULES = {"settings", "urls", "wsgi", "cli", "production"}
-ORCHESTRATION_MODULES = {"forecasts.monitoring"}
 
 # Each entry is an import against the layer order that is not resolved yet, with its reason.
 BACK_EDGES: dict[tuple[str, str], str] = {
@@ -152,7 +151,7 @@ def _layer(module: str) -> str:
         return "project"
     if parts[0] == "platform_admin":
         return "platform_admin"
-    if module in ORCHESTRATION_MODULES or ".management.commands." in module:
+    if ".management.commands." in module:
         return "orchestration"
     if parts[0] == "api" or parts[-1] in HTTP_MODULES or parts[-1].endswith(("_api", "_views")):
         return "http"

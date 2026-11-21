@@ -19,9 +19,9 @@ from pyracast.forecasts.models import (
     HistoricalReferenceImport,
     RequestAttempt,
 )
-from pyracast.forecasts.monitoring import delivery_health
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
+from pyracast.orchestration.delivery_health import delivery_health
 from pyracast.providers import FixtureProvider, SolcastProvider
 from tests.support.domain import make_system
 from tests.support.invariants import stored_again
@@ -273,7 +273,7 @@ def test_paired_actuals_cannot_spend_reserved_future_forecast_quota() -> None:
     job.refresh_from_db()
     assert (job.status, job.last_error) == ("stale", "history_budget_reserved")
     assert job.attempts == 0
-    assert delivery_health(MORNING, timedelta(hours=1))["failed_collections"] == 0
+    assert delivery_health(MORNING, timedelta(hours=1)).counts["failed_collections"] == 0
     assert not RequestAttempt.objects.filter(job=job).exists()
 
 

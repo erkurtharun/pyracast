@@ -476,6 +476,20 @@
             "reset": "turned off by a reset to the uncalibrated model",
             "configuration_revised": "turned off because the plant configuration changed",
             "workspace_disabled": "turned off by Pyracast support for this workspace"
+        },
+        "CollectionState": {
+            "collecting": "Collecting",
+            "waiting_for_approval": "Waiting for approval",
+            "paused": "Paused",
+            "provider_attention": "Waiting for the provider"
+        },
+        "CollectionInactiveReason": {
+            "not_approved": "Collection starts once the plant is approved.",
+            "not_validated": "Collection starts once the provider connection is validated.",
+            "binding_not_current": "Collection resumes once the provider connection is validated again.",
+            "schedule_disabled": "Data collection is turned off for this plant.",
+            "quota_too_low": "The provider allowance leaves no request for forecasts; only the daily history is collected.",
+            "provider_unavailable": "The provider is not accepting requests right now; collection continues automatically."
         }
     }
 }

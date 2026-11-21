@@ -34,6 +34,8 @@ from pyracast.regions.models import Region
 
 Fetcher = Callable[[EpiasPlant, date], EpiasDay]
 LEASE_DURATION = ACTORS["collect_epias"].lease
+# A job awaiting publication waits for EPIAS, not for a worker.
+WAITING = (EpiasJobStatus.PENDING,)
 CREDENTIAL_ERRORS = (EpiasJobError.CREDENTIALS_MISSING, EpiasJobError.CREDENTIALS_REJECTED)
 
 logger = logging.getLogger(__name__)
@@ -342,7 +344,7 @@ def run_epias_job(
 
 
 def pending_epias_ids(now: datetime, *, limit: int = 100) -> list[int]:
-    eligible = Q(status=EpiasJobStatus.PENDING) | claimable(EpiasJobStatus.RUNNING, now)
+    eligible = Q(status__in=WAITING) | claimable(EpiasJobStatus.RUNNING, now)
     EpiasCollectionJob.objects.filter(eligible, retry_until__lte=now).update(
         status=EpiasJobStatus.FAILED,
         last_error=Case(

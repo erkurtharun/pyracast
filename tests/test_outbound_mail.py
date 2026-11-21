@@ -28,8 +28,8 @@ from pyracast.accounts.invitations import (
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
 from pyracast.background.retry_policy import MAIL
 from pyracast.errors import DomainError
-from pyracast.forecasts.monitoring import delivery_health
 from pyracast.mail.errors import NotSentError, PermanentlyNotSentError, SendCancelledError
+from pyracast.orchestration.delivery_health import delivery_health
 from tests.support.api import verified_admin
 from tests.support.outbox import after_the_lease, deliver_mail
 
@@ -217,7 +217,7 @@ def test_retries_end_after_a_bound_and_the_failure_is_reported(
     ]
     assert report.levelno == logging.ERROR
     assert "guest@example.com" not in report.getMessage()
-    assert delivery_health(moment, timedelta(minutes=5))["failed_outbound_mail"] == 1
+    assert delivery_health(moment, timedelta(minutes=5)).counts["failed_outbound_mail"] == 1
 
 
 def test_a_permanent_refusal_fails_at_once(
@@ -256,9 +256,11 @@ def test_an_intent_its_worker_abandoned_is_reported_once_its_lease_ends(
     with pytest.raises(WorkerCrash):
         deliver_mail()
 
-    assert delivery_health(timezone.now(), timedelta(minutes=5))["overdue_outbound_mail"] == 0
+    assert (
+        delivery_health(timezone.now(), timedelta(minutes=5)).counts["overdue_outbound_mail"] == 0
+    )
     health = delivery_health(after_the_lease(), timedelta(minutes=5))
-    assert health["overdue_outbound_mail"] == 1
+    assert health.counts["overdue_outbound_mail"] == 1
 
 
 @pytest.mark.parametrize(
@@ -280,7 +282,10 @@ def test_an_interruption_after_the_transmit_marker_is_reported_and_never_sent_ag
     assert outbound_state() == [("uncertain", 1, "interrupted_send")]
     assert WorkspaceInvitation.objects.get().delivery_status == "uncertain"
     health = delivery_health(timezone.now() + timedelta(hours=2), timedelta(minutes=5))
-    assert (health["uncertain_outbound_mail"], health["failed_outbound_mail"]) == (1, 0)
+    assert (health.counts["uncertain_outbound_mail"], health.counts["failed_outbound_mail"]) == (
+        1,
+        0,
+    )
 
 
 def test_an_uncertain_invitation_holds_no_token_and_can_be_sent_again(
@@ -429,7 +434,10 @@ def test_uncertain_intents_are_counted_apart_from_failed_ones_and_listed_in_the_
     assert not send_outbound_mail(unknown.pk, after_the_lease())
 
     health = delivery_health(after_the_lease(), timedelta(minutes=5))
-    assert (health["uncertain_outbound_mail"], health["failed_outbound_mail"]) == (1, 1)
+    assert (health.counts["uncertain_outbound_mail"], health.counts["failed_outbound_mail"]) == (
+        1,
+        1,
+    )
     console, _ = verified_admin()
     (check,) = [
         check

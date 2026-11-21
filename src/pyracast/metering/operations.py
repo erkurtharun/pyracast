@@ -1,8 +1,9 @@
 from dataclasses import dataclass
+from datetime import date, datetime
 
 from django.contrib.auth.models import User
 from django.db import transaction
-from django.db.models import Max, Min, Q
+from django.db.models import Count, Max, Min, Q, QuerySet
 from django.utils import timezone
 
 from pyracast.accounts.authorization import require_platform_admin, tenant_membership
@@ -13,9 +14,11 @@ from pyracast.metering.models import (
     EpiasCollectionJob,
     EpiasConnection,
     EpiasConnectionRevision,
+    EpiasHealth,
     EpiasJobStatus,
     EpiasSnapshot,
     EpiasSourceKind,
+    EpiasState,
 )
 from pyracast.plants.events import record_plant_event
 from pyracast.plants.models import Plant, PlantEventAction
@@ -144,50 +147,108 @@ def disconnect_epias(plant_id: int, *, actor: User) -> bool:
     return True
 
 
-def get_epias_status(plant_id: int, *, actor: User) -> dict[str, object]:
+@dataclass(frozen=True)
+class EpiasStatus:
+    state: EpiasState
+    connected: bool
+    disconnected_at: datetime | None
+    health: EpiasHealth | None
+    complete_through: date | None
+    failed_days: int
+    provider_plant_id: int | None
+    settlement_plant_id: int | None
+    first_settlement_date: date | None
+    last_settlement_date: date | None
+    eic: str
+    name: str
+    last_success_at: datetime | None
+    last_error: str
+    pending_jobs: int
+    archived_days: int
+
+
+NEVER_CONNECTED = EpiasStatus(
+    EpiasState.NEVER_CONNECTED,
+    False,
+    None,
+    None,
+    None,
+    0,
+    None,
+    None,
+    None,
+    None,
+    "",
+    "",
+    None,
+    "",
+    0,
+    0,
+)
+
+
+def get_epias_status(plant_id: int, *, actor: User) -> EpiasStatus:
     plant = member_plant(plant_id, actor)
     connection = EpiasConnection.objects.filter(plant=plant).first()
     return epias_connection_status(connection)
 
 
-def epias_connection_status(connection: EpiasConnection | None) -> dict[str, object]:
+def _health(
+    connection: EpiasConnection, jobs: QuerySet[EpiasCollectionJob], pending: int
+) -> tuple[EpiasHealth | None, int]:
+    """The newest nightly batch decides once nothing waits for a worker."""
+    if not connection.enabled:
+        return None, 0
+    batch = jobs.aggregate(scheduled=Max("scheduled_for"))["scheduled"]
+    if pending or batch is None:
+        return EpiasHealth.COLLECTING, 0
+    outcome = jobs.filter(scheduled_for=batch).aggregate(
+        failed=Count("target_date", filter=Q(status=EpiasJobStatus.FAILED), distinct=True),
+        waiting=Count("pk", filter=Q(status=EpiasJobStatus.AWAITING_PUBLICATION)),
+    )
+    if outcome["failed"]:
+        return EpiasHealth.NEEDS_ATTENTION, outcome["failed"]
+    if outcome["waiting"]:
+        return EpiasHealth.WAITING_FOR_PUBLICATION, 0
+    return EpiasHealth.UP_TO_DATE, 0
+
+
+def epias_connection_status(connection: EpiasConnection | None) -> EpiasStatus:
     if connection is None:
-        return {
-            "connected": False,
-            "provider_plant_id": None,
-            "settlement_plant_id": None,
-            "first_settlement_date": None,
-            "last_settlement_date": None,
-            "eic": "",
-            "name": "",
-            "last_success_at": None,
-            "last_error": "",
-            "pending_jobs": 0,
-            "archived_days": 0,
-        }
+        return NEVER_CONNECTED
     jobs = EpiasCollectionJob.objects.filter(connection=connection)
     snapshots = EpiasSnapshot.objects.filter(_source_identity(connection), connection=connection)
     populated = snapshots.exclude(readings=[])
-    settlement_dates = populated.filter(source_kind=EpiasSourceKind.SETTLEMENT_INJECTION).aggregate(
-        first=Min("target_date"), last=Max("target_date")
+    dates = populated.aggregate(
+        first=Min("target_date", filter=Q(source_kind=EpiasSourceKind.SETTLEMENT_INJECTION)),
+        last=Max("target_date", filter=Q(source_kind=EpiasSourceKind.SETTLEMENT_INJECTION)),
+        complete_through=Max(
+            "target_date",
+            filter=Q(source_kind=EpiasSourceKind.REALTIME_GENERATION, complete=True),
+        ),
     )
     latest = populated.order_by("-available_at", "-pk").first()
     last_job = jobs.order_by("-scheduled_for", "-pk").first()
-    return {
-        "connected": connection.enabled,
-        "provider_plant_id": connection.provider_plant_id,
-        "settlement_plant_id": connection.settlement_plant_id,
-        "first_settlement_date": settlement_dates["first"],
-        "last_settlement_date": settlement_dates["last"],
-        "eic": connection.eic,
-        "name": connection.name,
-        "last_success_at": latest.available_at if latest else None,
-        "last_error": last_job.last_error if last_job else "",
-        "pending_jobs": jobs.filter(
-            status__in=(EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING)
-        ).count(),
-        "archived_days": populated.values("target_date").distinct().count(),
-    }
+    pending = jobs.filter(status__in=(EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING)).count()
+    health, failed_days = _health(connection, jobs, pending)
+    return EpiasStatus(
+        state=EpiasState.CONNECTED if connection.enabled else EpiasState.DISCONNECTED,
+        connected=connection.enabled,
+        disconnected_at=None if connection.enabled else connection.updated_at,
+        health=health,
+        complete_through=dates["complete_through"],
+        failed_days=failed_days,
+        provider_plant_id=connection.provider_plant_id,
+        settlement_plant_id=connection.settlement_plant_id,
+        first_settlement_date=dates["first"],
+        last_settlement_date=dates["last"],
+        eic=connection.eic,
+        name=connection.name,
+        last_success_at=latest.available_at if latest else None,
+        last_error=last_job.last_error if last_job else "",
+        pending_jobs=pending,
+        archived_days=populated.values("target_date").distinct().count(),
+    )
 
 
 def _source_identity(connection: EpiasConnection) -> Q:

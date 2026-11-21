@@ -6,6 +6,7 @@ from django.contrib.postgres.constraints import ExclusionConstraint
 from django.contrib.postgres.fields import DateTimeRangeField, RangeBoundary, RangeOperators
 from django.db import models
 from django.db.models import F, Q
+from django.utils.translation import gettext_lazy
 
 from pyracast.db import choices_check, lease_check
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
@@ -31,19 +32,19 @@ class ObservationQuality(models.TextChoices):
 
 
 class CalibrationStatus(models.TextChoices):
-    PENDING = "pending", "Pending"
-    RUNNING = "running", "Running"
-    READY = "ready", "Ready"
-    INSUFFICIENT = "insufficient", "Insufficient"
-    REJECTED = "rejected", "Rejected"
-    FAILED = "failed", "Failed"
-    SUPERSEDED = "superseded", "Superseded"
+    PENDING = "pending", gettext_lazy("Pending")
+    RUNNING = "running", gettext_lazy("Running")
+    READY = "ready", gettext_lazy("Ready")
+    INSUFFICIENT = "insufficient", gettext_lazy("Insufficient")
+    REJECTED = "rejected", gettext_lazy("Rejected")
+    FAILED = "failed", gettext_lazy("Failed")
+    SUPERSEDED = "superseded", gettext_lazy("Superseded")
 
 
 class CalibrationError(models.TextChoices):
-    ATTEMPT_LIMIT = "attempt_limit", "Attempt limit reached"
-    INVALID_CUTOFF = "invalid_cutoff", "Invalid cutoff"
-    INVALID_CALIBRATION_DATA = "invalid_calibration_data", "Invalid calibration data"
+    ATTEMPT_LIMIT = "attempt_limit", gettext_lazy("Attempt limit reached")
+    INVALID_CUTOFF = "invalid_cutoff", gettext_lazy("Invalid cutoff")
+    INVALID_CALIBRATION_DATA = "invalid_calibration_data", gettext_lazy("Invalid calibration data")
 
 
 class CalibrationAssessment(models.TextChoices):

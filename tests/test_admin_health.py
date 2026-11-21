@@ -1,8 +1,13 @@
+from dataclasses import replace
+
 import pytest
 from django.urls import reverse
 from django.utils.translation import override
 
+from pyracast.forecasts.models import DispatcherPhase
+from pyracast.orchestration.delivery_health import CHECKS, HealthReport, PhaseState
 from pyracast.platform_admin.health import HealthCategory, summarize_health
+from tests.support.delivery_health import NOW
 
 COUNTERS = [
     ("invalid_reminder_recipients", "action", "plants"),
@@ -27,26 +32,33 @@ COUNTERS = [
     ("overdue_metering", "action", "metering"),
     ("interrupted_metering", "action", "metering"),
     ("failed_metering", "review", "metering"),
+    ("overdue_calibrations", "action", "calibrations"),
+    ("interrupted_calibrations", "action", "calibrations"),
+    ("failed_calibrations", "review", "calibrations"),
 ]
 
 
-def healthy_report() -> dict[str, object]:
-    return {
-        **dict.fromkeys((key for key, _, _ in COUNTERS), 0),
-        "healthy": True,
-        "unhealthy_dispatch_phases": [],
-        "saved_forecast_notifications": 9,
-    }
+def healthy_report(**counts: int) -> HealthReport:
+    return HealthReport(
+        checked_at=NOW,
+        phases=tuple(
+            PhaseState(phase, NOW, NOW, "", None, None, healthy=True) for phase in DispatcherPhase
+        ),
+        counts={
+            **{item.key: 0 for item in CHECKS},
+            "saved_forecast_notifications": 9,
+            **counts,
+        },
+        requests=(),
+    )
 
 
 @pytest.mark.parametrize(("key", "category", "target"), COUNTERS)
 def test_each_health_reason_has_its_count_guidance_and_filtered_destination(
     key: str, category: HealthCategory, target: str
 ) -> None:
-    report = healthy_report()
-    report.update(healthy=False, **{key: 3})
     with override("en"):
-        summary = summarize_health(report)
+        summary = summarize_health(healthy_report(**{key: 3}))
     assert len(summary.checks) == 1
     check = summary.checks[0]
     assert (check.key, check.count, check.category) == (key, 3, category)
@@ -68,20 +80,24 @@ def test_each_health_reason_has_its_count_guidance_and_filtered_destination(
     assert summary.tone == ("attention" if category == "action" else category)
 
 
-def test_healthy_summary_has_no_attention_reasons_and_preserves_report() -> None:
-    report = healthy_report()
-    before = report.copy()
+def test_healthy_summary_has_no_attention_reasons_and_keeps_the_check_time() -> None:
     with override("en"):
-        summary = summarize_health(report)
+        summary = summarize_health(healthy_report())
     assert summary.title == "Healthy"
     assert summary.tone == "healthy"
     assert summary.checks == ()
-    assert report == before
+    assert summary.checked_at == NOW
 
 
 def test_dispatcher_reason_names_affected_phases_and_links_to_their_status() -> None:
     report = healthy_report()
-    report.update(healthy=False, unhealthy_dispatch_phases=["collection", "metering"])
+    report = replace(
+        report,
+        phases=tuple(
+            replace(state, healthy=state.phase not in {"collection", "metering"})
+            for state in report.phases
+        ),
+    )
     with override("en"):
         summary = summarize_health(report)
     assert summary.tone == "attention"
@@ -89,8 +105,7 @@ def test_dispatcher_reason_names_affected_phases_and_links_to_their_status() -> 
     check = summary.checks[0]
     assert (check.key, check.count, check.category) == ("dispatch", 2, "action")
     assert check.help == (
-        "Check the dispatcher process and its last successful run: "
-        "Collection, Production collection."
+        "Check the dispatcher process and its last successful run: Collection, Metering."
     )
     assert check.action_url == f"{reverse('admin:workspace_operations')}#dispatch-title"
 
@@ -110,20 +125,17 @@ def test_dispatcher_reason_names_affected_phases_and_links_to_their_status() -> 
 def test_summary_prioritizes_current_action_without_hiding_other_reasons(
     raised: tuple[str, ...], tone: str, title: str
 ) -> None:
-    report = healthy_report()
-    report.update(healthy=False, **dict.fromkeys(raised, 1))
+    report = healthy_report(**dict.fromkeys(raised, 1))
     with override("en"):
         summary = summarize_health(report)
     assert summary.tone == tone
     assert summary.title == title
     assert {check.key for check in summary.checks} == set(raised)
     assert all(check.count == 1 for check in summary.checks)
-    assert report["healthy"] is False
+    assert report.healthy is False
 
 
 def test_prepared_notification_reason_does_not_claim_the_message_was_sent() -> None:
-    report = healthy_report()
-    report.update(healthy=False, partial_forecasts=1)
     with override("en"):
-        check = summarize_health(report).checks[0]
+        check = summarize_health(healthy_report(partial_forecasts=1)).checks[0]
     assert check.label == "Notifications prepared with partial forecasts"

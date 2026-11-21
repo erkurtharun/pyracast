@@ -6366,6 +6366,18 @@
                 "type": "string",
                 "description": "* `forecasts` - Forecasts\n* `estimated_actuals` - Estimated actuals\n* `historical_import` - Historical import\n* `scaled_forecasts` - Scaled forecasts\n* `scaled_estimated_actuals` - Scaled estimated actuals"
             },
+            "CollectionInactiveReasonEnum": {
+                "enum": [
+                    "not_approved",
+                    "not_validated",
+                    "binding_not_current",
+                    "schedule_disabled",
+                    "quota_too_low",
+                    "provider_unavailable"
+                ],
+                "type": "string",
+                "description": "* `not_approved` - Not approved\n* `not_validated` - Not validated\n* `binding_not_current` - Binding not current\n* `schedule_disabled` - Schedule disabled\n* `quota_too_low` - Quota too low for forecasts\n* `provider_unavailable` - Provider unavailable"
+            },
             "CollectionJobErrorEnum": {
                 "enum": [
                     "history_window_closed",
@@ -6499,6 +6511,23 @@
                         "type": "string",
                         "format": "date-time"
                     },
+                    "state": {
+                        "$ref": "#/components/schemas/CollectionStateEnum"
+                    },
+                    "inactive_reason": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/CollectionInactiveReasonEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "requests_today": {
+                        "type": "integer"
+                    },
                     "last_success_at": {
                         "type": "string",
                         "format": "date-time",
@@ -6538,13 +6567,26 @@
                     "history_requests_reserved_per_day",
                     "history_retry_minutes",
                     "history_retry_until_local",
+                    "inactive_reason",
                     "last_success_at",
                     "max_forecast_times",
                     "next_collection_at",
                     "recent_jobs",
+                    "requests_today",
+                    "state",
                     "times",
                     "timezone"
                 ]
+            },
+            "CollectionStateEnum": {
+                "enum": [
+                    "collecting",
+                    "waiting_for_approval",
+                    "paused",
+                    "provider_attention"
+                ],
+                "type": "string",
+                "description": "* `collecting` - Collecting\n* `waiting_for_approval` - Waiting for approval\n* `paused` - Paused\n* `provider_attention` - Waiting for the provider"
             },
             "ComparisonEnum": {
                 "enum": ["archived_forecast", "historical_model"],
@@ -6912,8 +6954,35 @@
             "EpiasConnectionOutput": {
                 "type": "object",
                 "properties": {
+                    "state": {
+                        "$ref": "#/components/schemas/EpiasStateEnum"
+                    },
                     "connected": {
                         "type": "boolean"
+                    },
+                    "disconnected_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "health": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/EpiasHealthEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "complete_through": {
+                        "type": "string",
+                        "format": "date",
+                        "nullable": true
+                    },
+                    "failed_days": {
+                        "type": "integer"
                     },
                     "provider_plant_id": {
                         "type": "integer",
@@ -6963,17 +7032,32 @@
                 },
                 "required": [
                     "archived_days",
+                    "complete_through",
                     "connected",
+                    "disconnected_at",
                     "eic",
+                    "failed_days",
                     "first_settlement_date",
+                    "health",
                     "last_error",
                     "last_settlement_date",
                     "last_success_at",
                     "name",
                     "pending_jobs",
                     "provider_plant_id",
-                    "settlement_plant_id"
+                    "settlement_plant_id",
+                    "state"
                 ]
+            },
+            "EpiasHealthEnum": {
+                "enum": [
+                    "up_to_date",
+                    "collecting",
+                    "waiting_for_publication",
+                    "needs_attention"
+                ],
+                "type": "string",
+                "description": "* `up_to_date` - Up to date\n* `collecting` - Collecting\n* `waiting_for_publication` - Waiting for publication\n* `needs_attention` - Needs attention"
             },
             "EpiasJobErrorEnum": {
                 "enum": [
@@ -7004,6 +7088,11 @@
                 "enum": ["realtime_generation", "settlement_injection"],
                 "type": "string",
                 "description": "* `realtime_generation` - Real-time generation\n* `settlement_injection` - Settlement injection"
+            },
+            "EpiasStateEnum": {
+                "enum": ["never_connected", "connected", "disconnected"],
+                "type": "string",
+                "description": "* `never_connected` - Never connected\n* `connected` - Connected\n* `disconnected` - Disconnected"
             },
             "Error": {
                 "type": "object",
