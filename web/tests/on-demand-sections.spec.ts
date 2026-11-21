@@ -131,12 +131,15 @@ async function routeTurkishSession(page: Page) {
     );
 }
 
-test("a Turkish visit loads only the Turkish catalogue", async ({ page }) => {
+test("a Turkish visit loads only the Turkish catalogue", async ({
+    page,
+    baseURL,
+}) => {
     await page.context().addCookies([
         {
             name: "pyracast_language",
             value: "tr",
-            url: "http://127.0.0.1:3100",
+            url: baseURL!,
         },
     ]);
     await mockApi(page);
