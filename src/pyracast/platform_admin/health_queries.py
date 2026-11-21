@@ -43,7 +43,9 @@ def collection_jobs_for_issue(
 def notification_deliveries_for_issue(
     issue: str, now: datetime, maximum_lag: timedelta = timedelta(minutes=5)
 ) -> QuerySet[NotificationDelivery]:
-    deliveries = NotificationDelivery.objects.filter(active_region("schedule__region__"))
+    deliveries = NotificationDelivery.objects.defer("prepared_message").filter(
+        active_region("schedule__region__")
+    )
     recent = now - timedelta(days=1)
     if issue == "overdue_notifications":
         return deliveries.filter(
@@ -71,12 +73,10 @@ def notification_deliveries_for_issue(
         )
     if issue == "unavailable_forecasts":
         return deliveries.filter(
-            prepared_message__kind=PreparedMessageKind.UNAVAILABLE, scheduled_for__gte=recent
+            forecast_kind=PreparedMessageKind.UNAVAILABLE, scheduled_for__gte=recent
         )
     if issue == "partial_forecasts":
-        return deliveries.filter(
-            prepared_message__tomorrow_complete=False, scheduled_for__gte=recent
-        )
+        return deliveries.filter(forecast_complete=False, scheduled_for__gte=recent)
     if issue == "mail_authentication_failures":
         return deliveries.filter(last_error__in=CREDENTIAL_FAILURES, scheduled_for__gte=recent)
     if issue == "paused_notifications":

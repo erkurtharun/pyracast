@@ -620,16 +620,17 @@ def test_ended_intents_are_purged_after_a_week(
     workspace: tuple[Tenant, User], transport: type[Transport]
 ) -> None:
     from pyracast.accounts.models import OutboundMail
-    from pyracast.notifications.outbox import RETENTION, purge_finished_mail
+    from pyracast.retention import RETENTION
 
+    finished_mail = next(entry for entry in RETENTION if entry.rows == "finished_mail")
     invite(workspace)
     invite_workspace_member(workspace[1], workspace[0].pk, "second@example.com")
     finished = timezone.now()
     first, second = OutboundMail.objects.order_by("pk")
     deliver_mail(finished)
-    OutboundMail.objects.filter(pk=first.pk).update(finished_at=finished - RETENTION)
+    OutboundMail.objects.filter(pk=first.pk).update(finished_at=finished - timedelta(days=7))
 
-    assert purge_finished_mail(finished + timedelta(seconds=1)) == 1
+    assert finished_mail.run(finished + timedelta(seconds=1)) == 1
     assert list(OutboundMail.objects.values_list("pk", flat=True)) == [second.pk]
 
 

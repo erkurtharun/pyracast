@@ -503,6 +503,11 @@ fixtures do not establish provider access or inbox delivery.
   below says what each failure leaves and how to recover. A rerun of the verified
   release after remediation also clears the marker on success. Never use
   `migrate --fake` or automatically reverse migrations.
+- **Account erasure** cannot be undone. In the `api` container, `pyracast erase_account
+  --account ID` is a dry run that lists the rows erasure would change; take a backup
+  (`sudo systemctl start pyracast-backup.service`, then check the upload), then add
+  `--execute`. It anonymizes the account in place and refuses while the account
+  administers a workspace. Backups keep the erased data until they expire.
 - **Rollback:** prefer a reviewed Git revert on `main`, successful CI and Release.
   This deploys the former behavior with the current database. Only do this after
   confirming schema compatibility. An incompatible schema change needs a forward

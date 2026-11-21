@@ -123,12 +123,12 @@ def test_closed_invitations_leave_oldest_first_in_bounded_runs_once_their_period
     remaining = WorkspaceInvitation.objects.values_list("pk", flat=True)
 
     assert purge_closed_invitations(CUTOFF, 2) == 2
-    assert set(remaining) == kept | {accepted}
+    assert set(remaining.all()) == kept | {accepted}
     assert not OutboundMail.objects.exists()
     assert purge_closed_invitations(CUTOFF, 2) == 1
     assert purge_closed_invitations(CUTOFF, 2) == 0
-    assert set(remaining) == kept
-    assert revoked not in kept
+    assert set(remaining.all()) == kept
+    assert not WorkspaceInvitation.objects.filter(pk__in=(expired, revoked)).exists()
 
 
 def delivery_at(
@@ -206,8 +206,8 @@ def test_finished_mail_leaves_oldest_first_in_bounded_runs() -> None:
     remaining = OutboundMail.objects.values_list("pk", flat=True)
 
     assert purge_finished_mail(cutoff, 1) == 1
-    assert set(remaining) == kept | {old}
+    assert set(remaining.all()) == kept | {old}
     assert purge_finished_mail(cutoff, 1) == 1
     assert purge_finished_mail(cutoff, 1) == 0
-    assert set(remaining) == kept
-    assert older not in kept
+    assert set(remaining.all()) == kept
+    assert not OutboundMail.objects.filter(pk=older).exists()

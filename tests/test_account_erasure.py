@@ -242,9 +242,13 @@ def test_erasure_leaves_no_personal_data_and_keeps_the_history_that_points_at_th
     assert {relation: after[relation] for relation in KEPT} == {
         relation: before[relation] for relation in KEPT
     }
-    assert before["plants.PlantSubmission.submitted_by"] == 1
-    assert before["accounts.WorkspaceAdminChange.previous_administrator"] == 1
-    assert before["regions.AuditEvent.actor"] > 0
+    assert {relation for relation in KEPT if before[relation]} == {
+        "accounts.WorkspaceAdminChange.previous_administrator",
+        "notifications.ReminderSchedule.configured_by",
+        "plants.PlantConfiguration.created_by",
+        "plants.PlantEvent.actor",
+        "regions.AuditEvent.actor",
+    }
     person.refresh_from_db()
     assert (person.username, person.email, person.first_name, person.last_name) == (
         f"erased-{person.pk}",

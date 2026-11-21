@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from allauth.account.models import EmailAddress
@@ -17,28 +17,45 @@ from django.db.models import (
     QuerySet,
     RestrictedError,
 )
+from django.db.models.functions import Coalesce
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
 from pyracast.background.failures import ItemsFailedError, isolate
 
 logger = logging.getLogger(__name__)
-BATCH_SIZE = 500
-ABANDONED_AFTER = timedelta(days=7)
 
 
-def end_expired_sessions(now: datetime) -> int:
+def end_expired_sessions(cutoff: datetime, limit: int) -> int:
     expired = list(
-        Session.objects.filter(expire_date__lt=now)
+        Session.objects.filter(expire_date__lt=cutoff)
         .order_by("expire_date")
-        .values_list("session_key", flat=True)[:BATCH_SIZE]
+        .values_list("session_key", flat=True)[:limit]
     )
     removed = Session.objects.filter(session_key__in=expired).delete()[0]
     orphans = list(
         UserSession.objects.exclude(session_key__in=Session.objects.values("session_key"))
         .order_by("pk")
-        .values_list("pk", flat=True)[:BATCH_SIZE]
+        .values_list("pk", flat=True)[:limit]
     )
     return removed + UserSession.objects.filter(pk__in=orphans).delete()[0]
+
+
+def purge_closed_invitations(cutoff: datetime, limit: int) -> int:
+    # Acceptance and revocation exclude each other; an open invitation closes at its deadline.
+    closed = (
+        Q(accepted_at__lt=cutoff)
+        | Q(revoked_at__lt=cutoff)
+        | Q(accepted_at__isnull=True, revoked_at__isnull=True, expires_at__lt=cutoff)
+    )
+    with transaction.atomic():
+        ids = list(
+            WorkspaceInvitation.objects.filter(closed)
+            .select_for_update(skip_locked=True)
+            .order_by(Coalesce("accepted_at", "revoked_at", "expires_at").asc(), "pk")
+            .values_list("pk", flat=True)[:limit]
+        )
+        deleted = WorkspaceInvitation.objects.filter(pk__in=ids).delete()[1]
+    return deleted.get(WorkspaceInvitation._meta.label, 0)
 
 
 def _abandoned(cutoff: datetime) -> QuerySet[User]:
@@ -88,13 +105,7 @@ def reclaim_signup(user_id: int, cutoff: datetime) -> bool:
     return True
 
 
-def sweep_accounts(now: datetime) -> None:
-    end_expired_sessions(now)
-    reclaim_abandoned_signups(now)
-
-
-def reclaim_abandoned_signups(now: datetime) -> int:
-    cutoff = now - ABANDONED_AFTER
+def reclaim_abandoned_signups(cutoff: datetime, limit: int) -> int:
     candidates = _abandoned(cutoff).order_by("pk").values_list("pk", flat=True)
     reclaimed, failed, after = 0, 0, 0
 
@@ -102,27 +113,23 @@ def reclaim_abandoned_signups(now: datetime) -> int:
         nonlocal reclaimed
         reclaimed += reclaim_signup(user_id, cutoff)
 
-    try:
-        # The scan moves past kept and failing candidates, which stay eligible for the next run,
-        # so they never hold back later ones.
-        while reclaimed < BATCH_SIZE and (
-            page := list(candidates.filter(pk__gt=after)[: BATCH_SIZE - reclaimed])
-        ):
-            after = page[-1]
-            try:
-                isolate(
-                    page,
-                    reclaim,
-                    logger=logger,
-                    event="signup_reclaim_failed",
-                    name=lambda user_id: f"account:{user_id}",
-                    back_off=lambda _user_id: None,
-                )
-            except ItemsFailedError as error:
-                failed += error.count
-    finally:
-        if reclaimed:
-            logger.info("abandoned_signups_reclaimed count=%s", reclaimed)
+    # The scan moves past kept and failing candidates, which stay eligible for the next run, so
+    # they never hold back later ones.
+    while reclaimed < limit and (
+        page := list(candidates.filter(pk__gt=after)[: limit - reclaimed])
+    ):
+        after = page[-1]
+        try:
+            isolate(
+                page,
+                reclaim,
+                logger=logger,
+                event="signup_reclaim_failed",
+                name=lambda user_id: f"account:{user_id}",
+                back_off=lambda _user_id: None,
+            )
+        except ItemsFailedError as error:
+            failed += error.count
     if failed:
         raise ItemsFailedError(failed)
     return reclaimed

@@ -1,7 +1,6 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import cast
 from zoneinfo import ZoneInfo
 
 from django.core.mail import EmailMultiAlternatives
@@ -29,6 +28,7 @@ from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationDeliveryError,
     NotificationDeliveryStatus,
+    PreparedMessageKind,
 )
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
@@ -160,8 +160,8 @@ def process_notification(delivery_id: int, now: datetime) -> bool:
             )
             delivery.save()
             return False
-        frozen = cast(dict[str, object] | None, delivery.prepared_message)
-        frozen_snapshot_id = delivery.snapshot_id
+        frozen = delivery.prepared_message is not None
+        frozen_snapshot_id, frozen_at = delivery.snapshot_id, delivery.prepared_at
         try:
             if not prepare_delivery(delivery, now):
                 return False
@@ -170,14 +170,13 @@ def process_notification(delivery_id: int, now: datetime) -> bool:
             raise
         except Exception as error:
             log_failure(logger, "notification_preparation_failed", error, delivery_id=delivery.pk)
-            prepared_at = now
-            delivery.snapshot_id = None
-            if frozen is not None:
+            delivery.snapshot_id, delivery.prepared_at = None, now
+            if frozen:
                 delivery.snapshot_id = frozen_snapshot_id
-                prepared_at = datetime.fromisoformat(
-                    cast(str, frozen.get("prepared_at", delivery.scheduled_for.isoformat()))
-                )
-            message, delivery.prepared_message = build_unavailable_message(delivery, prepared_at)
+                delivery.prepared_at = frozen_at or delivery.scheduled_for
+            delivery.forecast_kind = PreparedMessageKind.UNAVAILABLE
+            delivery.forecast_complete = None
+            message, delivery.prepared_message = build_unavailable_message(delivery)
         message.bcc = addresses
         token = take(delivery, NotificationDeliveryStatus.SENDING, now, LEASE_DURATION)
         delivery.transmit_started_at = None

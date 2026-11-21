@@ -11,11 +11,12 @@ from tests.support.migrations import forward, migrate
 pytestmark = pytest.mark.django_db(transaction=True)
 
 PREVIOUS = ("notifications", "0009_purge_warning_mail")
-WORKBOOK = {"format": "xlsx", "subject": "Forecast", "html": "<p>Forecast</p>"}
-PLAIN = {"format": "plain", "subject": "Unavailable", "body": "Not prepared."}
-UNREADABLE = {**PLAIN, "kind": "unavailable", "prepared_at": "yesterday"}
-NAIVE = {**PLAIN, "kind": "current", "prepared_at": "2026-11-09T08:00:00"}
-UNNAMED = {**PLAIN, "prepared_at": "2026-11-09T08:00:00+00:00"}
+WORKBOOK: dict[str, object] = {"format": "xlsx", "subject": "Forecast", "html": "<p>Forecast</p>"}
+PLAIN: dict[str, object] = {"format": "plain", "subject": "Unavailable", "body": "Not prepared."}
+UNREADABLE: dict[str, object] = {**PLAIN, "kind": "unavailable", "prepared_at": "yesterday"}
+NAIVE: dict[str, object] = {**PLAIN, "kind": "current", "prepared_at": "2026-11-09T08:00:00"}
+UNNAMED: dict[str, object] = {**PLAIN, "prepared_at": "2026-11-09T08:00:00+00:00"}
+UNDATED: dict[str, object] = {**PLAIN, "kind": "unavailable"}
 
 
 def test_preparation_metadata_moves_from_the_message_into_typed_columns(
@@ -53,8 +54,11 @@ def test_preparation_metadata_moves_from_the_message_into_typed_columns(
         plain = stored(
             2, {**PLAIN, "kind": "unavailable", "prepared_at": "2026-11-09T09:00:00+03:00"}
         )
-        skipped = [stored(3, UNREADABLE), stored(4, NAIVE), stored(5, UNNAMED)]
-        unprepared = stored(6, None)
+        skipped = [
+            stored(hours, message)
+            for hours, message in ((3, UNREADABLE), (4, NAIVE), (5, UNNAMED), (6, UNDATED))
+        ]
+        unprepared = stored(7, None)
         capsys.readouterr()
     finally:
         forward()
@@ -75,10 +79,11 @@ def test_preparation_metadata_moves_from_the_message_into_typed_columns(
         ("", None, None, UNREADABLE),
         ("", None, None, NAIVE),
         ("", None, None, UNNAMED),
+        ("", None, None, UNDATED),
     ]
     assert columns[unprepared] == ("", None, None, None)
     assert (
-        "notifications: 3 prepared delivery message(s) carried no readable kind and time "
+        "notifications: 4 prepared delivery message(s) carried no readable kind and time "
         "and kept their message unchanged." in capsys.readouterr().out
     )
 

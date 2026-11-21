@@ -138,20 +138,16 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         ),
         unavailable_forecasts=Count(
             "pk",
-            filter=Q(
-                prepared_message__kind=PreparedMessageKind.UNAVAILABLE, scheduled_for__gte=recent
-            ),
+            filter=Q(forecast_kind=PreparedMessageKind.UNAVAILABLE, scheduled_for__gte=recent),
         ),
-        partial_forecasts=Count(
-            "pk", filter=Q(prepared_message__tomorrow_complete=False, scheduled_for__gte=recent)
-        ),
+        partial_forecasts=Count("pk", filter=Q(forecast_complete=False, scheduled_for__gte=recent)),
         mail_authentication_failures=Count(
             "pk", filter=Q(last_error__in=CREDENTIAL_FAILURES, scheduled_for__gte=recent)
         ),
         saved_forecast_notifications=Count(
             "pk",
             filter=Q(
-                prepared_message__kind__in=(
+                forecast_kind__in=(
                     PreparedMessageKind.SAVED_COMPLETE,
                     PreparedMessageKind.SAVED_PARTIAL,
                 ),

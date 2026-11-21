@@ -31,7 +31,7 @@ NOW = datetime(2026, 11, 15, 12, tzinfo=UTC)
 LAG = timedelta(minutes=5)
 RECENT = NOW - timedelta(days=1)
 BEFORE = timedelta(microseconds=1)
-PREPARED = {"kind": "current", "tomorrow_complete": True}
+RENDERED = {"format": "plain", "subject": "Forecast", "body": "Forecast"}
 
 
 def another_region(
@@ -130,7 +130,8 @@ def delivery(
     available: datetime = NOW,
     lease: datetime | None = None,
     error: str = "",
-    message: dict[str, object] | None = None,
+    kind: str = "",
+    complete: bool | None = None,
 ) -> NotificationDelivery:
     count = NotificationDelivery.objects.count()
     region = Region.objects.create(
@@ -151,7 +152,10 @@ def delivery(
         lease_token=None if lease is None else uuid.uuid4(),
         lease_expires_at=lease,
         last_error=error,
-        prepared_message=message,
+        prepared_message=RENDERED if kind else None,
+        forecast_kind=kind,
+        forecast_complete=complete,
+        prepared_at=scheduled if kind else None,
     )
 
 
@@ -177,8 +181,10 @@ def test_notification_filters_match_counter_boundaries_across_schedules(
         "pending": delivery(schedule, "pending", available=NOW - LAG - BEFORE),
         "retry": delivery(schedule, "retry", available=NOW - LAG - BEFORE),
         "cutoff": delivery(schedule, "pending", available=NOW - LAG),
-        "expired_lease": delivery(schedule, "sending", lease=NOW, message=PREPARED),
-        "live_lease": delivery(schedule, "sending", lease=NOW + BEFORE, message=PREPARED),
+        "expired_lease": delivery(schedule, "sending", lease=NOW, kind="current", complete=True),
+        "live_lease": delivery(
+            schedule, "sending", lease=NOW + BEFORE, kind="current", complete=True
+        ),
         "failed": delivery(schedule, "failed", scheduled=RECENT),
         "uncertain": delivery(schedule, "uncertain"),
         "old_failed": delivery(schedule, "failed", scheduled=RECENT - BEFORE),
@@ -189,10 +195,10 @@ def test_notification_filters_match_counter_boundaries_across_schedules(
             schedule, "skipped", scheduled=RECENT - BEFORE, error="missed_schedule"
         ),
         "partial": delivery(
-            schedule, "sent", scheduled=RECENT, message={"tomorrow_complete": False}
+            schedule, "sent", scheduled=RECENT, kind="saved_partial", complete=False
         ),
-        "complete": delivery(schedule, "sent", message={"tomorrow_complete": True}),
-        "missing": delivery(schedule, "sent", message={"kind": "unavailable"}),
+        "complete": delivery(schedule, "sent", kind="current", complete=True),
+        "missing": delivery(schedule, "sent", kind="unavailable"),
         "auth": delivery(schedule, "retry", error="mail_credentials_rejected"),
         "revoked": delivery(schedule, "failed", error="mail_authorization_revoked"),
         "old_auth": delivery(
@@ -202,7 +208,7 @@ def test_notification_filters_match_counter_boundaries_across_schedules(
             schedule,
             "sent",
             scheduled=RECENT - BEFORE,
-            message={"kind": "unavailable", "tomorrow_complete": False},
+            kind="unavailable",
         ),
         "over_limit": delivery(schedule, "skipped", error="recipient_limit_exceeded"),
         "no_recipients": delivery(schedule, "skipped", scheduled=RECENT, error="no_recipients"),

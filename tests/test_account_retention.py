@@ -17,6 +17,7 @@ from django.test import override_settings
 from django.utils import timezone
 from dramatiq.brokers.stub import StubBroker
 
+from pyracast import retention as dispatch_retention
 from pyracast import trash
 from pyracast.accounts import headless, retention
 from pyracast.accounts.invitations import invite_workspace_member
@@ -32,6 +33,8 @@ from pyracast.forecasts.models import DispatcherStatus
 from pyracast.orchestration import dispatcher as dispatch
 from pyracast.plants.models import Plant
 from pyracast.regions.models import Region
+from pyracast.retention import RETENTION as SWEEPS
+from pyracast.retention import SWEEP_BATCH, Retention
 from pyracast.trash import RETENTION, trash_region
 from tests.support.account_sessions import alongside, browser, elsewhere, session_user
 from tests.support.auth_lifecycle import submit
@@ -41,6 +44,7 @@ from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 LOCAL_MAIL = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
+ABANDONED_AFTER = next(entry.period for entry in SWEEPS if entry.rows == "abandoned_signups")
 
 
 def session(key: str, expires: datetime, user: User | None = None) -> None:
@@ -73,11 +77,10 @@ def test_session_cleanup_removes_a_bounded_batch_per_run(monkeypatch: pytest.Mon
     for index in range(3):
         session(f"expired-{index}", now - timedelta(minutes=index + 1))
         device(f"orphan-{index}", user)
-    monkeypatch.setattr(retention, "BATCH_SIZE", 2)
 
-    first = retention.end_expired_sessions(now)
+    first = retention.end_expired_sessions(now, 2)
     remaining = (Session.objects.count(), UserSession.objects.count())
-    second = retention.end_expired_sessions(now)
+    second = retention.end_expired_sessions(now, 2)
 
     assert (first, remaining, second) == (4, (1, 1), 2)
     assert not Session.objects.exists()
@@ -178,7 +181,7 @@ AFTER_SELECTION: dict[str, Callable[[User], None]] = {
 @pytest.mark.parametrize("case", AFTER_SELECTION)
 def test_a_signup_that_changes_after_selection_is_kept(case: str) -> None:
     user = signup_account("owner")
-    cutoff = timezone.now() - retention.ABANDONED_AFTER
+    cutoff = timezone.now() - ABANDONED_AFTER
     AFTER_SELECTION[case](user)
 
     assert not retention.reclaim_signup(user.pk, cutoff)
@@ -203,7 +206,7 @@ def test_a_signup_that_changes_before_its_workspaces_are_locked_is_kept(
 
     monkeypatch.setattr(retention, "_lock", changed_before_the_workspaces_are_locked)
 
-    assert not retention.reclaim_signup(user.pk, timezone.now() - retention.ABANDONED_AFTER)
+    assert not retention.reclaim_signup(user.pk, timezone.now() - ABANDONED_AFTER)
 
     assert changes == [case]
     assert User.objects.filter(pk=user.pk).exists()
@@ -232,7 +235,7 @@ def test_an_invitation_to_a_workspace_being_reclaimed_waits_and_finds_it_gone(
     monkeypatch.setattr(Collector, "collect", invited_meanwhile)
 
     with override_settings(MAILERS=LOCAL_MAIL):
-        reclaimed = retention.reclaim_signup(user.pk, timezone.now() - retention.ABANDONED_AFTER)
+        reclaimed = retention.reclaim_signup(user.pk, timezone.now() - ABANDONED_AFTER)
         with pytest.raises(Tenant.DoesNotExist):
             invitations[0].result(timeout=10)
 
@@ -262,7 +265,7 @@ def test_a_signup_that_signed_in_after_selection_keeps_its_invitation_while_it_i
     monkeypatch.setattr(retention, "_lock", invited_once_the_account_is_locked)
 
     with override_settings(MAILERS=LOCAL_MAIL):
-        reclaimed = retention.reclaim_signup(user.pk, timezone.now() - retention.ABANDONED_AFTER)
+        reclaimed = retention.reclaim_signup(user.pk, timezone.now() - ABANDONED_AFTER)
         invitations[0].result(timeout=10)
 
     assert not reclaimed
@@ -286,7 +289,13 @@ def test_a_verification_completing_while_its_signup_is_reclaimed_keeps_the_accou
 
     def reclaimed_meanwhile(address: EmailAddress) -> None:
         claim(address)
-        sweeps.append(alongside(lambda: retention.reclaim_abandoned_signups(timezone.now())))
+        sweeps.append(
+            alongside(
+                lambda: retention.reclaim_abandoned_signups(
+                    timezone.now() - ABANDONED_AFTER, SWEEP_BATCH
+                )
+            )
+        )
 
     monkeypatch.setattr(headless, "claim", reclaimed_meanwhile)
 
@@ -304,9 +313,8 @@ def test_a_kept_signup_does_not_hold_back_later_abandoned_ones(
     kept = signup_account("kept")
     referenced(kept)
     abandoned = signup_account("abandoned")
-    monkeypatch.setattr(retention, "BATCH_SIZE", 1)
 
-    reclaimed = retention.reclaim_abandoned_signups(timezone.now())
+    reclaimed = retention.reclaim_abandoned_signups(timezone.now() - ABANDONED_AFTER, 1)
 
     assert (reclaimed, abandoned.pk > kept.pk) == (1, True)
     assert list(User.objects.values_list("pk", flat=True)) == [kept.pk]
@@ -317,7 +325,6 @@ def test_scanning_past_kept_signups_retains_at_most_one_page_of_results(
 ) -> None:
     for index in range(3):
         referenced(signup_account(f"kept-{index}"))
-    monkeypatch.setattr(retention, "BATCH_SIZE", 1)
     retained: list[int] = []
 
     def recording(*args: Any, **kwargs: Any) -> list[Any]:
@@ -327,16 +334,16 @@ def test_scanning_past_kept_signups_retains_at_most_one_page_of_results(
 
     monkeypatch.setattr(retention, "isolate", recording)
 
-    assert retention.reclaim_abandoned_signups(timezone.now()) == 0
+    assert retention.reclaim_abandoned_signups(timezone.now() - ABANDONED_AFTER, 1) == 0
     assert (sum(retained), max(retained)) == (3, 1)
 
 
 def test_signup_reclaim_removes_a_bounded_batch_per_run(monkeypatch: pytest.MonkeyPatch) -> None:
     for index in range(3):
         signup_account(f"owner-{index}")
-    monkeypatch.setattr(retention, "BATCH_SIZE", 2)
 
-    counts = [retention.reclaim_abandoned_signups(timezone.now()) for _ in range(3)]
+    cutoff = timezone.now() - ABANDONED_AFTER
+    counts = [retention.reclaim_abandoned_signups(cutoff, 2) for _ in range(3)]
 
     assert counts == [2, 1, 0]
     assert not User.objects.exists()
@@ -366,8 +373,21 @@ def expired_region(monkeypatch: pytest.MonkeyPatch, *, failing: bool) -> Region:
     return system.region
 
 
-def failing_session_step(now: datetime) -> int:
+def failing_session_step(_cutoff: datetime, _limit: int) -> int:
     raise RuntimeError("private session detail")
+
+
+def failing_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        dispatch,
+        "RETENTION",
+        tuple(
+            Retention(entry.rows, entry.period, failing_session_step)
+            if entry.rows == "sessions"
+            else entry
+            for entry in SWEEPS
+        ),
+    )
 
 
 def test_a_failing_region_purge_still_ends_sessions_and_reclaims_signups(
@@ -392,7 +412,7 @@ def test_a_failing_account_sweep_keeps_the_committed_region_purge(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     region = expired_region(monkeypatch, failing=False)
-    monkeypatch.setattr(retention, "end_expired_sessions", failing_session_step)
+    failing_sessions(monkeypatch)
 
     dispatch_once(monkeypatch)
 
@@ -404,7 +424,7 @@ def test_when_purge_items_and_the_account_sweep_fail_the_sweep_failure_is_record
     monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
 ) -> None:
     region = expired_region(monkeypatch, failing=True)
-    monkeypatch.setattr(retention, "end_expired_sessions", failing_session_step)
+    failing_sessions(monkeypatch)
 
     dispatch_once(monkeypatch)
 
@@ -457,7 +477,7 @@ def test_signup_reclaim_failures_on_different_pages_do_not_hide_a_later_healthy_
     first = signup_account("first-failing")
     second = signup_account("second-failing")
     healthy = signup_account("healthy")
-    monkeypatch.setattr(retention, "BATCH_SIZE", 1)
+    monkeypatch.setattr(dispatch_retention, "SWEEP_BATCH", 1)
     failing = {first.pk, second.pk}
 
     def fail_reclaim(sender: type[User], instance: User, **_: Any) -> None:

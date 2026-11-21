@@ -88,12 +88,9 @@ def test_same_clock_collection_waits_without_spending_mail_attempts_then_uses_pu
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.snapshot_id == fresh.pk != old.pk
     assert isinstance(delivery.prepared_message, dict)
-    assert delivery.prepared_message["kind"] == "current"
-    assert (
-        when + timedelta(minutes=1)
-        <= datetime.fromisoformat(delivery.prepared_message["prepared_at"])
-        < when + timedelta(minutes=2)
-    )
+    assert delivery.forecast_kind == "current"
+    assert delivery.prepared_at is not None
+    assert when + timedelta(minutes=1) <= delivery.prepared_at < when + timedelta(minutes=2)
     assert attached_sheet(mail.outbox[0])["A2"].value == when.astimezone(
         ZoneInfo(system.region.timezone)
     ).replace(tzinfo=None)
@@ -118,7 +115,7 @@ def test_terminal_collection_prepares_immediately_using_older_complete_forecast(
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.snapshot_id == old.pk
     assert isinstance(delivery.prepared_message, dict)
-    assert delivery.prepared_message["kind"] == "saved_complete"
+    assert delivery.forecast_kind == "saved_complete"
     assert "Using the last saved forecast." in mail.outbox[0].body
 
 
@@ -179,7 +176,7 @@ def test_missing_due_job_waits_only_to_fixed_deadline_then_sends_honest_unavaila
     assert delivery.snapshot_id is None
     assert delivery.binding_id == system.binding.pk
     assert isinstance(delivery.prepared_message, dict)
-    assert delivery.prepared_message["kind"] == "unavailable"
+    assert delivery.forecast_kind == "unavailable"
     assert "Tomorrow's forecast is unavailable" in mail.outbox[0].body
     sheet = attached_sheet(mail.outbox[0])
     assert sheet.cell(_summary_row(sheet, 11), 3).value is None
@@ -248,7 +245,7 @@ def test_partial_tomorrow_survives_missing_today_and_does_not_invent_daily_total
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.snapshot_id == newer.pk
     assert isinstance(delivery.prepared_message, dict)
-    assert delivery.prepared_message["kind"] == "saved_partial"
+    assert delivery.forecast_kind == "saved_partial"
     assert "Unavailable" in mail.outbox[0].body
     assert "Partial:" in mail.outbox[0].body
     sheet = attached_sheet(mail.outbox[0])
@@ -261,7 +258,7 @@ def test_partial_tomorrow_survives_missing_today_and_does_not_invent_daily_total
     coverage = result.daily_payloads["2026-11-11"]["daylight"]["coverage_fraction"]
     assert f"Coverage: {coverage:.0%}" in note
     assert "Partial estimate" in note
-    assert delivery.prepared_message["tomorrow_complete"] is False
+    assert delivery.forecast_complete is False
 
 
 @pytest.mark.parametrize(
@@ -305,8 +302,8 @@ def test_same_slot_partial_forecast_exposes_incomplete_saved_data_status() -> No
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.snapshot_id == snapshot.pk
     assert isinstance(delivery.prepared_message, dict)
-    assert delivery.prepared_message["kind"] == "saved_partial"
-    assert delivery.prepared_message["tomorrow_complete"] is False
+    assert delivery.forecast_kind == "saved_partial"
+    assert delivery.forecast_complete is False
     after = reminder_schedule_payload(schedule, SLOT + timedelta(minutes=2))["deliveries"]
     assert isinstance(after, list)
     assert after[0]["status"] == "sent"
@@ -479,8 +476,8 @@ def test_forecast_age_in_history_uses_preparation_time_instead_of_view_time() ->
     delivery_id = enqueue_due(SLOT)[0]
     assert process_notification(delivery_id, SLOT)
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
-    assert isinstance(delivery.prepared_message, dict)
-    prepared_at = datetime.fromisoformat(delivery.prepared_message["prepared_at"])
+    prepared_at = delivery.prepared_at
+    assert prepared_at is not None
     at_send = reminder_schedule_payload(schedule, SLOT)["deliveries"]
     later = reminder_schedule_payload(schedule, SLOT + timedelta(days=7))["deliveries"]
     assert isinstance(at_send, list)
@@ -493,16 +490,11 @@ def test_forecast_age_in_history_uses_preparation_time_instead_of_view_time() ->
     assert at_send[0]["stale"] is later[0]["stale"] is False
 
 
-@pytest.mark.parametrize("prepared_at", ["invalid", "2026-11-10T07:00:00", 7])
-def test_legacy_history_with_invalid_preparation_metadata_uses_sent_time(
-    prepared_at: object,
-) -> None:
+def test_history_without_a_preparation_time_measures_the_source_age_at_sending() -> None:
     system, schedule = configured()
     saved(system)
     delivery_id = enqueue_due(SLOT)[0]
-    NotificationDelivery.objects.filter(pk=delivery_id).update(
-        status="sent", sent_at=SLOT, prepared_message={"prepared_at": prepared_at}
-    )
+    NotificationDelivery.objects.filter(pk=delivery_id).update(status="sent", sent_at=SLOT)
     payload = reminder_schedule_payload(schedule, SLOT + timedelta(days=7))["deliveries"]
     assert isinstance(payload, list)
     assert payload[0]["source_age_seconds"] == (SLOT - NOW).total_seconds()
