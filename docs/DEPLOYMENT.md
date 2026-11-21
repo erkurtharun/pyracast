@@ -603,6 +603,36 @@ fixtures do not establish provider access or inbox delivery.
   pruning in production. Monitor registry/backup/log retention and adjust
   deliberately to control cost.
 
+### Alert events
+
+The host scripts write these events to the `pyracast-operations` log; `deploy/operations_events.py`
+holds the list and the alerted ones have a policy in `monitoring.tf`. Lines carry ids, states and
+counts only. `sudo python3 /opt/pyracast/current/deploy/operations_events.py --test-alert EVENT`
+writes one sample line with `test: true` and changes nothing else; it exits 1 when the line could
+not be written. Never delete `release-blocked` by hand.
+
+| Event | Means | Check first | Recover |
+| --- | --- | --- | --- |
+| `pyracast_watchdog_heartbeat` | One watchdog run ended; `state` says how. Its absence for 15 minutes alerts | `systemctl status pyracast-watchdog.timer` | Start the timer; a down VM needs a start |
+| `pyracast_watchdog_step_failed` | One watchdog check (`step`) timed out or raised | `journalctl -u pyracast-watchdog.service` | Fix the cause the journal names; the other checks still ran |
+| `pyracast_host_capacity` | Disk or memory is low | `df -h`, `free -m` | Free or grow the disk; find the process holding memory |
+| `pyracast_runtime_unhealthy` | A container stays unhealthy after the restart, or PostgreSQL or RabbitMQ is unhealthy | `docker compose ... ps`, `logs --tail 100 SERVICE` | Fix the service; `systemctl restart pyracast` once the cause is gone |
+| `pyracast_runtime_restarted` | The watchdog restarted `services` and they recovered | Their logs before the restart | None unless it repeats |
+| `pyracast_delivery_unhealthy` | The delivery health check failed: `alarms` with counts, `dispatch_phases`, `broker_unreachable`, `missing_queues`; `outcome: unreadable` when it printed no report | The Operations page, `pyracast check_delivery_health` in `api` | Restart the worker or dispatcher it names; correct the data the check lists |
+| `pyracast_release_blocked` | A release has kept the site in maintenance for `hours` since its latest attempt | "A release that fails during maintenance" below, the release log | Rerun the verified release or follow the printed recovery |
+| `pyracast_certificate_expiring` | The origin certificate renewal is failing | Gateway logs, port 80 reachability | Fix the ACME challenge; the gateway renews by itself |
+| `pyracast_origin_pull_unenforced` | Port 443 accepts a handshake without the edge certificate | Gateway logs, its edge TLS option | Redeploy the release; check `origin_pull_ca` |
+| `pyracast_backup_succeeded` | A dump was uploaded | None | None |
+| `pyracast_backup_skipped` | A release held the lock or stayed blocked | Whether a release runs | None; the next hour backs up |
+| `pyracast_backup_failed` | A dump failed, was stopped, or the last verified one is older than 90 minutes | `journalctl -u pyracast-backup.service`, the bucket | Fix the cause; `systemctl start pyracast-backup.service`; release nothing before one succeeds |
+| `pyracast_backup_setting_invalid` | `daily_backups` in `/etc/pyracast/host.json` is neither true nor false; the hourly dump was kept | The file | Run the startup script again (Terraform writes it) |
+| `pyracast_backup_daily_copied` | The day's first backup was copied under `daily/` | None | None |
+| `pyracast_backup_daily_copy_failed` | The hourly dump succeeded, its daily copy did not (`error`) | The bucket and its IAM | The next hour retries |
+| `pyracast_rehearsal_passed` | A restore rehearsal passed | None | None |
+| `pyracast_rehearsal_failed` | A rehearsal failed in `step` | `journalctl -u pyracast-rehearsal.service` | Fix the step; `systemctl start pyracast-rehearsal.service` |
+| `pyracast_rehearsal_unhealthy` | The last rehearsal failed or none passed within eight days | `/var/lib/pyracast/last-rehearsal.json` | As for `pyracast_rehearsal_failed` |
+| `pyracast_secrets_failed` | A release's environment files were not prepared (`category`, `secret`) | The release log, `journalctl -u pyracast.service` | Fix the secret version or permission it names; release again |
+
 ## Database reset and restore
 
 `deploy/reset_database.py` runs as root on the VM under the host's Python 3 and the

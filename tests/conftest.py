@@ -52,6 +52,7 @@ TOOLING = frozenset(
         "test_infrastructure_settings",
         "test_npm_audit",
         "test_operations_contracts",
+        "test_operations_events",
         "test_postgres_workspace",
         "test_probe_origin",
         "test_probe_origin_pull",
@@ -101,6 +102,7 @@ SUBPROCESS = frozenset(
 MIGRATION = frozenset(
     {
         "test_calibration_requests",
+        "test_calibration_wait_migration",
         "test_collection_outcome_migration",
         "test_collection_times_migration",
         "test_epias_revision_migration",

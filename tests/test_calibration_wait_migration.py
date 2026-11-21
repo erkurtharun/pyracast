@@ -46,4 +46,6 @@ def test_a_requeued_run_waits_from_the_upgrade_and_every_other_run_from_its_crea
 
     waits = dict(CalibrationRun.objects.values_list("pk", "available_at"))
     assert waits[finished] == waits[replaced] == NOW - timedelta(days=2)
-    assert before <= waits[requeued] <= datetime.now(UTC)
+    requeued_wait = waits[requeued]
+    assert requeued_wait is not None
+    assert before <= requeued_wait <= datetime.now(UTC)

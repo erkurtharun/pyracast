@@ -77,12 +77,18 @@ resource "google_monitoring_alert_policy" "readiness" {
 
 resource "google_monitoring_alert_policy" "operations" {
   for_each = {
-    backup      = { event = "pyracast_backup_failed", description = "Database backup failed; inspect pyracast-backup.service and verify the latest private-bucket backup before releasing." }
-    runtime     = { event = "pyracast_runtime_unhealthy", description = "A required container remains unhealthy after supervision; inspect workers and release-blocked before restarting." }
-    host        = { event = "pyracast_host_capacity", description = "The VM has less than 15 percent disk space or 10 percent available memory; inspect capacity before jobs are interrupted." }
-    certificate = { event = "pyracast_certificate_expiring", description = "The origin certificate has less than a quarter of its lifetime left, so its renewal is failing; inspect the gateway logs and port 80 reachability for the ACME challenge." }
-    secrets     = { event = "pyracast_secrets_failed", description = "The runtime secret helper could not prepare a release's environment files; its category names the cause (configuration, identity, permission, version, unavailable, format, write, unexpected). Inspect journalctl -u pyracast.service or the release log." }
-    origin_pull = { event = "pyracast_origin_pull_unenforced", description = "Origin pulls are required, but port 443 on the host no longer refuses a handshake without the edge's certificate. Inspect the gateway logs and its edge TLS option." }
+    backup            = { event = "pyracast_backup_failed", description = "A database backup failed or the last verified one is older than 90 minutes." }
+    backup_setting    = { event = "pyracast_backup_setting_invalid", description = "The hourly backup ran, but daily_backups in the host configuration is neither true nor false, so no daily copy was made." }
+    backup_daily_copy = { event = "pyracast_backup_daily_copy_failed", description = "The hourly backup succeeded, but its daily copy failed." }
+    runtime           = { event = "pyracast_runtime_unhealthy", description = "A container stays unhealthy after the watchdog's restart, or PostgreSQL or RabbitMQ is unhealthy." }
+    delivery          = { event = "pyracast_delivery_unhealthy", description = "The delivery health check failed; the line names the failing checks with their counts." }
+    watchdog_step     = { event = "pyracast_watchdog_step_failed", description = "One watchdog check could not run; the line names the step." }
+    release_blocked   = { event = "pyracast_release_blocked", description = "A release has kept the site in maintenance for more than an hour." }
+    rehearsal         = { event = "pyracast_rehearsal_unhealthy", description = "The restore rehearsal failed or none passed within eight days." }
+    host              = { event = "pyracast_host_capacity", description = "The VM has less than 15 percent disk space or 10 percent available memory." }
+    certificate       = { event = "pyracast_certificate_expiring", description = "The origin certificate has less than a quarter of its lifetime left, so its renewal is failing." }
+    secrets           = { event = "pyracast_secrets_failed", description = "The runtime secret helper could not prepare a release's environment files; the line names the category." }
+    origin_pull       = { event = "pyracast_origin_pull_unenforced", description = "Origin pulls are required, but port 443 no longer refuses a handshake without the edge's certificate." }
   }
   display_name          = "${var.name} ${each.key} failure"
   combiner              = "OR"
@@ -110,7 +116,7 @@ resource "google_monitoring_alert_policy" "operations" {
 
   documentation {
     mime_type = "text/markdown"
-    content   = each.value.description
+    content   = "${each.value.description} What to check first and how to recover: the row of ${each.value.event} under Alert events in docs/DEPLOYMENT.md. A line with test set to true is a test alert."
   }
 }
 

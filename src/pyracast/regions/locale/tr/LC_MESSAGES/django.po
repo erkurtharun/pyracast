@@ -505,12 +505,6 @@ msgstr "Son başarı"
 msgid "Last validation"
 msgstr "Son doğrulama"
 
-msgid "Latest 20 deliveries"
-msgstr "Son 20 teslim"
-
-msgid "Latest 20 jobs"
-msgstr "Son 20 iş"
-
 msgid "Latitude must be between -90 and 90 degrees."
 msgstr "Enlem -90 ile 90 derece arasında olmalıdır."
 
@@ -2978,14 +2972,8 @@ msgstr "Son 7 günün en yoğun UTC günü"
 msgid "No provider requests in the last 7 days."
 msgstr "Son 7 günde sağlayıcı isteği yok."
 
-msgid "Showing %(shown)s of %(total)s"
-msgstr "%(total)s kayıttan %(shown)s gösteriliyor"
-
 msgid "Calibration runs"
 msgstr "Kalibrasyon çalışmaları"
-
-msgid "Latest 20 runs"
-msgstr "Son 20 çalışma"
 
 msgid "Requested"
 msgstr "İstendi"
@@ -3106,3 +3094,30 @@ msgstr "E-posta gönderim sınırına ulaşıldı"
 
 msgid "Mail sender forbidden"
 msgstr "E-posta göndericisine izin verilmedi"
+
+msgid "Showing %(first)s–%(last)s of %(total)s"
+msgstr "%(total)s kayıttan %(first)s–%(last)s gösteriliyor"
+
+msgid "Work of the last 24 hours."
+msgstr "Son 24 saatin işleri."
+
+msgid "Show all work"
+msgstr "Tüm işleri göster"
+
+msgid "All work."
+msgstr "Tüm işler."
+
+msgid "Show the last 24 hours"
+msgstr "Son 24 saati göster"
+
+msgid "Collection job pages"
+msgstr "Toplama işi sayfaları"
+
+msgid "Production collection pages"
+msgstr "Üretim toplama sayfaları"
+
+msgid "Calibration run pages"
+msgstr "Kalibrasyon çalışması sayfaları"
+
+msgid "Email delivery pages"
+msgstr "E-posta teslim sayfaları"

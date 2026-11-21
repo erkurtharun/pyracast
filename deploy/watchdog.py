@@ -40,6 +40,7 @@ MEMINFO = Path("/proc/meminfo")
 # Traefik renews at one third of the lifetime; below a quarter its renewal has failed for days.
 CERTIFICATE_WARNING_FRACTION = 0.25
 ORIGIN_PULL_WAIT_SECONDS = 5.0
+RELEASE_BLOCKED_WARNING_SECONDS = 3600
 
 
 class Run:
@@ -61,11 +62,11 @@ class Run:
             return check(*arguments)
         except subprocess.TimeoutExpired:
             self.failed.append(name)
-            report("pyracast_runtime_unhealthy", "ERROR", step=name, outcome="timeout")
+            report("pyracast_watchdog_step_failed", "ERROR", step=name, outcome="timeout")
         except Exception as error:
             self.failed.append(name)
             report(
-                "pyracast_runtime_unhealthy",
+                "pyracast_watchdog_step_failed",
                 "ERROR",
                 step=name,
                 outcome="error",
@@ -134,6 +135,16 @@ def check_backup_age() -> None:
         report(
             "pyracast_backup_failed", "ERROR", reason="last_verified_backup_older_than_90_minutes"
         )
+
+
+def check_release_blocked() -> None:
+    # Each release attempt touches the marker, so the age counts from the latest attempt.
+    try:
+        age = time.time() - host.RELEASE_BLOCKED.stat().st_mtime
+    except FileNotFoundError:
+        return
+    if age > RELEASE_BLOCKED_WARNING_SECONDS:
+        report("pyracast_release_blocked", "WARNING", hours=round(age / 3600, 1))
 
 
 def schedule_rehearsal() -> None:
@@ -222,7 +233,37 @@ def check_delivery(run: Run, compose: list[str]) -> None:
         [*compose, "exec", "-T", "api", "pyracast", "check_delivery_health"], capture_output=True
     )
     if result.returncode:
-        report("pyracast_runtime_unhealthy", "ERROR", reason="delivery_health")
+        failing = failing_delivery(result.stdout)
+        if failing is None:
+            report(
+                "pyracast_delivery_unhealthy",
+                "ERROR",
+                outcome="unreadable",
+                exit_status=result.returncode,
+            )
+        else:
+            report("pyracast_delivery_unhealthy", "ERROR", **failing)
+
+
+def failing_delivery(output: str) -> dict[str, object] | None:
+    try:
+        printed = json.loads(output)
+    except ValueError:
+        return None
+    if not isinstance(printed, dict):
+        return None
+    alarms = printed.get("alarms")
+    phases = printed.get("unhealthy_dispatch_phases")
+    broker = printed.get("broker")
+    if not (isinstance(alarms, dict) and isinstance(phases, list) and isinstance(broker, dict)):
+        return None
+    queues = broker.get("queues") or {}
+    return {
+        "alarms": alarms,
+        "dispatch_phases": phases,
+        "broker_unreachable": broker.get("reachable") is not True,
+        "missing_queues": [name for name, state in queues.items() if state.get("missing")],
+    }
 
 
 def certificate_validity(
@@ -271,6 +312,7 @@ def check_origin_pull(release: Path) -> None:
 def supervise(run: Run, release: Path) -> dict[str, str]:
     run.step("capacity", check_capacity)
     if host.RELEASE_BLOCKED.exists():
+        run.step("release_blocked", check_release_blocked)
         return {"state": "blocked"}
     run.step("backup_age", check_backup_age)
     run.step("rehearsal", check_rehearsal)

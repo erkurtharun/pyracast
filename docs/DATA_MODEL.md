@@ -674,6 +674,7 @@ erDiagram
         bigint plant_id FK "references plants_plant.id"
         bigint configuration_id FK "references plants_plantconfiguration.id"
         varchar_64 input_sha256
+        timestamp_with_time_zone available_at "nullable"
     }
     plants_forecastissuance {
         bigint id PK
