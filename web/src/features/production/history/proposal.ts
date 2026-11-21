@@ -16,10 +16,29 @@ export type StagedChange = {
 
 export type Refusal = { item: StagedChange; message: string };
 
+// Refused fields that name no item: the reason, and those of the request as a whole.
+export type FieldRefusals = { reason?: string; general: string[] };
+
 export type ProposalSend =
     | { status: "idle" }
+    | { status: "reason_missing" }
     | { status: "sending" }
-    | { status: "failed"; error: string; refusals: Refusal[] };
+    | {
+          status: "failed";
+          error: string;
+          refusals: Refusal[];
+          fields: FieldRefusals;
+      };
+
+const ITEM_FIELD = /^changes\.(\d+)(?:\.|$)/;
+
+// The member's own pending request of an interval is revised by withdrawing it, never by a second one.
+export function canStage(row: Interval, action: "set" | "revert" = "set") {
+    return (
+        row.pending_request_id == null &&
+        (action === "revert" ? row.can_propose_revert : row.can_propose)
+    );
+}
 
 export function stageChange(
     items: readonly StagedChange[],
@@ -34,7 +53,7 @@ export function unstageChange(items: readonly StagedChange[], key: string) {
     return items.filter((item) => item.key !== key);
 }
 
-// A staged change the server would refuse as stale: its interval left the day, can no longer be proposed or has a newer revision.
+// A staged change that can no longer be sent: its interval left the day, cannot be staged any more or has a newer revision.
 export function changedSinceStaged(
     items: readonly StagedChange[],
     rows: readonly Interval[],
@@ -46,9 +65,7 @@ export function changedSinceStaged(
                 const row = current.get(item.key);
                 return (
                     !row ||
-                    !(item.action === "revert"
-                        ? row.can_propose_revert
-                        : row.can_propose) ||
+                    !canStage(row, item.action) ||
                     row.revision_id !== item.expectedRevision
                 );
             })
@@ -77,7 +94,7 @@ export function refusals(
     if (!(error instanceof ApiError)) return [];
     const messages = new Map<number, string[]>();
     for (const [field, message] of Object.entries(error.fields)) {
-        const match = /^changes\.(\d+)(?:\.|$)/.exec(field);
+        const match = ITEM_FIELD.exec(field);
         if (match)
             messages.set(Number(match[1]), [
                 ...(messages.get(Number(match[1])) ?? []),
@@ -88,4 +105,15 @@ export function refusals(
         const found = messages.get(index);
         return found ? [{ item, message: found.join(" ") }] : [];
     });
+}
+
+export function fieldRefusals(error: unknown): FieldRefusals {
+    const refused: FieldRefusals = { general: [] };
+    if (!(error instanceof ApiError)) return refused;
+    for (const [field, message] of Object.entries(error.fields)) {
+        if (!message || ITEM_FIELD.test(field)) continue;
+        if (field === "reason") refused.reason = message;
+        else refused.general.push(message);
+    }
+    return refused;
 }

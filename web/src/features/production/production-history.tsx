@@ -29,7 +29,7 @@ import {
     type History,
     type Interval,
 } from "./history/model";
-import { stageChange, unstageChange } from "./history/proposal";
+import { canStage, stageChange, unstageChange } from "./history/proposal";
 import { ProposalDraft, type Proposal } from "./history/proposal-draft";
 import { ProductionTable } from "./history/production-table";
 import { ProductionSourceDetails } from "./history/source-details";
@@ -94,6 +94,17 @@ export function ProductionHistory({
         );
     }
     const history = reading.data;
+    // Only a member drafts; a draft kept across a promotion neither shows nor locks the day.
+    const draft = !canManage && configuration ? proposal : null;
+    const away = draft !== null && draft.day !== date;
+    const drafting = draft !== null;
+    useEffect(() => {
+        if (!drafting) return;
+        // A full page load drops the unsent draft, so the browser asks before leaving.
+        const keep = (event: BeforeUnloadEvent) => event.preventDefault();
+        window.addEventListener("beforeunload", keep);
+        return () => window.removeEventListener("beforeunload", keep);
+    }, [drafting]);
     useEffect(() => {
         if (editor.status !== "closed" || !history || !pendingFocus.current)
             return;
@@ -122,10 +133,10 @@ export function ProductionHistory({
     const intervalLabel = (row: Bounds) =>
         `${time(row.starts_at)}–${time(row.ends_at)}`;
     const canAct = (row: Interval) =>
-        canManage ? row.can_edit : row.can_propose;
+        canManage ? row.can_edit : canStage(row);
     const staged = (key: string) =>
-        proposal?.day === date
-            ? proposal.items.find((item) => item.key === key)
+        draft?.day === date
+            ? draft.items.find((item) => item.key === key)
             : undefined;
     const saving =
         editor.status === "saving" ||
@@ -141,7 +152,7 @@ export function ProductionHistory({
         }
     }
     function selectDate(value: string) {
-        if (!value || value > yesterday || saving || proposal) return;
+        if (!value || value > yesterday || saving || draft) return;
         onDay(value);
         setEditor({ status: "closed" });
         setMessage("");
@@ -214,8 +225,8 @@ export function ProductionHistory({
               };
     }
     function stage(row: Interval, action: "set" | "revert") {
-        if (!configuration || !row.can_propose) return;
-        if (action === "revert" && !row.can_propose_revert) return;
+        if (!configuration || canManage || away || !canStage(row, action))
+            return;
         const attempt = attemptFor(row);
         const energy = energyValue(attempt.energy);
         if (action === "set" && energy === null) {
@@ -232,31 +243,45 @@ export function ProductionHistory({
             ends_at: row.ends_at,
             expectedRevision: attempt.expectedRevision,
         };
-        setProposal((current) => ({
+        const updated = staged(attempt.key) !== undefined;
+        setProposal({
             day: date,
             items: stageChange(
-                current?.day === date ? current.items : [],
+                draft?.items ?? [],
                 action === "set" && energy !== null
                     ? { ...bounds, action, energy, quality: attempt.quality }
                     : { ...bounds, action: "revert" },
             ),
-        }));
+        });
         setMessage(
-            proposals("staged", {
+            proposals(updated ? "stagedUpdated" : "staged", {
                 interval: intervalLabel(row),
             }),
         );
         close(attempt.key);
     }
     function unstage(key: string) {
-        const items = unstageChange(proposal?.items ?? [], key);
-        setProposal(items.length && proposal ? { ...proposal, items } : null);
+        const item = draft?.items.find((item) => item.key === key);
+        if (!draft || !item) return;
+        const items = unstageChange(draft.items, key);
+        setProposal(items.length ? { ...draft, items } : null);
+        setMessage(
+            proposals("stagedRemoved", { interval: intervalLabel(item) }),
+        );
         if (!items.length) summaryRef.current?.focus();
     }
     function finishProposal(text: string) {
         setProposal(null);
+        setEditor({ status: "closed" });
         setMessage(text);
         summaryRef.current?.focus();
+    }
+    function editStaged(key: string) {
+        const row = rows.find((row) => intervalKey(row) === key);
+        if (!row) return;
+        // The editor opens in its row, so a row outside daylight brings the full day into view.
+        if (!visibleRows.includes(row)) setShowFullDay(true);
+        open(row);
     }
     async function save(
         row: Interval,
@@ -348,7 +373,7 @@ export function ProductionHistory({
                     date={date}
                     stepFrom={stepFrom}
                     yesterday={yesterday}
-                    disabled={saving || proposal !== null}
+                    disabled={saving || drafting}
                     onSelect={selectDate}
                 />
                 <CheckboxField
@@ -441,7 +466,7 @@ export function ProductionHistory({
                             canManage={canManage}
                             canAct={canAct}
                             hasConfiguration={Boolean(configuration)}
-                            editorOpen={editor.status !== "closed"}
+                            actionsDisabled={editor.status !== "closed" || away}
                             editingKey={
                                 editor.status !== "closed" &&
                                 editor.status !== "orphaned"
@@ -500,23 +525,19 @@ export function ProductionHistory({
                     />
                 </>
             )}
-            {!canManage && configuration && proposal && (
+            {configuration && draft && (
                 <ProposalDraft
+                    key={draft.day}
                     scope={scope}
                     configuration={configuration}
-                    proposal={proposal}
-                    rows={
-                        proposal.day === date ? history?.intervals : undefined
-                    }
+                    proposal={draft}
+                    away={away}
+                    rows={away ? undefined : history?.intervals}
                     intervalLabel={intervalLabel}
                     editing={editor.status !== "closed"}
-                    onEdit={(key) => {
-                        const row = rows.find(
-                            (row) => intervalKey(row) === key,
-                        );
-                        if (row) open(row);
-                    }}
+                    onEdit={editStaged}
                     onRemove={unstage}
+                    onReturn={() => onDay(draft.day)}
                     onDiscard={() => finishProposal(proposals("discarded"))}
                     onReload={reading.reload}
                     onSent={() => {

@@ -188,10 +188,12 @@ export function ControlField(
         | {
               label: ReactNode;
               hint: string;
+              error?: string;
               children: (describedBy: string) => ReactNode;
           },
 ) {
-    const hintId = `${useId()}-hint`;
+    const id = useId();
+    const hintId = `${id}-hint`;
     if (props.hint === undefined)
         return (
             <label className="field">
@@ -203,11 +205,12 @@ export function ControlField(
         <div className="field">
             <label className="field-control">
                 {props.label}
-                {props.children(hintId)}
+                {props.children(
+                    describedBy(!!props.error && `${id}-error`, hintId) ??
+                        hintId,
+                )}
             </label>
-            <span className="field-hint" id={hintId}>
-                {props.hint}
-            </span>
+            <Messages id={id} hint={props.hint} error={props.error} />
         </div>
     );
 }

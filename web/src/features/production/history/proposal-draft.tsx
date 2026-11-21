@@ -1,6 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
@@ -11,7 +11,9 @@ import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import { intervalKey, type Interval } from "./model";
 import {
+    canStage,
     changedSinceStaged,
+    fieldRefusals,
     proposalChanges,
     refusals,
     type ProposalSend,
@@ -24,11 +26,13 @@ export function ProposalDraft({
     scope,
     configuration,
     proposal,
+    away,
     rows,
     intervalLabel,
     editing,
     onEdit,
     onRemove,
+    onReturn,
     onDiscard,
     onReload,
     onSent,
@@ -36,12 +40,15 @@ export function ProposalDraft({
     scope: PlantScope;
     configuration: number;
     proposal: Proposal;
+    // Another day is shown; nothing is staged or sent until the draft's day is shown again.
+    away: boolean;
     // The rows of the draft's day, when that day is shown.
     rows: Interval[] | undefined;
     intervalLabel: (item: StagedChange) => string;
     editing: boolean;
     onEdit: (key: string) => void;
     onRemove: (key: string) => void;
+    onReturn: () => void;
     onDiscard: () => void;
     onReload: () => Promise<unknown>;
     onSent: () => void;
@@ -53,24 +60,38 @@ export function ProposalDraft({
     const proposalKey = useProposalKey();
     const headingId = useId();
     const heading = useRef<HTMLHeadingElement>(null);
+    const reasonRef = useRef<HTMLTextAreaElement>(null);
     const [reason, setReason] = useState("");
     const [send, setSend] = useState<ProposalSend>({ status: "idle" });
     const { items } = proposal;
     const count = items.length;
     const sending = send.status === "sending";
+    const current = new Map((rows ?? []).map((row) => [intervalKey(row), row]));
     const stale = rows ? changedSinceStaged(items, rows) : new Set<string>();
-    const proposable = new Set(
-        (rows ?? [])
-            .filter((row) => row.can_propose)
-            .map((row) => intervalKey(row)),
-    );
+    const editable = (item: StagedChange) => {
+        const row = current.get(item.key);
+        return row !== undefined && canStage(row);
+    };
     const refused = (item: StagedChange) =>
         send.status === "failed"
             ? send.refusals.find((refusal) => refusal.item === item)
             : undefined;
+    const reasonError =
+        send.status === "reason_missing"
+            ? t("reasonRequired")
+            : send.status === "failed"
+              ? send.fields.reason
+              : undefined;
+    useEffect(() => {
+        if (send.status === "reason_missing") reasonRef.current?.focus();
+    }, [send]);
 
     async function submit() {
-        if (sending) return;
+        if (sending || away) return;
+        if (!reason.trim()) {
+            setSend({ status: "reason_missing" });
+            return;
+        }
         const body = {
             configuration_id: configuration,
             unit: "MWh" as const,
@@ -96,6 +117,7 @@ export function ProposalDraft({
                 status: "failed",
                 error: errorMessage(error),
                 refusals: refusals(error, items),
+                fields: fieldRefusals(error),
             });
             // A refusal of what was sent shows the current rows, so the stale items are named.
             if (
@@ -119,6 +141,9 @@ export function ProposalDraft({
                 {t("intervals", { count })} · {proposal.day}.{" "}
                 {t("draftDayLocked")}
             </p>
+            {away && (
+                <Notice>{t("draftOtherDay", { day: proposal.day })}</Notice>
+            )}
             <ul className="production-proposal-items">
                 {items.map((item) => {
                     const interval = intervalLabel(item);
@@ -133,7 +158,10 @@ export function ProposalDraft({
                             </span>
                             {stale.has(item.key) && (
                                 <span className="field-error">
-                                    {t("stagedChanged")}
+                                    {current.get(item.key)
+                                        ?.pending_request_id != null
+                                        ? t("stagedPending")
+                                        : t("stagedChanged")}
                                 </span>
                             )}
                             {refusal && (
@@ -149,9 +177,7 @@ export function ProposalDraft({
                                         interval,
                                     })}
                                     disabled={
-                                        sending ||
-                                        editing ||
-                                        !proposable.has(item.key)
+                                        sending || editing || !editable(item)
                                     }
                                     onClick={() => onEdit(item.key)}
                                 >
@@ -182,29 +208,50 @@ export function ProposalDraft({
                     void submit();
                 }}
             >
-                <ControlField label={t("reason")} hint={t("approvalHelp")}>
+                <ControlField
+                    label={t("reason")}
+                    hint={t("approvalHelp")}
+                    error={reasonError}
+                >
                     {(describedBy) => (
                         <textarea
+                            ref={reasonRef}
                             required
                             maxLength={500}
                             aria-describedby={describedBy}
+                            aria-invalid={reasonError ? true : undefined}
                             value={reason}
                             disabled={sending}
-                            onChange={(event) => setReason(event.target.value)}
+                            onChange={(event) => {
+                                setReason(event.target.value);
+                                if (send.status === "reason_missing")
+                                    setSend({ status: "idle" });
+                            }}
                         />
                     )}
                 </ControlField>
                 {send.status === "failed" && (
-                    <Notice error>{send.error}</Notice>
+                    <Notice error>
+                        {[send.error, ...send.fields.general].join(" ")}
+                    </Notice>
                 )}
                 <div className="button-group">
                     <button
                         className="button"
                         type="submit"
-                        disabled={sending || editing}
+                        disabled={sending || editing || away}
                     >
                         {sending ? t("sending") : t("send")}
                     </button>
+                    {away && (
+                        <button
+                            className="button secondary"
+                            type="button"
+                            onClick={onReturn}
+                        >
+                            {t("returnToDraftDay", { day: proposal.day })}
+                        </button>
+                    )}
                     <button
                         className="button secondary"
                         type="button"

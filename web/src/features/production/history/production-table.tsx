@@ -15,7 +15,7 @@ export function ProductionTable({
     canManage,
     canAct,
     hasConfiguration,
-    editorOpen,
+    actionsDisabled,
     editingKey,
     editButtons,
     unavailable,
@@ -30,7 +30,7 @@ export function ProductionTable({
     canManage: boolean;
     canAct: (row: Interval) => boolean;
     hasConfiguration: boolean;
-    editorOpen: boolean;
+    actionsDisabled: boolean;
     editingKey: string | undefined;
     editButtons: RefObject<Map<string, HTMLButtonElement>>;
     unavailable: (row: Interval) => string;
@@ -56,6 +56,8 @@ export function ProductionTable({
                 <tbody>
                     {visibleRows.map((row) => {
                         const key = intervalKey(row);
+                        const pending = row.pending_request_id;
+                        const held = pending != null;
                         return (
                             <Fragment key={key}>
                                 <tr>
@@ -68,52 +70,56 @@ export function ProductionTable({
                                     </td>
                                     {actions && (
                                         <td>
-                                            {canAct(row) && hasConfiguration ? (
-                                                <button
-                                                    ref={(button) => {
-                                                        if (button)
-                                                            editButtons.current.set(
-                                                                key,
-                                                                button,
-                                                            );
-                                                        else
-                                                            editButtons.current.delete(
-                                                                key,
-                                                            );
-                                                    }}
-                                                    className="button secondary"
-                                                    type="button"
-                                                    disabled={editorOpen}
-                                                    aria-label={t(
-                                                        canManage
-                                                            ? "edit_interval"
-                                                            : "propose_interval",
-                                                        {
-                                                            interval:
-                                                                intervalLabel(
-                                                                    row,
-                                                                ),
-                                                        },
-                                                    )}
-                                                    onClick={() => onOpen(row)}
-                                                >
-                                                    {canManage
-                                                        ? t("edit")
-                                                        : proposals(
-                                                              "proposeCorrection",
-                                                          )}
-                                                </button>
-                                            ) : (
-                                                <span className="fine">
-                                                    {unavailable(row)}
-                                                </span>
-                                            )}
-                                            {row.pending_request_id != null && (
+                                            {(canManage || !held) &&
+                                                (canAct(row) &&
+                                                hasConfiguration ? (
+                                                    <button
+                                                        ref={(button) => {
+                                                            if (button)
+                                                                editButtons.current.set(
+                                                                    key,
+                                                                    button,
+                                                                );
+                                                            else
+                                                                editButtons.current.delete(
+                                                                    key,
+                                                                );
+                                                        }}
+                                                        className="button secondary"
+                                                        type="button"
+                                                        disabled={
+                                                            actionsDisabled
+                                                        }
+                                                        aria-label={t(
+                                                            canManage
+                                                                ? "edit_interval"
+                                                                : "propose_interval",
+                                                            {
+                                                                interval:
+                                                                    intervalLabel(
+                                                                        row,
+                                                                    ),
+                                                            },
+                                                        )}
+                                                        onClick={() =>
+                                                            onOpen(row)
+                                                        }
+                                                    >
+                                                        {canManage
+                                                            ? t("edit")
+                                                            : proposals(
+                                                                  "proposeCorrection",
+                                                              )}
+                                                    </button>
+                                                ) : (
+                                                    <span className="fine">
+                                                        {unavailable(row)}
+                                                    </span>
+                                                ))}
+                                            {held && (
                                                 <PendingApproval
                                                     tenantId={tenantId}
-                                                    requestId={
-                                                        row.pending_request_id
-                                                    }
+                                                    requestId={pending}
                                                     subject={intervalLabel(row)}
                                                 />
                                             )}
