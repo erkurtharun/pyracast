@@ -320,7 +320,11 @@ class BindingActionForm(forms.Form):
         """Carries the hash of the declarations the page shows, also on a page shown again after
         a refused action, so an approval from the page approves the values on the screen."""
         if self.is_bound:
-            self.data = {**self.data, "declaration": fingerprint}
+            # A QueryDict holds a list per key; unpacking it into a dict renders each list.
+            data = QueryDict(mutable=True)
+            data.update(self.data)
+            data["declaration"] = fingerprint
+            self.data = data
         else:
             self.initial = {**self.initial, "declaration": fingerprint}
 
