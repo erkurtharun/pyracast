@@ -7,7 +7,9 @@ from functools import reduce
 from operator import or_
 from typing import Any, Literal
 
-from django.db.models import Count, Exists, F, OuterRef, Q, QuerySet, Subquery
+from django.db.models import Count, Exists, F, OuterRef, Q, QuerySet, Subquery, Value
+from django.db.models.functions import Greatest, Least
+from django.db.models.lookups import LessThan
 
 from pyracast.accounts.models import OutboundMail, OutboundMailStatus
 from pyracast.background.broker import QueueState, queue_states
@@ -128,6 +130,15 @@ def _stale(window: Window) -> Q:
 def _invalid_recipients(_: Window) -> Q:
     # An empty IN () would empty the whole aggregate statement; a primary key is never null.
     return Q(pk__in=ids) if (ids := invalid_recipient_region_ids()) else Q(pk__isnull=True)
+
+
+def _calibration_claimable_at() -> Greatest:
+    # A run has no due time. The claim waits for a cutoff ahead and fails a run whose cutoff lies
+    # more than one lease ahead, so a run is claimable from its cutoff, at most a lease after its
+    # creation. A requeued run (attempts > 0) has no column that says since when it waits again.
+    return Greatest(
+        "created_at", Least("cutoff_at", F("created_at") + Value(training.LEASE_DURATION))
+    )
 
 
 def _recent(window: Window, **lookups: object) -> Q:
@@ -292,12 +303,14 @@ CHECKS: tuple[Check, ...] = (
         lambda window: holding(CalibrationStatus.RUNNING, window.now),
         alarm=False,
     ),
-    # A run has no due time: one that was never attempted is overdue a lag after it was
-    # requested, and a retried run waits only for the next dispatch.
     Check(
         "overdue_calibrations",
         "calibrations",
-        lambda window: Q(status__in=training.WAITING, attempts=0, created_at__lt=window.cutoff),
+        lambda window: Q(
+            LessThan(_calibration_claimable_at(), window.cutoff),
+            status__in=training.WAITING,
+            attempts=0,
+        ),
     ),
     Check(
         "interrupted_calibrations",

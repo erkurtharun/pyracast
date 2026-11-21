@@ -23,7 +23,9 @@ from pyracast.forecasts.models import (
     RequestPurpose,
 )
 from pyracast.notifications.models import ReminderSchedule
-from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration
+from pyracast.plants.calibration_runs import requeue_run, start_run
+from pyracast.plants.models import CalibrationError, CalibrationRun, Plant, PlantConfiguration
+from pyracast.plants.training import LEASE_DURATION as LEASE
 from pyracast.regions.models import Region
 from tests.support.budgets import assert_scale_invariant, captured_statements
 from tests.support.delivery_health import NOW, recent_forecast
@@ -117,6 +119,51 @@ def test_a_waiting_calibration_is_queued_until_it_waits_longer_than_the_lag(
 
     CalibrationRun.objects.filter(pk=run.pk).update(attempts=1)
     report, failed = printed(monkeypatch)
+    assert calibration_counts(report) == (1, 0, 0, 0, 0)
+    assert failed is False
+
+
+@pytest.mark.parametrize(
+    ("created_at", "cutoff_at", "overdue"),
+    [
+        pytest.param(NOW - LAG - LEASE, NOW - LAG, 0, id="cutoff-ahead-a-lag-ago"),
+        pytest.param(NOW - LAG - LEASE, NOW - LAG - BEFORE, 1, id="cutoff-ahead-past-the-lag"),
+        pytest.param(NOW - BEFORE, NOW + LEASE, 0, id="cutoff-ahead-of-the-check"),
+        pytest.param(NOW - LAG - LEASE, NOW + timedelta(days=1), 0, id="far-cutoff-a-lease"),
+        pytest.param(
+            NOW - LAG - LEASE - BEFORE, NOW + timedelta(days=1), 1, id="far-cutoff-past-a-lease"
+        ),
+        pytest.param(NOW - LAG, NOW - timedelta(days=1), 0, id="cutoff-behind-a-lag-ago"),
+        pytest.param(NOW - LAG - BEFORE, NOW - timedelta(days=1), 1, id="cutoff-behind-past"),
+        pytest.param(NOW + timedelta(hours=1), NOW + timedelta(hours=1), 0, id="created-ahead"),
+    ],
+)
+def test_a_calibration_waiting_for_its_cutoff_is_overdue_a_lag_after_the_claim_may_take_it(
+    monkeypatch: pytest.MonkeyPatch, created_at: datetime, cutoff_at: datetime, overdue: int
+) -> None:
+    system, plant = healthy_plant(monkeypatch)
+    run = calibration(system, plant)
+    CalibrationRun.objects.filter(pk=run.pk).update(created_at=created_at, cutoff_at=cutoff_at)
+
+    report, failed = printed(monkeypatch)
+
+    assert calibration_counts(report) == (1, 0, overdue, 0, 0)
+    assert failed is bool(overdue)
+
+
+def test_a_requeued_calibration_stays_queued_and_is_never_overdue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = healthy_plant(monkeypatch)
+    run = calibration(system, plant)
+    started = NOW - timedelta(days=1)
+    start_run(run, started, LEASE)
+    requeue_run(run, CalibrationError.INVALID_CALIBRATION_DATA)
+    CalibrationRun.objects.filter(pk=run.pk).update(created_at=started)
+
+    report, failed = printed(monkeypatch)
+
+    assert CalibrationRun.objects.filter(pk=run.pk, status="pending", attempts=1).exists()
     assert calibration_counts(report) == (1, 0, 0, 0, 0)
     assert failed is False
 
