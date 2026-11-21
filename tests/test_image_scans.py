@@ -164,8 +164,16 @@ def test_an_exception_accepts_nothing_but_its_own_findings(reports: Path) -> Non
         entry("web"),
         entry(package="libssl3"),
         entry(vulnerability="CVE-2026-124710"),
+        entry(vulnerability="cve-2026-124709"),
+        entry(package="Libssl3t64"),
     ],
-    ids=["another service", "another package", "another vulnerability"],
+    ids=[
+        "another service",
+        "another package",
+        "another vulnerability",
+        "another vulnerability case",
+        "another package case",
+    ],
 )
 def test_an_exception_for_another_service_package_or_vulnerability_accepts_nothing(
     reports: Path, exception: ScanException
@@ -240,8 +248,14 @@ def test_an_exception_no_longer_reported_must_be_removed(reports: Path) -> None:
         json.dumps([{**entry(), "service": None}]),
         json.dumps([entry(expires="21.12.2026")]),
         json.dumps([entry(expires="")]),
+        json.dumps([entry(expires="20261221")]),
+        json.dumps([entry(expires="2026-W52-1")]),
         json.dumps([entry("api")]),
         json.dumps([entry("*")]),
+        json.dumps([entry(vulnerability="")]),
+        json.dumps([entry(vulnerability=" ")]),
+        json.dumps([entry(package="")]),
+        json.dumps([entry(package="\t")]),
     ],
     ids=[
         "not a list",
@@ -252,8 +266,14 @@ def test_an_exception_no_longer_reported_must_be_removed(reports: Path) -> None:
         "non-string service",
         "bad date",
         "empty date",
+        "basic date",
+        "week date",
         "unknown service",
         "wildcard service",
+        "empty vulnerability",
+        "blank vulnerability",
+        "empty package",
+        "blank package",
     ],
 )
 def test_a_malformed_exceptions_file_fails(text: str) -> None:
@@ -261,19 +281,57 @@ def test_a_malformed_exceptions_file_fails(text: str) -> None:
         load_exceptions(text)
 
 
+@pytest.mark.parametrize(
+    "pair",
+    [
+        [entry(reason="Not affected: first."), entry(reason="Not affected: second.")],
+        [entry(), entry(expires="2026-11-01")],
+        [entry(expires="2026-11-01"), entry()],
+        [entry(), entry(reason=" ")],
+        [entry(reason=" "), entry()],
+    ],
+    ids=[
+        "two valid",
+        "valid then expired",
+        "expired then valid",
+        "valid then reasonless",
+        "reasonless then valid",
+    ],
+)
+def test_two_exceptions_for_one_finding_are_refused(pair: list[ScanException]) -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"^Duplicate image scan exception: backend: CVE-2026-124709 in libssl3t64$",
+    ):
+        load_exceptions(json.dumps(pair))
+
+
 def test_the_tracked_exceptions_are_exactly_the_two_reviewed_entries() -> None:
     tracked = load_exceptions(
         (ROOT / "deploy" / "image-scan-exceptions.json").read_text(encoding="utf-8")
     )
 
-    assert [
-        (item["service"], item["vulnerability"], item["package"], item["expires"])
-        for item in tracked
-    ] == [
-        ("backend", "CVE-2026-124709", "libssl3t64", "2026-12-21"),
-        ("web", "CVE-2026-124709", "libssl3t64", "2026-12-21"),
+    assert tracked == [
+        {
+            "service": "backend",
+            "vulnerability": "CVE-2026-124709",
+            "package": "libssl3t64",
+            "reason": "Not affected: the flaw is in OpenSSL's QUIC server, and this image runs "
+            "none, because CPython's ssl module offers no QUIC and every process either serves "
+            "plain HTTP over TCP behind the gateway or only opens outbound connections.",
+            "expires": "2026-12-21",
+        },
+        {
+            "service": "web",
+            "vulnerability": "CVE-2026-124709",
+            "package": "libssl3t64",
+            "reason": "Not affected: the flaw is in OpenSSL's QUIC server, and this image runs "
+            "none and never loads the system library, because the official Node.js binary "
+            "carries its own OpenSSL and the Next.js server serves plain HTTP over TCP behind "
+            "the gateway.",
+            "expires": "2026-12-21",
+        },
     ]
-    assert all(item["reason"].startswith("Not affected: ") for item in tracked)
 
 
 def test_main_lists_every_finding_and_fails(
@@ -375,6 +433,112 @@ def test_main_shows_accepted_findings_and_fails_on_an_expired_or_unneeded_except
         "Image scan exception gateway: CVE-2026-124709 in libssl3t64 is no longer reported; "
         "remove it.",
     ]
+
+
+def test_main_fails_on_an_unneeded_exception_when_every_finding_is_accepted(
+    reports: Path,
+    exceptions_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    expires = (datetime.now(UTC).date() + timedelta(days=30)).isoformat()
+    exceptions_file.write_text(
+        json.dumps([entry(expires=expires), entry("web", expires=expires)]), encoding="utf-8"
+    )
+    add_finding(reports, "backend", finding=OPENSSL)
+    monkeypatch.setattr("sys.argv", ["check_image_scans.py", str(reports)])
+
+    with pytest.raises(
+        SystemExit,
+        match=r"^Image scan gate failed: 0 high or critical findings and 1 exception problems\.$",
+    ):
+        check_image_scans.main()
+    assert capsys.readouterr().out.splitlines() == [
+        "backend: CVE-2026-124709 in libssl3t64 3.5.7-1~deb13u3 (backend) accepted until "
+        f"{expires}",
+        "Image scan exception web: CVE-2026-124709 in libssl3t64 is no longer reported; remove it.",
+    ]
+
+
+def test_main_fails_on_two_exceptions_for_one_finding(
+    reports: Path,
+    exceptions_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    expires = (datetime.now(UTC).date() + timedelta(days=30)).isoformat()
+    exceptions_file.write_text(
+        json.dumps([entry(expires=expires), entry(expires=expires)]), encoding="utf-8"
+    )
+    add_finding(reports, "backend", finding=OPENSSL)
+    monkeypatch.setattr("sys.argv", ["check_image_scans.py", str(reports)])
+
+    with pytest.raises(
+        SystemExit,
+        match=r"^Image scan gate failed: Duplicate image scan exception: backend: "
+        r"CVE-2026-124709 in libssl3t64$",
+    ):
+        check_image_scans.main()
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("field", ["VulnerabilityID", "PkgName"])
+def test_main_refuses_a_finding_without_its_id_or_package(
+    reports: Path, exceptions_file: Path, monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    add_finding(
+        reports, "backend", finding={key: value for key, value in OPENSSL.items() if key != field}
+    )
+    monkeypatch.setattr("sys.argv", ["check_image_scans.py", str(reports)])
+
+    with pytest.raises(SystemExit, match=f"^Image scan gate failed: '{field}'$"):
+        check_image_scans.main()
+
+
+@pytest.mark.parametrize("field", ["VulnerabilityID", "PkgName"])
+def test_main_reports_a_finding_with_an_empty_id_or_package(
+    reports: Path,
+    exceptions_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    field: str,
+) -> None:
+    add_finding(reports, "backend", finding={**OPENSSL, field: ""})
+    monkeypatch.setattr("sys.argv", ["check_image_scans.py", str(reports)])
+
+    with pytest.raises(
+        SystemExit,
+        match=r"^Image scan gate failed: 1 high or critical findings and 0 exception problems\.$",
+    ):
+        check_image_scans.main()
+    assert capsys.readouterr().out.splitlines() == [
+        "backend: CVE-2026-124709 in  3.5.7-1~deb13u3 (backend)"
+        if field == "PkgName"
+        else "backend:  in libssl3t64 3.5.7-1~deb13u3 (backend)"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "key"), [("VulnerabilityID", "vulnerability"), ("PkgName", "package")]
+)
+def test_main_lets_no_exception_accept_a_finding_with_an_empty_id_or_package(
+    reports: Path,
+    exceptions_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    field: str,
+    key: str,
+) -> None:
+    expires = (datetime.now(UTC).date() + timedelta(days=30)).isoformat()
+    exceptions_file.write_text(json.dumps([{**entry(expires=expires), key: ""}]), encoding="utf-8")
+    add_finding(reports, "backend", finding={**OPENSSL, field: ""})
+    monkeypatch.setattr("sys.argv", ["check_image_scans.py", str(reports)])
+
+    with pytest.raises(
+        SystemExit, match=r"^Image scan gate failed: Malformed image scan exception"
+    ):
+        check_image_scans.main()
+    assert capsys.readouterr().out == ""
 
 
 @pytest.mark.parametrize("text", [None, "not json", "{}", json.dumps([{**entry(), "reason": 1}])])
