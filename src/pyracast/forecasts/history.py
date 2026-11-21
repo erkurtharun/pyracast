@@ -1,7 +1,6 @@
 from copy import deepcopy
 from datetime import date, datetime, timedelta
 from typing import Literal, cast
-from zoneinfo import ZoneInfo
 
 from django.db.models import F, Q
 
@@ -9,7 +8,6 @@ from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import SiteBinding
-from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.actuals import (
     ACTUAL_COMPOSITION_POLICY,
     archived_actual_irradiance,
@@ -21,6 +19,8 @@ from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.faults import FROZEN_PAYLOAD_FAULTS, stored_data
 from pyracast.forecasts.intraday import (
+    VINTAGE_SCOPE,
+    ActualsMode,
     apply_intraday_source,
     prepare_intraday_source,
     preserve_forecast_weather,
@@ -160,42 +160,6 @@ def regional_history(
     )
 
 
-def regional_outlook(
-    region: Region,
-    target_date: date,
-    source: Literal["auto", "forecast", "estimated_actuals", "archived_forecast"],
-    now: datetime,
-) -> dict[str, object]:
-    today = now.astimezone(ZoneInfo(region.timezone)).date()
-    if not today - timedelta(days=366) <= target_date <= today + timedelta(days=14):
-        raise DomainError(ErrorCode.DATE_OUT_OF_RANGE)
-    if source == "estimated_actuals" and target_date > today:
-        raise DomainError(ErrorCode.COMPLETED_DAY_REQUIRED)
-    if (source == "archived_forecast" and target_date > today) or (
-        source == "forecast" and target_date < today
-    ):
-        raise DomainError(ErrorCode.DATE_OUT_OF_RANGE)
-    binding = region.approved_binding
-    if source == "archived_forecast":
-        return saved_region_forecast(region, target_date, now)
-    if source == "estimated_actuals" and target_date == today:
-        return _regional_composed_forecast(
-            region, target_date, now, now, binding, actuals_only=True
-        )
-    if source == "estimated_actuals":
-        return regional_history(region, target_date, now)
-    if source == "auto" and target_date < today:
-        return regional_history(region, target_date, now, fallback_forecast=True)
-    return _regional_composed_forecast(
-        region,
-        target_date,
-        now,
-        now,
-        binding,
-        include_actuals=source == "auto" and target_date == today,
-    )
-
-
 def saved_region_forecast(region: Region, target_date: date, now: datetime) -> dict[str, object]:
     """The forecast published before the day's first daylight, as the plant archive selects
     its issuances; the payload is the one saved at publication."""
@@ -296,23 +260,23 @@ def _regional_saved_forecast(region: Region, target_date: date, now: datetime) -
             .first()
         )
         binding = latest.binding if latest else None
-    outlook = _regional_composed_forecast(region, target_date, cutoff, now, binding)
+    outlook = regional_composed_forecast(region, target_date, cutoff, now, binding)
     payload = cast(dict[str, object] | None, outlook["result"])
     if payload is not None:
         mark_forecast_fallback(payload, cutoff)
     return outlook
 
 
-def _regional_composed_forecast(
+def regional_composed_forecast(
     region: Region,
     target_date: date,
     cutoff: datetime,
     now: datetime,
     binding: SiteBinding | None,
     *,
-    include_actuals: bool = False,
-    actuals_only: bool = False,
+    actuals: ActualsMode = "none",
 ) -> dict[str, object]:
+    actuals_only = actuals == "only"
     start, end = local_day_bounds(target_date, binding.timezone if binding else region.timezone)
     snapshots: list[ForecastSnapshot] = []
     if binding is not None:
@@ -330,7 +294,7 @@ def _regional_composed_forecast(
                 elapsed_cutoff=cutoff,
                 actuals_only=actuals_only,
             )
-            if binding is not None and (include_actuals or actuals_only)
+            if binding is not None and actuals != "none"
             else None
         )
     source_kind = "estimated_actuals" if actuals_only else "forecast"
@@ -360,7 +324,7 @@ def _regional_composed_forecast(
                 "binding_id": binding.pk,
                 "source_kind": source_kind,
             }
-            cast(dict[str, object], result["vintage"])["scope"] = "primary_forecast_source"
+            cast(dict[str, object], result["vintage"])["scope"] = VINTAGE_SCOPE
             if source is not None:
                 apply_intraday_source(result, source)
                 preserve_forecast_weather(result, binding, target_date, forecasts)

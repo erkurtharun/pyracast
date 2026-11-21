@@ -180,6 +180,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/change-requests/seen/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_change_requests_seen_all_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/invitations/": {
         parameters: {
             query?: never;
@@ -676,6 +692,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/resubmit/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_regions_resubmit_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/sites/": {
         parameters: {
             query?: never;
@@ -746,9 +778,11 @@ export interface components {
          *     * `location_change_rebased` - Location change request moved to the new revision
          *     * `binding_configured` - Provider connection configured
          *     * `connection_validated` - Provider connection validated
+         *     * `connection_validation_failed` - Provider connection validation failed
          *     * `region_approved` - Plant approved
          *     * `region_rejected` - Plant rejected
          *     * `region_suspended` - Plant suspended
+         *     * `region_resubmitted` - Plant resubmitted for review
          *     * `region_trashed` - Plant location moved to trash
          *     * `region_restored` - Plant location restored
          *     * `collection_schedule_updated` - Collection schedule updated
@@ -769,9 +803,11 @@ export interface components {
             | "location_change_rebased"
             | "binding_configured"
             | "connection_validated"
+            | "connection_validation_failed"
             | "region_approved"
             | "region_rejected"
             | "region_suspended"
+            | "region_resubmitted"
             | "region_trashed"
             | "region_restored"
             | "collection_schedule_updated"
@@ -794,6 +830,20 @@ export interface components {
          * @enum {string}
          */
         AutomaticCalibrationAttemptOutputStatusEnum: "activated" | "skipped";
+        /**
+         * @description * `toggle` - Toggle
+         *     * `manual_activation` - Manual Activation
+         *     * `reset` - Reset
+         *     * `configuration_revised` - Configuration Revised
+         *     * `workspace_disabled` - Workspace Disabled
+         * @enum {string}
+         */
+        AutomationCauseEnum:
+            | "toggle"
+            | "manual_activation"
+            | "reset"
+            | "configuration_revised"
+            | "workspace_disabled";
         /**
          * @description * `manual` - Manual
          *     * `realtime_generation` - Real-time generation
@@ -827,7 +877,7 @@ export interface components {
             next_check_at: string | null;
             disabled_cause:
                 | (
-                      | components["schemas"]["DisabledCauseEnum"]
+                      | components["schemas"]["AutomationCauseEnum"]
                       | components["schemas"]["NullEnum"]
                   )
                 | null;
@@ -1027,12 +1077,6 @@ export interface components {
             incident_title: string | null;
         };
         /**
-         * @description * `provider_hour_incomplete` - provider_hour_incomplete
-         *     * `energy_exceeds_capacity` - energy_exceeds_capacity
-         * @enum {string}
-         */
-        CodeEnum: "provider_hour_incomplete" | "energy_exceeds_capacity";
-        /**
          * @description * `forecasts` - Forecasts
          *     * `estimated_actuals` - Estimated actuals
          *     * `historical_import` - Historical import
@@ -1046,6 +1090,22 @@ export interface components {
             | "historical_import"
             | "scaled_forecasts"
             | "scaled_estimated_actuals";
+        /**
+         * @description * `not_approved` - Not approved
+         *     * `not_validated` - Not validated
+         *     * `binding_not_current` - Binding not current
+         *     * `schedule_disabled` - Schedule disabled
+         *     * `quota_too_low` - Quota too low for forecasts
+         *     * `provider_unavailable` - Provider unavailable
+         * @enum {string}
+         */
+        CollectionInactiveReasonEnum:
+            | "not_approved"
+            | "not_validated"
+            | "binding_not_current"
+            | "schedule_disabled"
+            | "quota_too_low"
+            | "provider_unavailable";
         /**
          * @description * `history_window_closed` - History window closed
          *     * `attempts_exhausted` - Attempts exhausted
@@ -1140,6 +1200,14 @@ export interface components {
             timezone: string;
             /** Format: date-time */
             effective_from: string;
+            state: components["schemas"]["CollectionStateEnum"];
+            inactive_reason:
+                | (
+                      | components["schemas"]["CollectionInactiveReasonEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            requests_today: number;
             /** Format: date-time */
             last_success_at: string | null;
             /** Format: date-time */
@@ -1151,6 +1219,18 @@ export interface components {
             history_retry_minutes: number;
             max_forecast_times: number;
         };
+        /**
+         * @description * `collecting` - Collecting
+         *     * `waiting_for_approval` - Waiting for approval
+         *     * `paused` - Paused
+         *     * `provider_attention` - Waiting for the provider
+         * @enum {string}
+         */
+        CollectionStateEnum:
+            | "collecting"
+            | "waiting_for_approval"
+            | "paused"
+            | "provider_attention";
         /**
          * @description * `archived_forecast` - archived_forecast
          *     * `historical_model` - historical_model
@@ -1264,20 +1344,6 @@ export interface components {
          */
         DiagnosticStatusEnum: "suspected" | "normal" | "insufficient";
         /**
-         * @description * `toggle` - Toggle
-         *     * `manual_activation` - Manual Activation
-         *     * `reset` - Reset
-         *     * `configuration_revised` - Configuration Revised
-         *     * `workspace_disabled` - Workspace Disabled
-         * @enum {string}
-         */
-        DisabledCauseEnum:
-            | "toggle"
-            | "manual_activation"
-            | "reset"
-            | "configuration_revised"
-            | "workspace_disabled";
-        /**
          * @description * `collection` - Collection
          *     * `notifications` - Notifications
          *     * `calibration` - Calibration
@@ -1310,7 +1376,19 @@ export interface components {
             configuration_revision: number;
         };
         EpiasConnectionOutput: {
+            state: components["schemas"]["EpiasStateEnum"];
             connected: boolean;
+            /** Format: date-time */
+            disconnected_at: string | null;
+            health:
+                | (
+                      | components["schemas"]["EpiasHealthEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            /** Format: date */
+            complete_through: string | null;
+            failed_days: number;
             provider_plant_id: number | null;
             settlement_plant_id: number | null;
             /** Format: date */
@@ -1327,6 +1405,18 @@ export interface components {
             pending_jobs: number;
             archived_days: number;
         };
+        /**
+         * @description * `up_to_date` - Up to date
+         *     * `collecting` - Collecting
+         *     * `waiting_for_publication` - Waiting for publication
+         *     * `needs_attention` - Needs attention
+         * @enum {string}
+         */
+        EpiasHealthEnum:
+            | "up_to_date"
+            | "collecting"
+            | "waiting_for_publication"
+            | "needs_attention";
         /**
          * @description * `retry_window_expired` - Retry window expired
          *     * `attempts_exhausted` - Attempts exhausted
@@ -1367,6 +1457,13 @@ export interface components {
          * @enum {string}
          */
         EpiasSourceKindEnum: "realtime_generation" | "settlement_injection";
+        /**
+         * @description * `never_connected` - Never connected
+         *     * `connected` - Connected
+         *     * `disconnected` - Disconnected
+         * @enum {string}
+         */
+        EpiasStateEnum: "never_connected" | "connected" | "disconnected";
         /** @description Body of every failed /api/ response. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -1385,6 +1482,7 @@ export interface components {
          * @description * `invalid_request` - Invalid Request
          *     * `bad_request` - Bad Request
          *     * `session_ended` - Session Ended
+         *     * `session_changed` - Session Changed
          *     * `not_authenticated` - Not Authenticated
          *     * `csrf_failed` - Csrf Failed
          *     * `permission_denied` - Permission Denied
@@ -1461,12 +1559,14 @@ export interface components {
          *     * `outage_history_changed` - Outage History Changed
          *     * `incumbent_changed` - Incumbent Changed
          *     * `calibration_not_activatable` - Calibration Not Activatable
+         *     * `review_reason_required` - Review Reason Required
          * @enum {string}
          */
         ErrorCode:
             | "invalid_request"
             | "bad_request"
             | "session_ended"
+            | "session_changed"
             | "not_authenticated"
             | "csrf_failed"
             | "permission_denied"
@@ -1542,7 +1642,8 @@ export interface components {
             | "production_source_changed"
             | "outage_history_changed"
             | "incumbent_changed"
-            | "calibration_not_activatable";
+            | "calibration_not_activatable"
+            | "review_reason_required";
         /**
          * @description * `current` - current
          *     * `stale` - stale
@@ -1638,6 +1739,11 @@ export interface components {
             before: components["schemas"]["IncidentBeforeOutput"] | null;
             applied_revision_id: number | null;
         };
+        IncidentConflict: {
+            code: components["schemas"]["ErrorCode"];
+            message: string;
+            current: components["schemas"]["IncidentOutput"];
+        };
         IncidentInput: {
             kind: components["schemas"]["IncidentKindEnum"];
             title: string;
@@ -1680,7 +1786,7 @@ export interface components {
             /** Format: double */
             readonly available_export_mw: number | null;
             declared_configuration_id: number;
-            readonly status: string;
+            readonly status: components["schemas"]["IncidentStatusEnum"];
             /** Format: date-time */
             readonly created_at: string;
             /** Format: date-time */
@@ -1698,6 +1804,13 @@ export interface components {
             /** Format: date-time */
             ends_at?: string;
         };
+        /**
+         * @description * `active` - Active
+         *     * `resolved` - Resolved
+         *     * `cancelled` - Cancelled
+         * @enum {string}
+         */
+        IncidentStatusEnum: "active" | "resolved" | "cancelled";
         IncidentUpdate: {
             kind: components["schemas"]["IncidentKindEnum"];
             title: string;
@@ -2630,12 +2743,19 @@ export interface components {
             corrected: boolean;
         };
         ProductionPreviewWarningOutput: {
-            code: components["schemas"]["CodeEnum"];
+            code: components["schemas"]["ProductionPreviewWarningOutputCodeEnum"];
             /** Format: date-time */
             starts_at: string;
             /** Format: date-time */
             ends_at: string;
         };
+        /**
+         * @description * `provider_hour_incomplete` - provider_hour_incomplete
+         *     * `energy_exceeds_capacity` - energy_exceeds_capacity
+         * @enum {string}
+         */
+        ProductionPreviewWarningOutputCodeEnum:
+            "provider_hour_incomplete" | "energy_exceeds_capacity";
         ProductionProviderOutput: {
             /** Format: date-time */
             starts_at: string;
@@ -2692,6 +2812,7 @@ export interface components {
          * @enum {string}
          */
         ReferenceKindEnum: "active_calibration" | "uncalibrated_reference";
+        /** @description Reads `regions.review.with_review_outcome` annotations. */
         RegionOutput: {
             readonly id: number;
             readonly name: string;
@@ -2702,6 +2823,9 @@ export interface components {
             readonly timezone: string;
             readonly revision: number;
             readonly status: components["schemas"]["RegionStatusEnum"];
+            /** Format: date-time */
+            readonly reviewed_at: string | null;
+            readonly review_reason: string | null;
         };
         /**
          * @description * `pending` - Awaiting approval
@@ -2837,8 +2961,14 @@ export interface components {
          */
         RestoreBlockerEnum:
             "trash_retention_expired" | "location_already_exists";
+        ResubmitInput: {
+            expected_revision: number;
+        };
         RevisionInput: {
             expected_revision: number;
+        };
+        SeenAllOutput: {
+            marked: number;
         };
         /**
          * @description * `active` - Active
@@ -2855,6 +2985,7 @@ export interface components {
             language: components["schemas"]["LanguageEnum"];
             /** Format: date-time */
             expires_at: string | null;
+            session_tag: string | null;
         };
         SessionUserOutput: {
             id: number;
@@ -2897,6 +3028,9 @@ export interface components {
             readonly timezone: string;
             readonly revision: number;
             readonly status: components["schemas"]["RegionStatusEnum"];
+            /** Format: date-time */
+            readonly reviewed_at: string | null;
+            readonly review_reason: string | null;
             readonly plant: components["schemas"]["PlantOutput"] | null;
             readonly reminder:
                 components["schemas"]["ReminderSummaryOutput"] | null;
@@ -3748,6 +3882,63 @@ export interface operations {
             };
             /** @description The addressed item or page does not exist. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    tenants_change_requests_seen_all_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeenAllOutput"];
+                };
+            };
+            /** @description The request input was refused. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Sign-in is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Access was refused. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5387,6 +5578,14 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentConflict"];
+                };
+            };
             /** @description Send the request as JSON. */
             415: {
                 headers: {
@@ -5807,6 +6006,14 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentConflict"];
+                };
+            };
             /** @description Send the request as JSON. */
             415: {
                 headers: {
@@ -5889,6 +6096,14 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentConflict"];
+                };
+            };
             /** @description Send the request as JSON. */
             415: {
                 headers: {
@@ -5969,6 +6184,14 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentConflict"];
                 };
             };
             /** @description Send the request as JSON. */
@@ -6582,6 +6805,95 @@ export interface operations {
             };
             /** @description The addressed item or page does not exist. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests; Retry-After gives the seconds to wait. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    tenants_regions_resubmit_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResubmitInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegionOutput"];
+                };
+            };
+            /** @description The request input was refused. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Sign-in is required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Access was refused. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The addressed item or page does not exist. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Send the request as JSON. */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };

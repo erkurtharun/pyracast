@@ -13,6 +13,7 @@ from pyracast.accounts.invitations import compose_invitation
 from pyracast.accounts.mail_intents import CODE_CONTEXT
 from pyracast.accounts.models import (
     ANONYMOUS_MAIL,
+    EVENT_MAIL,
     OPEN_MAIL,
     InvitationDeliveryStatus,
     OutboundMail,
@@ -33,6 +34,7 @@ from pyracast.mail.errors import (
     SendCancelledError,
 )
 from pyracast.mail.send import send
+from pyracast.notifications.event_messages import compose_event_mail
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +174,8 @@ def _anonymous_budget_left(now: datetime) -> bool:
 def _compose(mail: OutboundMail, now: datetime) -> EmailMultiAlternatives | OutboundMailError:
     if mail.invitation_id is not None:
         return compose_invitation(mail.invitation_id, mail.language, now)
+    if mail.kind in EVENT_MAIL:
+        return compose_event_mail(mail)
     code = unseal_code(mail.sealed_code) if mail.sealed_code else ""
     return compose_account_mail(mail, code)
 

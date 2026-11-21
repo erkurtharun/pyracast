@@ -20,10 +20,22 @@
       <div class="field{% if settings_form.max_recipients.errors %} field--error{% endif %}">
         {{ settings_form.max_recipients.as_field_group }}
       </div>
-      <p class="callout">{% translate "Lowering the limit pauses reminders for plants whose saved recipient list is over it. Their lists are kept, not deleted, and reminders resume once the list is shortened or the limit is raised." %}</p>
+      <p class="callout">{% translate "Lowering the limit pauses reminders for plants whose saved recipient list is over it. Their lists are kept, and future reminders resume once the list is shortened or the limit is raised." %}</p>
+      {% if newly_paused %}
+        <div class="callout callout--warn">
+          <p>{% translate "This limit pauses reminders for these plants:" %}</p>
+          <ul class="plain-list">{% for plant in newly_paused %}<li><a href="{{ plant.review_url }}">{{ plant.name }}</a> · {{ plant.workspace }} · {% blocktranslate count counter=plant.recipients %}{{ counter }} recipient{% plural %}{{ counter }} recipients{% endblocktranslate %}</li>{% endfor %}</ul>
+          <div class="field field--check{% if settings_form.confirm_pause.errors %} field--error{% endif %}">{{ settings_form.confirm_pause.as_field_group }}</div>
+        </div>
+      {% endif %}
       <div class="form-actions">
         <button type="submit" class="btn btn--primary">{% translate "Save limit" %}</button>
       </div>
     </form>
+  </section>
+  <section class="panel panel--narrow" aria-labelledby="over-limit-title">
+    <div class="panel-head"><h2 id="over-limit-title">{% translate "Plants over the limit" %} <span class="muted">{{ crowded_plants|length }}</span></h2></div>
+    {% if crowded_plants %}<ul class="plain-list">{% for plant in crowded_plants %}<li><a href="{{ plant.review_url }}">{{ plant.name }}</a> · {{ plant.workspace }} · {% blocktranslate count counter=plant.recipients %}{{ counter }} recipient{% plural %}{{ counter }} recipients{% endblocktranslate %}</li>{% endfor %}</ul>
+    {% else %}<p class="empty">{% translate "No plant is over the limit." %}</p>{% endif %}
   </section>
 {% endblock %}

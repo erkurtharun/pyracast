@@ -329,7 +329,7 @@ def plant_on(system: System, name: str, latitude: float) -> SiteBinding:
 
 def test_the_account_list_counts_the_plants_its_page_lists() -> None:
     system = solcast_system()
-    decide_review(system.admin, system.region.pk, "suspend")
+    decide_review(system.admin, system.region.pk, "suspend", reason="Paused.")
     plant_on(system, "pending-site", 41)
     now = timezone.now()
 

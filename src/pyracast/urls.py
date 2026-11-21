@@ -7,9 +7,10 @@ from pyracast.api.csp_reports import CSPReportView
 from pyracast.api.session import SessionLanguageView, SessionView
 from pyracast.api.trash import RestoreRegionView, TrashedRegionsView
 from pyracast.api.views import (
-    ForecastView,
     LocationChangeRequestsView,
     LocationChangeWithdrawView,
+    RegionForecastView,
+    RegionResubmitView,
     RegionView,
     TenantsView,
 )
@@ -83,7 +84,14 @@ urlpatterns = [
         "api/tenants/<int:tenant_id>/regions/<int:region_id>/restore/",
         RestoreRegionView.as_view(),
     ),
-    path("api/tenants/<int:tenant_id>/regions/<int:region_id>/forecast/", ForecastView.as_view()),
+    path(
+        "api/tenants/<int:tenant_id>/regions/<int:region_id>/resubmit/",
+        RegionResubmitView.as_view(),
+    ),
+    path(
+        "api/tenants/<int:tenant_id>/regions/<int:region_id>/forecast/",
+        RegionForecastView.as_view(),
+    ),
     path(
         "api/tenants/<int:tenant_id>/regions/<int:region_id>/collection-schedule/",
         CollectionScheduleView.as_view(),

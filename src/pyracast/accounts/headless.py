@@ -38,6 +38,7 @@ from pyracast.accounts.processes import (
     continuing,
     credential_write,
     lock_account,
+    renew_authority,
     require_authority,
 )
 from pyracast.accounts.security import Factor, strongest_factor
@@ -107,7 +108,6 @@ class RequestReauthenticationCodeView(
     StrongestFactor, StartingView, views.RequestReauthenticationCodeView
 ):
     factor = Factor.CODE
-    persists_session = True
 
     def handle_input(self, data: Any) -> ErrorResponse | None:
         # With the code budget of the typed address spent, the input reads the account unlocked
@@ -150,14 +150,17 @@ class VerifyEmailView(StepUpAnswers, views.VerifyEmailView):
                 if process.email_address.pk:
                     claim(process.email_address)
                 require_authority(request, EMAIL_VERIFICATION_CODE_SESSION_KEY)
+                own_change = not self.stage and code_account(process.state) == request.user.pk
                 if self.stage:
                     require_authority(request, LOGIN_SESSION_KEY)
-                elif code_account(process.state) == request.user.pk:
+                elif own_change:
                     # A signed-in session completing a change of its own address also needs its
                     # authority record; a change that ended the code answers above as nothing
                     # pending. A code of another account rests on that code's stamp alone.
                     authorize_credential_write(request)
                 email_address = process.finish()
+                if own_change:
+                    renew_authority(request, request.user.pk)
                 response = None
                 if self.stage:
                     # The sign-in rests on the state checked above, so it commits under its locks.
@@ -212,6 +215,12 @@ class ChangePasswordView(StepUpAnswers, views.ChangePasswordView):
         with credential_write(request):
             # The current password is checked against the password as locked here.
             request.user = User.objects.get(pk=user.pk)
+            # allauth asks an account without a password for a confirmation before it reads the
+            # input; a password it would refuse anyway is refused first.
+            if not request.user.has_usable_password():
+                invalid = self.handle_input(self._parse_json(request))
+                if invalid is not None:
+                    return invalid
             # The current password proves only the password; an account with an authenticator
             # also proves the authenticator.
             if strongest_factor(request.user) is Factor.MFA:
@@ -240,8 +249,6 @@ class ReauthenticateView(StrongestFactor, views.ReauthenticateView):
 
 
 class ManageEmailView(StepUpAnswers, StartingView, views.ManageEmailView):
-    persists_session = True
-
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         # A POST runs in `starting`'s transaction, and handle_input checks first in it.
         if not request.user.is_authenticated or request.method != "DELETE":

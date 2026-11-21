@@ -240,7 +240,7 @@ def test_failure_backoff_starts_after_the_failed_operation_finishes(
 def test_stale_binding_is_rejected_before_network(change: str) -> None:
     system = make_system(approved=True)
     if change == "suspended":
-        decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND)
+        decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND, reason="Paused.")
     elif change == "revision":
         Region.objects.filter(pk=system.region.pk).update(revision=2)
     elif change == "credential":
@@ -259,7 +259,7 @@ def test_approval_change_during_network_prevents_publication_but_preserves_snaps
     job = CollectionJob.objects.get()
 
     def suspend() -> None:
-        decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND)
+        decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND, reason="Paused.")
 
     adapter = FakeAdapter(suspend)
     assert not collect(job.pk, adapter, calculate, NOW)

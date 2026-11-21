@@ -463,7 +463,9 @@ def _configure_binding(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], objec
 
 def _review_decision(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
     system = make_system()
-    return lambda decision: decide_review(system.admin, system.region.pk, decision)
+    return lambda decision: decide_review(
+        system.admin, system.region.pk, decision, reason="A review reason."
+    )
 
 
 def _save_language(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:

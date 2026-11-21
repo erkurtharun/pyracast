@@ -21,26 +21,26 @@ function cached(client: QueryClient, key: readonly unknown[]) {
 test("the same request of two accounts or two workspaces never shares a key", () => {
     const client = new QueryClient();
     const requests = [
-        keys.request(1, sites, { path: { tenant_id: 5 } }, "en"),
-        keys.request(2, sites, { path: { tenant_id: 5 } }, "en"),
-        keys.request(1, sites, { path: { tenant_id: 6 } }, "en"),
-        keys.request(1, "/api/tenants/", {}, "en"),
-        keys.request(2, "/api/tenants/", {}, "en"),
+        keys.request("1:a", sites, { path: { tenant_id: 5 } }, "en"),
+        keys.request("2:b", sites, { path: { tenant_id: 5 } }, "en"),
+        keys.request("1:a", sites, { path: { tenant_id: 6 } }, "en"),
+        keys.request("1:a", "/api/tenants/", {}, "en"),
+        keys.request("2:b", "/api/tenants/", {}, "en"),
     ];
     for (const key of requests) client.setQueryData(key, key);
     expect(new Set(requests.map((key) => JSON.stringify(key))).size).toBe(5);
-    expect(cached(client, keys.user(1))).toEqual(
+    expect(cached(client, keys.owner("1:a"))).toEqual(
         [requests[0], requests[2], requests[3]].map((key) =>
             JSON.stringify(key),
         ),
     );
-    expect(cached(client, keys.workspace(1, 5))).toEqual([
+    expect(cached(client, keys.workspace("1:a", 5))).toEqual([
         JSON.stringify(requests[0]),
     ]);
-    expect(cached(client, keys.workspace(2, 5))).toEqual([
+    expect(cached(client, keys.workspace("2:b", 5))).toEqual([
         JSON.stringify(requests[1]),
     ]);
-    expect(cached(client, keys.account(2))).toEqual([
+    expect(cached(client, keys.account("2:b"))).toEqual([
         JSON.stringify(requests[4]),
     ]);
 });
@@ -50,7 +50,7 @@ test("a request key carries its path parameters, query and language", () => {
     const day = (date: string, locale = "en") =>
         JSON.stringify(
             keys.request(
-                1,
+                "1:a",
                 forecast,
                 { path: scope, query: { date, data_source: "auto" } },
                 locale,
@@ -60,16 +60,19 @@ test("a request key carries its path parameters, query and language", () => {
     expect(day("2026-11-20")).not.toBe(day("2026-11-20", "tr"));
     expect(
         JSON.stringify(
-            keys.request(1, forecast, { path: { ...scope, plant_id: 22 } }),
+            keys.request("1:a", forecast, { path: { ...scope, plant_id: 22 } }),
         ),
-    ).not.toBe(JSON.stringify(keys.request(1, forecast, { path: scope })));
+    ).not.toBe(JSON.stringify(keys.request("1:a", forecast, { path: scope })));
     const client = new QueryClient();
     client.setQueryData(
-        keys.request(1, forecast, { path: scope, query: { date: "x" } }),
+        keys.request("1:a", forecast, { path: scope, query: { date: "x" } }),
         1,
     );
-    client.setQueryData(keys.request(1, sites, { path: { tenant_id: 5 } }), 2);
-    expect(cached(client, keys.path(1, forecast, scope))).toHaveLength(1);
+    client.setQueryData(
+        keys.request("1:a", sites, { path: { tenant_id: 5 } }),
+        2,
+    );
+    expect(cached(client, keys.path("1:a", forecast, scope))).toHaveLength(1);
 });
 
 function json(body: unknown, status = 200) {
@@ -130,7 +133,7 @@ test("a refresh after a change reuses the read a just-mounted page started and s
         defaultOptions: { queries: { retry: false, staleTime: 2_000 } },
     });
     const pageOne = keys.request(
-        1,
+        "1:a",
         "/api/tenants/{tenant_id}/change-requests/",
         { path: { tenant_id: 5 }, query: { scope: "pending", page: 1 } },
         "en",
@@ -148,10 +151,10 @@ test("a refresh after a change reuses the read a just-mounted page started and s
     const unsubscribe = observer.subscribe(() => {});
     try {
         await expect.poll(() => reads).toBe(1);
-        await invalidate(client, keys.workspace(1, 5), pageOne);
+        await invalidate(client, keys.workspace("1:a", 5), pageOne);
         expect(reads).toBe(1);
         await expect.poll(() => observer.getCurrentResult().data).toBe(1);
-        await invalidate(client, keys.workspace(1, 5), pageOne);
+        await invalidate(client, keys.workspace("1:a", 5), pageOne);
         expect(reads).toBe(2);
     } finally {
         unsubscribe();

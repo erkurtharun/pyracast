@@ -14,7 +14,6 @@ import { ForecastSummary } from "./panel/forecast-summary";
 import { ForecastUnavailable } from "./panel/forecast-unavailable";
 import {
     chartIntervals,
-    forecastCsvRows,
     scenarioIntervals,
     type ForecastResult,
 } from "./panel/model";
@@ -29,26 +28,16 @@ export function ForecastPanel({
     const t = useTranslations("Forecast");
     const format = useFormat();
     const [showFullDay, setShowFullDay] = useState(false);
-    if (
-        !forecast.result ||
-        typeof forecast.result !== "object" ||
-        Array.isArray(forecast.result)
-    )
+    if (!forecast.result)
         return (
             <ForecastUnavailable forecast={forecast} electrical={electrical} />
         );
     const scenario = (electrical ? forecast.outage_scenario : null) ?? null;
     const diagnostic = electrical ? forecast.production_diagnostic : null;
-    const result = forecast.result as ForecastResult;
-    const affectedRows = (
-        scenario && Array.isArray(scenario.result.intervals)
-            ? scenario.result.intervals
-            : []
-    ) as Interval[];
-    const allRows = scenarioIntervals(
-        (Array.isArray(result.intervals) ? result.intervals : []) as Interval[],
-        scenario && affectedRows,
-    );
+    const result: ForecastResult = forecast.result;
+    const affectedRows: Interval[] = scenario?.result.intervals ?? [];
+    const intervals: Interval[] = result.intervals ?? [];
+    const allRows = scenarioIntervals(intervals, scenario && affectedRows);
     const metric = electrical ? "mean_power_mw" : "ghi_wm2",
         unit = electrical ? "MW" : "W/m²";
     const rows = chartIntervals(allRows, metric, showFullDay, result);
@@ -67,7 +56,7 @@ export function ForecastPanel({
                 scenario={scenario}
                 diagnostic={diagnostic}
                 affectedRows={affectedRows}
-                csvRows={forecastCsvRows(allRows, Boolean(scenario))}
+                rows={allRows}
             />
             <CheckboxField
                 label={t("show_full_day")}

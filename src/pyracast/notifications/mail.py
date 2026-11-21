@@ -6,12 +6,16 @@ from typing import cast
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 from django.utils import translation
-from django.utils.translation import gettext as _
 
 from pyracast.notifications.models import (
     NotificationDelivery,
     PreparedMessageFormat,
     PreparedMessageKind,
+)
+from pyracast.notifications.reminder_notice import (
+    reminder_footer,
+    unavailable_text,
+    unsubscribe_header,
 )
 from pyracast.notifications.rendering import render_forecast
 
@@ -21,6 +25,10 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 def message_id(delivery: NotificationDelivery) -> str:
     domain = parseaddr(settings.DEFAULT_FROM_EMAIL)[1].rpartition("@")[2]
     return f"<reminder.{delivery.message_token}@{domain}>"
+
+
+def _headers(delivery: NotificationDelivery) -> dict[str, str]:
+    return {"Message-ID": message_id(delivery), **unsubscribe_header()}
 
 
 def build_message(
@@ -42,6 +50,7 @@ def build_message(
                 results,
                 prepared_at=prepared_at or delivery.scheduled_for,
                 report_context=report_context,
+                footer=reminder_footer(delivery),
             ),
         )
 
@@ -50,29 +59,23 @@ def build_unavailable_message(
     delivery: NotificationDelivery, prepared_at: datetime
 ) -> tuple[EmailMultiAlternatives, dict[str, str]]:
     existing = delivery.prepared_message
-    with translation.override(delivery.language):
-        payload = (
-            existing
-            if isinstance(existing, dict) and existing.get("format") == PreparedMessageFormat.PLAIN
-            else {
-                "format": PreparedMessageFormat.PLAIN,
-                "subject": _("Pyracast forecast unavailable"),
-                "body": _(
-                    "Tomorrow's saved forecast could not be prepared. "
-                    "No forecast energy total is available.\n"
-                    "Scheduled reminder: %(scheduled)s\n"
-                    "Please check the plant page for collection status."
-                )
-                % {"scheduled": delivery.scheduled_for.isoformat()},
-                "kind": PreparedMessageKind.UNAVAILABLE,
-                "prepared_at": prepared_at.isoformat(),
-            }
-        )
+    if isinstance(existing, dict) and existing.get("format") == PreparedMessageFormat.PLAIN:
+        payload = existing
+    else:
+        with translation.override(delivery.language):
+            subject, body = unavailable_text(delivery)
+        payload = {
+            "format": PreparedMessageFormat.PLAIN,
+            "subject": subject,
+            "body": body,
+            "kind": PreparedMessageKind.UNAVAILABLE,
+            "prepared_at": prepared_at.isoformat(),
+        }
     return EmailMultiAlternatives(
         subject=payload["subject"],
         body=payload["body"],
         from_email=settings.DEFAULT_FROM_EMAIL,
-        headers={"Message-ID": message_id(delivery)},
+        headers=_headers(delivery),
     ), payload
 
 
@@ -83,7 +86,7 @@ def _restore_message(
         subject=payload["subject"],
         body=payload["body"],
         from_email=settings.DEFAULT_FROM_EMAIL,
-        headers={"Message-ID": message_id(delivery)},
+        headers=_headers(delivery),
     )
     message.attach_alternative(payload["html"], "text/html")
     message.attach(

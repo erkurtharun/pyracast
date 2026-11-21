@@ -36,6 +36,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
         ("delete", "regions/{region}/"),
         ("post", "regions/{region}/location-change-requests/"),
         ("post", "regions/{region}/restore/"),
+        ("post", "regions/{region}/resubmit/"),
         ("put", "regions/{region}/collection-schedule/"),
         ("put", "regions/{region}/reminders/"),
         ("post", "regions/{region}/plants/"),

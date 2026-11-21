@@ -203,13 +203,13 @@ def test_approval_is_atomic_idempotent_and_permissions_checked() -> None:
     assert first.target_date.isoformat() == "2026-11-10"
     assert AuditEvent.objects.filter(action="region_approved").count() == 1
     assert CollectionJob.objects.count() == 1
-    assert decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND)
+    assert decide_review(system.admin, system.region.pk, ReviewDecision.SUSPEND, reason="Paused.")
     assert Region.objects.get(pk=system.region.pk).status == "suspended"
     assert AuditEvent.objects.filter(action="region_suspended").count() == 1
     with pytest.raises(ValidationError):
-        decide_review(system.admin, system.region.pk, ReviewDecision.REJECT)
+        decide_review(system.admin, system.region.pk, ReviewDecision.REJECT, reason="Refused.")
     with pytest.raises(ValidationError):
-        decide_review(system.admin, system.region.pk, "approved")
+        decide_review(system.admin, system.region.pk, "approved", reason="Approved.")
     with pytest.raises(ValidationError):
         approve_region(system.admin, system.region.pk, system.binding.pk, NOW.replace(tzinfo=None))
 

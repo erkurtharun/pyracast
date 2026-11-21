@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import QuerySet
 from django.utils import timezone
 
 from pyracast.accounts.authorization import require_platform_admin, tenant_membership
@@ -116,20 +117,23 @@ def automation_status(plant: Plant) -> dict[str, Any]:
 
 
 @transaction.atomic
+def automated_plants(tenant_id: int) -> QuerySet[Plant]:
+    """The plants an administrator change switches to manual calibration, trashed ones too."""
+    return Plant.objects.filter(
+        region__tenant_id=tenant_id, automatic_calibration_enabled=True
+    ).order_by("pk")
+
+
 def disable_workspace_automation(actor: User, tenant_id: int) -> None:
     require_platform_admin(actor)
     Tenant.objects.select_for_update().get(pk=tenant_id)
-    region_ids = list(
+    list(
         Region.objects.select_for_update()
         .filter(tenant_id=tenant_id)
         .order_by("pk")
         .values_list("pk", flat=True)
     )
-    plants = (
-        Plant.objects.select_for_update()
-        .filter(region_id__in=region_ids, automatic_calibration_enabled=True)
-        .order_by("pk")
-    )
+    plants = automated_plants(tenant_id).select_for_update(of=("self",))
     now = timezone.now()
     for plant in plants:
         set_automation_state(

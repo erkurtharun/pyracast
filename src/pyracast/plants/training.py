@@ -49,6 +49,7 @@ from pyracast.plants.preparation import request_preparation
 from pyracast.regions.models import Region
 
 LEASE_DURATION = ACTORS["calibrate_plant"].lease
+WAITING = (CalibrationStatus.PENDING,)
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +237,7 @@ def pending_calibration_ids(now: datetime, limit: int = 100) -> list[int]:
     return list(
         CalibrationRun.objects.filter(
             active_plant("plant__"),
-            Q(status=CalibrationStatus.PENDING) | claimable(CalibrationStatus.RUNNING, now),
+            Q(status__in=WAITING) | claimable(CalibrationStatus.RUNNING, now),
         )
         .order_by("created_at", "pk")
         .values_list("pk", flat=True)[:limit]

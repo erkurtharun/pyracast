@@ -21,6 +21,7 @@ def test_dispatcher_touches_its_heartbeat_before_every_cycle_even_after_a_failed
     for name in (
         "purge_expired",
         "sweep_accounts",
+        "warn_before_purge",
         "purge_finished_mail",
         "publish_outbound_mail",
         "dispatch_calibrations",
@@ -64,6 +65,7 @@ def test_the_heartbeat_is_renewed_only_after_the_broker_answers(
     for name in (
         "purge_expired",
         "sweep_accounts",
+        "warn_before_purge",
         "purge_finished_mail",
         "publish_outbound_mail",
         "dispatch_calibrations",

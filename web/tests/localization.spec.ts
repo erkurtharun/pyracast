@@ -423,7 +423,7 @@ test("all translated messages are valid ICU and preserve keys and interpolation 
 
 test("CSV validation is localized while ISO timestamps, units and values remain unchanged", () => {
     const csv =
-        "starts_at,ends_at,energy,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T10:00:00+03:00,1234.5,valid,meter";
+        "starts_at,ends_at,energy_kwh,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T10:00:00+03:00,1234.5,valid,meter";
     expect(parseProduction(csv, "tr")).toEqual(parseProduction(csv, "en"));
     expect(() => parseProduction(csv.replace("1234.5", "-1"), "tr")).toThrow(
         "Satır 2: enerji sıfır veya pozitif bir sayı olmalı.",

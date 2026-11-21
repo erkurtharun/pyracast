@@ -21,6 +21,7 @@ from pyracast.accounts.language import (
     user_language,
 )
 from pyracast.accounts.models import Language
+from pyracast.accounts.session_tag import session_tag
 from pyracast.api.serializers import InputSerializer
 
 
@@ -50,6 +51,7 @@ class SessionOutput(serializers.Serializer[Any]):
     csrf_token = serializers.CharField()
     language = serializers.ChoiceField(choices=Language.choices)
     expires_at = serializers.DateTimeField(allow_null=True)
+    session_tag = serializers.CharField(allow_null=True)
 
 
 def _expires_at(request: Request) -> datetime | None:
@@ -78,6 +80,7 @@ def session_output(request: Request) -> dict[str, Any]:
         "csrf_token": get_token(django_request),
         "language": django_request.LANGUAGE_CODE,
         "expires_at": _expires_at(request),
+        "session_tag": session_tag(request._request),
     }
 
 

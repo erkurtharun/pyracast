@@ -46,6 +46,7 @@ POLICIES: dict[str, dict[str, tuple[str, str | None]]] = {
     TENANT + "change-requests/<int:request_id>/approve/": {"POST": (ADMIN, None)},
     TENANT + "change-requests/<int:request_id>/reject/": {"POST": (ADMIN, None)},
     TENANT + "change-requests/<int:request_id>/seen/": {"POST": (MEMBER, None)},
+    TENANT + "change-requests/seen/": {"POST": (MEMBER, None)},
     TENANT + "change-requests/<int:request_id>/withdraw/": {"POST": (MEMBER, None)},
     TENANT + "invitations/": {"GET": (ADMIN, None), "POST": (ADMIN, None)},
     TENANT + "invitations/<int:invitation_id>/": {"DELETE": (ADMIN, None)},
@@ -65,6 +66,7 @@ POLICIES: dict[str, dict[str, tuple[str, str | None]]] = {
     REGION + "plants/": {"GET": (MEMBER, None), "POST": (ADMIN, None)},
     REGION + "reminders/": {"GET": (MEMBER, None), "PUT": (ADMIN, None)},
     REGION + "restore/": {"POST": (ADMIN, SUBMISSION)},
+    REGION + "resubmit/": {"POST": (ADMIN, SUBMISSION)},
     PLANT: {"PUT": (ADMIN, None)},
     PLANT + "calibration/automation/": {"GET": (MEMBER, None), "PATCH": (ADMIN, None)},
     PLANT + "calibration/reset/": {"POST": (ADMIN, None)},
@@ -113,6 +115,7 @@ ANSWERS: dict[str, dict[str, tuple[int, str | None]]] = {
     TENANT + "change-requests/<int:request_id>/approve/": {"POST": INVALID},
     TENANT + "change-requests/<int:request_id>/reject/": {"POST": INVALID},
     TENANT + "change-requests/<int:request_id>/seen/": {"POST": NOT_FOUND},
+    TENANT + "change-requests/seen/": {"POST": OK},
     TENANT + "change-requests/<int:request_id>/withdraw/": {"POST": NOT_FOUND},
     TENANT + "invitations/": {"GET": OK, "POST": INVALID},
     TENANT + "invitations/<int:invitation_id>/": {"DELETE": (400, "invitation_unavailable")},
@@ -129,6 +132,7 @@ ANSWERS: dict[str, dict[str, tuple[int, str | None]]] = {
     REGION + "plants/": {"GET": OK, "POST": INVALID},
     REGION + "reminders/": {"GET": OK, "PUT": INVALID},
     REGION + "restore/": {"POST": OK},
+    REGION + "resubmit/": {"POST": INVALID},
     PLANT: {"PUT": INVALID},
     PLANT + "calibration/automation/": {"GET": OK, "PATCH": INVALID},
     PLANT + "calibration/reset/": {"POST": NO_CONFIGURATION},
@@ -291,6 +295,12 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
                 status for status in operation["responses"] if status.startswith(("4", "5"))
             )
     error = {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+    conflict = {"application/json": {"schema": {"$ref": "#/components/schemas/IncidentConflict"}}}
+    assert schema["components"]["schemas"]["IncidentConflict"]["properties"].keys() == {
+        "code",
+        "message",
+        "current",
+    }
     assert documented[("/api/session/", "get")] == []
     assert documented[("/api/session/language/", "post")] == ["400", "403", "415"]
     assert documented[("/api/tenants/", "get")] == ["401", "404"]
@@ -323,7 +333,7 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
                 assert "415" in responses
             for status, response in responses.items():
                 if status.startswith(("4", "5")) or status == "default":
-                    assert response["content"] == error
+                    assert response["content"] == (conflict if status == "409" else error)
 
 
 def test_a_request_that_bypassed_the_url_resolver_is_refused() -> None:

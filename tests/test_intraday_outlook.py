@@ -7,13 +7,13 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
 from pyracast.connections.models import SiteBinding
-from pyracast.forecasts.history import regional_outlook
 from pyracast.forecasts.intraday import (
     INTRADAY_POLICY,
     apply_intraday_source,
     prepare_intraday_source,
 )
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, RequestAttempt
+from pyracast.forecasts.outlook import regional_outlook
 from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import replay_composition

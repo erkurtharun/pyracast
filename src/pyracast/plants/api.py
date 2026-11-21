@@ -255,7 +255,7 @@ class CalibrationAutomationView(ScopedView[Plant]):
         return Response(CalibrationAutomationOutput(automation_status(plant)).data)
 
 
-class ForecastView(ScopedView[Plant]):
+class PlantForecastView(ScopedView[Plant]):
     @extend_schema(parameters=[ForecastQuery], responses=PlantForecastOutput)
     def get(self, request: Request, **_kwargs: Any) -> Response:
         scope = self.scope()

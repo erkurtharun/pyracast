@@ -1,0 +1,84 @@
+"use client";
+import { useTranslations } from "next-intl";
+import { useFormat } from "@/lib/format/use-format";
+import { MISSING } from "@/lib/format/number";
+import { useLabel } from "@/ui/vocabulary";
+import { changedFields, type Outage, type OutageField } from "./model";
+
+export type Stale = { before: Outage; current: Outage };
+
+const FIELD_LABELS = {
+    kind: "kind",
+    title: "title",
+    starts_at: "starts",
+    ends_at: "ends",
+    available_dc_mw: "available_dc_mw",
+    available_inverter_mw: "available_inverter_mw",
+    available_export_mw: "available_export_mw",
+    notes: "notes",
+} as const satisfies Record<Exclude<OutageField, "status">, string>;
+
+export function StaleChanges({
+    stale,
+    closed,
+    timezone,
+    onDiscard,
+}: {
+    stale: Stale;
+    closed: boolean;
+    timezone: string;
+    onDiscard: () => void;
+}) {
+    const t = useTranslations("Outages");
+    const proposals = useTranslations("ChangeRequests");
+    const format = useFormat();
+    const label = useLabel();
+    const { before, current } = stale;
+    const fieldLabel = (field: OutageField) =>
+        field === "status" ? t("status") : proposals(FIELD_LABELS[field]);
+    const show = (outage: Outage, field: OutageField) => {
+        if (field === "status") return label("IncidentStatus", outage.status);
+        if (field === "kind") return label("IncidentKind", outage.kind);
+        if (field === "starts_at")
+            return format.time(outage.starts_at, timezone);
+        if (field === "ends_at")
+            return outage.ends_at
+                ? format.time(outage.ends_at, timezone)
+                : proposals("ongoing");
+        if (field === "title" || field === "notes")
+            return outage[field] || MISSING;
+        const value = outage[field];
+        return value === null
+            ? t("unknown")
+            : t("power", { value: format.number(value, 6) });
+    };
+    return (
+        <div className="notice" role="status">
+            <p>
+                {closed
+                    ? t("staleClosed", {
+                          status: label("IncidentStatus", current.status),
+                      })
+                    : t("staleApply", { revision: current.revision })}
+            </p>
+            <ul>
+                {changedFields(before, current).map((field) => (
+                    <li key={field}>
+                        {t("changedField", {
+                            field: fieldLabel(field),
+                            before: show(before, field),
+                            after: show(current, field),
+                        })}
+                    </li>
+                ))}
+            </ul>
+            <button
+                className="button secondary"
+                type="button"
+                onClick={onDiscard}
+            >
+                {t("discardEdit")}
+            </button>
+        </div>
+    );
+}

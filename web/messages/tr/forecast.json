@@ -201,7 +201,11 @@
         "relative_error": "Göreli hata",
         "skill_score": "Kalibre edilmemiş modele göre başarı",
         "skill_days": "Başarı, kalibrasyonun eğitim dönemi dışındaki {count, plural, one {# günü} other {# günü}} kullanır.",
-        "reason_dates": "{reason}: {dates}"
+        "reason_dates": "{reason}: {dates}",
+        "daily_error_title": "Günlük tahmin hatası",
+        "daily_error_chart": "{count, plural, one {# eşleşen gün} other {# eşleşen gün}} için mutlak günlük tahmin hatası; aşağıdaki tablo her değeri listeler.",
+        "daily_error_tooltip": "{date}: {error} MWh",
+        "absolute_daily_error": "Günlük mutlak hata"
     },
     "Calibrations": {
         "calibration_history": "Kalibrasyon geçmişi",
@@ -218,11 +222,8 @@
         "assessment": "Değerlendirme",
         "factor": "Katsayı",
         "actions": "İşlemler",
-        "previous_configuration": "Önceki yapılandırma",
         "provisional_production": "Geçici üretim verisi",
         "view_details": "Ayrıntıları göster",
-        "only_the_current_configuration_can_be_activated": "Yalnızca mevcut yapılandırma etkinleştirilebilir.",
-        "activate": "Etkinleştir",
         "no_calibration_runs": "Kalibrasyon işlemi yok",
         "save_complete_paired_days_in_the_production": "Otomatik olarak bir aday hazırlamak için üretim günlüğüne tam eşleşen günleri kaydedin.",
         "loading_calibration_details": "Kalibrasyon ayrıntıları yükleniyor…",
@@ -285,7 +286,40 @@
             "incumbent_mae_regression": "Aday, eğitim sırasındaki seçime göre hatayı artırdı.",
             "baseline_bias_regression": "Aday, temel modele göre sapmayı artırdı.",
             "incumbent_bias_regression": "Aday, eğitim sırasındaki seçime göre sapmayı artırdı."
-        }
+        },
+        "in_force": "Geçerli kalibrasyon",
+        "in_force_run": "{factor} katsayılı #{id} kalibrasyonu, {time} tarihinde seçildi.",
+        "in_force_baseline": "Kalibrasyonsuz model (katsayı 1), {time} tarihinde seçildi.",
+        "in_force_none": "Bu yapılandırma için kalibrasyon seçilmedi; tahminler kalibrasyonsuz modeli kullanır.",
+        "selected_manually": "Bir çalışma alanı yöneticisi seçti.",
+        "selected_automatically": "Otomatik kalibrasyon seçti.",
+        "not_effective": "Eğitim verisi değiştiği için tahminler bunu şu anda uygulamıyor; başka bir kalibrasyon seçilene kadar kalibrasyonsuz model kullanılır.",
+        "review_activation": "Etkinleştirmeyi incele",
+        "activate_title": "#{id} kalibrasyonunu etkinleştir",
+        "activate_effect": "{factor} katsayısı yeni tahminlere ve ilk eğitim günü olan {start} tarihinden itibaren tahmini geçmiş günlere uygulanır. Yayımlanmış tahminler kalibrasyonlarını korur.",
+        "activation_turns_automation_on": "Otomatik kalibrasyon açılacak.",
+        "activation_keeps_automation": "Otomatik kalibrasyon açık kalır.",
+        "confirm_activation": "Kalibrasyonu etkinleştir",
+        "reset_title": "Kalibrasyonsuz modele dön",
+        "reset_effect": "Yeni tahminler ve tahmini geçmiş günler kalibrasyonsuz modeli (katsayı 1) kullanır. Yayımlanmış tahminler kalibrasyonlarını korur. Otomatik kalibrasyon kapatılacak.",
+        "confirm_reset": "Temel modele dön",
+        "cancel": "Vazgeç",
+        "working": "İşleniyor…",
+        "selection_state": "Seçim",
+        "blocked": "Bu kalibrasyon etkinleştirilemez: {blocker}.",
+        "blockers": {
+            "configuration_changed": "Başka bir santral yapılandırması için oluşturuldu ya da güncel yapılandırma onaylı değil.",
+            "production_source_changed": "Eğitimden sonra üretim kaynağı değişti.",
+            "outage_history_changed": "Eğitimden sonra dönemindeki kesinti geçmişi değişti.",
+            "incumbent_changed": "Karşılaştırmadan sonra etkin kalibrasyon değişti.",
+            "calibration_not_activatable": "Etkinleştirmeye izin veren bir doğrulama değerlendirmesiyle tamamlanmadı."
+        },
+        "request_new": "{start} – {end} için yeni kalibrasyon iste",
+        "request_sent": "Yeni kalibrasyon istendi. Başladığında listede görünür.",
+        "run_open": "Bekleyen ya da çalışan bir kalibrasyon var; o bittiğinde yenisini isteyin.",
+        "window_outside": "Yeni kalibrasyon 7 ile 90 gün arası bir aralık gerektirir; bu aralık yeniden istenemez.",
+        "days_incomplete": "Bu aralığın son günü santral saatine göre bittiğinde yeni kalibrasyon isteyin.",
+        "await_configuration": "Santral yapılandırması yeniden onaylandığında yeni kalibrasyon isteyin."
     },
     "CalibrationAutomation": {
         "automatic_calibration": "Otomatik kalibrasyon",
@@ -318,8 +352,14 @@
             "candidate_failed": "Aday değerlendirilemedi.",
             "candidate_superseded": "Adayın yerini daha yeni veriler aldı.",
             "preparation_failed": "Kalibrasyon hazırlanamadı. Yeniden denenecek.",
-            "promotion_failed": "Aday etkinleştirilemedi. Yeniden kontrol edilecek."
-        }
+            "promotion_failed": "Aday etkinleştirilemedi. Yeniden kontrol edilecek.",
+            "production_source_changed": "Üretim kaynağı değişti; yeni kalibrasyon gerekiyor.",
+            "outage_history_changed": "Kesinti geçmişi değişti; yeni kalibrasyon gerekiyor.",
+            "incumbent_changed": "Etkin kalibrasyon değişti; yeni karşılaştırma gerekiyor.",
+            "calibration_not_activatable": "Aday etkinleştirilemiyor."
+        },
+        "disabled_because": "Kapalı: {cause}.",
+        "paused_configuration": "Santral yapılandırması yeniden onaylanana kadar duraklatıldı."
     },
     "ProductionHistory": {
         "actuals": "Gerçekleşen üretim",
@@ -352,7 +392,7 @@
         "save": "Kaydet",
         "saving": "Kaydediliyor…",
         "cancel": "Vazgeç",
-        "use_provider": "Sağlayıcı değerini kullan",
+        "use_provider": "Sağlayıcı değerini kullan ({energy} MWh)",
         "revert_interval": "{interval} aralığında sağlayıcı değerini kullan",
         "invalid_energy": "MWh cinsinden sıfır veya pozitif bir enerji değeri girin.",
         "saved": "Üretim kaydedildi.",
@@ -387,19 +427,18 @@
         "quality": "Veri durumu",
         "mixed": "Karma veri durumu",
         "refresh_failed": "Kayıtlı üretim yenilenemedi. {error}",
-        "propose_interval": "{interval} aralığı için düzeltme öner"
+        "propose_interval": "{interval} aralığı için düzeltme öner",
+        "remove_correction": "Düzeltmeyi kaldır",
+        "remove_correction_interval": "{interval} için düzeltmeyi kaldır"
     },
     "ProductionImport": {
         "choose_a_csv_no_larger_than_2": "En fazla 2 MiB boyutunda bir CSV seçin.",
         "could_not_read_the_production_csv": "Üretim CSV dosyası okunamadı.",
         "csv_format_and_import_rules": "CSV biçimi ve içe aktarma kuralları",
-        "use_a_csv_with_the_exact_header": "Aşağıdaki başlığı aynen kullanın; zaman damgalarında saat dilimi bulunmalı, enerji negatif olmamalıdır. Aralıklar kesişmemelidir. Her dosya 31 yerel gün içinde en fazla 2.000 satır içerebilir.",
+        "use_a_csv_with_the_exact_header": "Aşağıdaki sütunları kullanın; enerji kWh (energy_kwh) veya MWh (energy_mwh) olarak, tarihler saat dilimiyle ve enerji sıfır ya da pozitif olmalıdır. Üretim dışa aktarımı olduğu gibi içe aktarılabilir. Aralıklar çakışamaz. Her dosya 31 yerel gün içinde en fazla 2.000 satır kabul eder.",
         "quality_valid_outage_curtailed_or_invalid_quoted": "Kalite: valid, outage, curtailed veya invalid. Birim dosyanın tamamına uygulanır. Aktarılan değerler düzeltme olarak kaydedilir ve sonraki sağlayıcı güncellemelerine göre önceliklidir.",
         "choose_and_validate_a_csv_before_importing": "İçe aktarmadan önce bir CSV seçip doğrulayın.",
         "production_csv": "Üretim CSV dosyası",
-        "energy_unit": "Enerji birimi",
-        "kwh_kilowatthours": "kWh — kilovatsaat",
-        "mwh_megawatthours": "MWh — megavatsaat",
         "validated_file": "{file}: {count} geçerli ölçüm hazır.",
         "import_complete": "İçe aktarma tamamlandı: {created} yeni kayıt, {existing} mevcut kayıt, toplam {total} kayıt.",
         "preview_import": "Aktarımı önizle",

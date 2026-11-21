@@ -8,7 +8,13 @@ import pytest
 from deploy import probe_origin
 
 SESSION = json.dumps(
-    {"user": None, "csrf_token": "token", "language": "tr", "expires_at": None}
+    {
+        "user": None,
+        "csrf_token": "token",
+        "language": "tr",
+        "expires_at": None,
+        "session_tag": None,
+    }
 ).encode()
 APP = b"<!doctype html><html><head><title>Pyracast workspace</title></head></html>"
 

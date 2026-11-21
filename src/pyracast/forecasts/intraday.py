@@ -25,7 +25,10 @@ from pyracast.plants.forecast_sources import apply_composition, compose_snapshot
 from pyracast.solar import Daylight, daylight_energy_windows, daylight_window
 
 INTRADAY_POLICY = "estimated-actuals-then-forecast-v1"
+VINTAGE_SCOPE = "primary_source"
 type IntradaySourceKind = Literal["forecast", "estimated_actuals", "mixed"]
+# Estimated actuals in a live outlook: none, those of the elapsed part of today, or only those.
+type ActualsMode = Literal["none", "elapsed", "only"]
 
 
 @dataclass(frozen=True)
@@ -284,7 +287,7 @@ def apply_intraday_source(result: dict[str, Any], source: PreparedIntradaySource
         )
     if "vintage" in result:
         result["vintage"]["source_kind"] = source.source_kind
-        result["vintage"]["scope"] = "primary_source"
+        result["vintage"]["scope"] = VINTAGE_SCOPE
     flags = result["quality_flags"]
     if "mixed_forecast_vintages" in flags:
         flags.remove("mixed_forecast_vintages")

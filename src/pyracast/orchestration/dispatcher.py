@@ -1,6 +1,7 @@
 import logging
 import time
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from pyracast.background.failures import (
     broker_answers,
     log_failure,
 )
-from pyracast.forecasts.monitoring import record_dispatch_phase
+from pyracast.forecasts.models import DispatcherStatus
 from pyracast.forecasts.revalidation import dispatch_revalidations
 from pyracast.forecasts.runtime import dispatch_collections
 from pyracast.metering.runtime import dispatch_epias
@@ -33,6 +34,7 @@ from pyracast.orchestration.kinds import (
     register_actors,
 )
 from pyracast.plants.runtime import dispatch_calibrations
+from pyracast.purge_warning import warn_before_purge
 from pyracast.shutdown import ShutdownRequest
 from pyracast.trash import purge_expired
 
@@ -40,6 +42,25 @@ logger = logging.getLogger(__name__)
 # Mail waits for a code in an open browser, so it is published between the regular cycles too.
 MAIL_TICK_SECONDS = 2.0
 Phase = tuple[str, Callable[[], PhaseOutcome]]
+
+
+def record_dispatch_phase(
+    phase: str,
+    now: datetime,
+    error: str = "",
+    *,
+    duration_ms: int | None = None,
+    published: int | None = None,
+) -> None:
+    values: dict[str, object] = {
+        "attempted_at": now,
+        "last_error": error,
+        "duration_ms": duration_ms,
+        "published": published,
+    }
+    if not error:
+        values["succeeded_at"] = now
+    DispatcherStatus.objects.update_or_create(phase=phase, defaults=values)
 
 
 def _published(operation: Callable[[], int]) -> Callable[[], PhaseOutcome]:
@@ -64,7 +85,7 @@ def _retention() -> PhaseOutcome:
     # them because its items are already logged one by one.
     now = timezone.now()
     failed = 0
-    for step in (purge_expired, sweep_accounts, purge_finished_mail):
+    for step in (purge_expired, warn_before_purge, sweep_accounts, purge_finished_mail):
         try:
             step(now)
         except ItemsFailedError as error:

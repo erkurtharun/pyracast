@@ -22,7 +22,8 @@
     </div>
     <div class="filters-actions">
       <button type="submit" class="btn btn--primary">{% translate "Search" %}</button>
-      {% if q or status %}<a class="btn btn--quiet" href="{% url 'admin:workspace_plants' %}">{% translate "Clear" %}</a>{% endif %}
+      {% if location_change %}<input type="hidden" name="location_change" value="{{ location_change }}">{% endif %}
+      {% if q or status or location_change %}<a class="btn btn--quiet" href="{% url 'admin:workspace_plants' %}">{% translate "Clear" %}</a>{% endif %}
     </div>
   </form>
 
@@ -40,6 +41,7 @@
               <th scope="col">{% translate "Connection" %}</th>
               <th scope="col">{% translate "Last saved forecast" %}</th>
               <th scope="col">{% translate "Location" %}</th>
+              {% if health_filter %}<th scope="col">{% translate "Why listed" %}</th>{% endif %}
               <th scope="col"><span class="visually-hidden">{% translate "Open" %}</span></th>
             </tr>
           </thead>
@@ -72,12 +74,15 @@
                     <span class="row-meta">{{ plant.timezone }}</span>
                   </span>
                 </td>
+                {% if health_filter %}<td data-label="{% translate "Why listed" %}">{{ plant.issue_reason }}{% if plant.issue_time %} <time datetime="{{ plant.issue_time|date:'c' }}">{{ plant.issue_time|date:"j M Y, H:i T" }}</time>{% endif %}</td>{% endif %}
                 <td class="cell-action"><a class="btn btn--quiet" href="{{ plant.review_url }}">{% translate "Open" %}<span class="visually-hidden"> {{ plant.plant_name }}</span></a></td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
+    {% elif health_filter and not q and not status %}
+      <p class="empty">{% translate "No plants currently match this check." %}</p>
     {% else %}
       <p class="empty">{% if q or status %}{% translate "No plants match these filters." %}{% else %}{% translate "No plants match." %}{% endif %}</p>
     {% endif %}

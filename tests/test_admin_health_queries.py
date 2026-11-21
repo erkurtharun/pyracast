@@ -1,8 +1,10 @@
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from django.db import connection
+from django.db.models import QuerySet
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import (
@@ -11,16 +13,10 @@ from pyracast.forecasts.models import (
     ForecastResult,
     ForecastSnapshot,
 )
-from pyracast.forecasts.monitoring import delivery_health
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.scheduler import PREPARATION_GRACE
-from pyracast.platform_admin.health_queries import (
-    collection_jobs_for_issue,
-    metering_jobs_for_issue,
-    notification_deliveries_for_issue,
-    regions_for_issue,
-)
+from pyracast.orchestration.delivery_health import TABLES, Window, check, delivery_health, listed
 from pyracast.regions.models import Region
 from tests.support.domain import System, make_system
 from tests.support.metering import connected
@@ -32,6 +28,10 @@ LAG = timedelta(minutes=5)
 RECENT = NOW - timedelta(days=1)
 BEFORE = timedelta(microseconds=1)
 PREPARED = {"kind": "current", "tomorrow_complete": True}
+
+
+def listed_for(issue: str, lag: timedelta = LAG) -> QuerySet[Any]:
+    return listed(check(issue), Window(NOW, lag))
 
 
 def another_region(
@@ -111,15 +111,13 @@ def test_collection_filters_match_counter_boundaries_and_find_failures_behind_ne
         "interrupted_collections": {rows["expired_lease"].pk},
         "failed_collections": {rows["failed"].pk, rows["future_failed"].pk},
     }[issue]
-    matches = collection_jobs_for_issue(issue, NOW).order_by("-id")[:20]
+    matches = listed_for(issue).order_by("-id")[:20]
     assert set(matches.values_list("pk", flat=True)) == expected
-    assert collection_jobs_for_issue(issue, NOW).count() == delivery_health(NOW, LAG)[issue]
-    baseline = collection_jobs_for_issue("unknown", NOW)
-    assert baseline.count() == len(rows) + 25
-    assert set(
-        collection_jobs_for_issue("failed_notifications", NOW).values_list("pk", flat=True)
-    ) == set(baseline.values_list("pk", flat=True))
-    assert collection_jobs_for_issue("overdue_collections", NOW, timedelta(minutes=6)).count() == 0
+    assert listed_for(issue).count() == delivery_health(NOW, LAG).counts[issue]
+    assert TABLES["collections"]().count() == len(rows) + 25
+    with pytest.raises(KeyError):
+        check("unknown")
+    assert listed_for("overdue_collections", timedelta(minutes=6)).count() == 0
 
 
 def delivery(
@@ -228,20 +226,12 @@ def test_notification_filters_match_counter_boundaries_across_schedules(
         "mail_authentication_failures": ("auth", "revoked"),
         "paused_notifications": ("over_limit", "no_recipients", "invalid"),
     }[issue]
-    assert set(
-        notification_deliveries_for_issue(issue, NOW)
-        .order_by("-id")[:20]
-        .values_list("pk", flat=True)
-    ) == {rows[name].pk for name in names}
-    assert notification_deliveries_for_issue(issue, NOW).count() == delivery_health(NOW, LAG)[issue]
-    assert notification_deliveries_for_issue("unknown", NOW).count() == len(rows) + 25
-    assert notification_deliveries_for_issue("failed_collections", NOW).count() == len(rows) + 25
-    assert (
-        notification_deliveries_for_issue(
-            "overdue_notifications", NOW, timedelta(minutes=6)
-        ).count()
-        == 0
-    )
+    assert set(listed_for(issue).order_by("-id")[:20].values_list("pk", flat=True)) == {
+        rows[name].pk for name in names
+    }
+    assert listed_for(issue).count() == delivery_health(NOW, LAG).counts[issue]
+    assert TABLES["deliveries"]().count() == len(rows) + 25
+    assert listed_for("overdue_notifications", timedelta(minutes=6)).count() == 0
 
 
 @pytest.mark.parametrize("issue", ["overdue_metering", "interrupted_metering", "failed_metering"])
@@ -290,16 +280,15 @@ def test_metering_filters_match_counter_boundaries_and_find_failures_behind_new_
         "interrupted_metering": ("expired_lease",),
         "failed_metering": ("failed", "future_failed"),
     }[issue]
-    assert set(
-        metering_jobs_for_issue(issue, NOW).order_by("-id")[:20].values_list("pk", flat=True)
-    ) == {rows[name].pk for name in names}
-    assert metering_jobs_for_issue(issue, NOW).count() == delivery_health(NOW, LAG)[issue]
-    assert metering_jobs_for_issue("unknown", NOW).count() == len(rows) + 25
-    assert metering_jobs_for_issue("failed_collections", NOW).count() == len(rows) + 25
-    assert metering_jobs_for_issue("overdue_metering", NOW, timedelta(minutes=6)).count() == 0
+    assert set(listed_for(issue).order_by("-id")[:20].values_list("pk", flat=True)) == {
+        rows[name].pk for name in names
+    }
+    assert listed_for(issue).count() == delivery_health(NOW, LAG).counts[issue]
+    assert TABLES["metering"]().count() == len(rows) + 25
+    assert listed_for("overdue_metering", timedelta(minutes=6)).count() == 0
     Region.objects.filter(pk=plant.region_id).update(deleted_at=NOW)
-    assert not metering_jobs_for_issue(issue, NOW).exists()
-    assert not metering_jobs_for_issue("unknown", NOW).exists()
+    assert not listed_for(issue).exists()
+    assert not TABLES["metering"]().exists()
 
 
 @pytest.mark.parametrize("issue", ["blocked_provider_credentials", "provider_cooldowns"])
@@ -336,25 +325,15 @@ def test_account_issue_filters_show_every_affected_region_and_exclude_inactive_a
         request_blocked_until=NOW,
     )
     healthy, _ = another_region(system, "Healthy account", account=healthy_account)
-    assert set(regions_for_issue(issue, NOW).values_list("pk", flat=True)) == {
+    assert set(listed_for(issue).values_list("pk", flat=True)) == {
         system.region.pk,
         shared.pk,
         collection_disabled.pk,
     }
-    assert delivery_health(NOW, LAG)[issue] == 1
-    expected_baseline = {
-        system.region.pk,
-        shared.pk,
-        collection_disabled.pk,
-        suspended.pk,
-        disabled.pk,
-        healthy.pk,
-    }
-    assert set(regions_for_issue("unknown", NOW).values_list("pk", flat=True)) == expected_baseline
-    assert (
-        set(regions_for_issue("failed_notifications", NOW).values_list("pk", flat=True))
-        == expected_baseline
-    )
+    assert delivery_health(NOW, LAG).counts[issue] == 1
+    candidates = {system.region.pk, shared.pk, collection_disabled.pk, healthy.pk}
+    assert set(TABLES["plants"]().values_list("pk", flat=True)) == candidates
+    assert {suspended.pk, disabled.pk, deleted.pk}.isdisjoint(candidates)
 
 
 def test_unvalidated_region_filter_matches_revision_and_collection_scope() -> None:
@@ -372,13 +351,15 @@ def test_unvalidated_region_filter_matches_revision_and_collection_scope() -> No
     pending, _ = another_region(system, "Pending")
     pending.status = "pending"
     pending.save(update_fields=["status"])
-    matches = regions_for_issue("unvalidated_provider_credentials", NOW)
+    matches = listed_for("unvalidated_provider_credentials")
     assert set(matches.values_list("pk", flat=True)) == {system.region.pk, null_validation.pk}
-    assert matches.count() == delivery_health(NOW, LAG)["unvalidated_provider_credentials"]
+    assert matches.count() == delivery_health(NOW, LAG).counts["unvalidated_provider_credentials"]
     system.account.enabled = False
     system.account.save(update_fields=["enabled"])
-    assert not regions_for_issue("unvalidated_provider_credentials", NOW).exists()
-    assert healthy.pk in regions_for_issue("unknown", NOW).values_list("pk", flat=True)
+    assert not listed_for("unvalidated_provider_credentials").exists()
+    system.account.enabled = True
+    system.account.save(update_fields=["enabled"])
+    assert healthy.pk in TABLES["plants"]().values_list("pk", flat=True)
 
 
 def saved_forecast(
@@ -418,16 +399,19 @@ def test_stale_region_filter_uses_successful_published_current_binding_forecast_
     latest_valid, binding = another_region(system, "Latest valid")
     saved_forecast(binding, NOW - timedelta(hours=25))
     saved_forecast(binding, NOW - timedelta(hours=27))
-    matches = regions_for_issue("regions_without_recent_forecasts", NOW)
+    matches = listed_for("regions_without_recent_forecasts")
     assert set(matches.values_list("pk", flat=True)) == {
-        system.region.pk,
         stale.pk,
         failed.pk,
         unpublished.pk,
         historical.pk,
     }
-    assert matches.count() == delivery_health(NOW, LAG)["regions_without_recent_forecasts"]
+    assert matches.count() == delivery_health(NOW, LAG).counts["regions_without_recent_forecasts"]
     assert not matches.filter(pk__in=[boundary.pk, latest_valid.pk]).exists()
+    CollectionJob.objects.filter(binding=system.binding).update(status="failed")
+    assert system.region.pk in listed_for("regions_without_recent_forecasts").values_list(
+        "pk", flat=True
+    )
 
 
 @pytest.mark.parametrize("recipients", [["invalid"], ["recipient@example.com", "invalid"]])
@@ -455,10 +439,10 @@ def test_invalid_recipient_filter_matches_validation_and_current_enabled_region_
         ReminderSchedule.objects.create(region=valid, effective_from=NOW, enabled=True),
         ["recipient@example.com"],
     )
-    matches = regions_for_issue("invalid_reminder_recipients", NOW)
+    matches = listed_for("invalid_reminder_recipients")
     assert set(matches.values_list("pk", flat=True)) == {system.region.pk, disabled_collection.pk}
-    assert matches.count() == delivery_health(NOW, LAG)["invalid_reminder_recipients"]
+    assert matches.count() == delivery_health(NOW, LAG).counts["invalid_reminder_recipients"]
     store(target, [])
     system.account.enabled = False
     system.account.save(update_fields=["enabled"])
-    assert not regions_for_issue("invalid_reminder_recipients", NOW).exists()
+    assert not listed_for("invalid_reminder_recipients").exists()

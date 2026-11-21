@@ -217,13 +217,13 @@ for (const electrical of [true, false]) {
             await readFile(await (await download).path(), "utf8"),
             { header: true, skipEmptyLines: true },
         );
-        expect(records.data[0]?.source_kinds).toContain("estimated_actuals");
-        expect(records.data[1]?.source_kinds).toContain("forecast");
+        expect(records.data[0]?.interval_source).toContain("estimated_actuals");
+        expect(records.data[1]?.interval_source).toContain("forecast");
         if (electrical) {
-            expect(records.data[2]?.source_kinds).toContain(
+            expect(records.data[2]?.interval_source).toContain(
                 "estimated_actuals",
             );
-            expect(records.data[2]?.source_kinds).toContain("forecast");
+            expect(records.data[2]?.interval_source).toContain("forecast");
         }
         await page.getByText("Source & quality", { exact: true }).click();
         await expect(
@@ -292,8 +292,8 @@ test("generation intervals show energy without redundant visible power columns",
     );
     expect(records.data).toHaveLength(4);
     expect(records.data[0]).toMatchObject({
-        start: "2026-11-14T09:00:00.000Z",
-        end: "2026-11-14T09:30:00.000Z",
+        starts_at: "2026-11-14T12:00:00+03:00",
+        ends_at: "2026-11-14T12:30:00+03:00",
         mean_power_mw: "2",
         energy_mwh: "1",
     });
@@ -390,10 +390,10 @@ for (const scenario of ["outage"] as const) {
             normal_energy_mwh: "2",
             affected_mean_power_mw: "1",
             affected_energy_mwh: "1",
-            normal_quality_flags: '["normal_test_flag"]',
+            normal_quality_flags: "normal_test_flag",
         });
         expect(records.data[1]?.affected_quality_flags).toBe(
-            '["affected_test_flag"]',
+            "affected_test_flag",
         );
     });
 }

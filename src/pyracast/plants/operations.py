@@ -272,7 +272,11 @@ def _save_plant_parameters(
         "surface_tilt_degrees": surface_tilt_degrees,
         "surface_azimuth_degrees": surface_azimuth_degrees,
     }
-    if region.status == RegionStatus.PENDING and plant.current_configuration_id is None:
+    # A rejected declaration is edited before the plant is resubmitted for review.
+    if (
+        region.status in (RegionStatus.PENDING, RegionStatus.REJECTED)
+        and plant.current_configuration_id is None
+    ):
         _rename(actor, plant, region, name)
         if PlantSubmission.objects.filter(plant=plant, **parameters).exists():
             return

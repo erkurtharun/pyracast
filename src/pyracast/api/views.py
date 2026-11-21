@@ -17,14 +17,18 @@ from pyracast.api.serializers import (
     ForecastQuery,
     LocationChangeInput,
     LocationChangeOutput,
+    RegionOutput,
+    ResubmitInput,
     TenantOutput,
 )
 from pyracast.change_requests.policy import workspace_counters
 from pyracast.db import read_snapshot
-from pyracast.forecasts.history import regional_outlook
+from pyracast.forecasts.outlook import regional_outlook
+from pyracast.plants.approval import resubmit_region
 from pyracast.plants.serializers import EmptyInput
 from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import request_location_change, withdraw_location_change
+from pyracast.regions.review import with_review_outcome
 
 
 def tenant_region(tenant_id: int, region_id: int) -> Region:
@@ -61,6 +65,17 @@ class RegionView(APIView):
     def delete(self, request: Request, tenant_id: int, region_id: int) -> Response:
         trash.trash_region(cast(User, request.user), tenant_id, region_id)
         return Response(status=204)
+
+
+class RegionResubmitView(APIView):
+    @extend_schema(request=ResubmitInput, responses=RegionOutput)
+    def post(self, request: Request, tenant_id: int, region_id: int) -> Response:
+        tenant_region(tenant_id, region_id)
+        data = ResubmitInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        resubmit_region(cast(User, request.user), tenant_id, region_id, **data.validated_data)
+        region = with_review_outcome(Region.objects.all()).get(pk=region_id)
+        return Response(RegionOutput(region).data)
 
 
 class LocationChangeRequestsView(GenericAPIView[RegionLocationChangeRequest]):
@@ -100,7 +115,7 @@ class LocationChangeWithdrawView(APIView):
         return Response(LocationChangeOutput(change).data)
 
 
-class ForecastView(APIView):
+class RegionForecastView(APIView):
     @extend_schema(parameters=[ForecastQuery], responses=ForecastOutput)
     def get(self, request: Request, tenant_id: int, region_id: int) -> Response:
         with read_snapshot():

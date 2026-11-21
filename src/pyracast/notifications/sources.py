@@ -6,6 +6,7 @@ from django.db.models import Q, QuerySet
 
 from pyracast.calculation import calculate
 from pyracast.forecasts.intraday import (
+    VINTAGE_SCOPE,
     PreparedIntradaySource,
     apply_intraday_source,
     prepare_intraday_source,
@@ -89,7 +90,7 @@ def saved_report_results(
                 "binding_id": delivery.binding_id,
                 "source_kind": "forecast",
             }
-            cast(dict[str, object], result["vintage"])["scope"] = "primary_forecast_source"
+            cast(dict[str, object], result["vintage"])["scope"] = VINTAGE_SCOPE
             apply_intraday_source(result, source)
             results[0] = result
     except ValueError, ArithmeticError, KeyError, TypeError:

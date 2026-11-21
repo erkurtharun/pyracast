@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { mockApi, paged, user } from "./support/workspace";
+import { answer, mockApi, paged, tenantRow, user } from "./support/workspace";
 import { nativeProductionHistory } from "./support/native-production";
 import { errorBody } from "./support/errors";
 
@@ -1144,4 +1144,39 @@ test("review cards show the period, item count and outage title", async ({
     await expect(
         cards.nth(1).locator('time[datetime="2026-11-09T08:00:00Z"]'),
     ).toHaveCount(1);
+});
+
+test("a member marks every decided request read at once", async ({ page }) => {
+    await mockApi(page);
+    let unread = 2;
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: answer(
+                "PaginatedTenantOutputList",
+                paged([
+                    tenantRow(
+                        { id: 1, name: "Sunfield Energy", role: "viewer" },
+                        { unread_outcome_count: unread },
+                    ),
+                ]),
+            ),
+        }),
+    );
+    await page.route(
+        "**/api/tenants/1/change-requests/seen/",
+        async (route) => {
+            expect(route.request().method()).toBe("POST");
+            unread = 0;
+            await route.fulfill({
+                json: answer("SeenAllOutput", { marked: 2 }),
+            });
+        },
+    );
+    await page.goto("/app/w/1/inbox/");
+
+    await page.getByRole("button", { name: "Mark all as read" }).click();
+
+    await expect(
+        page.getByRole("button", { name: "Mark all as read" }),
+    ).toHaveCount(0);
 });

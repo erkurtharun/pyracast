@@ -26,6 +26,7 @@ from pyracast.api.session import SessionView
 from pyracast.connections.contracts import ProviderError
 from pyracast.forecasts.quota import QuotaExceededError, RequestDeferredError
 from tests.support.auth_lifecycle import PASSWORD
+from tests.support.step_up import with_proof
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"])
 OPENAPI = Path(__file__).resolve().parents[1] / "web" / "openapi.json"
@@ -209,6 +210,12 @@ def forged_proxy_headers(monkeypatch: pytest.MonkeyPatch, accept: str) -> Any:
         )
 
 
+def another_session(monkeypatch: pytest.MonkeyPatch, accept: str) -> Any:
+    return Client().get(
+        "/api/tenants/", headers={"X-Session-Tag": "tag-of-another-session", **language(accept)}
+    )
+
+
 def unknown_path(monkeypatch: pytest.MonkeyPatch, accept: str) -> Any:
     return Client().get("/api/does-not-exist/", headers=language(accept))
 
@@ -254,6 +261,12 @@ CASES: dict[str, Case] = {
         "Your session ended. Sign in again.",
         "Oturumunuz sona erdi. Yeniden oturum aç\u0131n.",
         interrupted_session,
+    ),
+    "session_changed": Case(
+        409,
+        "The session changed in another tab. The page now shows the current session.",
+        "Oturum başka bir sekmede değişti. Sayfa art\u0131k geçerli oturumu gösteriyor.",
+        another_session,
     ),
     "not_authenticated": Case(
         401,
@@ -587,8 +600,8 @@ CASES: dict[str, Case] = {
     ),
     "incident_revision_changed": Case(
         409,
-        "The outage changed. Reload the list and try again.",
-        "Kesinti kayd\u0131 değişti. Listeyi yeniden yükleyip tekrar deneyin.",
+        "The outage changed. Review its current values and save again.",
+        "Kesinti kayd\u0131 değişti. Güncel değerleri inceleyip yeniden kaydedin.",
         domain("ConflictError", "incident_revision_changed"),
     ),
     "idempotency_key_reused": Case(
@@ -737,6 +750,12 @@ CASES: dict[str, Case] = {
         "de\u011ferlendirilmi\u015f bir "
         "kalibrasyon etkinle\u015ftirilebilir.",
         domain("DomainError", "calibration_not_activatable"),
+    ),
+    "review_reason_required": Case(
+        400,
+        "Enter the reason the customer will read.",
+        "Müşterinin okuyaca\u011f\u0131 gerekçeyi yaz\u0131n.",
+        domain("DomainError", "review_reason_required"),
     ),
 }
 
@@ -1119,8 +1138,12 @@ def repeated_login(accept: str) -> Any:
 
 
 def missing_authenticator(accept: str) -> Any:
+    user = User.objects.create_user(
+        username="person", email="person@example.com", password=PASSWORD
+    )
     client = Client()
-    client.force_login(User.objects.create_user(username="person", email="person@example.com"))
+    client.force_login(user)
+    with_proof(client, user, "password", age=0, reauthenticated=True)
     return client.get(f"{ALLAUTH}account/authenticators/totp", headers=language(accept))
 
 

@@ -96,12 +96,11 @@
         "setupAuthenticator": "Doğrulama uygulaması kur",
         "setupKey": "Kurulum anahtarı:",
         "activateAuthenticator": "Doğrulama uygulamasını etkinleştir",
-        "authenticatorActivated": "Doğrulama uygulaması etkinleştirildi. Kurtarma kodlarınızı saklayın.",
+        "authenticatorActivated": "Doğrulama uygulaması etkinleştirildi. Diğer cihazlarda oturum kapatıldı. Kurtarma kodlarınızı kaydedin.",
         "authenticatorCode": "Doğrulama uygulaması kodu",
-        "showRecovery": "Kurtarma kodlarını göster",
-        "codesReplaced": "Önceki kurtarma kodları artık geçersiz.",
+        "codesReplaced": "Önceki kurtarma kodları artık çalışmaz. Diğer cihazlarda oturum kapatıldı.",
         "replaceRecovery": "Kurtarma kodlarını yenile",
-        "authenticatorRemoved": "Doğrulama uygulaması kaldırıldı.",
+        "authenticatorRemoved": "Doğrulama uygulaması kaldırıldı. Diğer cihazlarda oturum kapatıldı.",
         "removeAuthenticator": "Doğrulama uygulamasını kaldır",
         "loading": "İki adımlı doğrulama ayarları yükleniyor…",
         "loadFailed": "İki adımlı doğrulama ayarları yüklenemedi.",
@@ -121,10 +120,8 @@
         "enterSixDigitCode": "Uygulamanızdaki güncel 6 haneli kodu girin.",
         "enterCode": "Bir kod girin.",
         "cancel": "Vazgeç",
-        "back": "Geri",
         "recoveryCount": "{total} kurtarma kodundan {unused} tanesi kullanılmamış.",
         "recoveryLowWarning": "Az sayıda kurtarma kodunuz kaldı. Yenilemeyi düşünebilirsiniz.",
-        "recoveryCodesTitle": "Kurtarma kodları",
         "saveRecoveryTitle": "Kurtarma kodlarınızı kaydedin",
         "recoveryShowOnceWarning": "Bu kodları şimdi kaydedin. Yalnızca bir kez gösterilir ve her biri tek kullanımlıktır.",
         "copyCodes": "Kodları kopyala",
@@ -133,7 +130,6 @@
         "codesDownloaded": "İndirme başlatıldı.",
         "acknowledgeSavedLabel": "Kodlarımı kaydettim",
         "recoverySavedAck": "Kurtarma kodları kaydedildi.",
-        "recoveryAlreadyViewed": "Kurtarma kodlarınız daha önce görüntülendi ve tekrar gösterilemez. Yeni bir set oluşturmak için kodları yenileyin.",
         "replaceConfirmTitle": "Kurtarma kodları yenilensin mi?",
         "replaceConfirmBody": "Yeni kurtarma kodları oluşturulduğunda kullanılmamış önceki tüm kodlar hemen geçersiz olur.",
         "confirmReplace": "Kodları yenile",
@@ -144,9 +140,8 @@
         "reauthPasswordTitle": "Şifrenizi onaylayın",
         "reauthMfaDescription": "Devam etmek için doğrulama uygulamanızdan bir kod veya bir kurtarma kodu girin.",
         "reauthPasswordDescription": "Devam etmek için mevcut şifrenizi girin.",
-        "nextUnusedCodeHint": "Doğrulama etkinleştirildi. Uygulamanızda yeni kod oluşmasını bekleyip buraya girin.",
         "reauthStillRequired": "Doğrulama tamamlanamadı. Lütfen tekrar deneyin.",
-        "setupUnavailable": "Kurulum bilgileri alınamadı. Lütfen tekrar deneyin.",
+        "confirmAgain": "Bu değişiklik için onayınız yeniden gerekiyor.",
         "verifying": "Doğrulanıyor…",
         "working": "İşleniyor…",
         "emailReauthTitle": "E-posta ile doğrulayın",
@@ -154,7 +149,15 @@
         "sendEmailCode": "Doğrulama kodu gönder",
         "emailReauthCode": "E-posta doğrulama kodu",
         "confirmEmailCode": "Kodu doğrula",
-        "setPassword": "Parola belirle"
+        "setPassword": "Parola belirle",
+        "enterFreshCode": "Onaylandı. Uygulamanızdaki güncel kodu girin.",
+        "generateRecovery": "Kurtarma kodları oluştur",
+        "authenticatorAdded": "{date} tarihinde eklendi.",
+        "authenticatorLastUsed": "Son kullanım: {date}.",
+        "authenticatorNotUsed": "Henüz oturum açmak için kullanılmadı.",
+        "forgotCurrentPassword": "Unuttunuz mu? Oturumu kapatıp giriş sayfasında Şifremi unuttum seçeneğini kullanın.",
+        "passwordHint": "En az {minimum} karakter.",
+        "showPasswords": "Şifreleri göster"
     },
     "Dashboard": {
         "retry": "Tekrar dene",
@@ -174,7 +177,6 @@
         "sendVerification": "Doğrulama kodu gönder",
         "sessionExpired": "Oturumunuzun süresi doldu. Tekrar giriş yapın.",
         "sessionEndingSoon": "Oturumunuz {time} saatinde sona erecek. Çalışmanızı kaydedin; yeniden oturum açmanız gerekecek.",
-        "confirmIdentity": "Kimliğinizi doğrulayıp tekrar deneyin.",
         "newEmail": "Yeni e-posta adresi",
         "verifyEmail": "Yeni e-postayı doğrula",
         "emailCode": "E-posta doğrulama kodu",
@@ -201,7 +203,16 @@
         "readOnly": "Üye · değişiklikler onay gerektirir",
         "inbox": "Gelen kutusu",
         "inboxCount": "Gelen kutusu, {count} güncelleme",
-        "workspaceUnavailable": "Bu çalışma alanı hesabınız için kullanılamıyor."
+        "workspaceUnavailable": "Bu çalışma alanı hesabınız için kullanılamıyor.",
+        "emailChangeSignsOut": "Yeni adres doğrulandığında diğer cihazlarda oturum kapatılır.",
+        "emailCodeSentTo": "{email} adresine gönderilen kodu girin. Kod 10 dakika geçerlidir.",
+        "emailCodeResent": "Yeni bir kod gönderildi.",
+        "emailCodeResendLimit": "Kod dakikada bir yeniden gönderilebilir.",
+        "sendCodeAgain": "Kodu yeniden gönder",
+        "useAnotherAddress": "Başka bir adres kullan",
+        "emailCodeExpired": "Kod artık geçerli değil. Yeni bir kod isteyin.",
+        "emailChangeCancelled": "Adres değişikliği iptal edildi.",
+        "emailChanged": "Adresiniz artık {email}."
     },
     "Common": {
         "unexpected": "Bir sorun oluştu.",
@@ -230,19 +241,20 @@
         "reference": "Referans: {reference}",
         "network": "Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.",
         "unconfirmed": "Sunucu değişikliği onaylamadı. Kaydedilip kaydedilmediğini görmek için sayfayı yenileyin.",
-        "stillSignedIn": "Oturumunuz hâlâ açık. Tekrar çıkış yapın.",
+        "sessionChanged": "Oturum başka bir sekmede değişti. Sayfa artık geçerli oturumu gösteriyor.",
         "invalidPage": "Sunucu geçersiz bir sonraki sayfa döndürdü.",
         "unexpected": "Bir sorun oluştu. Lütfen yeniden deneyin."
     },
     "ProductionCsv": {
         "size": "En fazla 2 MiB boyutunda bir CSV seçin.",
-        "header": "CSV başlığı şu olmalı: starts_at,ends_at,energy,quality,source",
+        "header": "CSV sütunları starts_at, ends_at, energy_kwh veya energy_mwh, quality ve source olmalı; timezone isteğe bağlıdır.",
         "parse": "CSV okunamadı: {reason}",
         "count": "Her seferde 1 ile 2.000 arasında kayıt aktarın.",
         "interval": "Satır {row}: 30 veya 60 dakikalık aralık için saat dilimi içeren ISO tarihleri kullanın.",
         "future": "Satır {row}: üretim aralıkları tamamlanmış olmalı.",
         "energy": "Satır {row}: enerji sıfır veya pozitif bir sayı olmalı.",
         "quality": "Satır {row}: geçerli bir veri niteliği ve kaynak (en fazla 200 karakter) girin.",
+        "mixed": "Satır {row}: bu aralık farklı veri niteliğindeki kayıtlı aralıkları birleştiriyor; bunun yerine o aralıkları kayıtlı çözünürlükte düzeltin.",
         "overlap": "CSV içinde çakışan zaman aralıkları var."
     },
     "SocialAuth": {
@@ -265,7 +277,23 @@
         "connected": "Hesap bağlandı.",
         "retry": "Tekrar dene",
         "loadError": "Bağlı hesaplar yüklenemedi.",
-        "connectAccount": "Hesap bağla"
+        "connectAccount": "Hesap bağla",
+        "signInUnavailable": "Oturum açmak için kullanılamaz",
+        "lastSignInMethod": "Tek oturum açma yönteminiz; önce bir şifre veya başka bir hesap ekleyin."
+    },
+    "Devices": {
+        "title": "Oturum açtığınız yerler",
+        "description": "Tanımadığınız bir oturumu kapatın.",
+        "loading": "Oturumlar yükleniyor…",
+        "loadFailed": "Oturumlar yüklenemedi.",
+        "retry": "Tekrar dene",
+        "thisDevice": "Bu cihaz",
+        "unknownDevice": "Bilinmeyen tarayıcı",
+        "details": "{ip} · son etkinlik {seen} · oturum açma {since}",
+        "end": "Oturumu kapat",
+        "endOne": "{device} oturumunu kapat, son etkinlik {seen}, oturum açma {since}",
+        "endOthers": "Diğer tüm oturumları kapat",
+        "endFailed": "Oturum kapatılamadı."
     },
     "Enums": {
         "RegionStatus": {
@@ -423,6 +451,45 @@
             "insufficient": "Yetersiz veri",
             "provisional": "Geçici",
             "evaluated": "Değerlendirildi"
+        },
+        "IncidentStatus": {
+            "active": "Etkin",
+            "resolved": "Çözüldü",
+            "cancelled": "İptal edildi"
+        },
+        "SelectionState": {
+            "active": "Etkin",
+            "candidate": "Aday",
+            "previous_configuration": "Önceki yapılandırma",
+            "not_ready": "Hazır değil"
+        },
+        "ActivationBlocker": {
+            "configuration_changed": "yapılandırma değişti",
+            "production_source_changed": "üretim kaynağı değişti",
+            "outage_history_changed": "kesinti geçmişi değişti",
+            "incumbent_changed": "etkin kalibrasyon değişti",
+            "calibration_not_activatable": "etkinleştirilemez"
+        },
+        "AutomationCause": {
+            "toggle": "bir çalışma alanı yöneticisi kapattı",
+            "manual_activation": "elle etkinleştirme ile değişti",
+            "reset": "kalibrasyonsuz modele dönüşle kapatıldı",
+            "configuration_revised": "santral yapılandırması değiştiği için kapatıldı",
+            "workspace_disabled": "Pyracast desteği bu çalışma alanı için kapattı"
+        },
+        "CollectionState": {
+            "collecting": "Veri toplanıyor",
+            "waiting_for_approval": "Onay bekleniyor",
+            "paused": "Duraklatıldı",
+            "provider_attention": "Sağlayıcı bekleniyor"
+        },
+        "CollectionInactiveReason": {
+            "not_approved": "Santral onaylandığında veri toplama başlar.",
+            "not_validated": "Sağlayıcı bağlantısı doğrulandığında veri toplama başlar.",
+            "binding_not_current": "Sağlayıcı bağlantısı yeniden doğrulandığında veri toplama sürer.",
+            "schedule_disabled": "Bu santral için veri toplama kapalı.",
+            "quota_too_low": "Sağlayıcı kullanım hakkı tahminlere istek bırakmıyor; yalnızca günlük geçmiş veriler toplanıyor.",
+            "provider_unavailable": "Sağlayıcı şu anda istek kabul etmiyor; veri toplama kendiliğinden sürecek."
         }
     }
 }

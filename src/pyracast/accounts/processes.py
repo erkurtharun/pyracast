@@ -240,22 +240,19 @@ def _refused[R](start: Callable[[], R]) -> R | ImmediateHttpResponse:
         return refusal
 
 
-def starting[R](
-    request: HttpRequest, start: Callable[[], R], *, persist_session: bool = False
-) -> R:
+def starting[R](request: HttpRequest, start: Callable[[], R]) -> R:
     # Every request that starts a pending process runs in one transaction from before its input
     # is validated: the lookups that identify an account lock its rows, the processes it starts
-    # are stamped from them before the commit, and their code mail leaves only with the commit.
-    # A step allauth refuses by raising still commits the work before it. With `persist_session`
-    # a stored session is saved before that commit, so the mail never names a code it lost.
+    # are stamped from them, and the session that holds them is saved before the commit. Their
+    # code mail is queued in that transaction, so it never names a code the session lost. A step
+    # allauth refuses by raising still commits the work before it.
     identified: set[Any] = set()
     token = _identified.set(identified)
     try:
         with transaction.atomic():
             outcome = _refused(start)
             stamp_started(request, identified)
-            if persist_session:
-                persist(request)
+            persist(request)
     finally:
         _identified.reset(token)
     if isinstance(outcome, ImmediateHttpResponse):
@@ -264,19 +261,13 @@ def starting[R](
 
 
 class StartingView(APIView):
-    persists_session = False
-
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         if request.method != "POST":
             return super().handle(request, *args, **kwargs)
-        return starting(
-            request,
-            lambda: super(StartingView, self).handle(request, *args, **kwargs),
-            persist_session=self.persists_session,
-        )
+        return starting(request, lambda: super(StartingView, self).handle(request, *args, **kwargs))
 
 
-def _proofs(request: HttpRequest, user: AbstractBaseUser) -> list[dict[str, Any]]:
+def live_confirmations(request: HttpRequest, user: AbstractBaseUser) -> list[dict[str, Any]]:
     # The reauthentications allauth's gates can still accept: flagged and inside the window.
     now = time.time()
     return [
@@ -315,7 +306,7 @@ def end_stale_reauthentication(request: HttpRequest) -> None:
     # Read unlocked as a request starts, so pages and the console's guard see a reauthentication
     # only while the session's record equals the account's state; the record stays.
     user = request.user
-    if not user.is_authenticated or not _proofs(request, user):
+    if not user.is_authenticated or not live_confirmations(request, user):
         return
     if request.session.get(AUTHORITY) != [user.pk, account_state(user.pk)]:
         _end(request, user)
@@ -339,11 +330,23 @@ def authorize_credential_write(request: HttpRequest) -> str:
     return state
 
 
+def renew_authority(request: HttpRequest, user_id: Any) -> None:
+    # A session's own completed write keeps its authority: its record names the state the write
+    # left, under the locks the write still holds, and its confirmations keep their window. No
+    # other session's record changes, so theirs no longer matches.
+    if not request.user.is_authenticated or request.user.pk != user_id:
+        return
+    record = [user_id, account_state(user_id)]
+    if request.session.get(AUTHORITY) != record:
+        request.session[AUTHORITY] = record
+
+
 @contextmanager
 def credential_write(request: HttpRequest) -> Iterator[str]:
-    # Yields the credential state the write was authorized under.
+    user_id = request.user.pk
     with transaction.atomic():
         yield authorize_credential_write(request)
+        renew_authority(request, user_id)
 
 
 @contextmanager

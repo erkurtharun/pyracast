@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from typing import cast
 from zoneinfo import ZoneInfo
 
@@ -9,6 +9,7 @@ from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.db import read_snapshot
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.actuals import (
     ArchivedActualSource,
     apply_archived_actual_source,
@@ -22,14 +23,22 @@ from pyracast.forecasts.history import (
     historical_irradiance,
     result_state,
 )
+from pyracast.forecasts.outlook import (
+    LIVE_MODES,
+    Policy,
+    is_source,
+    plant_days_include,
+    plant_policy,
+)
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automatic_forecast import automatic_forecast
 from pyracast.plants.current_forecast import current_forecast, saved_forecast
 from pyracast.plants.forecasting import (
-    archived_forecast,
     calibration_for_day,
     forecast_payload,
-    plant_forecast,
+    issued_forecast,
+    require_known_cutoff,
+    require_resolution,
 )
 from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration
@@ -57,19 +66,13 @@ def plant_outlook(
         plant = Plant.objects.get(pk=plant_id, region=region)
         plant.region = region
         result = _plant_outlook(
-            actor,
-            tenant_id,
             plant,
             target_date=target_date,
             resolution_minutes=resolution_minutes,
             as_of=as_of,
             source=source,
         )
-        scenario_at = (
-            datetime.fromisoformat(cast(str, result["as_of"]))
-            if source == "archived_forecast"
-            else as_of or timezone.now()
-        )
+        scenario_at = as_of or timezone.now()
         frozen = "outage_scenario" in result
         if not frozen:
             evaluated = incident_scenario(result, target_date, resolution_minutes, scenario_at)
@@ -126,14 +129,12 @@ def _declared_actuals(
 
 
 def _past_actuals(
-    actor: User,
-    tenant_id: int,
     plant: Plant,
     *,
     target_date: date,
     resolution_minutes: int,
     as_of: datetime | None,
-    source: str,
+    fallback: bool,
     now: datetime,
 ) -> dict[str, object]:
     cutoff = (as_of or now).astimezone(UTC)
@@ -159,20 +160,12 @@ def _past_actuals(
             and irradiance is not None
             and actuals_ready(actual_source.snapshot, target_date, irradiance)
         )
-    if source == "auto" and as_of is None and not ready:
-        fallback = saved_forecast(plant, target_date, resolution_minutes, now)
-        if fallback["result"] is not None:
-            return fallback
-    if actual_source is None and source == "auto" and as_of is not None:
-        return plant_forecast(
-            actor,
-            tenant_id,
-            plant.region.pk,
-            plant.pk,
-            target_date=target_date,
-            resolution_minutes=resolution_minutes,
-            as_of=cutoff,
-        )
+    if fallback and as_of is None and not ready:
+        saved = saved_forecast(plant, target_date, resolution_minutes, now)
+        if saved["result"] is not None:
+            return saved
+    if fallback and actual_source is None and as_of is not None:
+        return issued_forecast(plant, target_date, resolution_minutes, now, as_of=cutoff)
     if configuration is not None and actual_source is not None:
         with stored_data("plant", plant.pk, target_date, "estimated_actuals"):
             result = forecast_payload(
@@ -211,53 +204,45 @@ def _past_actuals(
     }
 
 
+def _outside(policy: Policy) -> ValidationError:
+    if policy in (Policy.ARCHIVED_ACTUALS, Policy.ACTUALS_THEN_SAVED_FORECAST):
+        return ValidationError(
+            gettext("Estimated actuals require a completed local day within the past year.")
+        )
+    return DomainError(ErrorCode.DATE_OUT_OF_RANGE)
+
+
 def _plant_outlook(
-    actor: User,
-    tenant_id: int,
     plant: Plant,
     *,
     target_date: date,
     resolution_minutes: int,
-    as_of: datetime | None = None,
-    source: str = "forecast",
+    as_of: datetime | None,
+    source: str,
 ) -> dict[str, object]:
-    region = plant.region
-    now = timezone.now()
-    today = now.astimezone(ZoneInfo(region.timezone)).date()
-    if source not in {"auto", "forecast", "estimated_actuals", "archived_forecast"}:
+    if not is_source(source):
         raise ValidationError(gettext("Unsupported data source."))
-    if source == "archived_forecast":
-        return archived_forecast(plant, target_date, resolution_minutes, now, as_of=as_of)
-    if source == "estimated_actuals" and target_date == today and as_of is None:
-        return current_forecast(plant, target_date, resolution_minutes, now, actuals_only=True)
-    if source == "forecast" or (source == "auto" and target_date >= today):
-        if as_of is None and target_date >= today:
-            selection = automatic_forecast if source == "auto" else current_forecast
-            return selection(plant, target_date, resolution_minutes, now)
-        return plant_forecast(
-            actor,
-            tenant_id,
-            region.pk,
-            plant.pk,
-            target_date=target_date,
-            resolution_minutes=resolution_minutes,
-            as_of=as_of,
-        )
-    if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
-        raise ValidationError(gettext("Resolution must be 30 or 60 minutes."))
-    if not today - timedelta(days=366) <= target_date < today:
-        raise ValidationError(
-            gettext("Estimated actuals require a completed local day within the past year.")
-        )
-    if as_of is not None and (as_of.utcoffset() is None or as_of > now):
-        raise ValidationError(gettext("as_of must be aware and no later than now."))
+    require_resolution(resolution_minutes)
+    now = timezone.now()
+    today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
+    policy = plant_policy(source, target_date, today, as_of=as_of is not None)
+    if not plant_days_include(policy, target_date, today):
+        raise _outside(policy)
+    require_known_cutoff(as_of, now)
+    match policy:
+        case Policy.ARCHIVE | Policy.ISSUANCE:
+            return issued_forecast(plant, target_date, resolution_minutes, now, as_of=as_of)
+        case Policy.AUTOMATIC:
+            return automatic_forecast(plant, target_date, resolution_minutes, now)
+        case Policy.LIVE | Policy.LIVE_ACTUALS:
+            return current_forecast(
+                plant, target_date, resolution_minutes, now, actuals=LIVE_MODES[policy]
+            )
     return _past_actuals(
-        actor,
-        tenant_id,
         plant,
         target_date=target_date,
         resolution_minutes=resolution_minutes,
         as_of=as_of,
-        source=source,
+        fallback=policy is Policy.ACTUALS_THEN_SAVED_FORECAST,
         now=now,
     )

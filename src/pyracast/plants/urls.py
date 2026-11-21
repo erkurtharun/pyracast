@@ -7,8 +7,8 @@ from pyracast.plants.api import (
     CalibrationAutomationView,
     CalibrationsView,
     CalibrationView,
-    ForecastView,
     PerformanceView,
+    PlantForecastView,
     PlantsView,
     PlantView,
     ProductionChangesView,
@@ -37,5 +37,5 @@ urlpatterns = [
     path("<int:plant_id>/calibrations/<int:calibration_id>/activate/", ActivateView.as_view()),
     path("<int:plant_id>/calibration/reset/", ResetView.as_view()),
     path("<int:plant_id>/calibration/automation/", CalibrationAutomationView.as_view()),
-    path("<int:plant_id>/forecast/", ForecastView.as_view()),
+    path("<int:plant_id>/forecast/", PlantForecastView.as_view()),
 ]

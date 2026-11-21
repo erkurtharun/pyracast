@@ -170,9 +170,10 @@ A write of the account's own credentials (recovery codes, authenticator, passwor
 addresses, provider identities) runs in one transaction that first
 locks the account, answers `session_ended` when the session is gone and asks for a
 confirmation by the factor the account needs now when the record differs, also before a
-password change that gives the current password. Other requests, such as console writes of
-business data, compare the record when they start, so one already past that check finishes,
-as a request of a session revoked a moment later does. Linking is
+password change that gives the current password. The session that made such a write keeps
+its record for the state it left, within its confirmation's window. Other requests, such as
+console writes of business data, compare the record when they start, so one already past that
+check finishes, as a request of a session revoked a moment later does. Linking is
 bound to the initiating user, and disconnects lock the user record to preserve a
 working login method. Provider sign-in retains Pyracast's local MFA requirements.
 
@@ -322,8 +323,15 @@ operation limits; business deadlines are checked separately after database waits
 or failed phases, overdue ready jobs, expired active leases, recent
 failed/uncertain/unavailable or incomplete tomorrow deliveries, missed delivery
 deadlines, EPİAŞ failures, credential blocks, account cooldowns, mail
-authentication failures and overdue, failed or uncertain account and invitation mail. Enabled approved regions without a successful forecast
-in 26 hours are unhealthy. Complete saved-forecast fallback remains informational.
+authentication failures, overdue, failed or uncertain account and invitation mail and
+overdue, interrupted or failed calibration runs. Enabled approved regions without a successful
+forecast in 26 hours are unhealthy unless their first collection is still open. Complete
+saved-forecast fallback, queued and running calibrations, provider requests per binding and UTC
+day and the broker's queue counts are informational. A broker that does not answer, read through
+the dispatcher's reconnecting read, fails the check: the dispatcher stops renewing its heartbeat then.
+A work queue the broker has not declared is reported missing and fails it too (nothing consumes it);
+the dispatcher's depth read declares every work queue each cycle, so this lasts only until its first
+cycle or after a queue was deleted. A missing dead-letter queue is only reported.
 This check needs a working database; monitoring
 must also treat failure to execute it as unhealthy. Run the mailer with
 `worker --queues notifications --threads 2`, separately from the default collection,
@@ -503,12 +511,15 @@ Forecast tables also offer the full local day, exposing missing edge intervals.
 Coverage notices distinguish missing source hours from values whose irradiance
 cannot be inferred; neither becomes zero or a complete daily total.
 The entry journal instead preserves available reference slots and saved/draft
-measurements. Numerical views offer UTF-8 CSV downloads containing the entire
-selected dataset, including hidden edge intervals, units and provenance. CSV cells
-preserve missingness, precision and quoting, and neutralize spreadsheet formulas
-in text fields.
+measurements. Numerical views offer UTF-8 CSV downloads with one explicit column
+list per export (`web/src/lib/exports.ts`): the plant, its time zone, plant-time
+timestamps with their offset, units in the column names and one row per interval,
+including hidden edge intervals; an empty list gives the header only. The production
+export imports again unchanged, except an aggregated interval of mixed qualities (`mixed`),
+which the import refuses: correct its intervals at the stored resolution. CSV cells preserve
+missingness, precision and quoting, and neutralize spreadsheet formulas in text fields.
 
-Route only what the customer interface calls: plant submission and listing, dated forecast retrieval and the workspace operations; provider setup, validation and approval live in the operator console. The customer DRF endpoints accept JSON bodies only. Generate OpenAPI; use explicit units, bounded date ranges and pagination. Every `/api/` failure answers one localized body, `{code, message, fields?, retry_after?, request_id?}`, whose codes are a closed vocabulary exported to OpenAPI. The adopted allauth sign-in views keep allauth's own keys and carry the same contract keys beside them, the code taken from the HTTP status and the message from allauth's first error. A CSRF failure redirects back to the app only on the provider sign-in redirect and callback routes, which a browser reaches by form navigation. User text says "outage"; `incident` stays the internal name. Approval transitions are operations, not writable status fields.
+Route only what the customer interface calls: plant submission and listing, dated forecast retrieval and the workspace operations; provider setup, validation and approval live in the operator console. The customer DRF endpoints accept JSON bodies only. Generate OpenAPI; use explicit units, bounded date ranges and pagination. Every `/api/` failure answers one localized body, `{code, message, fields?, retry_after?, request_id?}`, whose codes are a closed vocabulary exported to OpenAPI; a stale outage edit also carries `current`, the version it lost to. The adopted allauth sign-in views keep allauth's own keys and carry the same contract keys beside them, the code taken from the HTTP status and the message from allauth's first error. A CSRF failure redirects back to the app only on the provider sign-in redirect and callback routes, which a browser reaches by form navigation. User text says "outage"; `incident` stays the internal name. Approval transitions are operations, not writable status fields.
 
 Workspace administrators can move a region, with its one plant, to a tenant-scoped recycle bin; a plant is never deleted on its own. Keep data for 30 elapsed days from the first deletion; repeated deletion never extends the deadline. Normal reads and writes hide deleted regions and their children, and deletion stops collection, calibration and reminders. Restoring a region preserves approval and configuration and resumes future schedules without catch-up. Already submitted email cannot be recalled.
 
@@ -525,12 +536,17 @@ the stored session the cookie named other than by expiry (a sign-out, a password
 change); an expired session leaves its key, which names no session. So an answer
 arriving after a newer one never restores an older key, and an expiry never deletes the
 key of a later sign-in; a request whose session no longer exists answers as signed out.
-The web client treats that answer as the end of the session only after a session read
-sent after it agrees, and otherwise repeats the refused request once when that read shows
-the account the request was prepared under; a repeat refused
-again goes through the same read and is not sent a third time. A sign-out whose session
-read still shows the same account signed in is sent once more with the current key, and
-reported if the session is still signed in after it or the read shows another account.
+Each web-client request names the tag of the session it was prepared for (a random value
+issued at sign-in, kept when a confirmation renews the key, returned by `/api/session/`,
+never logged; a session that signs in no account holds the empty tag); a middleware right
+after the session's user is known refuses one for another session with 409
+`session_changed`, so it changes nothing. The client then reads the session and repeats the
+request once only when that read shows the same tag, and drops an answer that arrives after
+it adopted another session. Tabs share the last tag a session read observed in
+`localStorage`; a tab whose adopted tag differs hides its screens until it reads again. A
+read adopts its answer only if nothing changed while it ran (no session change sent by the
+tab, no newer read or adoption, no other tag observed); otherwise a read sent after the
+change answers. A read that would end a signed-in session is confirmed by a second read.
 Revoke sessions after 12 hours or 30 minutes without requests; polling of a visible
 tab counts as activity, and hidden tabs do not poll. Sessions predating the lifetime markers fail closed. A request
 whose session another session of the account ended while it ran answers 400
@@ -576,10 +592,13 @@ verification codes, go to private local process logs. Console mail in production
 an unknown backend stops startup. Email replacements require reauthentication
 and verification; a password change also needs a recent MFA reauthentication when the
 account has an authenticator, and invalidates other sessions. Customers can optionally
-enable TOTP from account settings. Enrollment renders the server-issued setup URI as a
-local QR code with a manual-key fallback. The browser keeps secrets only in component memory.
+enable TOTP from account settings: the setup secret is issued only after a confirmation, the
+first code activates the authenticator and its answer carries the recovery codes, shown once.
+Enrollment renders the server-issued setup URI as a local QR code with a manual-key fallback.
+The browser keeps secrets only in component memory.
 Removing TOTP or accessing and regenerating recovery codes requires explicit MFA
-reauthentication within five minutes, bound to a still-enrolled factor; password
+reauthentication within five minutes, bound to a still-enrolled factor (the activation code
+counts as one within the window of the confirmation that allowed it); password
 reauthentication is insufficient. Platform administrators cannot remove TOTP.
 
 Requests sharing a valid session cookie serialize through a PostgreSQL advisory

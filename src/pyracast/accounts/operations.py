@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.db import transaction
@@ -7,6 +9,7 @@ from django.utils import timezone
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authorization import authorize_workspace_admin, require_platform_admin
+from pyracast.accounts.event_mail import enqueue_role_mail
 from pyracast.accounts.models import (
     InvitationRevocation,
     Membership,
@@ -14,6 +17,7 @@ from pyracast.accounts.models import (
     UserLanguagePreference,
     WorkspaceAdminChange,
     WorkspaceInvitation,
+    WorkspaceInvitationQuerySet,
     WorkspaceMemberRemoval,
     WorkspaceRole,
 )
@@ -73,6 +77,15 @@ def remove_workspace_member(
     return True
 
 
+def invitations_closed_by_reassignment(
+    tenant_id: int, now: datetime
+) -> WorkspaceInvitationQuerySet:
+    # An expired administrator invitation closes too: no one may send it again.
+    return WorkspaceInvitation.objects.filter(
+        Q(expires_at__gt=now) | Q(role=WorkspaceRole.ADMIN), tenant_id=tenant_id
+    ).open()
+
+
 @transaction.atomic
 def reassign_workspace_admin(
     actor: User, tenant_id: int, user_id: int, *, expected_admin_id: int | None
@@ -104,16 +117,16 @@ def reassign_workspace_admin(
     membership.role = WorkspaceRole.ADMIN
     membership.save(update_fields=["role"])
     now = timezone.now()
-    # An expired administrator invitation closes too: no one may send it again.
-    WorkspaceInvitation.objects.filter(
-        Q(expires_at__gt=now) | Q(role=WorkspaceRole.ADMIN), tenant_id=tenant_id
-    ).revoke(now, InvitationRevocation.ADMINISTRATOR_CHANGED)
-    WorkspaceAdminChange.objects.create(
+    invitations_closed_by_reassignment(tenant_id, now).revoke(
+        now, InvitationRevocation.ADMINISTRATOR_CHANGED
+    )
+    change = WorkspaceAdminChange.objects.create(
         tenant_id=tenant_id,
         actor=actor,
         administrator_id=user_id,
         previous_administrator_id=current_admin_id,
     )
+    enqueue_role_mail(change, now)
     record_security_event(
         SecurityEvent.WORKSPACE_ADMIN_REASSIGNED,
         user_id=actor.pk,

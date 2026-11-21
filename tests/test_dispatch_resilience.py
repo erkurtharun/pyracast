@@ -47,6 +47,7 @@ def test_dispatch_failure_does_not_suppress_email_and_one_shot_reports_failure(
         monkeypatch.setattr(command, name, operations[name])
     operations["dispatch_collections"].return_value = PhaseOutcome()
     monkeypatch.setattr(command, "sweep_accounts", MagicMock())
+    monkeypatch.setattr(command, "warn_before_purge", MagicMock())
     operations[failed_phase].side_effect = RuntimeError("private-provider-response")
     monkeypatch.setattr(command, "logger", logging.getLogger("test.dispatch"), raising=False)
 
@@ -72,6 +73,7 @@ def test_dispatch_monitoring_failure_does_not_skip_other_phases(
     for name in (
         "purge_expired",
         "sweep_accounts",
+        "warn_before_purge",
         "purge_finished_mail",
         "publish_outbound_mail",
         "dispatch_calibrations",
@@ -95,6 +97,7 @@ def test_dispatch_loop_recovers_after_a_failed_cycle(
     for name in (
         "purge_expired",
         "sweep_accounts",
+        "warn_before_purge",
         "purge_finished_mail",
         "publish_outbound_mail",
         "dispatch_calibrations",
@@ -144,6 +147,7 @@ def test_phase_records_duration_and_published_count(
     monkeypatch.setattr(command, "dispatch_calibrations", MagicMock(return_value=1))
     monkeypatch.setattr(command, "purge_expired", MagicMock(return_value={"plants": 4}))
     monkeypatch.setattr(command, "sweep_accounts", MagicMock())
+    monkeypatch.setattr(command, "warn_before_purge", MagicMock())
     monkeypatch.setattr(command, "purge_finished_mail", MagicMock())
     monkeypatch.setattr(command, "dispatch_epias", MagicMock(return_value=0))
     call_command("dispatch")
@@ -176,6 +180,7 @@ def test_the_mail_purge_runs_beside_retention_steps_whose_items_failed(
     monkeypatch.setattr(command, "dispatch_collections", MagicMock(return_value=PhaseOutcome()))
     monkeypatch.setattr(command, "purge_expired", MagicMock(side_effect=ItemsFailedError(1)))
     monkeypatch.setattr(command, "sweep_accounts", MagicMock(side_effect=ItemsFailedError(2)))
+    monkeypatch.setattr(command, "warn_before_purge", MagicMock())
     purge_mail = MagicMock()
     monkeypatch.setattr(command, "purge_finished_mail", purge_mail)
 

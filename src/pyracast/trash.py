@@ -119,6 +119,7 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
         now = timezone.now()
         region.deleted_at = now
         region.save(update_fields=("deleted_at",))
+        # Without its earlier refusal, a job ended here is never taken for a planned skip.
         CollectionJob.objects.filter(
             binding__region=region,
             status__in=(
@@ -126,7 +127,9 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
                 CollectionJobStatus.RETRY,
                 CollectionJobStatus.RUNNING,
             ),
-        ).update(status=CollectionJobStatus.STALE, lease_token=None, lease_expires_at=None)
+        ).update(
+            status=CollectionJobStatus.STALE, last_error="", lease_token=None, lease_expires_at=None
+        )
         _cancel_calibrations([plant.pk for plant in plants], now)
         deliveries = NotificationDelivery.objects.filter(schedule__region=region)
         deliveries.filter(
@@ -168,8 +171,8 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
         now = timezone.now()
         if (blocker := restore_blocker(region, now)) is not None:
             raise DomainError(blocker)
-        region.deleted_at = None
-        region.save(update_fields=("deleted_at",))
+        region.deleted_at = region.purge_warning_sent_at = None
+        region.save(update_fields=("deleted_at", "purge_warning_sent_at"))
         CollectionSchedule.objects.get_or_create(
             region=region,
             defaults={
@@ -305,6 +308,10 @@ def _purge_region(region: Region, plants: list[Plant], budget: _Budget) -> None:
     _delete(AuditEvent.objects.filter(region=region), budget)
     _delete(RegionLocationChangeRequest.objects.filter(region=region), budget)
     _delete(Region.objects.filter(pk=region.pk), budget)
+
+
+def trashed_within_retention(now: datetime, remaining: timedelta) -> Q:
+    return Q(deleted_at__lte=now - (RETENTION - remaining), deleted_at__gt=now - RETENTION)
 
 
 def _purgeable(cutoff: datetime) -> Q:

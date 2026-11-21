@@ -4,22 +4,9 @@ import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { loadSession } from "@/lib/session-client";
 import { ApiError, displayMessage } from "@/lib/api/errors";
-import { authRequest, type AuthResult } from "@/lib/auth-api";
+import { authRequest } from "@/lib/auth-api";
 
 export type ReauthMode = "mfa" | "password" | "email";
-
-export function getReauthMode(
-    result: AuthResult<unknown>,
-    hasPassword: boolean,
-): ReauthMode {
-    return result.errors?.some(
-        (error) => error.code === "mfa_reauthentication_required",
-    )
-        ? "mfa"
-        : hasPassword
-          ? "password"
-          : "email";
-}
 
 export async function refreshExpiredSession(
     expiredMessage: string,
@@ -35,8 +22,6 @@ export function ReauthenticationForm({
     onCancel,
     disabled = false,
     autoFocus = false,
-    submitLabel,
-    label,
 }: {
     mode: ReauthMode;
     email?: string;
@@ -44,8 +29,6 @@ export function ReauthenticationForm({
     onCancel?: () => void;
     disabled?: boolean;
     autoFocus?: boolean;
-    submitLabel?: string;
-    label?: string;
 }) {
     const t = useTranslations("Security");
     const inputId = useId();
@@ -180,7 +163,7 @@ export function ReauthenticationForm({
                     <p>{t("emailReauthDescription")}</p>
                 ) : (
                     <div className="field">
-                        <label htmlFor={inputId}>{label ?? defaultLabel}</label>
+                        <label htmlFor={inputId}>{defaultLabel}</label>
                         <input
                             ref={inputRef}
                             id={inputId}
@@ -211,9 +194,7 @@ export function ReauthenticationForm({
                 )}
                 <div className="button-group">
                     <button ref={submitRef} className="button" type="submit">
-                        {submitting
-                            ? t("verifying")
-                            : (submitLabel ?? defaultSubmit)}
+                        {submitting ? t("verifying") : defaultSubmit}
                     </button>
                     {onCancel && (
                         <button

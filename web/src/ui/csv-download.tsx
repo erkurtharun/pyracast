@@ -1,40 +1,41 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { csvDocument } from "@/lib/csv";
+import { csvDocument, type CsvExport } from "@/lib/csv";
 
 export function CsvDownload({
-    filename,
-    records,
-    metadata = {},
+    build,
     label,
+    pending = false,
 }: {
-    filename: string;
-    records: Record<string, unknown>[];
-    metadata?: Record<string, unknown>;
+    build: () => CsvExport;
     label?: string;
+    pending?: boolean;
 }) {
     const t = useTranslations("CsvDownload");
+    const common = useTranslations("Common");
     return (
         <button
             type="button"
             className="button secondary"
+            disabled={pending}
             onClick={() => {
+                const file = build();
                 const url = URL.createObjectURL(
-                    new Blob([csvDocument(records, metadata)], {
+                    new Blob([csvDocument(file.header, file.rows)], {
                         type: "text/csv;charset=utf-8",
                     }),
                 );
                 const link = document.createElement("a");
                 link.href = url;
-                link.download = `${filename.replace(/[^a-zA-Z0-9_.-]/g, "-")}.csv`;
+                link.download = file.filename;
                 document.body.append(link);
                 link.click();
                 link.remove();
                 setTimeout(() => URL.revokeObjectURL(url), 1000);
             }}
         >
-            {label ?? t("download_csv")}
+            {pending ? common("working") : (label ?? t("download_csv"))}
         </button>
     );
 }

@@ -14,6 +14,7 @@ class ErrorCode(models.TextChoices):
     INVALID_REQUEST = "invalid_request"
     BAD_REQUEST = "bad_request"
     SESSION_ENDED = "session_ended"
+    SESSION_CHANGED = "session_changed"
     NOT_AUTHENTICATED = "not_authenticated"
     CSRF_FAILED = "csrf_failed"
     PERMISSION_DENIED = "permission_denied"
@@ -90,12 +91,16 @@ class ErrorCode(models.TextChoices):
     OUTAGE_HISTORY_CHANGED = "outage_history_changed"
     INCUMBENT_CHANGED = "incumbent_changed"
     CALIBRATION_NOT_ACTIVATABLE = "calibration_not_activatable"
+    REVIEW_REASON_REQUIRED = "review_reason_required"
 
 
 MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.INVALID_REQUEST: _("Check the highlighted values and try again."),
     ErrorCode.BAD_REQUEST: _("The request could not be processed."),
     ErrorCode.SESSION_ENDED: _("Your session ended. Sign in again."),
+    ErrorCode.SESSION_CHANGED: _(
+        "The session changed in another tab. The page now shows the current session."
+    ),
     ErrorCode.NOT_AUTHENTICATED: _("Sign in to continue."),
     ErrorCode.CSRF_FAILED: _("The page expired. Reload it and try again."),
     ErrorCode.PERMISSION_DENIED: _("You do not have permission for this action."),
@@ -182,7 +187,9 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.LOCATION_CHANGE_ALREADY_REVIEWED: _(
         "This location request has already been reviewed. Refresh the page."
     ),
-    ErrorCode.INCIDENT_REVISION_CHANGED: _("The outage changed. Reload the list and try again."),
+    ErrorCode.INCIDENT_REVISION_CHANGED: _(
+        "The outage changed. Review its current values and save again."
+    ),
     ErrorCode.IDEMPOTENCY_KEY_REUSED: _("Use a new request key for changed input."),
     ErrorCode.PENDING_REQUEST_LIMIT: _(
         "Resolve or withdraw pending requests before submitting more."
@@ -216,6 +223,7 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.CALIBRATION_NOT_ACTIVATABLE: _(
         "Only a completed, held-out evaluated calibration can be activated."
     ),
+    ErrorCode.REVIEW_REASON_REQUIRED: _("Enter the reason the customer will read."),
 }
 
 
@@ -231,10 +239,12 @@ class DomainError(ValidationError):
         field: str | None = None,
         status: int | None = None,
         retry_after: int | None = None,
+        details: Mapping[str, object] | None = None,
     ) -> None:
         super().__init__(MESSAGES[code] if message is None else message, code=code)
         self.code: ErrorCode = code
         self.field = field
+        self.details = details
         if status is not None:
             self.status = status
         if retry_after is not None:

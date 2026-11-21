@@ -10,10 +10,10 @@ from allauth.headless.base.response import (
     ForbiddenResponse,
 )
 from allauth.headless.base.views import APIView
-from allauth.headless.internal.restkit.response import ErrorResponse
+from allauth.headless.internal.restkit.response import APIResponse, ErrorResponse
 from allauth.headless.socialaccount.forms import RedirectToProviderForm
 from allauth.headless.socialaccount.inputs import SignupInput
-from allauth.headless.socialaccount.response import SocialAccountsResponse
+from allauth.headless.socialaccount.response import SocialAccountsResponse, _socialaccount_data
 from allauth.headless.socialaccount.views import (
     ManageProvidersView as AllauthManageProvidersView,
 )
@@ -42,8 +42,9 @@ from allauth.socialaccount.providers.oauth2.views import OAuth2Adapter, OAuth2Ca
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.sessions.backends.base import UpdateError
-from django.core.exceptions import ObjectNotUpdated, PermissionDenied
+from django.core.exceptions import ObjectNotUpdated, PermissionDenied, ValidationError
 from django.db import DatabaseError, IntegrityError, transaction
+from django.db.models import QuerySet
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -72,6 +73,7 @@ from pyracast.accounts.social import (
 )
 from pyracast.accounts.step_up import StepUpAnswers
 from pyracast.db import violated_constraint
+from pyracast.platform_admin.navigation import CONSOLE_RETURN, console_path
 
 # A provider sign-up whose identity or vouched address another account claimed meanwhile answers
 # like nothing pending.
@@ -151,6 +153,15 @@ class RedirectToProviderView(AllauthRedirectToProviderView):
         except ReauthenticationRequired:
             return refused
 
+    @staticmethod
+    def state_data(request: HttpRequest, process: str) -> dict[str, Any]:
+        # A sign-in started from a console link keeps that link, validated, with the state the
+        # session holds for the round trip; the callback's own address is never read for it.
+        if process == AuthProcess.CONNECT:
+            return {"user_id": request.user.pk}
+        target = console_path(request, request.POST.get("next"))
+        return {} if target is None else {"console_return": target}
+
     def to_provider(self, request: HttpRequest, callback: str) -> HttpResponse:
         form = RedirectToProviderForm(request.POST)
         if not form.is_valid():
@@ -163,7 +174,7 @@ class RedirectToProviderView(AllauthRedirectToProviderView):
                 request,
                 process,
                 next_url=callback,
-                data={"user_id": request.user.pk} if process == "connect" else {},
+                data=self.state_data(request, process),
                 headless=True,
             ),
         )
@@ -195,14 +206,40 @@ class RedirectToProviderView(AllauthRedirectToProviderView):
         return continuation
 
 
+def can_disconnect(account: SocialAccount, accounts: QuerySet[SocialAccount]) -> bool:
+    try:
+        get_social_adapter().validate_disconnect(account, accounts)
+    except ValidationError:
+        return False
+    return True
+
+
+class ProviderAccountsResponse(SocialAccountsResponse):
+    # Each identity says before any click whether it can be disconnected and signed in with; the
+    # disconnection itself checks again.
+    def __init__(self, request: HttpRequest, owned: QuerySet[SocialAccount]) -> None:
+        APIResponse.__init__(
+            self,
+            request,
+            data=[
+                {
+                    **_socialaccount_data(request, account),
+                    "can_disconnect": can_disconnect(account, owned),
+                    "sign_in_available": account.provider in settings.SOCIALACCOUNT_PROVIDERS,
+                }
+                for account in owned
+            ],
+        )
+
+
 class ManageProvidersView(StepUpAnswers, AllauthManageProvidersView):
     @classmethod
     def respond_provider_accounts(cls, request: HttpRequest) -> SocialAccountsResponse:
-        accounts = list(SocialAccount.objects.filter(user=cast(User, request.user)))
-        for account in accounts:
+        owned = SocialAccount.objects.filter(user=cast(User, request.user))
+        for account in owned:
             if account.provider not in settings.SOCIALACCOUNT_PROVIDERS:
                 cls.prepare_disabled_provider(request, account)
-        return SocialAccountsResponse(request, accounts)
+        return ProviderAccountsResponse(request, owned)
 
     @staticmethod
     def prepare_disabled_provider(request: HttpRequest, account: SocialAccount) -> None:
@@ -333,6 +370,9 @@ def sign_in(request: HttpRequest, login: SocialLogin) -> HttpResponseBase:
         response = login_flows.complete_login(request, login, raises=True)
     except PermissionDenied:
         return ForbiddenResponse(request)
+    target = (login.state.get("data") or {}).get("console_return")
+    if isinstance(target, str):
+        request.session[CONSOLE_RETURN] = target
     return AuthenticationResponse.from_response(request, response)
 
 

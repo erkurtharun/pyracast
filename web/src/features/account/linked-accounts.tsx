@@ -1,7 +1,7 @@
 "use client";
 import { DisplayError, displayMessage } from "@/lib/api/errors";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { ApiError } from "@/lib/api/errors";
 import {
@@ -10,24 +10,21 @@ import {
     type AuthResult,
 } from "@/lib/auth-api";
 import { addressWithout, appQuery, callbackParams } from "@/lib/routes";
+import { Tag } from "@/ui/ui";
 import {
     SocialProviderButtons,
     useSocialProviders,
 } from "@/features/auth/social-provider-buttons";
-import {
-    getReauthMode,
-    ReauthenticationForm,
-    refreshExpiredSession,
-    type ReauthMode,
-} from "./security-reauthentication";
+import { refreshExpiredSession } from "./security-reauthentication";
+import { StepUpPrompt, stepUpMode, useStepUp } from "./step-up";
 
 type ProviderAccount = {
     provider: { id: string; name: string };
     uid: string;
     display: string;
+    can_disconnect: boolean;
+    sign_in_available: boolean;
 };
-type Pending =
-    { kind: "connect" } | { kind: "disconnect"; account: ProviderAccount };
 export function LinkedAccounts({
     email,
     hasPassword,
@@ -43,11 +40,13 @@ export function LinkedAccounts({
     const [error, setError] = useState<string>();
     const [notice, setNotice] = useState<"removed" | "connected">();
     const [busy, setBusy] = useState(false);
-    const [reauth, setReauth] = useState<{
-        mode: ReauthMode;
-        pending: Pending;
-    }>();
+    const stepUp = useStepUp();
+    const { ask } = stepUp;
     const [canConnect, setCanConnect] = useState(false);
+    const allowConnection = useCallback(() => {
+        setCanConnect(true);
+        return Promise.resolve();
+    }, []);
     const [callbackError, setCallbackError] = useState(
         () =>
             typeof window !== "undefined" &&
@@ -78,12 +77,10 @@ export function LinkedAccounts({
                 if (!active) return;
                 completion.current = undefined;
                 if (result.status === 401) {
-                    if (!result.meta?.is_authenticated)
+                    const mode = stepUpMode(result);
+                    if (!mode)
                         await refreshExpiredSession(security("sessionExpired"));
-                    setReauth({
-                        mode: getReauthMode(result, hasPassword),
-                        pending: { kind: "connect" },
-                    });
+                    else ask(mode, allowConnection);
                     return;
                 }
                 setVersion((v) => v + 1);
@@ -99,7 +96,7 @@ export function LinkedAccounts({
         return () => {
             active = false;
         };
-    }, [hasPassword, security]);
+    }, [ask, allowConnection, security]);
     useEffect(() => {
         let active = true;
         authRequest<ProviderAccount[]>("account/providers", "GET")
@@ -132,21 +129,21 @@ export function LinkedAccounts({
             );
             if (result.status === 401)
                 await refreshExpiredSession(security("sessionExpired"));
-            setReauth({
-                mode: result.data?.length
+            stepUp.ask(
+                result.data?.length
                     ? "mfa"
                     : hasPassword
                       ? "password"
                       : "email",
-                pending: { kind: "connect" },
-            });
+                allowConnection,
+            );
         } catch (err) {
             setError(displayMessage(err, t("loadError")));
         } finally {
             setBusy(false);
         }
     }
-    async function disconnect(account: ProviderAccount, replay = false) {
+    async function disconnect(account: ProviderAccount) {
         setBusy(true);
         setError(undefined);
         setNotice(undefined);
@@ -156,17 +153,12 @@ export function LinkedAccounts({
                 account: account.uid,
             });
             if (result.status === 401) {
-                if (!result.meta?.is_authenticated)
+                const mode = stepUpMode(result);
+                if (!mode)
                     await refreshExpiredSession(security("sessionExpired"));
-                if (replay)
-                    throw new DisplayError(security("reauthStillRequired"));
-                setReauth({
-                    mode: getReauthMode(result, hasPassword),
-                    pending: { kind: "disconnect", account },
-                });
+                else stepUp.ask(mode, () => disconnect(account));
                 return;
             }
-            setReauth(undefined);
             setNotice("removed");
             setVersion((v) => v + 1);
         } catch (err) {
@@ -182,7 +174,7 @@ export function LinkedAccounts({
         !notice &&
         !error &&
         !callbackError &&
-        !reauth
+        !stepUp.pending
     )
         return null;
     return (
@@ -225,10 +217,20 @@ export function LinkedAccounts({
                                   : account.provider.name}
                         </strong>
                         <span className="muted">{account.display}</span>
+                        {!account.sign_in_available && (
+                            <Tag>{t("signInUnavailable")}</Tag>
+                        )}
+                        {!account.can_disconnect && (
+                            <span className="fine">
+                                {t("lastSignInMethod")}
+                            </span>
+                        )}
                     </span>
                     <button
                         className="button secondary"
-                        disabled={busy || !!reauth}
+                        disabled={
+                            busy || !!stepUp.pending || !account.can_disconnect
+                        }
                         onClick={() => void disconnect(account)}
                         aria-label={`${t("disconnect")} ${account.display}`}
                     >
@@ -236,28 +238,18 @@ export function LinkedAccounts({
                     </button>
                 </div>
             ))}
-            {reauth && (
-                <ReauthenticationForm
-                    key={reauth.mode}
-                    mode={reauth.mode}
-                    email={email}
-                    autoFocus
-                    onCancel={() => setReauth(undefined)}
-                    onVerified={async () => {
-                        if (reauth.pending.kind === "connect") {
-                            setCanConnect(true);
-                            setReauth(undefined);
-                        } else await disconnect(reauth.pending.account, true);
-                    }}
-                />
-            )}
+            <StepUpPrompt
+                stepUp={stepUp}
+                email={email}
+                onError={(message) => setError(message)}
+            />
             {canConnect ? (
                 <SocialProviderButtons
                     process="connect"
                     enabledProviders={providers}
                 />
             ) : (
-                !reauth &&
+                !stepUp.pending &&
                 providers.length > 0 && (
                     <button
                         className="button secondary"

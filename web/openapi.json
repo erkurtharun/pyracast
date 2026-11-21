@@ -937,6 +937,79 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/change-requests/seen/": {
+            "post": {
+                "operationId": "tenants_change_requests_seen_all_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SeenAllOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "description": "The request input was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Sign-in is required.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Access was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API failure.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/invitations/": {
             "get": {
                 "operationId": "tenants_invitations_retrieve",
@@ -3198,6 +3271,16 @@
                         },
                         "description": ""
                     },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IncidentConflict"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
                     "400": {
                         "description": "The request input was refused.",
                         "content": {
@@ -3831,6 +3914,16 @@
                         },
                         "description": ""
                     },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IncidentConflict"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
                     "400": {
                         "description": "The request input was refused.",
                         "content": {
@@ -3958,6 +4051,16 @@
                         },
                         "description": ""
                     },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IncidentConflict"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
                     "400": {
                         "description": "The request input was refused.",
                         "content": {
@@ -4080,6 +4183,16 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/IncidentOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IncidentConflict"
                                 }
                             }
                         },
@@ -5080,6 +5193,127 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/regions/{region_id}/resubmit/": {
+            "post": {
+                "operationId": "tenants_regions_resubmit_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ResubmitInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RegionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
+                    "400": {
+                        "description": "The request input was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Sign-in is required.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Access was refused.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "The addressed item or page does not exist.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Send the request as JSON.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests; Retry-After gives the seconds to wait.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "default": {
+                        "description": "API failure.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/sites/": {
             "get": {
                 "operationId": "tenants_sites_list",
@@ -5411,9 +5645,11 @@
                     "location_change_rebased",
                     "binding_configured",
                     "connection_validated",
+                    "connection_validation_failed",
                     "region_approved",
                     "region_rejected",
                     "region_suspended",
+                    "region_resubmitted",
                     "region_trashed",
                     "region_restored",
                     "collection_schedule_updated",
@@ -5425,7 +5661,7 @@
                     "provider_cooldown_cleared"
                 ],
                 "type": "string",
-                "description": "* `region_renamed` - Plant location renamed\n* `location_change_requested` - Location change requested\n* `location_change_approved` - Location change approved\n* `location_change_rejected` - Location change rejected\n* `location_change_withdrawn` - Location change withdrawn\n* `location_change_rebased` - Location change request moved to the new revision\n* `binding_configured` - Provider connection configured\n* `connection_validated` - Provider connection validated\n* `region_approved` - Plant approved\n* `region_rejected` - Plant rejected\n* `region_suspended` - Plant suspended\n* `region_trashed` - Plant location moved to trash\n* `region_restored` - Plant location restored\n* `collection_schedule_updated` - Collection schedule updated\n* `reminder_schedule_updated` - Email reminders updated\n* `historical_reference_imported` - Historical reference imported\n* `reference_capacity_normalized` - Reference capacity normalized\n* `provider_account_created` - Provider account created\n* `provider_secret_rotated` - Provider key rotated\n* `provider_cooldown_cleared` - Provider request pause cleared"
+                "description": "* `region_renamed` - Plant location renamed\n* `location_change_requested` - Location change requested\n* `location_change_approved` - Location change approved\n* `location_change_rejected` - Location change rejected\n* `location_change_withdrawn` - Location change withdrawn\n* `location_change_rebased` - Location change request moved to the new revision\n* `binding_configured` - Provider connection configured\n* `connection_validated` - Provider connection validated\n* `connection_validation_failed` - Provider connection validation failed\n* `region_approved` - Plant approved\n* `region_rejected` - Plant rejected\n* `region_suspended` - Plant suspended\n* `region_resubmitted` - Plant resubmitted for review\n* `region_trashed` - Plant location moved to trash\n* `region_restored` - Plant location restored\n* `collection_schedule_updated` - Collection schedule updated\n* `reminder_schedule_updated` - Email reminders updated\n* `historical_reference_imported` - Historical reference imported\n* `reference_capacity_normalized` - Reference capacity normalized\n* `provider_account_created` - Provider account created\n* `provider_secret_rotated` - Provider key rotated\n* `provider_cooldown_cleared` - Provider request pause cleared"
             },
             "AutomaticCalibrationAttemptOutput": {
                 "type": "object",
@@ -5451,6 +5687,17 @@
                 "enum": ["activated", "skipped"],
                 "type": "string",
                 "description": "* `activated` - activated\n* `skipped` - skipped"
+            },
+            "AutomationCauseEnum": {
+                "enum": [
+                    "toggle",
+                    "manual_activation",
+                    "reset",
+                    "configuration_revised",
+                    "workspace_disabled"
+                ],
+                "type": "string",
+                "description": "* `toggle` - Toggle\n* `manual_activation` - Manual Activation\n* `reset` - Reset\n* `configuration_revised` - Configuration Revised\n* `workspace_disabled` - Workspace Disabled"
             },
             "BaselineSourceKindEnum": {
                 "enum": [
@@ -5499,7 +5746,7 @@
                         "nullable": true,
                         "oneOf": [
                             {
-                                "$ref": "#/components/schemas/DisabledCauseEnum"
+                                "$ref": "#/components/schemas/AutomationCauseEnum"
                             },
                             {
                                 "$ref": "#/components/schemas/NullEnum"
@@ -6097,11 +6344,6 @@
                     "unread"
                 ]
             },
-            "CodeEnum": {
-                "enum": ["provider_hour_incomplete", "energy_exceeds_capacity"],
-                "type": "string",
-                "description": "* `provider_hour_incomplete` - provider_hour_incomplete\n* `energy_exceeds_capacity` - energy_exceeds_capacity"
-            },
             "CollectionEndpointEnum": {
                 "enum": [
                     "forecasts",
@@ -6112,6 +6354,18 @@
                 ],
                 "type": "string",
                 "description": "* `forecasts` - Forecasts\n* `estimated_actuals` - Estimated actuals\n* `historical_import` - Historical import\n* `scaled_forecasts` - Scaled forecasts\n* `scaled_estimated_actuals` - Scaled estimated actuals"
+            },
+            "CollectionInactiveReasonEnum": {
+                "enum": [
+                    "not_approved",
+                    "not_validated",
+                    "binding_not_current",
+                    "schedule_disabled",
+                    "quota_too_low",
+                    "provider_unavailable"
+                ],
+                "type": "string",
+                "description": "* `not_approved` - Not approved\n* `not_validated` - Not validated\n* `binding_not_current` - Binding not current\n* `schedule_disabled` - Schedule disabled\n* `quota_too_low` - Quota too low for forecasts\n* `provider_unavailable` - Provider unavailable"
             },
             "CollectionJobErrorEnum": {
                 "enum": [
@@ -6246,6 +6500,23 @@
                         "type": "string",
                         "format": "date-time"
                     },
+                    "state": {
+                        "$ref": "#/components/schemas/CollectionStateEnum"
+                    },
+                    "inactive_reason": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/CollectionInactiveReasonEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "requests_today": {
+                        "type": "integer"
+                    },
                     "last_success_at": {
                         "type": "string",
                         "format": "date-time",
@@ -6285,13 +6556,26 @@
                     "history_requests_reserved_per_day",
                     "history_retry_minutes",
                     "history_retry_until_local",
+                    "inactive_reason",
                     "last_success_at",
                     "max_forecast_times",
                     "next_collection_at",
                     "recent_jobs",
+                    "requests_today",
+                    "state",
                     "times",
                     "timezone"
                 ]
+            },
+            "CollectionStateEnum": {
+                "enum": [
+                    "collecting",
+                    "waiting_for_approval",
+                    "paused",
+                    "provider_attention"
+                ],
+                "type": "string",
+                "description": "* `collecting` - Collecting\n* `waiting_for_approval` - Waiting for approval\n* `paused` - Paused\n* `provider_attention` - Waiting for the provider"
             },
             "ComparisonEnum": {
                 "enum": ["archived_forecast", "historical_model"],
@@ -6573,17 +6857,6 @@
                 "type": "string",
                 "description": "* `suspected` - suspected\n* `normal` - normal\n* `insufficient` - insufficient"
             },
-            "DisabledCauseEnum": {
-                "enum": [
-                    "toggle",
-                    "manual_activation",
-                    "reset",
-                    "configuration_revised",
-                    "workspace_disabled"
-                ],
-                "type": "string",
-                "description": "* `toggle` - Toggle\n* `manual_activation` - Manual Activation\n* `reset` - Reset\n* `configuration_revised` - Configuration Revised\n* `workspace_disabled` - Workspace Disabled"
-            },
             "DispatcherPhaseEnum": {
                 "enum": [
                     "collection",
@@ -6670,8 +6943,35 @@
             "EpiasConnectionOutput": {
                 "type": "object",
                 "properties": {
+                    "state": {
+                        "$ref": "#/components/schemas/EpiasStateEnum"
+                    },
                     "connected": {
                         "type": "boolean"
+                    },
+                    "disconnected_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "health": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/EpiasHealthEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "complete_through": {
+                        "type": "string",
+                        "format": "date",
+                        "nullable": true
+                    },
+                    "failed_days": {
+                        "type": "integer"
                     },
                     "provider_plant_id": {
                         "type": "integer",
@@ -6721,17 +7021,32 @@
                 },
                 "required": [
                     "archived_days",
+                    "complete_through",
                     "connected",
+                    "disconnected_at",
                     "eic",
+                    "failed_days",
                     "first_settlement_date",
+                    "health",
                     "last_error",
                     "last_settlement_date",
                     "last_success_at",
                     "name",
                     "pending_jobs",
                     "provider_plant_id",
-                    "settlement_plant_id"
+                    "settlement_plant_id",
+                    "state"
                 ]
+            },
+            "EpiasHealthEnum": {
+                "enum": [
+                    "up_to_date",
+                    "collecting",
+                    "waiting_for_publication",
+                    "needs_attention"
+                ],
+                "type": "string",
+                "description": "* `up_to_date` - Up to date\n* `collecting` - Collecting\n* `waiting_for_publication` - Waiting for publication\n* `needs_attention` - Needs attention"
             },
             "EpiasJobErrorEnum": {
                 "enum": [
@@ -6762,6 +7077,11 @@
                 "enum": ["realtime_generation", "settlement_injection"],
                 "type": "string",
                 "description": "* `realtime_generation` - Real-time generation\n* `settlement_injection` - Settlement injection"
+            },
+            "EpiasStateEnum": {
+                "enum": ["never_connected", "connected", "disconnected"],
+                "type": "string",
+                "description": "* `never_connected` - Never connected\n* `connected` - Connected\n* `disconnected` - Disconnected"
             },
             "Error": {
                 "type": "object",
@@ -6798,6 +7118,7 @@
                     "invalid_request",
                     "bad_request",
                     "session_ended",
+                    "session_changed",
                     "not_authenticated",
                     "csrf_failed",
                     "permission_denied",
@@ -6873,10 +7194,11 @@
                     "production_source_changed",
                     "outage_history_changed",
                     "incumbent_changed",
-                    "calibration_not_activatable"
+                    "calibration_not_activatable",
+                    "review_reason_required"
                 ],
                 "type": "string",
-                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `request_too_large` - Request Too Large\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `production_implausible` - Production Implausible\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed\n* `reminder_time_required` - Reminder Time Required\n* `duplicate_reminder_times` - Duplicate Reminder Times\n* `too_many_reminder_times` - Too Many Reminder Times\n* `recipient_required` - Recipient Required\n* `duplicate_recipients` - Duplicate Recipients\n* `recipient_limit_exceeded` - Recipient Limit Exceeded\n* `reminder_schedule_changed` - Reminder Schedule Changed\n* `plant_not_approved` - Plant Not Approved\n* `provider_account_unavailable` - Provider Account Unavailable\n* `configuration_changed` - Configuration Changed\n* `production_source_changed` - Production Source Changed\n* `outage_history_changed` - Outage History Changed\n* `incumbent_changed` - Incumbent Changed\n* `calibration_not_activatable` - Calibration Not Activatable"
+                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `session_changed` - Session Changed\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `request_too_large` - Request Too Large\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `production_implausible` - Production Implausible\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed\n* `reminder_time_required` - Reminder Time Required\n* `duplicate_reminder_times` - Duplicate Reminder Times\n* `too_many_reminder_times` - Too Many Reminder Times\n* `recipient_required` - Recipient Required\n* `duplicate_recipients` - Duplicate Recipients\n* `recipient_limit_exceeded` - Recipient Limit Exceeded\n* `reminder_schedule_changed` - Reminder Schedule Changed\n* `plant_not_approved` - Plant Not Approved\n* `provider_account_unavailable` - Provider Account Unavailable\n* `configuration_changed` - Configuration Changed\n* `production_source_changed` - Production Source Changed\n* `outage_history_changed` - Outage History Changed\n* `incumbent_changed` - Incumbent Changed\n* `calibration_not_activatable` - Calibration Not Activatable\n* `review_reason_required` - Review Reason Required"
             },
             "EvidenceStateEnum": {
                 "enum": ["current", "stale"],
@@ -7115,6 +7437,21 @@
                     "values"
                 ]
             },
+            "IncidentConflict": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "$ref": "#/components/schemas/ErrorCode"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "current": {
+                        "$ref": "#/components/schemas/IncidentOutput"
+                    }
+                },
+                "required": ["code", "current", "message"]
+            },
             "IncidentInput": {
                 "type": "object",
                 "properties": {
@@ -7225,7 +7562,11 @@
                         "type": "integer"
                     },
                     "status": {
-                        "type": "string",
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/IncidentStatusEnum"
+                            }
+                        ],
                         "readOnly": true
                     },
                     "created_at": {
@@ -7288,6 +7629,11 @@
                     }
                 },
                 "required": ["action", "idempotency_key"]
+            },
+            "IncidentStatusEnum": {
+                "enum": ["active", "resolved", "cancelled"],
+                "type": "string",
+                "description": "* `active` - Active\n* `resolved` - Resolved\n* `cancelled` - Cancelled"
             },
             "IncidentUpdate": {
                 "type": "object",
@@ -9652,7 +9998,7 @@
                 "type": "object",
                 "properties": {
                     "code": {
-                        "$ref": "#/components/schemas/CodeEnum"
+                        "$ref": "#/components/schemas/ProductionPreviewWarningOutputCodeEnum"
                     },
                     "starts_at": {
                         "type": "string",
@@ -9664,6 +10010,11 @@
                     }
                 },
                 "required": ["code", "ends_at", "starts_at"]
+            },
+            "ProductionPreviewWarningOutputCodeEnum": {
+                "enum": ["provider_hour_incomplete", "energy_exceeds_capacity"],
+                "type": "string",
+                "description": "* `provider_hour_incomplete` - provider_hour_incomplete\n* `energy_exceeds_capacity` - energy_exceeds_capacity"
             },
             "ProductionProviderOutput": {
                 "type": "object",
@@ -9832,6 +10183,7 @@
             },
             "RegionOutput": {
                 "type": "object",
+                "description": "Reads `regions.review.with_review_outcome` annotations.",
                 "properties": {
                     "id": {
                         "type": "integer",
@@ -9866,6 +10218,17 @@
                             }
                         ],
                         "readOnly": true
+                    },
+                    "reviewed_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "review_reason": {
+                        "type": "string",
+                        "readOnly": true,
+                        "nullable": true
                     }
                 },
                 "required": [
@@ -9873,6 +10236,8 @@
                     "latitude",
                     "longitude",
                     "name",
+                    "review_reason",
+                    "reviewed_at",
                     "revision",
                     "status",
                     "timezone"
@@ -10209,6 +10574,16 @@
                 "type": "string",
                 "description": "* `trash_retention_expired` - Trash Retention Expired\n* `location_already_exists` - Location Already Exists"
             },
+            "ResubmitInput": {
+                "type": "object",
+                "properties": {
+                    "expected_revision": {
+                        "type": "integer",
+                        "minimum": 1
+                    }
+                },
+                "required": ["expected_revision"]
+            },
             "RevisionInput": {
                 "type": "object",
                 "properties": {
@@ -10218,6 +10593,15 @@
                     }
                 },
                 "required": ["expected_revision"]
+            },
+            "SeenAllOutput": {
+                "type": "object",
+                "properties": {
+                    "marked": {
+                        "type": "integer"
+                    }
+                },
+                "required": ["marked"]
             },
             "SelectionStateEnum": {
                 "enum": [
@@ -10250,9 +10634,19 @@
                         "type": "string",
                         "format": "date-time",
                         "nullable": true
+                    },
+                    "session_tag": {
+                        "type": "string",
+                        "nullable": true
                     }
                 },
-                "required": ["csrf_token", "expires_at", "language", "user"]
+                "required": [
+                    "csrf_token",
+                    "expires_at",
+                    "language",
+                    "session_tag",
+                    "user"
+                ]
             },
             "SessionUserOutput": {
                 "type": "object",
@@ -10418,6 +10812,17 @@
                         ],
                         "readOnly": true
                     },
+                    "reviewed_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "review_reason": {
+                        "type": "string",
+                        "readOnly": true,
+                        "nullable": true
+                    },
                     "plant": {
                         "allOf": [
                             {
@@ -10444,6 +10849,8 @@
                     "name",
                     "plant",
                     "reminder",
+                    "review_reason",
+                    "reviewed_at",
                     "revision",
                     "status",
                     "timezone"

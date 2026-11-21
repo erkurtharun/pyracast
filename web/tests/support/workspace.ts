@@ -34,6 +34,8 @@ export const region: Schemas["RegionOutput"] = {
     timezone: "Europe/Istanbul",
     revision: 1,
     status: "approved",
+    reviewed_at: "2026-01-01T09:00:00Z",
+    review_reason: null,
 };
 export const plant = {
     id: 21,
@@ -64,6 +66,15 @@ export const invitationPreview: Schemas["InvitationPreviewOutput"] = {
     inviter: "owner@example.test",
     email: user.email,
     expires_at: "2026-12-01T00:00:00Z",
+};
+export const signedInSession = {
+    id: 1,
+    ip: "203.0.113.7",
+    user_agent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+    created_at: 1767225600,
+    last_seen_at: 1767229200,
+    is_current: true,
 };
 export const paged = <T>(results: T[]) => ({
     results,
@@ -110,6 +121,13 @@ export async function mockApi(
             data = { status: 200, data: [] };
         } else if (path === "/api/auth/browser/v1/account/authenticators") {
             data = { status: 200, data: admin ? [{ type: "totp" }] : [] };
+        } else if (path === "/api/auth/browser/v1/account/email") {
+            data = {
+                status: 200,
+                data: [{ email: user.email, primary: true, verified: true }],
+            };
+        } else if (path === "/api/auth/browser/v1/auth/sessions") {
+            data = { status: 200, data: [signedInSession] };
         } else if (path === "/api/session/") {
             data = answer("SessionOutput", {
                 user: signedIn
@@ -241,8 +259,11 @@ export async function mockApi(
             data = answer("CalibrationAutomationOutput", {
                 enabled: automationEnabled,
                 authorized: automationEnabled,
-                configuration_id: automationEnabled ? 31 : null,
+                configuration_id: 31,
+                configuration_current: true,
                 next_check_at: null,
+                disabled_cause: null,
+                current_calibration: null,
                 last_attempt: null,
             });
         } else if (path.endsWith("/calibrations/"))

@@ -1,13 +1,12 @@
 "use client";
 import { useTranslations } from "next-intl";
-import type { TwoFactorView } from "./model";
 
 export function LoadError({
-    view,
+    message,
     busy,
     onRetry,
 }: {
-    view: Extract<TwoFactorView, { kind: "loadError" }>;
+    message?: string;
     busy: boolean;
     onRetry: () => void;
 }) {
@@ -15,11 +14,7 @@ export function LoadError({
     return (
         <div>
             <div className="notice error" role="alert">
-                {view.reason === "sessionExpired"
-                    ? t("sessionExpired")
-                    : view.reason === "identityRequired"
-                      ? t("confirmIdentityFirst")
-                      : view.message || t("loadFailed")}
+                {message || t("loadFailed")}
             </div>
             <button
                 className="button secondary"

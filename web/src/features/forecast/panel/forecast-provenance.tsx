@@ -6,19 +6,11 @@ import type { Forecast } from "@/lib/api";
 import { JsonDetails, Tag } from "@/ui/ui";
 import { useFlagLabel } from "./format";
 import {
+    dayEnergy,
     hasFlag,
-    type DaylightSummary,
     type ForecastResult,
     type ProductionDiagnostic,
 } from "./model";
-
-type Provenance = {
-    source_snapshots?: {
-        snapshot_id: number;
-        collected_at: string;
-        source_kind?: string;
-    }[];
-};
 
 export function ForecastProvenance({
     forecast,
@@ -41,11 +33,7 @@ export function ForecastProvenance({
     const diagnosticDays = diagnostic?.days.map((day) => day.day).sort() ?? [];
     const [firstDay] = diagnosticDays;
     const lastDay = diagnosticDays.at(-1);
-    const daylight = result.daylight as DaylightSummary | undefined;
-    const energyField = electrical ? "energy_mwh" : "energy_kwh_m2";
-    const partialEnergyField = electrical
-        ? "partial_energy_mwh"
-        : "partial_energy_kwh_m2";
+    const daylight = result.daylight;
     const dayHours =
         typeof result.start === "string" && typeof result.end === "string"
             ? (Date.parse(result.end) - Date.parse(result.start)) / 3_600_000
@@ -54,7 +42,7 @@ export function ForecastProvenance({
         typeof result.coverage_fraction === "number"
             ? result.coverage_fraction * dayHours
             : Number.NaN;
-    const provenance = result.provenance as Provenance | undefined;
+    const provenance = result.provenance;
     return (
         <details className="provenance">
             <summary>{t("source_quality")}</summary>
@@ -108,7 +96,7 @@ export function ForecastProvenance({
                 <p>
                     {t("irradiance_coverage", {
                         percent: number(
-                            daylight.coverage_fraction === null
+                            daylight.coverage_fraction == null
                                 ? null
                                 : daylight.coverage_fraction * 100,
                         ),
@@ -140,23 +128,24 @@ export function ForecastProvenance({
                             result.complete !== true &&
                                 result.coverage_fraction === 0
                                 ? undefined
-                                : result[
-                                      result.complete === true
-                                          ? energyField
-                                          : partialEnergyField
-                                  ],
+                                : dayEnergy(
+                                      result,
+                                      electrical,
+                                      result.complete !== true,
+                                  ),
                         ),
                         unit: electrical ? "MWh" : "kWh/m²",
                     },
                 )}
             </p>
-            {!electrical && typeof result.coverage_seconds === "number" && (
-                <p>
-                    {t("received_intervals", {
-                        hours: number(result.coverage_seconds / 3600),
-                    })}
-                </p>
-            )}
+            {"coverage_seconds" in result &&
+                typeof result.coverage_seconds === "number" && (
+                    <p>
+                        {t("received_intervals", {
+                            hours: number(result.coverage_seconds / 3600),
+                        })}
+                    </p>
+                )}
             {!electrical && hasFlag(result, "ambiguous_zero_power") && (
                 <p>
                     {t("zero_pv_output_cannot_uniquely_determine_irradiance")}
@@ -227,7 +216,7 @@ export function ForecastProvenance({
                 )}
             <JsonDetails
                 data={{
-                    vintage: result.vintage,
+                    vintage: "vintage" in result ? result.vintage : undefined,
                     provenance: result.provenance,
                     configuration: result.configuration,
                     daylight: result.daylight,

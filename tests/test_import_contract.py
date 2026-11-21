@@ -28,7 +28,7 @@ LAYERS: tuple[tuple[str, ...], ...] = (
     ("plants",),
     ("incidents", "metering"),
     ("change_requests", "notifications"),
-    ("trash",),
+    ("trash", "purge_warning"),
     ("orchestration",),
     ("http",),
     ("platform_admin",),
@@ -47,7 +47,6 @@ HTTP_MODULES = (
     "proxy",
 )
 PROJECT_MODULES = {"settings", "urls", "wsgi", "cli", "production"}
-ORCHESTRATION_MODULES = {"forecasts.monitoring"}
 
 # Each entry is an import against the layer order that is not resolved yet, with its reason.
 BACK_EDGES: dict[tuple[str, str], str] = {
@@ -60,6 +59,11 @@ BACK_EDGES: dict[tuple[str, str], str] = {
         "plants.automation",
     ): "member removal and administrator change call notifications and plants explicitly",
     ("accounts.session_lock", "api.errors"): "the busy-session answer reuses the API error body",
+    ("accounts.session_tag", "api.errors"): "the changed-session answer reuses the API error body",
+    (
+        "accounts.social_views",
+        "platform_admin.navigation",
+    ): "a provider sign-in keeps a console return checked by the console's own validator",
     (
         "accounts.stored_secrets",
         "connections.contracts",
@@ -150,7 +154,7 @@ def _layer(module: str) -> str:
         return "project"
     if parts[0] == "platform_admin":
         return "platform_admin"
-    if module in ORCHESTRATION_MODULES or ".management.commands." in module:
+    if ".management.commands." in module:
         return "orchestration"
     if parts[0] == "api" or parts[-1] in HTTP_MODULES or parts[-1].endswith(("_api", "_views")):
         return "http"

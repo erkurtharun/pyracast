@@ -1,39 +1,50 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.core.paginator import Paginator
-from django.db.models import Count, OuterRef, Q, QuerySet, Subquery
+from django.db.models import Count, OuterRef, Q, QuerySet, Subquery, TextChoices
+from django.db.models.fields.json import KT
 from django.db.models.functions import Coalesce
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import (
     CollectionEndpoint,
+    CollectionJobError,
     CollectionJobStatus,
-    DispatcherPhase,
-    DispatcherStatus,
     ForecastSnapshot,
     SnapshotSourceKind,
 )
-from pyracast.forecasts.monitoring import delivery_health
 from pyracast.metering.models import EpiasJobError, EpiasJobStatus
-from pyracast.notifications.models import PreparedMessageKind
+from pyracast.notifications.models import (
+    NotificationDeliveryError,
+    NotificationDeliveryStatus,
+    PreparedMessageKind,
+)
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.recipients import delivery_addresses
-from pyracast.plants.models import Plant
-from pyracast.platform_admin.forms import ReviewDecisionForm, WorkspaceSettingsForm
-from pyracast.platform_admin.health import summarize_health
-from pyracast.platform_admin.health_queries import (
-    collection_jobs_for_issue,
-    metering_jobs_for_issue,
-    notification_deliveries_for_issue,
-    regions_for_issue,
+from pyracast.orchestration.delivery_health import (
+    DISPATCH_LAG,
+    TABLES,
+    BindingRequests,
+    Check,
+    Scope,
+    Window,
+    check,
+    delivery_health,
+    listed,
+    read_broker,
 )
+from pyracast.plants.models import CalibrationError, CalibrationStatus, Plant
+from pyracast.platform_admin.forms import ReviewDecisionForm, WorkspaceSettingsForm
+from pyracast.platform_admin.health import PRESENTATION, presented, summarize_health
+from pyracast.platform_admin.records import region_records
 from pyracast.regions.models import (
     AuditAction,
     AuditEvent,
@@ -43,6 +54,7 @@ from pyracast.regions.models import (
     RegionStatus,
     active_region,
 )
+from pyracast.regions.review import REVIEW_DECISIONS
 
 if TYPE_CHECKING:
     from django_stubs_ext import StrOrPromise, WithAnnotations
@@ -64,6 +76,35 @@ class PlantSummary:
     connection: str
     last_collected_at: datetime | None
     review_url: str
+    issue_reason: str = ""
+    issue_time: datetime | None = None
+
+
+PLANT_SCOPES: frozenset[Scope] = frozenset({"plants"})
+OPERATION_SCOPES: frozenset[Scope] = frozenset(
+    {"collections", "deliveries", "metering", "calibrations"}
+)
+LISTED_BECAUSE = {
+    "invalid_reminder_recipients": gettext_lazy(
+        "A saved reminder recipient is not a valid address."
+    ),
+    "unvalidated_provider_credentials": gettext_lazy(
+        "The provider key changed and the connection is not validated."
+    ),
+    "blocked_provider_credentials": gettext_lazy("The provider rejected the current key."),
+    "provider_cooldowns": gettext_lazy("Provider delay until"),
+}
+
+
+def error_label(vocabulary: type[TextChoices], code: str) -> StrOrPromise:
+    return vocabulary(code).label if code else ""
+
+
+def own_check(issue: str, scopes: frozenset[Scope]) -> Check | None:
+    """The console check a page filters by; a page ignores the other pages' keys."""
+    if issue not in PRESENTATION or (selected := check(issue)).scope not in scopes:
+        return None
+    return selected
 
 
 class WorkspaceAnnotations(TypedDict):
@@ -120,7 +161,22 @@ def workspace_regions() -> QuerySet[WithAnnotations[Region, WorkspaceAnnotations
     )
 
 
-def summarize_plant(region: WithAnnotations[Region, WorkspaceAnnotations]) -> PlantSummary:
+def listed_because(
+    issue: str, region: WithAnnotations[Region, WorkspaceAnnotations]
+) -> tuple[str, datetime | None]:
+    if issue == "regions_without_recent_forecasts":
+        if region.workspace_last_collected_at is None:
+            return _("No forecast saved yet"), None
+        return _("Last forecast"), region.workspace_last_collected_at
+    if issue == "provider_cooldowns":
+        return str(LISTED_BECAUSE[issue]), region.workspace_request_blocked_until
+    return str(LISTED_BECAUSE[issue]), None
+
+
+def summarize_plant(
+    region: WithAnnotations[Region, WorkspaceAnnotations], issue: str = ""
+) -> PlantSummary:
+    issue_reason, issue_time = listed_because(issue, region) if issue else ("", None)
     connection = "Healthy"
     if region.workspace_binding_id is None:
         connection = "Not configured"
@@ -156,18 +212,25 @@ def summarize_plant(region: WithAnnotations[Region, WorkspaceAnnotations]) -> Pl
         connection=connection,
         last_collected_at=region.workspace_last_collected_at,
         review_url=reverse("admin:workspace_plant", args=(region.pk,)),
+        issue_reason=issue_reason,
+        issue_time=issue_time,
     )
 
 
-def plant_list_context(query: str, status: str, page: str, issue: str = "") -> dict[str, Any]:
+def plant_list_context(
+    query: str, status: str, page: str, issue: str = "", *, location_change: str = ""
+) -> dict[str, Any]:
     regions = workspace_regions()
-    health_filter = None
-    if issue:
-        now = timezone.now()
-        summary = summarize_health(delivery_health(now, timedelta(minutes=5)))
-        health_filter = next((check for check in summary.checks if check.key == issue), None)
-        if health_filter:
-            regions = regions.filter(pk__in=regions_for_issue(issue, now).values("pk"))
+    if location_change == LocationChangeStatus.PENDING:
+        regions = regions.filter(
+            regionlocationchangerequest__status=LocationChangeStatus.PENDING
+        ).distinct()
+    else:
+        location_change = ""
+    selected = own_check(issue, PLANT_SCOPES)
+    if selected is not None:
+        window = Window(timezone.now(), DISPATCH_LAG)
+        regions = regions.filter(pk__in=listed(selected, window).values("pk"))
     if query:
         regions = regions.filter(
             Q(name__icontains=query)
@@ -179,19 +242,21 @@ def plant_list_context(query: str, status: str, page: str, issue: str = "") -> d
     else:
         status = ""
     page_obj = Paginator(regions, 20).get_page(page)
+    issue = selected.key if selected else ""
     return {
-        "plants": [summarize_plant(region) for region in page_obj],
+        "plants": [summarize_plant(region, issue) for region in page_obj],
         "page_obj": page_obj,
         "q": query,
         "status": status,
         "status_choices": RegionStatus.choices,
-        "health_filter": health_filter,
+        "health_filter": presented(issue, page_obj.paginator.count) if selected else None,
+        "location_change": location_change,
     }
 
 
 def overview_context() -> dict[str, Any]:
     regions = workspace_regions()
-    health = delivery_health(timezone.now(), timedelta(minutes=5))
+    health = delivery_health(timezone.now())
     counts = dict.fromkeys(RegionStatus.values, 0)
     counts.update(
         {
@@ -199,7 +264,9 @@ def overview_context() -> dict[str, Any]:
             for row in regions.values("status").annotate(count=Count("pk")).order_by()
         }
     )
-    counts["total"] = sum(counts.values())
+    counts["needs_attention"] = sum(
+        summarize_plant(region).connection == "Needs attention" for region in regions
+    )
     counts["location_changes"] = RegionLocationChangeRequest.objects.filter(
         active_region("region__"), status=LocationChangeStatus.PENDING
     ).count()
@@ -234,13 +301,20 @@ def overview_context() -> dict[str, Any]:
 def recent_activity_context(
     region_id: int | None = None, *, limit: int = 5
 ) -> list[dict[str, Any]]:
-    events = AuditEvent.objects.filter(active_region("region__"), region__isnull=False)
+    """Events of live plants and, on the overview, of provider accounts."""
+    events = AuditEvent.objects.filter(
+        Q(active_region("region__"), region__isnull=False) | Q(provider_account__isnull=False)
+    )
     if region_id is not None:
         events = events.filter(region_id=region_id)
     return [
         {**row, "action_label": str(AuditAction(row["action"]).label)}
         for row in events.order_by("-created_at", "-pk").values(
-            "action", "created_at", "region__name", "actor__username"
+            "action",
+            "created_at",
+            "region__name",
+            "provider_account__external_account_id",
+            "actor__username",
         )[:limit]
     ]
 
@@ -252,8 +326,15 @@ def recent_work_context(
     issue: str = "",
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    now = now or timezone.now()
-    collection_rows = collection_jobs_for_issue(issue, now).annotate(
+    window = Window(now or timezone.now(), DISPATCH_LAG)
+    selected = own_check(issue, OPERATION_SCOPES)
+
+    def rows(scope: Scope) -> QuerySet[Any]:
+        if selected is not None and selected.scope == scope:
+            return listed(selected, window)
+        return TABLES[scope]()
+
+    collection_rows = rows("collections").annotate(
         display_plant_name=Coalesce(
             Subquery(
                 Plant.objects.filter(region_id=OuterRef("binding__region_id"))
@@ -263,7 +344,7 @@ def recent_work_context(
             "binding__region__name",
         )
     )
-    delivery_rows = notification_deliveries_for_issue(issue, now).annotate(
+    delivery_rows = rows("deliveries").annotate(
         display_plant_name=Coalesce(
             Subquery(
                 Plant.objects.filter(region_id=OuterRef("schedule__region_id"))
@@ -273,11 +354,13 @@ def recent_work_context(
             "schedule__region__name",
         )
     )
-    metering_rows = metering_jobs_for_issue(issue, now)
+    metering_rows = rows("metering")
+    calibration_rows = rows("calibrations")
     if region_id is not None:
         collection_rows = collection_rows.filter(binding__region_id=region_id)
         delivery_rows = delivery_rows.filter(schedule__region_id=region_id)
         metering_rows = metering_rows.filter(plant__region_id=region_id)
+        calibration_rows = calibration_rows.filter(plant__region_id=region_id)
     collections = [
         {
             "id": row.pk,
@@ -288,10 +371,10 @@ def recent_work_context(
             if row.endpoint == CollectionEndpoint.FORECASTS
             else _("Past estimates"),
             "target_date": row.target_date,
-            "status_label": row.status.replace("_", " ").capitalize(),
+            "status_label": CollectionJobStatus(row.status).label,
             "scheduled_for": row.scheduled_for,
             "last_error": row.last_error,
-            "error_label": row.last_error.replace("_", " ").capitalize(),
+            "error_label": error_label(CollectionJobError, row.last_error),
             "attempts": row.attempts,
             "review_url": reverse("admin:workspace_plant", args=(row.binding.region_id,)),
         }
@@ -309,11 +392,11 @@ def recent_work_context(
             "status_label": {
                 "sent": _("Accepted by email service"),
                 "uncertain": _("Acceptance unknown"),
-            }.get(row.status, row.status.replace("_", " ").capitalize()),
+            }.get(row.status, NotificationDeliveryStatus(row.status).label),
             "scheduled_for": row.scheduled_for,
             "sent_at": row.sent_at,
             "last_error": row.last_error,
-            "error_label": row.last_error.replace("_", " ").capitalize(),
+            "error_label": error_label(NotificationDeliveryError, row.last_error),
             "attempts": row.attempts,
             "review_url": reverse("admin:workspace_plant", args=(row.schedule.region_id,)),
             "forecast_status": (
@@ -346,13 +429,13 @@ def recent_work_context(
             "status_label": (
                 _("Waiting for provider publication")
                 if row.status == EpiasJobStatus.AWAITING_PUBLICATION
-                else row.status.replace("_", " ").capitalize()
+                else EpiasJobStatus(row.status).label
             ),
             "error_label": (
                 ""
                 if row.status == EpiasJobStatus.AWAITING_PUBLICATION
                 and row.last_error == EpiasJobError.UNPUBLISHED_DATA
-                else row.last_error.replace("_", " ").capitalize()
+                else error_label(EpiasJobError, row.last_error)
             ),
             "review_url": reverse("admin:workspace_plant", args=(row.plant.region_id,))
             + "#epias-title",
@@ -361,39 +444,109 @@ def recent_work_context(
             "-scheduled_for", "-pk"
         )[:limit]
     ]
-    return {"collections": collections, "deliveries": deliveries, "metering": metering}
+    calibrations = [
+        {
+            "id": run.pk,
+            "plant_name": run.plant.name,
+            "company": run.plant.region.tenant.name,
+            "window_start": run.window_start,
+            "window_end": run.window_end,
+            "created_at": run.created_at,
+            "status": run.status,
+            "status_label": CalibrationStatus(run.status).label,
+            "attempts": run.attempts,
+            "error_label": error_label(CalibrationError, run.last_error),
+            "review_url": reverse("admin:workspace_plant", args=(run.plant.region_id,)),
+        }
+        for run in calibration_rows.select_related("plant__region__tenant").order_by(
+            "-created_at", "-pk"
+        )[:limit]
+    ]
+    return {
+        "collections": collections,
+        "deliveries": deliveries,
+        "metering": metering,
+        "calibrations": calibrations,
+    }
+
+
+def provider_request_rows(requests: tuple[BindingRequests, ...]) -> list[dict[str, Any]]:
+    names = dict(
+        SiteBinding.objects.filter(pk__in=[item.binding_id for item in requests])
+        .annotate(
+            display_plant_name=Coalesce(
+                Subquery(
+                    Plant.objects.filter(region_id=OuterRef("region_id"))
+                    .order_by("pk")
+                    .values("name")[:1]
+                ),
+                "region__name",
+            )
+        )
+        .values_list("pk", "display_plant_name")
+    )
+    return [
+        {"plant_name": names[item.binding_id], "today": item.today, "busiest_day": item.busiest_day}
+        for item in requests
+    ]
 
 
 def operations_context(issue: str = "") -> dict[str, Any]:
     now = timezone.now()
-    health = delivery_health(now, timedelta(minutes=5))
+    health = delivery_health(now, broker=read_broker())
     summary = summarize_health(health)
-    selected = next((check for check in summary.checks if check.key == issue), None)
-    issue = selected.key if selected else ""
-    section = selected.action_url.rsplit("#", 1)[-1] if selected else ""
-    phases = {row.phase: row for row in DispatcherStatus.objects.all()}
-    unhealthy_phases = cast(list[str], health["unhealthy_dispatch_phases"])
+    selected = own_check(issue, OPERATION_SCOPES)
+    dispatch = (
+        next((item for item in summary.checks if item.key == "dispatch"), None)
+        if issue == "dispatch"
+        else None
+    )
+    section = selected.scope if selected else "dispatch" if dispatch else ""
     return {
         "health": health,
         "health_summary": summary,
-        "health_checks": summary.checks,
-        "health_filter": selected,
-        "show_collections": not issue or section == "collections-title",
-        "show_deliveries": not issue or section == "deliveries-title",
-        "show_metering": not issue or section == "metering-title",
-        "show_dispatch": not issue or section == "dispatch-title",
+        "health_filter": presented(issue, health.counts[issue]) if selected else dispatch,
+        "show_collections": not section or section == "collections",
+        "show_deliveries": not section or section == "deliveries",
+        "show_metering": not section or section == "metering",
+        "show_calibrations": not section or section == "calibrations",
+        "show_dispatch": not section or section == "dispatch",
+        "listed_total": health.counts[issue] if selected else None,
         "dispatch_phases": [
             {
-                "label": label,
-                "attempted_at": phases[name].attempted_at if name in phases else None,
-                "succeeded_at": phases[name].succeeded_at if name in phases else None,
-                "last_error": phases[name].last_error if name in phases else "",
-                "unhealthy": name in unhealthy_phases,
-                "state_label": _("Needs attention") if name in unhealthy_phases else _("Current"),
+                "label": state.phase.label,
+                "attempted_at": state.attempted_at,
+                "succeeded_at": state.succeeded_at,
+                "last_error": state.last_error,
+                "duration_ms": state.duration_ms,
+                "published": state.published,
+                "unhealthy": not state.healthy,
+                "state_label": _("Current") if state.healthy else _("Needs attention"),
             }
-            for name, label in DispatcherPhase.choices
+            for state in health.phases
         ],
+        "broker": health.broker,
+        "provider_requests": provider_request_rows(health.requests[:20]),
         **recent_work_context(issue=issue, now=now),
+    }
+
+
+def review_history(region_id: int) -> dict[str, Any]:
+    """The latest review decision with its reason, and whether the customer resubmitted the
+    plant after it."""
+    events = list(
+        AuditEvent.objects.filter(
+            region_id=region_id, action__in=(*REVIEW_DECISIONS, AuditAction.REGION_RESUBMITTED)
+        )
+        .annotate(reason=KT("details__reason"))
+        .order_by("-created_at", "-pk")
+        .values("action", "reason", "created_at")[:2]
+    )
+    resubmitted = bool(events) and events[0]["action"] == AuditAction.REGION_RESUBMITTED
+    decision = events[1 if resubmitted else 0] if len(events) > resubmitted else None
+    return {
+        "decision": decision and {**decision, "label": AuditAction(decision["action"]).label},
+        "resubmitted_at": events[0]["created_at"] if resubmitted else None,
     }
 
 
@@ -407,6 +560,8 @@ def review_context(region_id: int) -> dict[str, Any]:
         "recent_collections": work["collections"],
         "recent_deliveries": work["deliveries"],
         "recent_activity": recent_activity_context(region.pk),
+        "region_records": region_records(region.pk),
+        "review_history": review_history(region.pk),
         "review_form": ReviewDecisionForm(
             initial={"expected_revision": region.revision, "expected_status": region.status}
         ),

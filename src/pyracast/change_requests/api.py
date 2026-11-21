@@ -24,7 +24,9 @@ from pyracast.change_requests.serializers import (
     IncidentRequestInput,
     ProductionRequestInput,
     RejectionInput,
+    SeenAllOutput,
 )
+from pyracast.incidents.api import IncidentConflict, current_on_conflict
 from pyracast.plants.production_changes import ProductionChange
 from pyracast.plants.serializers import EmptyInput
 
@@ -63,18 +65,22 @@ class ProductionRequestsView(RequestView):
 
 
 class IncidentRequestsView(RequestView):
-    @extend_schema(request=IncidentRequestInput, responses={201: ChangeRequestSummaryOutput})
+    @extend_schema(
+        request=IncidentRequestInput,
+        responses={201: ChangeRequestSummaryOutput, 409: IncidentConflict},
+    )
     def post(self, request: Request, tenant_id: int, region_id: int, plant_id: int) -> Response:
         data = IncidentRequestInput(data=request.data)
         data.is_valid(raise_exception=True)
-        return self.summary(
-            request,
-            tenant_id,
-            lambda: operations.submit_incident(
-                cast(User, request.user), tenant_id, region_id, plant_id, **data.validated_data
-            ),
-            status=201,
-        )
+        with current_on_conflict():
+            return self.summary(
+                request,
+                tenant_id,
+                lambda: operations.submit_incident(
+                    cast(User, request.user), tenant_id, region_id, plant_id, **data.validated_data
+                ),
+                status=201,
+            )
 
 
 class InboxView(RequestView):
@@ -90,6 +96,19 @@ class InboxView(RequestView):
         return self.get_paginated_response(
             ChangeRequestSummaryOutput(cast(Any, rows), many=True).data
         )
+
+
+class SeenAllView(RequestView):
+    @extend_schema(
+        request=EmptyInput,
+        responses=SeenAllOutput,
+        operation_id="tenants_change_requests_seen_all_create",
+    )
+    def post(self, request: Request, tenant_id: int) -> Response:
+        data = EmptyInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        marked = operations.mark_all_seen(cast(User, request.user), tenant_id)
+        return Response(SeenAllOutput({"marked": marked}).data)
 
 
 class DetailView(RequestView):

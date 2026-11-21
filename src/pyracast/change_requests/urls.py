@@ -5,12 +5,14 @@ from pyracast.change_requests.api import (
     DetailView,
     InboxView,
     RejectView,
+    SeenAllView,
     SeenView,
     WithdrawView,
 )
 
 urlpatterns = [
     path("", InboxView.as_view()),
+    path("seen/", SeenAllView.as_view()),
     path("<int:request_id>/", DetailView.as_view()),
     path("<int:request_id>/approve/", ApproveView.as_view()),
     path("<int:request_id>/reject/", RejectView.as_view()),

@@ -11,6 +11,7 @@ import { qualityOf } from "@/lib/production";
 import type { components } from "@/lib/schema";
 import {
     ActionForm,
+    AsyncButton,
     TextAreaField,
     useErrorMessage,
     formText,
@@ -110,12 +111,29 @@ export function OperationalInbox({ tenant }: { tenant: Tenant }) {
         <>
             <div className="page-heading">
                 <h1>{t("inbox")}</h1>
-                <button
-                    className="button secondary"
-                    onClick={() => void refresh.requests(tenant.id)}
-                >
-                    {t("refreshList")}
-                </button>
+                <div className="button-group">
+                    {tenant.unread_outcome_count > 0 && (
+                        <AsyncButton
+                            permitted
+                            variant="secondary"
+                            onClick={async () => {
+                                await api.post(
+                                    "/api/tenants/{tenant_id}/change-requests/seen/",
+                                    { path: { tenant_id: tenant.id } },
+                                );
+                                changed("seen");
+                            }}
+                        >
+                            {t("markAllRead")}
+                        </AsyncButton>
+                    )}
+                    <button
+                        className="button secondary"
+                        onClick={() => void refresh.requests(tenant.id)}
+                    >
+                        {t("refreshList")}
+                    </button>
+                </div>
             </div>
             {update.outcome && (
                 <div ref={feedback} tabIndex={-1}>

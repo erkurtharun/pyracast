@@ -16,6 +16,9 @@ async function setup(page: Page) {
                 effective_from: "2026-01-01T00:00:00Z",
                 last_success_at: "2026-01-08T03:00:00Z",
                 next_collection_at: null,
+                state: "collecting",
+                inactive_reason: null,
+                requests_today: 0,
                 max_forecast_times: 9,
                 history_local_time: "03:00",
                 history_retry_until_local: "09:00",
@@ -38,6 +41,8 @@ async function setup(page: Page) {
         window_start: "2026-01-01",
         window_end: "2026-01-07",
         status: "ready",
+        selection_state: "candidate",
+        activation_blocker: null,
         assessment: "evaluated",
         factor: 1.1,
         result: { provisional_production: true },
@@ -478,7 +483,7 @@ for (const width of [320, 390, 768, 1440]) {
                         name: "production.csv",
                         mimeType: "text/csv",
                         buffer: Buffer.from(
-                            "starts_at,ends_at,energy,quality,source\n2026-01-07T10:00:00+03:00,2026-01-07T11:00:00+03:00,2400,valid,meter",
+                            "starts_at,ends_at,energy_kwh,quality,source\n2026-01-07T10:00:00+03:00,2026-01-07T11:00:00+03:00,2400,valid,meter",
                         ),
                     });
                 await page

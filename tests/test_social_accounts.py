@@ -251,17 +251,7 @@ def test_social_link_and_unlink_require_reauthentication_and_emit_audit(
     assert listed[0]["uid"] == account.uid
     assert listed[0]["provider"]["id"] == "google"
     removal = {"provider": "google", "account": account.uid}
-    token = client.get("/api/session/").json()["csrf_token"]
-    # The connection changed the account's credential state, which ends the reauthentication.
-    stale = client.delete(
-        AUTH + "account/providers",
-        removal,
-        content_type="application/json",
-        HTTP_X_CSRFTOKEN=token,
-    )
-    assert stale.status_code == 401
-    assert SocialAccount.objects.filter(pk=account.pk).exists()
-    assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+    # The session's own connection keeps its reauthentication for the rest of its window.
     token = client.get("/api/session/").json()["csrf_token"]
     with caplog.at_level("INFO", logger="pyracast.security"):
         removed = client.delete(

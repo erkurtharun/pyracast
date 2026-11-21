@@ -38,6 +38,8 @@ const tones: { [G in Group]?: Partial<Record<Vocabulary[G], Tone>> } = {
     },
     ReminderState: { sending: "success" },
     InvitationState: { pending: "warning" },
+    IncidentStatus: { active: "warning" },
+    SelectionState: { active: "success", candidate: "warning" },
 };
 
 export function useLabel() {

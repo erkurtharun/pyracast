@@ -73,7 +73,7 @@ for (const role of ["admin", "viewer"] as const) {
                         action: "set",
                         energy: index === 0 ? 0 : 1.25,
                         quality: "valid",
-                        source: "meter",
+                        source: "operator",
                     },
                 ],
             });

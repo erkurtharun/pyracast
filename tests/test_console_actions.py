@@ -149,6 +149,7 @@ def decision(region: Region, action: str, **changes: object) -> dict[str, object
         "expected_revision": region.revision,
         "expected_status": region.status,
         "action": action,
+        **({"decision_reason": "A review reason."} if action in {"reject", "suspend"} else {}),
         **changes,
     }
 

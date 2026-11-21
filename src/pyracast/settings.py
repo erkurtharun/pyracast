@@ -75,6 +75,7 @@ MIDDLEWARE = [
     "pyracast.accounts.session_lock.SessionRequestSerialization",
     "pyracast.accounts.session_cookie.SessionCookie",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "pyracast.accounts.session_tag.SessionTagCheck",
     "pyracast.accounts.middleware.SessionLifetime",
     "pyracast.accounts.processes.PendingProcessAuthority",
     "pyracast.accounts.language.RequestLanguage",
@@ -216,6 +217,7 @@ ACCOUNT_RATE_LIMITS = {
     "confirm_email": "1/1m/key,6/h/key",
     "change_password": f"{PASSWORD_CHANGE_MAX_ATTEMPTS}/{PASSWORD_CHANGE_WINDOW_MINUTES}m/user",
     "request_email_change": "3/10m/user,10/d/user,20/h/ip",
+    "manage_sessions": "30/m/user",
 }
 CACHES = {
     "default": {
@@ -278,11 +280,15 @@ SPECTACULAR_SETTINGS = {
         "RequestOutcomeEnum": "pyracast.forecasts.models.RequestOutcome",
         "SnapshotSourceKindEnum": "pyracast.forecasts.models.SnapshotSourceKind",
         "CollectionJobErrorEnum": "pyracast.forecasts.models.CollectionJobError",
+        "CollectionStateEnum": "pyracast.forecasts.models.CollectionState",
+        "CollectionInactiveReasonEnum": "pyracast.forecasts.models.CollectionInactiveReason",
         "SnapshotWeatherErrorEnum": "pyracast.forecasts.models.SnapshotWeatherError",
         "ForecastSourceKindEnum": ["forecast", "estimated_actuals", "mixed"],
         "EpiasSourceKindEnum": "pyracast.metering.models.EpiasSourceKind",
         "EpiasJobStatusEnum": "pyracast.metering.models.EpiasJobStatus",
         "EpiasJobErrorEnum": "pyracast.metering.models.EpiasJobError",
+        "EpiasStateEnum": "pyracast.metering.models.EpiasState",
+        "EpiasHealthEnum": "pyracast.metering.models.EpiasHealth",
         "MeasurementBasisEnum": "pyracast.plants.models.MeasurementBasis",
         "MountingTypeEnum": "pyracast.plants.models.MountingType",
         "ObservationQualityEnum": "pyracast.plants.models.ObservationQuality",
@@ -290,7 +296,11 @@ SPECTACULAR_SETTINGS = {
         "PlantEventActionEnum": "pyracast.plants.models.PlantEventAction",
         "CalibrationErrorEnum": "pyracast.plants.models.CalibrationError",
         "CalibrationAssessmentEnum": "pyracast.plants.models.CalibrationAssessment",
+        "SelectionStateEnum": "pyracast.plants.activation.SelectionState",
+        "ActivationBlockerEnum": "pyracast.plants.activation.ActivationBlocker",
+        "AutomationCauseEnum": "pyracast.plants.automation_state.AutomationCause",
         "IncidentKindEnum": "pyracast.incidents.models.IncidentKind",
+        "IncidentStatusEnum": "pyracast.incidents.models.IncidentStatus",
         "NotificationDeliveryStatusEnum": (
             "pyracast.notifications.models.NotificationDeliveryStatus"
         ),

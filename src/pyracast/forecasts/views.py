@@ -10,7 +10,13 @@ from rest_framework.views import APIView
 
 from pyracast.api.serializers import InputSerializer
 from pyracast.connections.models import MAX_DAILY_QUOTA
-from pyracast.forecasts.models import CollectionEndpoint, CollectionJobError, CollectionJobStatus
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionInactiveReason,
+    CollectionJobError,
+    CollectionJobStatus,
+    CollectionState,
+)
 from pyracast.forecasts.schedule import (
     configure_schedule,
     get_schedule,
@@ -39,6 +45,11 @@ class CollectionJobOutput(serializers.Serializer[dict[str, object]]):
 class CollectionScheduleOutput(CollectionScheduleInput):
     timezone = serializers.CharField()
     effective_from = serializers.DateTimeField()
+    state = serializers.ChoiceField(choices=CollectionState.choices)
+    inactive_reason = serializers.ChoiceField(
+        choices=CollectionInactiveReason.choices, allow_null=True
+    )
+    requests_today = serializers.IntegerField()
     last_success_at = serializers.DateTimeField(allow_null=True)
     next_collection_at = serializers.DateTimeField(allow_null=True)
     recent_jobs = CollectionJobOutput(many=True)

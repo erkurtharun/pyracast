@@ -416,23 +416,23 @@ def configure_binding(
 ) -> SiteBinding:
     require_platform_admin(actor)
     if not site_id.strip() or len(site_id) > 200:
-        raise ValidationError("A provider site identity is required.")
+        raise ValidationError(gettext("A provider site identity is required."))
     if not re.fullmatch(SITE_ID_PATTERN, site_id.strip()):
         raise ValidationError(SITE_ID_REFUSED)
     if not math.isfinite(capacity_kw) or capacity_kw <= 0:
-        raise ValidationError("Positive finite capacity is required.")
+        raise ValidationError(gettext("Positive finite capacity is required."))
     if dc_capacity_kw is not None and (
         isinstance(dc_capacity_kw, bool) or not math.isfinite(dc_capacity_kw) or dc_capacity_kw <= 0
     ):
-        raise ValidationError("DC capacity must be finite and positive when specified.")
+        raise ValidationError(gettext("DC capacity must be finite and positive when specified."))
     if power_basis not in PowerBasis.values:
-        raise ValidationError("An AC or DC power basis is required.")
+        raise ValidationError(gettext("An AC or DC power basis is required."))
     if not capacity_semantics_verified:
-        raise ValidationError("A verified horizontal reference configuration is required.")
+        raise ValidationError(gettext("A verified horizontal reference configuration is required."))
     if not math.isfinite(azimuth_degrees) or not 0 <= azimuth_degrees < 360:
-        raise ValidationError("Azimuth must be between 0 and 360 degrees.")
+        raise ValidationError(gettext("Azimuth must be between 0 and 360 degrees."))
     if not math.isfinite(losses_percent) or not 0 <= losses_percent < 100:
-        raise ValidationError("Losses must be between 0 and 100 percent.")
+        raise ValidationError(gettext("Losses must be between 0 and 100 percent."))
     with transaction.atomic():
         region = Region.objects.active().select_for_update().get(pk=region_id)
         account = ProviderAccount.objects.get(pk=provider_account_id, enabled=True)
@@ -440,7 +440,9 @@ def configure_binding(
         if len(reference) > 500 or (
             account.provider == Provider.SOLCAST and (not reference or installation_date is None)
         ):
-            raise ValidationError("Confirmed site settings and installation date are required.")
+            raise ValidationError(
+                gettext("Confirmed site settings and installation date are required.")
+            )
         values = {
             "provider_account": account,
             "site_id": site_id.strip(),

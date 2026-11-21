@@ -77,6 +77,9 @@ class ProviderAccount(models.Model):
             ),
         )
 
+    def __str__(self) -> str:
+        return f"{self.provider} · {self.external_account_id}"
+
 
 class SiteBinding(models.Model):
     region = models.ForeignKey(Region, on_delete=models.PROTECT, related_name="bindings")

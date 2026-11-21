@@ -6,8 +6,9 @@ from django.db import connections
 from django.test import Client
 from django.urls import URLPattern, URLResolver, get_resolver
 
+from pyracast.forecasts.schedule import configure_schedule
 from pyracast.regions.operations import submit_region
-from tests.support.budgets import assert_scale_invariant, query_budget
+from tests.support.budgets import assert_scale_invariant, count_queries, query_budget
 from tests.support.domain import NOW, System
 from tests.support.plant_operations import make_plant
 
@@ -105,6 +106,31 @@ def test_polled_reads_stay_within_their_statement_budget(workspace: Workspace, r
 
     assert response.status_code == 200, response.content
     assert not [statement for statement in captured if "FOR UPDATE" in statement]
+
+
+def test_a_saved_collection_schedule_reads_as_many_statements_as_the_default_one(
+    workspace: Workspace,
+) -> None:
+    system = workspace.system
+    query, ceiling = POLLED[f"{REGION}collection-schedule/"]
+    url = workspace.url(f"{REGION}collection-schedule/", query)
+    default = count_queries(lambda: workspace.client.get(url))
+    configure_schedule(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        times=["09:00", "15:00"],
+        now=NOW,
+    )
+    workspace.client.get(url)
+
+    with query_budget(default) as statements:
+        response = workspace.client.get(url)
+
+    assert response.status_code == 200, response.content
+    assert response.json()["times"] == ["09:00", "15:00"]
+    assert len(statements) == default <= ceiling
 
 
 def test_site_list_reads_do_not_grow_with_the_number_of_sites(workspace: Workspace) -> None:

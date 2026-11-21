@@ -175,6 +175,8 @@ test("social-only accounts confirm email before disconnecting the selected provi
                                       },
                                       uid: "account-42",
                                       display: "solar@example.test",
+                                      can_disconnect: true,
+                                      sign_in_available: true,
                                   },
                               ],
                     },
@@ -186,7 +188,11 @@ test("social-only accounts confirm email before disconnecting the selected provi
             if (!verified)
                 return route.fulfill({
                     status: 401,
-                    json: { status: 401, meta: { is_authenticated: true } },
+                    json: {
+                        status: 401,
+                        meta: { is_authenticated: true },
+                        data: { flows: [{ id: "reauthenticate_by_code" }] },
+                    },
                 });
             disconnected = true;
             return route.fulfill({ json: { status: 200, data: [] } });
@@ -381,7 +387,11 @@ test("social-only MFA setup requests email confirmation rather than an unavailab
         (route) =>
             route.fulfill({
                 status: 401,
-                json: { status: 401, meta: { is_authenticated: true } },
+                json: {
+                    status: 401,
+                    meta: { is_authenticated: true },
+                    data: { flows: [{ id: "reauthenticate_by_code" }] },
+                },
             }),
     );
     await page.goto("/app/account/");
@@ -641,6 +651,8 @@ const connectedAccount = {
     provider: { id: "google", name: "Google" },
     uid: "account-42",
     display: "solar@example.test",
+    can_disconnect: true,
+    sign_in_available: true,
 };
 
 async function connectingAccount(
@@ -771,4 +783,33 @@ test("a refused provider connection shows the callback error", async ({
     await expect(
         accounts.getByText("Account connected.", { exact: true }),
     ).toHaveCount(0);
+});
+
+test("a connected account says when it cannot be disconnected or used to sign in", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/api/auth/browser/v1/account/providers", (route) =>
+        route.fulfill({
+            json: {
+                status: 200,
+                data: [
+                    {
+                        ...connectedAccount,
+                        can_disconnect: false,
+                        sign_in_available: false,
+                    },
+                ],
+            },
+        }),
+    );
+    await page.goto("/app/account/");
+    const accounts = page.getByRole("region", { name: "Connected accounts" });
+    await expect(
+        accounts.getByRole("button", { name: "Disconnect solar@example.test" }),
+    ).toBeDisabled();
+    await expect(
+        accounts.getByText("Not available for sign-in", { exact: true }),
+    ).toBeVisible();
+    await expect(accounts.getByText(/Your only way to sign in/)).toBeVisible();
 });

@@ -1,6 +1,6 @@
 import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from enum import StrEnum
 from typing import Any
 
@@ -22,6 +22,7 @@ from django.http import HttpRequest
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.processes import record_authority
+from pyracast.accounts.session_tag import issue_tag
 
 # Seconds between two writes of a session's activity marker and its device record.
 ACTIVITY_REFRESH_SECONDS = 60
@@ -38,6 +39,7 @@ def start_session(*, request: HttpRequest, user: AbstractBaseUser, **_kwargs: An
     now = time.time()
     request.session["authenticated_at"] = now
     request.session["last_activity_at"] = now
+    issue_tag(request)
     with transaction.atomic():
         record_authority(request, user)
 
@@ -90,14 +92,18 @@ def _hold_account(user_id: Any) -> None:
 
 @transaction.atomic
 def end_sessions(
-    user_id: Any, trigger: str, *, keep: str | None = None, request: HttpRequest | None = None
+    user_id: Any,
+    trigger: str,
+    *,
+    keep: str | None = None,
+    only: Collection[str] | None = None,
+    request: HttpRequest | None = None,
 ) -> int:
     _hold_account(user_id)
-    keys = list(
-        UserSession.objects.filter(user_id=user_id)
-        .exclude(session_key=keep)
-        .values_list("session_key", flat=True)
-    )
+    sessions = UserSession.objects.filter(user_id=user_id).exclude(session_key=keep)
+    if only is not None:
+        sessions = sessions.filter(session_key__in=only)
+    keys = list(sessions.values_list("session_key", flat=True))
     if not keys:
         return 0
     Session.objects.filter(session_key__in=keys).delete()

@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 
 from django.contrib.auth.models import User
 
-from pyracast.event_details import INTEGER, DetailShape, shaped
+from pyracast.event_details import INTEGER, OPTIONAL_INTEGER, TEXT, DetailShape, shaped
 from pyracast.regions.models import AuditAction, AuditEvent, Region
 
 if TYPE_CHECKING:
@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 
 BINDING: DetailShape = {"binding_id": INTEGER}
 LOCATION_REQUEST: DetailShape = {"request_id": INTEGER}
+# The reason is written for the customer and read by every member of the plant's workspace.
+REVIEW_REASON: DetailShape = {"reason": TEXT}
 AUDIT_DETAILS: Mapping[str, DetailShape] = {
     AuditAction.REGION_RENAMED: {},
     AuditAction.LOCATION_CHANGE_REQUESTED: LOCATION_REQUEST,
@@ -20,9 +22,15 @@ AUDIT_DETAILS: Mapping[str, DetailShape] = {
     AuditAction.LOCATION_CHANGE_REBASED: {},
     AuditAction.BINDING_CONFIGURED: BINDING,
     AuditAction.CONNECTION_VALIDATED: BINDING,
+    AuditAction.CONNECTION_VALIDATION_FAILED: {
+        **BINDING,
+        "error_code": TEXT,
+        "status_code": OPTIONAL_INTEGER,
+    },
     AuditAction.REGION_APPROVED: BINDING,
-    AuditAction.REGION_REJECTED: {},
-    AuditAction.REGION_SUSPENDED: {},
+    AuditAction.REGION_REJECTED: REVIEW_REASON,
+    AuditAction.REGION_SUSPENDED: REVIEW_REASON,
+    AuditAction.REGION_RESUBMITTED: {},
     AuditAction.REGION_TRASHED: {},
     AuditAction.REGION_RESTORED: {},
     AuditAction.COLLECTION_SCHEDULE_UPDATED: {},

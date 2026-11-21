@@ -6,7 +6,6 @@ import type { Plant, PlantScope, Region } from "@/lib/api";
 import { useRefresh } from "@/lib/api/query";
 import { plantDay } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
-import { contactEmail } from "@/lib/public-metadata";
 import {
     plantView,
     routes,
@@ -16,11 +15,13 @@ import {
 import { Calibrations } from "@/features/calibration/calibrations";
 import { OwnPendingRequests } from "@/features/inbox/operational-inbox";
 import { ViewNav } from "@/ui/action";
+import { ExportPlant } from "@/ui/export-plant";
 import { usePageTitle } from "@/ui/page-title";
 import { Notice } from "@/ui/ui";
-import { StatusTag, useLabel } from "@/ui/vocabulary";
+import { StatusTag } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import { Outages } from "./outages";
+import { ReviewNotice } from "./review-notice";
 import {
     ForecastSection,
     type ForecastOptions,
@@ -47,7 +48,6 @@ export function PlantWorkspace({
 }) {
     const t = useTranslations("PlantWorkspace");
     const format = useFormat();
-    const label = useLabel();
     const canManage = useCanManageWorkspace();
     const router = useRouter();
     const refresh = useRefresh();
@@ -65,7 +65,9 @@ export function PlantWorkspace({
     const configuration = currentPlant.current_configuration;
     usePageTitle(`${t(tab)} · ${currentPlant.name} | Pyracast`);
     return (
-        <>
+        <ExportPlant
+            value={{ id: currentPlant.id, name: currentPlant.name, timezone }}
+        >
             <button
                 className="back-button"
                 onClick={() => router.push(portfolio)}
@@ -90,16 +92,7 @@ export function PlantWorkspace({
             <p className="fine plant-time">
                 {t("plantTime", { zone: format.zone(timezone) })}
             </p>
-            {region.status !== "approved" && (
-                <Notice>
-                    {region.status === "pending"
-                        ? t("awaitingApproval")
-                        : t("approvalStatus", {
-                              status: label("RegionStatus", region.status),
-                              contact: contactEmail,
-                          })}
-                </Notice>
-            )}
+            <ReviewNotice region={region} scope={scope} timezone={timezone} />
             <ViewNav
                 tabs
                 label={t("plantSections")}
@@ -168,9 +161,8 @@ export function PlantWorkspace({
                 <Calibrations
                     key={`calibration-${configuration.id}`}
                     scope={scope}
-                    currentConfigurationId={configuration.id}
                 />
             )}
-        </>
+        </ExportPlant>
     );
 }
