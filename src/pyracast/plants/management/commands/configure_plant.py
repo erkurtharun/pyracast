@@ -1,3 +1,4 @@
+from dataclasses import fields
 from typing import Any
 
 from django.contrib.auth.models import User
@@ -5,6 +6,7 @@ from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, Validat
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from pyracast.plants.operations import create_plant, revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 
 
@@ -38,27 +40,19 @@ class Command(BaseCommand):
         try:
             actor = User.objects.get(username=options["username"])
             region = Region.objects.get(pk=options["region_id"])
-            values = {
-                key: options[key]
-                for key in (
-                    "name",
-                    "dc_capacity_mw",
-                    "inverter_capacity_mw",
-                    "export_limit_mw",
-                    "measurement_basis",
-                    "mounting_type",
-                    "surface_tilt_degrees",
-                    "surface_azimuth_degrees",
-                )
-            }
+            parameters = PlantParameters(
+                **{field.name: options[field.name] for field in fields(PlantParameters)}
+            )
             if options["plant_id"] is None:
-                plant = create_plant(actor, region.tenant_id, region.pk, **values)
+                plant = create_plant(actor, region.tenant_id, region.pk, parameters)
             else:
                 plant = revise_plant(
-                    actor, region.tenant_id, region.pk, options["plant_id"], **values
+                    actor, region.tenant_id, region.pk, options["plant_id"], parameters
                 )
-        except (ObjectDoesNotExist, PermissionDenied, ValidationError) as exc:
+        except ValidationError as exc:
+            raise CommandError(f"Plant configuration failed: {'; '.join(exc.messages)}") from exc
+        except (ObjectDoesNotExist, PermissionDenied) as exc:
             raise CommandError(
-                "Plant configuration failed: invalid input, access, or record."
+                "Plant configuration failed: unknown or inaccessible record."
             ) from exc
         self.stdout.write(f"Plant {plant.pk}, configuration {plant.current_configuration_id}.")

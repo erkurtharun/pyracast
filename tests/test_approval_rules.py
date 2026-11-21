@@ -8,6 +8,7 @@ from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import ReviewDecision, decide_review
 from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 from pyracast.regions.operations import request_location_change
 from tests.support.admin_setup import admin_system, submitted_plant
@@ -87,10 +88,9 @@ def test_approval_is_refused_when_the_declaration_changed_after_the_page_opened(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name=plant.name,
-        dc_capacity_mw=9.9,
-        inverter_capacity_mw=4,
-        export_limit_mw=3.8,
+        PlantParameters(
+            name=plant.name, dc_capacity_mw=9.9, inverter_capacity_mw=4, export_limit_mw=3.8
+        ),
     )
 
     response = client.post(plant_url(system.region), {**seen, "action": "approve"})

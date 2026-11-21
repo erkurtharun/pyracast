@@ -17,6 +17,7 @@ from pyracast.plants.history import plant_outlook
 from pyracast.plants.incident_forecasts import incident_scenario
 from pyracast.plants.models import CalibrationActivation, Plant
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 from tests.support.concurrency import row_locked_elsewhere, short_lock_timeout
 from tests.support.domain import NOW, System
@@ -55,12 +56,14 @@ def test_resolved_total_outage_keeps_zero_power_after_rename_and_tilt_edit(
     )
     edited = revise_plant(
         *scope,
-        name="Renamed",
-        dc_capacity_mw=130,
-        export_limit_mw=100,
-        mounting_type="fixed",
-        surface_tilt_degrees=25,
-        surface_azimuth_degrees=180,
+        PlantParameters(
+            name="Renamed",
+            dc_capacity_mw=130,
+            export_limit_mw=100,
+            mounting_type="fixed",
+            surface_tilt_degrees=25,
+            surface_azimuth_degrees=180,
+        ),
     )
     assert edited.current_configuration_id != declared
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=1))
@@ -86,7 +89,9 @@ def test_reopening_a_resolved_outage_declares_and_validates_the_current_configur
     start = NOW - timedelta(hours=3)
     outage = incident(system, plant, start, start + timedelta(hours=1), available_dc_mw=100)
     resolved_under = outage.declared_configuration_id
-    rebuilt = revise_plant(*scope, name="Plant", dc_capacity_mw=80, export_limit_mw=70)
+    rebuilt = revise_plant(
+        *scope, PlantParameters(name="Plant", dc_capacity_mw=80, export_limit_mw=70)
+    )
     client = admin(system)
     detail = f"{outages_url(system, plant)}{outage.pk}/"
     payload = {

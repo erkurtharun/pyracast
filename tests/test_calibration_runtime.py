@@ -13,6 +13,7 @@ from pyracast.forecasts.models import RequestAttempt
 from pyracast.orchestration.kinds import CALIBRATION
 from pyracast.plants.models import CalibrationRun
 from pyracast.plants.operations import create_plant, request_calibration
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.runtime import dispatch_calibrations
 from tests.support.domain import NOW, make_system
 
@@ -23,9 +24,7 @@ def calibration_request() -> CalibrationRun:
         system.member,
         system.tenant.pk,
         system.region.pk,
-        name="Plant",
-        dc_capacity_mw=130,
-        export_limit_mw=100,
+        PlantParameters(name="Plant", dc_capacity_mw=130, export_limit_mw=100),
     )
     assert plant.current_configuration_id is not None
     return request_calibration(

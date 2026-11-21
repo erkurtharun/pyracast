@@ -3,7 +3,8 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from functools import cache
+from zoneinfo import available_timezones
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -24,6 +25,7 @@ from pyracast.connections.models import (
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import (
+    NAME_MAX_LENGTH,
     AuditAction,
     AuditEvent,
     LocationChangeStatus,
@@ -66,6 +68,24 @@ def require_available_location(
         raise DomainError(ErrorCode.LOCATION_ALREADY_EXISTS)
 
 
+@cache
+def available_zones() -> frozenset[str]:
+    """ZoneInfo also opens keys outside this set, such as `right/UTC` with leap seconds or a
+    Windows path spelling, which other hosts cannot open."""
+    return frozenset(available_timezones())
+
+
+def require_name(name: str) -> str:
+    name = name.strip()
+    if not name or len(name) > NAME_MAX_LENGTH:
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST,
+            _("A plant name of at most 200 characters is required."),
+            field="name",
+        )
+    return name
+
+
 def validate_location(latitude: float, longitude: float, timezone: str) -> None:
     if not math.isfinite(latitude) or not -90 <= latitude <= 90:
         raise DomainError(
@@ -79,12 +99,10 @@ def validate_location(latitude: float, longitude: float, timezone: str) -> None:
             _("Longitude must be between -180 and 180 degrees."),
             field="longitude",
         )
-    try:
-        ZoneInfo(timezone)
-    except (ZoneInfoNotFoundError, ValueError) as exc:
+    if timezone not in available_zones():
         raise DomainError(
             ErrorCode.INVALID_REQUEST, _("An IANA timezone is required."), field="timezone"
-        ) from exc
+        )
 
 
 def submit_region(
@@ -98,22 +116,21 @@ def submit_region(
     platform: bool = False,
 ) -> Region:
     validate_location(latitude, longitude, timezone)
-    if not name.strip() or len(name) > 200:
-        raise DomainError(
-            ErrorCode.INVALID_REQUEST,
-            _("A region name of at most 200 characters is required."),
-            field="name",
-        )
+    name = require_name(name)
     with transaction.atomic():
         authorize_workspace_admin(actor, tenant_id, platform=platform)
         require_available_location(tenant_id, latitude, longitude)
-        return Region.objects.create(
+        region = Region.objects.create(
             tenant_id=tenant_id,
-            name=name.strip(),
+            name=name,
             latitude=canonical_coordinate(latitude),
             longitude=canonical_coordinate(longitude),
             timezone=timezone,
         )
+        record_audit(
+            actor=actor, region=region, action=AuditAction.REGION_CREATED, revision=region.revision
+        )
+        return region
 
 
 def _require_free_target(tenant_id: int, latitude: float, longitude: float, region: Region) -> None:

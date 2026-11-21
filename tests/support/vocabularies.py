@@ -55,6 +55,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production_changes import (
     ObservationInput,
     ProductionChange,
@@ -292,7 +293,10 @@ def _epias_job(monkeypatch: pytest.MonkeyPatch) -> models.Model:
 def _plant_submission(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     system = make_system()
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=1),
     )
     return PlantSubmission.objects.get(plant=plant)
 
@@ -522,7 +526,10 @@ def _submit_incident_kind(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], ob
 def _create_plant(monkeypatch: pytest.MonkeyPatch) -> Callable[..., object]:
     system = make_system()
     return lambda **values: create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1, **values
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=1, **values),
     )
 
 

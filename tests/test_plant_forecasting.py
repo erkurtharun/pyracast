@@ -18,6 +18,7 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.numerics import MODEL_VERSION
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from tests.support.domain import NOW
 from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
@@ -234,7 +235,11 @@ def test_historical_issuance_survives_revision_at_both_resolutions(
         resolution_minutes=60,
     )
     revise_plant(
-        system.member, system.tenant.pk, system.region.pk, plant.pk, name="New", dc_capacity_mw=140
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        PlantParameters(name="New", dc_capacity_mw=140),
     )
     historical = plant_outlook(
         system.member,
@@ -419,8 +424,7 @@ def test_finite_capacity_overflow_returns_validation_without_saving_forecast(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Large finite capacity",
-        dc_capacity_mw=1e308,
+        PlantParameters(name="Large finite capacity", dc_capacity_mw=1e308),
     )
     client = Client()
     client.force_login(system.member)

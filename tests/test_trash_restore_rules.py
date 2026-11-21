@@ -43,7 +43,9 @@ def _location_taken(system: System, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _purge_started(system: System, monkeypatch: pytest.MonkeyPatch) -> None:
-    Region.objects.filter(pk=system.region.pk).update(purge_started_at=NOW)
+    Region.objects.filter(pk=system.region.pk).update(
+        purge_started_at=NOW, purge_plant_ids=[], purge_bindings=[]
+    )
 
 
 BLOCKERS: dict[str, tuple[list[Callable[[System, pytest.MonkeyPatch], None]], str | None]] = {
@@ -141,7 +143,7 @@ def test_a_purge_over_several_cycles_logs_what_its_first_cycle_found(
     caplog.set_level(logging.INFO, logger="pyracast.trash")
     monkeypatch.setattr("pyracast.trash.PURGE_STATEMENT_BUDGET", 1)
 
-    reports = []
+    reports: list[dict[str, int]] = []
     while Region.objects.filter(pk=system.region.pk).exists():
         assert len(reports) < 200
         reports.append(trash.purge_expired(NOW + trash.RETENTION))

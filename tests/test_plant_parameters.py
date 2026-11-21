@@ -10,11 +10,12 @@ from django.core.management.base import CommandError
 from django.db import IntegrityError, close_old_connections, connection, transaction
 from django.test import Client
 
-from pyracast.errors import DomainError
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import approve_region, decide_review, resubmit_region
 from pyracast.plants.models import Plant, PlantConfiguration, PlantEvent, PlantSubmission
 from pyracast.plants.operations import create_plant, revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.serializers import PlantInput
 from pyracast.plants.sites import submit_site
 from pyracast.platform_admin.read_models import recent_activity_context
@@ -37,7 +38,9 @@ INF, NAN = float("inf"), float("nan")
 
 def declared_plant(*, approved: bool) -> tuple[System, Plant]:
     system = make_system(approved=approved)
-    plant = create_plant(system.member, system.tenant.pk, system.region.pk, **VALUES)
+    plant = create_plant(
+        system.member, system.tenant.pk, system.region.pk, PlantParameters(**VALUES)
+    )
     assert (plant.current_configuration_id is not None) is approved
     return system, plant
 
@@ -181,7 +184,7 @@ def test_a_plant_rejected_after_returning_to_review_keeps_an_edit_for_its_next_a
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        **{**VALUES, "export_limit_mw": 90},
+        PlantParameters(**{**VALUES, "export_limit_mw": 90}),
     )
 
     client = session(system.member)
@@ -219,7 +222,12 @@ FIELD_ERRORS: list[tuple[dict[str, Any], str]] = [
 def test_a_refused_plant_value_names_its_field(arguments: dict[str, Any], field: str) -> None:
     system = make_system()
     with pytest.raises(DomainError) as error:
-        create_plant(system.member, system.tenant.pk, system.region.pk, **{**VALUES, **arguments})
+        create_plant(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            PlantParameters(**{**VALUES, **arguments}),
+        )
     assert (error.value.code, error.value.field) == ("invalid_request", field)
     assert not Plant.objects.exists()
 
@@ -277,7 +285,11 @@ def _accepted_by_the_operation(system: System, plant: Plant, values: dict[str, A
     try:
         with transaction.atomic():
             revise_plant(
-                system.member, system.tenant.pk, system.region.pk, plant.pk, name="P", **values
+                system.member,
+                system.tenant.pk,
+                system.region.pk,
+                plant.pk,
+                PlantParameters(name="P", **values),
             )
             raise _UndoneError
     except _UndoneError:
@@ -327,7 +339,7 @@ def test_a_zone_outside_the_available_zones_is_refused_naming_the_field(zone: st
     )
     assert response.status_code == 400, response.content
     assert response.json()["code"] == "invalid_request"
-    assert response.json()["fields"] == {"timezone": "GeÃ§erli bir IANA saat dilimi girin."}
+    assert response.json()["fields"] == {"timezone": "Geçerli bir IANA saat dilimi girin."}
     with pytest.raises(DomainError) as error:
         request_location_change(
             system.member,
@@ -356,10 +368,24 @@ def test_a_site_submission_records_one_creation_event_the_console_lists() -> Non
     assert recent_activity_context(region_id)[0]["action_label"] == "Plant submitted"
 
 
-def test_a_refused_site_submission_records_no_creation_event() -> None:
+def test_a_site_submission_failing_after_its_location_records_no_creation_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     system = make_system()
     events = AuditEvent.objects.count()
-    with pytest.raises(ValidationError):
-        submit_site(system.member, system.tenant.pk, **{**SITE, "dc_capacity_mw": 0})
+
+    def refuse(*_arguments: object, **_keywords: object) -> None:
+        raise DomainError(ErrorCode.LOCATION_ALREADY_HAS_PLANT)
+
+    monkeypatch.setattr("pyracast.plants.sites.create_plant", refuse)
+    with pytest.raises(DomainError):
+        submit_site(
+            system.member,
+            system.tenant.pk,
+            PlantParameters(**VALUES),
+            latitude=41.5,
+            longitude=30.5,
+            timezone="Europe/Istanbul",
+        )
     assert AuditEvent.objects.count() == events
     assert Region.objects.count() == 1

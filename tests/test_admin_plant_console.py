@@ -6,6 +6,7 @@ from django.test import Client
 from pyracast.accounts.models import Tenant
 from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import (
     AuditAction,
     AuditEvent,
@@ -128,9 +129,7 @@ def approved_plant() -> tuple[System, Plant]:
         system.member,
         system.tenant.pk,
         system.region.pk,
-        name="Plant",
-        dc_capacity_mw=130,
-        export_limit_mw=100,
+        PlantParameters(name="Plant", dc_capacity_mw=130, export_limit_mw=100),
     )
     return system, plant
 
@@ -188,9 +187,7 @@ def test_details_shown_at_full_precision_are_saved_back_without_a_new_revision()
         system.member,
         system.tenant.pk,
         system.region.pk,
-        name="Plant",
-        dc_capacity_mw=1.2345678901234567,
-        export_limit_mw=100,
+        PlantParameters(name="Plant", dc_capacity_mw=1.2345678901234567, export_limit_mw=100),
     )
     client, _ = verified_admin()
     url = f"/admin/plants/{system.region.pk}/details/"
@@ -239,12 +236,17 @@ def test_a_location_correction_returns_the_plant_to_review_with_both_audit_event
     html = client.get(response["Location"]).content.decode()
     assert "The plant is back in review with its corrected location." in html
 
-    refused = client.post(
+    edited = client.post(
         url,
         details(client, region, name="Renamed plant", latitude="40.5", dc_capacity_mw="150"),
     )
-    assert refused.status_code == 400
-    assert "An approved current provider binding is required." in refused.content.decode()
+    assert edited.status_code == 302
+    submission = PlantSubmission.objects.get(plant=plant)
+    assert (submission.dc_capacity_mw, submission.base_configuration_id) == (
+        150,
+        plant.current_configuration_id,
+    )
+    assert PlantConfiguration.objects.get(plant=plant).revision == 1
 
 
 def test_a_waiting_location_request_blocks_a_correction_and_is_linked() -> None:
@@ -307,7 +309,10 @@ def test_a_stale_details_page_asks_for_a_reload_and_a_plant_in_review_updates_it
 ):
     system = make_system()
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=5
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=5),
     )
     client, _ = verified_admin()
     url = f"/admin/plants/{system.region.pk}/details/"

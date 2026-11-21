@@ -38,6 +38,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.trash import (
     RETENTION,
@@ -280,7 +281,10 @@ def test_purge_region_removes_owned_dependencies_and_preserves_shared_quota_ledg
     source, _ = linked_records(system, plant)
     region, binding = sibling(system)
     other_plant = create_plant(
-        system.member, system.tenant.pk, region.pk, name="Other plant", dc_capacity_mw=2
+        system.member,
+        system.tenant.pk,
+        region.pk,
+        PlantParameters(name="Other plant", dc_capacity_mw=2),
     )
     other_job = CollectionJob.objects.create(
         binding=binding, target_date=NOW.date(), scheduled_for=NOW, available_at=NOW

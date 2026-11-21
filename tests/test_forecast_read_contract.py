@@ -12,6 +12,7 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
 from pyracast.weather_data import serialize_weather
@@ -82,7 +83,10 @@ def test_forecast_reads_answer_not_found_outside_the_url_scope(
         timezone="Europe/Istanbul",
     )
     sibling = create_plant(
-        system.member, system.tenant.pk, sibling_region.pk, name="Sibling", dc_capacity_mw=10
+        system.member,
+        system.tenant.pk,
+        sibling_region.pk,
+        PlantParameters(name="Sibling", dc_capacity_mw=10),
     )
     other_member = User.objects.create(username="other-member")
     other_tenant = Tenant.objects.create(name="Other")

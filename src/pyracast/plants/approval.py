@@ -23,7 +23,9 @@ from pyracast.regions.models import AuditAction, Region, RegionStatus
 from pyracast.regions.review import SETUP_CHANGED, require_seen_status, set_review_status
 
 DECLARED_FIELDS = frozenset(CONFIGURATION_PARAMETERS)
-UNDECLARED_FIELDS = frozenset({"id", "plant", "submitted_by", "created_at", "updated_at"})
+UNDECLARED_FIELDS = frozenset(
+    {"id", "plant", "submitted_by", "base_configuration", "created_at", "updated_at"}
+)
 
 DECLARATION_CHANGED = gettext_lazy(
     "The declared plant details changed after this page opened. Review them again before approving."
