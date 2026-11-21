@@ -319,6 +319,21 @@ def test_a_history_job_skipped_for_the_provider_day_is_not_collected_again_in_it
     assert claim(history.pk, history.available_at) is None
 
 
+def test_a_history_job_that_could_only_be_claimed_after_its_window_is_not_opened_again() -> None:
+    system = collected(make_system(approved=True))
+    enqueue_due(WINDOW_START)
+    history = night_history(system)
+    late = WINDOW_END - timedelta(minutes=10)
+    CollectionJob.objects.filter(pk=history.pk).update(
+        status="stale", last_error="schedule_changed", available_at=late + timedelta(minutes=30)
+    )
+
+    assert at(read(system, late)["next_collection_at"]) == NEXT_SLOT
+    assert created_jobs(late) == set()
+    history.refresh_from_db()
+    assert (history.status, history.last_error) == ("stale", "schedule_changed")
+
+
 def test_a_forecast_job_whose_lease_ended_is_collected_now() -> None:
     system = make_system(approved=True)
     job = CollectionJob.objects.get(binding=system.binding)
