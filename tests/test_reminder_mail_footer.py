@@ -8,6 +8,7 @@ from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.plants.models import Plant
 from tests.support.domain import NOW, make_system
+from tests.support.notification_transmission import replying
 from tests.support.notifications import SLOT, saved
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -49,9 +50,10 @@ def delivery(language: str) -> NotificationDelivery:
 
 
 def sent(delivery: NotificationDelivery) -> EmailMultiAlternatives:
-    messages: list[EmailMultiAlternatives] = []
-    assert jobs.process_notification(delivery.pk, SLOT, sender=messages.append)
+    with replying(lambda message: None) as messages:
+        assert jobs.process_notification(delivery.pk, SLOT)
     (message,) = messages
+    assert isinstance(message, EmailMultiAlternatives)
     return message
 
 
