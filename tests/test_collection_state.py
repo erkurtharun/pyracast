@@ -8,8 +8,9 @@ from django.test import Client
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.background.retry_policy import PROVIDER_JOB
 from pyracast.connections.contracts import ProviderData
-from pyracast.connections.models import SiteBinding
+from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts.jobs.claim import claim
 from pyracast.forecasts.jobs.ready import pending_job_ids
@@ -18,6 +19,7 @@ from pyracast.forecasts.quota import RequestDeferredError, reserve_request
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.operations import configure_binding, submit_region
+from pyracast.trash import restore_region, trash_region
 from tests.support.collection_schedule import HistoricalFixture, no_calculation
 from tests.support.domain import NOW, System, make_system
 from tests.support.jobs import collect
@@ -363,6 +365,155 @@ def test_an_interrupted_history_job_is_collected_at_its_retry_time() -> None:
     assert history.pk not in pending_job_ids(retry_at - TICK)
     assert claim(history.pk, retry_at - EARLY) is None
     assert claim(history.pk, retry_at) is not None
+
+
+def trashed_and_restored(system: System, trashed_at: datetime, restored_at: datetime) -> None:
+    for operation, moment in ((trash_region, trashed_at), (restore_region, restored_at)):
+        with patch.object(timezone, "now", lambda moment=moment: moment):
+            operation(system.member, system.tenant.pk, system.region.pk)
+
+
+def used_requests(system: System, moment: datetime, count: int) -> None:
+    for _ in range(count):
+        RequestAttempt.objects.create(
+            provider_account=system.account,
+            utc_day=moment.date(),
+            created_at=moment,
+            purpose=RequestPurpose.FORECAST,
+        )
+
+
+def assert_opened_again_at_its_wait(
+    system: System, history: CollectionJob, restored_at: datetime
+) -> None:
+    waits_until = history.available_at
+    assert waits_until > restored_at
+    assert at(read(system, restored_at)["next_collection_at"]) == waits_until
+    enqueue_due(restored_at)
+    history.refresh_from_db()
+    assert (history.status, history.last_error, history.available_at) == (
+        "pending",
+        "",
+        waits_until,
+    )
+    assert at(read(system, restored_at)["next_collection_at"]) == waits_until
+    assert claim(history.pk, waits_until - EARLY) is None
+    assert claim(history.pk, waits_until) is not None
+
+
+def test_a_provider_day_retry_across_utc_midnight_is_opened_again_after_a_restore() -> None:
+    system = collected(make_system(approved=True))
+    enqueue_due(WINDOW_START)
+    history = night_history(system)
+    moment = WINDOW_START + timedelta(minutes=30)
+    system.account.refresh_from_db()
+    used_requests(system, moment, system.account.daily_quota)
+    assert not collect(history.pk, HistoricalFixture(moment), no_calculation, moment)
+    history.refresh_from_db()
+    assert (history.status, history.last_error) == ("retry", "quota_exhausted")
+    assert history.available_at == NIGHT + timedelta(minutes=2)
+
+    trashed_and_restored(system, moment + timedelta(minutes=30), moment + timedelta(hours=1))
+
+    assert_opened_again_at_its_wait(system, history, moment + timedelta(hours=1))
+
+
+def test_a_budget_reserve_retry_is_opened_again_after_a_restore() -> None:
+    system = collected(make_system(approved=True))
+    enqueue_due(WINDOW_START)
+    history = night_history(system)
+    moment = NIGHT + timedelta(minutes=30)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=2)
+    used_requests(system, moment, 1)
+    assert not collect(history.pk, HistoricalFixture(moment), no_calculation, moment)
+    history.refresh_from_db()
+    assert (history.status, history.last_error) == ("retry", "history_budget_reserved")
+
+    trashed_and_restored(system, moment + timedelta(minutes=5), moment + timedelta(minutes=10))
+
+    assert_opened_again_at_its_wait(system, history, moment + timedelta(minutes=10))
+
+
+def test_a_history_job_skipped_for_the_provider_day_stays_skipped_after_a_restore() -> None:
+    system = collected(make_system(approved=True))
+    enqueue_due(WINDOW_START)
+    history = night_history(system)
+    moment = NIGHT + timedelta(hours=1)
+    system.account.refresh_from_db()
+    used_requests(system, moment, system.account.daily_quota)
+    assert not collect(history.pk, HistoricalFixture(moment), no_calculation, moment)
+    history.refresh_from_db()
+    assert (history.status, history.last_error) == ("stale", "quota_exhausted")
+    restored_at = moment + timedelta(minutes=20)
+
+    trashed_and_restored(system, moment + timedelta(minutes=10), restored_at)
+
+    assert at(read(system, restored_at)["next_collection_at"]) == NEXT_SLOT
+    assert created_jobs(restored_at) == set()
+    history.refresh_from_db()
+    assert (history.status, history.last_error) == ("stale", "quota_exhausted")
+
+
+def lease_ended(job: CollectionJob) -> datetime:
+    job.refresh_from_db()
+    assert job.status == "running"
+    assert job.lease_expires_at is not None
+    return job.lease_expires_at + timedelta(minutes=10)
+
+
+def ended_unclaimed(job: CollectionJob, moment: datetime) -> tuple[str, str]:
+    assert claim(job.pk, moment) is None
+    job.refresh_from_db()
+    return job.status, job.last_error
+
+
+def test_an_interrupted_forecast_whose_attempts_are_used_up_is_not_the_next_collection() -> None:
+    system = make_system(approved=True)
+    job = CollectionJob.objects.get(binding=system.binding)
+    moment = EVENING
+    for _ in range(PROVIDER_JOB.max_attempts):
+        assert claim(job.pk, moment) is not None
+        moment = lease_ended(job)
+    assert job.attempts == PROVIDER_JOB.max_attempts
+
+    assert at(read(system, moment)["next_collection_at"]) == WINDOW_START
+    assert ended_unclaimed(job, moment) == ("failed", "attempts_exhausted")
+    assert at(read(system, moment)["next_collection_at"]) == WINDOW_START
+
+
+def test_an_interrupted_forecast_a_newer_slot_superseded_is_not_the_next_collection() -> None:
+    system = make_system(approved=True)
+    job = CollectionJob.objects.get(binding=system.binding)
+    assert claim(job.pk, EVENING) is not None
+    enqueue_due(NEXT_SLOT)
+    CollectionJob.objects.exclude(pk=job.pk).update(status="succeeded")
+    later = NEXT_SLOT + timedelta(minutes=10)
+    next_night = WINDOW_START + timedelta(days=1)
+
+    assert at(read(system, later)["next_collection_at"]) == next_night
+    assert ended_unclaimed(job, later) == ("stale", "forecast_superseded")
+    assert at(read(system, later)["next_collection_at"]) == next_night
+
+
+def test_an_interrupted_forecast_whose_clock_was_removed_is_not_the_next_collection() -> None:
+    system = make_system(approved=True)
+    job = CollectionJob.objects.get(binding=system.binding)
+    assert claim(job.pk, EVENING) is not None
+    configure_schedule(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        times=["18:00"],
+        now=EVENING,
+    )
+    later = lease_ended(job)
+    new_slot = datetime(2026, 11, 9, 15, tzinfo=UTC)
+    assert later < new_slot
+
+    assert at(read(system, later)["next_collection_at"]) == new_slot
+    assert ended_unclaimed(job, later) == ("stale", "slot_not_configured")
+    assert at(read(system, later)["next_collection_at"]) == new_slot
 
 
 def test_usage_counts_only_the_plants_own_requests_of_the_utc_day() -> None:
