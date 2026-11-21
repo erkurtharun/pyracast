@@ -2,7 +2,7 @@
 import { useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import type { Plant, PlantScope, Region } from "@/lib/api";
 import { useRefresh } from "@/lib/api/query";
 import { plantDay } from "@/lib/format/time";
@@ -122,62 +122,64 @@ export function PlantWorkspace({
                 current={tab}
                 onSelect={navigation.selectTab}
             />
-            {tab === "forecast" ? (
-                <ForecastSection
-                    scope={scope}
-                    timezone={timezone}
-                    configurationId={configuration?.id}
-                    view={forecastView}
-                    date={address.date ?? plantDay(timezone, 1)}
-                    baseDate={navigation.base.date}
-                    leaving={navigation.leaving("forecast")}
-                    options={forecastOptions}
-                    onOptions={setForecastOptions}
-                    show={navigation.show}
-                />
-            ) : tab === "outages" ? (
-                <Outages
-                    configuration={configuration}
-                    scope={scope}
-                    timezone={timezone}
-                    onChanged={changed}
-                />
-            ) : tab === "settings" ? (
-                <SettingsSection
-                    plant={currentPlant}
-                    scope={scope}
-                    region={region}
-                    timezone={timezone}
-                    view={plantView("settings", address)}
-                    leaving={navigation.leaving("settings")}
-                    show={navigation.show}
-                    onSaved={setSavedPlant}
-                    onChanged={changed}
-                    onDeleted={async () => {
-                        await changed();
-                        router.push(portfolio);
-                    }}
-                />
-            ) : tab === "production" ? (
-                <ProductionSection
-                    scope={scope}
-                    timezone={timezone}
-                    configurationId={configuration?.id}
-                    view={plantView("production", address)}
-                    day={address.date}
-                    baseDay={navigation.base.date}
-                    leaving={navigation.leaving("production")}
-                    show={navigation.show}
-                    onSaved={changed}
-                />
-            ) : !configuration ? (
-                <Notice>{t("calibrationUnavailable")}</Notice>
-            ) : (
-                <Calibrations
-                    key={`calibration-${configuration.id}`}
-                    scope={scope}
-                />
-            )}
+            <Suspense fallback={<p role="status">{t("loadingSection")}</p>}>
+                {tab === "forecast" ? (
+                    <ForecastSection
+                        scope={scope}
+                        timezone={timezone}
+                        configurationId={configuration?.id}
+                        view={forecastView}
+                        date={address.date ?? plantDay(timezone, 1)}
+                        baseDate={navigation.base.date}
+                        leaving={navigation.leaving("forecast")}
+                        options={forecastOptions}
+                        onOptions={setForecastOptions}
+                        show={navigation.show}
+                    />
+                ) : tab === "outages" ? (
+                    <Outages
+                        configuration={configuration}
+                        scope={scope}
+                        timezone={timezone}
+                        onChanged={changed}
+                    />
+                ) : tab === "settings" ? (
+                    <SettingsSection
+                        plant={currentPlant}
+                        scope={scope}
+                        region={region}
+                        timezone={timezone}
+                        view={plantView("settings", address)}
+                        leaving={navigation.leaving("settings")}
+                        show={navigation.show}
+                        onSaved={setSavedPlant}
+                        onChanged={changed}
+                        onDeleted={async () => {
+                            await changed();
+                            router.push(portfolio);
+                        }}
+                    />
+                ) : tab === "production" ? (
+                    <ProductionSection
+                        scope={scope}
+                        timezone={timezone}
+                        configurationId={configuration?.id}
+                        view={plantView("production", address)}
+                        day={address.date}
+                        baseDay={navigation.base.date}
+                        leaving={navigation.leaving("production")}
+                        show={navigation.show}
+                        onSaved={changed}
+                    />
+                ) : !configuration ? (
+                    <Notice>{t("calibrationUnavailable")}</Notice>
+                ) : (
+                    <Calibrations
+                        key={`calibration-${configuration.id}`}
+                        scope={scope}
+                    />
+                )}
+            </Suspense>
         </ExportPlant>
     );
 }
