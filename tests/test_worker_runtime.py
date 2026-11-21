@@ -1,6 +1,9 @@
+import contextlib
 import logging
 import threading
 import time
+from collections.abc import Callable
+from functools import partial
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock
@@ -21,8 +24,15 @@ from pyracast.background.failures import PhaseOutcome, queue_depth, queue_full
 from pyracast.forecasts import runtime
 from pyracast.forecasts.management.commands import worker as command
 from pyracast.metering.runtime import dispatch_epias, make_epias_actor
-from pyracast.notifications.runtime import make_outbound_mail_actor, publish_outbound_mail
+from pyracast.notifications.runtime import (
+    dispatch_notifications,
+    make_notification_actor,
+    make_outbound_mail_actor,
+    publish_outbound_mail,
+)
+from pyracast.plants.runtime import dispatch_calibrations, make_calibration_actor
 from pyracast.shutdown import ShutdownRequest
+from tests.support.rabbitmq import FakeRabbitmq, install_fake_rabbitmq
 
 FACTORIES = (
     "make_actor",
@@ -178,6 +188,115 @@ def test_a_queue_ten_batches_deep_receives_no_more_mail(monkeypatch: pytest.Monk
     broker.queues[actor.queue_name].get_nowait()
 
     assert publish_outbound_mail(actor) == 2
+
+
+@pytest.fixture
+def rabbitmq(monkeypatch: pytest.MonkeyPatch) -> FakeRabbitmq:
+    return install_fake_rabbitmq(monkeypatch)
+
+
+def collection_round(
+    broker: RabbitmqBroker, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[], object]:
+    actor = runtime.make_actor(broker)
+    monkeypatch.setattr(runtime, "enqueue_due", MagicMock())
+    monkeypatch.setattr(runtime, "pending_job_ids", MagicMock(return_value=[3, 5]))
+    return partial(runtime.dispatch_collections, actor)
+
+
+def metering_round(broker: RabbitmqBroker, monkeypatch: pytest.MonkeyPatch) -> Callable[[], object]:
+    actor = make_epias_actor(broker)
+    monkeypatch.setattr("pyracast.metering.runtime.enqueue_due_epias_jobs", MagicMock())
+    monkeypatch.setattr(
+        "pyracast.metering.runtime.pending_epias_ids", MagicMock(return_value=[3, 5])
+    )
+    return partial(dispatch_epias, actor)
+
+
+def calibration_round(
+    broker: RabbitmqBroker, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[], object]:
+    actor = make_calibration_actor(broker)
+    monkeypatch.setattr("pyracast.plants.runtime._schedule", MagicMock())
+    monkeypatch.setattr(
+        "pyracast.plants.runtime.pending_calibration_ids", MagicMock(return_value=[3, 5])
+    )
+    return partial(dispatch_calibrations, actor)
+
+
+def reminder_round(broker: RabbitmqBroker, monkeypatch: pytest.MonkeyPatch) -> Callable[[], object]:
+    actor = make_notification_actor(broker)
+    monkeypatch.setattr("pyracast.notifications.runtime.enqueue_due", MagicMock())
+    monkeypatch.setattr(
+        "pyracast.notifications.runtime.pending_notification_ids", MagicMock(return_value=[3, 5])
+    )
+    monkeypatch.setattr(
+        "pyracast.notifications.runtime.publish_outbound_mail", MagicMock(return_value=0)
+    )
+    return partial(dispatch_notifications, actor, MagicMock())
+
+
+def mail_tick(broker: RabbitmqBroker, monkeypatch: pytest.MonkeyPatch) -> Callable[[], object]:
+    actor = make_outbound_mail_actor(broker)
+    monkeypatch.setattr("pyracast.notifications.runtime.end_expired_mail", MagicMock())
+
+    def publish_due_mail(send: Callable[[int], object], _now: object) -> int:
+        for identifier in (3, 5):
+            send(identifier)
+        return 2
+
+    monkeypatch.setattr("pyracast.notifications.runtime.publish_due_mail", publish_due_mail)
+    return partial(publish_outbound_mail, actor)
+
+
+PUBLISHERS = {
+    "default": collection_round,
+    "epias": metering_round,
+    "calibration": calibration_round,
+    "notifications": reminder_round,
+    "mail": mail_tick,
+}
+
+
+@pytest.mark.parametrize("loss", ["connection", "channel"])
+@pytest.mark.parametrize("publisher", sorted(PUBLISHERS))
+def test_every_round_after_a_lost_broker_connection_publishes_again(
+    rabbitmq: FakeRabbitmq, monkeypatch: pytest.MonkeyPatch, publisher: str, loss: str
+) -> None:
+    broker = RabbitmqBroker(url="amqp://broker.invalid/", confirm_delivery=True)
+    publish = PUBLISHERS[publisher](broker, monkeypatch)
+    queue = "notifications" if publisher == "mail" else publisher
+    publish()
+    assert rabbitmq.published(queue) == 2
+
+    rabbitmq.drop(loss)
+    delivered = []
+    for _round in range(3):
+        before = rabbitmq.published(queue)
+        with contextlib.suppress(Exception):
+            publish()
+        delivered.append(rabbitmq.published(queue) - before)
+
+    assert delivered == [2, 2, 2]
+
+
+def test_an_unreadable_queue_depth_still_sends_and_the_next_round_publishes(
+    rabbitmq: FakeRabbitmq,
+    monkeypatch: pytest.MonkeyPatch,
+    pyracast_logs: pytest.LogCaptureFixture,
+) -> None:
+    broker = RabbitmqBroker(url="amqp://broker.invalid/", confirm_delivery=True)
+    publish = collection_round(broker, monkeypatch)
+    rabbitmq.reachable = False
+
+    outcome = publish()
+
+    assert outcome == PhaseOutcome(published=0, error="ConnectionClosed")
+    assert "queue_depth_unavailable queue=default" in pyracast_logs.text
+    assert rabbitmq.attempts > 2
+    rabbitmq.reachable = True
+    assert publish() == PhaseOutcome(published=2)
+    assert rabbitmq.published("default") == 2
 
 
 def test_the_queue_depth_comes_from_the_broker_holding_the_queue(

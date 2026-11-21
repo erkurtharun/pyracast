@@ -88,9 +88,18 @@ def test_an_interrupted_actor_stops_before_its_lease_can_be_claimed_again() -> N
             ), name
 
 
+def test_a_mail_exchange_outlasts_each_of_its_socket_operations() -> None:
+    for name in MAIL_ACTORS:
+        assert deadlines.ACTORS[name].time_limit is None, name
+    assert timedelta(0) < timedelta(seconds=deadlines.MAIL_SOCKET_SECONDS) < deadlines.MAIL_EXCHANGE
+
+
 def test_a_provider_request_ends_within_its_body_deadline_and_one_read() -> None:
     assert (
-        deadlines.HTTP_CONNECT_SECONDS < deadlines.HTTP_READ_SECONDS <= deadlines.HTTP_BODY_SECONDS
+        0
+        < deadlines.HTTP_CONNECT_SECONDS
+        < deadlines.HTTP_READ_SECONDS
+        <= deadlines.HTTP_BODY_SECONDS
     )
     assert (
         timedelta(seconds=deadlines.HTTP_BODY_SECONDS + deadlines.HTTP_READ_SECONDS)
@@ -194,6 +203,31 @@ def test_the_dispatcher_polls_well_inside_its_heartbeat_lag() -> None:
     assert timedelta(seconds=2 * poll) < deadlines.HEARTBEAT_LAG
 
 
+def test_a_dispatcher_without_a_broker_is_restarted_within_the_outage_bound() -> None:
+    services = compose_services()
+    health = services["dispatcher"]["healthcheck"]
+    broker = services["rabbitmq"]["healthcheck"]
+    broker_starting = duration(broker["start_period"]) + broker["retries"] * duration(
+        broker["interval"]
+    )
+    # The EPIAS settlement directory loads within one phase with up to two provider requests.
+    longest_phase_step = 2 * deadlines.PROVIDER_REQUEST
+
+    assert duration(health["interval"]) == deadlines.DISPATCHER_HEALTH_INTERVAL
+    assert health["retries"] == deadlines.DISPATCHER_HEALTH_RETRIES
+    assert (
+        deadlines.BROKER_OUTAGE_RESTART
+        == deadlines.HEARTBEAT_LAG
+        + deadlines.DISPATCHER_HEALTH_RETRIES * deadlines.DISPATCHER_HEALTH_INTERVAL
+    )
+    assert broker_starting < deadlines.HEARTBEAT_LAG < deadlines.BROKER_OUTAGE_RESTART
+    assert longest_phase_step > timedelta(seconds=2 * deadlines.BROKER_HEARTBEAT_SECONDS)
+    assert (
+        timedelta(seconds=deadlines.DISPATCH_POLL_SECONDS) + longest_phase_step
+        < deadlines.HEARTBEAT_LAG
+    )
+
+
 def test_database_sessions_carry_the_ladder_timeouts() -> None:
     database = settings.DATABASES["default"]
     session = cast("dict[str, object]", database["OPTIONS"])
@@ -250,6 +284,8 @@ def test_publication_stops_ten_batches_deep() -> None:
         metering_jobs.pending_epias_ids,
         notification_jobs.pending_notification_ids,
         pending_calibration_ids,
+        outbox.pending_mail_ids,
+        outbox.publish_due_mail,
     ):
         assert inspect.signature(pending).parameters["limit"].default == deadlines.PUBLISH_BATCH
     assert deadlines.QUEUE_DEPTH_LIMIT == 10 * deadlines.PUBLISH_BATCH

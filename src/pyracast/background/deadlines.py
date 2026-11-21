@@ -57,6 +57,14 @@ DRAIN = max(bound.longest_run for bound in ACTORS.values())
 STOP_GRACE = DRAIN + timedelta(minutes=1)
 DISPATCH_POLL_SECONDS = 30.0
 HEARTBEAT_LAG = timedelta(minutes=5)
+# deploy/compose.yaml checks the dispatcher heartbeat at this interval and marks the container
+# unhealthy after this many failed checks in a row.
+DISPATCHER_HEALTH_INTERVAL = timedelta(seconds=60)
+DISPATCHER_HEALTH_RETRIES = 3
+# The dispatcher renews its heartbeat only after the broker answered on a live or fresh
+# connection, so its container is unhealthy, for the watchdog to restart, at most this long after
+# the broker stops answering.
+BROKER_OUTAGE_RESTART = HEARTBEAT_LAG + DISPATCHER_HEALTH_RETRIES * DISPATCHER_HEALTH_INTERVAL
 PUBLISH_BATCH = 100
 QUEUE_DEPTH_LIMIT = 10 * PUBLISH_BATCH
 
