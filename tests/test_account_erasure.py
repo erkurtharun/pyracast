@@ -1371,16 +1371,19 @@ def test_an_audit_entry_on_a_region_erasure_holds_is_recorded_while_its_actor_is
         schedule=schedule, address=person.email, key=recipient_key(person.email)
     )
 
-    erased, audited = paused_in(
+    def audit_and_see_actor() -> tuple[int, bool]:
+        entry = record_audit(AuditAction.REGION_RENAMED, actor=person, region=region, revision=0)
+        return entry.pk, User.objects.get(pk=person.pk).is_active
+
+    erased, (audited, actor_active_at_audit) = paused_in(
         monkeypatch,
         erasure,
         "_forget_recipients",
         lambda: erase_account(person.pk, execute=True),
-        lambda: (
-            record_audit(AuditAction.REGION_RENAMED, actor=person, region=region, revision=0).pk
-        ),
+        audit_and_see_actor,
     )
 
+    assert actor_active_at_audit
     assert erased.changes["notifications.ReminderRecipient"] == 1
     assert list(AuditEvent.objects.values_list("pk", "actor_id", "region_id")) == [
         (audited, person.pk, region.pk)
