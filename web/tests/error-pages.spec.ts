@@ -230,3 +230,33 @@ test("a missing workspace page leads back to the app without choosing a language
     expect(new URL(page.url()).searchParams.has("language")).toBe(false);
     expect(languages).toEqual([]);
 });
+
+test("an unmatched app address leads back to the app without choosing a language", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const languages: string[] = [];
+    await page.route("**/api/session/language/", (route) => {
+        languages.push(route.request().method());
+        return route.fallback();
+    });
+    const response = await page.goto("/app/typo/");
+    expect(response?.status()).toBe(404);
+    const html = await response!.text();
+    expect(html).toContain('<a href="/app/">Go to the app</a>');
+    expect(html).toContain('<a href="/app/">Uygulamaya git</a>');
+    await expect(
+        page.getByRole("heading", { name: "Page not found", exact: true }),
+    ).toBeVisible();
+    const app = page.getByRole("link", { name: "Go to the app", exact: true });
+    await expect(app).toHaveAttribute("href", "/app/");
+    await expect(
+        page.getByRole("link", { name: "Uygulamaya git", exact: true }),
+    ).toHaveAttribute("href", "/app/");
+    await app.click();
+    await expect(page).toHaveURL("/app/");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    expect(languages).toEqual([]);
+});
