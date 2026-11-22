@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -48,7 +49,7 @@ def exceptions_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def add_finding(
-    reports: Path, service: str, result: int = 0, finding: dict[str, str] = FINDING
+    reports: Path, service: str, result: int = 0, finding: Mapping[str, object] = FINDING
 ) -> None:
     path = reports / f"{service}.json"
     report = json.loads(path.read_text())

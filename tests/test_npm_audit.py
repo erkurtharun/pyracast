@@ -161,7 +161,7 @@ def test_two_exceptions_for_one_advisory_in_one_package_are_refused() -> None:
     pair = [exception(IN_PICOMATCH), exception(IN_PICOMATCH, reason="Again.")]
 
     with pytest.raises(
-        ValueError, match="^Duplicate audit exception: GHSA-aaaa-bbbb-cccc in picomatch$"
+        ValueError, match=r"^Duplicate audit exception: GHSA-aaaa-bbbb-cccc in picomatch$"
     ):
         load_exceptions(json.dumps(pair))
     assert load_exceptions(json.dumps([exception(IN_PICOMATCH), exception(IN_NEXT)]))
