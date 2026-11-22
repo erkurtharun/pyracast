@@ -78,7 +78,7 @@ def test_gaps_and_unmatched_edges_are_counted(tmp_path: Path) -> None:
 )
 def test_rejects_invalid_power_fields(tmp_path: Path, field: str, value: object) -> None:
     p, w = files(tmp_path, [power() | {field: value}], [])
-    with pytest.raises(ValueError, match=r"Invalid|sorted|interval objects"):
+    with pytest.raises(ValueError, match=r"Invalid|sorted|interval objects|Nonfinite"):
         load_pairs(p, w, trusted_root=tmp_path)
 
 
@@ -96,7 +96,7 @@ def test_rejects_invalid_power_fields(tmp_path: Path, field: str, value: object)
 )
 def test_rejects_invalid_weather_fields(tmp_path: Path, field: str, value: object) -> None:
     p, w = files(tmp_path, [], [weather(0, **{field: value})])
-    with pytest.raises(ValueError, match=r"Invalid|sorted|interval objects"):
+    with pytest.raises(ValueError, match=r"Invalid|sorted|interval objects|Nonfinite"):
         load_pairs(p, w, trusted_root=tmp_path)
 
 
@@ -114,7 +114,7 @@ def test_rejects_overlapping_unsorted_or_non_object_rows(
     tmp_path: Path, powers: object, weathers: object
 ) -> None:
     p, w = files(tmp_path, powers, weathers)
-    with pytest.raises(ValueError, match=r"Invalid|sorted|interval objects"):
+    with pytest.raises(ValueError, match=r"Invalid|sorted|interval objects|Nonfinite"):
         load_pairs(p, w, trusted_root=tmp_path)
 
 

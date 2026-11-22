@@ -49,6 +49,7 @@ ACTORS: dict[str, ActorBound] = {
     "collect_forecast": ActorBound(LEASE, TIME_LIMIT),
     "collect_epias": ActorBound(LEASE, TIME_LIMIT),
     "calibrate_plant": ActorBound(LEASE, TIME_LIMIT),
+    "revalidate_provider_account": ActorBound(LEASE, TIME_LIMIT),
     "send_forecast_reminder": ActorBound(LEASE, None),
     "send_outbound_mail": ActorBound(LEASE, None),
 }

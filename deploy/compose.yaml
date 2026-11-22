@@ -19,6 +19,7 @@ x-process: &process
   environment: &application-environment
     DJANGO_SETTINGS_MODULE: pyracast.production
     PYRACAST_DEBUG: "0"
+    PYRACAST_FIXTURE_PROVIDER: "0"
     PYRACAST_HOSTS: ${SITE_ADDRESS},localhost,127.0.0.1
     PYRACAST_PUBLIC_ORIGIN: https://${SITE_ADDRESS}
     PYRACAST_CSRF_ORIGINS: https://${SITE_ADDRESS}

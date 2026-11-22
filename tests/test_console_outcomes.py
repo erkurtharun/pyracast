@@ -12,7 +12,7 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceAdminChange, W
 from pyracast.connections.models import ProviderAccount
 from pyracast.notifications.models import NotificationSettings
 from pyracast.regions.models import AuditAction, AuditEvent, Region
-from tests.support.admin_setup import admin_system, review_fields, setup_input, setup_url
+from tests.support.admin_setup import admin_system, setup_input, setup_url
 from tests.support.api import verified_admin
 
 pytestmark = pytest.mark.django_db
@@ -95,18 +95,15 @@ def test_a_double_submitted_provider_wait_clearance_reports_it_once() -> None:
     until = timezone.now().replace(microsecond=0) + timedelta(hours=1)
     ProviderAccount.objects.filter(pk=system.account.pk).update(request_blocked_until=until)
     client, _ = verified_admin()
+    url = reverse("admin:workspace_provider_account_delay", args=(system.account.pk,))
     clearance: dict[str, object] = {
-        "action": "clear_cooldown",
-        "expected_revision": system.region.revision,
-        "binding_id": system.binding.pk,
-        "credential_revision": system.account.credential_revision,
-        "expected_cooldown_until": until.isoformat(),
+        "expected_revision": system.account.credential_revision,
+        "expected_blocked_until": until.isoformat(),
         "provider_recovered": "on",
-        **review_fields(system),
     }
 
-    assert notices(client, setup_url(system), clearance) == (302, [WAIT_CLEARED])
-    assert notices(client, setup_url(system), clearance) == (302, [NO_WAIT])
+    assert notices(client, url, clearance) == (302, [WAIT_CLEARED])
+    assert notices(client, url, clearance) == (302, [NO_WAIT])
     assert AuditEvent.objects.filter(action=AuditAction.PROVIDER_COOLDOWN_CLEARED).count() == 1
 
 

@@ -8,13 +8,14 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, connections, transaction
 
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.operations import create_account, rotate_secret
+from pyracast.connections.operations import create_account, replace_api_key
 from pyracast.connections.secrets import decrypt_api_key
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.plants.approval import approve_region
 from pyracast.regions.models import AuditAction, AuditEvent
 from tests.support.api import verified_admin
 from tests.support.domain import NOW, make_system
+from tests.support.providers import replace_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -59,7 +60,7 @@ def test_rotation_is_write_only_invalidates_validation_and_preserves_account_quo
     attempts = list(RequestAttempt.objects.values())
     quota = system.account.daily_quota
 
-    rotate_secret(actor, system.account.pk, reference)
+    replace_key(actor, system.account.pk, reference)
 
     system.account.refresh_from_db()
     assert decrypt_api_key(system.account.encrypted_api_key) == reference
@@ -92,7 +93,7 @@ def test_rotation_requires_platform_administrator(identity: str) -> None:
     initial_events = AuditEvent.objects.count()
 
     with pytest.raises(PermissionDenied):
-        rotate_secret(user, system.account.pk, "test-only-replacement")
+        replace_key(user, system.account.pk, "test-only-replacement")
 
     system.account.refresh_from_db()
     assert system.account.credential_revision == 1
@@ -105,7 +106,7 @@ def test_invalid_rotation_inputs_remain_private_and_unchanged(api_key: str) -> N
     initial_events = AuditEvent.objects.count()
 
     with pytest.raises(ValidationError, match="without spaces"):
-        rotate_secret(system.admin, system.account.pk, api_key)
+        replace_key(system.admin, system.account.pk, api_key)
 
     system.account.refresh_from_db()
     assert system.account.credential_revision == 1
@@ -117,7 +118,7 @@ def test_rotation_of_missing_account_changes_nothing() -> None:
     initial_events = AuditEvent.objects.count()
 
     with pytest.raises(ProviderAccount.DoesNotExist):
-        rotate_secret(system.admin, 999999, "test-only-replacement")
+        replace_key(system.admin, 999999, "test-only-replacement")
 
     assert AuditEvent.objects.count() == initial_events
 
@@ -145,7 +146,7 @@ def test_account_mutation_rolls_back_if_audit_insert_fails(
                 api_key=original_reference,
             )
         else:
-            rotate_secret(system.admin, system.account.pk, "test-only-rollback")
+            replace_key(system.admin, system.account.pk, "test-only-rollback")
 
     with pytest.raises(IntegrityError):
         mutate_account()
@@ -156,24 +157,27 @@ def test_account_mutation_rolls_back_if_audit_insert_fails(
     assert system.account.credential_revision == 1
 
 
-def test_concurrent_rotations_have_serial_credential_revisions_and_audits() -> None:
+def test_concurrent_replacements_of_the_key_one_page_showed_let_exactly_one_through() -> None:
     system = make_system()
     barrier = Barrier(2)
 
-    def rotate(reference: str) -> None:
+    def rotate(reference: str) -> str:
         try:
             barrier.wait(timeout=5)
-            rotate_secret(system.admin, system.account.pk, reference)
+            replace_api_key(system.admin, system.account.pk, reference, expected_revision=1)
+        except ValidationError as refusal:
+            return " ".join(refusal.messages)
         finally:
             connections.close_all()
+        return "replaced"
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(rotate, f"test-only-rotation-{number}") for number in (1, 2)]
-        for future in futures:
-            future.result(timeout=10)
+        outcomes = sorted(future.result(timeout=10) for future in futures)
 
+    assert outcomes == ["The account changed. Reload this page.", "replaced"]
     system.account.refresh_from_db()
-    assert system.account.credential_revision == 3
+    assert system.account.credential_revision == 2
     assert decrypt_api_key(system.account.encrypted_api_key) in {
         "test-only-rotation-1",
         "test-only-rotation-2",
@@ -182,7 +186,7 @@ def test_concurrent_rotations_have_serial_credential_revisions_and_audits() -> N
         AuditEvent.objects.filter(provider_account=system.account, action="provider_secret_rotated")
         .order_by("revision")
         .values_list("revision", flat=True)
-    ) == [2, 3]
+    ) == [2]
 
 
 @pytest.mark.parametrize("targets", ["none", "both"])
