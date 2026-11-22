@@ -50,7 +50,7 @@ sequenceDiagram
 | Table | R/W | What |
 | --- | --- | --- |
 | `forecasts_collectionjob`, `connections_sitebinding`, `connections_provideraccount` | R | `forecasts.runtime.deliver` loads the job, binding and provider account to pick the adapter before `collect`. |
-| Job tables of the owning flows | R/W | `forecasts.jobs.collect`, `plants.training.run_calibration`, `metering.jobs.run_epias_job`, `notifications.jobs.process_notification` and `notifications.outbox.send_outbound_mail` claim and update `forecasts_collectionjob`, `plants_calibrationrun`, `metering_epiascollectionjob`, `notifications_notificationdelivery`, `notifications_outboundmail`. |
+| Job tables of the owning flows | R/W | `forecasts.jobs.collect`, `plants.training.run_calibration`, `metering.jobs.run_epias_job`, `notifications.jobs.process_notification`, `notifications.outbox.send_outbound_mail` and `forecasts.revalidation.revalidate_account` claim and update `forecasts_collectionjob`, `plants_calibrationrun`, `metering_epiascollectionjob`, `notifications_notificationdelivery`, `notifications_outboundmail` and the lease `connections_provideraccount.revalidation_due_at`. |
 | RabbitMQ queues | R/W | Per queue name a durable queue plus `.DQ` (delay) and `.XQ` (dead letter, 7-day TTL), declared lazily when a consumer or publisher first uses it. |
 
 ## Authorization
@@ -67,7 +67,8 @@ sequenceDiagram
 | Stop file exists or signal arrives after handlers are installed, before start | Silent return, exit 0, no broker created |
 | Broker URL missing or blank outside development | `ImproperlyConfigured` at start, no process |
 | Broker unreachable at start or later | Process stays up: each consumer logs a critical error and restarts every 3 s; nothing is consumed meanwhile |
-| Actor raises (deleted job row, unsupported provider, `lock_timeout`, database down) or runs past its time limit | Dramatiq logs "Failed to process message ... unhandled exception" and "Retries exceeded", nacks to `.XQ`; the row keeps what the operation committed and the dispatcher re-sends it while it stays due (an unsupported provider dead-letters every cycle) |
+| A claim waits out `lock_timeout` or loses a deadlock | The delivery ends normally, no dead letter: `background/claims.py` logs `job_claim_contended kind=<actor> job_id=<id> error_type=<LockNotAvailable or DeadlockDetected>` at WARNING, the claim's transaction rolled back, and the dispatcher publishes the job again |
+| Actor raises (deleted job row, unsupported provider, a lock error after the claim, any other database error, database down) or runs past its time limit | Dramatiq logs "Failed to process message ... unhandled exception" and "Retries exceeded", nacks to `.XQ`; the row keeps what the operation committed and the dispatcher re-sends it while it stays due (an unsupported provider dead-letters every cycle) |
 | Worker killed (SIGKILL, power, grace expired) | Unacked messages return to the queue; a `running` or `sending` row is reselected after its lease expires |
 | `Worker.stop` raises | Exception propagates, `broker.close` still runs, exit non-zero, Compose restarts it (up to 5 times) |
 | Restart budget exhausted | Container stays down until `deploy/watchdog.py` restarts it (only while `pyracast.service` is active, no release is blocked and the release lock is free) |
@@ -87,6 +88,7 @@ sequenceDiagram
 - `tests/test_worker_runtime.py`: the time limit of each actor, the ten-minute drain, a missing broker URL (production process and deployment check), the development fallback, queue depth limits per queue and an unreadable depth. `tests/test_deadline_ladder.py`: the bounds and their relations.
 - `tests/test_runtime.py`: worker arguments and queue selection, `--threads 0`, interrupt, broker close after a failing stop, handler restore, existing stop file, `make_broker` parameters and failover URLs.
 - `tests/test_shutdown.py` (unit) and `tests/test_shutdown_process.py` (real subprocess, stub broker, worker and dispatch: active job finishes, then broker closes; the SIGTERM variant is skipped on Windows).
+- `tests/test_claim_contention.py`: each kind's delivery behind a lock held by a second connection ends without claiming; other database errors still raise.
 - `tests/test_dev_launcher.py`: cooperative stop, timeout keeps identity, foreign marker path, `wait_for_jobs` drain.
 - `tests/test_live_queue.py`, `tests/test_calibration_runtime.py`, `tests/test_metering_runtime.py`, `tests/test_notifications_runtime.py`: real RabbitMQ delivery and redelivery, skipped unless `PYRACAST_LIVE_QUEUE=1`, which CI sets on Ubuntu (Docker RabbitMQ) and on both Windows shards (`scripts.start_rabbitmq` writes it to `GITHUB_ENV`); their other tests use stub brokers.
 - `tests/test_deployment_watchdog.py` (recovery of exhausted workers, Compose mocked) and `deploy/smoke.sh` (idle stop with `stop -t 30`).
