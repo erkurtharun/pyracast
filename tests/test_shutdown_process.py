@@ -107,13 +107,12 @@ def test_shutdown_finishes_active_work_and_closes_broker(
             else:
                 stub_actors()
                 command.purge_expired = lambda now: record("ready")
-                command.sweep_accounts = MagicMock()
                 command.warn_before_purge = MagicMock()
                 command.dispatch_collections = MagicMock()
                 command.dispatch_calibrations = MagicMock()
                 command.dispatch_notifications = MagicMock()
                 command.dispatch_epias = MagicMock()
-                command.purge_finished_mail = MagicMock()
+                command.RETENTION = ()
                 command.publish_outbound_mail = MagicMock()
                 dispatch.Command().handle(loop=True, poll_seconds=60, stop_file=root / "stop")
             """

@@ -11,6 +11,7 @@ from pyracast.plants.automation import set_calibration_automation
 from pyracast.plants.management.commands import calibrate_plant
 from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
 from pyracast.plants.operations import request_calibration, revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.preparation import prepare_calibration
 from tests.support.calibration_preparation import add_days
 from tests.support.concurrency import behind_open_transaction
@@ -91,7 +92,7 @@ def test_a_configuration_revision_supersedes_open_runs_and_disables_automation_w
     set_calibration_automation(*scope, enabled=True)
     run = request_run(system, plant)
 
-    revise_plant(*scope, name="Changed", dc_capacity_mw=140)
+    revise_plant(*scope, PlantParameters(name="Changed", dc_capacity_mw=140))
 
     run.refresh_from_db()
     assert (run.status, run.completed_at, run.lease_token) == ("superseded", NOW, None)

@@ -44,10 +44,12 @@ def test_mounting_geometry_is_validated_and_versioned_in_api() -> None:
         "mounting_type": "fixed",
         "surface_tilt_degrees": 30,
         "surface_azimuth_degrees": 180,
+        "expected_revision": plant["parameters_revision"],
     }
     detail = f"{base}{plant['id']}/"
     response = client.put(detail, values, content_type="application/json")
     assert response.status_code == 200, response.content
+    values["expected_revision"] = response.json()["parameters_revision"]
     fixed = response.json()["current_configuration"]
     assert fixed["mounting_type"] == "fixed"
     assert fixed["surface_tilt_degrees"] == 30
@@ -192,7 +194,7 @@ def test_tenant_scope_and_production_input_validation() -> None:
     assert (
         client.put(
             detail,
-            {"name": "PV", "dc_capacity_mw": 1, "tenant_id": 1},
+            {"name": "PV", "dc_capacity_mw": 1, "expected_revision": 1, "tenant_id": 1},
             content_type="application/json",
         ).status_code
         == 400
@@ -300,7 +302,9 @@ def test_calibration_pending_forecast_and_csrf() -> None:
     assert reset.json()["calibration_id"] is None
     assert (
         client.put(
-            detail, {"name": "PV", "dc_capacity_mw": True}, content_type="application/json"
+            detail,
+            {"name": "PV", "dc_capacity_mw": True, "expected_revision": 1},
+            content_type="application/json",
         ).status_code
         == 400
     )
@@ -308,7 +312,9 @@ def test_calibration_pending_forecast_and_csrf() -> None:
     guarded.force_login(User.objects.get(username="member"))
     assert (
         guarded.put(
-            detail, {"name": "PV", "dc_capacity_mw": 1}, content_type="application/json"
+            detail,
+            {"name": "PV", "dc_capacity_mw": 1, "expected_revision": 1},
+            content_type="application/json",
         ).status_code
         == 403
     )
@@ -319,7 +325,12 @@ def test_forecast_resolution_caps_native_intervals() -> None:
     detail = f"{base}{plant['id']}/"
     response = client.put(
         detail,
-        {"name": "PV", "dc_capacity_mw": 1, "export_limit_mw": 0.5},
+        {
+            "name": "PV",
+            "dc_capacity_mw": 1,
+            "export_limit_mw": 0.5,
+            "expected_revision": plant["parameters_revision"],
+        },
         content_type="application/json",
     )
     assert response.status_code == 200

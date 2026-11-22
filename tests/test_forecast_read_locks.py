@@ -20,6 +20,7 @@ from pyracast.plants.activation import activate_calibration
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 from tests.support.concurrency import row_locked_elsewhere, short_lock_timeout
 from tests.support.domain import NOW, System
@@ -113,8 +114,7 @@ def _revision(system: System, plant: Plant) -> None:
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Revised",
-        dc_capacity_mw=260,
+        PlantParameters(name="Revised", dc_capacity_mw=260),
     )
 
 

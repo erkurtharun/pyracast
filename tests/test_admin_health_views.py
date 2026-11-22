@@ -55,7 +55,9 @@ def test_historical_health_reasons_are_visible_and_link_to_the_matching_records(
         preparation_deadline=NOW + PREPARATION_GRACE,
         available_at=NOW,
         status="sent",
-        prepared_message={"kind": "saved_partial", "tomorrow_complete": False},
+        forecast_kind="saved_partial",
+        forecast_complete=False,
+        prepared_at=NOW,
     )
     client, _ = verified_admin()
     overview = client.get("/admin/")
@@ -141,7 +143,8 @@ def test_metering_periods_publication_waits_and_email_content_are_distinct(
         scheduled_for=NOW,
         preparation_deadline=NOW + PREPARATION_GRACE,
         available_at=NOW,
-        prepared_message={"kind": "unavailable"},
+        forecast_kind="unavailable",
+        prepared_at=NOW,
     )
     assert recent_work_context()["deliveries"][0]["forecast_status"] == "Forecast unavailable"
     client, _ = verified_admin()
