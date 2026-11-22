@@ -2,10 +2,17 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { reloadPage } from "@/lib/on-demand";
+import { routes } from "@/lib/routes";
 import { loadSession } from "@/lib/session-client";
 import { useErrorMessage } from "./form";
 
-export function RouteError({ retry }: { retry: () => void }) {
+export function RouteError({
+    retry,
+    startLink = false,
+}: {
+    retry: () => void;
+    startLink?: boolean;
+}) {
     const t = useTranslations("AppError");
     const errorMessage = useErrorMessage();
     const [state, setState] = useState<
@@ -41,6 +48,11 @@ export function RouteError({ retry }: { retry: () => void }) {
             <button className="text-button" type="button" onClick={reloadPage}>
                 {t("reload")}
             </button>
+            {startLink && (
+                <a className="text-button" href={routes.entry()}>
+                    {t("start")}
+                </a>
+            )}
         </section>
     );
 }

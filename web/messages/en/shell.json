@@ -1,5 +1,6 @@
 {
     "Bootstrap": {
+        "title": "Pyracast could not be opened",
         "retry": "Try again",
         "loading": "Loading…"
     },
@@ -7,7 +8,8 @@
         "title": "This page could not be displayed",
         "description": "Something went wrong while showing this page. Try again; if the problem continues, reload the page.",
         "retry": "Try again",
-        "reload": "Reload page"
+        "reload": "Reload page",
+        "start": "Go to the start screen"
     },
     "Language": {
         "label": "Language",

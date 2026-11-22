@@ -12,6 +12,7 @@ import { displayMessage } from "@/lib/api/errors";
 import { createQueryClient, QueryOwner } from "@/lib/api/query";
 import { captureInstallPrompt } from "@/lib/install-prompt";
 import { reloadPage } from "@/lib/on-demand";
+import { routes } from "@/lib/routes";
 import { browserErrors } from "@/i18n/browser";
 import {
     isCurrent,
@@ -100,10 +101,14 @@ function Bootstrap({
                 <Brand />
                 {error ? (
                     <>
+                        <h1>{t("title")}</h1>
                         <Notice error>{error}</Notice>
                         <button className="button" onClick={retry}>
                             {t("retry")}
                         </button>
+                        <a className="text-button" href={routes.entry()}>
+                            {page("start")}
+                        </a>
                     </>
                 ) : (
                     <div
