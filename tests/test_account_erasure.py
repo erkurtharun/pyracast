@@ -1,5 +1,6 @@
 import io
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from functools import reduce
@@ -56,6 +57,7 @@ from pyracast.change_requests.operations import submit_production
 from pyracast.connections import operations as provider_operations
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.erasure import AdministersWorkspaceError, erase_account
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.forecasts.revalidation import RevalidationOutcome, revalidate_account
 from pyracast.forecasts.validation import validate_binding
@@ -77,7 +79,8 @@ from pyracast.orchestration import dispatcher
 from pyracast.plants.approval import approve_region
 from pyracast.plants.models import Plant, PlantSubmission
 from pyracast.plants.production_changes import ProductionChange
-from pyracast.regions.models import Region, RegionLocationChangeRequest
+from pyracast.regions.audit import record_audit
+from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionLocationChangeRequest
 from pyracast.regions.operations import configure_binding
 from tests.support.account_sessions import capture_security_events
 from tests.support.api import verified_admin
@@ -1061,8 +1064,10 @@ def test_a_row_committed_after_erasure_locked_its_table_is_not_deleted(
     locking = erasure._locked
     later: list[int] = []
 
-    def lock_then_another_client_commits(rows: models.QuerySet[Any], *fields: str) -> Any:
-        locked = locking(rows, *fields)
+    def lock_then_another_client_commits(
+        rows: models.QuerySet[Any], *fields: str, no_key: bool = False
+    ) -> Any:
+        locked = locking(rows, *fields, no_key=no_key)
         if rows.model is model and not later:
             later.append(committed_elsewhere(add))
         return locked
@@ -1167,8 +1172,10 @@ def test_a_reminder_entry_committed_in_another_workspace_after_the_workspace_loc
     later: list[int] = []
     locked_regions: list[int] = []
 
-    def commit_after_the_workspace_lock(rows: models.QuerySet[Any], *fields: str) -> Any:
-        locked = locking(rows, *fields)
+    def commit_after_the_workspace_lock(
+        rows: models.QuerySet[Any], *fields: str, no_key: bool = False
+    ) -> Any:
+        locked = locking(rows, *fields, no_key=no_key)
         if rows.model is Tenant and not later:
             later.append(
                 committed_elsewhere(
@@ -1348,6 +1355,112 @@ def test_erasure_reaching_an_invitation_mail_a_mail_worker_holds_waits_for_the_w
     ) == (1, 1)
     assert not WorkspaceInvitation.objects.exists()
     assert not OutboundMail.objects.exists()
+
+
+def test_an_audit_entry_on_a_region_erasure_holds_is_recorded_while_its_actor_is_erased(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform_administrator("remaining-admin")
+    person = platform_administrator("erased-admin")
+    tenant, _inviter = administered_workspace()
+    region = Region.objects.create(
+        tenant=tenant, name="Reminded", latitude=38, longitude=27, timezone="Europe/Istanbul"
+    )
+    schedule = ReminderSchedule.objects.create(region=region, effective_from=NOW)
+    ReminderRecipient.objects.create(
+        schedule=schedule, address=person.email, key=recipient_key(person.email)
+    )
+
+    def audit_and_see_actor() -> tuple[int, bool]:
+        entry = record_audit(AuditAction.REGION_RENAMED, actor=person, region=region, revision=0)
+        return entry.pk, User.objects.get(pk=person.pk).is_active
+
+    erased, (audited, actor_active_at_audit) = paused_in(
+        monkeypatch,
+        erasure,
+        "_forget_recipients",
+        lambda: erase_account(person.pk, execute=True),
+        audit_and_see_actor,
+    )
+
+    assert actor_active_at_audit
+    assert erased.changes["notifications.ReminderRecipient"] == 1
+    assert list(AuditEvent.objects.values_list("pk", "actor_id", "region_id")) == [
+        (audited, person.pk, region.pk)
+    ]
+    assert erasure.is_erased(User.objects.get(pk=person.pk))
+
+
+def refusal(action: Callable[[], object]) -> ErrorCode | None:
+    try:
+        action()
+    except DomainError as error:
+        return error.code
+    return None
+
+
+def test_an_administrator_assignment_reaching_a_workspace_erasure_holds_waits_for_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = make_system()
+    person = person_with("assigned.during@example.com")
+    Membership.objects.create(tenant=system.tenant, user=person)
+
+    erased, refused = paused_in(
+        monkeypatch,
+        erasure,
+        "_forget_recipients",
+        lambda: erase_account(person.pk, execute=True),
+        lambda: refusal(
+            lambda: reassign_workspace_admin(
+                system.admin, system.tenant.pk, person.pk, expected_admin_id=system.member.pk
+            )
+        ),
+    )
+
+    assert refused == ErrorCode.MEMBER_UNAVAILABLE
+    assert erased.changes["accounts.Membership"] == 1
+    assert list(Membership.objects.filter(tenant=system.tenant).values_list("user_id", "role")) == [
+        (system.member.pk, WorkspaceRole.ADMIN)
+    ]
+
+
+def test_a_reminder_change_to_a_region_erasure_is_clearing_waits_for_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = make_system()
+    person = person_with("reminded.during@example.com")
+    Membership.objects.create(tenant=system.tenant, user=person)
+
+    def configure(recipients: list[str], revision: int | None = None) -> ReminderSchedule:
+        return configure_reminders(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            enabled=False,
+            recipients=recipients,
+            times=["10:00"],
+            language="en",
+            now=NOW,
+            expected_revision=revision,
+        )
+
+    schedule = configure(["reminded.during@example.com"])
+
+    erased, refused = paused_in(
+        monkeypatch,
+        erasure,
+        "_forget_recipients",
+        lambda: erase_account(person.pk, execute=True),
+        lambda: refusal(
+            lambda: configure(["reminded.during@example.com", COLLEAGUE], schedule.revision)
+        ),
+    )
+
+    assert refused == ErrorCode.REMINDER_SCHEDULE_CHANGED
+    assert erased.changes["notifications.ReminderRecipient"] == 1
+    assert not ReminderRecipient.objects.filter(schedule=schedule).exists()
+    assert ReminderSchedule.objects.get(pk=schedule.pk).revision == schedule.revision + 1
 
 
 def test_erasure_that_meets_a_held_lock_changes_nothing_and_says_to_run_it_again(
