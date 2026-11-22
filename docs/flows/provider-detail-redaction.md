@@ -47,7 +47,7 @@ sequenceDiagram
 | Condition | Result |
 | --- | --- |
 | Private key at any depth (`_PRIVATE_FIELDS`) | Key and value removed, no marker |
-| `provider` key whose value is not a string (also `None`), or is `solcast` or `fixture` (case-folded) | Key removed; any other string, such as `open_meteo`, is kept |
+| `provider` key whose value is not a string (also `None`), or is `solcast` or `fixture` (case-folded) | Key removed; any other string is kept |
 | Key containing `solcast` other than `solcast_ghi_wm2`, `solcast_kwh_m2` | Key removed; those two become `reference_ghi_wm2`, `reference_kwh_m2` |
 | String containing `solcast` inside a technical subtree | Whole string equal to `solcast_forecast` or `solcast_estimated_actuals` becomes `forecast` or `estimated_actuals` (under any technical key); a string directly under `quality_flags` gets `reference` for the word; anything else becomes `null` |
 | Redacted string | Becomes `null`, not a marker text; a technical string inside a list becomes a `null` item |
@@ -65,7 +65,6 @@ sequenceDiagram
 - Stored provenance keeps operator detail: below `capacity_normalization`, `reference_capacity_normalization` and `reference_import` only allowlisted fields are delivered (the import's id, hash and time, and a short list of source settings); the rest of those subtrees is dropped before the walk.
 - Two keys that map to the same public key (`solcast_ghi_wm2` and `reference_ghi_wm2`) overwrite each other in iteration order.
 - `authorized_by_id`, `site_id` and `resource_id` are private. Internal numeric ids such as `binding_id` and `snapshot_id` and the `binding_revision` value are not private (no recorded decision); a test pins `provenance.binding_id` as public.
-- Open-Meteo is the licensed attribution exception (`docs/ARCHITECTURE.md`): its `provider` value `open_meteo` and `attribution` reach the customer because only `solcast` and `fixture` are dropped.
 
 ## Tests
 
