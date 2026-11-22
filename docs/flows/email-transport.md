@@ -78,7 +78,7 @@ sequenceDiagram
 | Message without recipient, or backend count other than 1 | `NotSentError` |
 | Outbound mail: known non-send / permanent refusal / uncertain | `retry` with backoff (at most 8 attempts, only before the intent expires, else `failed`) / `failed` at once / `uncertain`, never sent again and never reopened |
 | Outbound mail: worker lost before / after the transmit marker | After the lease ends: `retry` (`interrupted_connection`) / `uncertain` (`interrupted_send`) |
-| Outbound mail: lock timeout or deadlock on the mail row at claim | The delivery ends normally with `job_claim_contended` (`worker-runtime`); the intent is published again a minute after its `published_at` |
+| Outbound mail: lock timeout or deadlock on the mail row at claim | The delivery ends normally with `job_claim_contended` (`worker-runtime`); the intent is published again while due, no sooner than a minute after its `published_at` |
 | Outbound mail: expired intent, closed invitation, no account for a sign-in pause notice, reported row gone, recipient left the workspace, anonymous budget spent | `skipped` with a reason code (`expired`, `invitation_unavailable`, `no_account` and others); nothing sent |
 | Outbound mail or reminder: unclassified exception before / after the transmit marker | Retry with `mail_not_sent` / `uncertain` with `mail_outcome_uncertain`; logged as `outbound_mail_send_failed` or `notification_send_failed` |
 | Invitation intent ends `failed` or `uncertain` | `delivery_status` follows; the API answered 201 when it was stored |
