@@ -37,10 +37,16 @@ function translucentPixels(png: PNG) {
 }
 
 function edgePixels(png: PNG) {
+    const last = png.width - 1;
     const edges = [];
-    for (let i = 0; i < png.width; i++)
-        edges.push([i, 0], [i, png.height - 1], [0, i], [png.width - 1, i]);
-    return edges.map(([x, y]) => pixel(png, x, y));
+    for (let i = 0; i <= last; i++)
+        edges.push(
+            pixel(png, i, 0),
+            pixel(png, i, last),
+            pixel(png, 0, i),
+            pixel(png, last, i),
+        );
+    return edges;
 }
 
 function markOutsideSafeZone(png: PNG) {
