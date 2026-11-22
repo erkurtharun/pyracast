@@ -4,6 +4,7 @@ import {
     outageControls,
     reduceOutages,
     type Live,
+    type OutageControls,
     type OutageEvent,
     type OutageRow,
     type OutageScreen,
@@ -38,6 +39,12 @@ const listed = (held: number | null = null, reason: string | null = null) => ({
         outage(id, { pending_request_id: id === held ? 9 : null }),
     ),
 });
+// The same list after someone else cancelled or resolved outage 4, or once outage 4 has left it.
+const endedFour = (fields: Partial<OutageRow>) => ({
+    ...listed(),
+    results: [outage(4, fields), outage(5)],
+});
+const withoutFour = () => ({ ...listed(), results: [outage(5)] });
 const member = (offer = listed()): Live => ({
     offer,
     direct: false,
@@ -70,6 +77,15 @@ function loaded(step: Step, offer: ReturnType<typeof listed>): Step {
         screen: reduceOutages(step.screen, { type: "rowsLoaded", live }),
     };
 }
+
+// The member's access changes while the list stays as it was read.
+const access = (step: Step, direct: boolean): Step => {
+    const live = { ...step.live, direct };
+    return {
+        live,
+        screen: reduceOutages(step.screen, { type: "rowsLoaded", live }),
+    };
+};
 
 const rowOf = (step: Step, id: number) =>
     step.live.offer?.results.find((row) => row.id === id) ?? outage(id);
@@ -107,24 +123,53 @@ const events = {
         failed(step, outage(4, { revision: 3, title: "Changed" })),
     conflictHeld: (step: Step) =>
         failed(step, outage(4, { revision: 3, pending_request_id: 9 })),
+    conflictCancelled: (step: Step) =>
+        failed(step, outage(4, { revision: 3, status: "cancelled" })),
     rowsHeld: (step: Step) => loaded(step, listed(4)),
     rowsLimit: (step: Step) =>
         loaded(step, listed(null, "pending_request_limit")),
     rowsFree: (step: Step) => loaded(step, listed()),
+    rowsCancelled: (step: Step) =>
+        loaded(step, endedFour({ revision: 3, status: "cancelled" })),
+    rowsResolved: (step: Step) =>
+        loaded(
+            step,
+            endedFour({
+                revision: 3,
+                status: "resolved",
+                ends_at: "2026-11-10T10:00:00Z",
+            }),
+        ),
+    rowsRemoved: (step: Step) => loaded(step, withoutFour()),
+    demote: (step: Step) => access(step, false),
+    promote: (step: Step) => access(step, true),
 } satisfies Record<string, (step: Step) => Step>;
 
 type EventName = keyof typeof events;
 
 function phase({ screen, live }: Step) {
     const { workflow } = screen;
+    const rows = live.offer?.results ?? [];
     const shown = [
-        ...(live.offer?.results
+        ...rows
             .filter((row) => row.pending_request_id != null)
-            .map((row) => `${row.id}held`) ?? []),
+            .map((row) => `${row.id}held`),
+        ...rows
+            .filter((row) => row.status !== "active")
+            .map((row) => `${row.id}${row.status}`),
+        ...(rows.some((row) => row.id === 4) ? [] : ["4gone"]),
         ...(live.offer?.proposal_unavailable_reason === "pending_request_limit"
             ? ["limit"]
             : []),
     ];
+    const hold = (phase: NonNullable<typeof workflow>["phase"]) =>
+        phase.status !== "held"
+            ? ""
+            : phase.hold === "held"
+              ? ":own"
+              : phase.hold === "pending_request_limit"
+                ? ":limit"
+                : `:${phase.hold}`;
     const status = !workflow
         ? "none"
         : [
@@ -132,11 +177,7 @@ function phase({ screen, live }: Step) {
               workflow.kind === "create" ? "" : workflow.outage.id,
               "/",
               workflow.phase.status,
-              workflow.phase.status === "held"
-                  ? workflow.phase.hold === "held"
-                      ? ":own"
-                      : ":limit"
-                  : "",
+              hold(workflow.phase),
           ].join("");
     return [
         live.direct ? "direct:" : "",
@@ -188,6 +229,29 @@ const states = {
     "direct:none|4held": { screen: INITIAL_OUTAGES, live: admin(listed(4)) },
     "direct:update4/idle": events.openUpdate(directStart),
     "direct:update4/sending": events.send(events.openUpdate(directStart)),
+    "none|4resolved": {
+        screen: INITIAL_OUTAGES,
+        live: member(
+            endedFour({ status: "resolved", ends_at: "2026-11-10T10:00:00Z" }),
+        ),
+    },
+    "resolve4/held:cancelled|4cancelled": events.rowsCancelled(
+        events.openResolve(start),
+    ),
+    "resolve4/held:resolved|4resolved": events.rowsResolved(
+        events.openResolve(start),
+    ),
+    "cancel4/held:cancelled|4cancelled": events.rowsCancelled(
+        events.openCancel(start),
+    ),
+    "cancel4/held:removed|4gone": events.rowsRemoved(events.openCancel(start)),
+    "cancel4/held:cancelled+stale": events.conflictCancelled(
+        events.send(events.openCancel(start)),
+    ),
+    "direct:update4/idle|4held": events.openUpdate({
+        screen: INITIAL_OUTAGES,
+        live: admin(listed(4)),
+    }),
 } satisfies Record<string, Step>;
 
 type StateName = keyof typeof states;
@@ -198,77 +262,94 @@ const same = (name: StateName) =>
         Object.keys(events).map((event) => [event, `${name}=`]),
     ) as Record<EventName, string>;
 
+// A reload that leaves the screen as it was: the same state beside each list.
+const unchanged = (base: string, direct = false) => ({
+    rowsHeld: `${base}|4held=`,
+    rowsLimit: direct ? `${base}=` : `${base}|limit=`,
+    rowsFree: `${base}=`,
+    rowsCancelled: `${base}|4cancelled=`,
+    rowsResolved: `${base}|4resolved=`,
+    rowsRemoved: `${base}|4gone=`,
+});
+
 // Every state against every event: the class of the next state.
 const expected: Record<StateName, Record<EventName, string>> = {
     none: {
         ...same("none"),
+        ...unchanged("none"),
         openCreate: "create/idle",
         openUpdate: "update4/idle",
         openResolve: "resolve4/idle",
         openCancel: "cancel4/idle",
         openOther: "update5/idle",
-        rowsHeld: "none|4held=",
-        rowsLimit: "none|limit=",
+        promote: "direct:none=",
     },
     "none+sent": {
         ...same("none+sent"),
+        ...unchanged("none+sent"),
         openCreate: "create/idle",
         openUpdate: "update4/idle",
         openResolve: "resolve4/idle",
         openCancel: "cancel4/idle",
         openOther: "update5/idle",
-        rowsHeld: "none+sent|4held=",
-        rowsLimit: "none+sent|limit=",
+        promote: "direct:none+sent=",
     },
     "none|4held": {
         ...same("none|4held"),
+        ...unchanged("none"),
         openCreate: "create/idle|4held",
         openOther: "update5/idle|4held",
-        rowsLimit: "none|limit=",
-        rowsFree: "none=",
+        promote: "direct:none|4held=",
     },
     "none|limit": {
         ...same("none|limit"),
-        rowsHeld: "none|4held=",
-        rowsFree: "none=",
+        ...unchanged("none"),
+        promote: "direct:none|limit=",
     },
     "create/idle": {
         ...same("create/idle"),
+        ...unchanged("create/idle"),
         openUpdate: "update4/idle",
         openResolve: "resolve4/idle",
         openCancel: "cancel4/idle",
         openOther: "update5/idle",
         close: "none",
         send: "create/sending",
-        rowsHeld: "create/idle|4held=",
         rowsLimit: "create/held:limit|limit",
+        promote: "direct:create/idle=",
     },
     "create/sending": {
         ...same("create/sending"),
+        ...unchanged("create/sending"),
         sent: "none+sent",
         fail: "create/idle",
         conflict: "create/idle",
         conflictHeld: "create/idle",
-        rowsHeld: "create/sending|4held=",
-        rowsLimit: "create/sending|limit=",
+        conflictCancelled: "create/idle",
+        promote: "direct:create/sending=",
     },
     "create/held:limit|limit": {
         ...same("create/held:limit|limit"),
+        ...unchanged("create/held:limit"),
         close: "none|limit",
-        rowsHeld: "create/held:limit|4held=",
-        rowsFree: "create/held:limit=",
+        promote: "direct:create/held:limit|limit=",
     },
     "update4/idle": {
         ...same("update4/idle"),
+        ...unchanged("update4/idle"),
         openCreate: "create/idle",
         openOther: "update5/idle",
         close: "none",
         send: "update4/sending",
         rowsHeld: "update4/held:own|4held",
         rowsLimit: "update4/held:limit|limit",
+        rowsCancelled: "update4/held:cancelled|4cancelled",
+        rowsRemoved: "update4/held:removed|4gone",
+        promote: "direct:update4/idle=",
     },
     "update4/idle+stale": {
         ...same("update4/idle+stale"),
+        ...unchanged("update4/idle+stale"),
         openCreate: "create/idle",
         openOther: "update5/idle",
         close: "none",
@@ -276,76 +357,100 @@ const expected: Record<StateName, Record<EventName, string>> = {
         send: "update4/sending+stale",
         rowsHeld: "update4/held:own+stale|4held",
         rowsLimit: "update4/held:limit+stale|limit",
+        rowsCancelled: "update4/held:cancelled+stale|4cancelled",
+        rowsRemoved: "update4/held:removed+stale|4gone",
+        promote: "direct:update4/idle+stale=",
     },
     "update4/sending": {
         ...same("update4/sending"),
+        ...unchanged("update4/sending"),
         sent: "none+sent",
         fail: "update4/idle",
         conflict: "update4/idle+stale",
         conflictHeld: "update4/held:own+stale",
-        rowsHeld: "update4/sending|4held=",
-        rowsLimit: "update4/sending|limit=",
+        conflictCancelled: "update4/held:cancelled+stale",
+        promote: "direct:update4/sending=",
     },
     "update4/held:own|4held": {
         ...same("update4/held:own|4held"),
+        ...unchanged("update4/held:own"),
         openCreate: "create/idle|4held",
         openOther: "update5/idle|4held",
         close: "none|4held",
-        rowsLimit: "update4/held:own|limit=",
-        rowsFree: "update4/held:own=",
+        rowsCancelled: "update4/held:cancelled|4cancelled",
+        rowsRemoved: "update4/held:removed|4gone",
+        promote: "direct:update4/held:own|4held=",
     },
     "update4/held:own+stale": {
         ...same("update4/held:own+stale"),
+        ...unchanged("update4/held:own+stale"),
         openCreate: "create/idle",
         openOther: "update5/idle",
         close: "none",
-        discard: "update4/held:own",
-        rowsHeld: "update4/held:own+stale|4held=",
-        rowsLimit: "update4/held:own+stale|limit=",
+        discard: "none",
+        rowsCancelled: "update4/held:cancelled+stale|4cancelled",
+        rowsRemoved: "update4/held:removed+stale|4gone",
+        promote: "direct:update4/held:own+stale=",
     },
     "update4/held:limit|limit": {
         ...same("update4/held:limit|limit"),
+        ...unchanged("update4/held:limit"),
         close: "none|limit",
-        rowsHeld: "update4/held:limit|4held=",
-        rowsFree: "update4/held:limit=",
+        rowsCancelled: "update4/held:cancelled|4cancelled",
+        rowsRemoved: "update4/held:removed|4gone",
+        promote: "direct:update4/held:limit|limit=",
     },
     "resolve4/idle": {
         ...same("resolve4/idle"),
+        ...unchanged("resolve4/idle"),
         openCreate: "create/idle",
         openOther: "update5/idle",
         close: "none",
         send: "resolve4/sending",
         rowsHeld: "resolve4/held:own|4held",
         rowsLimit: "resolve4/held:limit|limit",
+        rowsCancelled: "resolve4/held:cancelled|4cancelled",
+        rowsResolved: "resolve4/held:resolved|4resolved",
+        rowsRemoved: "resolve4/held:removed|4gone",
+        promote: "direct:resolve4/idle=",
     },
     "resolve4/sending": {
         ...same("resolve4/sending"),
+        ...unchanged("resolve4/sending"),
         sent: "none+sent",
         fail: "resolve4/idle",
         conflict: "resolve4/idle+stale",
         conflictHeld: "resolve4/held:own+stale",
-        rowsHeld: "resolve4/sending|4held=",
-        rowsLimit: "resolve4/sending|limit=",
+        conflictCancelled: "resolve4/held:cancelled+stale",
+        promote: "direct:resolve4/sending=",
     },
     "resolve4/held:own|4held": {
         ...same("resolve4/held:own|4held"),
+        ...unchanged("resolve4/held:own"),
         openCreate: "create/idle|4held",
         openOther: "update5/idle|4held",
         close: "none|4held",
-        rowsLimit: "resolve4/held:own|limit=",
-        rowsFree: "resolve4/held:own=",
+        rowsCancelled: "resolve4/held:cancelled|4cancelled",
+        rowsResolved: "resolve4/held:resolved|4resolved",
+        rowsRemoved: "resolve4/held:removed|4gone",
+        promote: "direct:resolve4/held:own|4held=",
     },
     "cancel4/idle": {
         ...same("cancel4/idle"),
+        ...unchanged("cancel4/idle"),
         openCreate: "create/idle",
         openOther: "update5/idle",
         close: "none",
         send: "cancel4/sending",
         rowsHeld: "cancel4/held:own|4held",
         rowsLimit: "cancel4/held:limit|limit",
+        rowsCancelled: "cancel4/held:cancelled|4cancelled",
+        rowsRemoved: "cancel4/held:removed|4gone",
+        promote: "direct:cancel4/idle=",
     },
     "cancel4/idle+stale": {
         ...same("cancel4/idle+stale"),
+        ...unchanged("cancel4/idle+stale"),
         openCreate: "create/idle",
         openOther: "update5/idle",
         close: "none",
@@ -353,78 +458,157 @@ const expected: Record<StateName, Record<EventName, string>> = {
         send: "cancel4/sending+stale",
         rowsHeld: "cancel4/held:own+stale|4held",
         rowsLimit: "cancel4/held:limit+stale|limit",
+        rowsCancelled: "cancel4/held:cancelled+stale|4cancelled",
+        rowsRemoved: "cancel4/held:removed+stale|4gone",
+        promote: "direct:cancel4/idle+stale=",
     },
     "cancel4/sending": {
         ...same("cancel4/sending"),
+        ...unchanged("cancel4/sending"),
         sent: "none+sent",
         fail: "cancel4/idle",
         conflict: "cancel4/idle+stale",
         conflictHeld: "cancel4/held:own+stale",
-        rowsHeld: "cancel4/sending|4held=",
-        rowsLimit: "cancel4/sending|limit=",
+        conflictCancelled: "cancel4/held:cancelled+stale",
+        promote: "direct:cancel4/sending=",
     },
     "cancel4/held:own|4held": {
         ...same("cancel4/held:own|4held"),
+        ...unchanged("cancel4/held:own"),
         openCreate: "create/idle|4held",
         openOther: "update5/idle|4held",
         close: "none|4held",
-        rowsLimit: "cancel4/held:own|limit=",
-        rowsFree: "cancel4/held:own=",
+        rowsCancelled: "cancel4/held:cancelled|4cancelled",
+        rowsRemoved: "cancel4/held:removed|4gone",
+        promote: "direct:cancel4/held:own|4held=",
     },
     "update5/idle": {
         ...same("update5/idle"),
+        ...unchanged("update5/idle"),
         openCreate: "create/idle",
         openUpdate: "update4/idle",
         openResolve: "resolve4/idle",
         openCancel: "cancel4/idle",
         close: "none",
         send: "update5/sending",
-        rowsHeld: "update5/idle|4held=",
         rowsLimit: "update5/held:limit|limit",
+        promote: "direct:update5/idle=",
     },
     "direct:none": {
         ...same("direct:none"),
+        ...unchanged("direct:none", true),
         openCreate: "direct:create/idle",
         openUpdate: "direct:update4/idle",
         openResolve: "direct:resolve4/idle",
         openCancel: "direct:cancel4/idle",
         openOther: "direct:update5/idle",
-        rowsHeld: "direct:none|4held=",
+        demote: "none=",
     },
     "direct:none|4held": {
         ...same("direct:none|4held"),
+        ...unchanged("direct:none", true),
         openCreate: "direct:create/idle|4held",
         openUpdate: "direct:update4/idle|4held",
         openResolve: "direct:resolve4/idle|4held",
         openCancel: "direct:cancel4/idle|4held",
         openOther: "direct:update5/idle|4held",
-        rowsLimit: "direct:none=",
-        rowsFree: "direct:none=",
+        demote: "none|4held=",
     },
     "direct:update4/idle": {
         ...same("direct:update4/idle"),
+        ...unchanged("direct:update4/idle", true),
         openCreate: "direct:create/idle",
         openOther: "direct:update5/idle",
         close: "direct:none",
         send: "direct:update4/sending",
-        rowsHeld: "direct:update4/idle|4held=",
+        rowsCancelled: "direct:update4/held:cancelled|4cancelled",
+        rowsRemoved: "direct:update4/held:removed|4gone",
+        demote: "update4/idle=",
     },
     "direct:update4/sending": {
         ...same("direct:update4/sending"),
+        ...unchanged("direct:update4/sending", true),
         sent: "direct:none",
         fail: "direct:update4/idle",
         conflict: "direct:update4/idle+stale",
         conflictHeld: "direct:update4/idle+stale",
-        rowsHeld: "direct:update4/sending|4held=",
+        conflictCancelled: "direct:update4/held:cancelled+stale",
+        demote: "update4/sending=",
     },
     "update4/sending+stale": {
         ...same("update4/sending+stale"),
+        ...unchanged("update4/sending+stale"),
         sent: "none+sent",
         fail: "update4/idle+stale",
         conflict: "update4/idle+stale",
         conflictHeld: "update4/held:own+stale",
-        rowsHeld: "update4/sending+stale|4held=",
-        rowsLimit: "update4/sending+stale|limit=",
+        conflictCancelled: "update4/held:cancelled+stale",
+        promote: "direct:update4/sending+stale=",
+    },
+    // A resolved outage takes no resolution, but still a change or a cancellation.
+    "none|4resolved": {
+        ...same("none|4resolved"),
+        ...unchanged("none"),
+        openCreate: "create/idle|4resolved",
+        openUpdate: "update4/idle|4resolved",
+        openCancel: "cancel4/idle|4resolved",
+        openOther: "update5/idle|4resolved",
+        promote: "direct:none|4resolved=",
+    },
+    // A workflow whose outage ended stays held so until closed; a later list changes nothing.
+    "resolve4/held:cancelled|4cancelled": {
+        ...same("resolve4/held:cancelled|4cancelled"),
+        ...unchanged("resolve4/held:cancelled"),
+        openCreate: "create/idle|4cancelled",
+        openOther: "update5/idle|4cancelled",
+        close: "none|4cancelled",
+        promote: "direct:resolve4/held:cancelled|4cancelled=",
+    },
+    "resolve4/held:resolved|4resolved": {
+        ...same("resolve4/held:resolved|4resolved"),
+        ...unchanged("resolve4/held:resolved"),
+        openCreate: "create/idle|4resolved",
+        openOther: "update5/idle|4resolved",
+        close: "none|4resolved",
+        promote: "direct:resolve4/held:resolved|4resolved=",
+    },
+    "cancel4/held:cancelled|4cancelled": {
+        ...same("cancel4/held:cancelled|4cancelled"),
+        ...unchanged("cancel4/held:cancelled"),
+        openCreate: "create/idle|4cancelled",
+        openOther: "update5/idle|4cancelled",
+        close: "none|4cancelled",
+        promote: "direct:cancel4/held:cancelled|4cancelled=",
+    },
+    "cancel4/held:removed|4gone": {
+        ...same("cancel4/held:removed|4gone"),
+        ...unchanged("cancel4/held:removed"),
+        openCreate: "create/idle|4gone",
+        openOther: "update5/idle|4gone",
+        close: "none|4gone",
+        promote: "direct:cancel4/held:removed|4gone=",
+    },
+    // Discarding the change of a workflow that can no longer send closes it.
+    "cancel4/held:cancelled+stale": {
+        ...same("cancel4/held:cancelled+stale"),
+        ...unchanged("cancel4/held:cancelled+stale"),
+        openCreate: "create/idle",
+        openOther: "update5/idle",
+        close: "none",
+        discard: "none",
+        promote: "direct:cancel4/held:cancelled+stale=",
+    },
+    // An administrator who loses the right to write directly is held by the request they already have.
+    "direct:update4/idle|4held": {
+        ...same("direct:update4/idle|4held"),
+        ...unchanged("direct:update4/idle", true),
+        openCreate: "direct:create/idle|4held",
+        openOther: "direct:update5/idle|4held",
+        close: "direct:none|4held",
+        send: "direct:update4/sending|4held",
+        rowsCancelled: "direct:update4/held:cancelled|4cancelled",
+        rowsRemoved: "direct:update4/held:removed|4gone",
+        demote: "update4/held:own|4held",
     },
 };
 
@@ -447,7 +631,13 @@ test("every state of the outage screen meets every event as the table says", () 
 });
 
 test("no event other than its answer replaces, closes or changes a workflow that is sending", () => {
-    const answers = new Set(["sent", "fail", "conflict", "conflictHeld"]);
+    const answers = new Set([
+        "sent",
+        "fail",
+        "conflict",
+        "conflictHeld",
+        "conflictCancelled",
+    ]);
     for (const [name, state] of Object.entries(states)) {
         const { workflow } = state.screen;
         if (workflow?.phase.status !== "sending") continue;
@@ -489,7 +679,13 @@ const open4 = {
     close: true,
 };
 const sending4 = { ...open4, acts: false, send: false, close: false };
-const held4 = { ...open4, send: false, editable: false, hold: "held" as const };
+const heldBy = (hold: NonNullable<OutageControls["hold"]>) => ({
+    ...open4,
+    send: false,
+    editable: false,
+    hold,
+});
+const held4 = heldBy("held");
 const atLimit = {
     ...quiet,
     create: false,
@@ -527,6 +723,13 @@ test("every state of the outage screen enables only the controls whose event it 
         "direct:none|4held": quiet,
         "direct:update4/idle": open4,
         "direct:update4/sending": sending4,
+        "none|4resolved": quiet,
+        "resolve4/held:cancelled|4cancelled": heldBy("cancelled"),
+        "resolve4/held:resolved|4resolved": heldBy("resolved"),
+        "cancel4/held:cancelled|4cancelled": heldBy("cancelled"),
+        "cancel4/held:removed|4gone": heldBy("removed"),
+        "cancel4/held:cancelled+stale": heldBy("cancelled"),
+        "direct:update4/idle|4held": open4,
     };
     expect(
         Object.fromEntries(
