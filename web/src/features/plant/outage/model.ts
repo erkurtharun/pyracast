@@ -75,7 +75,6 @@ export type OutageControls = {
 };
 
 const atLimit = (live: Live) =>
-    !live.direct &&
     live.offer?.proposal_unavailable_reason === "pending_request_limit";
 
 const sending = (workflow: Workflow | null) =>

@@ -125,6 +125,8 @@ const events = {
     change: (step: Step) => apply(step, { type: "change", energy: "0,7" }),
     cancel: (step: Step) => apply(step, { type: "cancel" }),
     remove: (step: Step) => apply(step, { type: "remove", key: EIGHT }),
+    removeUnstaged: (step: Step) =>
+        apply(step, { type: "remove", key: intervalKey(row(DAY, 23)) }),
     discard: (step: Step) => apply(step, { type: "discard" }),
     reason: (step: Step) => apply(step, { type: "reason", text: "verified" }),
     send: (step: Step) => apply(step, { type: "send", rows: step.rows }),
@@ -145,6 +147,8 @@ const events = {
         }),
     save: (step: Step) =>
         apply(step, { type: "save", row: editorRow(step), action: "set" }),
+    saveRevert: (step: Step) =>
+        apply(step, { type: "save", row: editorRow(step), action: "revert" }),
     saved: (step: Step) => apply(step, { type: "saved", key: editorKey(step) }),
     saveFailed: (step: Step) =>
         apply(step, {
@@ -160,6 +164,13 @@ const events = {
             key: editorKey(step),
             message: "Offline.",
         }),
+    // The answer of a reload started for another interval, before its editor closed.
+    staleReloadFailed: (step: Step) =>
+        apply(step, {
+            type: "reloadFailed",
+            key: intervalKey(row(DAY, 23)),
+            message: "Offline.",
+        }),
     // The day control acts only while it is enabled.
     pickDay: (step: Step) =>
         controls(step.screen, step.rows).dayNav
@@ -167,6 +178,7 @@ const events = {
             : step,
     back: (step: Step) => shown(step, other(step), dayRows(other(step))),
     backFails: (step: Step) => shown(step, other(step), undefined),
+    sameDay: (step: Step) => shown(step, step.screen.day, step.rows),
     rowsHeld: (step: Step) => reloaded(step, { pending_request_id: 7 }),
     rowsChanged: (step: Step) =>
         reloaded(step, { can_propose: false, can_edit: false }),
@@ -252,11 +264,12 @@ const admin: Step = {
     screen: initialScreen(DAY, "direct"),
     rows: adminRows(DAY),
 };
-const adminSaving = apply(
-    admin,
-    { type: "open", row: adminRows(DAY)[1]! },
-    { type: "save", row: adminRows(DAY)[1]!, action: "set" },
-);
+const adminEditing = apply(admin, { type: "open", row: adminRows(DAY)[1]! });
+const adminSaving = apply(adminEditing, {
+    type: "save",
+    row: adminRows(DAY)[1]!,
+    action: "set",
+});
 
 const states = {
     "none/closed": start,
@@ -286,6 +299,7 @@ const states = {
     "idle/closed+away": events.back(staged),
     "idle/closed+held": events.rowsHeld(staged),
     "idle/editing+held": events.openRow(events.rowsHeld(staged)),
+    "direct:none/editing": adminEditing,
     "direct:none/saving": adminSaving,
     "direct:none/orphaned:day_left*": events.back(adminSaving),
     "direct:none/orphaned:day_left!": events.saveFailed(
@@ -295,9 +309,10 @@ const states = {
 
 type StateName = keyof typeof states;
 
+// A refused event returns the very same screen, marked "=".
 const same = (name: StateName) =>
     Object.fromEntries(
-        Object.keys(events).map((event) => [event, name]),
+        Object.keys(events).map((event) => [event, `${name}=`]),
     ) as Record<EventName, string>;
 
 // Leaving for another day, by Back or a link, with the read of that day answering or failing.
@@ -319,6 +334,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         ...leaves("none/closed"),
         ...quits,
         fullDay: "none/closed+full",
+        pickDay: "none/closed",
     },
     "none/closed?unread": {
         ...same("none/closed?unread"),
@@ -327,13 +343,14 @@ const expected: Record<StateName, Record<EventName, string>> = {
         promote: "direct:none/closed?unread",
         lose: "none:none/closed?unread",
         fullDay: "none/closed+full?unread",
-        refresh: "none/closed",
+        refresh: "none/closed=",
     },
     "none:none/closed": {
         ...same("none:none/closed"),
         ...leaves("none:none/closed"),
         promote: "direct:none/closed",
         fullDay: "none:none/closed+full",
+        pickDay: "none:none/closed",
     },
     "none/editing": {
         ...same("none/editing"),
@@ -345,6 +362,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         rowsHeld: "none/orphaned:held",
         rowsChanged: "none/orphaned:unavailable",
         ...quits,
+        change: "none/editing",
     },
     "none/failed": {
         ...same("none/failed"),
@@ -356,6 +374,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         rowsHeld: "none/orphaned:held",
         rowsChanged: "none/orphaned:unavailable",
         ...quits,
+        stage: "none/failed",
     },
     "none/reloading": {
         ...same("none/reloading"),
@@ -382,7 +401,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         reason: "idle/closed+reason=verified",
         send: "missing/closed",
         ...leaves("idle/closed+away"),
-        rowsHeld: "idle/closed+held",
+        rowsHeld: "idle/closed+held=",
         ...quits,
         fullDay: "idle/closed+full",
     },
@@ -399,6 +418,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         rowsChanged: "idle/orphaned:unavailable+full",
         promote: "direct:none/closed+full",
         lose: "none:none/closed+full",
+        change: "idle/staged+full",
     },
     "idle/editing": {
         ...same("idle/editing"),
@@ -412,6 +432,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         rowsHeld: "idle/orphaned:held+held",
         rowsChanged: "idle/orphaned:unavailable",
         ...quits,
+        change: "idle/editing",
     },
     "idle/reloading": {
         ...same("idle/reloading"),
@@ -431,7 +452,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         discard: "none/closed",
         reason: "idle/orphaned:unavailable+reason=verified",
         ...leaves("idle/closed+away"),
-        rowsHeld: "idle/orphaned:unavailable+held",
+        rowsHeld: "idle/orphaned:unavailable+held=",
         ...quits,
     },
     "idle/orphaned:held+held": {
@@ -451,9 +472,10 @@ const expected: Record<StateName, Record<EventName, string>> = {
         discard: "none/closed",
         reason: "idle/closed+reason=verified",
         ...leaves("missing/closed+away"),
-        rowsHeld: "missing/closed+held",
+        rowsHeld: "missing/closed+held=",
         ...quits,
         fullDay: "missing/closed+full",
+        send: "missing/closed",
     },
     "sending/closed+reason=metered": {
         ...same("sending/closed+reason=metered"),
@@ -461,7 +483,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         failItem: "failed/closed+reason=metered",
         failRequest: "failed/closed+reason=metered",
         ...leaves("sending/closed+away+reason=metered"),
-        rowsHeld: "sending/closed+held+reason=metered",
+        rowsHeld: "sending/closed+held+reason=metered=",
         ...quits,
         fullDay: "sending/closed+full+reason=metered",
     },
@@ -492,7 +514,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         reason: "failed/closed+reason=verified",
         send: "sending/closed+reason=metered",
         ...leaves("failed/closed+away+reason=metered"),
-        rowsHeld: "failed/closed+held+reason=metered",
+        rowsHeld: "failed/closed+held+reason=metered=",
         ...quits,
         fullDay: "failed/closed+full+reason=metered",
     },
@@ -525,6 +547,18 @@ const expected: Record<StateName, Record<EventName, string>> = {
         reload: "idle/reloading+held",
         ...leaves("idle/closed+away"),
         ...quits,
+        change: "idle/editing+held",
+    },
+    "direct:none/editing": {
+        ...same("direct:none/editing"),
+        change: "direct:none/editing",
+        cancel: "direct:none/closed",
+        save: "direct:none/saving",
+        reload: "direct:none/reloading",
+        pickDay: "direct:none/closed",
+        ...leaves("direct:none/closed"),
+        rowsChanged: "direct:none/orphaned:unavailable",
+        lose: "none:none/closed",
     },
     "direct:none/saving": {
         ...same("direct:none/saving"),
@@ -540,6 +574,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         saveFailed: "direct:none/orphaned:day_left!",
         backFails: "direct:none/orphaned:day_left*?unread",
         lose: "none:none/orphaned:unavailable*",
+        back: "direct:none/orphaned:day_left*",
     },
     "direct:none/orphaned:day_left!": {
         ...same("direct:none/orphaned:day_left!"),
@@ -557,10 +592,11 @@ test("every state of the production history screen meets every event as the tabl
         Object.entries(states).map(([name, state]) => [
             name,
             Object.fromEntries(
-                Object.entries(events).map(([event, run]) => [
-                    event,
-                    phase(run(state)),
-                ]),
+                Object.entries(events).map(([event, run]) => {
+                    const next = run(state);
+                    const kept = next.screen === state.screen ? "=" : "";
+                    return [event, `${phase(next)}${kept}`];
+                }),
             ),
         ]),
     );
@@ -688,6 +724,7 @@ test("every state enables only the controls whose event it accepts", () => {
             send: false,
         },
         "idle/editing+held": { ...draftOpen, held: [EIGHT] },
+        "direct:none/editing": editing,
         "direct:none/saving": { ...editing, dayNav: false },
         "direct:none/orphaned:day_left*": { ...editing, dayNav: false },
         "direct:none/orphaned:day_left!": { ...editing, refresh: true },

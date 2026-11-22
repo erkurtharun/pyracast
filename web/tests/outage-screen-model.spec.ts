@@ -166,6 +166,9 @@ const states = {
         events.send(events.openUpdate(start)),
     ),
     "update4/sending": events.send(events.openUpdate(start)),
+    "update4/sending+stale": events.send(
+        events.conflict(events.send(events.openUpdate(start))),
+    ),
     "update4/held:own|4held": events.rowsHeld(events.openUpdate(start)),
     "update4/held:own+stale": events.conflictHeld(
         events.send(events.openUpdate(start)),
@@ -189,9 +192,10 @@ const states = {
 
 type StateName = keyof typeof states;
 
+// A refused event returns the very same screen, marked "=".
 const same = (name: StateName) =>
     Object.fromEntries(
-        Object.keys(events).map((event) => [event, name]),
+        Object.keys(events).map((event) => [event, `${name}=`]),
     ) as Record<EventName, string>;
 
 // Every state against every event: the class of the next state.
@@ -203,8 +207,8 @@ const expected: Record<StateName, Record<EventName, string>> = {
         openResolve: "resolve4/idle",
         openCancel: "cancel4/idle",
         openOther: "update5/idle",
-        rowsHeld: "none|4held",
-        rowsLimit: "none|limit",
+        rowsHeld: "none|4held=",
+        rowsLimit: "none|limit=",
     },
     "none+sent": {
         ...same("none+sent"),
@@ -213,20 +217,20 @@ const expected: Record<StateName, Record<EventName, string>> = {
         openResolve: "resolve4/idle",
         openCancel: "cancel4/idle",
         openOther: "update5/idle",
-        rowsHeld: "none+sent|4held",
-        rowsLimit: "none+sent|limit",
+        rowsHeld: "none+sent|4held=",
+        rowsLimit: "none+sent|limit=",
     },
     "none|4held": {
         ...same("none|4held"),
         openCreate: "create/idle|4held",
         openOther: "update5/idle|4held",
-        rowsLimit: "none|limit",
-        rowsFree: "none",
+        rowsLimit: "none|limit=",
+        rowsFree: "none=",
     },
     "none|limit": {
         ...same("none|limit"),
-        rowsHeld: "none|4held",
-        rowsFree: "none",
+        rowsHeld: "none|4held=",
+        rowsFree: "none=",
     },
     "create/idle": {
         ...same("create/idle"),
@@ -236,7 +240,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         openOther: "update5/idle",
         close: "none",
         send: "create/sending",
-        rowsHeld: "create/idle|4held",
+        rowsHeld: "create/idle|4held=",
         rowsLimit: "create/held:limit|limit",
     },
     "create/sending": {
@@ -245,14 +249,14 @@ const expected: Record<StateName, Record<EventName, string>> = {
         fail: "create/idle",
         conflict: "create/idle",
         conflictHeld: "create/idle",
-        rowsHeld: "create/sending|4held",
-        rowsLimit: "create/sending|limit",
+        rowsHeld: "create/sending|4held=",
+        rowsLimit: "create/sending|limit=",
     },
     "create/held:limit|limit": {
         ...same("create/held:limit|limit"),
         close: "none|limit",
-        rowsHeld: "create/held:limit|4held",
-        rowsFree: "create/held:limit",
+        rowsHeld: "create/held:limit|4held=",
+        rowsFree: "create/held:limit=",
     },
     "update4/idle": {
         ...same("update4/idle"),
@@ -279,16 +283,16 @@ const expected: Record<StateName, Record<EventName, string>> = {
         fail: "update4/idle",
         conflict: "update4/idle+stale",
         conflictHeld: "update4/held:own+stale",
-        rowsHeld: "update4/sending|4held",
-        rowsLimit: "update4/sending|limit",
+        rowsHeld: "update4/sending|4held=",
+        rowsLimit: "update4/sending|limit=",
     },
     "update4/held:own|4held": {
         ...same("update4/held:own|4held"),
         openCreate: "create/idle|4held",
         openOther: "update5/idle|4held",
         close: "none|4held",
-        rowsLimit: "update4/held:own|limit",
-        rowsFree: "update4/held:own",
+        rowsLimit: "update4/held:own|limit=",
+        rowsFree: "update4/held:own=",
     },
     "update4/held:own+stale": {
         ...same("update4/held:own+stale"),
@@ -296,14 +300,14 @@ const expected: Record<StateName, Record<EventName, string>> = {
         openOther: "update5/idle",
         close: "none",
         discard: "update4/held:own",
-        rowsHeld: "update4/held:own+stale|4held",
-        rowsLimit: "update4/held:own+stale|limit",
+        rowsHeld: "update4/held:own+stale|4held=",
+        rowsLimit: "update4/held:own+stale|limit=",
     },
     "update4/held:limit|limit": {
         ...same("update4/held:limit|limit"),
         close: "none|limit",
-        rowsHeld: "update4/held:limit|4held",
-        rowsFree: "update4/held:limit",
+        rowsHeld: "update4/held:limit|4held=",
+        rowsFree: "update4/held:limit=",
     },
     "resolve4/idle": {
         ...same("resolve4/idle"),
@@ -320,16 +324,16 @@ const expected: Record<StateName, Record<EventName, string>> = {
         fail: "resolve4/idle",
         conflict: "resolve4/idle+stale",
         conflictHeld: "resolve4/held:own+stale",
-        rowsHeld: "resolve4/sending|4held",
-        rowsLimit: "resolve4/sending|limit",
+        rowsHeld: "resolve4/sending|4held=",
+        rowsLimit: "resolve4/sending|limit=",
     },
     "resolve4/held:own|4held": {
         ...same("resolve4/held:own|4held"),
         openCreate: "create/idle|4held",
         openOther: "update5/idle|4held",
         close: "none|4held",
-        rowsLimit: "resolve4/held:own|limit",
-        rowsFree: "resolve4/held:own",
+        rowsLimit: "resolve4/held:own|limit=",
+        rowsFree: "resolve4/held:own=",
     },
     "cancel4/idle": {
         ...same("cancel4/idle"),
@@ -356,16 +360,16 @@ const expected: Record<StateName, Record<EventName, string>> = {
         fail: "cancel4/idle",
         conflict: "cancel4/idle+stale",
         conflictHeld: "cancel4/held:own+stale",
-        rowsHeld: "cancel4/sending|4held",
-        rowsLimit: "cancel4/sending|limit",
+        rowsHeld: "cancel4/sending|4held=",
+        rowsLimit: "cancel4/sending|limit=",
     },
     "cancel4/held:own|4held": {
         ...same("cancel4/held:own|4held"),
         openCreate: "create/idle|4held",
         openOther: "update5/idle|4held",
         close: "none|4held",
-        rowsLimit: "cancel4/held:own|limit",
-        rowsFree: "cancel4/held:own",
+        rowsLimit: "cancel4/held:own|limit=",
+        rowsFree: "cancel4/held:own=",
     },
     "update5/idle": {
         ...same("update5/idle"),
@@ -375,7 +379,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         openCancel: "cancel4/idle",
         close: "none",
         send: "update5/sending",
-        rowsHeld: "update5/idle|4held",
+        rowsHeld: "update5/idle|4held=",
         rowsLimit: "update5/held:limit|limit",
     },
     "direct:none": {
@@ -385,7 +389,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         openResolve: "direct:resolve4/idle",
         openCancel: "direct:cancel4/idle",
         openOther: "direct:update5/idle",
-        rowsHeld: "direct:none|4held",
+        rowsHeld: "direct:none|4held=",
     },
     "direct:none|4held": {
         ...same("direct:none|4held"),
@@ -394,8 +398,8 @@ const expected: Record<StateName, Record<EventName, string>> = {
         openResolve: "direct:resolve4/idle|4held",
         openCancel: "direct:cancel4/idle|4held",
         openOther: "direct:update5/idle|4held",
-        rowsLimit: "direct:none",
-        rowsFree: "direct:none",
+        rowsLimit: "direct:none=",
+        rowsFree: "direct:none=",
     },
     "direct:update4/idle": {
         ...same("direct:update4/idle"),
@@ -403,7 +407,7 @@ const expected: Record<StateName, Record<EventName, string>> = {
         openOther: "direct:update5/idle",
         close: "direct:none",
         send: "direct:update4/sending",
-        rowsHeld: "direct:update4/idle|4held",
+        rowsHeld: "direct:update4/idle|4held=",
     },
     "direct:update4/sending": {
         ...same("direct:update4/sending"),
@@ -411,7 +415,16 @@ const expected: Record<StateName, Record<EventName, string>> = {
         fail: "direct:update4/idle",
         conflict: "direct:update4/idle+stale",
         conflictHeld: "direct:update4/idle+stale",
-        rowsHeld: "direct:update4/sending|4held",
+        rowsHeld: "direct:update4/sending|4held=",
+    },
+    "update4/sending+stale": {
+        ...same("update4/sending+stale"),
+        sent: "none+sent",
+        fail: "update4/idle+stale",
+        conflict: "update4/idle+stale",
+        conflictHeld: "update4/held:own+stale",
+        rowsHeld: "update4/sending+stale|4held=",
+        rowsLimit: "update4/sending+stale|limit=",
     },
 };
 
@@ -422,10 +435,11 @@ test("every state of the outage screen meets every event as the table says", () 
         Object.entries(states).map(([name, state]) => [
             name,
             Object.fromEntries(
-                Object.entries(events).map(([event, run]) => [
-                    event,
-                    phase(run(state)),
-                ]),
+                Object.entries(events).map(([event, run]) => {
+                    const next = run(state);
+                    const kept = next.screen === state.screen ? "=" : "";
+                    return [event, `${phase(next)}${kept}`];
+                }),
             ),
         ]),
     );
@@ -497,6 +511,7 @@ test("every state of the outage screen enables only the controls whose event it 
         "update4/idle": open4,
         "update4/idle+stale": open4,
         "update4/sending": sending4,
+        "update4/sending+stale": sending4,
         "update4/held:own|4held": held4,
         "update4/held:own+stale": held4,
         "update4/held:limit|limit": atLimit,
@@ -627,6 +642,11 @@ test("a workflow whose outage closed meanwhile cannot send, and discarding its s
         editable: true,
     });
     expect(closedBy(states["update4/idle"], "cancelled").send).toBe(false);
+    const cancelled = failed(
+        events.send(states["cancel4/idle"]),
+        outage(4, { revision: 3, status: "cancelled" }),
+    );
+    expect(events.send(cancelled).screen).toBe(cancelled.screen);
     const stale = states["cancel4/idle+stale"];
     expect(stale.screen.workflow?.form).toBe(0);
     expect(events.discard(stale).screen.workflow?.form).toBe(1);
