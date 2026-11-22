@@ -1,4 +1,3 @@
-import io
 import json
 import uuid
 from datetime import datetime, timedelta
@@ -22,6 +21,7 @@ from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.orchestration.delivery_health import delivery_health
 from pyracast.orchestration.dispatcher import record_dispatch_phase
 from pyracast.regions.models import Region
+from tests.support.command_output import process_streams
 from tests.support.delivery_health import NOW, answering_broker, recent_forecast
 from tests.support.domain import FakeAdapter, System, make_system
 from tests.support.invariants import stored_again
@@ -251,14 +251,13 @@ def test_health_command_emits_json_and_nonzero_for_degraded_work(
         "pyracast.orchestration.management.commands.check_delivery_health.timezone.now", lambda: NOW
     )
     answering_broker(monkeypatch)
-    output = io.StringIO()
-    with pytest.raises(CommandError, match="needs attention"):
-        call_command("check_delivery_health", stdout=output)
+    with process_streams() as (output, _), pytest.raises(CommandError, match="needs attention"):
+        call_command("check_delivery_health")
     assert json.loads(output.getvalue())["healthy"] is False
     for name in DispatcherPhase.values:
         record_dispatch_phase(name, NOW)
-    output = io.StringIO()
-    call_command("check_delivery_health", stdout=output)
+    with process_streams() as (output, _):
+        call_command("check_delivery_health")
     assert json.loads(output.getvalue())["healthy"] is True
     with pytest.raises(CommandError, match="must be positive"):
         call_command("check_delivery_health", max_lag_minutes=0)
@@ -280,8 +279,8 @@ def test_health_command_bounds_every_statement_to_ten_seconds(
     monkeypatch.setattr(
         "pyracast.orchestration.management.commands.check_delivery_health.delivery_health", report
     )
-    output = io.StringIO()
-    call_command("check_delivery_health", stdout=output)
+    with process_streams() as (output, _):
+        call_command("check_delivery_health")
     assert json.loads(output.getvalue())["statement_timeout"] == "10s"
 
 

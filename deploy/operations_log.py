@@ -39,7 +39,7 @@ def log_resource() -> tuple[str, dict[str, Any]]:
     }
 
 
-def report(event: str, severity: str, **details: object) -> None:
+def report(event: str, severity: str, **details: object) -> bool:
     payload = {"event": event, **details}
     print(json.dumps(payload), file=sys.stderr, flush=True)
     try:
@@ -61,3 +61,5 @@ def report(event: str, severity: str, **details: object) -> None:
             pass
     except (OSError, ValueError, HTTPException):
         print('{"event":"pyracast_operations_log_failed"}', file=sys.stderr, flush=True)
+        return False
+    return True

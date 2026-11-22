@@ -1,4 +1,3 @@
-import io
 import json
 import uuid
 from collections.abc import Callable
@@ -40,6 +39,7 @@ from pyracast.plants.models import CalibrationError, CalibrationRun, Plant, Plan
 from pyracast.plants.training import LEASE_DURATION as LEASE
 from pyracast.regions.models import Region
 from tests.support.budgets import assert_scale_invariant, captured_statements
+from tests.support.command_output import process_streams
 from tests.support.delivery_health import NOW, AnsweringBroker, recent_forecast
 from tests.support.domain import System, make_system
 from tests.support.notifications import store
@@ -63,13 +63,13 @@ def printed(
 ) -> tuple[dict[str, Any], bool]:
     monkeypatch.setattr(f"{COMMAND}.timezone.now", lambda: NOW)
     monkeypatch.setattr("pyracast.background.broker.make_broker", broker)
-    output = io.StringIO()
-    try:
-        call_command("check_delivery_health", *arguments, stdout=output)
-    except CommandError:
-        failed = True
-    else:
-        failed = False
+    with process_streams() as (output, _):
+        try:
+            call_command("check_delivery_health", *arguments)
+        except CommandError:
+            failed = True
+        else:
+            failed = False
     report: dict[str, Any] = json.loads(output.getvalue())
     assert report["healthy"] is not failed
     return report, failed
@@ -131,7 +131,7 @@ def test_a_waiting_calibration_is_queued_until_it_waits_longer_than_the_lag(
     assert calibration_counts(report) == (1, 0, 1, 0, 0)
     assert failed is True
 
-    CalibrationRun.objects.filter(pk=run.pk).update(attempts=1)
+    CalibrationRun.objects.filter(pk=run.pk).update(attempts=1, available_at=NOW - LAG)
     report, failed = printed(monkeypatch)
     assert calibration_counts(report) == (1, 0, 0, 0, 0)
     assert failed is False
@@ -165,21 +165,30 @@ def test_a_calibration_waiting_for_its_cutoff_is_overdue_a_lag_after_the_claim_m
     assert failed is bool(overdue)
 
 
-def test_a_requeued_calibration_stays_queued_and_is_never_overdue(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("requeued_at", "overdue"),
+    [
+        pytest.param(NOW - LAG, 0, id="a-lag-ago"),
+        pytest.param(NOW - LAG - BEFORE, 1, id="past-the-lag"),
+    ],
+)
+def test_a_requeued_calibration_is_overdue_a_lag_after_it_was_requeued(
+    monkeypatch: pytest.MonkeyPatch, requeued_at: datetime, overdue: int
 ) -> None:
     system, plant = healthy_plant(monkeypatch)
     run = calibration(system, plant)
     started = NOW - timedelta(days=1)
     start_run(run, started, LEASE)
-    requeue_run(run, CalibrationError.INVALID_CALIBRATION_DATA)
+    requeue_run(run, CalibrationError.INVALID_CALIBRATION_DATA, requeued_at)
     CalibrationRun.objects.filter(pk=run.pk).update(created_at=started)
 
     report, failed = printed(monkeypatch)
 
-    assert CalibrationRun.objects.filter(pk=run.pk, status="pending", attempts=1).exists()
-    assert calibration_counts(report) == (1, 0, 0, 0, 0)
-    assert failed is False
+    assert CalibrationRun.objects.filter(
+        pk=run.pk, status="pending", attempts=1, available_at=requeued_at
+    ).exists()
+    assert calibration_counts(report) == (1, 0, overdue, 0, 0)
+    assert failed is bool(overdue)
 
 
 def test_a_running_calibration_is_interrupted_once_its_lease_has_ended(

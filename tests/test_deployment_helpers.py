@@ -15,6 +15,7 @@ import pytest
         "host.py",
         "host_contract.py",
         "image_rescan.py",
+        "operations_events.py",
         "operations_log.py",
         "pin_release_images.py",
         "rehearsal.py",
@@ -33,7 +34,14 @@ def test_host_helpers_accept_ubuntu_system_python_312_syntax(helper: str) -> Non
 
 @pytest.mark.parametrize(
     "helper",
-    ["bootstrap_database.py", "backup.py", "rehearsal.py", "release_state.py", "reset_database.py"],
+    [
+        "bootstrap_database.py",
+        "backup.py",
+        "operations_events.py",
+        "rehearsal.py",
+        "release_state.py",
+        "reset_database.py",
+    ],
 )
 def test_smoke_helpers_run_without_application_dependencies_or_project_working_directory(
     tmp_path: Path,
