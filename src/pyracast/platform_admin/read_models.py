@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, TypedDict
 
 from django.core.paginator import Paginator
 from django.db.models import Count, OuterRef, Q, QuerySet, Subquery, TextChoices
 from django.db.models.fields.json import KT
 from django.db.models.functions import Coalesce
+from django.http import QueryDict
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.budget import OPEN as OPEN_COLLECTIONS
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJobError,
@@ -29,7 +32,7 @@ from pyracast.notifications.models import (
     PreparedMessageKind,
 )
 from pyracast.notifications.operations import recipient_limit
-from pyracast.notifications.recipients import delivery_addresses
+from pyracast.notifications.recipients import OPEN_DELIVERIES, delivery_addresses
 from pyracast.orchestration.delivery_health import (
     DISPATCH_LAG,
     TABLES,
@@ -42,6 +45,7 @@ from pyracast.orchestration.delivery_health import (
     listed,
     read_broker,
 )
+from pyracast.plants.calibration_runs import OPEN_STATUSES as OPEN_CALIBRATIONS
 from pyracast.plants.models import CalibrationError, CalibrationStatus, Plant
 from pyracast.platform_admin.forms import ReviewDecisionForm, WorkspaceSettingsForm
 from pyracast.platform_admin.health import PRESENTATION, presented, summarize_health
@@ -320,6 +324,172 @@ def recent_activity_context(
     ]
 
 
+# The column each operations list is ordered and windowed by.
+WORK_ORDER: Mapping[Scope, str] = {
+    "collections": "created_at",
+    "deliveries": "scheduled_for",
+    "metering": "scheduled_for",
+    "calibrations": "created_at",
+}
+WORK_REGION: Mapping[Scope, str] = {
+    "collections": "binding__region_id",
+    "deliveries": "schedule__region_id",
+    "metering": "plant__region_id",
+    "calibrations": "plant__region_id",
+}
+WORK_WINDOW = timedelta(hours=24)
+WORK_PAGE_SIZE = 20
+# Rows in these statuses stay listed whatever their age. A metering job awaiting publication is
+# never claimed again: a later night's job asks EPIAS for the same period anew.
+OPEN_WORK: Mapping[Scope, tuple[str, ...]] = {
+    "collections": OPEN_COLLECTIONS,
+    "deliveries": OPEN_DELIVERIES,
+    "metering": (EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING),
+    "calibrations": OPEN_CALIBRATIONS,
+}
+
+
+def _first_plant_name(region: str, fallback: str) -> Coalesce:
+    return Coalesce(
+        Subquery(
+            Plant.objects.filter(region_id=OuterRef(region)).order_by("pk").values("name")[:1]
+        ),
+        fallback,
+    )
+
+
+def _work_tables(
+    region_id: int | None, selected: Check | None, window: Window
+) -> dict[Scope, QuerySet[Any]]:
+    def rows(scope: Scope) -> QuerySet[Any]:
+        if selected is not None and selected.scope == scope:
+            return listed(selected, window)
+        return TABLES[scope]()
+
+    tables: dict[Scope, QuerySet[Any]] = {
+        "collections": rows("collections")
+        .annotate(
+            display_plant_name=_first_plant_name("binding__region_id", "binding__region__name")
+        )
+        .select_related("binding__region__tenant"),
+        "deliveries": rows("deliveries")
+        .annotate(
+            display_plant_name=_first_plant_name("schedule__region_id", "schedule__region__name")
+        )
+        .select_related("schedule__region__tenant")
+        .prefetch_related("recipient_rows"),
+        "metering": rows("metering").select_related("plant__region__tenant"),
+        "calibrations": rows("calibrations").select_related("plant__region__tenant"),
+    }
+    return {
+        scope: (
+            table if region_id is None else table.filter(**{WORK_REGION[scope]: region_id})
+        ).order_by(f"-{WORK_ORDER[scope]}", "-pk")
+        for scope, table in tables.items()
+    }
+
+
+def _collection_row(row: Any) -> dict[str, Any]:
+    return {
+        "id": row.pk,
+        "plant_name": row.display_plant_name,
+        "company": row.binding.region.tenant.name,
+        "status": row.status,
+        "kind": _("Forecast")
+        if row.endpoint == CollectionEndpoint.FORECASTS
+        else _("Past estimates"),
+        "target_date": row.target_date,
+        "status_label": CollectionJobStatus(row.status).label,
+        "scheduled_for": row.scheduled_for,
+        "last_error": row.last_error,
+        "error_label": error_label(CollectionJobError, row.last_error),
+        "attempts": row.attempts,
+        "review_url": reverse("admin:workspace_plant", args=(row.binding.region_id,)),
+    }
+
+
+def _delivery_row(row: Any) -> dict[str, Any]:
+    return {
+        "id": row.pk,
+        "plant_name": row.display_plant_name,
+        "company": row.schedule.region.tenant.name,
+        "recipient": ", ".join(delivery_addresses(row)),
+        "status": row.status,
+        "status_label": {
+            "sent": _("Accepted by email service"),
+            "uncertain": _("Acceptance unknown"),
+        }.get(row.status, NotificationDeliveryStatus(row.status).label),
+        "scheduled_for": row.scheduled_for,
+        "sent_at": row.sent_at,
+        "last_error": row.last_error,
+        "error_label": error_label(NotificationDeliveryError, row.last_error),
+        "attempts": row.attempts,
+        "review_url": reverse("admin:workspace_plant", args=(row.schedule.region_id,)),
+        "forecast_status": (
+            _("Forecast unavailable")
+            if row.forecast_kind == PreparedMessageKind.UNAVAILABLE
+            else _("Partial forecast")
+            if row.forecast_complete is False
+            else ""
+        ),
+    }
+
+
+def _metering_row(row: Any) -> dict[str, Any]:
+    return {
+        "id": row.pk,
+        "plant_name": row.plant.name,
+        "company": row.plant.region.tenant.name,
+        "source_label": (
+            _("Reported production")
+            if row.source_kind == "realtime_generation"
+            else _("Settlement production")
+        ),
+        "target_date": row.target_date,
+        "period_end_day": row.period_end_day,
+        "scheduled_for": row.scheduled_for,
+        "available_at": row.available_at,
+        "status": row.status,
+        "status_label": (
+            _("Waiting for provider publication")
+            if row.status == EpiasJobStatus.AWAITING_PUBLICATION
+            else EpiasJobStatus(row.status).label
+        ),
+        "error_label": (
+            ""
+            if row.status == EpiasJobStatus.AWAITING_PUBLICATION
+            and row.last_error == EpiasJobError.UNPUBLISHED_DATA
+            else error_label(EpiasJobError, row.last_error)
+        ),
+        "review_url": reverse("admin:workspace_plant", args=(row.plant.region_id,))
+        + "#epias-title",
+    }
+
+
+def _calibration_row(run: Any) -> dict[str, Any]:
+    return {
+        "id": run.pk,
+        "plant_name": run.plant.name,
+        "company": run.plant.region.tenant.name,
+        "window_start": run.window_start,
+        "window_end": run.window_end,
+        "created_at": run.created_at,
+        "status": run.status,
+        "status_label": CalibrationStatus(run.status).label,
+        "attempts": run.attempts,
+        "error_label": error_label(CalibrationError, run.last_error),
+        "review_url": reverse("admin:workspace_plant", args=(run.plant.region_id,)),
+    }
+
+
+WORK_ROWS: Mapping[Scope, Callable[[Any], dict[str, Any]]] = {
+    "collections": _collection_row,
+    "deliveries": _delivery_row,
+    "metering": _metering_row,
+    "calibrations": _calibration_row,
+}
+
+
 def recent_work_context(
     region_id: int | None = None,
     limit: int = 20,
@@ -328,147 +498,54 @@ def recent_work_context(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     window = Window(now or timezone.now(), DISPATCH_LAG)
-    selected = own_check(issue, OPERATION_SCOPES)
-
-    def rows(scope: Scope) -> QuerySet[Any]:
-        if selected is not None and selected.scope == scope:
-            return listed(selected, window)
-        return TABLES[scope]()
-
-    collection_rows = rows("collections").annotate(
-        display_plant_name=Coalesce(
-            Subquery(
-                Plant.objects.filter(region_id=OuterRef("binding__region_id"))
-                .order_by("pk")
-                .values("name")[:1]
-            ),
-            "binding__region__name",
-        )
-    )
-    delivery_rows = rows("deliveries").annotate(
-        display_plant_name=Coalesce(
-            Subquery(
-                Plant.objects.filter(region_id=OuterRef("schedule__region_id"))
-                .order_by("pk")
-                .values("name")[:1]
-            ),
-            "schedule__region__name",
-        )
-    )
-    metering_rows = rows("metering")
-    calibration_rows = rows("calibrations")
-    if region_id is not None:
-        collection_rows = collection_rows.filter(binding__region_id=region_id)
-        delivery_rows = delivery_rows.filter(schedule__region_id=region_id)
-        metering_rows = metering_rows.filter(plant__region_id=region_id)
-        calibration_rows = calibration_rows.filter(plant__region_id=region_id)
-    collections = [
-        {
-            "id": row.pk,
-            "plant_name": row.display_plant_name,
-            "company": row.binding.region.tenant.name,
-            "status": row.status,
-            "kind": _("Forecast")
-            if row.endpoint == CollectionEndpoint.FORECASTS
-            else _("Past estimates"),
-            "target_date": row.target_date,
-            "status_label": CollectionJobStatus(row.status).label,
-            "scheduled_for": row.scheduled_for,
-            "last_error": row.last_error,
-            "error_label": error_label(CollectionJobError, row.last_error),
-            "attempts": row.attempts,
-            "review_url": reverse("admin:workspace_plant", args=(row.binding.region_id,)),
-        }
-        for row in collection_rows.select_related("binding__region__tenant").order_by(
-            "-created_at", "-pk"
-        )[:limit]
-    ]
-    deliveries = [
-        {
-            "id": row.pk,
-            "plant_name": row.display_plant_name,
-            "company": row.schedule.region.tenant.name,
-            "recipient": ", ".join(delivery_addresses(row)),
-            "status": row.status,
-            "status_label": {
-                "sent": _("Accepted by email service"),
-                "uncertain": _("Acceptance unknown"),
-            }.get(row.status, NotificationDeliveryStatus(row.status).label),
-            "scheduled_for": row.scheduled_for,
-            "sent_at": row.sent_at,
-            "last_error": row.last_error,
-            "error_label": error_label(NotificationDeliveryError, row.last_error),
-            "attempts": row.attempts,
-            "review_url": reverse("admin:workspace_plant", args=(row.schedule.region_id,)),
-            "forecast_status": (
-                _("Forecast unavailable")
-                if row.forecast_kind == PreparedMessageKind.UNAVAILABLE
-                else _("Partial forecast")
-                if row.forecast_complete is False
-                else ""
-            ),
-        }
-        for row in delivery_rows.select_related("schedule__region__tenant")
-        .prefetch_related("recipient_rows")
-        .order_by("-scheduled_for", "-pk")[:limit]
-    ]
-    metering = [
-        {
-            "id": row.pk,
-            "plant_name": row.plant.name,
-            "company": row.plant.region.tenant.name,
-            "source_label": (
-                _("Reported production")
-                if row.source_kind == "realtime_generation"
-                else _("Settlement production")
-            ),
-            "target_date": row.target_date,
-            "period_end_day": row.period_end_day,
-            "scheduled_for": row.scheduled_for,
-            "available_at": row.available_at,
-            "status": row.status,
-            "status_label": (
-                _("Waiting for provider publication")
-                if row.status == EpiasJobStatus.AWAITING_PUBLICATION
-                else EpiasJobStatus(row.status).label
-            ),
-            "error_label": (
-                ""
-                if row.status == EpiasJobStatus.AWAITING_PUBLICATION
-                and row.last_error == EpiasJobError.UNPUBLISHED_DATA
-                else error_label(EpiasJobError, row.last_error)
-            ),
-            "review_url": reverse("admin:workspace_plant", args=(row.plant.region_id,))
-            + "#epias-title",
-        }
-        for row in metering_rows.select_related("plant__region__tenant").order_by(
-            "-scheduled_for", "-pk"
-        )[:limit]
-    ]
-    calibrations = [
-        {
-            "id": run.pk,
-            "plant_name": run.plant.name,
-            "company": run.plant.region.tenant.name,
-            "window_start": run.window_start,
-            "window_end": run.window_end,
-            "created_at": run.created_at,
-            "status": run.status,
-            "status_label": CalibrationStatus(run.status).label,
-            "attempts": run.attempts,
-            "error_label": error_label(CalibrationError, run.last_error),
-            "review_url": reverse("admin:workspace_plant", args=(run.plant.region_id,)),
-        }
-        for run in calibration_rows.select_related("plant__region__tenant").order_by(
-            "-created_at", "-pk"
-        )[:limit]
-    ]
+    tables = _work_tables(region_id, own_check(issue, OPERATION_SCOPES), window)
     return {
-        "collections": collections,
-        "deliveries": deliveries,
-        "metering": metering,
-        "calibrations": calibrations,
+        scope: [WORK_ROWS[scope](row) for row in table[:limit]] for scope, table in tables.items()
     }
+
+
+def _page_url(query: QueryDict, key: str, number: int) -> str:
+    linked = query.copy()
+    linked[key] = str(number)
+    return f"?{linked.urlencode()}"
+
+
+def _window_url(query: QueryDict, window: str) -> str:
+    """The same query in another window; each list starts again at its first page."""
+    linked = query.copy()
+    for key in [key for key in linked if key == "window" or key.endswith("_page")]:
+        del linked[key]
+    if window == "all":
+        linked["window"] = window
+    return f"?{linked.urlencode()}" if linked else ""
+
+
+def work_pages(
+    selected: Check | None, section: str, now: datetime, query: QueryDict
+) -> dict[str, Any]:
+    """Each operations list the section shows, as one page; on the unfiltered page the rows of
+    the last 24 hours and every open row, unless the query asks for all work."""
+    recent = not section and query.get("window") != "all"
+    context: dict[str, Any] = {}
+    for scope, table in _work_tables(None, selected, Window(now, DISPATCH_LAG)).items():
+        if section and section != scope:
+            continue
+        if recent:
+            table = table.filter(
+                Q(**{f"{WORK_ORDER[scope]}__gte": now - WORK_WINDOW})
+                | Q(status__in=OPEN_WORK[scope])
+            )
+        key = f"{scope}_page"
+        page = Paginator(table, WORK_PAGE_SIZE).get_page(query.get(key))
+        context[scope] = [WORK_ROWS[scope](row) for row in page]
+        context[key] = page
+        context[f"{scope}_links"] = {
+            "previous": _page_url(query, key, page.number - 1) if page.has_previous() else "",
+            "next": _page_url(query, key, page.number + 1) if page.has_next() else "",
+        }
+    context["work_window"] = "" if section else "recent" if recent else "all"
+    context["window_links"] = {"recent": _window_url(query, ""), "all": _window_url(query, "all")}
+    return context
 
 
 def provider_request_rows(requests: tuple[BindingRequests, ...]) -> list[dict[str, Any]]:
@@ -492,7 +569,7 @@ def provider_request_rows(requests: tuple[BindingRequests, ...]) -> list[dict[st
     ]
 
 
-def operations_context(issue: str = "") -> dict[str, Any]:
+def operations_context(issue: str = "", query: QueryDict | None = None) -> dict[str, Any]:
     now = timezone.now()
     health = delivery_health(now, broker=read_broker())
     summary = summarize_health(health)
@@ -512,7 +589,6 @@ def operations_context(issue: str = "") -> dict[str, Any]:
         "show_metering": not section or section == "metering",
         "show_calibrations": not section or section == "calibrations",
         "show_dispatch": not section or section == "dispatch",
-        "listed_total": health.counts[issue] if selected else None,
         "dispatch_phases": [
             {
                 "label": state.phase.label,
@@ -528,7 +604,7 @@ def operations_context(issue: str = "") -> dict[str, Any]:
         ],
         "broker": health.broker,
         "provider_requests": provider_request_rows(health.requests[:20]),
-        **recent_work_context(issue=issue, now=now),
+        **work_pages(selected, section, now, query if query is not None else QueryDict()),
     }
 
 

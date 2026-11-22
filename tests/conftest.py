@@ -4,9 +4,11 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from django.conf import settings as django_settings
 from django.core.cache import caches
 from django.db.backends.base.base import NO_DB_ALIAS, BaseDatabaseWrapper
 from django.db.backends.signals import connection_created
+from django.utils.log import configure_logging
 from hypothesis import settings
 
 pytest.register_assert_rewrite("tests.support")
@@ -26,6 +28,7 @@ TOOLING = frozenset(
         "test_ci_artifacts",
         "test_ci_images",
         "test_ci_result",
+        "test_container_log_lines",
         "test_deadline_ladder",
         "test_deployment_backup",
         "test_deployment_backup_lock",
@@ -52,6 +55,7 @@ TOOLING = frozenset(
         "test_infrastructure_settings",
         "test_npm_audit",
         "test_operations_contracts",
+        "test_operations_events",
         "test_postgres_workspace",
         "test_probe_origin",
         "test_probe_origin_pull",
@@ -78,6 +82,7 @@ SUBPROCESS = frozenset(
         "test_agent_graph",
         "test_api_schema_generation",
         "test_ci_images",
+        "test_container_log_lines",
         "test_deployment_helpers",
         "test_deployment_previous_helper",
         "test_deployment_reset",
@@ -101,6 +106,7 @@ SUBPROCESS = frozenset(
 MIGRATION = frozenset(
     {
         "test_calibration_requests",
+        "test_calibration_wait_migration",
         "test_collection_outcome_migration",
         "test_collection_times_migration",
         "test_delivery_metadata_migration",
@@ -230,6 +236,12 @@ def pytest_runtest_call(item: pytest.Item) -> Iterator[None]:
 @pytest.fixture(autouse=True)
 def fresh_throttle_counters() -> None:
     caches["throttle"].clear()
+
+
+@pytest.fixture
+def restored_logging() -> Iterator[None]:
+    yield
+    configure_logging(django_settings.LOGGING_CONFIG, django_settings.LOGGING)
 
 
 @pytest.fixture

@@ -40,10 +40,16 @@ switched=0
 recorded=0
 promoted=0
 gated=0
+# The attempt that creates the marker records when the block began; a later attempt keeps that
+# record, or the reset helper's identity, untouched, so the watchdog measures the whole block.
 begin_maintenance() {
   maintenance_started=1
-  touch /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast/release-blocked \
-    && sync -f /var/lib/pyracast
+  if [[ ! -e /var/lib/pyracast/release-blocked ]]; then
+    printf '{"revision": "%s", "started_at": "%s"}\n' "$revision" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      >/var/lib/pyracast/release-blocked.next || return 1
+    mv -T /var/lib/pyracast/release-blocked.next /var/lib/pyracast/release-blocked || return 1
+  fi
+  sync -f /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast
 }
 # With origin pulls required, only a request through the edge shows that the edge's certificate
 # is accepted: the site must answer it before this release can become current. In an upgrade the

@@ -10,6 +10,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,8 @@ APPLICATION_SERVICES = (
 )
 SERVICES = (*SUPPORT_SERVICES, *APPLICATION_SERVICES)
 HEALTHY = ("running", "healthy")
+# An activating unit is still starting or waiting to restart after a failure.
+STOPPED_UNIT_STATES = ("failed", "inactive")
 # The unit's TimeoutStartSec leaves 90 s after this deadline for the reports.
 DEADLINE_SECONDS = 210
 DELIVERY_INTERVAL_SECONDS = 300
@@ -40,6 +43,7 @@ MEMINFO = Path("/proc/meminfo")
 # Traefik renews at one third of the lifetime; below a quarter its renewal has failed for days.
 CERTIFICATE_WARNING_FRACTION = 0.25
 ORIGIN_PULL_WAIT_SECONDS = 5.0
+RELEASE_BLOCKED_WARNING_SECONDS = 3600
 
 
 class Run:
@@ -61,11 +65,11 @@ class Run:
             return check(*arguments)
         except subprocess.TimeoutExpired:
             self.failed.append(name)
-            report("pyracast_runtime_unhealthy", "ERROR", step=name, outcome="timeout")
+            report("pyracast_watchdog_step_failed", "ERROR", step=name, outcome="timeout")
         except Exception as error:
             self.failed.append(name)
             report(
-                "pyracast_runtime_unhealthy",
+                "pyracast_watchdog_step_failed",
                 "ERROR",
                 step=name,
                 outcome="error",
@@ -104,6 +108,16 @@ def unit_state(run: Run) -> str:
     ).stdout.strip()
 
 
+def check_stopped_unit(run: Run) -> None:
+    # A release, and systemd stopping the unit, hold the release lock while the unit is down.
+    with host.release_lock(0) as locked:
+        if not locked or host.RELEASE_BLOCKED.exists():
+            return
+        unit = unit_state(run)
+    if unit in STOPPED_UNIT_STATES:
+        report("pyracast_runtime_unhealthy", "ERROR", unit_state=unit)
+
+
 def check_capacity() -> None:
     boot_disk = shutil.disk_usage("/")
     data_disk = shutil.disk_usage("/var/lib/pyracast")
@@ -134,6 +148,30 @@ def check_backup_age() -> None:
         report(
             "pyracast_backup_failed", "ERROR", reason="last_verified_backup_older_than_90_minutes"
         )
+
+
+def blocked_since() -> float | None:
+    # The installer records the start in the marker it creates; a marker of the reset helper,
+    # or of an installer before that record, counts from its file time, which no attempt renews.
+    try:
+        content = host.RELEASE_BLOCKED.read_text()
+        modified = host.RELEASE_BLOCKED.stat().st_mtime
+    except FileNotFoundError:
+        return None
+    try:
+        began = datetime.fromisoformat(json.loads(content)["started_at"])
+    except (ValueError, TypeError, KeyError):
+        return modified
+    return began.timestamp() if began.tzinfo is not None else modified
+
+
+def check_release_blocked() -> None:
+    began = blocked_since()
+    if began is None:
+        return
+    age = time.time() - began
+    if age > RELEASE_BLOCKED_WARNING_SECONDS:
+        report("pyracast_release_blocked", "WARNING", hours=round(age / 3600, 1))
 
 
 def schedule_rehearsal() -> None:
@@ -222,7 +260,39 @@ def check_delivery(run: Run, compose: list[str]) -> None:
         [*compose, "exec", "-T", "api", "pyracast", "check_delivery_health"], capture_output=True
     )
     if result.returncode:
-        report("pyracast_runtime_unhealthy", "ERROR", reason="delivery_health")
+        failing = failing_delivery(result.stdout)
+        if failing is None:
+            report(
+                "pyracast_delivery_unhealthy",
+                "ERROR",
+                outcome="unreadable",
+                exit_status=result.returncode,
+            )
+        else:
+            report("pyracast_delivery_unhealthy", "ERROR", **failing)
+
+
+def failing_delivery(output: str) -> dict[str, object] | None:
+    try:
+        printed = json.loads(output)
+    except ValueError:
+        return None
+    if not isinstance(printed, dict):
+        return None
+    alarms = printed.get("alarms")
+    phases = printed.get("unhealthy_dispatch_phases")
+    broker = printed.get("broker")
+    if not (isinstance(alarms, dict) and isinstance(phases, list) and isinstance(broker, dict)):
+        return None
+    queues = broker.get("queues", {})
+    if not (isinstance(queues, dict) and all(isinstance(state, dict) for state in queues.values())):
+        return None
+    return {
+        "alarms": alarms,
+        "dispatch_phases": phases,
+        "broker_unreachable": broker.get("reachable") is not True,
+        "missing_queues": [name for name, state in queues.items() if state.get("missing")],
+    }
 
 
 def certificate_validity(
@@ -271,11 +341,14 @@ def check_origin_pull(release: Path) -> None:
 def supervise(run: Run, release: Path) -> dict[str, str]:
     run.step("capacity", check_capacity)
     if host.RELEASE_BLOCKED.exists():
+        run.step("release_blocked", check_release_blocked)
         return {"state": "blocked"}
     run.step("backup_age", check_backup_age)
     run.step("rehearsal", check_rehearsal)
     unit = run.step("unit", unit_state, run)
     if unit != "active":
+        if unit in STOPPED_UNIT_STATES:
+            run.step("unit", check_stopped_unit, run)
         return {"state": "unit_failed", "unit_state": str(unit or "unknown")}
     compose = compose_command(release)
     heartbeat = run.step("runtime", check_runtime, run, compose) or {"state": "ok"}
