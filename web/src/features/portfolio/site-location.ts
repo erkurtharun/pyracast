@@ -20,10 +20,11 @@ function pairParts(input: string): string[] {
 export type CoordinateAxis = "latitude" | "longitude";
 
 // HTML pattern syntax, which browsers compile whole with the v flag: an optional leading minus,
-// no leading zero, at most one decimal comma or point, and the axis's range in degrees.
+// no leading zero, at most one decimal comma or point, and the axis's range in degrees. Spaces
+// around the value are ignored, as the console's form strips them.
 const coordinatePatterns: Record<CoordinateAxis, string> = {
-    latitude: String.raw`-?(?:90(?:[.,]0+)?|[1-8]?\d(?:[.,]\d+)?)`,
-    longitude: String.raw`-?(?:180(?:[.,]0+)?|(?:1[0-7]\d|[1-9]?\d)(?:[.,]\d+)?)`,
+    latitude: String.raw`\s*-?(?:90(?:[.,]0+)?|[1-8]?\d(?:[.,]\d+)?)\s*`,
+    longitude: String.raw`\s*-?(?:180(?:[.,]0+)?|(?:1[0-7]\d|[1-9]?\d)(?:[.,]\d+)?)\s*`,
 };
 
 export function coordinatePattern(axis: CoordinateAxis) {
@@ -33,7 +34,7 @@ export function coordinatePattern(axis: CoordinateAxis) {
 // NaN when the field's pattern refuses the text, as Number() of any other non-number.
 export function coordinateValue(axis: CoordinateAxis, text: string): number {
     return new RegExp(`^(?:${coordinatePatterns[axis]})$`, "u").test(text)
-        ? Number(text.replace(",", "."))
+        ? Number(text.trim().replace(",", "."))
         : Number.NaN;
 }
 
