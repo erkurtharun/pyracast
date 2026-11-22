@@ -3,11 +3,14 @@ import { expect, test, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
 import { mockApi } from "./support/workspace";
 import {
+    announceResentInvitation,
     expiredNotice,
     firstAccount,
     focusWindow,
     isMarked,
+    liveRegion,
     markDocument,
+    resentNotice,
     sessionAnswer,
     type Account,
 } from "./support/session";
@@ -152,4 +155,15 @@ test("the ending-soon warning appears at the next tick once the clock passed its
     await page.clock.setSystemTime(new Date(start.getTime() + 6 * 60_000));
     await page.clock.runFor(tick);
     await expect(warning).toBeVisible();
+});
+
+test("a cover hides what the screens last announced", async ({ page }) => {
+    await signedInOnClock(page);
+    await page.goto("/app/w/1/");
+    await announceResentInvitation(page);
+    await page.route("**/api/**", abort);
+    await page.clock.runFor(idleLimit + tick);
+    await expect(cover(page)).toBeVisible();
+    await expect(liveRegion(page)).toBeHidden();
+    await expect(page.getByText(resentNotice)).toBeHidden();
 });

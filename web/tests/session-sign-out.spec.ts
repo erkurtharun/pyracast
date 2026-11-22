@@ -2,13 +2,16 @@ import { expect, test, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
 import { answer, mockApi } from "./support/workspace";
 import {
+    announceResentInvitation,
     changedNotice,
     expiredNotice,
     firstAccount,
     focusWindow,
     isMarked,
+    liveRegion,
     markDocument,
     pendingInvitation,
+    resentNotice,
     restoreFromCache,
     secondUser,
     serveSession,
@@ -391,6 +394,21 @@ test("accepting an invitation and using another account exclude each other", asy
         page.getByRole("button", { name: "Use another account", exact: true }),
     ).toBeEnabled();
     expect(server.deletes).toEqual([]);
+});
+
+test("signing out removes what the screens last announced", async ({
+    page,
+}) => {
+    const account: { current: Account } = { current: firstAccount };
+    await mockApi(page);
+    await serveSession(page, () => account.current);
+    await signOutServer(page, account);
+    await page.goto("/app/w/1/");
+    await announceResentInvitation(page);
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(signingOut(page)).toBeVisible();
+    await expect(liveRegion(page)).toHaveCount(0);
+    await expect(page.getByText(resentNotice)).toHaveCount(0);
 });
 
 test("an acceptance answered after signing out began navigates nowhere", async ({

@@ -59,41 +59,39 @@ export function AppRoot({ children }: { children: ReactNode }) {
     return (
         <QueryClientProvider client={client}>
             <SessionLanguage value={language}>
-                <LiveRegion>
-                    <IdleSessionCheck />
-                    {ending ? (
-                        <Bootstrap retry={retry} />
-                    ) : leaving.status !== "idle" ? (
-                        <SigningOut state={leaving} />
-                    ) : ready && current ? (
-                        <QueryOwner value={sessionOwner(session)}>
-                            <Screens
-                                covered={unconfirmed && Boolean(session?.user)}
-                            >
-                                {children}
-                            </Screens>
-                        </QueryOwner>
-                    ) : language.status === "failed" ? (
-                        <Bootstrap
-                            failure={{ kind: "catalogue" }}
-                            retry={reloadPage}
-                        />
-                    ) : handoff.status === "failed" ? (
-                        <Bootstrap
-                            failure={{ kind: "language" }}
-                            retry={handoff.retry}
-                        />
-                    ) : (
-                        <Bootstrap
-                            failure={
-                                failure === undefined
-                                    ? undefined
-                                    : { kind: "session", message: failure }
-                            }
-                            retry={retry}
-                        />
-                    )}
-                </LiveRegion>
+                <IdleSessionCheck />
+                {ending ? (
+                    <Bootstrap retry={retry} />
+                ) : leaving.status !== "idle" ? (
+                    <SigningOut state={leaving} />
+                ) : ready && current ? (
+                    <QueryOwner value={sessionOwner(session)}>
+                        <Screens
+                            covered={unconfirmed && Boolean(session?.user)}
+                        >
+                            {children}
+                        </Screens>
+                    </QueryOwner>
+                ) : language.status === "failed" ? (
+                    <Bootstrap
+                        failure={{ kind: "catalogue" }}
+                        retry={reloadPage}
+                    />
+                ) : handoff.status === "failed" ? (
+                    <Bootstrap
+                        failure={{ kind: "language" }}
+                        retry={handoff.retry}
+                    />
+                ) : (
+                    <Bootstrap
+                        failure={
+                            failure === undefined
+                                ? undefined
+                                : { kind: "session", message: failure }
+                        }
+                        retry={retry}
+                    />
+                )}
             </SessionLanguage>
         </QueryClientProvider>
     );
@@ -278,7 +276,7 @@ function Screens({
         <>
             {covered && <SessionUnconfirmed />}
             <div hidden={covered} inert={covered}>
-                {children}
+                <LiveRegion>{children}</LiveRegion>
             </div>
         </>
     );

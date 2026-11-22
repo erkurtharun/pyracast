@@ -1,5 +1,5 @@
-import type { Page } from "@playwright/test";
-import { user } from "./workspace";
+import { expect, type Page } from "@playwright/test";
+import { answer, user } from "./workspace";
 
 export type Account = { user: typeof user; tag: string } | null;
 
@@ -136,6 +136,53 @@ export function restoreFromCache(page: Page) {
             new PageTransitionEvent("pageshow", { persisted: true }),
         ),
     );
+}
+
+const invitee = {
+    id: 3,
+    email: "late@example.test",
+    role: "viewer",
+    state: "pending",
+    created_at: "2026-11-20T09:00:00Z",
+    expires_at: "2026-11-27T09:00:00Z",
+    delivery_status: "sent",
+} as const;
+
+export const resentNotice =
+    "A new invitation link is being sent to late@example.test.";
+
+export function liveRegion(page: Page) {
+    return page.locator("[data-live-region]");
+}
+
+// Leaves the members screen with an announcement that names an address.
+export async function announceResentInvitation(page: Page) {
+    let rows = [answer("InvitationOutput", invitee)];
+    await page.route("**/api/tenants/1/members/", (route) =>
+        route.fulfill({
+            json: answer("WorkspaceMembersOutput", {
+                members: [{ id: user.id, email: user.email, role: "admin" }],
+                plants_at_recipient_limit: 0,
+            }),
+        }),
+    );
+    await page.route("**/api/tenants/1/invitations/", (route) =>
+        route.fulfill({
+            json: answer("WorkspaceInvitationsOutput", { invitations: rows }),
+        }),
+    );
+    await page.route("**/api/tenants/1/invitations/3/resend/", (route) => {
+        rows = [{ ...invitee, id: 4 }];
+        return route.fulfill({ status: 201, json: rows[0] });
+    });
+    await page.getByRole("button", { name: "Members", exact: true }).click();
+    await page
+        .getByRole("button", {
+            name: `Send again: ${invitee.email}`,
+            exact: true,
+        })
+        .click();
+    await expect(liveRegion(page)).toHaveText(resentNotice);
 }
 
 export async function tagObserver(page: Page) {
