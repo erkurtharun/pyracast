@@ -309,7 +309,7 @@ def test_ci_clusters_run_the_production_postgresql_image() -> None:
 
 
 def postgresql_minors(text: str) -> set[str]:
-    return set(re.findall(r"postgres(?:ql)?[^\w\n]{0,4}(\d+\.\d+)(?!\d)", text, re.I))
+    return set(re.findall(r"postgres(?:ql)?\W{0,8}(\d+\.\d+)(?!\d)", text, re.I))
 
 
 @pytest.mark.parametrize(
@@ -390,7 +390,10 @@ def test_another_minor_of_the_production_major_in_the_stack_postgresql_text_is_r
     [
         "Development runs PostgreSQL {older}.",
         "Development runs **PostgreSQL** `{older}`.",
+        "Development runs **PostgreSQL** **{older}**.",
+        "Development runs PostgreSQL\n{older} with the same settings.",
         "PostgreSQL {production} in every cluster, development PostgreSQL {older}",
+        "PostgreSQL {production} in every cluster, development **PostgreSQL** **{older}**",
     ],
 )
 def test_a_version_after_the_postgresql_name_in_the_stack_text_is_read_whatever_its_major(
