@@ -38,6 +38,11 @@ class Answer(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else b""
         self.server.requests.append((self.command, self.path, str(self.headers["Host"]), body))
+        if self.path == "/folded/":
+            self.wfile.write(
+                b"HTTP/1.1 200 OK\r\nX-Test: first\r\n Injected: yes\r\nContent-Length: 0\r\n\r\n"
+            )
+            return
         payload = self.server.name.encode()
         if self.path == "/redirect/":
             self.send_response(302)
@@ -130,6 +135,38 @@ def test_the_browser_gateway_forwards_bodies_cookies_and_redirects_unchanged(
     assert (redirected.status, redirected.headers["Location"]) == (302, "/app/")
     assert frontend.requests[0][:2] == ("GET", "/redirect/")
     assert gateway.origin == f"http://127.0.0.1:{gateway.server_port}"
+
+
+def test_the_browser_gateway_answers_bad_gateway_for_a_folded_upstream_header(
+    upstreams: tuple[Upstream, Upstream, Gateway],
+) -> None:
+    _, frontend, gateway = upstreams
+
+    response = request(gateway, "GET", "/folded/")
+
+    assert response.status == 502
+    assert "X-Test" not in response.headers
+    assert "Injected" not in response.headers
+    assert [path for _, path, _, _ in frontend.requests] == ["/folded/"]
+
+
+@pytest.mark.parametrize("name", ["X-Test\r\nInjected", "X-Test\rInjected", "X-Test\nInjected"])
+def test_the_browser_gateway_answers_bad_gateway_for_a_line_break_in_an_upstream_header_name(
+    upstreams: tuple[Upstream, Upstream, Gateway], monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    _, _, gateway = upstreams
+    getheaders = http.client.HTTPResponse.getheaders
+
+    def with_broken_name(response: http.client.HTTPResponse) -> list[tuple[str, str]]:
+        return [*getheaders(response), (name, "yes")]
+
+    monkeypatch.setattr(http.client.HTTPResponse, "getheaders", with_broken_name)
+
+    response = request(gateway, "GET", "/app/")
+
+    assert response.status == 502
+    assert "Injected" not in response.headers
+    assert "Set-Cookie" not in response.headers
 
 
 def test_the_browser_gateway_answers_bad_gateway_while_an_upstream_is_down() -> None:

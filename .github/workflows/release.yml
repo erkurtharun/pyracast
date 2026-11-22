@@ -266,6 +266,7 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: 0.13.9
+          enable-cache: false
       # An automatic release starts early and again after the whole CI run; the later one ends
       # here without failing once the other has deployed and its cleanup may remove the images.
       - name: Find the production deployments of this commit before the download
@@ -417,6 +418,7 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: 0.13.9
+          enable-cache: false
       # The other release of this commit held this serialized job until it ended; its success
       # is recorded before this job starts, while its cleanup may already remove the images.
       - name: Find the production deployments of this commit before the download

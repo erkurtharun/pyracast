@@ -296,9 +296,10 @@ def failing_delivery(output: str) -> dict[str, object] | None:
 
 
 def certificate_validity(
-    server_name: str, address: tuple[str, int], context: ssl.SSLContext | None = None
+    server_name: str, address: tuple[str, int], *, authority: str | None = None
 ) -> tuple[float, float]:
-    context = context or ssl.create_default_context()
+    context = ssl.create_default_context(cadata=authority)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     with (
         socket.create_connection(address, timeout=10) as connection,
         context.wrap_socket(connection, server_hostname=server_name) as secure,
