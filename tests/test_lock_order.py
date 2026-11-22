@@ -10,6 +10,7 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.db import connection, transaction
 from django.db.models import BooleanField, Case, Q, Value, When
+from django.db.models.expressions import RawSQL
 
 from pyracast.accounts.invitations import accept_workspace_invitation, invitation_digest
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
@@ -30,24 +31,21 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 PERSON = "auth_user"
 WORKSPACE = frozenset({"accounts_tenant", "regions_region", "plants_plant"})
+GUARDED = WORKSPACE | {PERSON}
 GUARDED_TABLE = re.compile(
-    r'(?<!\w)"?(auth_user|accounts_tenant|regions_region|plants_plant)"?(?!\w)', re.IGNORECASE
+    r"(?<![\w$])(auth_user|accounts_tenant|regions_region|plants_plant)(?![\w$])"
 )
-ANY_ROW_LOCK = re.compile(
-    r"\bFOR\s+(?:NO\s+KEY\s+UPDATE|UPDATE|SHARE|KEY\s+SHARE)\b", re.IGNORECASE
+ESCAPED_NAME = 'u&"'
+ACQUIRING_WORD = re.compile(
+    r"(?<![\w$])(?:insert|update|delete|merge|truncate|copy|lock|share)(?![\w$])"
 )
-ANY_READ = re.compile(r"\s*SELECT\b", re.IGNORECASE)
-DJANGO_WRITE = re.compile(r'(?:UPDATE|DELETE FROM|INSERT INTO) "(?P<table>\w+)" ')
-DJANGO_ROW_LOCK = re.compile(
-    r' FOR (?:NO KEY UPDATE|UPDATE|SHARE|KEY SHARE)(?: OF (?P<of>"\w+"(?:, "\w+")*))?'
-    r"(?: NOWAIT| SKIP LOCKED)?$"
-)
-INNERMOST_GROUP = re.compile(r"\([^()]*\)")
-COLLAPSED_GROUP = "<group>"
-DERIVED_TABLE = re.compile(rf"(?:FROM|JOIN|,) {COLLAPSED_GROUP}")
-UNALIASED = r"(?= (?:WHERE|INNER|LEFT|RIGHT|FULL|CROSS|ORDER|GROUP|LIMIT|FOR|ON)\b)"
-SAVEPOINT = re.compile(
-    r'\s*(?P<verb>SAVEPOINT|ROLLBACK\s+TO(?:\s+SAVEPOINT)?)\s+"?(?P<name>\w+)"?', re.IGNORECASE
+LATER_STATEMENT = re.compile(r";\s*\S")
+SAVEPOINT_WORD = re.compile(r"(?<![\w$])(?:savepoint|release|rollback)(?![\w$])")
+SAVEPOINT_CONTROL = re.compile(
+    r"\s*(?P<verb>savepoint|release(?:\s+savepoint)?"
+    r"|rollback(?:\s+(?:work|transaction))?\s+to(?:\s+savepoint)?)"
+    r'\s+(?:"(?P<quoted>[^"]+)"|(?P<plain>\w+))\s*;?\s*',
+    re.IGNORECASE,
 )
 PERSON_ROW_STATEMENTS = (
     re.compile(
@@ -55,7 +53,7 @@ PERSON_ROW_STATEMENTS = (
         r'(?:, "auth_user"\."\w+"(?: AS "\w+")?)*) FROM "auth_user" WHERE (?P<rows>.+?)'
         r'(?: ORDER BY 1 ASC)?(?: LIMIT \d+)? FOR (?:NO KEY )?UPDATE(?: OF "auth_user")?'
     ),
-    re.compile(r'UPDATE "auth_user" SET (?:(?!SELECT\b| WHERE ).)+ WHERE (?P<rows>.+)'),
+    re.compile(r'UPDATE "auth_user" SET "\w+" = %s(?:, "\w+" = %s)* WHERE (?P<rows>.+)'),
     re.compile(r'DELETE FROM "auth_user" WHERE (?P<rows>.+)'),
 )
 PERSON_ROWS = re.compile(
@@ -64,43 +62,23 @@ PERSON_ROWS = re.compile(
 )
 
 
-def guarded_tables(sql: str) -> frozenset[str]:
-    return frozenset(name.lower() for name in GUARDED_TABLE.findall(sql))
-
-
-def outer_level(sql: str) -> str:
-    while (collapsed := INNERMOST_GROUP.sub(COLLAPSED_GROUP, sql)) != sql:
-        sql = collapsed
-    return sql
-
-
-def recognised_acquisitions(sql: str) -> frozenset[str] | None:
-    locks = len(ANY_ROW_LOCK.findall(sql))
-    if write := DJANGO_WRITE.match(sql):
-        return guarded_tables(f'"{write["table"]}"') if locks == 0 else None
-    if ANY_READ.match(sql) is None or locks > 1:
-        return None
-    if locks == 0:
+def acquired_tables(sql: str) -> frozenset[str]:
+    text = sql.casefold()
+    if ACQUIRING_WORD.search(text) is None:
         return frozenset()
-    outer = outer_level(sql)
-    clause = DJANGO_ROW_LOCK.search(outer)
-    if clause is None:
-        return None
-    if clause["of"]:
-        names = re.findall(r'"(\w+)"', clause["of"])
-        if all(re.search(rf'(?:FROM|JOIN) "{name}"{UNALIASED}', outer) for name in names):
-            return guarded_tables(clause["of"])
-        return None
-    if DERIVED_TABLE.search(outer):
-        return None
-    return guarded_tables(outer)
+    if ESCAPED_NAME in text:
+        return GUARDED
+    return frozenset(GUARDED_TABLE.findall(text))
 
 
-def proven_persons(sql: str, params: Any) -> frozenset[object] | None:
+def proven_persons(sql: str, params: Any, rows: int) -> frozenset[object] | None:
+    if "%" in sql.replace("%s", ""):
+        return None
     for statement in PERSON_ROW_STATEMENTS:
         if (match := statement.fullmatch(sql)) and PERSON_ROWS.fullmatch(match["rows"]):
             start = sql[: match.start("rows")].count("%s")
-            return frozenset(params[start : start + match["rows"].count("%s")])
+            ids = frozenset(params[start : start + match["rows"].count("%s")])
+            return ids if rows == len(ids) else None
     return None
 
 
@@ -114,19 +92,34 @@ class LockOrder:
 class _Transaction:
     outer: object = None
     workspace: bool = False
-    held_persons: set[object] = field(default_factory=set)
-    savepoints: dict[str, frozenset[object]] = field(default_factory=dict)
+    held_persons: frozenset[object] = frozenset()
+    savepoints: list[tuple[str, frozenset[object]]] = field(default_factory=list)
 
     def follow_savepoint(self, sql: str) -> None:
-        if (savepoint := SAVEPOINT.match(sql)) is None:
+        if SAVEPOINT_WORD.search(sql.casefold()) is None:
             return
-        if savepoint["verb"].upper() == "SAVEPOINT":
-            self.savepoints[savepoint["name"]] = frozenset(self.held_persons)
+        if (control := SAVEPOINT_CONTROL.fullmatch(sql)) is None:
+            self.forget_held_persons()
+            return
+        verb = control["verb"].split()[0].lower()
+        name = control["quoted"] or control["plain"].lower()
+        names = [saved for saved, _held in self.savepoints]
+        if verb == "savepoint":
+            self.savepoints.append((name, self.held_persons))
+        elif name not in names:
+            self.forget_held_persons()
         else:
-            self.held_persons = set(self.savepoints.get(savepoint["name"], ()))
+            latest = len(names) - 1 - names[::-1].index(name)
+            if verb == "rollback":
+                self.held_persons = self.savepoints[latest][1]
+                latest += 1
+            del self.savepoints[latest:]
+
+    def forget_held_persons(self) -> None:
+        self.held_persons, self.savepoints = frozenset(), []
 
 
-# The detector reads the SQL Django sends, so cascades and checks inside the database are not seen.
+# The detector reads the SQL Django sends; cascades, checks and views in the database are unseen.
 @contextmanager
 def lock_order() -> Iterator[LockOrder]:
     order = LockOrder()
@@ -139,18 +132,18 @@ def lock_order() -> Iterator[LockOrder]:
         outer = connection.atomic_blocks[0] if connection.atomic_blocks else None
         if outer is None or outer is not state.outer:
             state = _Transaction(outer=outer)
-        recognised = recognised_acquisitions(sql)
-        acquired = guarded_tables(sql) if recognised is None else recognised
-        proven = None if many else proven_persons(sql, params)
         result = execute(sql, params, many, context)
-        rows = context["cursor"].rowcount
-        order.locked |= recognised or frozenset()
-        takes_new_person_rows = PERSON in acquired and (
-            proven is None or (rows > 0 and not proven <= state.held_persons)
-        )
-        if takes_new_person_rows and state.workspace and outer is not None:
+        rows = -1 if LATER_STATEMENT.search(sql) else context["cursor"].rowcount
+        acquired = frozenset() if rows == 0 else acquired_tables(sql)
+        proven = None if many else proven_persons(sql, params, rows)
+        if proven is not None:
+            order.locked.add(PERSON)
+        if rows > 0:
+            order.locked |= acquired & WORKSPACE
+        already_held = proven is not None and proven <= state.held_persons
+        if PERSON in acquired and state.workspace and outer is not None and not already_held:
             order.late.append(sql)
-        if proven is not None and rows == len(proven):
+        if proven is not None:
             state.held_persons |= proven
         state.workspace = state.workspace or bool(acquired & WORKSPACE)
         state.follow_savepoint(sql)
@@ -311,10 +304,18 @@ def raw(sql: str, *params: int) -> None:
         cursor.execute(sql, params)
 
 
-def lock_and_roll_back(alice: User) -> None:
+def lock_and_roll_back(person: User) -> None:
     savepoint = transaction.savepoint_create()
-    list(User.objects.select_for_update().filter(pk=alice.pk))
+    list(User.objects.select_for_update().filter(pk=person.pk))
     transaction.savepoint_rollback(savepoint)
+
+
+def lock_and_reuse_a_savepoint_name(alice: User) -> None:
+    raw("SAVEPOINT s")
+    list(User.objects.select_for_update().filter(pk=alice.pk))
+    raw("SAVEPOINT s")
+    raw("RELEASE SAVEPOINT s")
+    raw("ROLLBACK TO SAVEPOINT s")
 
 
 def unless_named(alice: User) -> Case:
@@ -339,6 +340,31 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
         User.objects.select_for_update().filter(unless_named(alice), username=bob.username)
     ),
     "lock alice and roll back to a savepoint": lambda alice, bob, tenant: lock_and_roll_back(alice),
+    "lock bob and roll back to a savepoint": lambda alice, bob, tenant: lock_and_roll_back(bob),
+    "lock alice and reuse a savepoint name": lambda alice, bob, tenant: (
+        lock_and_reuse_a_savepoint_name(alice)
+    ),
+    "lock bob through an iterator": lambda alice, bob, tenant: list(
+        User.objects.filter(pk=bob.pk).select_for_update().iterator()
+    ),
+    "lock bob in a lateral derived table": lambda alice, bob, tenant: raw(
+        "SELECT p.id FROM LATERAL (SELECT id FROM auth_user WHERE id = %s) AS p FOR UPDATE",
+        bob.pk,
+    ),
+    "lock bob behind an empty statement": lambda alice, bob, tenant: raw(
+        "SELECT 1 WHERE false; SELECT id FROM auth_user WHERE id = %s FOR UPDATE", bob.pk
+    ),
+    "lock bob with a comment inside the locking clause": lambda alice, bob, tenant: raw(
+        "SELECT id FROM auth_user WHERE id = %s FOR /* row lock */ UPDATE", bob.pk
+    ),
+    "write bob with alice's id in a text placeholder": lambda alice, bob, tenant: (
+        User.objects.filter(pk=bob.pk).update(first_name=RawSQL("CAST(%t AS text)", (alice.pk,)))
+    ),
+    "write alice with a subquery locking bob": lambda alice, bob, tenant: User.objects.filter(
+        pk=alice.pk
+    ).update(
+        first_name=RawSQL("(select username from auth_user where id = %s for update)", (bob.pk,))
+    ),
     "lock alice in a derived table": lambda alice, bob, tenant: raw(
         'SELECT "locked"."id" FROM (SELECT "auth_user"."id" FROM "auth_user"'
         ' WHERE "auth_user"."id" = %s FOR UPDATE) "locked"',
@@ -365,6 +391,9 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
     "write a missing person": lambda alice, bob, tenant: User.objects.filter(pk=0).update(
         first_name="Renamed"
     ),
+    "write a missing person by name": lambda alice, bob, tenant: User.objects.filter(
+        username="nobody"
+    ).update(first_name="Renamed"),
     "lock alice by key": lambda alice, bob, tenant: list(
         User.objects.select_for_update().filter(pk=alice.pk)
     ),
@@ -392,7 +421,7 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
 }
 
 
-def late_statements(*steps: str) -> int:
+def detected(*steps: str) -> LockOrder:
     alice = User.objects.create(username="alice")
     bob = User.objects.create(username="bob")
     tenant = Tenant.objects.create(name="Workspace")
@@ -402,7 +431,11 @@ def late_statements(*steps: str) -> int:
         for step in steps:
             STEPS[step](alice, bob, tenant)
 
-    return len(order.late)
+    return order
+
+
+def late_statements(*steps: str) -> int:
+    return len(detected(*steps).late)
 
 
 @pytest.mark.parametrize(
@@ -418,6 +451,8 @@ def late_statements(*steps: str) -> int:
         (("lock bob by a filter naming alice inside a case", "lock workspace", "write alice"), 1),
         (("write alice", "lock workspace", "write alice"), 0),
         (("write alice", "lock workspace", "write bob"), 1),
+        (("write bob with alice's id in a text placeholder", "lock workspace", "write alice"), 1),
+        (("lock alice by key", "lock workspace", "write alice with a subquery locking bob"), 1),
         (("lock alice by key", "lock workspace", "write alice and bob in bulk"), 1),
         (
             (
@@ -426,7 +461,7 @@ def late_statements(*steps: str) -> int:
                 "lock workspace",
                 "write alice and bob in bulk",
             ),
-            0,
+            1,
         ),
         (("lock alice by key", "lock workspace", "lock alice by key"), 0),
         (("lock alice by key", "lock workspace", "lock bob by key"), 1),
@@ -449,18 +484,19 @@ def test_a_person_row_is_held_only_after_a_whole_id_filter_matched_it(
         "lock alice in a subquery",
         "lock alice in raw lower case",
         "write alice in raw lower case",
+        "lock a membership joined to alice",
+        "lock bob through an iterator",
+        "lock bob in a lateral derived table",
+        "lock bob with a comment inside the locking clause",
+        "lock bob behind an empty statement",
     ],
 )
-def test_an_unrecognised_person_lock_or_write_after_a_workspace_lock_is_late(step: str) -> None:
+def test_an_unproven_person_lock_or_write_after_a_workspace_lock_is_late(step: str) -> None:
     assert late_statements("lock alice by key", "lock workspace", step) == 1
 
 
-@pytest.mark.parametrize(
-    "step", ["read alice", "read alice in raw lower case", "lock a membership joined to alice"]
-)
-def test_a_person_read_without_a_person_lock_after_a_workspace_lock_is_not_late(
-    step: str,
-) -> None:
+@pytest.mark.parametrize("step", ["read alice", "read alice in raw lower case"])
+def test_a_person_read_without_a_lock_after_a_workspace_lock_is_not_late(step: str) -> None:
     assert late_statements("lock workspace", step) == 0
 
 
@@ -468,18 +504,35 @@ def test_a_workspace_write_orders_a_later_person_write_like_a_workspace_lock() -
     assert late_statements("write workspace", "write alice") == 1
 
 
-def test_a_rollback_to_a_savepoint_releases_the_person_rows_locked_inside_it() -> None:
+@pytest.mark.parametrize(
+    "step", ["lock alice and roll back to a savepoint", "lock alice and reuse a savepoint name"]
+)
+def test_a_rollback_to_a_savepoint_releases_the_person_rows_locked_inside_it(step: str) -> None:
+    assert late_statements(step, "lock workspace", "write alice") == 1
+
+
+def test_a_rollback_to_a_savepoint_keeps_the_person_rows_locked_before_it() -> None:
     assert (
-        late_statements("lock alice and roll back to a savepoint", "lock workspace", "write alice")
-        == 1
+        late_statements(
+            "lock alice by key",
+            "lock bob and roll back to a savepoint",
+            "lock workspace",
+            "write alice",
+        )
+        == 0
     )
 
 
-def test_a_person_write_after_a_workspace_lock_that_matched_no_row_is_not_late() -> None:
-    assert late_statements("lock workspace", "write a missing person") == 0
+@pytest.mark.parametrize("step", ["write a missing person", "write a missing person by name"])
+def test_a_person_write_after_a_workspace_lock_that_matched_no_row_is_not_late(step: str) -> None:
+    assert late_statements("lock workspace", step) == 0
 
 
-def test_a_workspace_lock_through_a_person_subquery_locks_no_person() -> None:
+def test_a_person_write_that_matched_no_row_is_no_evidence_of_a_person_lock() -> None:
+    assert PERSON not in detected("lock workspace", "write a missing person").locked
+
+
+def test_a_workspace_lock_through_a_person_subquery_is_no_evidence_of_a_person_lock() -> None:
     alice = User.objects.create(username="alice")
     tenant = Tenant.objects.create(name="Workspace")
     Membership.objects.create(tenant=tenant, user=alice)
