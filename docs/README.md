@@ -1,7 +1,6 @@
 # Documentation index
 
-Read on demand: every page is small or generated. The code is the source of truth;
-these pages hold what it cannot show at a glance.
+Read on demand. The code is the source of truth; these pages hold what it cannot show at a glance.
 
 | Need | Read |
 | --- | --- |
@@ -11,6 +10,7 @@ these pages hold what it cannot show at a glance.
 | System-wide design decisions and their rationale | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Irradiance, energy and calibration calculations | [IRRADIANCE.md](IRRADIANCE.md) |
 | Production topology, release and recovery | [DEPLOYMENT.md](DEPLOYMENT.md) |
+| How contributors and coding agents work, verify and deliver | [AGENTS.md](../AGENTS.md) |
 | State of the current improvement program | [agents/PROGRESS.md](agents/PROGRESS.md) |
 
 ## Keeping it true
@@ -19,5 +19,4 @@ these pages hold what it cannot show at a glance.
 - A change to models or migrations regenerates the data model with
   `uv run python scripts/generate_er_diagram.py`; the quality gate fails on drift.
 - A change to a pinned version updates its row in `STACK.md`.
-- `ARCHITECTURE.md` predates the flow map and is being reconciled with it. Where they
-  disagree, the flow page and the code win.
+- Where `ARCHITECTURE.md` and a flow page disagree, the flow page and the code win.
