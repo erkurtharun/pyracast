@@ -397,8 +397,8 @@ limits. Holdout improvement against estimated actuals does not establish better 
 
 - `native-thirty-days-else-settings-matched-pool-v2` selects the cohort: native Hobby days alone
   once 30 complete matched days exist; below that, native days pooled with an authorized
-  historical rooftop export of the same configuration; legacy products of unknown origin only as a
-  separate cohort, never pooled. Pooled products, coverage counts and excluded samples are
+  historical rooftop export of the same configuration; days without a recorded source product
+  (`unknown`) only as a separate cohort, never pooled. Pooled products, coverage counts and excluded samples are
   recorded. Import rules are in [historical-reference-import](flows/historical-reference-import.md).
 - For a past day's estimated actuals, native acquisitions keep precedence once they cover daylight
   and its whole boundary intervals, even with nights missing; otherwise a complete authorized
