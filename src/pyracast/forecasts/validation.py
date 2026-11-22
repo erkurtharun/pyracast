@@ -150,7 +150,7 @@ def validate_binding(
                 and account.enabled
                 and account.authorized_at is not None
             ):
-                _rearm_after_validation(binding, region, committed_at)
+                _rearm_after_validation(binding, region, account, committed_at)
             record_audit(
                 actor=actor,
                 region=region,
@@ -189,8 +189,14 @@ def _record_refusal(binding: SiteBinding) -> None:
             SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
 
 
-def _rearm_after_validation(binding: SiteBinding, region: Region, recovered_at: datetime) -> None:
-    timing = forecast_timing(binding, CollectionSchedule.objects.filter(region=region).first())
+def _rearm_after_validation(
+    binding: SiteBinding, region: Region, account: ProviderAccount, recovered_at: datetime
+) -> None:
+    timing = forecast_timing(
+        binding,
+        CollectionSchedule.objects.filter(region=region).first(),
+        daily_quota=account.daily_quota,
+    )
     if timing is None:
         return
     due = latest_forecast_slot(recovered_at, region.timezone, timing.times, timing.effective_from)
