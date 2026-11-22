@@ -3,10 +3,12 @@ from io import BytesIO
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+from pyracast.accounts.models import Membership
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.forecasts.models import (
@@ -18,6 +20,8 @@ from pyracast.intervals import NormalizedInterval
 from pyracast.notifications.models import (
     DeliveryRecipient,
     NotificationDelivery,
+    RecipientRole,
+    ReminderMemberRole,
     ReminderRecipient,
     ReminderRecipientTie,
     ReminderSchedule,
@@ -61,6 +65,14 @@ def store(
         )
         for membership_id in (tied or {}).get(row.key, []):
             ReminderRecipientTie.objects.create(recipient=row, membership_id=membership_id)
+
+
+def chosen(schedule: ReminderSchedule, user: User, role: RecipientRole) -> ReminderMemberRole:
+    return ReminderMemberRole.objects.create(
+        schedule=schedule,
+        membership=Membership.objects.get(tenant_id=schedule.region.tenant_id, user=user),
+        role=role,
+    )
 
 
 def candidates(delivery: NotificationDelivery) -> list[str]:

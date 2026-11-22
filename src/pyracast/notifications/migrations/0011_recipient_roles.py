@@ -1,0 +1,86 @@
+from typing import ClassVar
+
+import django.db.models.deletion
+from django.db import migrations, models
+from django.db.migrations.operations.base import Operation
+
+ROLES = [("to", "To"), ("cc", "Cc"), ("bcc", "Bcc")]
+
+
+class Migration(migrations.Migration):
+    dependencies: ClassVar = [
+        ("accounts", "0008_invitation_revocation_reason_and_acceptor"),
+        ("notifications", "0010_delivery_preparation_metadata"),
+    ]
+
+    # Existing schedules stay hidden, typed addresses carry no choice and every delivery row
+    # was sent in blind copy.
+    operations: ClassVar[list[Operation]] = [
+        migrations.AddField(
+            model_name="reminderschedule",
+            name="hide_recipients",
+            field=models.BooleanField(default=True),
+        ),
+        migrations.AddField(
+            model_name="reminderrecipient",
+            name="role",
+            field=models.CharField(blank=True, choices=ROLES, default="", max_length=3),
+        ),
+        migrations.AddConstraint(
+            model_name="reminderrecipient",
+            constraint=models.CheckConstraint(
+                condition=models.Q(role__in=["", "to", "cc", "bcc"]),
+                name="reminderrecipient_role_chk",
+            ),
+        ),
+        migrations.AddField(
+            model_name="deliveryrecipient",
+            name="role",
+            field=models.CharField(choices=ROLES, default="bcc", max_length=3),
+        ),
+        migrations.AddConstraint(
+            model_name="deliveryrecipient",
+            constraint=models.CheckConstraint(
+                condition=models.Q(role__in=["to", "cc", "bcc"]),
+                name="deliveryrecipient_role_chk",
+            ),
+        ),
+        migrations.CreateModel(
+            name="ReminderMemberRole",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("role", models.CharField(choices=ROLES, max_length=3)),
+                (
+                    "membership",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE, to="accounts.membership"
+                    ),
+                ),
+                (
+                    "schedule",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="member_roles",
+                        to="notifications.reminderschedule",
+                    ),
+                ),
+            ],
+            options={
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=("schedule", "membership"),
+                        name="remindermemberrole_schedule_membership_uniq",
+                    ),
+                    models.CheckConstraint(
+                        condition=models.Q(role__in=["to", "cc", "bcc"]),
+                        name="remindermemberrole_role_chk",
+                    ),
+                ],
+            },
+        ),
+    ]

@@ -10,13 +10,14 @@ from django.db import connection, models
 from django.db.models import QuerySet
 
 from pyracast import trash
+from pyracast.notifications.models import RecipientRole
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.plants.models import Plant
 from pyracast.regions.models import Region
 from pyracast.trash import RETENTION, trash_region
 from tests.support.domain import NOW
 from tests.support.notification_groups import group, member
-from tests.support.notifications import SLOT
+from tests.support.notifications import SLOT, chosen
 from tests.support.plant_operations import make_plant, snapshot_for
 from tests.support.trash_operations import DETACHED, PURGED, revised_observation
 
@@ -71,6 +72,7 @@ FOREIGN_KEYS = {
     ("notifications.NotificationDelivery", "binding"): ORDERED,
     ("notifications.NotificationDelivery", "schedule"): ORDERED,
     ("notifications.NotificationDelivery", "snapshot"): ORDERED,
+    ("notifications.ReminderMemberRole", "schedule"): ORDERED,
     ("notifications.ReminderRecipient", "schedule"): ORDERED,
     ("notifications.ReminderRecipientTie", "recipient"): ORDERED,
     ("notifications.ReminderSchedule", "region"): ORDERED,
@@ -192,8 +194,9 @@ def test_every_purge_statement_keeps_the_stated_references_consistent(
     system, plant = make_plant(monkeypatch)
     snapshot_for(system, NOW.date() - timedelta(days=1))
     revised_observation(system, plant, 2)
-    member(system, "holder@example.com")
-    group(system, ["holder@example.com", "external@example.com"])
+    holder = member(system, "holder@example.com")
+    schedule = group(system, ["holder@example.com", "external@example.com"])
+    chosen(schedule, holder, RecipientRole.BCC)
     assert enqueue_due(SLOT)
     trash_region(system.member, system.tenant.pk, system.region.pk)
     events: list[tuple[str, str, frozenset[str]]] = []

@@ -27,7 +27,12 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.forecasts.scheduler import enqueue_due
-from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.models import (
+    NotificationDelivery,
+    RecipientRole,
+    ReminderMemberRole,
+    ReminderSchedule,
+)
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -49,6 +54,8 @@ from tests.support.concurrency import behind_open_transaction
 from tests.support.domain import NOW, System
 from tests.support.errors import raises_code
 from tests.support.historical_reference_import import archive, power_file, system_for_import
+from tests.support.notification_groups import group, member
+from tests.support.notifications import chosen
 from tests.support.plant_operations import make_plant, request_run, snapshot_for
 from tests.support.trash_operations import remaining_purge_work, revised_observation, sibling
 
@@ -526,3 +533,29 @@ def test_a_small_budget_purges_a_revised_observation_history_in_committed_steps(
 
     assert not Region.objects.filter(pk=system.region.pk).exists()
     assert not ProductionObservation.objects.exists()
+
+
+def test_an_interrupted_purge_of_a_plant_with_saved_recipient_choices_resumes_to_the_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _ = make_plant(monkeypatch)
+    holder = member(system, "holder@example.com")
+    schedule = group(system, ["holder@example.com"])
+    chosen(schedule, holder, RecipientRole.BCC)
+    chosen(schedule, system.member, RecipientRole.TO)
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    monkeypatch.setattr("pyracast.trash.PURGE_CHUNK_SIZE", 1)
+    monkeypatch.setattr("pyracast.trash.PURGE_STATEMENT_BUDGET", 1)
+    work = remaining_purge_work()
+
+    for _ in range(work):
+        if not Region.objects.filter(pk=system.region.pk).exists():
+            break
+        purge_expired(NOW + RETENTION)
+        left = remaining_purge_work()
+        assert left < work, "every cycle commits progress"
+        work = left
+
+    assert not Region.objects.filter(pk=system.region.pk).exists()
+    assert not ReminderMemberRole.objects.exists()
+    assert Membership.objects.filter(user=holder).exists()

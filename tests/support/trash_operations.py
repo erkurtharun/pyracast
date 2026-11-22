@@ -34,6 +34,7 @@ PURGED = frozenset(
         "metering.EpiasSnapshot",
         "notifications.DeliveryRecipient",
         "notifications.NotificationDelivery",
+        "notifications.ReminderMemberRole",
         "notifications.ReminderRecipient",
         "notifications.ReminderRecipientTie",
         "notifications.ReminderSchedule",
