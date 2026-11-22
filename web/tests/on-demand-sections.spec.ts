@@ -540,7 +540,7 @@ test("a language chosen before signing in whose catalogue arrives afterwards is 
     expect(written).toEqual(["account:tr"]);
 });
 
-test("a language another tab saved clears this tab's failed save of it", async ({
+test("a language another tab saved clears this tab's failed save of it for good", async ({
     page,
 }) => {
     await mockApi(page, { anonymous: true });
@@ -575,6 +575,17 @@ test("a language another tab saved clears this tab's failed save of it", async (
     await expect(page.getByLabel("Dil", { exact: true })).toHaveValue("tr");
     await expect(
         page.getByText("Dil kaydedilemedi. Tekrar deneyin."),
+    ).toHaveCount(0);
+    language = "en";
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Language", { exact: true })).toHaveValue(
+        "en",
+    );
+    await expect(
+        page.getByText("Language could not be saved. Please try again."),
     ).toHaveCount(0);
 });
 
