@@ -95,10 +95,11 @@ Authorization is checked at three places, so that no single omission opens data:
    interleave with a write; reads take no tenant lock. Only console views pass `platform=True`,
    which replaces the membership with a platform-administrator check.
 
-Lock order starts at the tenant, then region, plant and request rows. A transaction that also
-locks a person's account (`auth_user`) locks that person first, `FOR NO KEY UPDATE`: one order, so two
-such transactions cannot deadlock, and a writer that only references the person does not wait;
-`tests/test_lock_order.py` holds every such operation to it. See [tenant-authorization](flows/tenant-authorization.md).
+Lock order: a transaction that locks a person's account (`auth_user`, `FOR NO KEY UPDATE`)
+locks it before any workspace row; workspace rows follow as tenant, region, plant, then request
+rows. One order, so a person/workspace lock inversion cannot deadlock, and a writer that only
+references the person does not wait. `tests/test_lock_order.py` checks it for the operations it
+lists; flow pages name their own sequence and link here. See [tenant-authorization](flows/tenant-authorization.md).
 
 ## Authentication and sessions
 
