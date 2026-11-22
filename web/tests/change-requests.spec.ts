@@ -2114,6 +2114,35 @@ test("a member promoted while a draft is open can choose another day", async ({
     );
 });
 
+test("the notice of a promotion that discarded a draft goes with the next access change and a second such promotion is announced again", async ({
+    page,
+}) => {
+    const promoted =
+        "You can now edit production directly, so the correction request you were preparing was discarded.";
+    let role: "viewer" | "admin" = "viewer";
+    await memberOnClock(page, () => role);
+    await serveDays(page, () => [{}, {}]);
+    await openPlant(page, "Production");
+    await stage(page, "08:00", "0,5");
+    role = "admin";
+    await page.clock.runFor(120_001);
+    const notice = page.getByRole("status").filter({ hasText: promoted });
+    await expect(notice).toHaveCount(1);
+
+    role = "viewer";
+    await page.clock.runFor(120_001);
+    await expect(
+        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+    ).toBeVisible();
+    await expect(notice).toHaveCount(0);
+
+    await stage(page, "08:00", "0,5");
+    role = "admin";
+    await page.clock.runFor(120_001);
+    await expect(draft(page)).toHaveCount(0);
+    await expect(notice).toHaveCount(1);
+});
+
 test("the manual mark as read recovers a failed read receipt", async ({
     page,
 }) => {
