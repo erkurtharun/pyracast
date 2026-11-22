@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { ESLint } from "eslint";
@@ -236,18 +237,35 @@ function composite(colour: string, alpha: number, surface: string) {
         .join("")}`;
 }
 
-type Shade = string;
+type Token = `--${string}`;
+type Shade = Token | { colour: Token; alpha: number; over: Token };
 type Pairing = { pair: [Shade, Shade] } & (
     { before: [string, string] } | { atLeast: number }
 );
 
-const publicForecastPanel = "#edf0e5";
+const shades: Record<string, string> = { ...brandProperties, ...imageShades };
+
+const tokens: Record<string, string> = {
+    ...Object.fromEntries(
+        [
+            ...readFileSync(
+                path.join(web, "src/styles/tokens.css"),
+                "utf8",
+            ).matchAll(/^\s*(--[\w-]+):\s*#([0-9a-f]{3}|[0-9a-f]{6});$/gim),
+        ].map(([, name, digits]) => [
+            name!,
+            `#${digits!.length === 3 ? [...digits!].map((digit) => digit + digit).join("") : digits}`.toLowerCase(),
+        ]),
+    ),
+    ...shades,
+};
+
 // The densest forecast fill the production line crosses: 15.3 % of the series over the panel.
-const forecastFillUnderProduction = composite(
-    "#28664e",
-    0.153,
-    publicForecastPanel,
-);
+const forecastFillUnderProduction: Shade = {
+    colour: "--green-722",
+    alpha: 0.153,
+    over: "--olive-80",
+};
 
 const derivation: Record<string, { from: string; keeps?: Pairing }> = {
     "--forest-822": {
@@ -274,7 +292,7 @@ const derivation: Record<string, { from: string; keeps?: Pairing }> = {
     "--amber-684": {
         from: "#a56a12",
         keeps: {
-            pair: ["--amber-684", "#e8ecdf"],
+            pair: ["--amber-684", "--olive-100"],
             before: ["#946827", "#e8ecdf"],
         },
     },
@@ -289,7 +307,7 @@ const derivation: Record<string, { from: string; keeps?: Pairing }> = {
     "--cream-45": {
         from: "#f6f7f3",
         keeps: {
-            pair: ["#ffffff", "--cream-45"],
+            pair: ["--white", "--cream-45"],
             before: ["#ffffff", "#f6f7f3"],
         },
     },
@@ -297,35 +315,35 @@ const derivation: Record<string, { from: string; keeps?: Pairing }> = {
     "--teal-708": {
         from: "#26735f",
         keeps: {
-            pair: ["#ffffff", "--teal-708"],
+            pair: ["--white", "--teal-708"],
             before: ["#ffffff", "#26735f"],
         },
     },
     "--teal-729": {
         from: "#28664e",
         keeps: {
-            pair: ["#ffffff", "--teal-729"],
+            pair: ["--white", "--teal-729"],
             before: ["#ffffff", "#28664e"],
         },
     },
     "--teal-753": {
         from: "#176b56",
         keeps: {
-            pair: ["#ffffff", "--teal-753"],
+            pair: ["--white", "--teal-753"],
             before: ["#ffffff", "#176b56"],
         },
     },
     "--teal-802": {
         from: "#1c4d3a",
         keeps: {
-            pair: ["#ffffff", "--teal-802"],
+            pair: ["--white", "--teal-802"],
             before: ["#ffffff", "#1c4d3a"],
         },
     },
     "--teal-824": {
         from: "#104d3f",
         keeps: {
-            pair: ["#ffffff", "--teal-824"],
+            pair: ["--white", "--teal-824"],
             before: ["#ffffff", "#104d3f"],
         },
     },
@@ -333,8 +351,6 @@ const derivation: Record<string, { from: string; keeps?: Pairing }> = {
     "--teal-841-a4": { from: "#173a360a" },
     "--teal-841-a5": { from: "#173a360d" },
 };
-
-const shades: Record<string, string> = { ...brandProperties, ...imageShades };
 
 function ruleShade(name: string, lightness: number) {
     const [, family] = /^--(\w+)-/.exec(name)!;
@@ -348,12 +364,19 @@ function ruleShade(name: string, lightness: number) {
 }
 
 function measured(pairing: Pairing, name: string, value: string) {
-    const [first, second] = pairing.pair.map((colour) =>
-        colour === name
-            ? value
-            : colour.startsWith("--")
-              ? shades[colour]!
-              : colour,
+    const resolve = (token: Token) => {
+        if (token === name) return value;
+        expect(tokens[token], token).toBeDefined();
+        return tokens[token]!;
+    };
+    const [first, second] = pairing.pair.map((shade) =>
+        typeof shade === "string"
+            ? resolve(shade)
+            : composite(
+                  resolve(shade.colour),
+                  shade.alpha,
+                  resolve(shade.over),
+              ),
     ) as [string, string];
     return contrast(first, second);
 }
@@ -373,8 +396,9 @@ test("every brand shade is the kit's colour or follows the token rule, and each 
                 name,
             ).toBe(Number(alpha));
         if (number === undefined) {
-            expect(value.slice(0, 7), name).toBe(
-                families[family as keyof typeof families].kit,
+            expect(value, name).toBe(
+                families[family as keyof typeof families].kit +
+                    (alpha === undefined ? "" : value.slice(7)),
             );
             continue;
         }
@@ -450,19 +474,27 @@ test("the console's brand tokens are the shades of the tokens module", async () 
         "utf8",
     );
     const [, root] = /^:root \{\n([^}]*)\n\}/.exec(stylesheet)!;
-    const tokens = [
+    const declared = [
         ...root!.matchAll(
             /^\s*(--(?:forest|amber|cream|teal)[\w-]*): (#\w+);$/gm,
         ),
     ];
-    expect(tokens.length).toBeGreaterThan(3);
-    for (const [, name, value] of tokens) {
-        const [, family, number] =
-            /^--(forest|amber|cream|teal)(?:-(\d+))?(?:-a\d+)?$/.exec(name!)!;
-        if (number === undefined)
-            expect(value!.slice(0, 7), name).toBe(
-                families[family as keyof typeof families].kit,
-            );
-        else expect(value, name).toBe(shades[name!]);
+    expect(declared.length).toBeGreaterThan(3);
+    for (const [, name, value] of declared) {
+        const [, family, number, alpha] =
+            /^--(forest|amber|cream|teal)(?:-(\d+))?(?:-a(\d+))?$/.exec(name!)!;
+        if (number !== undefined) {
+            expect(value, name).toBe(shades[name!]);
+            continue;
+        }
+        expect(value, name).toBe(
+            families[family as keyof typeof families].kit +
+                (alpha === undefined ? "" : value!.slice(7)),
+        );
+        if (alpha !== undefined)
+            expect(
+                Math.round((Number.parseInt(value!.slice(7), 16) / 255) * 100),
+                name,
+            ).toBe(Number(alpha));
     }
 });
