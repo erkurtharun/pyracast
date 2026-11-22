@@ -4,7 +4,7 @@ import { ApiError } from "@/lib/api/errors";
 import type { components } from "@/lib/schema";
 
 export type Outage = components["schemas"]["IncidentOutput"];
-export type OutageInput = components["schemas"]["IncidentInput"];
+type OutageInput = components["schemas"]["IncidentInput"];
 
 export type OutageChange =
     | { action: "create"; values: OutageInput; reason: string }
@@ -113,7 +113,7 @@ export function staleVersion(error: unknown, id: number): Outage | null {
     return isOutage(current) && current.id === id ? current : null;
 }
 
-export const OUTAGE_FIELDS = [
+const OUTAGE_FIELDS = [
     "status",
     "kind",
     "title",

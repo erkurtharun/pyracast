@@ -4,7 +4,7 @@ import type { Configuration } from "@/features/portfolio/plant-configuration-fie
 export type Values = Configuration & { name: string };
 export type ValueField = keyof Values;
 
-export const VALUE_FIELDS = [
+const VALUE_FIELDS = [
     "name",
     "dc_capacity_mw",
     "inverter_capacity_mw",
@@ -43,7 +43,7 @@ export type Draft = {
     conflict: Conflict | null;
 };
 
-export function plantValues(plant: Plant, parameters: Configuration): Values {
+function plantValues(plant: Plant, parameters: Configuration): Values {
     return { ...parameters, name: plant.name };
 }
 

@@ -28,7 +28,7 @@ function files(directory: string, extension: RegExp): string[] {
         .map((entry) => path.join(entry.parentPath, entry.name));
 }
 
-export function messageKeys(node: unknown, prefix = ""): string[] {
+function messageKeys(node: unknown, prefix = ""): string[] {
     return node && typeof node === "object"
         ? Object.entries(node).flatMap(([key, value]) =>
               messageKeys(value, `${prefix}${key}.`),
@@ -206,7 +206,7 @@ export function keyUse(web: string): KeyUse {
 
 // The codes a family can label: every lower-case code the backend or a screen writes as a
 // string, and every Python f-string that composes one.
-export function codePatterns(root: string): RegExp[] {
+function codePatterns(root: string): RegExp[] {
     const literals = new Set<string>();
     const composed = new Set<string>();
     for (const file of files(path.join(root, "src", "pyracast"), /\.py$/)) {

@@ -4,7 +4,7 @@ const counters = {
     functions: ["FNF", "FNH"],
 } as const;
 
-export type Metric = keyof typeof counters;
+type Metric = keyof typeof counters;
 export type Floor = Record<Metric, number>;
 type Totals = Record<Metric, { found: number; hit: number }>;
 
