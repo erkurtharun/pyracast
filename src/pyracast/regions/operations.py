@@ -61,11 +61,21 @@ def require_available_location(
     )
     if exclude_region_id is not None:
         regions = regions.exclude(pk=exclude_region_id)
-    if regions.filter(
-        location_latitude=Decimal(str(canonical_coordinate(latitude))),
-        location_longitude=Decimal(str(canonical_coordinate(longitude))),
-    ).exists():
-        raise DomainError(ErrorCode.LOCATION_ALREADY_EXISTS)
+    occupant = (
+        regions.filter(
+            location_latitude=Decimal(str(canonical_coordinate(latitude))),
+            location_longitude=Decimal(str(canonical_coordinate(longitude))),
+        )
+        .values_list("pk", flat=True)
+        .first()
+    )
+    if occupant is not None:
+        raise _location_taken(occupant)
+
+
+def _location_taken(region_id: int) -> DomainError:
+    """Names the plant of the same workspace that holds the location, so it can be opened."""
+    return DomainError(ErrorCode.LOCATION_ALREADY_EXISTS, details={"region_id": region_id})
 
 
 @cache
@@ -141,7 +151,7 @@ def submit_region(
 
 def _require_free_target(tenant_id: int, latitude: float, longitude: float, region: Region) -> None:
     require_available_location(tenant_id, latitude, longitude, exclude_region_id=region.pk)
-    if (
+    requester = (
         RegionLocationChangeRequest.objects.filter(
             active_region("region__"),
             region__tenant_id=tenant_id,
@@ -156,9 +166,11 @@ def _require_free_target(tenant_id: int, latitude: float, longitude: float, regi
             target_latitude=Decimal(str(latitude)),
             target_longitude=Decimal(str(longitude)),
         )
-        .exists()
-    ):
-        raise DomainError(ErrorCode.LOCATION_ALREADY_EXISTS)
+        .values_list("region_id", flat=True)
+        .first()
+    )
+    if requester is not None:
+        raise _location_taken(requester)
 
 
 def _awaits_first_setup(region: Region) -> bool:

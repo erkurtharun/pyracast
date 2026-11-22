@@ -26,6 +26,7 @@ import { useErrorMessage } from "@/ui/form";
 import { LanguageSelect } from "@/ui/language-select";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { WorkspaceAccess } from "@/ui/workspace-access";
+import { RecentDeletionProvider } from "@/features/trash/recent-deletion";
 
 const rememberedKey = "pyracast.workspace";
 const Workspace = createContext<{
@@ -277,41 +278,45 @@ export function WorkspaceShell({
                     <RefreshFailed resource={tenants} />
                     <WorkspaceAccess value={screen === "account" || canManage}>
                         <Workspace value={{ tenant, user, navigating }}>
-                            {screen === "account" ? (
-                                children
-                            ) : tenants.loading ? (
-                                <p role="status">{t("loadingWorkspaces")}</p>
-                            ) : !tenants.data ? (
-                                <>
-                                    <Notice error>{tenants.error}</Notice>
-                                    <button
-                                        className="button secondary"
-                                        onClick={tenants.retry}
+                            <RecentDeletionProvider tenant={tenant?.id}>
+                                {screen === "account" ? (
+                                    children
+                                ) : tenants.loading ? (
+                                    <p role="status">
+                                        {t("loadingWorkspaces")}
+                                    </p>
+                                ) : !tenants.data ? (
+                                    <>
+                                        <Notice error>{tenants.error}</Notice>
+                                        <button
+                                            className="button secondary"
+                                            onClick={tenants.retry}
+                                        >
+                                            {t("retry")}
+                                        </button>
+                                    </>
+                                ) : tenant ? (
+                                    <Suspense
+                                        fallback={
+                                            <p role="status">
+                                                {t("loadingScreen")}
+                                            </p>
+                                        }
                                     >
-                                        {t("retry")}
-                                    </button>
-                                </>
-                            ) : tenant ? (
-                                <Suspense
-                                    fallback={
-                                        <p role="status">
-                                            {t("loadingScreen")}
-                                        </p>
-                                    }
-                                >
-                                    {children}
-                                </Suspense>
-                            ) : tenantId === undefined ? (
-                                <Empty page title={t("noWorkspace")}>
-                                    {t("contactAdmin", {
-                                        contact: contactEmail,
-                                    })}
-                                </Empty>
-                            ) : (
-                                <Notice error>
-                                    {t("workspaceUnavailable")}
-                                </Notice>
-                            )}
+                                        {children}
+                                    </Suspense>
+                                ) : tenantId === undefined ? (
+                                    <Empty page title={t("noWorkspace")}>
+                                        {t("contactAdmin", {
+                                            contact: contactEmail,
+                                        })}
+                                    </Empty>
+                                ) : (
+                                    <Notice error>
+                                        {t("workspaceUnavailable")}
+                                    </Notice>
+                                )}
+                            </RecentDeletionProvider>
                         </Workspace>
                     </WorkspaceAccess>
                 </main>
