@@ -16,7 +16,7 @@ export const brandProperties = {
     "--amber-300": "#dabb8b",
     "--amber-329-a0": "#f7bb5f00",
     "--amber-329-a20": "#f7bb5f33",
-    "--amber-600": "#a47328",
+    "--amber-608": "#a17027",
     "--amber-684": "#a16100",
     "--amber-755": "#7d4b00",
     "--cream": brand.cream,
@@ -38,7 +38,7 @@ export const imageShades = { "--amber-296": "#fec369" } as const;
 export const illustrationColours = {
     grid: "#dedfd3",
     axis: "#c4ccbd",
-    production: brandProperties["--amber-600"],
+    production: brandProperties["--amber-608"],
     halo: "#fbfbf5",
 };
 

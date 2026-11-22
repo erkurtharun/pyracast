@@ -170,6 +170,15 @@ test("actions take the brand's petrol while the forecast keeps its chart colour"
         "border-top-color",
         forecast,
     );
+    const production = "rgb(161, 112, 39)";
+    const productionSeries = page.locator(
+        'figure svg[role="img"] path[stroke-dasharray="5 7"]',
+    );
+    await expect(productionSeries).toHaveCount(1);
+    await expect(productionSeries).toHaveCSS("stroke", production);
+    const productionLegend = page.locator('[class*="actualLine"]');
+    await expect(productionLegend).toHaveCSS("border-top-color", production);
+    await expect(productionLegend).toHaveCSS("border-top-style", "dashed");
     await expect(page.locator('[class*="primaryButton"]').first()).toHaveCSS(
         "background-color",
         "rgb(35, 100, 103)",

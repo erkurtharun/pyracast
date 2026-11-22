@@ -225,8 +225,29 @@ const families = {
     teal: { kit: brand.forest, old: "#176b56" },
 };
 
+function composite(colour: string, alpha: number, surface: string) {
+    const [top, bottom] = [colour, surface].map(channels);
+    return `#${top!
+        .map((value, index) =>
+            Math.round((value * alpha + bottom![index]! * (1 - alpha)) * 255)
+                .toString(16)
+                .padStart(2, "0"),
+        )
+        .join("")}`;
+}
+
 type Shade = string;
-type Pairing = { pair: [Shade, Shade]; before: [string, string] };
+type Pairing = { pair: [Shade, Shade] } & (
+    { before: [string, string] } | { atLeast: number }
+);
+
+const publicForecastPanel = "#edf0e5";
+// The densest forecast fill the production line crosses: 15.3 % of the series over the panel.
+const forecastFillUnderProduction = composite(
+    "#28664e",
+    0.153,
+    publicForecastPanel,
+);
 
 const derivation: Record<string, { from: string; keeps?: Pairing }> = {
     "--forest-822": {
@@ -243,11 +264,11 @@ const derivation: Record<string, { from: string; keeps?: Pairing }> = {
     "--amber-300": { from: "#d2c293" },
     "--amber-329-a0": { from: "#e8bd6e00" },
     "--amber-329-a20": { from: "#e8bd6e33" },
-    "--amber-600": {
+    "--amber-608": {
         from: "#a17537",
         keeps: {
-            pair: ["--amber-600", "#edf0e5"],
-            before: ["#a17537", "#edf0e5"],
+            pair: ["--amber-608", forecastFillUnderProduction],
+            atLeast: 3,
         },
     },
     "--amber-684": {
@@ -364,7 +385,8 @@ test("every brand shade is the kit's colour or follows the token rule, and each 
             expect(Number(number), name).toBe(oldNumber);
             continue;
         }
-        const floor = contrast(...keeps.before);
+        const floor =
+            "atLeast" in keeps ? keeps.atLeast : contrast(...keeps.before);
         expect(measured(keeps, name, value), name).toBeGreaterThanOrEqual(
             floor,
         );
