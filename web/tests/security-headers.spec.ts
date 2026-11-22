@@ -66,6 +66,46 @@ test("pages send the same-origin referrer policy", async ({ request }) => {
     }
 });
 
+test("the app manifest and icons are served as files with their own type and revalidation", async ({
+    request,
+}) => {
+    for (const [file, type] of [
+        ["/app/manifest.webmanifest", "application/manifest+json"],
+        ["/app/icon-192.png", "image/png"],
+        ["/app/icon-512.png", "image/png"],
+        ["/app/icon-512-maskable.png", "image/png"],
+        ["/app/apple-touch-icon.png", "image/png"],
+    ]) {
+        const response = await request.get(file);
+        expect(response.status(), file).toBe(200);
+        const headers = response.headers();
+        expect(headers["content-type"]?.split(";")[0], file).toBe(type);
+        expect(headers["cache-control"], file).toBe("no-cache");
+        expect(headers["content-security-policy"], file).toBeUndefined();
+        expect(headers["x-robots-tag"], file).toBeUndefined();
+    }
+});
+
+test("pages and unknown files under /app/ keep the page headers", async ({
+    request,
+}) => {
+    for (const address of [
+        "/app/",
+        "/app/account/",
+        "/app/w/1/plants/2/forecast/",
+        "/app/icon-1024.png",
+        "/app/manifest.json",
+    ]) {
+        const headers = (await request.get(address)).headers();
+        expect(headers["content-security-policy"], address).toMatch(
+            /script-src 'self' 'nonce-[^']+' 'strict-dynamic'/,
+        );
+        if (productionServer)
+            expect(headers["cache-control"], address).toBe("private, no-store");
+        expect(headers["x-robots-tag"], address).toBe("noindex, nofollow");
+    }
+});
+
 test("a spoofed language header on /app/ is ignored", async ({ request }) => {
     const response = await request.get("/app/", {
         headers: { "x-pyracast-public-language": "tr" },

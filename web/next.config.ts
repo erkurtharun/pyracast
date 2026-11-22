@@ -19,6 +19,10 @@ const config = (phase: string): NextConfig => ({
                     { key: "X-Frame-Options", value: "DENY" },
                 ],
             },
+            {
+                source: "/app/:file([^/]+\\.(?:webmanifest|png))",
+                headers: [{ key: "Cache-Control", value: "no-cache" }],
+            },
         ]);
     },
     rewrites() {
