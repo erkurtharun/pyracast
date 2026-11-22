@@ -8,7 +8,6 @@ PACKAGE = Path(__file__).resolve().parents[1] / "src" / "pyracast"
 LAYERS: tuple[tuple[str, ...], ...] = (
     (
         "collection_window",
-        "evaluation",
         "event_details",
         "intervals",
         "irradiance",
@@ -18,10 +17,9 @@ LAYERS: tuple[tuple[str, ...], ...] = (
         "provider_retry",
         "shutdown",
         "solar",
-        "weather_data",
     ),
     ("background", "db", "encryption", "environment", "errors", "health", "schema_objects"),
-    ("epias", "mail", "maintenance", "outbound", "providers", "weather"),
+    ("epias", "mail", "maintenance", "outbound", "providers"),
     ("accounts",),
     ("regions",),
     ("connections",),
@@ -77,10 +75,6 @@ BACK_EDGES: dict[tuple[str, str], str] = {
         "accounts.stored_secrets",
         "connections.secrets",
     ): "secret re-encryption walks provider credentials",
-    (
-        "connections.contracts",
-        "forecasts.models",
-    ): "provider data carries the snapshot weather vocabulary",
     ("forecasts.acquisition", "plants.forecast_sources"): "snapshot replay lives in plants",
     (
         "forecasts.historical_import",

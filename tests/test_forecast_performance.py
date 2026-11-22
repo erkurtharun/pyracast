@@ -294,7 +294,6 @@ def test_frozen_power_does_not_reapply_calibration_or_current_model(
         result = forecast_performance(plant, start_date=DAY, end_date=DAY)
     unused_columns = (
         "raw_payload",
-        "weather_payload",
         "normalized_intervals",
         "payloads",
         "outage_scenarios",

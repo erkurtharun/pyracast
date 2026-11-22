@@ -1,6 +1,6 @@
 import { isLanguage, type Language } from "@/i18n/language";
 
-export const plantSections = [
+const plantSections = [
     "forecast",
     "production",
     "calibration",
@@ -8,7 +8,7 @@ export const plantSections = [
     "settings",
 ] as const;
 export type PlantSection = (typeof plantSections)[number];
-export const plantViews = {
+const plantViews = {
     forecast: ["generation", "irradiance"],
     production: ["actuals", "comparison"],
     settings: ["configuration", "location", "collection", "reminders"],

@@ -204,12 +204,9 @@ def test_restored_rows_keep_the_acquisition_and_take_the_live_job_shape(
         "coverage_start",
         "coverage_end",
         "available_at",
-        "weather_payload",
     ):
         assert getattr(copy, name) == getattr(original, name)
-    assert copy.weather_error == ""
     forecast = restored_copy(system.binding, before.forecasts[0])
-    assert forecast.weather_payload == {"source": "open-meteo"}
     assert forecast.job.target_date == date(2026, 11, 6)
     result = ForecastResult.objects.get(snapshot=forecast)
     assert forecast.available_at == before.forecasts[0].available_at
@@ -960,6 +957,21 @@ def test_a_row_without_its_identity_refuses_the_run(
     assert restored_count(system) == 0
 
 
+def test_an_export_line_of_a_release_that_stored_weather_still_restores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    before = collections_before_reset(system)
+    rows = export_rows(before.content)
+    for row in rows:
+        row["weather_payload"] = (
+            {"source": "open-meteo"} if row["endpoint"] == "forecasts" else None
+        )
+
+    assert restore(system, encode_rows(rows)).restored == 8
+    assert restored_count(system) == 8
+
+
 @pytest.mark.parametrize(
     "changes",
     [
@@ -996,7 +1008,6 @@ def test_a_row_without_its_identity_refuses_the_run(
                 }
             ]
         },
-        {"weather_payload": []},
         {"available_at": None},
         {"available_at": "2026-11-05T07:01:00"},
     ],

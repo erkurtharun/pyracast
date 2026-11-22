@@ -1,15 +1,14 @@
 from collections.abc import Iterable, Mapping
 from datetime import datetime
-from typing import Literal, cast
+from typing import cast
 
 from django.db.models import Q, QuerySet
 
 from pyracast.connections.contracts import ProviderData
 from pyracast.errors import BusyError, ErrorCode
-from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot, SnapshotWeatherError
+from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.intervals import NormalizedInterval
 from pyracast.irradiance import SourceKind
-from pyracast.weather_data import WeatherError, restore_weather
 
 
 def mark_forecast_fallback(payload: dict[str, object], cutoff: datetime) -> None:
@@ -85,15 +84,6 @@ def covering_snapshots(
 def snapshot_data(
     snapshot: ForecastSnapshot, *, intervals: Iterable[Mapping[str, object]] | None = None
 ) -> ProviderData:
-    weather = None
-    weather_error: SnapshotWeatherError | Literal[""] = (
-        SnapshotWeatherError(snapshot.weather_error) if snapshot.weather_error else ""
-    )
-    if snapshot.weather_payload is not None:
-        try:
-            weather = restore_weather(snapshot.weather_payload)
-        except WeatherError as exc:
-            weather_error = SnapshotWeatherError(exc.code)
     return ProviderData(
         raw_payload=snapshot.raw_payload,
         intervals=NormalizedInterval.from_rows(
@@ -102,6 +92,4 @@ def snapshot_data(
         issued_at=snapshot.issued_at,
         collected_at=snapshot.collected_at,
         source_kind=cast(SourceKind, snapshot.source_kind),
-        weather=weather,
-        weather_error=weather_error,
     )

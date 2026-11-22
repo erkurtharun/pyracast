@@ -39,7 +39,7 @@ const SYSTEMS: [RegExp, string][] = [
     [/Linux/, "Linux"],
 ];
 
-export function deviceLabel(userAgent: string) {
+function deviceLabel(userAgent: string) {
     const browser = BROWSERS.find(([pattern]) => pattern.test(userAgent))?.[1];
     const system = SYSTEMS.find(([pattern]) => pattern.test(userAgent))?.[1];
     return [browser, system].filter(Boolean).join(" · ");

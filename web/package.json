@@ -19,7 +19,8 @@
         "test:integration": "playwright test --config playwright.integration.config.ts",
         "test:coverage": "node testing/run-coverage.mjs",
         "budget": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON testing/check-bundle-budget.mjs",
-        "check:static": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm run budget",
+        "knip": "knip",
+        "check:static": "npm run format:check && npm run lint && npm run typecheck && npm run knip && npm run build && npm run budget",
         "check:coverage": "npm run check:static && npm run test:coverage"
     },
     "dependencies": {
@@ -47,6 +48,7 @@
         "eslint-plugin-jsx-a11y-x": "0.2.0",
         "eslint-plugin-react-hooks": "7.1.1",
         "jsqr": "1.4.0",
+        "knip": "6.45.1",
         "monocart-coverage-reports": "3.2.1",
         "openapi-typescript": "7.13.0",
         "pngjs": "7.0.0",

@@ -292,13 +292,13 @@ def _select_reference_cohort(
             "complete_matched_day_dates": evaluation["included_day_dates"],
             "samples": len(indexes),
         }
-    native, historical, legacy = products
+    native, historical, unknown = products
     pooled = 0 < counts[native] < NATIVE_COHORT_DAYS and counts[historical] > 0
     selected = (
         native
         if pooled or counts[native] >= 7
         else next(
-            (product for product in (historical, legacy) if counts[product] >= 7),
+            (product for product in (historical, unknown) if counts[product] >= 7),
             max(products, key=lambda product: counts[product]),
         )
     )

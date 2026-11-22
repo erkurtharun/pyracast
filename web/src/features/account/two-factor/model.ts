@@ -2,7 +2,7 @@ import { browserErrors } from "@/i18n/browser";
 import { ApiError } from "@/lib/api/errors";
 import type { AuthenticatorRecord } from "@/lib/auth-api";
 
-export type RecoveryCounts = {
+type RecoveryCounts = {
     unused: number;
     total: number;
 };

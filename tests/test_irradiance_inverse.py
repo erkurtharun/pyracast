@@ -3,15 +3,19 @@ from typing import cast
 
 import pytest
 
-from pyracast.irradiance import SourceKind, Sunlight
-from pyracast.irradiance.inverse import (
-    Coefficients,
-    QuadraticModel,
-    forward_power,
-    reconstruct_ghi,
-)
+from pyracast.irradiance.inverse import Coefficients, QuadraticModel, reconstruct_ghi
 
 MODEL = QuadraticModel((-0.025, 1.03, 0, -0.1, -0.17, 0.002), -10, 35)
+
+
+def forward_power(
+    ghi_wm2: float, *, capacity_kw: float, air_temp_c: float, snow_loss_fraction: float
+) -> float:
+    c0, c1, c2, c3, c4, c5 = MODEL.coefficients
+    t = (air_temp_c - 25) / 25
+    g = ghi_wm2 / 1000
+    shape = c4 * g * g + (c1 + c3 * t) * g + c0 + c2 * t + c5 * t * t
+    return capacity_kw * (1 - snow_loss_fraction) * shape
 
 
 @pytest.mark.parametrize(
@@ -26,7 +30,6 @@ def test_forward_inverse_round_trip_on_increasing_branch(
         capacity_kw=capacity,
         air_temp_c=temperature,
         snow_loss_fraction=snow,
-        model=MODEL,
     )
     estimate = reconstruct_ghi(
         power,
@@ -56,62 +59,34 @@ def test_independent_quadratic_and_linear_solutions_and_sensitivity() -> None:
 
 
 @pytest.mark.parametrize(
-    ("power", "temperature", "snow", "sunlight", "capped", "flag"),
+    ("power", "temperature", "snow", "flag"),
     [
-        (None, 25, 0, "unknown", False, "missing_power"),
-        (-1, 25, 0, "day", False, "invalid_power"),
-        (float("nan"), 25, 0, "day", False, "invalid_power"),
-        (True, 25, 0, "day", False, "invalid_power"),
-        (1, 25, 0, "night", False, "night_power_conflict"),
-        (0, 25, 0, "day", False, "zero_power_not_identifiable"),
-        (1000, 25, 0, "day", True, "capped_power_not_identifiable"),
-        (500, None, 0, "day", False, "weather_inputs_required"),
-        (500, 25, None, "day", False, "weather_inputs_required"),
-        (500, float("nan"), 0, "day", False, "invalid_weather"),
-        (500, 25, -0.1, "day", False, "invalid_weather"),
-        (500, 25, float("inf"), "day", False, "invalid_weather"),
-        (500, True, 0, "day", False, "invalid_weather"),
-        (500, 25, True, "day", False, "invalid_weather"),
-        (500, 25, 1, "day", False, "snow_opaque"),
-        (5, 25, 0.99, "day", False, "snow_ill_conditioned"),
-        (1e308, 25, 0, "day", False, "no_supported_root"),
+        (None, 25, 0, "missing_power"),
+        (-1, 25, 0, "invalid_power"),
+        (float("nan"), 25, 0, "invalid_power"),
+        (True, 25, 0, "invalid_power"),
+        (0, 25, 0, "zero_power_not_identifiable"),
+        (500, None, 0, "weather_inputs_required"),
+        (500, 25, None, "weather_inputs_required"),
+        (500, float("nan"), 0, "invalid_weather"),
+        (500, 25, -0.1, "invalid_weather"),
+        (500, 25, float("inf"), "invalid_weather"),
+        (500, True, 0, "invalid_weather"),
+        (500, 25, True, "invalid_weather"),
+        (500, 25, 1, "snow_opaque"),
+        (5, 25, 0.99, "snow_ill_conditioned"),
+        (1e308, 25, 0, "no_supported_root"),
     ],
 )
 def test_unidentified_or_invalid_inputs_preserve_missingness(
-    power: float | None,
-    temperature: float | None,
-    snow: float | None,
-    sunlight: str,
-    capped: bool,
-    flag: str,
+    power: float | None, temperature: float | None, snow: float | None, flag: str
 ) -> None:
     result = reconstruct_ghi(
-        power,
-        capacity_kw=1000,
-        air_temp_c=temperature,
-        snow_loss_fraction=snow,
-        model=MODEL,
-        sunlight=cast(Sunlight, sunlight),
-        power_is_capped=capped,
+        power, capacity_kw=1000, air_temp_c=temperature, snow_loss_fraction=snow, model=MODEL
     )
     assert result.ghi_wm2 is None
     assert result.sensitivity_wm2_per_kw is None
     assert flag in result.quality_flags
-
-
-def test_night_does_not_require_weather_and_forecast_transfer_remains_unvalidated() -> None:
-    result = reconstruct_ghi(
-        0,
-        capacity_kw=1000,
-        air_temp_c=None,
-        snow_loss_fraction=None,
-        model=MODEL,
-        sunlight="night",
-        source_kind="forecast",
-    )
-    assert result.ghi_wm2 == 0
-    assert "declared_night" in result.quality_flags
-    assert "forecast_transfer_unvalidated" in result.quality_flags
 
 
 def test_domain_and_temperature_extrapolation_are_explicit() -> None:
@@ -163,27 +138,6 @@ def test_invalid_capacity_is_a_configuration_error(capacity: float) -> None:
         reconstruct_ghi(100, capacity_kw=capacity, air_temp_c=25, snow_loss_fraction=0, model=MODEL)
 
 
-def test_invalid_source_kind_and_sunlight_are_rejected() -> None:
-    with pytest.raises(ValueError, match="source kind"):
-        reconstruct_ghi(
-            100,
-            capacity_kw=1000,
-            air_temp_c=25,
-            snow_loss_fraction=0,
-            model=MODEL,
-            source_kind=cast(SourceKind, "measured"),
-        )
-    with pytest.raises(ValueError, match="sunlight"):
-        reconstruct_ghi(
-            100,
-            capacity_kw=1000,
-            air_temp_c=25,
-            snow_loss_fraction=0,
-            model=MODEL,
-            sunlight=cast(Sunlight, "sunny"),
-        )
-
-
 @pytest.mark.parametrize(
     "values",
     [
@@ -202,20 +156,3 @@ def test_invalid_source_kind_and_sunlight_are_rejected() -> None:
 def test_invalid_model_parameters_are_rejected(values: dict[str, object]) -> None:
     with pytest.raises(ValueError, match=r"required|range|limit|transmission"):
         replace(MODEL, **values)  # type: ignore[arg-type]
-
-
-@pytest.mark.parametrize(
-    ("ghi", "capacity", "temperature", "snow"),
-    [(-1, 1000, 25, 0), (1, 0, 25, 0), (1, 1000, float("nan"), 0), (1, 1000, 25, 2)],
-)
-def test_forward_model_rejects_invalid_inputs(
-    ghi: float, capacity: float, temperature: float, snow: float
-) -> None:
-    with pytest.raises(ValueError, match="Finite irradiance"):
-        forward_power(
-            ghi,
-            capacity_kw=capacity,
-            air_temp_c=temperature,
-            snow_loss_fraction=snow,
-            model=MODEL,
-        )

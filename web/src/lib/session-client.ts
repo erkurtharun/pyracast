@@ -12,7 +12,7 @@ import { authRequest } from "./auth-api";
 
 export type Session = components["schemas"]["SessionOutput"];
 export type SessionUser = components["schemas"]["SessionUserOutput"];
-export type SessionState = { session?: Session; ended: boolean };
+type SessionState = { session?: Session; ended: boolean };
 
 // The last session tag any tab of this browser observed. A write is an observation of a session
 // read, never a new value, so tabs that read crossing answers converge.
@@ -35,7 +35,7 @@ export function sessionState() {
     return state;
 }
 
-export function subscribeSession(listener: () => void) {
+function subscribeSession(listener: () => void) {
     listeners.add(listener);
     return () => {
         listeners.delete(listener);
@@ -46,7 +46,7 @@ export function useSessionState() {
     return useSyncExternalStore(subscribeSession, sessionState, sessionState);
 }
 
-export function tagOf(session: Session | undefined): Tag {
+function tagOf(session: Session | undefined): Tag {
     return session && (session.session_tag ?? "");
 }
 
@@ -55,7 +55,7 @@ export function sessionOwner(session: Session | undefined) {
     return session?.user ? `${session.user.id}:${tagOf(session)}` : undefined;
 }
 
-export function observedTag(): string | null {
+function observedTag(): string | null {
     try {
         return window.localStorage.getItem(observedTagKey);
     } catch {

@@ -149,7 +149,7 @@ def test_operator_provenance_reaches_customers_as_an_allowlist() -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-def test_saved_forecast_email_hides_weather_provider_in_all_alternatives() -> None:
+def test_saved_forecast_email_hides_the_provider_in_all_alternatives() -> None:
     delivery = ready()
     assert delivery.snapshot is not None
     account = delivery.snapshot.job.binding.provider_account

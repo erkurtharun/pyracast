@@ -48,7 +48,6 @@
         "baseline_estimate_using_the_current_configuration_no": "Baseline estimate using the current configuration; no calibration factor applied.",
         "baseline_no_active_calibration": "Baseline (no active calibration).",
         "source_configuration_details": "Source & configuration details",
-        "with_outages": "with outages",
         "with_outages_title": "With outages",
         "production_below_uncalibrated": "Production below uncalibrated model: {percent}% on {date}.",
         "production_below_model": "Production below model: {percent}% on {date}.",
@@ -91,16 +90,7 @@
             "nonfinite_irradiance": "nonfinite irradiance",
             "prorated_interval_mean": "prorated interval mean",
             "incomplete_day": "incomplete day",
-            "empirical_inverse": "empirical inverse",
-            "aggregation_approximation": "aggregation approximation",
-            "historical_calibration": "historical calibration",
-            "forecast_transfer_unvalidated": "forecast transfer unvalidated",
-            "temperature_extrapolation": "temperature extrapolation",
-            "independent_weather_model": "independent weather model",
-            "unvalidated_against_ground": "unvalidated against ground",
-            "snow_loss_unknown": "snow loss unknown",
             "uniform_mean_proration": "uniform mean proration",
-            "external_weather_unavailable": "external weather unavailable",
             "estimated_actuals_not_metered": "estimated actuals not metered",
             "historical_configuration_assumed": "historical configuration assumed",
             "uncalibrated": "uncalibrated",
@@ -118,8 +108,6 @@
             "unvalidated_reference_transfer": "unvalidated reference transfer",
             "outage_configuration_changed": "outage configuration changed",
             "unknown_outage_impact": "unknown outage impact",
-            "provider_error": "provider error",
-            "missing": "missing",
             "unknown": "{value}"
         },
         "stale_reason": {
@@ -188,7 +176,6 @@
         "unavailable_dates": "Unavailable dates ({count})",
         "reasons": {
             "estimated_actuals_not_available": "Historical weather estimates are not available",
-            "configuration_not_available": "Configuration was not available before this day",
             "forecast_not_available": "No forecast was archived for this day",
             "configuration_not_comparable": "The measurement basis or timezone has changed",
             "incomplete_or_invalid_day": "Production or reference coverage is incomplete or invalid",
@@ -266,8 +253,7 @@
             "valid": "valid",
             "outage": "outage",
             "curtailed": "curtailed",
-            "invalid": "invalid",
-            "meter": "meter"
+            "invalid": "invalid"
         },
         "unknown_value": "{value}",
         "status_messages": {
@@ -425,7 +411,6 @@
         "total_unavailable": "Total: —",
         "provider_original_interval": "Provider {interval}: {value}",
         "quality": "Data quality",
-        "mixed": "Mixed quality",
         "refresh_failed": "Could not refresh saved production. {error}",
         "propose_interval": "Suggest correction for {interval}",
         "remove_correction": "Remove correction",
@@ -453,17 +438,6 @@
         "exact_interval": "Interval: {start} – {end}",
         "missing": "—",
         "confirm_import": "Confirm import ({count})"
-    },
-    "WeatherReference": {
-        "independent_weather_model": "Independent weather model",
-        "an_independent_solar_irradiation_forecast_separate_from": "An independent solar irradiation forecast, separate from the plant energy estimate.",
-        "weather_model_data_is_currently_unavailable": "Weather model data is currently unavailable.",
-        "the_daily_total_is_unavailable_the_partial": "The daily total is unavailable; the partial value includes covered hours only.",
-        "daily_solar_irradiation": "Daily solar irradiation",
-        "partial_irradiation": "Partial irradiation",
-        "coverage": "Coverage",
-        "weather_attribution": "Weather data by",
-        "normalized_attribution": "Intervals normalized; daily energy calculated by Pyracast."
     },
     "DataSource": {
         "data_source": "Data source",

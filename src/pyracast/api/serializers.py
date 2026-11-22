@@ -184,14 +184,6 @@ class ForecastProvenanceOutput(serializers.Serializer[dict[str, Any]]):
     source_snapshots = SourceSnapshotOutput(many=True, required=False)
 
 
-class WeatherReferenceOutput(serializers.Serializer[dict[str, Any]]):
-    status = serializers.ChoiceField(choices=("ready", "partial", "unavailable"))
-    energy_kwh_m2 = _optional_number()
-    partial_energy_kwh_m2 = _optional_number()
-    coverage_fraction = _optional_number()
-    quality_flags = _flags()
-
-
 class IrradianceIntervalOutput(serializers.Serializer[dict[str, Any]]):
     start = serializers.DateTimeField()
     end = serializers.DateTimeField()
@@ -249,7 +241,6 @@ class IrradianceResultOutput(IrradianceSummaryOutput):
     configuration = IrradianceConfigurationOutput(required=False)
     provenance = ForecastProvenanceOutput(required=False)
     reference_capacity_normalization = serializers.DictField(allow_null=True, required=False)
-    weather_reference = WeatherReferenceOutput(required=False)
 
 
 # Stored results are frozen JSON from earlier code versions: the typed components document

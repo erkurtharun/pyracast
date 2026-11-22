@@ -7,8 +7,8 @@ from django.db import IntegrityError, transaction
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
 from pyracast.plants.measurements import (
-    LEGACY_MEASUREMENT_POLICY,
     MEASUREMENT_POLICY,
+    SETTLEMENT_ONLY_MEASUREMENT_POLICY,
     latest_measurement_day,
     production_identity_current,
     select_measurements,
@@ -147,7 +147,7 @@ def test_native_hours_and_missingness_are_preserved(
     assert select_measurements(configuration, start, end, start) == ([], [])
 
 
-def test_pinned_sources_replay_and_legacy_policy_never_adopts_provisional(
+def test_pinned_sources_replay_and_settlement_only_policy_never_adopts_provisional(
     source: tuple[PlantConfiguration, EpiasConnection],
 ) -> None:
     configuration, _ = source
@@ -167,19 +167,21 @@ def test_pinned_sources_replay_and_legacy_policy_never_adopts_provisional(
         [],
         [],
     )
-    legacy, legacy_ids = select_measurements(
+    settled, settled_ids = select_measurements(
         configuration,
         start,
         end,
         NOW,
         production_snapshot_ids=ids,
-        policy=LEGACY_MEASUREMENT_POLICY,
+        policy=SETTLEMENT_ONLY_MEASUREMENT_POLICY,
     )
-    assert legacy_ids == [settlement.pk]
-    assert [row.energy_mwh for row in legacy] == [5]
+    assert settled_ids == [settlement.pk]
+    assert [row.energy_mwh for row in settled] == [5]
     assert (
-        selection_fingerprint(configuration, legacy, NOW)[0]
-        != selection_fingerprint(configuration, legacy, NOW, policy=LEGACY_MEASUREMENT_POLICY)[0]
+        selection_fingerprint(configuration, settled, NOW)[0]
+        != selection_fingerprint(
+            configuration, settled, NOW, policy=SETTLEMENT_ONLY_MEASUREMENT_POLICY
+        )[0]
     )
 
 
@@ -223,7 +225,7 @@ def test_provisional_selection_requires_enabled_net_export_connection(
     start, end = local_day_bounds(DAY, configuration.binding.timezone)
     assert select_measurements(configuration, start, end, NOW)[1] == [snapshot.pk]
     assert select_measurements(
-        configuration, start, end, NOW, policy=LEGACY_MEASUREMENT_POLICY
+        configuration, start, end, NOW, policy=SETTLEMENT_ONLY_MEASUREMENT_POLICY
     ) == ([], [])
     configuration.measurement_basis = "ac_generation"
     assert select_measurements(configuration, start, end, NOW) == ([], [])
@@ -255,7 +257,10 @@ def test_latest_day_includes_provisional_but_only_completed_local_dates(
     assert latest_measurement_day(configuration, end, NOW, 0) == DAY
     assert latest_measurement_day(configuration, end - timedelta(minutes=1), NOW, 0) is None
     assert (
-        latest_measurement_day(configuration, end, NOW, 0, policy=LEGACY_MEASUREMENT_POLICY) is None
+        latest_measurement_day(
+            configuration, end, NOW, 0, policy=SETTLEMENT_ONLY_MEASUREMENT_POLICY
+        )
+        is None
     )
     assert select_measurements(configuration, start + timedelta(minutes=30), end, NOW)[0][
         0

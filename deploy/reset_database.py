@@ -62,7 +62,7 @@ SOLCAST_COUNT_SQL = (
 SOLCAST_EXPORT_SQL = (
     "COPY (SELECT row_to_json(e) FROM (SELECT s.id, a.provider, s.source_kind, j.endpoint, "
     "s.issued_at, s.collected_at, s.available_at, s.coverage_start, s.coverage_end, "
-    "s.raw_payload, s.normalized_intervals, s.weather_payload, ARRAY(SELECT DISTINCT c.plant_id "
+    "s.raw_payload, s.normalized_intervals, ARRAY(SELECT DISTINCT c.plant_id "
     "FROM plants_plantconfiguration c WHERE c.binding_id = b.id ORDER BY c.plant_id) "
     "AS plant_ids, row_to_json(j) AS job, row_to_json(b) AS binding "
     "FROM forecasts_forecastsnapshot s "
