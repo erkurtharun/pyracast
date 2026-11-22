@@ -68,17 +68,19 @@ test("pages send the same-origin referrer policy", async ({ request }) => {
     }
 });
 
+const appFiles = [
+    ["/app/manifest.webmanifest", "application/manifest+json"],
+    ["/app/icons/any-192.png", "image/png"],
+    ["/app/icons/any-512.png", "image/png"],
+    ["/app/icons/maskable-192.png", "image/png"],
+    ["/app/icons/maskable-512.png", "image/png"],
+    ["/app/icons/apple-touch-icon.png", "image/png"],
+] as const;
+
 test("the app manifest and icons are served as files with their own type and revalidation", async ({
     request,
 }) => {
-    for (const [file, type] of [
-        ["/app/manifest.webmanifest", "application/manifest+json"],
-        ["/app/icons/any-192.png", "image/png"],
-        ["/app/icons/any-512.png", "image/png"],
-        ["/app/icons/maskable-192.png", "image/png"],
-        ["/app/icons/maskable-512.png", "image/png"],
-        ["/app/icons/apple-touch-icon.png", "image/png"],
-    ] as const) {
+    for (const [file, type] of appFiles) {
         const response = await request.get(file);
         expect(response.status(), file).toBe(200);
         const headers = response.headers();
@@ -89,19 +91,34 @@ test("the app manifest and icons are served as files with their own type and rev
     }
 });
 
+test("an app file address with a trailing slash redirects to the file", async ({
+    request,
+}) => {
+    for (const file of [...appFiles.map(([file]) => file), "/app/sw.js"]) {
+        const response = await request.get(`${file}/`, { maxRedirects: 0 });
+        expect(response.status(), file).toBe(308);
+        expect(response.headers()["location"], file).toBe(file);
+    }
+});
+
 test("pages and unknown files under /app/ keep the page headers", async ({
     request,
 }) => {
-    for (const address of [
-        "/app/",
-        "/app/account/",
-        "/app/w/1/plants/2/forecast/",
-        "/app/icon-1024.png",
-        "/app/icons/any-1024.png",
-        "/app/icons/apple-touch-icon-precomposed.png",
-        "/app/manifest.json",
-    ]) {
-        const headers = (await request.get(address)).headers();
+    for (const [address, status] of [
+        ["/app/", 200],
+        ["/app/account/", 200],
+        ["/app/w/1/plants/2/forecast/", 200],
+        ["/app/icon-1024.png", 404],
+        ["/app/icons/any-1024.png", 404],
+        ["/app/icons/apple-touch-icon-precomposed.png", 404],
+        ["/app/manifest.json", 404],
+        ["/app/manifest.webmanifest/child/", 404],
+        ["/app/icons/any-192.png/child/", 404],
+        ["/app/sw.js/child/", 404],
+    ] as const) {
+        const response = await request.get(address, { maxRedirects: 0 });
+        expect(response.status(), address).toBe(status);
+        const headers = response.headers();
         expect(headers["content-security-policy"], address).toMatch(
             /script-src 'self' 'nonce-[^']+' 'strict-dynamic'/,
         );

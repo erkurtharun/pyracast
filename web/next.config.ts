@@ -40,6 +40,15 @@ const config = (phase: string): NextConfig => ({
             },
         ]);
     },
+    redirects() {
+        return Promise.resolve([
+            {
+                source: "/app/:file((?:[^/]+/)*[^/]+\\.\\w+)/",
+                destination: "/app/:file",
+                permanent: true,
+            },
+        ]);
+    },
     rewrites() {
         if (phase !== PHASE_DEVELOPMENT_SERVER) return Promise.resolve([]);
         return Promise.resolve([
