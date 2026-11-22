@@ -225,15 +225,15 @@ def _link_problem(document: str, target: str) -> str | None:
 
 
 def _module(parts: list[str]) -> tuple[Path | None, list[str]]:
-    current = ROOT / "src"
+    current = PurePosixPath("src")
     for index, part in enumerate(parts):
-        if (current / part).is_dir():
+        if _exists(current / part) and (ROOT / current / part).is_dir():
             current /= part
-        elif (current / f"{part}.py").is_file():
-            return current / f"{part}.py", parts[index + 1 :]
+        elif _exists(current / f"{part}.py"):
+            return ROOT / current / f"{part}.py", parts[index + 1 :]
         else:
-            return (current / "__init__.py" if index > 1 else None), parts[index:]
-    return current / "__init__.py", []
+            return (ROOT / current / "__init__.py" if index > 1 else None), parts[index:]
+    return ROOT / current / "__init__.py", []
 
 
 @cache
@@ -390,6 +390,8 @@ def test_path_rules_accept_globs_placeholders_and_ignored_outputs_only(
         ("pyracast.cli.absent", False),
         ("pyracast.absent", False),
         ("pyracast.platform_admin.site.PlatformAdminSite.absent", False),
+        ("pyracast.Settings", False),
+        ("pyracast.PLATFORM_ADMIN.site", False),
     ],
 )
 def test_dotted_names_resolve_by_source_or_by_a_spelling_in_code(
