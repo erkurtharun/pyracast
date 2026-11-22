@@ -1,6 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, type TestInfo } from "@playwright/test";
-import { totp } from "./totp";
 
 export async function recordCspViolations(page: Page): Promise<string[]> {
     const violations: string[] = [];
@@ -45,12 +44,16 @@ export async function checkPage(page: Page, testInfo: TestInfo, name: string) {
     ).toEqual([]);
 }
 
+// Recovery codes answer both second-factor prompts: an authenticator code minted from the clock
+// can reach the server in the next 30-second step and be refused; auth-security.spec.ts and the
+// backend tests cover authenticator codes.
 export async function signInToConsole(
     page: Page,
     email: string,
     password: string,
-    totpSeed: string,
+    recoveryCodes: string,
 ) {
+    const [signInCode, confirmationCode] = recoveryCodes.split(",");
     await page.goto("/app/");
     await page.getByLabel("Email", { exact: true }).fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
@@ -61,23 +64,16 @@ export async function signInToConsole(
     await expect(
         page.getByRole("heading", { name: "Two-factor authentication" }),
     ).toBeVisible();
-    const signedInAt = Date.now();
-    const signInPeriod = Math.floor(signedInAt / 30_000);
-    await page
-        .getByLabel("Authenticator or recovery code")
-        .fill(totp(totpSeed, signedInAt));
+    await page.getByLabel("Authenticator or recovery code").fill(signInCode!);
     await page.getByRole("button", { name: "Verify code" }).click();
     await expect(page).toHaveURL("/admin/");
-    // Console writes need a confirmation after sign-in, and a code is accepted only once.
-    await expect
-        .poll(() => Math.floor(Date.now() / 30_000), { timeout: 35_000 })
-        .toBeGreaterThan(signInPeriod);
+    // Console writes need a confirmation after sign-in.
     await page
         .getByRole("link", { name: "Confirm with your authenticator" })
         .click();
     await page
         .getByLabel("Authenticator or recovery code")
-        .fill(totp(totpSeed));
+        .fill(confirmationCode!);
     await page.getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page).toHaveURL("/admin/");
 }
