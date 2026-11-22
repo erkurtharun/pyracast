@@ -1,9 +1,17 @@
 from datetime import date
 
+from django.contrib.auth.models import User
+
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.connections.operations import replace_api_key
 from pyracast.connections.secrets import encrypt_secret
 
 TARGET = date(2026, 11, 10)
+
+
+def replace_key(actor: User, account_id: int, api_key: str) -> None:
+    current = ProviderAccount.objects.get(pk=account_id).credential_revision
+    replace_api_key(actor, account_id, api_key, expected_revision=current)
 
 
 def binding_for(provider: str = "solcast") -> SiteBinding:

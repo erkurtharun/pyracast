@@ -7,14 +7,14 @@ from django.core.exceptions import ValidationError
 from django.test import override_settings
 
 from pyracast.connections.contracts import ProviderError
-from pyracast.connections.operations import create_account, rotate_secret
+from pyracast.connections.operations import create_account
 from pyracast.connections.secrets import (
     decrypt_api_key,
     encrypt_secret,
 )
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import AuditEvent
-from tests.support.providers import binding_for, payload_for
+from tests.support.providers import binding_for, payload_for, replace_key
 
 KEY = "test-only-" + "provider-credential"
 
@@ -89,7 +89,7 @@ def test_account_create_and_rotation_keep_encrypted_keys_out_of_audit_records() 
     )
     account.refresh_from_db()
     assert KEY not in account.encrypted_api_key
-    rotate_secret(admin, account.pk, KEY + "-rotated")
+    replace_key(admin, account.pk, KEY + "-rotated")
     account.refresh_from_db()
     assert decrypt_api_key(account.encrypted_api_key) == KEY + "-rotated"
     assert account.credential_revision == 2

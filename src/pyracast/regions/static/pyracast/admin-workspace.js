@@ -54,8 +54,6 @@ if (setupForm instanceof HTMLFormElement) {
       setupForm.querySelectorAll("[data-new-account-required] input").forEach((field) => {
         field.required = mode === "new";
       });
-      const apiKey = setupForm.elements.namedItem(setupForm.dataset.apiKeyName);
-      if (apiKey instanceof HTMLInputElement) apiKey.required = mode === "new";
     };
     setupForm.addEventListener("change", syncAccountGroups);
     syncAccountGroups();

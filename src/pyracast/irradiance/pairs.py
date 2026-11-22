@@ -1,12 +1,12 @@
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from hashlib import sha256
 from itertools import pairwise
 from math import fsum, isfinite
 from pathlib import Path
 from typing import Any
+
+from pyracast.irradiance.solcast_export import PowerFileInterval, load_json_file
 
 
 @dataclass(frozen=True)
@@ -36,20 +36,6 @@ class PairedDataset:
     unmatched_weather_intervals: int
     power_sha256: str
     weather_sha256: str
-
-
-@dataclass(frozen=True)
-class PowerFileInterval:
-    start: datetime
-    end: datetime
-    power_kw: float
-
-
-@dataclass(frozen=True)
-class PowerFile:
-    intervals: tuple[PowerFileInterval, ...]
-    raw_rows: tuple[dict[str, Any], ...]
-    sha256: str
 
 
 def _number(
@@ -84,21 +70,6 @@ def _bounds(row: dict[str, Any], period: str, duration: timedelta) -> tuple[date
         raise ValueError("Invalid period_end") from exc
 
 
-def load_json_file(path: Path, *, trusted_root: Path | None = None) -> tuple[object, str]:
-    try:
-        root = (Path.cwd() if trusted_root is None else trusted_root).resolve(strict=True)
-        resolved = path.resolve(strict=True)
-        resolved.relative_to(root)
-        if resolved.suffix.lower() != ".json" or not resolved.is_file():
-            raise ValueError("Invalid input file")
-        raw = resolved.read_bytes()
-    except OSError, ValueError:
-        raise ValueError(
-            "Input must be an existing JSON file within the trusted directory"
-        ) from None
-    return json.loads(raw), sha256(raw).hexdigest()
-
-
 def _load(path: Path, trusted_root: Path) -> tuple[list[dict[str, Any]], str]:
     data, digest = load_json_file(path, trusted_root=trusted_root)
     if not isinstance(data, dict) or not isinstance(data.get("estimated_actuals"), list):
@@ -117,12 +88,6 @@ def _power(rows: list[dict[str, Any]]) -> list[PowerFileInterval]:
             raise ValueError("Power intervals must be sorted and non-overlapping")
         result.append(PowerFileInterval(start, end, _number(row, "pv_power_rooftop", minimum=0)))
     return result
-
-
-def load_power(path: Path, *, trusted_root: Path | None = None) -> PowerFile:
-    root = (Path.cwd() if trusted_root is None else trusted_root).resolve(strict=True)
-    rows, digest = _load(path, root)
-    return PowerFile(tuple(_power(rows)), tuple(rows), digest)
 
 
 def _weather(rows: list[dict[str, Any]]) -> list[WeatherInterval]:

@@ -50,11 +50,11 @@ def upload(
         system.tenant.pk,
         system.region.pk,
         system.binding.pk,
-        document() if content is None else content,
+        parse_historical_upload(document() if content is None else content, "historical.json"),
         "historical.json",
         settings_confirmed=True,
         **options,
-    )
+    )[0]
 
 
 @pytest.mark.parametrize("offset", ["Z", "+00:00", "+03:00", "+02:00"])
@@ -103,7 +103,7 @@ def test_decoder_recursion_exhaustion_is_a_validation_error(
     def exhausted(*args: Any, **kwargs: Any) -> object:
         raise RecursionError
 
-    monkeypatch.setattr("pyracast.forecasts.historical_upload.json.loads", exhausted)
+    monkeypatch.setattr("pyracast.irradiance.solcast_export.json.loads", exhausted)
     with pytest.raises(ValidationError, match="nested too deeply"):
         parse_historical_upload(b"{}", "h.json")
 
@@ -345,7 +345,7 @@ def test_file_metadata_verifies_only_present_settings_and_csv_product_is_checked
             system.tenant.pk,
             system.region.pk,
             system.binding.pk,
-            csv,
+            parsed,
             "h.csv",
             settings_confirmed=True,
         )
@@ -375,8 +375,7 @@ def test_upload_preserves_declared_provenance_availability_and_idempotence(
     assert snapshot.raw_payload["estimated_actuals"] == [row()]
     assert system.account.requestattempt_set.count() == attempts
     assert AuditEvent.objects.filter(action="historical_reference_imported").count() == 1
-    with pytest.raises(ValidationError, match="different source declaration"):
-        upload(system, content, source_reference="Changed declaration")
+    assert upload(system, content, source_reference="Changed declaration") == record
 
 
 @pytest.mark.django_db(transaction=True)
@@ -414,7 +413,7 @@ def test_authorization_confirmation_current_configuration_and_binding_are_rechec
         system.tenant.pk,
         system.region.pk,
         system.binding.pk,
-        document(),
+        parse_historical_upload(document(), "history.json"),
         "history.json",
     )
     for options in (
@@ -433,7 +432,7 @@ def test_authorization_confirmation_current_configuration_and_binding_are_rechec
     SiteBinding.objects.filter(pk=system.binding.pk).update(
         validated_at=None, validated_credential_revision=None
     )
-    with pytest.raises(ValidationError, match="current authorized"):
+    with pytest.raises(ValidationError, match="has not been validated"):
         upload(system)
 
 

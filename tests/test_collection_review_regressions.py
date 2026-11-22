@@ -4,7 +4,6 @@ import pytest
 
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.timing import ForecastTiming, forecast_timing
@@ -12,6 +11,7 @@ from pyracast.forecasts.validation import validate_binding
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate, collect
+from tests.support.providers import replace_key
 
 
 @pytest.mark.django_db(transaction=True)
@@ -86,7 +86,7 @@ def test_repaired_credentials_rearm_the_latest_authentication_failure() -> None:
     job.refresh_from_db()
     assert job.last_error == "provider_authentication_failed"
     assert RequestAttempt.objects.filter(purpose="forecast").count() == 1
-    rotate_secret(system.admin, system.account.pk, "test-only-new-credentials")
+    replace_key(system.admin, system.account.pk, "test-only-new-credentials")
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), NOW + timedelta(seconds=1))
     job.refresh_from_db()
     assert (job.status, job.attempts, job.last_error) == ("pending", 0, "")

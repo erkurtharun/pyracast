@@ -31,6 +31,8 @@ PYRACAST_RABBITMQ_URL = os.environ.get("PYRACAST_RABBITMQ_URL", "")
 SECRET_KEY = os.environ.get("PYRACAST_SECRET_KEY", "")
 SECRET_KEY_FALLBACKS = os.environ.get("PYRACAST_SECRET_KEY_FALLBACKS", "").split()
 DEBUG = os.environ.get("PYRACAST_DEBUG") == "1"
+# The synthetic provider answers outside development only where a deployment opts in (the smoke).
+PYRACAST_FIXTURE_PROVIDER = DEBUG or os.environ.get("PYRACAST_FIXTURE_PROVIDER") == "1"
 ALLOWED_HOSTS = os.environ.get("PYRACAST_HOSTS", "localhost,127.0.0.1").split(",")
 CSRF_TRUSTED_ORIGINS = os.environ.get("PYRACAST_CSRF_ORIGINS", "").split()
 ROOT_URLCONF = "pyracast.urls"

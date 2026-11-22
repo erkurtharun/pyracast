@@ -55,17 +55,21 @@ if (uploadForm instanceof HTMLFormElement) {
       const payload = await response.json();
       if (payload.saved) {
         result.replaceChildren(); controls.hidden = true; token.value = "";
-        status.textContent = `${uploadForm.dataset.saved} ${uploadForm.dataset.intervals}: ${payload.interval_count}.`;
+        status.textContent = payload.created === false
+          ? uploadForm.dataset.already
+          : `${uploadForm.dataset.saved} ${uploadForm.dataset.intervals}: ${payload.interval_count}.`;
         status.tabIndex = -1;
         status.focus();
       } else if (typeof payload.message === "string") {
         status.textContent = payload.message;
-      } else {
+      } else if (typeof payload.html === "string") {
         result.innerHTML = payload.html;
         token.value = payload.token;
         controls.hidden = !payload.can_save;
         status.textContent = "";
         result.querySelector("[data-error-summary]")?.focus();
+      } else {
+        status.textContent = uploadForm.dataset.networkError;
       }
     } catch {
       status.textContent = uploadForm.dataset.networkError;

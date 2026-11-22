@@ -220,6 +220,7 @@ def test_configured_smtp_passes_registered_production_mail_check(
         PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS=configuration[
             "PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS"
         ],
+        PYRACAST_FIXTURE_PROVIDER=configuration["PYRACAST_FIXTURE_PROVIDER"],
     ):
         assert isinstance(mail.mailers["default"], SMTPEmailBackend)
         checks = run_checks(tags=[Tags.security], include_deployment_checks=True)
