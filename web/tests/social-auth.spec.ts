@@ -144,6 +144,82 @@ test("social signup restores invitation and does not request a password", async 
     ).toBeVisible();
 });
 
+test("a provider return whose sign-in screen has gone asks for no sign-in state", async ({
+    context,
+    page,
+}) => {
+    await mockApi(page, { anonymous: true });
+    const reached = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    await page.route(
+        "**/api/auth/browser/v1/auth/provider/complete",
+        async (route) => {
+            reached.resolve();
+            await release.promise;
+            await route.fulfill({
+                status: 401,
+                json: {
+                    status: 401,
+                    data: {
+                        flows: [{ id: "provider_signup", is_pending: true }],
+                    },
+                    meta: { is_authenticated: false },
+                },
+            });
+        },
+    );
+    const reads: string[] = [];
+    page.on("request", (request) => {
+        if (
+            request.method() === "GET" &&
+            new URL(request.url()).pathname ===
+                "/api/auth/browser/v1/auth/session"
+        )
+            reads.push(request.url());
+    });
+    await page.goto("/app/?social_callback=1");
+    await reached.promise;
+    // Another tab observes a signed-in session: this tab hides the sign-in screen until its read,
+    // queued behind the completion, adopts that session.
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: {
+                user,
+                csrf_token: "signed-token",
+                language: "en",
+                session_tag: "tag-b",
+            },
+        }),
+    );
+    const other = await context.newPage();
+    await other.route("**/blank", (route) =>
+        route.fulfill({ contentType: "text/html", body: "<html></html>" }),
+    );
+    await other.goto("/blank");
+    await other.evaluate(() =>
+        window.localStorage.setItem("pyracast.sessionTag", "tag-b"),
+    );
+    await expect(
+        page.getByRole("progressbar", { name: "Loading…" }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toHaveCount(0);
+    release.resolve();
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    await page.evaluate(
+        () =>
+            new Promise<void>((resolve) =>
+                requestAnimationFrame(() =>
+                    requestAnimationFrame(() => resolve()),
+                ),
+            ),
+    );
+    expect(reads).toEqual([]);
+});
+
 test("social-only accounts confirm email before disconnecting the selected provider", async ({
     page,
 }) => {
