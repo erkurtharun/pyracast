@@ -124,16 +124,21 @@ export function IntervalEditor({
             )}
             {editor.status === "failed" && (
                 <>
-                    <Notice error>{editor.error}</Notice>
-                    {editor.implausible && (
-                        <button
-                            className="button"
-                            type="button"
-                            onClick={() => onSave("set", true)}
-                        >
-                            {t("save_implausible")}
-                        </button>
-                    )}
+                    <Notice error>
+                        {editor.issue === "invalid_energy"
+                            ? t("invalid_energy")
+                            : editor.issue.message}
+                    </Notice>
+                    {editor.issue !== "invalid_energy" &&
+                        editor.issue.implausible && (
+                            <button
+                                className="button"
+                                type="button"
+                                onClick={() => onSave("set", true)}
+                            >
+                                {t("save_implausible")}
+                            </button>
+                        )}
                     <button
                         className="button secondary"
                         type="button"

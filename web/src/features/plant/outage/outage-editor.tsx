@@ -1,11 +1,12 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DisplayError } from "@/lib/api/errors";
 import { fromPlantInput, toPlantInput } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
 import type { components } from "@/lib/schema";
 import { ActionForm, Field, Select, TextAreaField, formText } from "@/ui/form";
+import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import {
     capacityImpact,
@@ -91,6 +92,7 @@ export function OutageEditor({
     timezone,
     ceilings,
     direct,
+    hold,
     onSubmit,
     onClose,
 }: {
@@ -98,6 +100,8 @@ export function OutageEditor({
     timezone: string;
     ceilings?: Ceilings;
     direct: boolean;
+    // Why this editor cannot send any more; it can still be closed.
+    hold: string | null;
     onSubmit: (change: OutageChange) => Promise<void>;
     onClose: () => void;
 }) {
@@ -108,6 +112,17 @@ export function OutageEditor({
     const recovery = useStaleRecovery(outage);
     const [impact, setImpact] = useState(capacityImpact(outage));
     const [openedAt] = useState(Date.now);
+    const section = useRef<HTMLElement>(null);
+    const closeButton = useRef<HTMLButtonElement>(null);
+    useEffect(() => {
+        const active = document.activeElement;
+        // The form is disabled under a hold, so a focus inside it moves to the one control left.
+        if (
+            hold &&
+            (active === document.body || section.current?.contains(active))
+        )
+            closeButton.current?.focus();
+    }, [hold]);
     const closed = recovery.base?.status === "cancelled";
     const ceiling = (value?: number | null) =>
         value == null
@@ -115,7 +130,7 @@ export function OutageEditor({
             : t("capacityCeiling", { value: format.number(value, 6) });
     const heading = outage ? t("editOutage") : t("reportOutage");
     return (
-        <section aria-label={heading}>
+        <section aria-label={heading} ref={section}>
             <h3>{heading}</h3>
             {recovery.stale && (
                 <StaleChanges
@@ -125,8 +140,9 @@ export function OutageEditor({
                     onDiscard={onClose}
                 />
             )}
+            {hold && <Notice>{hold}</Notice>}
             <ActionForm
-                permitted={!closed}
+                permitted={!closed && !hold}
                 submit={
                     direct
                         ? outage
@@ -296,6 +312,7 @@ export function OutageEditor({
             </ActionForm>
             <div className="button-group">
                 <button
+                    ref={closeButton}
                     className="button secondary"
                     type="button"
                     onClick={onClose}

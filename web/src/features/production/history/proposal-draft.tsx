@@ -1,6 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
@@ -9,27 +9,24 @@ import { useProposalKey } from "@/lib/idempotency";
 import { ControlField, useErrorMessage } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
-import { intervalKey, type Interval } from "./model";
+import type { Interval } from "./model";
 import {
-    canStage,
-    changedSinceStaged,
     fieldRefusals,
     proposalChanges,
     refusals,
-    type ProposalSend,
     type StagedChange,
 } from "./proposal";
-
-export type Proposal = { day: string; items: StagedChange[] };
+import type { Controls, Proposal, Screen, ScreenEvent } from "./screen";
 
 export function ProposalDraft({
     scope,
     configuration,
-    proposal,
-    away,
+    draft,
+    controls,
     rows,
     intervalLabel,
-    editing,
+    request,
+    onEvent,
     onEdit,
     onRemove,
     onReturn,
@@ -39,13 +36,14 @@ export function ProposalDraft({
 }: {
     scope: PlantScope;
     configuration: number;
-    proposal: Proposal;
-    // Another day is shown; nothing is staged or sent until the draft's day is shown again.
-    away: boolean;
-    // The rows of the draft's day, when that day is shown.
+    draft: Proposal;
+    controls: Controls;
+    // The rows of the shown day.
     rows: Interval[] | undefined;
     intervalLabel: (item: StagedChange) => string;
-    editing: boolean;
+    // Applies an event to the screen and returns the next state, or null when the event is refused.
+    request: (event: ScreenEvent) => Screen | null;
+    onEvent: (event: ScreenEvent) => void;
     onEdit: (key: string) => void;
     onRemove: (key: string) => void;
     onReturn: () => void;
@@ -59,22 +57,17 @@ export function ProposalDraft({
     const errorMessage = useErrorMessage();
     const proposalKey = useProposalKey();
     const headingId = useId();
+    const heldId = useId();
     const heading = useRef<HTMLHeadingElement>(null);
     const reasonRef = useRef<HTMLTextAreaElement>(null);
-    const [reason, setReason] = useState("");
-    const [send, setSend] = useState<ProposalSend>({ status: "idle" });
-    const { items } = proposal;
+    const running = useRef(false);
+    const { items, send } = draft;
     const count = items.length;
     const sending = send.status === "sending";
-    const current = new Map((rows ?? []).map((row) => [intervalKey(row), row]));
-    const stale = rows ? changedSinceStaged(items, rows) : new Set<string>();
-    const editable = (item: StagedChange) => {
-        const row = current.get(item.key);
-        return row !== undefined && canStage(row);
-    };
+    const held = controls.held.size > 0;
     const refused = (item: StagedChange) =>
         send.status === "failed"
-            ? send.refusals.find((refusal) => refusal.item === item)
+            ? send.refusals.find((refusal) => refusal.key === item.key)
             : undefined;
     const reasonError =
         send.status === "reason_missing"
@@ -87,18 +80,16 @@ export function ProposalDraft({
     }, [send]);
 
     async function submit() {
-        if (sending || away) return;
-        if (!reason.trim()) {
-            setSend({ status: "reason_missing" });
-            return;
-        }
+        if (running.current) return;
+        const sent = request({ type: "send", rows })?.draft;
+        if (sent?.send.status !== "sending") return;
+        running.current = true;
         const body = {
             configuration_id: configuration,
             unit: "MWh" as const,
-            changes: proposalChanges(items),
-            reason: reason.trim(),
+            changes: proposalChanges(sent.items),
+            reason: sent.reason.trim(),
         };
-        setSend({ status: "sending" });
         try {
             await api.post(
                 "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/change-requests/production/",
@@ -113,10 +104,10 @@ export function ProposalDraft({
             proposalKey.reset();
             onSent();
         } catch (error) {
-            setSend({
-                status: "failed",
+            onEvent({
+                type: "sendFailed",
                 error: errorMessage(error),
-                refusals: refusals(error, items),
+                refusals: refusals(error, sent.items),
                 fields: fieldRefusals(error),
             });
             // A refusal of what was sent shows the current rows, so the stale items are named.
@@ -125,6 +116,8 @@ export function ProposalDraft({
                 (error.status === 400 || error.status === 409)
             )
                 void onReload().catch(() => undefined);
+        } finally {
+            running.current = false;
         }
     }
 
@@ -138,11 +131,10 @@ export function ProposalDraft({
                 {t("draftTitle")}
             </h3>
             <p className="fine">
-                {t("intervals", { count })} · {proposal.day}.{" "}
-                {t("draftDayLocked")}
+                {t("intervals", { count })} · {draft.day}. {t("draftDayLocked")}
             </p>
-            {away && (
-                <Notice>{t("draftOtherDay", { day: proposal.day })}</Notice>
+            {controls.away && (
+                <Notice>{t("draftOtherDay", { day: draft.day })}</Notice>
             )}
             <ul className="production-proposal-items">
                 {items.map((item) => {
@@ -156,10 +148,9 @@ export function ProposalDraft({
                                     ? t("stagedProviderReading")
                                     : `${format.quantity(item.energy, "MWh", 6)} · ${label("ObservationQuality", item.quality)}`}
                             </span>
-                            {stale.has(item.key) && (
+                            {controls.stale.has(item.key) && (
                                 <span className="field-error">
-                                    {current.get(item.key)
-                                        ?.pending_request_id != null
+                                    {controls.held.has(item.key)
                                         ? t("stagedPending")
                                         : t("stagedChanged")}
                                 </span>
@@ -176,9 +167,7 @@ export function ProposalDraft({
                                     aria-label={t("editStagedInterval", {
                                         interval,
                                     })}
-                                    disabled={
-                                        sending || editing || !editable(item)
-                                    }
+                                    disabled={!controls.editable.has(item.key)}
                                     onClick={() => onEdit(item.key)}
                                 >
                                     {t("editStaged")}
@@ -189,7 +178,7 @@ export function ProposalDraft({
                                     aria-label={t("removeStagedInterval", {
                                         interval,
                                     })}
-                                    disabled={sending}
+                                    disabled={!controls.remove}
                                     onClick={() => {
                                         onRemove(item.key);
                                         if (count > 1) heading.current?.focus();
@@ -220,13 +209,14 @@ export function ProposalDraft({
                             maxLength={500}
                             aria-describedby={describedBy}
                             aria-invalid={reasonError ? true : undefined}
-                            value={reason}
-                            disabled={sending}
-                            onChange={(event) => {
-                                setReason(event.target.value);
-                                if (send.status === "reason_missing")
-                                    setSend({ status: "idle" });
-                            }}
+                            value={draft.reason}
+                            disabled={!controls.reason}
+                            onChange={(event) =>
+                                onEvent({
+                                    type: "reason",
+                                    text: event.target.value,
+                                })
+                            }
                         />
                     )}
                 </ControlField>
@@ -235,27 +225,33 @@ export function ProposalDraft({
                         {[send.error, ...send.fields.general].join(" ")}
                     </Notice>
                 )}
+                {held && (
+                    <p className="field-error" id={heldId} role="status">
+                        {t("draftHeld")}
+                    </p>
+                )}
                 <div className="button-group">
                     <button
                         className="button"
                         type="submit"
-                        disabled={sending || editing || away}
+                        disabled={!controls.send}
+                        aria-describedby={held ? heldId : undefined}
                     >
                         {sending ? t("sending") : t("send")}
                     </button>
-                    {away && (
+                    {controls.away && (
                         <button
                             className="button secondary"
                             type="button"
                             onClick={onReturn}
                         >
-                            {t("returnToDraftDay", { day: proposal.day })}
+                            {t("returnToDraftDay", { day: draft.day })}
                         </button>
                     )}
                     <button
                         className="button secondary"
                         type="button"
-                        disabled={sending}
+                        disabled={!controls.discard}
                         onClick={onDiscard}
                     >
                         {t("discardDraft")}

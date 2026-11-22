@@ -14,6 +14,43 @@ export type OutageChange =
 
 type ProposalKey = { forPayload(payload: unknown): string; reset(): void };
 
+export type OutageEditing =
+    { status: "closed" } | { status: "open"; outage?: Outage };
+
+type Held = { id: number; pending_request_id: number | null };
+type Offer = { proposal_unavailable_reason: string | null; results: Held[] };
+
+const atLimit = (offer: Offer | undefined) =>
+    offer?.proposal_unavailable_reason === "pending_request_limit";
+
+// Why a member's open editor cannot send: its outage now holds their own request, or they reached the limit.
+export function editorHold(
+    editing: OutageEditing,
+    offer: Offer | undefined,
+    direct: boolean,
+): "held" | "pending_request_limit" | null {
+    if (direct || editing.status === "closed") return null;
+    const id = editing.outage?.id;
+    const live = offer?.results.find((row) => row.id === id);
+    if (live?.pending_request_id != null) return "held";
+    return atLimit(offer) ? "pending_request_limit" : null;
+}
+
+// The member's own pending request of an outage is revised by withdrawing it; an editor open on it holds its other proposals.
+export function proposalActs(
+    outage: Held,
+    editing: OutageEditing,
+    offer: Offer | undefined,
+    direct: boolean,
+) {
+    return (
+        direct ||
+        (!atLimit(offer) &&
+            outage.pending_request_id == null &&
+            !(editing.status === "open" && editing.outage?.id === outage.id))
+    );
+}
+
 function proposal(change: OutageChange) {
     const target =
         change.action === "create"

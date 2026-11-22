@@ -14,7 +14,7 @@ export type StagedChange = {
     { action: "set"; energy: number; quality: Quality } | { action: "revert" }
 );
 
-export type Refusal = { item: StagedChange; message: string };
+export type Refusal = { key: string; message: string };
 
 // Refused fields that name no item: the reason, and those of the request as a whole.
 export type FieldRefusals = { reason?: string; general: string[] };
@@ -103,7 +103,7 @@ export function refusals(
     }
     return items.flatMap((item, index) => {
         const found = messages.get(index);
-        return found ? [{ item, message: found.join(" ") }] : [];
+        return found ? [{ key: item.key, message: found.join(" ") }] : [];
     });
 }
 

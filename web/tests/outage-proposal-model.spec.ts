@@ -36,11 +36,11 @@ const offer = (
     })),
 });
 
-const editors: Record<string, OutageEditing> = {
+const editors = {
     closed: { status: "closed" },
     "open on 4": { status: "open", outage: outage(4) },
     "open on a new outage": { status: "open" },
-};
+} satisfies Record<string, OutageEditing>;
 const offers = {
     free: offer(null),
     "4 held": offer(4),

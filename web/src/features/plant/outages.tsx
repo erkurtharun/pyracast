@@ -13,17 +13,19 @@ import { Notice } from "@/ui/ui";
 import { useCodeLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import {
+    editorHold,
+    proposalActs,
     staleVersion,
     submitOutageChange,
     type Outage,
     type OutageChange,
+    type OutageEditing,
 } from "./outage/model";
 import { OutageCard } from "./outage/outage-card";
 import { OutageEditor, type Ceilings } from "./outage/outage-editor";
 
 type Configuration = NonNullable<Plant["current_configuration"]>;
 type OutageRow = components["schemas"]["IncidentListOutput"];
-type Editor = { status: "closed" } | { status: "open"; outage?: Outage };
 
 export function Outages({
     scope,
@@ -43,7 +45,7 @@ export function Outages({
     const plant = useExportPlant();
     const proposalKey = useProposalKey();
     const [submitted, setSubmitted] = useState(false);
-    const [editor, setEditor] = useState<Editor>({ status: "closed" });
+    const [editor, setEditor] = useState<OutageEditing>({ status: "closed" });
     const [resolving, setResolving] = useState<number | null>(null);
     const [reloads, setReloads] = useState(0);
     const resource = useApiList(
@@ -84,14 +86,12 @@ export function Outages({
     const open = (outage?: Outage) => {
         proposalKey.reset();
         setSubmitted(false);
+        if (outage && resolving === outage.id) setResolving(null);
         setEditor({ status: "open", outage });
     };
     const offer = resource.data;
     const canOpen = direct ? !!configuration : !!offer?.can_propose;
-    // Every proposal is one more pending request; the member's own pending one is revised by withdrawing it.
-    const atLimit =
-        !direct &&
-        offer?.proposal_unavailable_reason === "pending_request_limit";
+    const hold = editorHold(editor, offer, direct);
     const unavailable = direct
         ? !configuration && t("configurationRequired")
         : offer &&
@@ -108,9 +108,7 @@ export function Outages({
             pendingRequestId={outage.pending_request_id}
             timezone={timezone}
             direct={direct}
-            actionable={
-                direct || (!atLimit && outage.pending_request_id == null)
-            }
+            actionable={proposalActs(outage, editor, offer, direct)}
             configurationChanged={
                 outage.status === "active" &&
                 !!configuration &&
@@ -155,6 +153,11 @@ export function Outages({
                     timezone={timezone}
                     ceilings={ceilings(editor.outage)}
                     direct={direct}
+                    hold={
+                        hold === "held"
+                            ? t("editorHeld")
+                            : hold && reason(hold, t("proposalUnavailable"))
+                    }
                     onSubmit={submit}
                     onClose={() => setEditor({ status: "closed" })}
                 />
