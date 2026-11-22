@@ -634,6 +634,20 @@ def test_windows_tests_run_in_four_shards_that_the_verify_job_combines() -> None
     assert jobs["verify_windows"]["needs"] == "verify_windows_shards"
 
 
+def test_every_tls_client_context_of_the_deployment_sets_a_minimum_version() -> None:
+    floors = [
+        (path.name, lines[index + 1].strip())
+        for path in sorted([*DEPLOY.glob("*.py"), *DEPLOY.glob("*.sh")])
+        for lines in [path.read_text(encoding="utf-8").splitlines()]
+        for index, line in enumerate(lines)
+        if "ssl.create_default_context(" in line
+    ]
+
+    assert {name for name, _ in floors} >= {"smoke.sh", "watchdog.py", "probe_origin_pull.py"}
+    for name, floor in floors:
+        assert re.fullmatch(r"context\.minimum_version = ssl\.TLSVersion\.TLSv1_[23]", floor), name
+
+
 def test_every_workflow_job_caches_exactly_the_locked_dependencies_it_installs() -> None:
     installs_by_key: dict[str, set[tuple[str, ...]]] = {}
     jobs = {
