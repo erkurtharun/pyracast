@@ -37,6 +37,18 @@ test("the flag the server adds when it shows an earlier forecast labels its key"
     ).toEqual([]);
 });
 
+test("a value of a shared enumeration labels a key only where its producer names the member", () => {
+    expect(
+        unusedKeys(web, {
+            Outages: { proposalReasons: { throttled: "throttled" } },
+            Calibrations: { status_messages: { curtailed: "curtailed" } },
+        }),
+    ).toEqual([
+        "Outages.proposalReasons.throttled",
+        "Calibrations.status_messages.curtailed",
+    ]);
+});
+
 test("every translation call names its namespace and keys in a form the key check reads", () => {
     expect(keyUse(web).unresolved).toEqual([]);
 });
@@ -105,6 +117,61 @@ test("a code a screen writes as a template literal without substitution labels i
                 flagProducers,
             ),
         ).toEqual([]);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("an enumeration value labels its key only where the producer references its member in code", () => {
+    const root = tree({
+        "web/src/reasons.ts": [
+            "declare function useCodeLabel(namespace: string): (code: string) => string;",
+            'export const label = useCodeLabel("Outages.proposalReasons");',
+        ].join("\n"),
+        "src/pyracast/errors.py": [
+            "class ErrorCode(TextChoices):",
+            '    BUSY = "busy"',
+            '    LIMIT = "pending_request_limit", "Limit"',
+            '    THROTTLED = "throttled"',
+            "",
+            'OTHER = "unrelated"',
+        ].join("\n"),
+        "src/pyracast/policy.py": [
+            "# ErrorCode.THROTTLED is retired.",
+            "def refusal():",
+            '    """Returns ErrorCode.BUSY when busy."""',
+            "    return ErrorCode.LIMIT",
+        ].join("\n"),
+    });
+    try {
+        expect(
+            unusedKeys(
+                path.join(root, "web"),
+                {
+                    Outages: {
+                        proposalReasons: {
+                            busy: "busy",
+                            pending_request_limit: "limit",
+                            throttled: "throttled",
+                            unrelated: "unrelated",
+                        },
+                    },
+                },
+                {
+                    "Outages.proposalReasons": [
+                        {
+                            module: "src/pyracast/policy.py",
+                            enumeration: "ErrorCode",
+                            definedIn: "src/pyracast/errors.py",
+                        },
+                    ],
+                },
+            ),
+        ).toEqual([
+            "Outages.proposalReasons.busy",
+            "Outages.proposalReasons.throttled",
+            "Outages.proposalReasons.unrelated",
+        ]);
     } finally {
         rmSync(root, { recursive: true, force: true });
     }

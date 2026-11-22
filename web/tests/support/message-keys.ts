@@ -238,18 +238,40 @@ function webCodes(file: string, literals: Set<string>) {
     });
 }
 
-export type Producers = Readonly<Record<string, readonly string[]>>;
+type EnumerationMembers = {
+    module: string;
+    enumeration: string;
+    definedIn: string;
+};
+type Producer = string | EnumerationMembers;
+export type Producers = Readonly<Record<string, readonly Producer[]>>;
 
-// The modules, from the repository root, whose literals can produce each code family; a code
-// another module holds labels nothing. An enumeration counts where its values are written.
+// The modules, from the repository root, whose literals can produce each code family, or whose
+// code names members of an enumeration; a code another module holds labels nothing.
 const PRODUCERS: Producers = {
     "Calibrations.values": ["src/pyracast/plants/numerics.py"],
-    "Calibrations.status_messages": ["src/pyracast/plants/models.py"],
+    "Calibrations.status_messages": [
+        "src/pyracast/plants/numerics.py",
+        {
+            module: "src/pyracast/plants/calibration_runs.py",
+            enumeration: "CalibrationStatus",
+            definedIn: "src/pyracast/plants/models.py",
+        },
+        {
+            module: "src/pyracast/plants/training.py",
+            enumeration: "CalibrationStatus",
+            definedIn: "src/pyracast/plants/models.py",
+        },
+    ],
     "Calibrations.reasons": ["src/pyracast/plants/numerics.py"],
     "CalibrationAutomation.reasons": [
         "src/pyracast/plants/automation.py",
         "src/pyracast/plants/calibration_runs.py",
-        "src/pyracast/errors.py",
+        {
+            module: "src/pyracast/plants/activation.py",
+            enumeration: "ErrorCode",
+            definedIn: "src/pyracast/errors.py",
+        },
     ],
     "ForecastPerformance.reasons": ["src/pyracast/plants/performance.py"],
     "Forecast.qualityFlags": [
@@ -267,21 +289,62 @@ const PRODUCERS: Producers = {
         "web/src/features/forecast/panel/model.ts",
     ],
     "Outages.proposalReasons": [
-        "src/pyracast/errors.py",
+        {
+            module: "src/pyracast/change_requests/policy.py",
+            enumeration: "ErrorCode",
+            definedIn: "src/pyracast/errors.py",
+        },
         "web/src/features/plant/outage/model.ts",
     ],
-    "ProductionHistory.reasons": [
-        "src/pyracast/plants/production.py",
-        "src/pyracast/errors.py",
-    ],
+    "ProductionHistory.reasons": ["src/pyracast/plants/production.py"],
 };
 
-// Every lower-case code a string literal of the modules holds, and every Python f-string that
-// composes one.
-function codePatterns(root: string, modules: readonly string[]): RegExp[] {
+const ENUMERATION_MEMBER = /^[ \t]+([A-Z][A-Z0-9_]*) = (["'])([a-z0-9_]+)\2/gm;
+
+function enumerationValues(
+    root: string,
+    producer: EnumerationMembers,
+): string[] {
+    const definition = readFileSync(
+        path.join(root, producer.definedIn),
+        "utf8",
+    );
+    const body =
+        new RegExp(
+            `^class ${producer.enumeration}\\b.*\\n((?:[ \\t]+.*\\n?|\\n)*)`,
+            "m",
+        ).exec(definition)?.[1] ?? "";
+    const values = new Map(
+        [...body.matchAll(ENUMERATION_MEMBER)].map(([, member, , value]) => [
+            member,
+            value,
+        ]),
+    );
+    const code = readFileSync(path.join(root, producer.module), "utf8").replace(
+        PYTHON_TOKEN,
+        " ",
+    );
+    const reference = new RegExp(
+        `\\b${producer.enumeration}\\.([A-Z][A-Z0-9_]*)\\b`,
+        "g",
+    );
+    return [...code.matchAll(reference)].flatMap(([, member]) => {
+        const value = member === undefined ? undefined : values.get(member);
+        return value === undefined ? [] : [value];
+    });
+}
+
+// Every lower-case code a string literal of the modules holds, every Python f-string that
+// composes one, and every enumeration value a producer's code names by its member.
+function codePatterns(root: string, producers: readonly Producer[]): RegExp[] {
     const literals = new Set<string>();
     const composed = new Set<string>();
-    for (const producer of modules) {
+    for (const producer of producers) {
+        if (typeof producer !== "string") {
+            for (const value of enumerationValues(root, producer))
+                literals.add(value);
+            continue;
+        }
         const file = path.join(root, producer);
         if (producer.endsWith(".py"))
             pythonCodes(readFileSync(file, "utf8"), literals, composed);
