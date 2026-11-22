@@ -115,7 +115,8 @@ sequenceDiagram
 | Snapshot source kind differs from the endpoint, or the target-day calculation or issuance preparation raises | `retry`, `invalid_source_kind` or `calculation_failure`; snapshot reused without a new request. A failing supplemental day in `prepare_daily_payloads` is only logged and left out of `daily_payloads`; publication continues |
 | Lease lost at publication, or binding no longer current there | False and reclaimed after expiry with the snapshot reused, or `stale` with the snapshot kept unpublished |
 | Estimated actuals still incomplete after publication | `succeeded`, `history_incomplete`; new job 30 minutes later if before `retry_until` |
-| Lock timeout or database error inside `claim` | The exception escapes `deliver`; the job row is untouched |
+| Lock timeout or deadlock inside `claim` | The delivery ends normally with `job_claim_contended` (`worker-runtime`); the job row is untouched and published again |
+| Other database error inside `claim` | The exception escapes `deliver`; the job row is untouched |
 | Database error after the claim | `retry`, `lock_contention` (lock timeout or deadlock: attempt returned when nothing was reserved, otherwise counted) or `publication_failure`; the open transaction rolls back |
 | Any other exception after the claim | `retry`, `publication_failure`, logged without its message |
 
@@ -131,6 +132,7 @@ sequenceDiagram
 ## Tests
 
 - `tests/test_jobs.py`: duplicate delivery, lease takeover, expired lease, snapshot reuse, quota and backoff, stale binding, publication locks. `tests/test_collection_failures.py` (one outcome per provider answer, 402, unreachable and invalid answers, lock timeouts, missing job, account disabled, supersession before the attempt limit), `tests/test_collection_resilience.py`, `tests/test_collection_review_regressions.py`, `tests/test_collection_dispatch_isolation.py`, `tests/test_provider_retry.py`: attempt budget, 401/429 blocks, permanent failures, supersession, outage recovery. `tests/test_job_leases.py`, `tests/test_job_lease_invariants.py`, `tests/test_archive_invariants.py` (snapshot publication guard).
+- `tests/test_claim_contention.py`: a delivery behind a held region lock ends and collects once released.
 - `tests/test_nightly_solcast.py`, `tests/test_collection_calendar_windows.py`: windowed history, `history_incomplete`, deadlines. `tests/test_providers.py`: adapters.
 - `tests/test_forecast_archive_publication.py`, `tests/test_provisional_calibration.py`: issuances and calibration preparation after history. Delivery: `tests/test_runtime.py` (stub broker), `tests/test_job_kinds.py`, `tests/test_live_queue.py` (real RabbitMQ on a test queue, skipped unless `PYRACAST_LIVE_QUEUE=1`), `deploy/smoke.sh`.
 - Gaps: no test for an unsupported provider in `deliver` (only `adapter_for`). No Playwright coverage (no UI).
