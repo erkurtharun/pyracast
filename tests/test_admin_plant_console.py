@@ -1,3 +1,4 @@
+import html
 import re
 from types import SimpleNamespace
 
@@ -308,6 +309,50 @@ def test_details_shown_at_full_precision_are_saved_back_without_a_new_revision()
     assert unchanged.status_code == 302
     assert "Nothing changed." in client.get(unchanged["Location"]).content.decode()
     assert PlantConfiguration.objects.get(plant=plant).revision == 1
+
+
+def shown_form(page: str) -> dict[str, str]:
+    """What a browser posts from the details page's untouched form."""
+    fields = {
+        name: html.unescape(value)
+        for name, value in re.findall(r'<input [^>]*name="([^"]+)"[^>]*value="([^"]*)"', page)
+    }
+    for name, options in re.findall(r'<select name="([^"]+)"[^>]*>(.*?)</select>', page, re.S):
+        selected = re.search(r'<option value="([^"]*)" selected>', options)
+        assert selected is not None
+        fields[name] = selected.group(1)
+    return {**fields, "reason": ""}
+
+
+# Python writes the smaller of these floats with an exponent, which the form's number rule refuses.
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"latitude": "41.0082", "longitude": "-28.9784", "dc_capacity_mw": "130"},
+        {"latitude": "0", "longitude": "-29", "surface_tilt_degrees": "0"},
+        {"latitude": "0.00005", "longitude": "-0.00001", "dc_capacity_mw": "0.00005"},
+        {"latitude": "-0.000001", "longitude": "0.0001", "inverter_capacity_mw": "0.00002"},
+        {"export_limit_mw": "0.00003", "surface_tilt_degrees": "0.00004"},
+        {"surface_azimuth_degrees": "0.00006"},
+    ],
+)
+def test_details_are_shown_as_plain_numbers_and_saved_back_unchanged(
+    values: dict[str, str],
+) -> None:
+    tenant = Tenant.objects.create(name="Console customer")
+    client, _ = verified_admin()
+    created = client.post(f"/admin/workspaces/{tenant.pk}/plants/new/", site_values(**values))
+    assert created.status_code == 302
+    region = Region.objects.get(tenant=tenant)
+    stored = (region.latitude, region.longitude, region.revision)
+    url = f"/admin/plants/{region.pk}/details/"
+    form = shown_form(client.get(url).content.decode())
+    assert {name: form[name] for name in values} == values
+    unchanged = client.post(url, form)
+    assert unchanged.status_code == 302
+    assert "Nothing changed." in client.get(unchanged["Location"]).content.decode()
+    region.refresh_from_db()
+    assert (region.latitude, region.longitude, region.revision) == stored
 
 
 def test_a_location_correction_returns_the_plant_to_review_with_both_audit_events() -> None:

@@ -51,6 +51,80 @@ test("bin rows are titled with the plant name and a restored plant opens from th
     await expect(page).toHaveURL("/app/w/1/plants/11/forecast/");
 });
 
+const busy = errorBody("busy", "The workspace is busy. Try again in a moment.");
+
+test("a failed restore moves the focus to its reason", async ({ page }) => {
+    await mockApi(page);
+    await bin(page, { deleted: true });
+    await page.route("**/api/tenants/1/regions/11/restore/", (route) =>
+        route.fulfill({ status: 503, json: busy }),
+    );
+    await page.goto("/app/w/1/trash/");
+    await page
+        .getByRole("button", { name: `Restore ${plant.name}` })
+        .press("Enter");
+    await expect(
+        page.getByRole("alert").filter({ hasText: "The workspace is busy." }),
+    ).toBeFocused();
+});
+
+test("a restored plant's row leaves the focus on the notice that opens it", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await bin(page, { deleted: true });
+    await page.goto("/app/w/1/trash/");
+    await page
+        .getByRole("button", { name: `Restore ${plant.name}` })
+        .press("Enter");
+    const notice = page.getByRole("status").filter({
+        hasText: `${plant.name} restored.`,
+    });
+    await expect(notice).toBeFocused();
+    await expect(
+        notice.getByRole("button", { name: "Open plant" }),
+    ).toBeVisible();
+});
+
+test("a failed move to the recycle bin moves the focus to its reason", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/api/tenants/1/regions/11/", (route) =>
+        route.request().method() === "DELETE"
+            ? route.fulfill({ status: 503, json: busy })
+            : route.fallback(),
+    );
+    await page.goto("/app/w/1/plants/11/settings/");
+    await page
+        .getByRole("button", { name: "Delete plant", exact: true })
+        .press("Enter");
+    const confirmation = page.getByRole("region", {
+        name: "Delete plant confirmation",
+    });
+    await confirmation
+        .getByRole("button", { name: "Move plant to recycle bin" })
+        .press("Enter");
+    await expect(confirmation.getByRole("alert")).toBeFocused();
+});
+
+test("cancelling the move to the recycle bin returns the focus to Delete plant", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.goto("/app/w/1/plants/11/settings/");
+    const deletePlant = page.getByRole("button", {
+        name: "Delete plant",
+        exact: true,
+    });
+    await deletePlant.press("Enter");
+    await page
+        .getByRole("region", { name: "Delete plant confirmation" })
+        .getByRole("button", { name: "Cancel" })
+        .press("Enter");
+    await expect(deletePlant).toBeFocused();
+});
+
 test("a failed delete keeps the confirmation open with the reason and lets the person retry", async ({
     page,
 }) => {
