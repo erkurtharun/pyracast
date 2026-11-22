@@ -53,7 +53,6 @@ exclude:
   - name: PyMethodOverridingInspection
     paths:
       - src/pyracast/platform_admin/site.py
-      - src/pyracast/platform_admin/records.py
   - name: PyPackageRequirementsInspection
     paths:
       - scripts/dev_dependencies.py
@@ -68,9 +67,6 @@ exclude:
     paths:
       - src/pyracast/accounts/invitations.py
       - src/pyracast/accounts/language.py
-      - src/pyracast/incidents/operations.py
-      - src/pyracast/languages.py
-      - src/pyracast/trash.py
   # A backend can fail after accepting mail; retain the uncertain delivery outcome.
   - name: PyBroadExceptionInspection
     paths:
