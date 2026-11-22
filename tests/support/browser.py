@@ -102,6 +102,8 @@ class Forward(BaseHTTPRequestHandler):
                 for name, value in response.getheaders()
                 if name.lower() not in HOP_BY_HOP
             ]
+            if any("\r" in part or "\n" in part for field in fields for part in field):
+                status, reason, payload, fields = 502, "Bad Gateway", b"", []
         except OSError:
             status, reason, payload, fields = 502, "Bad Gateway", b"", []
         finally:
