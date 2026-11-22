@@ -1,0 +1,18 @@
+{
+    "$schema": "https://unpkg.com/knip@6.45.1/schema.json",
+    "entry": [
+        "playwright.config.ts",
+        "tests/**/*.spec.ts",
+        "integration/**/*.spec.ts",
+        "testing/coverage-reporter.ts"
+    ],
+    "project": [
+        "src/**/*.{ts,tsx}",
+        "tests/**/*.ts",
+        "integration/**/*.ts",
+        "testing/**/*.{ts,mjs}",
+        "eslint/**/*.mjs"
+    ],
+    "playwright": false,
+    "ignoreBinaries": ["uv"]
+}

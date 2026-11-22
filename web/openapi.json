@@ -8143,9 +8143,6 @@
                         "type": "object",
                         "additionalProperties": {},
                         "nullable": true
-                    },
-                    "weather_reference": {
-                        "$ref": "#/components/schemas/WeatherReferenceOutput"
                     }
                 }
             },
@@ -9345,9 +9342,6 @@
                     },
                     "provenance": {
                         "$ref": "#/components/schemas/ForecastProvenanceOutput"
-                    },
-                    "weather_reference": {
-                        "$ref": "#/components/schemas/WeatherReferenceOutput"
                     }
                 }
             },
@@ -11112,25 +11106,6 @@
                 "type": "string",
                 "description": "* `forecast` - Forecast\n* `estimated_actuals` - Estimated actuals"
             },
-            "SnapshotWeatherErrorEnum": {
-                "enum": [
-                    "invalid_weather_number",
-                    "invalid_weather_coordinates",
-                    "invalid_weather_schema",
-                    "invalid_weather_timezone",
-                    "invalid_weather_units",
-                    "empty_weather_response",
-                    "invalid_weather_interval",
-                    "invalid_weather_window",
-                    "unsafe_weather_response",
-                    "invalid_weather_collection_time",
-                    "weather_request_failed",
-                    "weather_acquisition_failed",
-                    "weather_acquisition_interrupted"
-                ],
-                "type": "string",
-                "description": "* `invalid_weather_number` - Invalid weather number\n* `invalid_weather_coordinates` - Invalid weather coordinates\n* `invalid_weather_schema` - Invalid weather schema\n* `invalid_weather_timezone` - Invalid weather timezone\n* `invalid_weather_units` - Invalid weather units\n* `empty_weather_response` - Empty weather response\n* `invalid_weather_interval` - Invalid weather interval\n* `invalid_weather_window` - Invalid weather window\n* `unsafe_weather_response` - Unsafe weather response\n* `invalid_weather_collection_time` - Invalid weather collection time\n* `weather_request_failed` - Weather request failed\n* `weather_acquisition_failed` - Weather acquisition failed\n* `weather_acquisition_interrupted` - Weather acquisition interrupted"
-            },
             "SourceSnapshotOutput": {
                 "type": "object",
                 "properties": {
@@ -11314,41 +11289,6 @@
                         "nullable": true
                     }
                 }
-            },
-            "WeatherReferenceOutput": {
-                "type": "object",
-                "properties": {
-                    "status": {
-                        "$ref": "#/components/schemas/WeatherReferenceStatusEnum"
-                    },
-                    "energy_kwh_m2": {
-                        "type": "number",
-                        "format": "double",
-                        "nullable": true
-                    },
-                    "partial_energy_kwh_m2": {
-                        "type": "number",
-                        "format": "double",
-                        "nullable": true
-                    },
-                    "coverage_fraction": {
-                        "type": "number",
-                        "format": "double",
-                        "nullable": true
-                    },
-                    "quality_flags": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "required": ["status"]
-            },
-            "WeatherReferenceStatusEnum": {
-                "enum": ["ready", "partial", "unavailable"],
-                "type": "string",
-                "description": "* `ready` - ready\n* `partial` - partial\n* `unavailable` - unavailable"
             },
             "WorkspaceInvitationsOutput": {
                 "type": "object",

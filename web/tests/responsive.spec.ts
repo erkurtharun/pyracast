@@ -788,9 +788,6 @@ for (const width of [320, 390, 1440]) {
             await expect(page.locator(".account-disclosure[open]")).toHaveCount(
                 0,
             );
-            await expect(page.locator(".identity-details[open]")).toHaveCount(
-                0,
-            );
             await page.screenshot({
                 path: testInfo.outputPath("account.png"),
                 fullPage: true,

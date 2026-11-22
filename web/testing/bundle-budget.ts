@@ -20,7 +20,7 @@ const pageFolder = (dist: string, route: string) =>
 // The scripts and stylesheets a modern browser loads for the route's first page: the shared
 // runtime plus the client entries of its layouts and page. Polyfills load only in browsers
 // without module support; metadata image routes are separate requests.
-export function firstLoadFiles(dist: string, route: string) {
+function firstLoadFiles(dist: string, route: string) {
     const page = pageFolder(dist, route);
     const build = JSON.parse(
         readFileSync(path.join(page, "build-manifest.json"), "utf8"),

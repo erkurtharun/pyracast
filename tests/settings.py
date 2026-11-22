@@ -9,7 +9,6 @@ os.environ.update(
     PYRACAST_CSRF_ORIGINS="",
     PYRACAST_PUBLIC_ORIGIN="http://127.0.0.1:3000",
     PYRACAST_CUTOFF_LOCAL="16:00",
-    PYRACAST_WEATHER_ENABLED="1",
     PYRACAST_TRUST_PROXY="0",
     PYRACAST_TRUSTED_PROXY_CIDRS="",
     PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS="",
@@ -31,7 +30,6 @@ os.environ.update(
     PYRACAST_GMAIL_CLIENT_SECRET="",
     PYRACAST_GMAIL_REFRESH_TOKEN="",
     PYRACAST_LOG_LEVEL="INFO",
-    PYRACAST_OPEN_METEO_API_KEY="",
 )
 
 from pyracast.settings import *  # noqa: F403 -- Django settings overlay.

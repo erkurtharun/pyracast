@@ -22,8 +22,6 @@ _cutoff = os.environ.get("PYRACAST_CUTOFF_LOCAL", "16:00")
 if not CLOCK_PATTERN.fullmatch(_cutoff):
     raise ImproperlyConfigured("PYRACAST_CUTOFF_LOCAL must be a valid HH:MM time.")
 PYRACAST_CUTOFF_LOCAL = time(int(_cutoff[:2]), int(_cutoff[3:]))
-PYRACAST_WEATHER_ENABLED = os.environ.get("PYRACAST_WEATHER_ENABLED", "1") == "1"
-PYRACAST_OPEN_METEO_API_KEY = os.environ.get("PYRACAST_OPEN_METEO_API_KEY", "")
 PYRACAST_EPIAS_USERNAME = os.environ.get("EPIAS_USERNAME", "")
 PYRACAST_EPIAS_PASSWORD = os.environ.get("EPIAS_PASSWORD", "")
 PYRACAST_RABBITMQ_URL = os.environ.get("PYRACAST_RABBITMQ_URL", "")
@@ -185,7 +183,6 @@ ACCOUNT_LOGIN_ON_PASSWORD_RESET = False
 ACCOUNT_LOGIN_TIMEOUT = 900
 # A password sign-up not refused by a rate limit answers no sooner than this after it arrives.
 PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS = 1.0
-PASSWORD_RESET_TIMEOUT = 3600
 HEADLESS_ONLY = True
 HEADLESS_CLIENTS = ("browser",)
 PYRACAST_PUBLIC_ORIGIN = os.environ.get("PYRACAST_PUBLIC_ORIGIN", "http://127.0.0.1:3000").rstrip(
@@ -193,9 +190,7 @@ PYRACAST_PUBLIC_ORIGIN = os.environ.get("PYRACAST_PUBLIC_ORIGIN", "http://127.0.
 )
 HEADLESS_FRONTEND_URLS = {
     "account_login": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
-    "account_confirm_email": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_reset_password": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
-    "account_reset_password_from_key": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_signup": f"{PYRACAST_PUBLIC_ORIGIN}/app/?signup=1",
 }
 HEADLESS_ADAPTER = "pyracast.accounts.social.HeadlessAdapter"
@@ -283,7 +278,6 @@ SPECTACULAR_SETTINGS = {
         "CollectionJobErrorEnum": "pyracast.forecasts.models.CollectionJobError",
         "CollectionStateEnum": "pyracast.forecasts.models.CollectionState",
         "CollectionInactiveReasonEnum": "pyracast.forecasts.models.CollectionInactiveReason",
-        "SnapshotWeatherErrorEnum": "pyracast.forecasts.models.SnapshotWeatherError",
         "ForecastSourceKindEnum": ["forecast", "estimated_actuals", "mixed"],
         "EpiasSourceKindEnum": "pyracast.metering.models.EpiasSourceKind",
         "EpiasJobStatusEnum": "pyracast.metering.models.EpiasJobStatus",
@@ -316,7 +310,6 @@ SPECTACULAR_SETTINGS = {
         "PerformanceDayReasonEnum": "pyracast.plants.performance.DayReason",
         "PerformanceSelectionPolicyEnum": "pyracast.plants.performance.SelectionPolicy",
         "DaylightStatusEnum": ["normal", "polar_day", "polar_night"],
-        "WeatherReferenceStatusEnum": ["ready", "partial", "unavailable"],
         "OutageScenarioStatusEnum": ["estimated", "unknown_impact"],
         "DiagnosticStatusEnum": ["suspected", "normal", "insufficient"],
         "DiagnosticDayStatusEnum": ["shortfall", "within_threshold"],

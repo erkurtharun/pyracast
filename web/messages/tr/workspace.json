@@ -143,7 +143,6 @@
         "siteUnavailable": "Bu santral kullanılamıyor."
     },
     "Reminders": {
-        "remove": "Kaldır",
         "addTime": "Saat ekle",
         "emailRecipients": "E-posta alıcıları",
         "emailLanguage": "E-posta dili",
@@ -405,7 +404,6 @@
         "proposed": "Önerilen",
         "atSubmission": "Gönderim anında",
         "noReading": "Ölçüm yok",
-        "quality": "Veri kalitesi",
         "revert": "Güncel sağlayıcı ölçümüne dön",
         "approve": "Onayla ve uygula",
         "reject": "Reddet",

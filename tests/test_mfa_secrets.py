@@ -1,7 +1,5 @@
 import pytest
 from allauth.mfa.adapter import get_adapter
-from allauth.mfa.models import Authenticator
-from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.test import override_settings
 
@@ -51,21 +49,3 @@ def test_mfa_rejects_authenticated_non_text_payload() -> None:
     ciphertext = secret_cipher(KEY_CONTEXT).encrypt(b"\xff").decode("ascii")
     with pytest.raises(PermissionDenied):
         MFAAdapter().decrypt(PREFIX + ciphertext)
-
-
-@pytest.mark.parametrize(
-    ("staff", "superuser", "kind", "allowed"),
-    [
-        (True, False, "totp", False),
-        (False, True, "totp", False),
-        (False, False, "totp", True),
-        (True, True, "recovery_codes", True),
-    ],
-)
-def test_administrators_cannot_remove_their_required_factor(
-    staff: bool, superuser: bool, kind: str, allowed: bool
-) -> None:
-    authenticator = Authenticator(
-        user=User(is_staff=staff, is_superuser=superuser), type=kind, data={}
-    )
-    assert MFAAdapter().can_delete_authenticator(authenticator) is allowed

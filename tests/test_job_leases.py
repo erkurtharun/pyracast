@@ -34,6 +34,7 @@ from tests.support.invariants import lease_violations
 from tests.support.metering import connected, day_data
 from tests.support.notification_transmission import OpeningBackend, replying
 from tests.support.notifications import SLOT, candidates, ready
+from tests.support.outbox import pending_mail_ids
 from tests.support.plant_operations import make_plant, request_run
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -315,8 +316,8 @@ def test_an_interrupted_outbound_mail_is_released_before_it_is_claimed_again() -
     later = now + LEASE + timedelta(seconds=1)
     stored = OutboundMail.objects.filter(pk=mail.pk)
 
-    assert outbox.pending_mail_ids(now + LEASE - SECOND) == []
-    assert outbox.pending_mail_ids(later) == [mail.pk]
+    assert pending_mail_ids(now + LEASE - SECOND) == []
+    assert pending_mail_ids(later) == [mail.pk]
     assert outbox._claim(mail.pk, later) is None
     assert lease_of(stored) == ("retry", 1, None)
     assert stored.get().last_error == "interrupted_connection"

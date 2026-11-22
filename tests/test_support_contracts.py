@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -14,7 +14,6 @@ from tests.support.metering import connected
 from tests.support.plant_operations import saved_actuals
 from tests.support.settlement_calibration import settlement
 from tests.support.trash_operations import sibling
-from tests.support.weather_collection import WeatherFixture
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -56,23 +55,6 @@ def test_archived_metering_fixture_records_completion_from_its_readings(missing:
     assert len(snapshot.readings) == 24
     assert len(absent) == int(missing)
     assert snapshot.complete is (not absent)
-
-
-@pytest.mark.parametrize(
-    ("day", "zone"),
-    [(date(2026, 11, 1), "Asia/Kathmandu"), (date(2026, 10, 25), "Europe/Berlin")],
-)
-def test_weather_fixture_covers_local_days_with_native_utc_hours(day: date, zone: str) -> None:
-    start, end = local_day_bounds(day, zone)
-
-    weather = WeatherFixture().fetch(40, 29, start, end)
-
-    assert weather.requested_start == start
-    assert weather.requested_end == end
-    assert weather.intervals[0].start <= start
-    assert weather.intervals[-1].end >= end
-    assert all(interval.start.timestamp() % 3600 == 0 for interval in weather.intervals)
-    assert all(interval.temperature_start_c == 10 for interval in weather.intervals)
 
 
 def test_recent_forecast_uses_the_requested_binding_job() -> None:
@@ -130,15 +112,9 @@ def test_the_archive_audit_lets_only_a_production_revision_leave_the_current_set
     assert rewritten_archive_rows(before, rewritten) == {"metering_epiassnapshot": [5]}
 
 
-def test_the_archive_audit_lets_only_an_unpublished_snapshot_take_weather_and_publication() -> None:
-    staged: dict[str, object] = {
-        "raw_payload": {},
-        "available_at": None,
-        "weather_payload": None,
-        "weather_error": "",
-    }
-    taken = {"available_at": NOW.isoformat(), "weather_payload": {}, "weather_error": ""}
-    published = staged | taken
+def test_the_archive_audit_lets_only_an_unpublished_snapshot_take_its_publication() -> None:
+    staged: dict[str, object] = {"raw_payload": {}, "available_at": None}
+    published = staged | {"available_at": NOW.isoformat()}
 
     def audit(before: dict[str, object], after: dict[str, object]) -> dict[str, list[int]]:
         return rewritten_archive_rows(
@@ -150,6 +126,6 @@ def test_the_archive_audit_lets_only_an_unpublished_snapshot_take_weather_and_pu
     assert audit(staged, published | {"raw_payload": {"changed": True}}) == {
         "forecasts_forecastsnapshot": [1]
     }
-    assert audit(published, published | {"weather_error": "weather_request_failed"}) == {
+    assert audit(published, published | {"available_at": None}) == {
         "forecasts_forecastsnapshot": [1]
     }

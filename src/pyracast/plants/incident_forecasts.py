@@ -195,7 +195,7 @@ def incident_scenario(
     )
     if not invalidated and not scenario_needed:
         return ScenarioResult(None, None)
-    snapshot = ForecastSnapshot.objects.defer("raw_payload", "weather_payload").get(
+    snapshot = ForecastSnapshot.objects.defer("raw_payload").get(
         pk=normal["provenance"]["snapshot_id"], job__binding_id=configuration.binding_id
     )
     selected_sources = replay_composition(normal["provenance"], configuration, start, end)

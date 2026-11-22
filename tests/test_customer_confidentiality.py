@@ -363,7 +363,6 @@ CUSTOMER_FIELDS = {
     "values",
     "vintage",
     "warnings",
-    "weather_reference",
     "window_end",
     "window_start",
     "windows",

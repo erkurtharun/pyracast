@@ -740,8 +740,16 @@ def test_failed_dispatcher_start_requests_worker_shutdown_and_preserves_timeout_
                 raise startup_failure
 
     monkeypatch.setattr(launcher, "wait_ready", ready)
+    started: list[subprocess.Popen[bytes]] = []
+    popen = subprocess.Popen
+
+    def recorded(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+        child = popen(*args, **kwargs)
+        started.append(child)
+        return child
+
+    monkeypatch.setattr(subprocess, "Popen", recorded)
     state: dict[str, Any] = {"root": str(root), "processes": {}}
-    previous_children = set(launcher.CHILDREN)
     try:
         with pytest.raises(failure_type) as caught:
             launcher.start(root, state)
@@ -766,11 +774,10 @@ def test_failed_dispatcher_start_requests_worker_shutdown_and_preserves_timeout_
             assert launcher.recorded_process(root, "worker", state["processes"]["worker"])
             assert any("worker" in note for note in caught.value.__notes__)
     finally:
-        for child in set(launcher.CHILDREN) - previous_children:
+        for child in started:
             if child.poll() is None:
                 launcher.terminate_tree(psutil.Process(child.pid))
             child.wait(timeout=5)
-            launcher.CHILDREN.remove(child)
 
 
 def _touch(path: Path) -> Path:

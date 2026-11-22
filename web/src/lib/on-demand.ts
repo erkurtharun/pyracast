@@ -1,4 +1,4 @@
-export class SectionUnavailable extends Error {}
+class SectionUnavailable extends Error {}
 
 // The bundler runtime keeps a failed chunk failed for the life of the document (an offline moment,
 // or a release that replaced the files), so only a reload loads the section again.

@@ -57,9 +57,6 @@ export type ListPath = {
         ? P
         : never;
 }[PathFor<"get">];
-export type ListItem<P extends ListPath> =
-    Answer<P, "get"> extends { results: (infer T)[] } ? T : never;
-
 type Rest<T> = object extends T ? [options?: T] : [options: T];
 type Loose = {
     path?: Record<string, string | number>;

@@ -72,7 +72,6 @@ class EpiasDay:
     collected_at: datetime
     raw_payload: str
     endpoint: str = f"{BASE_URL}/realtime-generation"
-    unit: str = "MWh"
     source_kind: SourceKind = "realtime_generation"
     end_day: date | None = None
 

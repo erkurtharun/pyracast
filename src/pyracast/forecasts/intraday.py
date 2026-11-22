@@ -18,9 +18,8 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     SnapshotSourceKind,
 )
-from pyracast.forecasts.sources import covering_snapshots, snapshot_data
+from pyracast.forecasts.sources import covering_snapshots
 from pyracast.irradiance import local_day_bounds
-from pyracast.irradiance.weather_reference import summarize_weather, unavailable_weather
 from pyracast.plants.forecast_sources import apply_composition, compose_snapshots
 from pyracast.solar import Daylight, daylight_energy_windows, daylight_window
 
@@ -151,7 +150,7 @@ def native_actual_queryset(
             coverage_end__gt=start,
         )
         .filter(eligible)
-        .defer("raw_payload", "weather_payload")
+        .defer("raw_payload")
         .order_by("-collected_at", "-available_at", "-pk")
     )
 
@@ -307,7 +306,7 @@ def replay_intraday_composition(
             pk__in=identifiers,
             binding_id=binding_id,
             source_kind__in=("forecast", "estimated_actuals"),
-        ).defer("raw_payload", "weather_payload")
+        ).defer("raw_payload")
     }
     if set(indexed) != set(identifiers):
         raise ValueError("Pinned intraday sources are unavailable")
@@ -345,18 +344,3 @@ def replay_intraday_composition(
         ),
         [indexed[identifier] for identifier in identifiers],
     )
-
-
-def preserve_forecast_weather(
-    result: dict[str, Any],
-    binding: SiteBinding,
-    target_date: date,
-    forecasts: list[ForecastSnapshot],
-) -> None:
-    if not forecasts:
-        return
-    data = snapshot_data(forecasts[0])
-    if data.weather is not None:
-        result["weather_reference"] = summarize_weather(data.weather, target_date, binding.timezone)
-    elif data.weather_error:
-        result["weather_reference"] = unavailable_weather(data.weather_error)

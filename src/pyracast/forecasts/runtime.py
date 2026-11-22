@@ -2,7 +2,6 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from django.conf import settings
 from django.db import close_old_connections
 from dramatiq import Actor
 
@@ -12,10 +11,9 @@ from pyracast.calculation import calculate
 from pyracast.forecasts.jobs.collect import collect
 from pyracast.forecasts.jobs.publish import PublicationHooks
 from pyracast.forecasts.jobs.ready import pending_job_ids
-from pyracast.forecasts.models import CollectionEndpoint, CollectionJob
+from pyracast.forecasts.models import CollectionJob
 from pyracast.forecasts.scheduler import CollectionSchedulingError, enqueue_due
 from pyracast.providers import adapter_for
-from pyracast.weather import OpenMeteoProvider
 
 logger = logging.getLogger(__name__)
 
@@ -27,21 +25,7 @@ def deliver(job_id: int, *, hooks: PublicationHooks[Any]) -> None:
     )
     if job is None:
         return
-    weather = (
-        OpenMeteoProvider(api_key=settings.PYRACAST_OPEN_METEO_API_KEY or None)
-        if settings.PYRACAST_WEATHER_ENABLED
-        and job.binding.provider_account.provider == "solcast"
-        and job.endpoint == CollectionEndpoint.FORECASTS
-        else None
-    )
-    collect(
-        job_id,
-        adapter_for(job.binding),
-        calculate,
-        datetime.now(UTC),
-        hooks=hooks,
-        weather_provider=weather,
-    )
+    collect(job_id, adapter_for(job.binding), calculate, datetime.now(UTC), hooks=hooks)
 
 
 def dispatch_collections(actor: Actor[[int], None]) -> PhaseOutcome:
