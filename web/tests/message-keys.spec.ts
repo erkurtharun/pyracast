@@ -1,9 +1,21 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { keyUse, unusedKeys } from "./support/message-keys";
 import { messages } from "../src/i18n/messages";
 
-const web = path.resolve();
+const web = path.resolve(__dirname, "..");
+
+function tree(files: Record<string, string>): string {
+    const root = mkdtempSync(path.join(tmpdir(), "message-keys-"));
+    for (const [name, text] of Object.entries(files)) {
+        const file = path.join(root, name);
+        mkdirSync(path.dirname(file), { recursive: true });
+        writeFileSync(file, text);
+    }
+    return root;
+}
 
 test("every message key is read by a screen or names a code the server or a screen sends", () => {
     expect(unusedKeys(web, messages.en)).toEqual([]);
@@ -11,4 +23,45 @@ test("every message key is read by a screen or names a code the server or a scre
 
 test("every translation call names its namespace and keys in a form the key check reads", () => {
     expect(keyUse(web).unresolved).toEqual([]);
+});
+
+test("a code named only in a comment, a docstring or a migration labels nothing", () => {
+    const root = tree({
+        "web/src/flags.ts": [
+            "declare function useCodeLabel(namespace: string): (code: string) => string;",
+            "// Shown for 'provider_error'.",
+            'export const label = useCodeLabel("Forecast.qualityFlags");',
+            'export const state = "stale";',
+        ].join("\n"),
+        "src/pyracast/forecasts/flags.py": [
+            '"""Flags such as "provider_error" are not produced here."""',
+            "",
+            "",
+            "def flags(reason):",
+            '    # "provider_error" was retired.',
+            '    return ["#fff", "unvalidated", f"stale_{reason}"]',
+        ].join("\n"),
+        "src/pyracast/forecasts/migrations/0002_flags.py":
+            'FLAGS = ["provider_error", "weather_request_failed"]\n',
+    });
+    try {
+        expect(
+            unusedKeys(path.join(root, "web"), {
+                Forecast: {
+                    qualityFlags: {
+                        provider_error: "provider error",
+                        weather_request_failed: "weather request failed",
+                        unvalidated: "unvalidated",
+                        stale: "stale",
+                        stale_source: "stale source",
+                    },
+                },
+            }),
+        ).toEqual([
+            "Forecast.qualityFlags.provider_error",
+            "Forecast.qualityFlags.weather_request_failed",
+        ]);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
 });

@@ -204,28 +204,50 @@ export function keyUse(web: string): KeyUse {
     return result;
 }
 
-// The codes a family can label: every lower-case code the backend or a screen writes as a
-// string, and every Python f-string that composes one.
+const CODE = /^[a-z][a-z0-9_]*$/;
+const COMPOSED_CODE = /^(?:[a-z0-9_]|\{[\w.]+\})*_(?:[a-z0-9_]|\{[\w.]+\})*$/;
+// A comment, or a string literal with its prefix and its whole text; a docstring is one literal,
+// so a code it mentions is not a literal of its own.
+const PYTHON_TOKEN =
+    /#[^\n]*|([A-Za-z]{0,2})("""|'''|"|')((?:\\[\s\S]|(?!\2)[^\\])*)\2/g;
+
+function pythonCodes(
+    text: string,
+    literals: Set<string>,
+    composed: Set<string>,
+) {
+    for (const [, prefix, , value] of text.matchAll(PYTHON_TOKEN)) {
+        if (prefix === undefined || value === undefined) continue;
+        if (!/f/i.test(prefix)) {
+            if (CODE.test(value)) literals.add(value);
+        } else if (value.includes("{") && COMPOSED_CODE.test(value))
+            composed.add(value.replace(/\{[\w.]+\}/g, "[a-z0-9_]+"));
+    }
+}
+
+function webCodes(file: string, literals: Set<string>) {
+    const source = ts.createSourceFile(
+        file,
+        readFileSync(file, "utf8"),
+        ts.ScriptTarget.Latest,
+    );
+    ts.forEachChild(source, function visit(node): void {
+        if (ts.isStringLiteral(node) && CODE.test(node.text))
+            literals.add(node.text);
+        ts.forEachChild(node, visit);
+    });
+}
+
+// The codes a family can label: every lower-case code a string literal of the backend or a screen
+// holds, and every Python f-string that composes one. Migrations freeze retired values.
 function codePatterns(root: string): RegExp[] {
     const literals = new Set<string>();
     const composed = new Set<string>();
-    for (const file of files(path.join(root, "src", "pyracast"), /\.py$/)) {
-        const text = readFileSync(file, "utf8");
-        for (const match of text.matchAll(
-            /(?<![\w])["']([a-z][a-z0-9_]*)["']/g,
-        ))
-            literals.add(match[1]!);
-        for (const match of text.matchAll(
-            /\bf["']((?:[a-z0-9_]|\{[\w.]+\})*_(?:[a-z0-9_]|\{[\w.]+\})*)["']/g,
-        ))
-            if (match[1]!.includes("{"))
-                composed.add(match[1]!.replace(/\{[\w.]+\}/g, "[a-z0-9_]+"));
-    }
+    for (const file of files(path.join(root, "src", "pyracast"), /\.py$/))
+        if (!file.split(path.sep).includes("migrations"))
+            pythonCodes(readFileSync(file, "utf8"), literals, composed);
     for (const file of files(path.join(root, "web", "src"), /\.tsx?$/))
-        for (const match of readFileSync(file, "utf8").matchAll(
-            /["']([a-z][a-z0-9_]*)["']/g,
-        ))
-            literals.add(match[1]!);
+        webCodes(file, literals);
     return [...literals, ...composed].map((code) => new RegExp(`^${code}$`));
 }
 

@@ -108,8 +108,6 @@
             "unvalidated_reference_transfer": "unvalidated reference transfer",
             "outage_configuration_changed": "outage configuration changed",
             "unknown_outage_impact": "unknown outage impact",
-            "provider_error": "provider error",
-            "missing": "missing",
             "unknown": "{value}"
         },
         "stale_reason": {
