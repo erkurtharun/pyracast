@@ -12,13 +12,30 @@ import { authRequest } from "./auth-api";
 
 export type Session = components["schemas"]["SessionOutput"];
 export type SessionUser = components["schemas"]["SessionUserOutput"];
-type SessionState = { session?: Session; ended: boolean };
+export type SignOutState =
+    | { status: "idle" }
+    | { status: "pending"; keepInvitation: boolean }
+    | { status: "failed"; keepInvitation: boolean; error: unknown };
+type SessionState = {
+    session?: Session;
+    ended: boolean;
+    changed: boolean;
+    replaced: boolean;
+    signOut: SignOutState;
+};
 
 // The last session tag any tab of this browser observed. A write is an observation of a session
 // read, never a new value, so tabs that read crossing answers converge.
 export const observedTagKey = "pyracast.sessionTag";
+const replacedKey = "pyracast.sessionReplaced";
 
-let state: SessionState = { ended: false };
+let state: SessionState = {
+    ended: false,
+    changed: false,
+    replaced: false,
+    signOut: { status: "idle" },
+};
+let documentOwner: string | null | undefined;
 // What a session read's answer may have missed: this tab's session changes, another tab's
 // observation and every read started or session adopted here.
 type Mark = { epoch: number; observed: string | null; generation: number };
@@ -42,8 +59,30 @@ function subscribeSession(listener: () => void) {
     };
 }
 
+function notify() {
+    for (const listener of listeners) listener();
+}
+
 export function useSessionState() {
     return useSyncExternalStore(subscribeSession, sessionState, sessionState);
+}
+
+function takeReplacedMark() {
+    try {
+        const marked = window.sessionStorage.getItem(replacedKey) !== null;
+        window.sessionStorage.removeItem(replacedKey);
+        return marked;
+    } catch {
+        return false;
+    }
+}
+
+function markReplaced() {
+    try {
+        window.sessionStorage.setItem(replacedKey, "1");
+    } catch {
+        return;
+    }
 }
 
 function tagOf(session: Session | undefined): Tag {
@@ -78,20 +117,36 @@ export function isCurrent(session: Session | undefined) {
 }
 
 export function adoptSession(session: Session) {
-    state = {
-        session,
-        ended: session.user
-            ? false
-            : !signingOut &&
-              (state.ended ||
-                  confirming !== undefined ||
-                  Boolean(state.session?.user)),
-    };
+    const owner = sessionOwner(session) ?? null;
+    if (documentOwner === undefined) {
+        documentOwner = owner;
+        const replacedBefore = takeReplacedMark();
+        state = {
+            ...state,
+            session,
+            ended: replacedBefore && !session.user,
+            changed: replacedBefore && Boolean(session.user),
+        };
+    } else
+        state = {
+            ...state,
+            session,
+            replaced: state.replaced || owner !== documentOwner,
+        };
     setCsrfToken(session.csrf_token);
     observe(session.session_tag ?? "");
     generation += 1;
     adopted = { mark: mark(), session };
-    for (const listener of listeners) listener();
+    notify();
+}
+
+export function endDocument(): { clearInvitation: boolean } {
+    if (!documentOwner) return { clearInvitation: false };
+    const leaving = state.signOut;
+    if (leaving.status === "idle") markReplaced();
+    return {
+        clearInvitation: leaving.status === "idle" || !leaving.keepInvitation,
+    };
 }
 
 function mark(): Mark {
@@ -156,15 +211,24 @@ export function loadSession(): Promise<Session> {
     return startRead().promise;
 }
 
+function setSignOut(signOut: SignOutState) {
+    state = { ...state, signOut };
+    notify();
+}
+
 // One sign-out request, for the session this tab adopted; when another tab changed the session
 // meanwhile, the server refuses it and the tab shows the session the browser now holds.
-export async function signOut() {
+export async function signOut({ keepInvitation = false } = {}) {
+    const shown = Boolean(state.session?.user);
+    if (shown) setSignOut({ status: "pending", keepInvitation });
     signingOut = true;
     try {
         await authRequest("auth/session", "DELETE");
         const session = await loadSession();
         if (session.user) throw changedSession();
-        return session;
+    } catch (error) {
+        if (shown) setSignOut({ status: "failed", keepInvitation, error });
+        throw error;
     } finally {
         signingOut = false;
     }

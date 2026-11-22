@@ -22,7 +22,6 @@ import {
     type SessionUser,
 } from "@/lib/session-client";
 import { Brand } from "@/ui/brand";
-import { useErrorMessage } from "@/ui/form";
 import { LanguageSelect } from "@/ui/language-select";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { WorkspaceAccess } from "@/ui/workspace-access";
@@ -87,10 +86,11 @@ export function WorkspaceShell({
     children: ReactNode;
 }) {
     const t = useTranslations("Dashboard");
+    const errors = useTranslations("Errors");
     const format = useFormat();
     const router = useRouter();
     const screen = screenOf(usePathname());
-    const { session } = useSessionState();
+    const { session, changed } = useSessionState();
     const user = session?.user;
     if (!user) throw new Error("The workspace shell needs a signed-in user.");
     const tenants = useApiList(
@@ -99,8 +99,6 @@ export function WorkspaceShell({
         { poll: cadence.background },
     );
     const endingSoon = useEndingSoon(session?.expires_at ?? null);
-    const [logoutError, setLogoutError] = useState("");
-    const errorMessage = useErrorMessage();
     const rows = tenants.data?.results ?? [];
     const tenant =
         tenantId === undefined
@@ -237,15 +235,7 @@ export function WorkspaceShell({
                     <button
                         title={t("signOut")}
                         aria-label={t("signOut")}
-                        onClick={() =>
-                            void (async () => {
-                                try {
-                                    await signOut();
-                                } catch (error) {
-                                    setLogoutError(errorMessage(error));
-                                }
-                            })()
-                        }
+                        onClick={() => void signOut().catch(() => {})}
                     >
                         ↪
                     </button>
@@ -276,7 +266,7 @@ export function WorkspaceShell({
                             })}
                         </Notice>
                     )}
-                    {logoutError && <Notice error>{logoutError}</Notice>}
+                    {changed && <Notice>{errors("sessionChanged")}</Notice>}
                     <RefreshFailed resource={tenants} />
                     <WorkspaceAccess value={screen === "account" || canManage}>
                         <Workspace value={{ tenant, user, navigating }}>

@@ -10,8 +10,8 @@ const turkishCatalogue = (body: string) => body.includes("Kalibrasyon geçmişi"
 const readingTexts = (namespace: string) => (body: string) =>
     body.includes(`("${namespace}")`);
 
-// Every script is answered from the server; one that matches is held until `release` or `fail`, or
-// aborted, and after `release` or `fail` none is.
+// Every script is answered from the server; one that matches is held until `release`, or aborted,
+// and after `release` none is.
 async function interceptScript(
     page: Page,
     matches: (body: string) => boolean,
@@ -19,34 +19,27 @@ async function interceptScript(
 ) {
     let reach!: () => void;
     const reached = new Promise<void>((resolve) => (reach = resolve));
-    let settle!: (failed: boolean) => void;
-    const settled = new Promise<boolean>((resolve) => (settle = resolve));
-    let abort!: () => void;
-    const aborted = new Promise<void>((resolve) => (abort = resolve));
+    let settle!: () => void;
+    const settled = new Promise<void>((resolve) => (settle = resolve));
     let active = true;
     await page.route(chunks, async (route) => {
         const response = await route.fetch();
         const body = await response.text();
         if (active && matches(body)) {
             reach();
-            if (outcome === "aborted" || (await settled)) {
+            if (outcome === "aborted") {
                 await route.abort("internetdisconnected");
-                abort();
                 return;
             }
+            await settled;
         }
         await route.fulfill({ response, body });
     });
-    const finish = (failed: boolean) => {
-        active = false;
-        settle(failed);
-    };
     return {
         reached,
-        release: () => finish(false),
-        fail: () => {
-            finish(true);
-            return aborted;
+        release: () => {
+            active = false;
+            settle();
         },
     };
 }
@@ -774,7 +767,7 @@ test("a language save refused after the session ended reports nothing on the scr
     await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
 });
 
-test("a language whose catalogue fails after the session ended reports nothing on the screen that replaced the workspace and is not saved", async ({
+test("a language whose catalogue is still loading when the session ends elsewhere is not saved and the fresh document reports nothing", async ({
     page,
 }) => {
     await mockApi(page);
@@ -787,22 +780,6 @@ test("a language whose catalogue fails after the session ended reports nothing o
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await turkish.reached;
     await endSessionElsewhere(page);
-    const failed = page.waitForEvent(
-        "requestfailed",
-        (request) => request.resourceType() === "script",
-    );
-    await turkish.fail();
-    await failed;
-    // The failed import settles in the page after the request fails; the checks below come after
-    // the frames that follow it, so a report it caused would be on the screen.
-    await page.evaluate(
-        () =>
-            new Promise<void>((resolve) =>
-                requestAnimationFrame(() =>
-                    requestAnimationFrame(() => resolve()),
-                ),
-            ),
-    );
     await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
     await expect(
         page.getByRole("button", { name: "Reload page", exact: true }),

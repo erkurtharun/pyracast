@@ -1,5 +1,5 @@
 "use client";
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import {
     useCallback,
@@ -15,16 +15,21 @@ import { reloadPage } from "@/lib/on-demand";
 import { routes } from "@/lib/routes";
 import { browserErrors } from "@/i18n/browser";
 import {
+    endDocument,
     isCurrent,
     loadSession,
     observedTagKey,
     sessionOwner,
     sessionState,
+    signOut,
     useSessionState,
     type Session,
+    type SignOutState,
 } from "@/lib/session-client";
 import { Brand } from "@/ui/brand";
+import { useErrorMessage } from "@/ui/form";
 import { LiveRegion } from "@/ui/live-region";
+import { clearWorkspaceInvitation } from "@/features/workspace/workspace-invitation";
 import { useLanguageHandoff } from "./language-handoff";
 import { SessionLanguage, useSessionLanguage } from "./session-language";
 import { Notice } from "@/ui/ui";
@@ -34,6 +39,7 @@ if (typeof window !== "undefined") captureInstallPrompt();
 export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
     const { session, failure, fail, clear, retry } = useSessionBootstrap();
+    const { replaced, signOut: leaving } = useSessionState();
     const handoff = useLanguageHandoff(session);
     const language = useSessionLanguage(session, handoff.status !== "ready");
     const ready =
@@ -41,15 +47,21 @@ export function AppRoot({ children }: { children: ReactNode }) {
         handoff.status === "ready" &&
         language.status === "ready";
     useFocusSessionRead(ready);
+    useRestoredDocumentReload();
+    useDocumentReplacement(replaced);
     const current = useCurrentSession(session, ready, fail, clear);
-    const owner = sessionOwner(session);
-    useForeignCacheRemoval(client, owner);
     return (
         <QueryClientProvider client={client}>
             <SessionLanguage value={language}>
                 <LiveRegion>
-                    {ready && current ? (
-                        <QueryOwner value={owner}>{children}</QueryOwner>
+                    {replaced ? (
+                        <Bootstrap retry={retry} />
+                    ) : leaving.status !== "idle" ? (
+                        <SigningOut state={leaving} />
+                    ) : ready && current ? (
+                        <QueryOwner value={sessionOwner(session)}>
+                            {children}
+                        </QueryOwner>
                     ) : language.status === "failed" ? (
                         <Bootstrap
                             failure={{ kind: "catalogue" }}
@@ -216,13 +228,59 @@ function useCurrentSession(
     return current;
 }
 
-function useForeignCacheRemoval(
-    client: QueryClient,
-    owner: string | undefined,
-) {
+// The reload runs after the replaced document's screens and their leave listeners are gone.
+function useDocumentReplacement(replaced: boolean) {
     useEffect(() => {
-        client.removeQueries({
-            predicate: (query) => query.queryKey[1] !== owner,
-        });
-    }, [client, owner]);
+        if (!replaced) return;
+        if (endDocument().clearInvitation) clearWorkspaceInvitation();
+        reloadPage();
+    }, [replaced]);
+}
+
+function useRestoredDocumentReload() {
+    useEffect(() => {
+        const restored = (event: PageTransitionEvent) => {
+            if (event.persisted) reloadPage();
+        };
+        window.addEventListener("pageshow", restored);
+        return () => window.removeEventListener("pageshow", restored);
+    }, []);
+}
+
+function SigningOut({
+    state,
+}: {
+    state: Exclude<SignOutState, { status: "idle" }>;
+}) {
+    const t = useTranslations("Session");
+    const errorMessage = useErrorMessage();
+    return (
+        <main className="auth-page">
+            <div className="auth-card">
+                <Brand />
+                <h1>{t("signingOut")}</h1>
+                {state.status === "failed" ? (
+                    <>
+                        <Notice error>{errorMessage(state.error)}</Notice>
+                        <button
+                            className="button"
+                            onClick={() =>
+                                void signOut({
+                                    keepInvitation: state.keepInvitation,
+                                }).catch(() => {})
+                            }
+                        >
+                            {t("retry")}
+                        </button>
+                    </>
+                ) : (
+                    <div
+                        className="loading-indicator"
+                        role="progressbar"
+                        aria-label={t("signingOut")}
+                    />
+                )}
+            </div>
+        </main>
+    );
 }

@@ -1,9 +1,8 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { api } from "@/lib/api/client";
-import { authRequest } from "@/lib/auth-api";
 import { routes } from "@/lib/routes";
-import { useSessionState } from "@/lib/session-client";
+import { signOut, useSessionState } from "@/lib/session-client";
 import { AsyncButton } from "@/ui/form";
 import { InvitationDetails, type PreviewState } from "./invitation-preview";
 import { clearWorkspaceInvitation } from "./workspace-invitation";
@@ -38,17 +37,19 @@ export function AcceptInvitation({
                         {t("accept")}
                     </AsyncButton>
                 )}
-                <AsyncButton
-                    permitted
-                    variant="secondary"
-                    errorTitle={t("signOutFailed")}
-                    onClick={async () => {
-                        await authRequest("auth/session", "DELETE");
-                        window.location.replace(routes.invitation());
-                    }}
-                >
-                    {t("useAnotherAccount")}
-                </AsyncButton>
+                <div>
+                    <button
+                        type="button"
+                        className="button secondary"
+                        onClick={() =>
+                            void signOut({ keepInvitation: true }).catch(
+                                () => {},
+                            )
+                        }
+                    >
+                        {t("useAnotherAccount")}
+                    </button>
+                </div>
                 <button
                     type="button"
                     className="text-button"

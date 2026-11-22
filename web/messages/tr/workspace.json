@@ -342,7 +342,6 @@
         "cancelFailed": "Davet iptal edilemedi",
         "cancelled": "Davet iptal edildi.",
         "acceptFailed": "Davet kabul edilemedi",
-        "signOutFailed": "Oturumunuz hâlâ açık",
         "sentOn": "Gönderildi: {date}",
         "expiresOn": "son gün {date}",
         "expiredOn": "süresi {date} tarihinde doldu",

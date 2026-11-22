@@ -212,6 +212,10 @@
         "attentionReason": "Needs attention: {reason}",
         "awaitingSetup": "Waiting for an administrator to finish setup"
     },
+    "Session": {
+        "signingOut": "Signing out",
+        "retry": "Try again"
+    },
     "InstallApp": {
         "install": "Install app",
         "browserMenu": "Open the browser menu and choose the command with Install in its name, such as Install this site as an app or Install and create shortcut. In some browsers it is inside a submenu.",

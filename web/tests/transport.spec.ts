@@ -251,7 +251,6 @@ test("a not-authenticated answer ends the session once", async () => {
         "not_authenticated",
     ]);
     await expect.poll(() => sessionState().session?.user).toBeNull();
-    expect(sessionState().ended).toBe(true);
     expect(calls.filter((call) => call.url === "/api/session/")).toHaveLength(
         3,
     );
@@ -391,7 +390,7 @@ test("a URL requires every named path parameter", () => {
     );
 });
 
-test("a session read that discovers expiry records the signed-out transition", async () => {
+test("a session read that discovers expiry adopts it once a second read agrees", async () => {
     adoptSession(signedIn("token"));
     answer(
         () => json(anonymous("anonymous")),
@@ -399,7 +398,7 @@ test("a session read that discovers expiry records the signed-out transition", a
     );
     await loadSession();
     expect(sessionState().session?.user).toBeNull();
-    expect(sessionState().ended).toBe(true);
+    expect(calls).toHaveLength(2);
 });
 
 test("an explicit sign-out returns to sign-in without an expiry notice", async () => {
@@ -424,8 +423,7 @@ test("a sign-out refused for a key another tab renewed signs out the renewed ses
         signedOutAnswer,
         () => json(anonymous("anonymous")),
     );
-    const session = await signOut();
-    expect(session.user).toBeNull();
+    await signOut();
     expect(sessionState()).toMatchObject({
         ended: false,
         session: { user: null },
@@ -474,10 +472,7 @@ test("an account read refused for a session that ended is not repeated", async (
         (failure) => failure,
     );
     expect(error).toMatchObject({ code: "session_changed" });
-    expect(sessionState()).toMatchObject({
-        ended: true,
-        session: { user: null },
-    });
+    expect(sessionState().session?.user).toBeNull();
     expect(calls).toHaveLength(4);
 });
 

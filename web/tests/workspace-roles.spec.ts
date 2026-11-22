@@ -474,25 +474,12 @@ test("switching invited account signs out with CSRF and preserves invitation thr
 }) => {
     await mockApi(page);
     let signouts = 0;
-    let leaving = false;
-    page.on("framenavigated", (frame) => {
-        if (frame === page.mainFrame()) leaving = false;
-    });
-    await page.route("**/api/session/", (route) =>
-        leaving
-            ? route.fulfill({
-                  status: 503,
-                  json: errorBody("busy", "Try again."),
-              })
-            : route.fallback(),
-    );
     await page.route("**/api/auth/browser/v1/auth/session", (route) => {
         if (route.request().method() === "DELETE") {
             expect(route.request().headers()["x-csrftoken"]).toBe(
                 "signed-token",
             );
             signouts++;
-            leaving = true;
         }
         return route.fallback();
     });
