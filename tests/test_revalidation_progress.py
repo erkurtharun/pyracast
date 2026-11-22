@@ -9,6 +9,7 @@ from pyracast import trash
 from pyracast.background import clock as monotonic_clock
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.forecasts import budget
 from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.jobs.claim import claim
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
@@ -325,6 +326,87 @@ def test_a_job_refused_for_the_key_stays_ended_while_collection_is_off() -> None
     assert_the_refused_job_stays_ended_at_validation_and_claim(
         system, plant, refused, utc(D1, 14), need=0
     )
+
+
+def refused_together_for_the_key(
+    system: System, slot: datetime
+) -> tuple[SiteBinding, CollectionJob, SiteBinding, CollectionJob]:
+    """The plant revalidated first is refused 401 at the slot; the other's job then ends
+    unsent, as the account waits for a new key."""
+    first, second = budget.approved_bindings(account(system)).order_by("validated_at", "pk")
+    refused = refused_for_the_key(first, slot)
+    blocked = CollectionJob.objects.get(binding=second, endpoint="forecasts", scheduled_for=slot)
+    assert not collect(blocked.pk, FakeAdapter(), calculate, slot)
+    blocked.refresh_from_db()
+    assert (blocked.status, blocked.last_error, blocked.attempts) == (
+        "failed",
+        "provider_authentication_failed",
+        0,
+    )
+    return first, refused, second, blocked
+
+
+@pytest.mark.parametrize(("quota", "earlier"), [(4, 0), (10, 6)])
+def test_a_job_armed_again_earlier_in_the_run_keeps_its_room_from_the_next_plant(
+    quota: int, earlier: int
+) -> None:
+    system, _plants = collecting_account([["16:00"], ["16:00"]], replaced=False)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=quota)
+    spend_until(system, utc(D1, 12), earlier)
+    first, refused, second, blocked = refused_together_for_the_key(system, utc(D1, 13))
+    replace_key(system.admin, system.account.pk, provider_key("NEW"))
+    lease = account(system).revalidation_due_at
+    assert lease is not None
+    moment = utc(D1, 13, 30)
+
+    outcome = revalidate_account(
+        system.account.pk, moment, claim=lease, adapter_for=lambda binding: FakeAdapter()
+    )
+
+    # The first plant fits earlier + 1 used + 1 + 1. Its job, reopened but refused once today, is
+    # still sent: earlier + 2 used + 1 + 1 + 1 > quota for the second plant.
+    assert outcome == WAITING
+    assert [revision(first), revision(second)] == [2, 1]
+    refused.refresh_from_db()
+    assert refused.status == "pending"
+    assert remaining_forecast_requests(account(system), moment, validating=second) == 2
+    collect_the_slot(moment)
+    refused.refresh_from_db()
+    blocked.refresh_from_db()
+    assert refused.status == "succeeded"
+    assert (blocked.status, blocked.last_error) == ("failed", "provider_authentication_failed")
+    assert used(system, moment) == earlier + 3
+    assert remaining_forecast_requests(account(system), moment, validating=second) == 1
+    assert not CollectionJob.objects.filter(
+        binding__in=[first, second], last_error="quota_exhausted"
+    ).exists()
+
+
+def lower_the_quota_to_two(system: System) -> Callable[[], None]:
+    def lower() -> None:
+        ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=2)
+
+    return lower
+
+
+def test_a_validation_arms_again_only_at_a_clock_the_locked_account_quota_keeps() -> None:
+    system, (plant,) = collecting_account([["06:00", "16:00"]], replaced=False)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=3)
+    refused = refused_for_the_key(plant, utc(D1, 13))
+    replace_key(system.admin, system.account.pk, provider_key("NEW"))
+    moment = utc(D1, 13, 30)
+
+    validate_binding(system.admin, plant.pk, FakeAdapter(lower_the_quota_to_two(system)), moment)
+
+    # Quota 2 keeps the clock of 06:00 only, and claim ends a job of 16:00 unsent.
+    assert revision(plant) == 2
+    refused.refresh_from_db()
+    assert (refused.status, refused.last_error) == ("failed", "provider_authentication_failed")
+    attempts = RequestAttempt.objects.count()
+    assert claim(refused.pk, moment) is None
+    refused.refresh_from_db()
+    assert (refused.status, refused.last_error) == ("failed", "provider_authentication_failed")
+    assert RequestAttempt.objects.count() == attempts
 
 
 def recording(asked: list[int]) -> Callable[[SiteBinding], ProviderAdapter]:
