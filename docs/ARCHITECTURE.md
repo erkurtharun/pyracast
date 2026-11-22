@@ -26,9 +26,10 @@ credentials or live calls.
 | `migrate` | Release command that applies migrations under its own database role |
 
 PostgreSQL is the only durable state: jobs, leases, retries, results and sessions live there, and
-RabbitMQ only wakes a worker for a row (`orchestration/kinds.py`). No process keeps authoritative
-workflow state in memory, so any process can be restarted. Mail has its own worker process because
-a queue alone reserves no execution capacity: provider work must never delay a sign-in code.
+RabbitMQ only wakes a worker: a message carries a row id, a provider-account revalidation also its
+lease time (`orchestration/kinds.py`). No process keeps authoritative workflow state in memory, so
+any process can be restarted. Mail has its own worker process because a queue alone reserves no
+execution capacity: provider work must never delay a sign-in code.
 See [worker-runtime](flows/worker-runtime.md) and [dispatcher-cycle](flows/dispatcher-cycle.md).
 
 The API, workers and dispatcher run on Windows x64 and Ubuntu x64, and CI tests both. Correctness
@@ -41,8 +42,11 @@ Configuration follows [Twelve-Factor](https://12factor.net/config): deployment s
 credentials (application key, database, broker, mail, EPİAŞ login) come from environment
 variables; the ignored `.env` is a local convenience that never overrides a set variable
 (`environment.py`). Per-plant provider accounts, encrypted API keys and site identifiers are
-administrator-managed database records. Logs go to standard output for the supervisor to collect;
-`PYRACAST_LOG_LEVEL` sets verbosity. See [secret-provisioning](flows/secret-provisioning.md).
+administrator-managed database records. Logs go to standard error for the supervisor to collect,
+because standard output belongs to what a command prints (such as the health check's JSON); the
+security log writes to standard output or to the file `PYRACAST_SECURITY_LOG_PATH` names, and
+gunicorn's access log to standard output. `PYRACAST_LOG_LEVEL` sets verbosity, and
+`DisallowedHost` lines are discarded. See [secret-provisioning](flows/secret-provisioning.md).
 
 ## Module boundaries
 
@@ -50,7 +54,7 @@ Each Django app owns the models and migrations of one domain.
 
 | Package | Owns |
 | --- | --- |
-| `accounts` | Tenants, memberships, invitations, language preferences, the authentication cache and outbound account mail |
+| `accounts` | Tenants, memberships, invitations, language preferences and the authentication cache; it writes its mail intents |
 | `regions` | Locations (coordinates, timezone, approval, trash), location change requests and the audit log |
 | `connections` | Canonical provider accounts with their encrypted keys and quota, and site bindings |
 | `forecasts` | Collection schedules and jobs, the request ledger, immutable snapshots, results and reference imports |
@@ -58,17 +62,19 @@ Each Django app owns the models and migrations of one domain.
 | `incidents` | Outages and their immutable revisions |
 | `change_requests` | Member proposals and their decisions |
 | `metering` | EPİAŞ connections, collection jobs and snapshots |
-| `notifications` | Reminder schedules, recipients and deliveries |
+| `notifications` | Reminder schedules, recipients, deliveries and outbound mail (`OutboundMail`, declared in `accounts/models.py`) |
 | `orchestration` | Dispatcher, worker command, job kinds and the health check (no tables) |
 | `api`, `platform_admin` | HTTP surfaces: DRF views and the console views |
-| `irradiance`, `calculation`, `solar`, `intervals` | Calculations, free of Django imports |
+| `irradiance`, `solar`, `intervals` | Calculations, free of Django imports |
+| `calculation` | The calculation of one site binding's provider data, on top of them |
 
 API views, console views, management commands and job actors call the same application operations,
 so a rule is enforced once whatever the entry point. Views validate input, check access and
-serialize; serializers do not write; no model signal carries business logic (authentication
-signals only feed the security log and session bookkeeping in `accounts`). HTTP, persistence and
-queue details stay out of the calculations, which receive typed values with units and missingness
-preserved.
+serialize; serializers do not write; no model signal carries business logic. Authentication
+signals in `accounts` feed the security log and session bookkeeping, and a password reset also
+removes the sign-in provider identities of an account that never signed in
+(`accounts/social.py`). HTTP, persistence and queue details stay out of the calculations, which
+receive typed values with units and missingness preserved.
 
 ## Tenancy and authorization
 
@@ -156,8 +162,6 @@ them. See [session-and-csrf](flows/session-and-csrf.md),
   renderer (`api/public.py`) removes provider names, account and site identities, keys and raw
   payloads from every response and passes stored provenance only through allowlists; stored rows
   keep their full provenance ([provider-detail-redaction](flows/provider-detail-redaction.md)).
-  The auxiliary Open-Meteo weather reference is the one source named to customers, because its
-  licence requires attribution next to the data.
 - A trashed location hides its plant and everything under it; queries select live rows through
   `Region.objects.active()` and `Plant.objects.active()`. Data is kept for 30 days, then purged
   ([plant-trash-and-restore](flows/plant-trash-and-restore.md),
@@ -180,6 +184,11 @@ Objects models cannot declare are listed once in `schema_objects.py`, read by th
 and the schema catalog test. Constraint and index names follow `<model>_<subject>_<kind>` with `chk`, `uniq`, `excl`, `fk` or
 `idx` (`tests/test_schema_names.py`). These are not row-level security: access and publication
 rules stay in the operations, and direct SQL must not create business records.
+
+Project tables keep `bigint` identity keys (`DEFAULT_AUTO_FIELD`): replacing them with UUIDv7 has
+no demonstrated need. JSONB holds provider payloads and versioned numerical artifacts; foreign
+keys, scheduling selectors and quantities that need database rules stay typed columns, so the
+database enforces them.
 
 Provider account identity is PostgreSQL `casefold()` under the `pg_unicode_fast` collation, used
 by the unique index, lookups and inserts alike, so one account cannot gain a second quota budget
@@ -217,11 +226,12 @@ do not change with the language ([i18n-and-language](flows/i18n-and-language.md)
 ## API contract
 
 The customer API exposes only what the web application calls; provider setup, validation and
-approval live in the console. Endpoints accept JSON only, paginate lists and bound date ranges.
-Every `/api/` failure answers one localized body `{code, message, fields?, retry_after?,
-request_id?}` whose codes are a closed vocabulary exported to OpenAPI; allauth's views carry the
-same keys beside their own. State transitions such as approval are operations, never writable
-status fields. User text says "outage"; `incident` stays the internal name. See
+approval live in the console. Endpoints accept JSON only, paginate record lists (a workspace's
+members and open invitations come whole) and bound date ranges. Every `/api/` failure answers one
+localized body `{code, message, fields?, retry_after?, request_id?}` whose codes are a closed
+vocabulary exported to OpenAPI; allauth's views carry the same keys beside their own. State
+transitions such as approval are operations, never writable status fields. User text says
+"outage"; `incident` stays the internal name. See
 [api-error-contract](flows/api-error-contract.md).
 
 ## Primary references
