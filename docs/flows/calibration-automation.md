@@ -89,7 +89,7 @@ sequenceDiagram
 
 - GET: `RoutePolicy` (`api/permissions.py`) admits any active member, including viewers (403 `membership_required` otherwise); `ScopedView.plant_queryset` scopes region to tenant and plant to region, both non-deleted (404).
 - PATCH: session authentication enforces CSRF, then `RoutePolicy` admits only active workspace administrators of the URL tenant (a platform superuser without that membership is refused). `set_calibration_automation` repeats the check with `tenant_membership(role=ADMIN, lock=True)` after locking the tenant row. The UI disables the checkbox for viewers (`useCanManageWorkspace`), a convenience only.
-- Promotion and daily preparation are authorized by the stored enabler, not by the caller: `_authorized` requires that user to be active and an `admin` member of the plant's tenant; where a transaction decides on it, the person and the membership are locked first (lock order below), so a concurrent deactivation or demotion is seen; disabling locks no person. The GET status evaluates the same rule without locks.
+- Promotion and daily preparation are authorized by the stored enabler, not by the caller: `_authorized` requires that user to be active and an `admin` member of the plant's tenant; where a transaction decides on it, the person and the membership are locked (lock order below), so a concurrent deactivation or demotion is seen; disabling locks no person. The GET status evaluates the same rule without locks.
 - `disable_workspace_automation` requires an active platform superuser (`require_platform_admin`); it is reached only through `reassign_workspace_admin`, whose console page requires `has_platform_admin_session` (staff, superuser and verified MFA).
 
 ## Failure paths
