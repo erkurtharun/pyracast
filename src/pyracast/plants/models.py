@@ -14,14 +14,14 @@ from pyracast.regions.models import NAME_MAX_LENGTH, active_region
 
 
 class MeasurementBasis(models.TextChoices):
-    NET_EXPORT = "net_export", "Net export"
-    AC_GENERATION = "ac_generation", "AC generation"
+    NET_EXPORT = "net_export", gettext_lazy("Net export")
+    AC_GENERATION = "ac_generation", gettext_lazy("AC generation")
 
 
 class MountingType(models.TextChoices):
-    UNKNOWN = "unknown", "Unknown"
-    FIXED = "fixed", "Fixed"
-    TRACKING = "tracking", "Tracking"
+    UNKNOWN = "unknown", gettext_lazy("Unknown")
+    FIXED = "fixed", gettext_lazy("Fixed")
+    TRACKING = "tracking", gettext_lazy("Tracking")
 
 
 class ObservationQuality(models.TextChoices):

@@ -384,7 +384,6 @@ def test_candidate_loading_excludes_unrelated_history_and_defers_provider_json(
         assert snapshot.get_deferred_fields() == {
             "raw_payload",
             "normalized_intervals",
-            "weather_payload",
         }
         return snapshot
 

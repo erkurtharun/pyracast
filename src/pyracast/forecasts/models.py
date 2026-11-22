@@ -36,17 +36,17 @@ class CollectionJobStatus(models.TextChoices):
 
 
 class RequestPurpose(models.TextChoices):
-    FORECAST = "forecast", "Forecast"
-    ESTIMATED_ACTUALS = "estimated_actuals", "Estimated actuals"
-    VALIDATION = "validation", "Validation"
-    INSPECT_SETTINGS = "inspect_settings", "Site settings check"
-    INSPECT_FORECAST = "inspect_forecast", "Forecast check"
+    FORECAST = "forecast", gettext_lazy("Forecast")
+    ESTIMATED_ACTUALS = "estimated_actuals", gettext_lazy("Estimated actuals")
+    VALIDATION = "validation", gettext_lazy("Validation")
+    INSPECT_SETTINGS = "inspect_settings", gettext_lazy("Site settings check")
+    INSPECT_FORECAST = "inspect_forecast", gettext_lazy("Forecast check")
 
 
 class RequestOutcome(models.TextChoices):
-    UNCERTAIN = "uncertain", "Uncertain"
-    SUCCEEDED = "succeeded", "Succeeded"
-    FAILED = "failed", "Failed"
+    UNCERTAIN = "uncertain", gettext_lazy("Uncertain")
+    SUCCEEDED = "succeeded", gettext_lazy("Succeeded")
+    FAILED = "failed", gettext_lazy("Failed")
 
 
 class SnapshotSourceKind(models.TextChoices):
@@ -114,23 +114,6 @@ class CollectionJobError(models.TextChoices):
     CALCULATION_FAILURE = "calculation_failure", gettext_lazy("Calculation failure")
     LOCK_CONTENTION = "lock_contention", gettext_lazy("Lock contention")
     PUBLICATION_FAILURE = "publication_failure", gettext_lazy("Publication failure")
-
-
-class SnapshotWeatherError(models.TextChoices):
-    # Every WeatherFailure code is a member: weather collection stores WeatherError.code here.
-    INVALID_NUMBER = "invalid_weather_number", "Invalid weather number"
-    INVALID_COORDINATES = "invalid_weather_coordinates", "Invalid weather coordinates"
-    INVALID_SCHEMA = "invalid_weather_schema", "Invalid weather schema"
-    INVALID_TIMEZONE = "invalid_weather_timezone", "Invalid weather timezone"
-    INVALID_UNITS = "invalid_weather_units", "Invalid weather units"
-    EMPTY_RESPONSE = "empty_weather_response", "Empty weather response"
-    INVALID_INTERVAL = "invalid_weather_interval", "Invalid weather interval"
-    INVALID_WINDOW = "invalid_weather_window", "Invalid weather window"
-    UNSAFE_RESPONSE = "unsafe_weather_response", "Unsafe weather response"
-    INVALID_COLLECTION_TIME = "invalid_weather_collection_time", "Invalid weather collection time"
-    REQUEST_FAILED = "weather_request_failed", "Weather request failed"
-    ACQUISITION_FAILED = "weather_acquisition_failed", "Weather acquisition failed"
-    ACQUISITION_INTERRUPTED = "weather_acquisition_interrupted", "Weather acquisition interrupted"
 
 
 class DispatcherStatus(models.Model):
@@ -300,10 +283,6 @@ class ForecastSnapshot(models.Model):
     coverage_start = models.DateTimeField(null=True, db_index=True)
     coverage_end = models.DateTimeField(null=True, db_index=True)
     available_at = models.DateTimeField(null=True)
-    weather_payload = models.JSONField(null=True)
-    weather_error = models.CharField(
-        max_length=64, choices=SnapshotWeatherError, blank=True, default=""
-    )
 
     class Meta:
         indexes = (
@@ -326,7 +305,6 @@ class ForecastSnapshot(models.Model):
                 name="%(class)s_coverage_chk",
             ),
             choices_check("source_kind", SnapshotSourceKind),
-            choices_check("weather_error", SnapshotWeatherError, blank=True),
         )
 
     def __str__(self) -> str:

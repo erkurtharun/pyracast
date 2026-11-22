@@ -14,6 +14,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
+from pyracast.background.claims import claim_unless_contended
 from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS
 from pyracast.background.failures import log_failure
@@ -179,7 +180,7 @@ def _fail(lease: _Lease, now: datetime) -> None:
 
 def run_calibration(run_id: int, now: datetime | None = None) -> bool:
     clock = Clock(timezone.now() if now is None else now)
-    lease = _claim(run_id, clock.entered)
+    lease = claim_unless_contended("calibrate_plant", run_id, lambda: _claim(run_id, clock.entered))
     if lease is None:
         return False
     try:

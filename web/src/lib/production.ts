@@ -10,14 +10,14 @@ export function qualityOf(value: string | null | undefined): Quality {
         throw new Error("Unrecognized production quality.");
     return selected;
 }
-export type Observation = {
+type Observation = {
     starts_at: string;
     ends_at: string;
     energy: number;
     quality: Quality;
     source: string;
 };
-export type Unit = "MWh" | "kWh";
+type Unit = "MWh" | "kWh";
 export type ProductionFile = { unit: Unit; observations: Observation[] };
 
 // The energy column names its unit; timezone is informational, as the production export writes it.

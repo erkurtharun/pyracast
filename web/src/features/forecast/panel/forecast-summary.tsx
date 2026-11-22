@@ -6,7 +6,6 @@ import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
 import { Notice, Stat, Tag } from "@/ui/ui";
 import type { ForecastInterval as Interval } from "../forecast-intervals";
-import { WeatherReferenceCard } from "../weather-reference";
 import { useFormat } from "@/lib/format/use-format";
 import { Freshness } from "./freshness";
 import {
@@ -114,9 +113,6 @@ export function ForecastSummary({
                     )}
                 </div>
             </div>
-            {!electrical && result.weather_reference != null && (
-                <WeatherReferenceCard reference={result.weather_reference} />
-            )}
             {diagnostic?.evidence_state === "stale" ? (
                 <Notice>{t("production_comparison_is_out_of_date")}</Notice>
             ) : diagnostic &&

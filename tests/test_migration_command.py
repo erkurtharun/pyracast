@@ -85,6 +85,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
             "0004_schema_naming_convention",
             "0005_collection_times_shape_check",
             "0006_collection_outcomes_and_ledger_status",
+            "0007_remove_weather_reference",
         ),
         "incidents": ("0002_incident_kind_choices", "0003_schema_naming_convention"),
         "metering": (

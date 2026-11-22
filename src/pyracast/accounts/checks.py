@@ -79,6 +79,25 @@ def check_session_middleware_order(**_kwargs: Any) -> list[CheckMessage]:
     ]
 
 
+# The mail templates and HEADLESS_FRONTEND_URLS serve only codes; a link mode would mail allauth's
+# own untranslated link templates.
+@register(Tags.compatibility)
+def check_code_modes(**_kwargs: Any) -> list[CheckMessage]:
+    if (
+        settings.ACCOUNT_EMAIL_VERIFICATION_BY_CODE_ENABLED
+        and settings.ACCOUNT_PASSWORD_RESET_BY_CODE_ENABLED
+    ):
+        return []
+    return [
+        Error(
+            "Email verification and password reset must both use codes.",
+            hint="Set ACCOUNT_EMAIL_VERIFICATION_BY_CODE_ENABLED and "
+            "ACCOUNT_PASSWORD_RESET_BY_CODE_ENABLED to True.",
+            id="accounts.E007",
+        )
+    ]
+
+
 @register(Tags.security, deploy=True)
 def check_authentication_origin(**_kwargs: Any) -> list[CheckMessage]:
     try:

@@ -125,6 +125,7 @@ MIGRATION = frozenset(
         "test_schema_naming_migrations",
         "test_submission_change_time_migration",
         "test_vocabulary_migrations",
+        "test_weather_removal_migration",
         "test_workspace_name_migration",
     }
 )

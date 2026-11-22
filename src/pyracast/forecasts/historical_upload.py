@@ -14,6 +14,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_noop
 
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.models import SiteBinding
@@ -277,10 +278,16 @@ def parse_historical_upload(
         warnings = []
         if declared_period:
             warnings.append(
-                "Interval duration was declared by the operator, not provided by every row."
+                gettext_noop(
+                    "Interval duration was declared by the operator, not provided by every row."
+                )
             )
         if used_naive:
-            warnings.append("Naive source timestamps were interpreted using the selected timezone.")
+            warnings.append(
+                gettext_noop(
+                    "Naive source timestamps were interpreted using the selected timezone."
+                )
+            )
         return HistoricalUpload(
             PowerFile(tuple(intervals), tuple(rows), sha256(content).hexdigest()),
             metadata,
@@ -363,11 +370,17 @@ def preview_historical_upload(
     warnings = list(upload.warnings)
     if missing:
         warnings.append(
-            "The file does not verify all reference settings; operator confirmation is required."
+            gettext_noop(
+                "The file does not verify all reference settings; "
+                "operator confirmation is required."
+            )
         )
     if binding.dc_capacity_kw is None:
         warnings.append(
-            "The selected reference has no declared DC capacity; settings matching is incomplete."
+            gettext_noop(
+                "The selected reference has no declared DC capacity; "
+                "settings matching is incomplete."
+            )
         )
     days = tuple(day_indexes(upload.power, ZoneInfo(binding.timezone)))
     highest = max(interval.power_kw for interval in upload.power.intervals)
@@ -383,7 +396,9 @@ def preview_historical_upload(
     plausible_size = len(days) < 2 or highest >= binding.capacity_kw * IMPLAUSIBLY_SMALL_SHARE
     if not plausible_size:
         warnings.append(
-            "Every interval stays below 1% of the reference capacity; check the file's unit."
+            gettext_noop(
+                "Every interval stays below 1% of the reference capacity; check the file's unit."
+            )
         )
     previous = (
         HistoricalReferenceImport.objects.filter(

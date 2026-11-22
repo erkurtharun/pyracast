@@ -21,6 +21,7 @@ from pyracast.accounts.models import (
     OutboundMailStatus,
     WorkspaceInvitation,
 )
+from pyracast.background.claims import claim_unless_contended
 from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS, PUBLISH_BATCH
 from pyracast.background.lease import carries, claimable, expired, release, take
@@ -54,14 +55,6 @@ def unseal_code(sealed: str) -> str:
 
 def _due(now: datetime) -> Q:
     return Q(status__in=WAITING, available_at__lte=now) | claimable(OutboundMailStatus.SENDING, now)
-
-
-def pending_mail_ids(now: datetime, limit: int = PUBLISH_BATCH) -> list[int]:
-    return list(
-        OutboundMail.objects.filter(_due(now))
-        .order_by("available_at", "pk")
-        .values_list("pk", flat=True)[:limit]
-    )
 
 
 def publish_due_mail(
@@ -237,7 +230,7 @@ def _record(
 
 def send_outbound_mail(mail_id: int, now: datetime) -> bool:
     clock = Clock(now).now
-    claimed = _claim(mail_id, now)
+    claimed = claim_unless_contended("send_outbound_mail", mail_id, lambda: _claim(mail_id, now))
     if claimed is None:
         return False
     mail, token = claimed
@@ -279,14 +272,14 @@ def send_outbound_mail(mail_id: int, now: datetime) -> bool:
 
 def end_expired_mail(now: datetime, limit: int = 100) -> int:
     with transaction.atomic():
-        expired = list(
+        ended = list(
             OutboundMail.objects.select_for_update(skip_locked=True)
             .filter(status__in=WAITING, expires_at__lte=now)
             .order_by("pk")[:limit]
         )
-        for mail in expired:
+        for mail in ended:
             _finish(mail, OutboundMailStatus.SKIPPED, OutboundMailError.EXPIRED, now)
-    return len(expired)
+    return len(ended)
 
 
 def purge_finished_mail(cutoff: datetime, limit: int) -> int:

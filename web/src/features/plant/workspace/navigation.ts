@@ -9,9 +9,7 @@ import {
     type PlantSection,
 } from "@/lib/routes";
 
-export type Leaving = (
-    section: "forecast" | "production" | "settings",
-) => boolean;
+type Leaving = (section: "forecast" | "production" | "settings") => boolean;
 
 export function usePlantNavigation(
     scope: PlantScope,

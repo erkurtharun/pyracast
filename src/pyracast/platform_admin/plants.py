@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.models import User
-from django.db import models, transaction
+from django.db import transaction
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.utils.translation import gettext as _
@@ -70,10 +70,6 @@ def coordinate_number(text: str) -> float:
     return float(text.replace(",", "."))
 
 
-def _choices(vocabulary: type[models.TextChoices]) -> list[tuple[str, StrOrPromise]]:
-    return [(value, gettext_lazy(label)) for value, label in vocabulary.choices]
-
-
 def _text(value: object) -> str:
     if value is None:
         return ""
@@ -115,11 +111,11 @@ class SiteForm(forms.Form):
     )
     export_limit_mw = _number(gettext_lazy("Grid export limit (MW, optional)"), required=False)
     measurement_basis = forms.ChoiceField(
-        label=gettext_lazy("Measurement point"), choices=_choices(MeasurementBasis)
+        label=gettext_lazy("Measurement point"), choices=MeasurementBasis.choices
     )
     mounting_type = forms.ChoiceField(
         label=gettext_lazy("Mounting type"),
-        choices=_choices(MountingType),
+        choices=MountingType.choices,
         widget=forms.Select(attrs={"data-mounting": ""}),
     )
     surface_tilt_degrees = _number(gettext_lazy("Tilt (°, optional)"), required=False)

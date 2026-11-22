@@ -29,7 +29,10 @@ from pyracast.plants.forecasting import (
     power_intervals,
     power_limit,
 )
-from pyracast.plants.measurement_policy import LEGACY_MEASUREMENT_POLICY, MEASUREMENT_POLICY
+from pyracast.plants.measurement_policy import (
+    MEASUREMENT_POLICY,
+    SETTLEMENT_ONLY_MEASUREMENT_POLICY,
+)
 from pyracast.plants.measurements import Measurement, select_plant_measurements
 from pyracast.plants.models import CalibrationRun, ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.numerics import (
@@ -429,7 +432,7 @@ def forecast_performance(
     start, _ = local_day_bounds(start_date, zone)
     _, end = local_day_bounds(end_date, zone)
     historical = comparison == "historical_model"
-    measurement_policy = MEASUREMENT_POLICY if historical else LEGACY_MEASUREMENT_POLICY
+    measurement_policy = MEASUREMENT_POLICY if historical else SETTLEMENT_ONLY_MEASUREMENT_POLICY
     required_windows = None
     if daylight_only:
         location = configuration.binding if configuration else plant.region

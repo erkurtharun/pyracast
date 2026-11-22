@@ -162,8 +162,6 @@ def _prepared(
         coverage_start=source.coverage_start,
         coverage_end=source.coverage_end,
         available_at=moment,
-        weather_payload=source.weather_payload,
-        weather_error=source.weather_error,
     )
     copy = _Copy(source, job, snapshot)
     if source.job.endpoint == CollectionEndpoint.FORECASTS:

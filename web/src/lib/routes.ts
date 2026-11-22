@@ -1,6 +1,6 @@
 import { isLanguage, type Language } from "@/i18n/language";
 
-export const plantSections = [
+const plantSections = [
     "forecast",
     "production",
     "calibration",
@@ -8,7 +8,7 @@ export const plantSections = [
     "settings",
 ] as const;
 export type PlantSection = (typeof plantSections)[number];
-export const plantViews = {
+const plantViews = {
     forecast: ["generation", "irradiance"],
     production: ["actuals", "comparison"],
     settings: ["configuration", "location", "collection", "reminders"],
@@ -34,7 +34,8 @@ export const routes = {
     workspaces: () => "/app/w/",
     portfolio: workspace,
     members: (tenant: number) => `${workspace(tenant)}members/`,
-    inbox: (tenant: number) => `${workspace(tenant)}inbox/`,
+    inbox: (tenant: number, request?: number) =>
+        `${workspace(tenant)}inbox/${request ? `?request=${request}` : ""}`,
     trash: (tenant: number) => `${workspace(tenant)}trash/`,
     plant(
         tenant: number,
