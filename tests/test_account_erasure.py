@@ -77,7 +77,8 @@ from pyracast.orchestration import dispatcher
 from pyracast.plants.approval import approve_region
 from pyracast.plants.models import Plant, PlantSubmission
 from pyracast.plants.production_changes import ProductionChange
-from pyracast.regions.models import Region, RegionLocationChangeRequest
+from pyracast.regions.audit import record_audit
+from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionLocationChangeRequest
 from pyracast.regions.operations import configure_binding
 from tests.support.account_sessions import capture_security_events
 from tests.support.api import verified_admin
@@ -1348,6 +1349,37 @@ def test_erasure_reaching_an_invitation_mail_a_mail_worker_holds_waits_for_the_w
     ) == (1, 1)
     assert not WorkspaceInvitation.objects.exists()
     assert not OutboundMail.objects.exists()
+
+
+def test_an_audit_entry_on_a_region_erasure_holds_is_recorded_while_its_actor_is_erased(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    platform_administrator("remaining-admin")
+    person = platform_administrator("erased-admin")
+    tenant, _inviter = administered_workspace()
+    region = Region.objects.create(
+        tenant=tenant, name="Reminded", latitude=38, longitude=27, timezone="Europe/Istanbul"
+    )
+    schedule = ReminderSchedule.objects.create(region=region, effective_from=NOW)
+    ReminderRecipient.objects.create(
+        schedule=schedule, address=person.email, key=recipient_key(person.email)
+    )
+
+    erased, audited = paused_in(
+        monkeypatch,
+        erasure,
+        "_forget_recipients",
+        lambda: erase_account(person.pk, execute=True),
+        lambda: (
+            record_audit(AuditAction.REGION_RENAMED, actor=person, region=region, revision=0).pk
+        ),
+    )
+
+    assert erased.changes["notifications.ReminderRecipient"] == 1
+    assert list(AuditEvent.objects.values_list("pk", "actor_id", "region_id")) == [
+        (audited, person.pk, region.pk)
+    ]
+    assert erasure.is_erased(User.objects.get(pk=person.pk))
 
 
 def test_erasure_that_meets_a_held_lock_changes_nothing_and_says_to_run_it_again(

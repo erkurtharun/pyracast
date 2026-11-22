@@ -128,7 +128,11 @@ def is_erased(account: User) -> bool:
 
 def _locked(rows: models.QuerySet[Any], field: str = "pk") -> dict[int, Any]:
     """Locks the rows in id order; maps the id of each locked row to its `field`."""
-    return dict(rows.select_for_update(of=("self",)).order_by("pk").values_list("pk", field))
+    # Erasure never deletes or rekeys these: a foreign-key check on one must not wait for it.
+    no_key = rows.model in {Tenant, Region}
+    return dict(
+        rows.select_for_update(of=("self",), no_key=no_key).order_by("pk").values_list("pk", field)
+    )
 
 
 def _count(changes: Counter[str], deleted: tuple[int, dict[str, int]]) -> None:
