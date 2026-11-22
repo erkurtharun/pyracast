@@ -4,7 +4,10 @@ import { generatedCode } from "./generated-code.mjs";
 // configuration from the repository root.
 export default [
     {
-        files: ["src/pyracast/regions/static/pyracast/*.js"],
+        files: [
+            "src/pyracast/regions/static/pyracast/admin-historical.js",
+            "src/pyracast/regions/static/pyracast/admin-workspace.js",
+        ],
         languageOptions: {
             sourceType: "script",
             globals: {

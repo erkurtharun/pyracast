@@ -129,15 +129,21 @@ test("the admin console scripts refuse code generated from strings", async () =>
         "new Function(source);",
         "",
     ].join("\n");
-    for (const script of ["admin-historical.js", "admin-workspace.js"]) {
+    const ruleIds = async (script: string) => {
         const [result] = await consoleScripts.lintText(probe, {
             filePath: path.join(root, directory!, script),
         });
-        expect(
-            result!.messages.map((message) => message.ruleId).sort(),
-            script,
-        ).toEqual(["no-eval", "no-implied-eval", "no-new-func"]);
-    }
+        return result!.messages
+            .flatMap((message) => message.ruleId ?? [])
+            .sort();
+    };
+    for (const script of ["admin-historical.js", "admin-workspace.js"])
+        expect(await ruleIds(script), script).toEqual([
+            "no-eval",
+            "no-implied-eval",
+            "no-new-func",
+        ]);
+    expect(await ruleIds("hypothetical.js")).toEqual([]);
 });
 
 test("configuration scripts are linted as JavaScript modules", async () => {
