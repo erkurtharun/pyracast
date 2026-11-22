@@ -7,6 +7,7 @@ import {
     useContext,
     useEffect,
     useState,
+    useTransition,
     type ReactNode,
 } from "react";
 import type { Tenant } from "@/lib/api";
@@ -27,9 +28,11 @@ import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { WorkspaceAccess } from "@/ui/workspace-access";
 
 const rememberedKey = "pyracast.workspace";
-const Workspace = createContext<{ tenant?: Tenant; user: SessionUser } | null>(
-    null,
-);
+const Workspace = createContext<{
+    tenant?: Tenant;
+    user: SessionUser;
+    navigating: boolean;
+} | null>(null);
 
 function useWorkspaceContext() {
     const value = useContext(Workspace);
@@ -45,6 +48,10 @@ export function useWorkspace() {
 
 export function useOptionalWorkspace() {
     return useWorkspaceContext().tenant;
+}
+
+export function useNavigating() {
+    return useWorkspaceContext().navigating;
 }
 
 function remembered() {
@@ -104,7 +111,8 @@ export function WorkspaceShell({
     const inboxCount =
         (canManage ? (tenant?.pending_review_count ?? 0) : 0) +
         (tenant?.unread_outcome_count ?? 0);
-    const go = (target: string) => router.push(target);
+    const [navigating, startNavigation] = useTransition();
+    const go = (target: string) => startNavigation(() => router.push(target));
     const entry = (active: boolean) => ({
         className: active ? "active" : "",
         "aria-current": active ? ("page" as const) : undefined,
@@ -268,7 +276,7 @@ export function WorkspaceShell({
                     {logoutError && <Notice error>{logoutError}</Notice>}
                     <RefreshFailed resource={tenants} />
                     <WorkspaceAccess value={screen === "account" || canManage}>
-                        <Workspace value={{ tenant, user }}>
+                        <Workspace value={{ tenant, user, navigating }}>
                             {screen === "account" ? (
                                 children
                             ) : tenants.loading ? (
