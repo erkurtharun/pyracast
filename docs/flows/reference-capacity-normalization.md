@@ -43,7 +43,7 @@ sequenceDiagram
 | `regions_region` | R, lock | Tenant-scoped, non-trashed region; must be approved with the target as approved binding; `revision` goes to the audit row |
 | `connections_provideraccount` | R, lock | Target binding's account: Solcast, enabled, authorized, authorization reference and actor required |
 | `connections_sitebinding` | R, lock | Source and target compared field by field |
-| `forecasts_forecastsnapshot` | R, W | Eligible originals read; scaled copy inserted per original (raw and weather payloads unchanged) |
+| `forecasts_forecastsnapshot` | R, W | Eligible originals read; scaled copy inserted per original (raw payload unchanged) |
 | `forecasts_collectionjob` | R, W | Inserted `succeeded` with endpoint `scaled_<original endpoint>` and the original `scheduled_for`, never dispatched |
 | `forecasts_forecastresult` | W | One result per forecast copy from `calculate`, with `daily_payloads` from `prepare_daily_payloads`; the payload and every daily entry carry `reference_capacity_normalization`; `published_at` = run time. Actuals copies get no result |
 | `forecasts_referencecapacitynormalization` | R, W | Lineage, both capacities, factor, operator and reference text; deleted before snapshots on region purge (`pyracast.trash`) |
@@ -77,7 +77,7 @@ sequenceDiagram
 - Preparation, including `calculate`, runs without locks; one short transaction locks region, provider account, then both bindings by pk, re-checks every gate and writes. `jobs.publish` and `validate_binding` also take the region before the account and the historical import locks only the region, so they cannot deadlock.
 - Idempotent per (source snapshot, target binding): unique constraint plus a re-read under the lock, so only uncopied sources are written. A replay writes nothing, not even an audit row, and reports the existing copies as reused; newly archived sources are picked up by a later run. When the source history holds copies from an earlier binding, the output names that binding: copies are never rescaled again, so it needs its own run onto the target.
 - Source eligibility: succeeded jobs, endpoint `estimated_actuals` or `forecasts` with matching `source_kind`, no historical-import jobs, no snapshot that is itself a copy, collected, available and issued no later than the run's single `moment`. A snapshot without `available_at` (unpublished) never qualifies. Copies never backdate: job and snapshot `available_at`, result `published_at` and record `created_at` are the run time; `collected_at` and `issued_at` are preserved.
-- Only `power_kw` is scaled, so reconstructed GHI (`power / capacity * 1000`) is unchanged; raw payloads keep the original scale, explained by `source_capacity_kw`. Copies create no forecast issuances. Read-side precedence covers actuals only: `forecasts.actuals.legacy_actual_queryset` (used by `history.select_actual_snapshot`) ranks native, scaled, then imports; `sources.current_forecast_snapshots` ranks forecasts by recency alone.
+- Only `power_kw` is scaled, so reconstructed GHI (`power / capacity * 1000`) is unchanged; raw payloads keep the original scale, explained by `source_capacity_kw`. Copies create no forecast issuances. Read-side precedence covers actuals only: `forecasts.actuals.single_snapshot_actual_queryset` (used by `history.select_actual_snapshot`) ranks native, scaled, then imports; `sources.current_forecast_snapshots` ranks forecasts by recency alone.
 
 ## Tests
 
