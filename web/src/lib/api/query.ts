@@ -5,6 +5,7 @@ import {
     QueryClient,
     useQuery,
     useQueryClient,
+    type DefaultError,
     type QueryKey,
 } from "@tanstack/react-query";
 import { useLocale } from "next-intl";
@@ -92,6 +93,27 @@ export function sameRequest(before: QueryKey, after: QueryKey) {
     return hashKey(before.slice(0, -1)) === hashKey(after.slice(0, -1));
 }
 
+// A refusal of the reader or a missing resource: rows read before it are no longer shown.
+export function isDenied(error: unknown) {
+    return (
+        error instanceof ApiError &&
+        (error.status === 403 || error.status === 404)
+    );
+}
+
+type Previous = { queryKey: QueryKey; state: { error: DefaultError | null } };
+
+// A language change shows the rows already read until they arrive in the new language, so the screen showing them
+// is not mounted again and keeps what was typed into it and its focus; rows of a refused request stay hidden.
+export function languagePlaceholder(queryKey: QueryKey) {
+    return <T>(previous: T | undefined, previousQuery?: Previous) =>
+        previousQuery &&
+        !isDenied(previousQuery.state.error) &&
+        sameRequest(previousQuery.queryKey, queryKey)
+            ? previous
+            : undefined;
+}
+
 function useOwner() {
     const owner = useContext(QueryOwner);
     if (owner === undefined)
@@ -114,18 +136,11 @@ function useLoaded<T>(
         queryKey,
         queryFn: () => read(url),
         select: (fetched) => fetched.value,
-        // A language change shows the rows already read until they arrive in the new language, so the screen
-        // showing them is not mounted again and keeps what was typed into it and its focus.
-        placeholderData: (previous, previousQuery) =>
-            previousQuery && sameRequest(previousQuery.queryKey, queryKey)
-                ? previous
-                : undefined,
+        placeholderData: languagePlaceholder(queryKey),
         refetchInterval: (query) =>
             pollInterval(poll, query.state.data?.requests),
     });
-    const denied =
-        query.error instanceof ApiError &&
-        (query.error.status === 403 || query.error.status === 404);
+    const denied = isDenied(query.error);
     return {
         data: denied ? undefined : query.data,
         error: query.error
