@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from django.db import transaction
 
 from pyracast.accounts.models import Tenant
+from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automation import (
     promote_automatic_calibration,
 )
@@ -11,9 +12,11 @@ from pyracast.plants.models import (
     CalibrationRun,
     Plant,
 )
+from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
 from tests.support.plant_operations import ready_run
+from tests.support.plant_training import actual_snapshot_for
 
 
 def declare_native_sources(run: CalibrationRun) -> None:
@@ -69,3 +72,25 @@ def promote(plant_id: int, run: CalibrationRun) -> bool:
         Region.objects.select_for_update().get(pk=identity.region_id)
         plant = Plant.objects.select_for_update().get(pk=plant_id)
         return promote_automatic_calibration(plant, run, NOW)
+
+
+def import_fit_history(system: System, plant: Plant) -> None:
+    """Thirty days of hourly production with their actuals; the import requests the run."""
+    rows: list[ObservationInput] = []
+    for offset in range(30):
+        day = date(2026, 10, 9) + timedelta(days=offset)
+        actual_snapshot_for(system, day)
+        start, end = local_day_bounds(day, system.region.timezone)
+        while start < end:
+            rows.append(ObservationInput(start, start + timedelta(hours=1), 26))
+            start += timedelta(hours=1)
+    assert plant.current_configuration_id is not None
+    import_observations(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        configuration_id=plant.current_configuration_id,
+        unit="MWh",
+        observations=rows,
+    )
