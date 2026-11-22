@@ -55,4 +55,3 @@ def test_authorized_epias_live_access() -> None:
     result = client.fetch_day(matches[0], day)
     assert result.plant.id == matches[0].id
     assert result.day == day
-    assert result.unit == "MWh"

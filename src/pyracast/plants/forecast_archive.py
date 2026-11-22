@@ -272,7 +272,7 @@ def select_forecast_issuances(
         ForecastIssuance.objects.select_related(
             "configuration__binding", "snapshot__job", "calibration"
         )
-        .defer("snapshot__raw_payload", "snapshot__weather_payload")
+        .defer("snapshot__raw_payload")
         .filter(plant=plant, target_date__in=tuple(cutoffs))
     )
     if native_only:

@@ -397,9 +397,6 @@ STORED_VOCABULARIES = (
     StoredVocabulary(RequestAttempt, "purpose", _request_attempt, retired=("operator",)),
     StoredVocabulary(RequestAttempt, "outcome", _request_attempt),
     StoredVocabulary(ForecastSnapshot, "source_kind", _forecast_snapshot),
-    StoredVocabulary(
-        ForecastSnapshot, "weather_error", _forecast_snapshot, retired=("weather_timeout",)
-    ),
     StoredVocabulary(EpiasCollectionJob, "source_kind", _epias_job),
     StoredVocabulary(EpiasCollectionJob, "status", _epias_job, retired=("retry",)),
     StoredVocabulary(EpiasCollectionJob, "last_error", _epias_job, retired=("upstream_error",)),

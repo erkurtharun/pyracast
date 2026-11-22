@@ -6,7 +6,14 @@ from django.db.models import TextChoices
 from django.utils import timezone, translation
 
 from pyracast.accounts.models import UserLanguagePreference
-from pyracast.forecasts.models import CollectionJob, CollectionJobError, CollectionJobStatus
+from pyracast.connections.models import BindingHealth
+from pyracast.forecasts.models import (
+    CollectionJob,
+    CollectionJobError,
+    CollectionJobStatus,
+    RequestOutcome,
+    RequestPurpose,
+)
 from pyracast.metering.models import EpiasCollectionJob, EpiasJobError, EpiasJobStatus
 from pyracast.notifications.models import (
     NotificationDelivery,
@@ -19,6 +26,8 @@ from pyracast.plants.models import (
     CalibrationError,
     CalibrationRun,
     CalibrationStatus,
+    MeasurementBasis,
+    MountingType,
     PlantConfiguration,
 )
 from tests.support.api import verified_admin
@@ -35,6 +44,11 @@ VOCABULARIES: tuple[type[TextChoices], ...] = (
     NotificationDeliveryError,
     CalibrationStatus,
     CalibrationError,
+    BindingHealth,
+    RequestPurpose,
+    RequestOutcome,
+    MeasurementBasis,
+    MountingType,
 )
 
 

@@ -565,7 +565,8 @@ def test_anonymous_account_mails_share_twenty_per_hour_in_the_worker(
 
 
 def test_concurrent_workers_keep_the_anonymous_budget(transport: type[Transport]) -> None:
-    from pyracast.notifications.outbox import pending_mail_ids, send_outbound_mail
+    from pyracast.notifications.outbox import send_outbound_mail
+    from tests.support.outbox import pending_mail_ids
 
     for index in range(24):
         request_reset(index, f"absent-{index}@example.com")

@@ -5,7 +5,7 @@ import pytest
 from django.db import models
 
 from pyracast.change_requests.models import IncidentChange, ProductionChangeItem
-from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, RequestAttempt
+from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.plants.models import CalibrationRun, PlantConfiguration, PlantEvent
@@ -20,7 +20,7 @@ from tests.support.epias_api import archive_source
 from tests.support.incident_calibration import incident
 from tests.support.metering import connected
 from tests.support.migrations import checks, forward, leaf_nodes, migrate
-from tests.support.plant_operations import make_plant, snapshot_for
+from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -38,7 +38,6 @@ NEW_CHECKS = {
     ("forecasts_collectionjob", "endpoint"): "collectionjob_endpoint_chk",
     ("forecasts_requestattempt", "purpose"): "requestattempt_purpose_chk",
     ("forecasts_collectionjob", "last_error"): "collectionjob_last_error_chk",
-    ("forecasts_forecastsnapshot", "weather_error"): "forecastsnapshot_weather_error_chk",
     ("metering_epiascollectionjob", "last_error"): "epiascollectionjob_last_error_chk",
     ("plants_plantevent", "action"): "plantevent_action_chk",
     ("plants_calibrationrun", "last_error"): "calibrationrun_last_error_chk",
@@ -102,10 +101,6 @@ def _job(monkeypatch: pytest.MonkeyPatch) -> models.Model:
 
 def _attempt(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     return _job_and_attempt(make_system())[1]
-
-
-def _snapshot(monkeypatch: pytest.MonkeyPatch) -> ForecastSnapshot:
-    return snapshot_for(make_system(), NOW.date())
 
 
 def _epias_job(monkeypatch: pytest.MonkeyPatch) -> EpiasCollectionJob:
@@ -216,7 +211,6 @@ def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
         (_job, "endpoint", "legacy_endpoint", INITIAL["forecasts"]),
         (_attempt, "purpose", "operator", INITIAL["forecasts"]),
         (_job, "last_error", "provider_timeout", INITIAL["forecasts"]),
-        (_snapshot, "weather_error", "weather_timeout", INITIAL["forecasts"]),
         (_epias_job, "last_error", "upstream_error", INITIAL["metering"]),
         (_plant_event, "action", "legacy_action", INITIAL["plants"]),
         (_calibration_run, "last_error", "ValueError", INITIAL["plants"]),

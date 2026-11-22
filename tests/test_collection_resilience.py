@@ -11,8 +11,6 @@ from pyracast.forecasts.jobs.claim import LEASE_DURATION, claim
 from pyracast.forecasts.jobs.collect import persist_snapshot
 from pyracast.forecasts.models import (
     CollectionJob,
-    ForecastResult,
-    ForecastSnapshot,
     RequestAttempt,
     RequestPurpose,
 )
@@ -29,12 +27,10 @@ from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.provider_retry import retry_delay
 from pyracast.providers import SolcastProvider
-from pyracast.weather_data import WeatherData
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate, collect, publish
 from tests.support.metering import connected
 from tests.support.providers import TARGET, binding_for, replace_key
-from tests.support.weather_collection import WeatherFixture
 
 
 @pytest.mark.parametrize(
@@ -296,26 +292,6 @@ def test_unexpected_provider_errors_are_bounded_private_and_conservatively_count
     assert RequestAttempt.objects.filter(purpose="forecast", outcome="uncertain").count() == 3
     assert "private secret" not in caplog.text
     assert "RuntimeError" in caplog.text
-
-
-@pytest.mark.django_db(transaction=True)
-def test_unexpected_auxiliary_weather_failure_does_not_block_primary_publication(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    make_system(approved=True)
-    weather = WeatherFixture()
-
-    def fail(latitude: float, longitude: float, start: datetime, end: datetime) -> WeatherData:
-        raise RuntimeError("private weather key")
-
-    monkeypatch.setattr(weather, "fetch", fail)
-    assert collect(
-        CollectionJob.objects.get().pk, FakeAdapter(), calculate, NOW, weather_provider=weather
-    )
-    assert ForecastResult.objects.count() == 1
-    assert ForecastSnapshot.objects.get().weather_error == "weather_acquisition_failed"
-    assert "private weather" not in caplog.text
 
 
 @pytest.mark.django_db(transaction=True)

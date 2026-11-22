@@ -13,11 +13,11 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.errors import ConflictError
 from pyracast.forecasts.validation import validate_binding
-from pyracast.plants.approval import ReviewDecision, approve_region, review_snapshot
+from pyracast.plants.approval import ReviewDecision, approve_region
 from pyracast.plants.models import PlantSubmission
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 from pyracast.regions.operations import configure_binding, submit_region
-from tests.support.admin_setup import admin_system, form_fields, submitted_plant
+from tests.support.admin_setup import admin_system, form_fields, review_snapshot, submitted_plant
 from tests.support.api import verified_admin
 from tests.support.concurrency import behind_open_transaction
 from tests.support.domain import FakeAdapter, System, make_system

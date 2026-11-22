@@ -4,9 +4,16 @@ from html.parser import HTMLParser
 from django.urls import reverse
 
 from pyracast.connections.secrets import encrypt_secret
-from pyracast.plants.approval import review_snapshot
+from pyracast.plants.approval import ReviewSnapshot, declaration_fingerprint
 from pyracast.plants.models import Plant, PlantSubmission
+from pyracast.regions.models import Region
 from tests.support.domain import System, make_system
+
+
+def review_snapshot(region_id: int) -> ReviewSnapshot:
+    region = Region.objects.active().get(pk=region_id)
+    return ReviewSnapshot(region.status, region.revision, declaration_fingerprint(region_id))
+
 
 REJECTED_KEY = (
     "The provider rejected the API key. Enter the current key for this account, "

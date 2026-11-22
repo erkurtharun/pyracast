@@ -172,6 +172,16 @@ def test_a_held_rate_limit_lock_refuses_after_about_one_second() -> None:
     assert 0.9 <= time.monotonic() - started < 3
 
 
+@pytest.mark.parametrize(
+    "mode",
+    ["ACCOUNT_EMAIL_VERIFICATION_BY_CODE_ENABLED", "ACCOUNT_PASSWORD_RESET_BY_CODE_ENABLED"],
+)
+def test_turning_off_a_code_mode_fails_the_system_checks(settings: LazySettings, mode: str) -> None:
+    assert "accounts.E007" not in {error.id for error in run_checks(tags=[Tags.compatibility])}
+    setattr(settings, mode, False)
+    assert "accounts.E007" in {error.id for error in run_checks(tags=[Tags.compatibility])}
+
+
 def test_deployment_requires_production_mail_configuration(settings: LazySettings) -> None:
     settings.DEBUG = False
     settings.DEFAULT_FROM_EMAIL = "Pyracast <noreply@localhost>"

@@ -23,7 +23,6 @@ ROOT = Path(__file__).resolve().parents[1]
 ROLES = ("api", "worker", "mailer", "dispatcher", "frontend")
 BACKGROUND_ROLES = ("worker", "mailer", "dispatcher")
 PORTS = {"api": 8000, "frontend": 3000}
-CHILDREN: list[subprocess.Popen[bytes]] = []
 
 if sys.platform == "win32":
     import msvcrt
@@ -375,7 +374,6 @@ def start(root: Path, state: dict[str, Any]) -> None:
                         start_new_session=os.name != "nt",
                     )
                 process = psutil.Process(child.pid)
-                CHILDREN.append(child)
                 launched.append((role, process, child))
             state["processes"][role] = identity(process)
             save_state(root, state)
@@ -398,7 +396,6 @@ def start(root: Path, state: dict[str, Any]) -> None:
                     "retained. Retry stop to finish cleanup."
                 )
                 continue
-            CHILDREN.remove(child)
             state["processes"].pop(role, None)
         try:
             save_state(root, state)

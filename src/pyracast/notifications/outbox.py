@@ -57,14 +57,6 @@ def _due(now: datetime) -> Q:
     return Q(status__in=WAITING, available_at__lte=now) | claimable(OutboundMailStatus.SENDING, now)
 
 
-def pending_mail_ids(now: datetime, limit: int = PUBLISH_BATCH) -> list[int]:
-    return list(
-        OutboundMail.objects.filter(_due(now))
-        .order_by("available_at", "pk")
-        .values_list("pk", flat=True)[:limit]
-    )
-
-
 def publish_due_mail(
     publish: Callable[[int], object], now: datetime, limit: int = PUBLISH_BATCH
 ) -> int:
@@ -280,14 +272,14 @@ def send_outbound_mail(mail_id: int, now: datetime) -> bool:
 
 def end_expired_mail(now: datetime, limit: int = 100) -> int:
     with transaction.atomic():
-        expired = list(
+        ended = list(
             OutboundMail.objects.select_for_update(skip_locked=True)
             .filter(status__in=WAITING, expires_at__lte=now)
             .order_by("pk")[:limit]
         )
-        for mail in expired:
+        for mail in ended:
             _finish(mail, OutboundMailStatus.SKIPPED, OutboundMailError.EXPIRED, now)
-    return len(expired)
+    return len(ended)
 
 
 def purge_finished_mail(cutoff: datetime, limit: int) -> int:
