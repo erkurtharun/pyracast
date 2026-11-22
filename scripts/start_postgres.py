@@ -26,6 +26,8 @@ PRODUCTION_DOCKERFILE = Path(__file__).resolve().parents[1] / "deploy" / "postgr
 CONTAINER = "pyracast-postgres"
 EPHEMERAL_CONTAINER = "pyracast-postgres-ephemeral"
 VOLUME = "pyracast-postgres-data"
+# pg_ctl status exits 0 for a running server and 3 for a stopped one; anything else is an error.
+PG_CTL_STOPPED = 3
 # Only for throwaway clusters: a crash can lose or corrupt data that was not flushed.
 NON_DURABLE_OPTIONS = (
     "-c",
@@ -212,10 +214,27 @@ def running_port(binary: Path, data: Path, env: dict[str, str]) -> str | None:
         check=False,
         capture_output=True,
     )
-    if status.returncode:
+    if status.returncode == PG_CTL_STOPPED:
         return None
+    if status.returncode:
+        problem = (status.stderr or status.stdout or "").strip()
+        raise RuntimeError(
+            f"pg_ctl status for {data} failed with exit status {status.returncode}: {problem}; "
+            "nothing was changed."
+        )
+    pid_file = data / "postmaster.pid"
+    try:
+        lines = pid_file.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
     # The fourth line of a running server's postmaster.pid is its port.
-    return (data / "postmaster.pid").read_text(encoding="utf-8").splitlines()[3].strip()
+    port = lines[3].strip() if len(lines) > 3 else ""
+    if not port.isdigit():
+        raise RuntimeError(
+            f"The cluster in {data} is running, but {pid_file} names no port; nothing was "
+            "changed. Rerun when the server has finished starting or stopping."
+        )
+    return port
 
 
 def provision_windows(root: Path, port: str, options: tuple[str, ...]) -> str:
@@ -236,7 +255,7 @@ def provision_windows(root: Path, port: str, options: tuple[str, ...]) -> str:
             f"changed. Set PGPORT={running} for this command and the application, or stop it "
             f'with "{binary / "pg_ctl.exe"}" stop -D "{data}" and rerun to start it on {port}.'
         )
-    if cluster and accepts_connections(port):
+    if running == port or (cluster and accepts_connections(port)):
         status = "running"
     else:
         if not cluster:
@@ -320,7 +339,13 @@ def inspect_container(docker: str, name: str) -> Container | None:
         return None
     (details,) = json.loads(result.stdout)
     mounts = details.get("Mounts") or []
-    bindings = (details.get("HostConfig") or {}).get("PortBindings") or {}
+    running = details["State"]["Running"] is True
+    # A running container's effective mapping; a stopped one only has the requested bindings.
+    bindings = (
+        (details.get("NetworkSettings") or {}).get("Ports")
+        if running
+        else (details.get("HostConfig") or {}).get("PortBindings")
+    ) or {}
     pgdata = next(
         (
             value.removeprefix("PGDATA=")
@@ -331,7 +356,7 @@ def inspect_container(docker: str, name: str) -> Container | None:
     )
     return Container(
         image=details["Config"].get("Image") or "",
-        running=details["State"]["Running"] is True,
+        running=running,
         volumes=frozenset(
             mount["Name"]
             for mount in mounts
@@ -345,6 +370,15 @@ def inspect_container(docker: str, name: str) -> Container | None:
         ),
         data_directory=PurePosixPath(posixpath.normpath(pgdata)),
     )
+
+
+def loopback_port(ports: frozenset[tuple[str, str]]) -> str | None:
+    if len(ports) != 1:
+        return None
+    ((host, published),) = ports
+    if host != "127.0.0.1" or not published.isdigit() or not 1 <= int(published) <= 65535:
+        return None
+    return published
 
 
 def wait_for_container(docker: str, name: str) -> None:
@@ -389,11 +423,10 @@ def provision_docker(
             "changed. Move its data or remove it, then rerun."
         )
     if existing is not None and existing.ports != frozenset({("127.0.0.1", port)}):
-        loopback = [published for host, published in existing.ports if host == "127.0.0.1"]
-        if len(existing.ports) == 1 and loopback:
+        if published := loopback_port(existing.ports):
             raise RuntimeError(
-                f"Container {name} publishes loopback port {loopback[0]}, not {port}; nothing "
-                f"was changed. Set PGPORT={loopback[0]} for this command and the application, "
+                f"Container {name} publishes loopback port {published}, not {port}; nothing "
+                f"was changed. Set PGPORT={published} for this command and the application, "
                 f"or run docker stop {name} and docker rm {name} (volume {volume} keeps the "
                 f"data) and rerun to publish port {port}."
             )
