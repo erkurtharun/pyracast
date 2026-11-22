@@ -17,6 +17,8 @@ export async function recordCspViolations(page: Page): Promise<string[]> {
     return violations;
 }
 
+// The Django console keeps its own WCAG 2.1 scan: the web app's shared rules (WCAG 2.2 and best
+// practice, tests/support/accessibility.ts) were never applied to the console's pages.
 export async function checkPage(page: Page, testInfo: TestInfo, name: string) {
     await page.screenshot({
         path: testInfo.outputPath(`${name}.png`),
