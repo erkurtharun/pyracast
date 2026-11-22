@@ -152,6 +152,11 @@ def ended_at_claim(
     return ended | (slot_bound & unconfigured & ~approval_acquisition)
 
 
+def attempts_used_up(job: CollectionJob) -> bool:
+    """Claim ends a job without a window once it was taken as often as it may be."""
+    return job.retry_until is None and PROVIDER_JOB.exhausted(job.attempts)
+
+
 def window_closed(job: CollectionJob, now: datetime) -> bool:
     return job.retry_until is not None and now >= job.retry_until
 
@@ -221,7 +226,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         if reason == CollectionJobError.FORECAST_SUPERSEDED:
             _end_unclaimed(job, CollectionJobStatus.STALE, reason)
             return None
-        if job.retry_until is None and PROVIDER_JOB.exhausted(job.attempts):
+        if attempts_used_up(job):
             _end_unclaimed(job, CollectionJobStatus.FAILED, CollectionJobError.ATTEMPTS_EXHAUSTED)
             return None
         if reason is not None:

@@ -6,7 +6,7 @@ from django.db.models import Exists, F, OuterRef, Q, QuerySet
 from pyracast.background.deadlines import DATABASE_LOCK_SECONDS, PROVIDER_REQUEST
 from pyracast.background.lease import held
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts.jobs.claim import LEASE_DURATION, claimable_from
+from pyracast.forecasts.jobs.claim import LEASE_DURATION, attempts_used_up, claimable_from
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
@@ -116,9 +116,9 @@ def _jobs_still_sent(
 
     def sent_today(job: CollectionJob) -> bool:
         """A worker holding the job's lease sends unless its request is out; claim takes any
-        other open job when it is ready and ends it unsent when it is older than the due slot or,
-        under a saved schedule, off its clocks. A request refused earlier today does not keep the
-        job from being sent again."""
+        other open job when it is ready and ends it unsent when it is older than the due slot, was
+        taken as often as it may be or, under a saved schedule, is off its clocks. A request
+        refused earlier today does not keep the job from being sent again."""
         if job.status not in OPEN or job.__dict__["answered"]:
             return False
         if held(job, CollectionJobStatus.RUNNING, now):
@@ -126,6 +126,7 @@ def _jobs_still_sent(
         return (
             job.__dict__["claimable"] < day_end
             and (due is None or job.scheduled_for >= due)
+            and not attempts_used_up(job)
             and (not scheduled or on_the_schedule(job, timing, binding.region.timezone))
         )
 
