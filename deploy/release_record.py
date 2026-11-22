@@ -159,18 +159,20 @@ def recovery(host: Host) -> str:
     )
 
 
-def main(arguments: list[str] | None = None) -> int:
-    match sys.argv[1:] if arguments is None else arguments:
+def _command(arguments: list[str]) -> tuple[str, str, str] | None:
+    match arguments:
         case [config, "record", record]:
-            action = "record"
-        case [config, "recovery"]:
-            action, record = "recovery", ""
-        case [config, "end"]:
-            action, record = "end", ""
-        case [config, "discard"]:
-            action, record = "discard", ""
-        case _:
-            return 2
+            return config, "record", record
+        case [config, "recovery" | "end" | "discard" as action]:
+            return config, action, ""
+    return None
+
+
+def main(arguments: list[str] | None = None) -> int:
+    command = _command(sys.argv[1:] if arguments is None else arguments)
+    if command is None:
+        return 2
+    config, action, record = command
     try:
         host = reset_database.load_host(Path(config))
     except Exception as error:

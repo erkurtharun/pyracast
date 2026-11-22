@@ -268,5 +268,6 @@ class AccountAdapter(DefaultAccountAdapter):
             self._ensure_lock_notice(credentials)
 
     def _ensure_lock_notice(self, credentials: dict[str, Any]) -> None:
-        if address := str(credentials.get("email") or "").strip().lower():
+        address = str(credentials.get("email") or "").strip().lower()
+        if address:
             enqueue_lock_notice(address, language=mail_language(), lifetime=NOTICE_LIFETIME)

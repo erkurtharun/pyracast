@@ -346,12 +346,12 @@ def _holds_flow_of(data: dict[str, Any], account: User, addresses: Collection[st
     """Signed in as the account or holding a pending process of it, holding one of its
     addresses, or a pending provider sign-up under its first and last name that names no other
     account."""
-    owners = {
-        str(owner)
+    accounts = (
+        process.account(value)
         for process in PROCESSES
         if isinstance(value := data.get(process.session_key), dict)
-        and (owner := process.account(value)) is not None
-    }
+    )
+    owners = {str(owner) for owner in accounts if owner is not None}
     if (signed_in := data.get(SESSION_KEY)) is not None:
         owners.add(str(signed_in))
     if str(account.pk) in owners or not set(addresses).isdisjoint(_strings(data)):

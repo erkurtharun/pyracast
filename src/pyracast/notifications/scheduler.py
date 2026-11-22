@@ -19,12 +19,8 @@ from pyracast.notifications.models import (
     NotificationDeliveryStatus,
     ReminderSchedule,
 )
-from pyracast.notifications.operations import (
-    effective_recipients,
-    recipient_limit,
-    validate_recipient,
-)
-from pyracast.notifications.recipients import freeze_recipients
+from pyracast.notifications.operations import recipient_limit, validate_recipient
+from pyracast.notifications.recipients import effective_recipients, freeze_recipients
 from pyracast.regions.models import Region, active_region
 
 MAX_LATENESS = timedelta(hours=2)
