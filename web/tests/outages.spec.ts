@@ -158,19 +158,24 @@ async function workspace(
                     };
                 }
             } else {
-                if (body.expected_revision !== incident?.revision) {
+                const { expected_revision, ...values } = body;
+                if (expected_revision !== incident?.revision) {
                     await refuseStale();
                     return;
                 }
                 incident = {
                     ...incident,
-                    ...body,
+                    ...values,
                     revision: Number(incident?.revision) + 1,
                 };
-                if (path.endsWith("/resolve/"))
-                    incident = { ...incident, status: "resolved" };
-                if (path.endsWith("/cancel/"))
-                    incident = { ...incident, status: "cancelled" };
+                incident = {
+                    ...incident,
+                    status: path.endsWith("/cancel/")
+                        ? "cancelled"
+                        : incident?.ends_at
+                          ? "resolved"
+                          : "active",
+                };
             }
             data = incident;
             if (dropAnswer) {
@@ -238,6 +243,13 @@ async function workspace(
         creations: () => creations,
         conflict: () => {
             conflict = true;
+        },
+        elsewhere: (change: Partial<Schemas["IncidentOutput"]>) => {
+            incident = {
+                ...incident,
+                ...change,
+                revision: Number(incident?.revision) + 1,
+            };
         },
         dropAnswer: () =>
             new Promise<void>((resolve) => {
@@ -487,6 +499,75 @@ test("an edit saved again after its answer was lost closes as saved, shows the o
         notes: "Replaced fuse",
     });
     expect(revisions).toEqual([1, 1]);
+});
+
+test("a first save that meets an outage someone else saved with the same values shows the stale notice and saves only when asked", async ({
+    page,
+}) => {
+    const state = await workspace(page, false, true);
+    await create(page);
+    const revisions: unknown[] = [];
+    page.on("request", (request) => {
+        if (request.method() === "PUT")
+            revisions.push(request.postDataJSON().expected_revision);
+    });
+    await page
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    state.elsewhere({});
+    const save = page.getByRole("button", { name: "Save outage changes" });
+    await save.click();
+    await expect(
+        page.getByRole("alert").filter({
+            hasText: "Someone changed this outage after you opened it.",
+        }),
+    ).toBeVisible();
+    await expect(save).toBeEnabled();
+    expect(revisions).toEqual([1]);
+    expect(state.incident()?.revision).toBe(2);
+    await save.click();
+    await expect(save).toHaveCount(0);
+    expect(revisions).toEqual([1, 2]);
+    expect(state.incident()?.revision).toBe(3);
+});
+
+test("an edit sent again after an unanswered try to an outage cancelled meanwhile shows the cancelled outage and cannot send", async ({
+    page,
+}) => {
+    const state = await workspace(page);
+    await create(page);
+    const revisions: unknown[] = [];
+    let reachable = false;
+    await page.route("**/plants/21/outages/51/", (route) => {
+        revisions.push(route.request().postDataJSON().expected_revision);
+        return reachable ? route.fallback() : route.abort("failed");
+    });
+    await page
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    const save = page.getByRole("button", { name: "Save outage changes" });
+    await save.click();
+    await expect(
+        page
+            .getByRole("alert")
+            .filter({ hasText: "did not confirm the change" }),
+    ).toBeVisible();
+    state.elsewhere({ status: "cancelled" });
+    reachable = true;
+    await save.click();
+    const editor = page.getByRole("region", { name: "Edit outage" });
+    await expect(
+        editor.getByRole("status").filter({
+            hasText:
+                "This outage is now Cancelled, so your change cannot be applied.",
+        }),
+    ).toBeVisible();
+    await expect(save).toHaveCount(0);
+    expect(revisions).toEqual([1, 1]);
+    expect(state.incident()).toMatchObject({
+        revision: 2,
+        status: "cancelled",
+    });
 });
 
 test("unknown impact remains missing and stale edits show a conflict", async ({

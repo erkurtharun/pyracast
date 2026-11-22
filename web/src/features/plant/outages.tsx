@@ -2,7 +2,7 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { Plant, PlantScope } from "@/lib/api";
-import { DisplayError } from "@/lib/api/errors";
+import { ApiError, DisplayError } from "@/lib/api/errors";
 import { useApiList } from "@/lib/api/query";
 import { outagesExport } from "@/lib/exports";
 import { CsvDownload } from "@/ui/csv-download";
@@ -12,7 +12,6 @@ import { Notice } from "@/ui/ui";
 import { useCodeLabel, useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import {
-    alreadySaved,
     attemptPayload,
     INITIAL_OUTAGES,
     isEnding,
@@ -130,8 +129,15 @@ export function Outages({
                 change.action === "create"
                     ? null
                     : staleVersion(error, change.outage.id);
-            if (alreadySaved(change, current, direct)) return finishSent();
-            apply({ type: "sendFailed", current, direct });
+            const failed = reduceOutages(next, {
+                type: "sendFailed",
+                change,
+                current,
+                answered: !(error instanceof ApiError && error.status === 0),
+                direct,
+            });
+            setScreen(failed);
+            if (failed.workflow?.phase.status === "saved") return finishSent();
             if (!current) throw error;
             // The list shows the version the change lost to while the form keeps what was typed.
             void reload();
