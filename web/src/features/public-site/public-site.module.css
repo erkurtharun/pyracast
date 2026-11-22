@@ -2,7 +2,7 @@
     --paper: var(--cream-39);
     --ink: var(--forest);
     --muted: var(--neutral-624);
-    --green: var(--green-722);
+    --accent: var(--teal-729);
     --rule: var(--olive-163);
     color: var(--ink);
     background: var(--paper);
@@ -162,7 +162,7 @@
 .site .heroCopy > .eyebrow,
 .site .productHeading > .eyebrow,
 .site .startHeading > .eyebrow {
-    color: var(--green);
+    color: var(--accent);
     margin-bottom: var(--space-6);
 }
 .hero h1 {
@@ -200,10 +200,10 @@
 }
 .site .primaryButton {
     color: var(--white);
-    background: var(--green);
+    background: var(--accent);
 }
 .primaryButton:hover {
-    background: var(--green-794);
+    background: var(--teal-802);
 }
 .textLink {
     font-size: 0.9rem;
@@ -237,7 +237,7 @@
     font-weight: 600;
 }
 .forecastHeading svg {
-    color: var(--green);
+    color: var(--accent);
     flex-shrink: 0;
 }
 .chart {
@@ -249,6 +249,7 @@
 }
 .chart > svg {
     display: block;
+    color: var(--green-722);
     width: 100%;
     height: auto;
     overflow: visible;
@@ -280,7 +281,7 @@
     flex-shrink: 0;
     width: 20px;
     height: 0;
-    border-top: 2px solid var(--green);
+    border-top: 2px solid var(--green-722);
 }
 .actualLine {
     border-top: 2px dashed var(--amber-600);
@@ -330,7 +331,7 @@
     border-bottom: 0;
 }
 .featureNumber {
-    color: var(--green);
+    color: var(--accent);
     font-size: 0.72rem;
     padding-top: var(--space-0-8);
     font-variant-numeric: tabular-nums;
@@ -414,7 +415,7 @@
 }
 .legalHeader .eyebrow {
     margin-bottom: var(--space-4);
-    color: var(--teal);
+    color: var(--teal-753);
 }
 .site .legalHeader h1 {
     font-size: clamp(2.3rem, 5vw, 3.5rem);
@@ -487,12 +488,12 @@
     border-top: 1px solid var(--line);
 }
 .site .legalContact a {
-    color: var(--teal);
+    color: var(--teal-753);
     text-decoration: underline;
     text-underline-offset: 3px;
 }
 .site .legalLink a {
-    color: var(--teal);
+    color: var(--teal-753);
     text-decoration: underline;
     text-underline-offset: 3px;
 }

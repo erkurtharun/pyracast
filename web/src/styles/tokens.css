@@ -1,9 +1,7 @@
 :root {
     --ink: #172f2a;
     --muted: #5c6d65;
-    --teal: #176b56;
-    --teal-dark: #104d3f;
-    --teal-soft: #eaf3ed;
+    --success: #176b56;
     --line: #dfe6df;
     --surface: #fafbf8;
     --white: #fff;
@@ -34,10 +32,8 @@
     --green-459: #72a28c;
     --green-545: #4f9973;
     --green-692: #37664c;
-    --green-700: #26735f;
     --green-706: #395d47;
     --green-722: #28664e;
-    --green-794: #1c4d3a;
     --neutral-0-a15: #ffffff25;
     --neutral-0-a16: #ffffff29;
     --neutral-0-a5: #ffffff0e;
@@ -77,9 +73,6 @@
     --red-616: #963c2e;
     --red-639: #8c392c;
     --red-692: #7a2f23;
-    --teal-841-a3: #173a3608;
-    --teal-841-a4: #173a360a;
-    --teal-841-a5: #173a360d;
 
     /* Spacing in quarter-rem steps: --space-4 is 1rem. */
     --space-0-25: 0.0625rem;

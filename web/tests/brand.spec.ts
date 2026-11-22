@@ -155,3 +155,30 @@ for (const path of ["/", "/tr/"]) {
         }
     });
 }
+
+test("actions take the brand's petrol while the forecast keeps its chart colour", async ({
+    page,
+}) => {
+    await page.goto("/");
+    const forecast = "rgb(40, 102, 78)";
+    const series = page.locator(
+        'figure svg[role="img"] path[stroke="currentColor"]',
+    );
+    await expect(series).toHaveCount(1);
+    await expect(series).toHaveCSS("stroke", forecast);
+    await expect(page.locator('[class*="forecastLine"]')).toHaveCSS(
+        "border-top-color",
+        forecast,
+    );
+    await expect(page.locator('[class*="primaryButton"]').first()).toHaveCSS(
+        "background-color",
+        "rgb(35, 100, 103)",
+    );
+    await mockApi(page);
+    await page.goto("/app/");
+    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
+    await expect(page.locator(".button").first()).toHaveCSS(
+        "background-color",
+        "rgb(17, 105, 109)",
+    );
+});

@@ -22,12 +22,20 @@ export const brandProperties = {
     "--cream": brand.cream,
     "--cream-39": "#f9f7f2",
     "--cream-45": "#f8f6ef",
+    "--teal-65": "#e9f3f4",
+    "--teal-708": "#207175",
+    "--teal-729": "#236467",
+    "--teal-753": "#11696d",
+    "--teal-802": "#184b4d",
+    "--teal-824": "#0c4b4e",
+    "--teal-841-a3": "#153b3c08",
+    "--teal-841-a4": "#153b3c0a",
+    "--teal-841-a5": "#153b3c0d",
 } as const;
 
 export const imageShades = { "--amber-296": "#fec369" } as const;
 
 export const illustrationColours = {
-    forecast: "#28664e",
     grid: "#dedfd3",
     axis: "#c4ccbd",
     production: brandProperties["--amber-600"],

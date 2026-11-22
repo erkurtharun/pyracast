@@ -102,7 +102,7 @@ const designTokens = {
     },
 };
 
-const BRAND_PROPERTY = /^--(?:forest|amber|cream)(?:-|$)/;
+const BRAND_PROPERTY = /^--(?:forest|amber|cream|teal)(?:-|$)/;
 
 const brandSource = {
     meta: {

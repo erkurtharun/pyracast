@@ -58,7 +58,7 @@ p {
     color: var(--muted);
 }
 a {
-    color: var(--teal);
+    color: var(--teal-753);
 }
 button:focus-visible,
 a:focus-visible,
@@ -250,8 +250,8 @@ textarea:focus-visible,
     height: 36px;
     flex-shrink: 0;
     border-radius: 50%;
-    background: var(--teal-soft);
-    color: var(--teal);
+    background: var(--teal-65);
+    color: var(--teal-753);
     font-weight: 650;
 }
 .user-box > div:nth-child(2) {
@@ -336,7 +336,7 @@ main#main {
 .eyebrow {
     display: block;
     margin-bottom: var(--space-2);
-    color: var(--teal);
+    color: var(--teal-753);
     font-size: 11px;
     font-weight: 650;
     letter-spacing: 0.12em;
@@ -349,9 +349,9 @@ main#main {
     gap: var(--space-1-75);
     min-height: 44px;
     padding: var(--space-2-75) var(--space-4-5);
-    border: 1px solid var(--teal);
+    border: 1px solid var(--teal-753);
     border-radius: 10px;
-    background: var(--teal);
+    background: var(--teal-753);
     color: var(--white);
     font-size: 14px;
     font-weight: 600;
@@ -363,8 +363,8 @@ main#main {
         border-color 0.15s;
 }
 .button:hover {
-    background: var(--teal-dark);
-    border-color: var(--teal-dark);
+    background: var(--teal-824);
+    border-color: var(--teal-824);
 }
 .button.secondary {
     background: var(--white);
@@ -528,8 +528,8 @@ main#main {
     width: 40px;
     height: 40px;
     border-radius: 12px;
-    background: var(--teal-soft);
-    color: var(--teal);
+    background: var(--teal-65);
+    color: var(--teal-753);
     font-size: 22px;
 }
 .region-card h2 {
@@ -560,7 +560,7 @@ main#main {
     overflow-wrap: anywhere;
 }
 .region-card-bottom > span:last-child {
-    color: var(--teal);
+    color: var(--teal-753);
     font-size: 18px;
 }
 .tag {
@@ -685,7 +685,7 @@ main#main {
 .field input[type="checkbox"] {
     width: 18px;
     min-height: 18px;
-    accent-color: var(--teal);
+    accent-color: var(--teal-753);
 }
 .reminder-recipients {
     position: relative;
@@ -755,7 +755,7 @@ fieldset {
     margin-top: var(--space-3);
 }
 .form-footer > span {
-    color: var(--teal);
+    color: var(--success);
     font-size: 12px;
 }
 .check-field {
@@ -770,7 +770,7 @@ fieldset {
 .check-field input {
     width: 18px;
     height: 18px;
-    accent-color: var(--teal);
+    accent-color: var(--teal-753);
 }
 .notice {
     padding: var(--space-3-5) var(--space-4-5);
@@ -811,12 +811,12 @@ fieldset {
     white-space: normal;
 }
 .tabs button.active {
-    background: var(--teal-soft);
-    color: var(--teal);
+    background: var(--teal-65);
+    color: var(--teal-753);
     font-weight: 650;
 }
 .tabs button:hover {
-    color: var(--teal);
+    color: var(--teal-753);
 }
 .back-button,
 .text-button {
@@ -827,7 +827,7 @@ fieldset {
     border: 0;
     border-radius: 5px;
     background: none;
-    color: var(--teal);
+    color: var(--teal-753);
     font-size: 13px;
     font-weight: 550;
     text-align: left;
@@ -1014,7 +1014,7 @@ summary {
     max-width: 100%;
     min-height: 44px;
     padding: var(--space-3) 0;
-    color: var(--teal);
+    color: var(--teal-753);
     font-size: 13px;
     font-weight: 550;
     cursor: pointer;
@@ -1156,7 +1156,7 @@ pre,
 .production-correction {
     display: inline-block;
     margin-top: var(--space-1-25);
-    color: var(--teal);
+    color: var(--teal-753);
     font-size: 12px;
     font-weight: 600;
 }
@@ -1231,7 +1231,7 @@ pre,
     align-items: center;
     min-height: 44px;
     padding: var(--space-2-5) 0;
-    color: var(--teal);
+    color: var(--teal-753);
     font-weight: 600;
     cursor: pointer;
 }
@@ -1363,7 +1363,7 @@ pre,
     padding: var(--space-2-5) var(--space-3-75);
     border-radius: 8px;
     background: var(--white);
-    color: var(--teal);
+    color: var(--teal-753);
 }
 .skip-link:focus {
     top: 12px;
@@ -1409,8 +1409,8 @@ pre,
     font-weight: 650;
 }
 .onboarding-steps li[aria-current="step"]::before {
-    border-color: var(--teal);
-    background: var(--teal);
+    border-color: var(--teal-753);
+    background: var(--teal-753);
     color: var(--white);
 }
 .onboarding-actions {
@@ -1486,8 +1486,8 @@ pre,
 .subnav button.active,
 .subnav button[aria-current="page"] {
     border-color: var(--green-267);
-    background: var(--teal-soft);
-    color: var(--teal-dark);
+    background: var(--teal-65);
+    color: var(--teal-824);
     font-weight: 600;
 }
 .auth-page {
@@ -2118,7 +2118,7 @@ pre,
 .invitation-banner {
     padding: var(--space-4) var(--space-5);
     border-bottom: 1px solid var(--line);
-    background: var(--teal-soft);
+    background: var(--teal-65);
     color: var(--ink);
     text-align: center;
     overflow-wrap: anywhere;
@@ -2223,7 +2223,7 @@ pre,
     align-items: center;
     min-height: 44px;
     padding: var(--space-2) 0;
-    color: var(--teal);
+    color: var(--teal-753);
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
@@ -2315,7 +2315,7 @@ pre,
     object-fit: contain;
 }
 .social-provider:focus-visible {
-    outline: 3px solid var(--accent, var(--green-700));
+    outline: 3px solid var(--teal-708);
     outline-offset: 3px;
 }
 .social-provider:hover {

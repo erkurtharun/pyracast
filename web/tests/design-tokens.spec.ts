@@ -222,6 +222,7 @@ const families = {
     forest: { kit: brand.forest, old: "#143c32" },
     amber: { kit: brand.amber, old: "#a56a12" },
     cream: { kit: brand.cream, old: "#f6f7f3" },
+    teal: { kit: brand.forest, old: "#176b56" },
 };
 
 type Shade = string;
@@ -271,6 +272,45 @@ const derivation: Record<string, { from: string; keeps?: Pairing }> = {
             before: ["#ffffff", "#f6f7f3"],
         },
     },
+    "--teal-65": { from: "#eaf3ed" },
+    "--teal-708": {
+        from: "#26735f",
+        keeps: {
+            pair: ["#ffffff", "--teal-708"],
+            before: ["#ffffff", "#26735f"],
+        },
+    },
+    "--teal-729": {
+        from: "#28664e",
+        keeps: {
+            pair: ["#ffffff", "--teal-729"],
+            before: ["#ffffff", "#28664e"],
+        },
+    },
+    "--teal-753": {
+        from: "#176b56",
+        keeps: {
+            pair: ["#ffffff", "--teal-753"],
+            before: ["#ffffff", "#176b56"],
+        },
+    },
+    "--teal-802": {
+        from: "#1c4d3a",
+        keeps: {
+            pair: ["#ffffff", "--teal-802"],
+            before: ["#ffffff", "#1c4d3a"],
+        },
+    },
+    "--teal-824": {
+        from: "#104d3f",
+        keeps: {
+            pair: ["#ffffff", "--teal-824"],
+            before: ["#ffffff", "#104d3f"],
+        },
+    },
+    "--teal-841-a3": { from: "#173a3608" },
+    "--teal-841-a4": { from: "#173a360a" },
+    "--teal-841-a5": { from: "#173a360d" },
 };
 
 const shades: Record<string, string> = { ...brandProperties, ...imageShades };
@@ -305,7 +345,7 @@ test("every brand shade is the kit's colour or follows the token rule, and each 
     );
     for (const [name, value] of Object.entries(shades)) {
         const [, family, number, alpha] =
-            /^--(forest|amber|cream)(?:-(\d+))?(?:-a(\d+))?$/.exec(name)!;
+            /^--(forest|amber|cream|teal)(?:-(\d+))?(?:-a(\d+))?$/.exec(name)!;
         if (alpha !== undefined)
             expect(
                 Math.round((Number.parseInt(value.slice(7), 16) / 255) * 100),
@@ -389,12 +429,14 @@ test("the console's brand tokens are the shades of the tokens module", async () 
     );
     const [, root] = /^:root \{\n([^}]*)\n\}/.exec(stylesheet)!;
     const tokens = [
-        ...root!.matchAll(/^\s*(--(?:forest|amber|cream)[\w-]*): (#\w+);$/gm),
+        ...root!.matchAll(
+            /^\s*(--(?:forest|amber|cream|teal)[\w-]*): (#\w+);$/gm,
+        ),
     ];
     expect(tokens.length).toBeGreaterThan(3);
     for (const [, name, value] of tokens) {
         const [, family, number] =
-            /^--(forest|amber|cream)(?:-(\d+))?(?:-a\d+)?$/.exec(name!)!;
+            /^--(forest|amber|cream|teal)(?:-(\d+))?(?:-a\d+)?$/.exec(name!)!;
         if (number === undefined)
             expect(value!.slice(0, 7), name).toBe(
                 families[family as keyof typeof families].kit,
