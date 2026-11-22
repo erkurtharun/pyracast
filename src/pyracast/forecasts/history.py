@@ -279,12 +279,15 @@ def composed_irradiance(
     snapshots: list[ForecastSnapshot],
     composition: ForecastComposition,
     source: PreparedIntradaySource | None,
+    normalization: bool = False,
 ) -> dict[str, object]:
     result = calculate(
         binding,
         target_date,
         snapshot_data(snapshot, intervals=list(composition.intervals)),
     )
+    if normalization:
+        result["reference_capacity_normalization"] = normalization_provenance(snapshot)
     result["provenance"] = {
         "snapshot_id": snapshot.pk,
         "binding_id": binding.pk,
@@ -351,8 +354,8 @@ def regional_composed_forecast(
                 snapshots=snapshots,
                 composition=composition,
                 source=source,
+                normalization=True,
             )
-            result["reference_capacity_normalization"] = normalization_provenance(snapshot)
             used_snapshots = [row for row in snapshots if row.pk in composition.snapshot_ids]
     return regional_envelope(
         target_date,
