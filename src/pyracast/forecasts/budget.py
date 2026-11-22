@@ -24,6 +24,7 @@ from pyracast.forecasts.timing import (
     forecast_timing,
     latest_forecast_job,
     latest_forecast_slot,
+    on_the_schedule,
 )
 from pyracast.local_time import local_slot
 from pyracast.regions.models import RegionStatus, active_region
@@ -97,7 +98,7 @@ def _request_out() -> Exists:
 
 
 def _jobs_still_sent(
-    binding: SiteBinding, timing: ForecastTiming, now: datetime
+    binding: SiteBinding, timing: ForecastTiming, now: datetime, *, scheduled: bool
 ) -> dict[datetime, CollectionJob | None]:
     day_start = datetime.combine(now.astimezone(UTC).date(), datetime.min.time(), UTC)
     day_end = day_start + timedelta(days=1)
@@ -115,13 +116,18 @@ def _jobs_still_sent(
 
     def sent_today(job: CollectionJob) -> bool:
         """A worker holding the job's lease sends unless its request is out; claim takes any
-        other open job when it is ready and ends it unsent when it is older than the due slot.
-        A request refused earlier today does not keep the job from being sent again."""
+        other open job when it is ready and ends it unsent when it is older than the due slot or,
+        under a saved schedule, off its clocks. A request refused earlier today does not keep the
+        job from being sent again."""
         if job.status not in OPEN or job.__dict__["answered"]:
             return False
         if held(job, CollectionJobStatus.RUNNING, now):
             return not job.__dict__["request_out"]
-        return job.__dict__["claimable"] < day_end and (due is None or job.scheduled_for >= due)
+        return (
+            job.__dict__["claimable"] < day_end
+            and (due is None or job.scheduled_for >= due)
+            and (not scheduled or on_the_schedule(job, timing, binding.region.timezone))
+        )
 
     sent: dict[datetime, CollectionJob | None] = {
         job.scheduled_for: job for job in jobs if sent_today(job)
@@ -166,14 +172,11 @@ def _jobs_still_sent(
 
 def forecast_need(binding: SiteBinding, now: datetime, daily_quota: int) -> int:
     """Forecast requests the binding still sends in the UTC day of `now`, as claim admits them."""
-    timing = forecast_timing(
-        binding,
-        CollectionSchedule.objects.filter(region_id=binding.region_id).first(),
-        daily_quota=daily_quota,
-    )
+    schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
+    timing = forecast_timing(binding, schedule, daily_quota=daily_quota)
     if timing is None:
         return 0
-    sent = _jobs_still_sent(binding, timing, now)
+    sent = _jobs_still_sent(binding, timing, now, scheduled=schedule is not None)
     free = started_jobs(timing, [job.pk for job in sent.values() if job is not None])
     starts = sum(1 for job in sent.values() if job is None or job.pk not in free)
     left = max(
