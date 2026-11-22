@@ -1338,6 +1338,7 @@ def test_command_reports_forecasts_alone_without_a_day_report(
 @pytest.fixture
 def detached_console_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(logging.getLogger("pyracast"), "handlers", [])
+    monkeypatch.setattr(logging.getLogger(), "handlers", [])
 
 
 def test_command_prints_a_fixed_sentence_per_refusal_and_no_export_value_or_path(

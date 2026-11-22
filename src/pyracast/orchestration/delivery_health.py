@@ -8,7 +8,7 @@ from operator import or_
 from typing import Any, Literal
 
 from django.db.models import Count, Exists, F, OuterRef, Q, QuerySet, Subquery, Value
-from django.db.models.functions import Greatest, Least
+from django.db.models.functions import Coalesce, Greatest, Least
 from django.db.models.lookups import LessThan
 
 from pyracast.accounts.models import OutboundMail, OutboundMailStatus
@@ -136,9 +136,10 @@ def _invalid_recipients(_: Window) -> Q:
 def _calibration_claimable_at() -> Greatest:
     # A run has no due time. The claim waits for a cutoff ahead and fails a run whose cutoff lies
     # more than one lease ahead, so a run is claimable from its cutoff, at most a lease after its
-    # creation. A requeued run (attempts > 0) has no column that says since when it waits again.
+    # creation, and never before it waits (since its creation or its latest requeue).
     return Greatest(
-        "created_at", Least("cutoff_at", F("created_at") + Value(training.LEASE_DURATION))
+        Coalesce("available_at", "created_at"),
+        Least("cutoff_at", F("created_at") + Value(training.LEASE_DURATION)),
     )
 
 
@@ -310,7 +311,6 @@ CHECKS: tuple[Check, ...] = (
         lambda window: Q(
             LessThan(_calibration_claimable_at(), window.cutoff),
             status__in=training.WAITING,
-            attempts=0,
         ),
     ),
     Check(
@@ -487,14 +487,23 @@ class HealthReport:
             not self.unhealthy_phases
             and not self.broker_unreachable
             and not self.missing_queues
-            and not any(self.counts[item.key] for item in CHECKS if item.alarm)
+            and not self.alarms
         )
+
+    @property
+    def alarms(self) -> dict[str, int]:
+        return {
+            item.key: self.counts[item.key]
+            for item in CHECKS
+            if item.alarm and self.counts[item.key]
+        }
 
     def as_json(self) -> dict[str, object]:
         report: dict[str, object] = {
             "healthy": self.healthy,
             "checked_at": self.checked_at.isoformat(),
             "unhealthy_dispatch_phases": self.unhealthy_phases,
+            "alarms": self.alarms,
             **self.counts,
             "provider_requests_max_binding_today": max(
                 (item.today for item in self.requests), default=0

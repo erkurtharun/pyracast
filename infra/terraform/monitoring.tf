@@ -75,15 +75,28 @@ resource "google_monitoring_alert_policy" "readiness" {
   }
 }
 
-resource "google_monitoring_alert_policy" "operations" {
-  for_each = {
-    backup      = { event = "pyracast_backup_failed", description = "Database backup failed; inspect pyracast-backup.service and verify the latest private-bucket backup before releasing." }
-    runtime     = { event = "pyracast_runtime_unhealthy", description = "A required container remains unhealthy after supervision; inspect workers and release-blocked before restarting." }
-    host        = { event = "pyracast_host_capacity", description = "The VM has less than 15 percent disk space or 10 percent available memory; inspect capacity before jobs are interrupted." }
-    certificate = { event = "pyracast_certificate_expiring", description = "The origin certificate has less than a quarter of its lifetime left, so its renewal is failing; inspect the gateway logs and port 80 reachability for the ACME challenge." }
-    secrets     = { event = "pyracast_secrets_failed", description = "The runtime secret helper could not prepare a release's environment files; its category names the cause (configuration, identity, permission, version, unavailable, format, write, unexpected). Inspect journalctl -u pyracast.service or the release log." }
-    origin_pull = { event = "pyracast_origin_pull_unenforced", description = "Origin pulls are required, but port 443 on the host no longer refuses a handshake without the edge's certificate. Inspect the gateway logs and its edge TLS option." }
+locals {
+  # Every operations event a log-match policy alerts on, each with its own policy. A key names an
+  # existing policy (backup, runtime, host, certificate, secrets and origin_pull existed first):
+  # renaming one replaces that policy.
+  operations_alerts = {
+    backup            = { event = "pyracast_backup_failed", description = "A database backup failed or the last verified one is older than 90 minutes." }
+    backup_setting    = { event = "pyracast_backup_setting_invalid", description = "daily_backups in the host configuration is neither true nor false; an hourly backup run ends failed." }
+    backup_daily_copy = { event = "pyracast_backup_daily_copy_failed", description = "The hourly backup succeeded, but its daily copy failed." }
+    rehearsal         = { event = "pyracast_rehearsal_unhealthy", description = "The restore rehearsal failed or none passed within eight days." }
+    runtime           = { event = "pyracast_runtime_unhealthy", description = "A container stays unhealthy after the watchdog's restart, PostgreSQL or RabbitMQ is unhealthy, or pyracast.service is stopped outside a release." }
+    delivery          = { event = "pyracast_delivery_unhealthy", description = "The delivery health check failed; the line names the failing checks with their counts." }
+    watchdog_step     = { event = "pyracast_watchdog_step_failed", description = "One watchdog check could not run; the line names the step." }
+    release_blocked   = { event = "pyracast_release_blocked", description = "A release has kept the site in maintenance for more than an hour." }
+    host              = { event = "pyracast_host_capacity", description = "The VM has less than 15 percent disk space or 10 percent available memory." }
+    certificate       = { event = "pyracast_certificate_expiring", description = "The origin certificate has less than a quarter of its lifetime left, so its renewal is failing." }
+    secrets           = { event = "pyracast_secrets_failed", description = "The runtime secret helper could not prepare a release's environment files; the line names the category." }
+    origin_pull       = { event = "pyracast_origin_pull_unenforced", description = "Origin pulls are required, but port 443 no longer refuses a handshake without the edge's certificate." }
   }
+}
+
+resource "google_monitoring_alert_policy" "operations" {
+  for_each              = local.operations_alerts
   display_name          = "${var.name} ${each.key} failure"
   combiner              = "OR"
   enabled               = true
@@ -110,7 +123,7 @@ resource "google_monitoring_alert_policy" "operations" {
 
   documentation {
     mime_type = "text/markdown"
-    content   = each.value.description
+    content   = "${each.value.event}: ${each.value.description} What to check first and how to recover: the event's row under Alert events in DEPLOYMENT.md. A line with test set to true is a test alert."
   }
 }
 
@@ -121,6 +134,7 @@ resource "google_logging_metric" "watchdog_heartbeat" {
     "resource.type=\"gce_instance\"",
     "logName=\"projects/${var.project_id}/logs/pyracast-operations\"",
     "jsonPayload.event=\"pyracast_watchdog_heartbeat\"",
+    "NOT jsonPayload.test=true",
   ])
 
   metric_descriptor {
@@ -168,15 +182,110 @@ resource "google_monitoring_alert_policy" "watchdog_heartbeat" {
   }
 }
 
-# Counts the pyracast.security lines the API ships through the gcplogs driver, by event.
-resource "google_logging_metric" "security_events" {
-  name = "${var.name}-security-events"
+# One line per watchdog run that restarted containers which then recovered. Counted in total:
+# `services` is a list, and a label holds one value, so per service would miss a run that
+# restarted two.
+resource "google_logging_metric" "runtime_restarts" {
+  name = "${var.name}-runtime-restarts"
 
   filter = join(" AND ", [
     "resource.type=\"gce_instance\"",
-    "logName=\"projects/${var.project_id}/logs/gcplogs-docker-driver\"",
-    "jsonPayload.message:\" pyracast.security \"",
+    "logName=\"projects/${var.project_id}/logs/pyracast-operations\"",
+    "jsonPayload.event=\"pyracast_runtime_restarted\"",
+    "NOT jsonPayload.test=true",
   ])
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_monitoring_alert_policy" "runtime_restarts" {
+  display_name          = "${var.name} repeated container restarts"
+  combiner              = "OR"
+  enabled               = true
+  notification_channels = [google_monitoring_notification_channel.operator.name]
+  user_labels           = local.labels
+
+  # The window is the named period plus the minute the condition must hold (duration).
+  conditions {
+    display_name = "Three watchdog restarts within one hour"
+    condition_threshold {
+      filter = join(" AND ", [
+        "metric.type=\"logging.googleapis.com/user/${google_logging_metric.runtime_restarts.name}\"",
+        "resource.type=\"gce_instance\"",
+      ])
+      comparison              = "COMPARISON_GT"
+      threshold_value         = 2
+      duration                = "60s"
+      evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE"
+
+      aggregations {
+        alignment_period     = "3660s"
+        per_series_aligner   = "ALIGN_SUM"
+        cross_series_reducer = "REDUCE_SUM"
+      }
+
+      trigger {
+        count = 1
+      }
+    }
+  }
+
+  # An empty window closes the incident (evaluation_missing_data); this backs that up, never
+  # sooner than the longest window could still hold the lines that opened it.
+  alert_strategy {
+    auto_close = "3660s"
+  }
+
+  documentation {
+    mime_type = "text/markdown"
+    content   = "pyracast_runtime_restarted: the watchdog restarted containers in at least three runs within one hour and they recovered each time, so one keeps crashing. Test alerts never count. What to check first and how to recover: the event's row under Alert events in DEPLOYMENT.md."
+  }
+}
+
+locals {
+  # gcplogs writes each container line as jsonPayload.message and the container's name, which
+  # Docker sets and no line can change, as jsonPayload.container.name: Compose names it
+  # /<project>-<service>-<n>, or /<project>-<service>-run-<id> for `compose run`. Only the
+  # services that write security lines count. Their records start one line each with
+  # "<date> <time,ms> <level> <logger> " (pyracast.log_lines; every further line is indented),
+  # so the anchored pattern matches only a record of the pyracast.security logger.
+  security_log_filter = join(" AND ", [
+    "resource.type=\"gce_instance\"",
+    "logName=\"projects/${var.project_id}/logs/gcplogs-docker-driver\"",
+    "jsonPayload.container.name=~\"^/pyracast-(api|worker|notifications|dispatcher|migrate)-([0-9]+|run-[0-9a-f]+)$\"",
+    "jsonPayload.message=~\"^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]{3} [A-Z]+ pyracast[.]security \"",
+  ])
+}
+
+# Security lines are kept 365 days here; the default bucket keeps its own copy for 30 days.
+resource "google_logging_project_bucket_config" "security" {
+  project        = var.project_id
+  location       = var.region
+  bucket_id      = "${var.name}-security"
+  description    = "pyracast.security lines, kept 365 days."
+  retention_days = 365
+
+  depends_on = [google_project_service.required]
+}
+
+# A sink into a log bucket of its own project is authorized without a service account or grant.
+resource "google_logging_project_sink" "security" {
+  name        = "${var.name}-security"
+  description = "Routes the pyracast.security lines to their 365-day bucket."
+  destination = "logging.googleapis.com/projects/${var.project_id}/locations/${google_logging_project_bucket_config.security.location}/buckets/${google_logging_project_bucket_config.security.bucket_id}"
+  filter      = local.security_log_filter
+}
+
+# Counts by event the same pyracast.security lines the security sink keeps.
+resource "google_logging_metric" "security_events" {
+  name = "${var.name}-security-events"
+
+  filter = local.security_log_filter
 
   label_extractors = {
     event = "REGEXP_EXTRACT(jsonPayload.message, \"\\\"event\\\": \\\"([a-z_]+)\\\"\")"
@@ -211,6 +320,7 @@ resource "google_monitoring_alert_policy" "security" {
   notification_channels = [google_monitoring_notification_channel.operator.name]
   user_labels           = local.labels
 
+  # The window is the named period plus the minute the condition must hold (duration).
   conditions {
     display_name = "${each.value.signal} above ${each.value.threshold} in ten minutes"
     condition_threshold {
@@ -219,12 +329,13 @@ resource "google_monitoring_alert_policy" "security" {
         "metric.label.event=\"${each.value.signal}\"",
         "resource.type=\"gce_instance\"",
       ])
-      comparison      = "COMPARISON_GT"
-      threshold_value = each.value.threshold
-      duration        = "0s"
+      comparison              = "COMPARISON_GT"
+      threshold_value         = each.value.threshold
+      duration                = "60s"
+      evaluation_missing_data = "EVALUATION_MISSING_DATA_INACTIVE"
 
       aggregations {
-        alignment_period     = "600s"
+        alignment_period     = "660s"
         per_series_aligner   = "ALIGN_SUM"
         cross_series_reducer = "REDUCE_SUM"
       }
@@ -235,8 +346,10 @@ resource "google_monitoring_alert_policy" "security" {
     }
   }
 
+  # An empty window closes the incident (evaluation_missing_data); this backs that up, never
+  # sooner than the longest window could still hold the lines that opened it.
   alert_strategy {
-    auto_close = "86400s"
+    auto_close = "3660s"
   }
 
   documentation {

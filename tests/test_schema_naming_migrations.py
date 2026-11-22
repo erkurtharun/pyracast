@@ -305,6 +305,10 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     for row in after["plants_plantsubmission"]:
         del row["updated_at"]
     assert all(row.pop("base_configuration_id") is None for row in after["plants_plantsubmission"])
+    assert after["plants_calibrationrun"]
+    assert all(row["available_at"] is None for row in after["plants_calibrationrun"])
+    for row in after["plants_calibrationrun"]:
+        del row["available_at"]
     assert after.pop("notifications_outboundmail") == []
     assert [after.pop(table) for table in RECIPIENT_TABLES] == [[], [], []]
     revisions = after.pop("metering_epiasconnectionrevision")
