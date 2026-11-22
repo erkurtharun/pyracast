@@ -672,6 +672,41 @@ def test_a_job_off_the_schedule_in_force_holds_back_no_history_request(lease_end
     assert used(system, moment) == 2
 
 
+def server_error() -> None:
+    raise ProviderError("provider_request_failed", status_code=503)
+
+
+def test_a_job_whose_worker_died_on_its_last_attempt_holds_back_no_history_request() -> None:
+    system, (current,) = collecting_account([["16:00"]], replaced=False)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=3)
+    enqueue_due(utc(DAY, 13))
+    job = CollectionJob.objects.get(
+        binding=current, endpoint="forecasts", scheduled_for=utc(DAY, 13)
+    )
+    for _ in range(2):
+        job.refresh_from_db()
+        assert not collect(job.pk, FakeAdapter(server_error), calculate, job.available_at)
+    job.refresh_from_db()
+    assert claim(job.pk, job.available_at) is not None
+    job.refresh_from_db()
+    assert (job.status, job.attempts) == ("running", 3)
+    assert job.lease_expires_at is not None
+    moment = job.lease_expires_at + timedelta(minutes=1)
+    assert moment.date() == DAY
+
+    # Claim ends the job attempts_exhausted without a request: 2 + 1 + 0 = 3.
+    assert remaining_forecast_requests(account(system), moment) == 0
+    reserve_request(
+        current, moment, purpose=RequestPurpose.ESTIMATED_ACTUALS, job=history_job(current, moment)
+    )
+    attempts = RequestAttempt.objects.count()
+    assert claim(job.pk, moment) is None
+    job.refresh_from_db()
+    assert (job.status, job.last_error) == ("failed", "attempts_exhausted")
+    assert RequestAttempt.objects.count() == attempts
+    assert used(system, moment) == 3
+
+
 def retrying_older_job(waiting: SiteBinding) -> CollectionJob:
     """The state a server error with a long Retry-After leaves on the waiting plant's job of
     DAY 13:00 UTC: sent that day and retried late on the next."""

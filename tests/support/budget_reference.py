@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 
 from pyracast.background.deadlines import ACTORS
+from pyracast.background.retry_policy import PROVIDER_JOB
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -32,10 +33,12 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
     a job already sits at it. A job whose provider answer is stored costs nothing more. A job a
     worker runs under its lease costs one unless the request it made since it was taken is out
     and not refused. Any other open job costs one when claim would take it before the day ends:
-    not older than the due slot, at a clock of the saved schedule (or the approval job), and
-    ready by its time or at once if it is throttled and its account's delay was cleared. A job
-    refused for the key costs one where the current schedule collects it. Starts per UTC day are
-    bounded as claim admits them."""
+    not older than the due slot, at a clock of the saved schedule (or the approval job), with
+    claims left, and ready by its time or at once if it is throttled and its account's delay was
+    cleared. A job refused for the key costs one where the current schedule collects it while a
+    validation can still reopen it: these plants are validated with the current key, so only
+    while that key is recorded as rejected. Starts per UTC day are bounded as claim admits
+    them."""
     day_start = datetime.combine(now.astimezone(UTC).date(), datetime.min.time(), UTC)
     day_end = day_start + timedelta(days=1)
     total = 0
@@ -94,11 +97,13 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
                     needed[job.scheduled_for] = job
                 continue
             superseded = due is not None and job.scheduled_for < due
+            spent = job.retry_until is None and job.attempts >= PROVIDER_JOB.max_attempts
             released = (job.status, job.last_error) == ("retry", "provider_throttled") and (
                 account.request_blocked_until is None
             )
             if (
                 not superseded
+                and not spent
                 and (schedule is None or at_a_kept_clock(job, zone, clocks, first_id, effective))
                 and (released or job.available_at < day_end)
             ):
@@ -130,6 +135,7 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         )
         if (
             latest is not None
+            and account.authentication_failed_revision == account.credential_revision
             and (latest.status, latest.last_error) == ("failed", "provider_authentication_failed")
             and latest.scheduled_for >= effective
             and at_a_kept_clock(latest, zone, clocks, first_id, effective)

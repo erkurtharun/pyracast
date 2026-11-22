@@ -56,7 +56,8 @@ MOMENTS = (
 @dataclass(frozen=True)
 class JobState:
     """The planned job at a moment: an attempt made then or `attempted` earlier, a stored
-    answer, a lease ending `lease` after the moment, available only after the UTC day."""
+    answer, a lease ending `lease` after the moment, available only after the UTC day, its claims,
+    the account's key recorded as rejected, a saved schedule taking effect after its slot."""
 
     status: str
     last_error: str = ""
@@ -66,6 +67,9 @@ class JobState:
     lease: timedelta | None = None
     late: bool = False
     blocked: bool = False
+    attempts: int = 0
+    rejected: bool = False
+    before_effective: bool = False
 
 
 HELD, ENDED_LEASE = timedelta(minutes=1), timedelta(minutes=-1)
@@ -84,6 +88,20 @@ JOB_STATES = (
     JobState("running", attempt="uncertain", lease=HELD),
     JobState("running", attempt="uncertain", attempted=timedelta(minutes=-10), lease=HELD),
     JobState("running", attempt="uncertain", lease=ENDED_LEASE),
+    JobState(
+        "running", attempt="failed", attempted=timedelta(minutes=-10), lease=ENDED_LEASE, attempts=3
+    ),
+    JobState("failed", "provider_authentication_failed", attempt="failed", rejected=True),
+    JobState(
+        "failed",
+        "provider_authentication_failed",
+        attempt="failed",
+        rejected=True,
+        before_effective=True,
+    ),
+    JobState("stale", "quota_exhausted", attempt="failed"),
+    JobState("stale", "binding_not_current", attempt="succeeded", answered=True),
+    JobState("running", attempt="succeeded", lease=HELD),
 )
 
 
@@ -91,13 +109,19 @@ def arrange_planned_job(
     system: System, planned: CollectionJob, state: JobState, moment: datetime
 ) -> None:
     ProviderAccount.objects.filter(pk=system.account.pk).update(
-        request_blocked_until=moment + timedelta(days=2) if state.blocked else None
+        request_blocked_until=moment + timedelta(days=2) if state.blocked else None,
+        authentication_failed_revision=1 if state.rejected else None,
     )
+    if state.before_effective:
+        CollectionSchedule.objects.filter(region=system.region).update(
+            effective_from=planned.scheduled_for + timedelta(minutes=30)
+        )
     ForecastSnapshot.objects.filter(job=planned).delete()
     RequestAttempt.objects.filter(job=planned).delete()
     CollectionJob.objects.filter(pk=planned.pk).update(
         status=state.status,
         last_error=state.last_error,
+        attempts=state.attempts,
         available_at=next_provider_day(moment) + timedelta(hours=1)
         if state.late
         else planned.scheduled_for,
@@ -184,7 +208,7 @@ def test_the_forecast_budget_equals_its_reference_across_schedules_and_job_state
             account, moment
         ), (schedule, quota, state, moment)
         compared += 1
-    assert compared == 840
+    assert compared == 1200
 
 
 def jobs_created(moments: list[datetime]) -> set[tuple[str, datetime, object, datetime | None]]:

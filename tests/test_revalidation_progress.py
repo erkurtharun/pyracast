@@ -12,8 +12,13 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts import budget
 from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.jobs.claim import claim
-from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
-from pyracast.forecasts.quota import ForecastBudgetReservedError
+from pyracast.forecasts.models import (
+    CollectionJob,
+    CollectionSchedule,
+    RequestAttempt,
+    RequestPurpose,
+)
+from pyracast.forecasts.quota import ForecastBudgetReservedError, reserve_request
 from pyracast.forecasts.revalidation import (
     AFTER_THE_SLOT,
     RETRY_DELAY,
@@ -407,6 +412,54 @@ def test_a_validation_arms_again_only_at_a_clock_the_locked_account_quota_keeps(
     refused.refresh_from_db()
     assert (refused.status, refused.last_error) == ("failed", "provider_authentication_failed")
     assert RequestAttempt.objects.count() == attempts
+
+
+def left_ended_by_a_quota_lowered_during_the_validation(
+    system: System, plant: SiteBinding
+) -> CollectionJob:
+    """Clocks of 06:00 and 16:00 on quota 3: the job of D1 13:00 UTC is refused for the key, the
+    validation of 13:30 commits under quota 2 and leaves it ended, and the quota is 3 again."""
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=3)
+    refused = refused_for_the_key(plant, utc(D1, 13))
+    replace_key(system.admin, system.account.pk, provider_key("NEW"))
+    validate_binding(
+        system.admin, plant.pk, FakeAdapter(lower_the_quota_to_two(system)), utc(D1, 13, 30)
+    )
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=3)
+    refused.refresh_from_db()
+    assert (refused.status, refused.last_error) == ("failed", "provider_authentication_failed")
+    assert (revision(plant), used(system, utc(D1, 13, 30))) == (2, 2)
+    return refused
+
+
+def test_a_job_no_validation_arms_again_holds_back_no_history_request() -> None:
+    system, (plant,) = collecting_account([["06:00", "16:00"]], replaced=False)
+    refused = left_ended_by_a_quota_lowered_during_the_validation(system, plant)
+    moment = utc(D1, 13, 45)
+
+    # The plant is validated with the current key, so nothing reopens the job: 2 + 1 + 0 = 3.
+    assert remaining_forecast_requests(account(system), moment) == 0
+    reserve_request(
+        plant, moment, purpose=RequestPurpose.ESTIMATED_ACTUALS, keep_forecast_reserve=True
+    )
+    assert used(system, moment) == 3
+    assert claim(refused.pk, moment) is None
+    refused.refresh_from_db()
+    assert (refused.status, refused.last_error) == ("failed", "provider_authentication_failed")
+
+
+def test_validating_a_current_plant_again_leaves_its_job_refused_for_the_key_ended() -> None:
+    system, (plant,) = collecting_account([["06:00", "16:00"]], replaced=False)
+    refused = left_ended_by_a_quota_lowered_during_the_validation(system, plant)
+    moment = utc(D1, 13, 45)
+
+    validate_binding(system.admin, plant.pk, FakeAdapter(), moment)
+
+    # Admitted at 2 + 1 + 0 = 3, as the count saw the job; reopening it would need a fourth.
+    refused.refresh_from_db()
+    assert (refused.status, refused.last_error) == ("failed", "provider_authentication_failed")
+    assert used(system, moment) == 3
+    assert_current_plants_keep_their_forecasts(system, moment)
 
 
 def recording(asked: list[int]) -> Callable[[SiteBinding], ProviderAdapter]:
