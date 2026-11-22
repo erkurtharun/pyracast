@@ -167,6 +167,8 @@ def _path_problem(token: str) -> str | None:
             return f"{alternative} does not exist"
         elif alternative.endswith("/") and not (ROOT / relative).is_dir():
             return f"{alternative} is not a directory"
+    if node and not _exists(PurePosixPath(path)):
+        return f"{path} does not exist"
     if node and not re.search(
         rf"^\s*(?:async\s+)?def {re.escape(node.split('::')[-1].split('[')[0])}\(",
         (ROOT / path).read_text(encoding="utf-8"),
@@ -369,7 +371,7 @@ def test_heading_anchors_follow_githubs_slug_rule(heading: str, anchor: str) -> 
         ("docs/readme.md", "docs/readme.md does not exist"),
         ("docs/README.md/", "docs/README.md/ is not a directory"),
         ("tests/test_documentation.py::test_absent", "tests/test_documentation.py has no test"),
-    ],
+        ("web/node_modules/absent.py::test_x", "web/node_modules/absent.py does not exist"),    ],
 )
 def test_path_rules_accept_globs_placeholders_and_ignored_outputs_only(
     token: str, problem: str | None
