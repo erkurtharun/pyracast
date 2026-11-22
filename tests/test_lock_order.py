@@ -32,35 +32,54 @@ WORKSPACE = frozenset({"accounts_tenant", "regions_region", "plants_plant"})
 ROW_LOCK = re.compile(
     r"\bFOR (?:NO KEY UPDATE|UPDATE|SHARE|KEY SHARE)(?: OF (?P<of>.+?))?(?: NOWAIT| SKIP LOCKED)?$"
 )
+PARENTHESIZED = re.compile(r"\([^()]*\)")
 # An UPDATE or DELETE locks the person rows it writes.
 PERSON_WRITE = re.compile(r'^(?:UPDATE|DELETE FROM) "auth_user"\s')
-PERSON_ID = re.compile(r'"auth_user"\."id" (?:= %s|IN \((?:%s, )*%s\))')
+# A filter on the person table alone, without a join or subquery; ids prove a target only as a
+# top-level conjunct of it.
+PERSON_FILTER = re.compile(
+    r'^(?:UPDATE "auth_user" SET .+|DELETE FROM "auth_user"|SELECT .+ FROM "auth_user")'
+    r" WHERE (?P<where>.+?)(?: ORDER BY .+?)?(?: LIMIT \d+)?(?: FOR .+)?$"
+)
+PERSON_KEY = re.compile(
+    r'(?:^\(?|\bAND )(?P<key>"auth_user"\."id" (?:= %s|IN \((?:%s, )*%s\)))(?=\)?$| AND )'
+)
 
 
 def locked_tables(sql: str) -> set[str]:
-    # Without OF a locking read locks every table of its FROM list, joined ones included.
+    # Without OF a locking read locks every table of its outer FROM list, joined ones included,
+    # and none read only in a subquery.
     match = ROW_LOCK.search(sql.strip())
     if match is None:
         return set()
     if match["of"]:
         return set(re.findall(r'"(\w+)"', match["of"]))
-    return set(re.findall(r'\b(?:FROM|JOIN) "(\w+)"', sql[: match.start()]))
+    outer = sql[: match.start()]
+    while (stripped := PARENTHESIZED.sub("", outer)) != outer:
+        outer = stripped
+    return set(re.findall(r'\b(?:FROM|JOIN) "(\w+)"', outer))
 
 
-def person_ids(sql: str, params: Any) -> frozenset[object] | None:
-    """The person ids a statement names by placeholder, or None when it names none."""
-    match = PERSON_ID.search(sql)
-    if match is None or not params:
+def person_target(sql: str, params: Any) -> frozenset[object] | None:
+    """The person ids a statement is limited to, or None when its text does not prove them."""
+    match = PERSON_FILTER.match(sql.strip())
+    if match is None or "(SELECT" in sql or not params:
         return None
-    start = sql[: match.start()].count("%s")
-    return frozenset(params[start : start + match[0].count("%s")])
+    where = match["where"]
+    if " OR " in where or "NOT " in where:
+        return None
+    key = PERSON_KEY.search(where)
+    if key is None:
+        return None
+    start = sql[: match.start("where") + key.start("key")].count("%s")
+    return frozenset(params[start : start + key["key"].count("%s")])
 
 
 @dataclass
 class LockOrder:
     locked: set[str] = field(default_factory=set)
-    # The statements that, after their transaction locked a workspace row, lock a person or
-    # write a person row the transaction had not locked.
+    # The statements that, after their transaction locked a workspace row, lock or write
+    # person rows the transaction does not provably hold.
     late: list[str] = field(default_factory=list)
 
 
@@ -68,13 +87,8 @@ class LockOrder:
 class _Transaction:
     outer: object = None
     workspace: bool = False
-    # The person ids locked so far; None once a lock named no ids and so may hold any person.
-    persons: frozenset[object] | None = frozenset()
-
-    def holds(self, ids: frozenset[object] | None) -> bool:
-        if self.persons is None:
-            return True
-        return bool(self.persons) if ids is None else ids <= self.persons
+    # The person ids a statement of this transaction provably locked or wrote.
+    persons: set[object] = field(default_factory=set)
 
 
 @contextmanager
@@ -82,23 +96,25 @@ def lock_order() -> Iterator[LockOrder]:
     order = LockOrder()
     state = _Transaction()
 
-    def inspect(execute: Callable[..., Any], sql: str, params: Any, *args: Any) -> Any:
+    def inspect(
+        execute: Callable[..., Any], sql: str, params: Any, many: bool, context: dict[str, Any]
+    ) -> Any:
         nonlocal state
         outer = connection.atomic_blocks[0] if connection.atomic_blocks else None
         if outer is None or outer is not state.outer:
             state = _Transaction(outer=outer)
         tables = locked_tables(sql)
         order.locked |= tables
-        ids = person_ids(sql, params)
-        locks_person = PERSON in tables or (
-            PERSON_WRITE.match(sql) is not None and not state.holds(ids)
-        )
-        if locks_person and state.workspace and outer is not None:
+        locks_person = PERSON in tables or PERSON_WRITE.match(sql) is not None
+        target = None if many else person_target(sql, params)
+        held = target is not None and target <= state.persons
+        if locks_person and state.workspace and outer is not None and not held:
             order.late.append(sql)
-        if PERSON in tables:
-            state.persons = None if ids is None or state.persons is None else state.persons | ids
+        result = execute(sql, params, many, context)
+        if locks_person and target is not None and context["cursor"].rowcount == len(target):
+            state.persons |= target
         state.workspace = state.workspace or bool(tables & WORKSPACE)
-        return execute(sql, params, *args)
+        return result
 
     with connection.execute_wrapper(inspect):
         yield order
@@ -250,18 +266,88 @@ def test_a_transaction_locks_a_person_before_any_workspace_row(
     assert order.late == []
 
 
-@pytest.mark.parametrize("person_locked_first", [False, True])
-def test_a_person_row_written_after_a_workspace_lock_is_late_unless_locked_before(
-    person_locked_first: bool,
+STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
+    "lock workspace": lambda alice, bob, tenant: list(
+        Tenant.objects.select_for_update().filter(pk=tenant.pk)
+    ),
+    "lock alice by key": lambda alice, bob, tenant: list(
+        User.objects.select_for_update().filter(pk=alice.pk)
+    ),
+    "lock alice by name": lambda alice, bob, tenant: list(
+        User.objects.select_for_update().filter(username=alice.username)
+    ),
+    "lock alice if inactive": lambda alice, bob, tenant: list(
+        User.objects.select_for_update().filter(pk=alice.pk, is_active=False)
+    ),
+    "lock bob by key": lambda alice, bob, tenant: list(
+        User.objects.select_for_update().filter(pk=bob.pk)
+    ),
+    "write alice": lambda alice, bob, tenant: User.objects.filter(pk=alice.pk).update(
+        first_name="Renamed"
+    ),
+    "write bob": lambda alice, bob, tenant: User.objects.filter(pk=bob.pk).update(
+        first_name="Renamed"
+    ),
+    "write alice and bob in bulk": lambda alice, bob, tenant: User.objects.bulk_update(
+        [User(pk=alice.pk, first_name="Alice"), User(pk=bob.pk, first_name="Bob")],
+        ["first_name"],
+    ),
+    "delete alice": lambda alice, bob, tenant: User.objects.filter(pk=alice.pk).delete(),
+    "delete bob": lambda alice, bob, tenant: User.objects.filter(pk=bob.pk).delete(),
+}
+
+
+@pytest.mark.parametrize(
+    ("steps", "late"),
+    [
+        (("lock workspace", "write alice"), 1),
+        (("lock alice by key", "lock workspace", "write alice"), 0),
+        (("lock alice by key", "lock workspace", "write bob"), 1),
+        (("lock alice by name", "lock workspace", "write bob"), 1),
+        (("lock alice by name", "lock workspace", "write alice"), 1),
+        (("lock alice if inactive", "lock workspace", "write alice"), 1),
+        (("write alice", "lock workspace", "write alice"), 0),
+        (("write alice", "lock workspace", "write bob"), 1),
+        (("lock alice by key", "lock workspace", "write alice and bob in bulk"), 1),
+        (
+            (
+                "lock alice by key",
+                "lock bob by key",
+                "lock workspace",
+                "write alice and bob in bulk",
+            ),
+            0,
+        ),
+        (("lock alice by key", "lock workspace", "lock alice by key"), 0),
+        (("lock alice by key", "lock workspace", "lock bob by key"), 1),
+        (("lock workspace", "delete alice"), 1),
+        (("lock alice by key", "lock workspace", "delete alice"), 0),
+        (("lock alice by key", "lock workspace", "delete bob"), 1),
+    ],
+    ids=lambda value: ", ".join(value) if isinstance(value, tuple) else str(value),
+)
+def test_a_person_statement_after_a_workspace_lock_is_late_unless_its_rows_were_held(
+    steps: tuple[str, ...], late: int
 ) -> None:
-    person = User.objects.create(username="person")
+    alice = User.objects.create(username="alice")
+    bob = User.objects.create(username="bob")
     tenant = Tenant.objects.create(name="Workspace")
+    Membership.objects.create(tenant=tenant, user=alice)
 
     with lock_order() as order, transaction.atomic():
-        if person_locked_first:
-            list(User.objects.select_for_update().filter(pk=person.pk))
-        list(Tenant.objects.select_for_update().filter(pk=tenant.pk))
-        User.objects.filter(pk=person.pk).update(first_name="Renamed")
+        for step in steps:
+            STEPS[step](alice, bob, tenant)
 
-    writes = [sql for sql in order.late if sql.startswith('UPDATE "auth_user"')]
-    assert len(writes) == (0 if person_locked_first else 1)
+    assert len(order.late) == late
+
+
+def test_a_workspace_lock_through_a_person_subquery_locks_no_person() -> None:
+    alice = User.objects.create(username="alice")
+    tenant = Tenant.objects.create(name="Workspace")
+    Membership.objects.create(tenant=tenant, user=alice)
+    memberships = Membership.objects.filter(user__username="alice").values("tenant")
+
+    with lock_order() as order, transaction.atomic():
+        list(Tenant.objects.select_for_update().filter(pk__in=memberships))
+
+    assert order.locked == {"accounts_tenant"}
