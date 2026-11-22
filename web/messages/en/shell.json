@@ -6,7 +6,8 @@
     "AppError": {
         "title": "This page could not be displayed",
         "description": "Something went wrong while showing this page. Try again; if the problem continues, reload the page.",
-        "retry": "Try again"
+        "retry": "Try again",
+        "reload": "Reload page"
     },
     "Language": {
         "label": "Language",

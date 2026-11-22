@@ -1,6 +1,7 @@
 "use client";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { reloadPage } from "@/lib/on-demand";
 import { loadSession } from "@/lib/session-client";
 import { useErrorMessage } from "./form";
 
@@ -36,6 +37,9 @@ export function RouteError({ retry }: { retry: () => void }) {
                 }
             >
                 {t("retry")}
+            </button>
+            <button className="text-button" type="button" onClick={reloadPage}>
+                {t("reload")}
             </button>
         </section>
     );

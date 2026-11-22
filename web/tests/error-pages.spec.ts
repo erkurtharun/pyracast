@@ -59,3 +59,26 @@ test("the workspace failure text follows the language cookie", async ({
         page.getByRole("button", { name: "Tekrar dene", exact: true }),
     ).toBeVisible();
 });
+
+test("a workspace render failure offers a reload for a window without browser controls", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const repair = await breakSession(page);
+    await page.goto("/app/");
+    await expect(
+        page.getByRole("heading", {
+            name: "This page could not be displayed",
+            exact: true,
+        }),
+    ).toBeVisible();
+    await page.evaluate(() => Object.assign(window, { failedDocument: true }));
+    repair();
+    await page
+        .getByRole("button", { name: "Reload page", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    expect(await page.evaluate(() => "failedDocument" in window)).toBe(false);
+});
