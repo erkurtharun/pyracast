@@ -1,11 +1,14 @@
 from typing import Self
 
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.models import Tenant
 from pyracast.db import choices_check, json_shape_check
+
+NAME_MAX_LENGTH = 200
 
 
 class RegionStatus(models.TextChoices):
@@ -23,6 +26,7 @@ class LocationChangeStatus(models.TextChoices):
 
 
 class AuditAction(models.TextChoices):
+    REGION_CREATED = "region_created", gettext_lazy("Plant submitted")
     REGION_RENAMED = "region_renamed", gettext_lazy("Plant location renamed")
     LOCATION_CHANGE_REQUESTED = (
         "location_change_requested",
@@ -98,7 +102,7 @@ class RegionQuerySet[M: Region = Region, Row = M](models.QuerySet[M, Row]):
 
 class Region(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
-    name = models.CharField(max_length=200)
+    name = models.CharField(max_length=NAME_MAX_LENGTH)
     latitude = models.FloatField()
     longitude = models.FloatField()
     timezone = models.CharField(max_length=100)
@@ -114,6 +118,10 @@ class Region(models.Model):
     # Set when the administrators are warned before the purge, cleared by a restore. Regions
     # already in the trash when the column was added carry the migration time: never warned.
     purge_warning_sent_at = models.DateTimeField(null=True)
+    # What the first purge transaction found, for the record of the purge that ends later:
+    # plant ids and "provider:account:site" of every binding.
+    purge_plant_ids = ArrayField(models.BigIntegerField(), null=True)
+    purge_bindings = ArrayField(models.TextField(), null=True)
 
     objects = RegionQuerySet.as_manager()
 
@@ -139,6 +147,19 @@ class Region(models.Model):
                 condition=~models.Q(status=RegionStatus.APPROVED)
                 | models.Q(approved_binding__isnull=False),
                 name="%(class)s_status_approved_binding_chk",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    purge_started_at__isnull=True,
+                    purge_plant_ids__isnull=True,
+                    purge_bindings__isnull=True,
+                )
+                | models.Q(
+                    purge_started_at__isnull=False,
+                    purge_plant_ids__isnull=False,
+                    purge_bindings__isnull=False,
+                ),
+                name="%(class)s_purge_found_chk",
             ),
         )
 

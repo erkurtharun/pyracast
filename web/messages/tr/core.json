@@ -223,7 +223,8 @@
         "refreshFailed": "Yenilenemedi; {time} itibarıyla veriler gösteriliyor.",
         "retry": "Tekrar dene",
         "actionFailed": "İşlem tamamlanamadı",
-        "working": "İşleniyor…"
+        "working": "İşleniyor…",
+        "changedField": "{field}: {before} → {after}"
     },
     "AppError": {
         "title": "Bu sayfa görüntülenemedi",

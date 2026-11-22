@@ -16,6 +16,7 @@ from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import approve_region
 from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
 from pyracast.plants.operations import create_plant, revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.sites import site_queryset, sites, submit_site
 from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import (
@@ -47,9 +48,18 @@ def site_values(**updates: Any) -> dict[str, Any]:
     }
 
 
+def submitted(actor: User, tenant_id: int, **updates: Any) -> Region:
+    values = site_values(**updates)
+    location = {name: values.pop(name) for name in ("latitude", "longitude", "timezone")}
+    return submit_site(actor, tenant_id, PlantParameters(**values), **location)
+
+
 def pending_plant(system: System) -> Plant:
     return create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Pending", dc_capacity_mw=120
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Pending", dc_capacity_mw=120),
     )
 
 
@@ -64,9 +74,9 @@ def test_combined_site_api_saves_technical_submission_before_provider_approval()
     assert site["status"] == "pending"
     assert site["latitude"] == 41.123456
     assert site["plant"]["current_configuration"] is None
-    assert site["plant"]["submission"]["dc_capacity_mw"] == 120
-    assert site["plant"]["submission"]["inverter_capacity_mw"] is None
-    assert site["plant"]["submission"]["export_limit_mw"] == 100
+    assert site["plant"]["parameters"]["dc_capacity_mw"] == 120
+    assert site["plant"]["parameters"]["inverter_capacity_mw"] is None
+    assert site["plant"]["parameters"]["export_limit_mw"] == 100
     assert PlantConfiguration.objects.count() == CollectionJob.objects.count() == 0
     rows = client.get(base).json()["results"]
     assert rows[0]["plant"] is None
@@ -75,11 +85,13 @@ def test_combined_site_api_saves_technical_submission_before_provider_approval()
         f"/api/tenants/{system.tenant.pk}/regions/{site['id']}/plants/{site['plant']['id']}/"
     )
     updated = client.put(
-        plant_url, {"name": "Updated", "dc_capacity_mw": 130}, content_type="application/json"
+        plant_url,
+        {"name": "Updated", "dc_capacity_mw": 130, "expected_revision": 1},
+        content_type="application/json",
     )
     assert updated.status_code == 200
     assert updated.json()["current_configuration"] is None
-    assert updated.json()["submission"]["dc_capacity_mw"] == 130
+    assert updated.json()["parameters"]["dc_capacity_mw"] == 130
     assert PlantSubmission.objects.count() == 1
 
 
@@ -107,7 +119,7 @@ def test_site_api_rejects_invalid_values_and_cross_tenant_access_atomically() ->
 def test_site_list_prepares_plants_without_per_row_queries(django_assert_num_queries: Any) -> None:
     system = make_system()
     for index in range(4):
-        submit_site(system.member, system.tenant.pk, **site_values(latitude=41 + index))
+        submitted(system.member, system.tenant.pk, latitude=41 + index)
     from pyracast.plants.site_api import SiteOutput
 
     with django_assert_num_queries(2):
@@ -125,9 +137,7 @@ def test_approval_materializes_submission_once_and_preserves_customer_declaratio
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Declared",
-        dc_capacity_mw=140,
-        mounting_type="tracking",
+        PlantParameters(name="Declared", dc_capacity_mw=140, mounting_type="tracking"),
     )
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), NOW)
     job = approve_region(system.admin, system.region.pk, system.binding.pk, NOW).job
@@ -145,8 +155,7 @@ def test_approval_materializes_submission_once_and_preserves_customer_declaratio
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Later",
-        dc_capacity_mw=150,
+        PlantParameters(name="Later", dc_capacity_mw=150),
     )
     submission.refresh_from_db()
     assert submission.dc_capacity_mw == 140
@@ -174,9 +183,7 @@ def test_reapproval_rebinds_current_technical_parameters_without_rewriting_histo
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Revised",
-        dc_capacity_mw=150,
-        export_limit_mw=100,
+        PlantParameters(name="Revised", dc_capacity_mw=150, export_limit_mw=100),
     )
     previous = plant.current_configuration
     assert previous is not None
@@ -220,12 +227,12 @@ def test_approval_rejects_missing_technical_declaration_atomically() -> None:
 
 def test_duplicate_locations_use_six_decimal_tenant_scoped_identity() -> None:
     system = make_system()
-    site = submit_site(system.member, system.tenant.pk, **site_values())
+    site = submitted(system.member, system.tenant.pk)
     with raises_code("location_already_exists"):
-        submit_site(system.member, system.tenant.pk, **site_values(latitude=41.1234562))
+        submitted(system.member, system.tenant.pk, latitude=41.1234562)
     other = Tenant.objects.create(name="Other")
     Membership.objects.create(user=system.member, tenant=other, role=WorkspaceRole.ADMIN)
-    assert submit_site(system.member, other.pk, **site_values()).pk != site.pk
+    assert submitted(system.member, other.pk).pk != site.pk
     with pytest.raises(IntegrityError), transaction.atomic():
         Region.objects.create(
             tenant=system.tenant,
@@ -262,7 +269,7 @@ def test_one_plant_per_location_and_restore_rejects_a_replacement_location() -> 
 
 def test_a_location_request_onto_another_plant_is_refused_without_changing_approval() -> None:
     system = make_system(approved=True)
-    submit_site(system.member, system.tenant.pk, **site_values())
+    submitted(system.member, system.tenant.pk)
     with raises_code("location_already_exists"):
         request_location_change(
             system.member,
@@ -289,9 +296,14 @@ def test_concurrent_site_and_plant_submission_preserve_uniqueness(kind: str) -> 
             actor = User.objects.get(pk=system.member.pk)
             barrier.wait(timeout=10)
             if kind == "site":
-                submit_site(actor, system.tenant.pk, **site_values())
+                submitted(actor, system.tenant.pk)
             else:
-                create_plant(actor, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=1)
+                create_plant(
+                    actor,
+                    system.tenant.pk,
+                    system.region.pk,
+                    PlantParameters(name="PV", dc_capacity_mw=1),
+                )
             return "created"
         except ValidationError:
             return "duplicate"

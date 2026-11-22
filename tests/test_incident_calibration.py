@@ -21,6 +21,7 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.numerics import FitResult, fit_calibration
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from tests.support.domain import NOW
 from tests.support.incident_calibration import incident
 from tests.support.plant_operations import (
@@ -219,7 +220,7 @@ def test_unknown_or_changed_configuration_never_invents_affected_power(
     assert scenario["status"] == "unknown_impact"
     assert scenario["result"]["energy_mwh"] is None
     assert scenario["result"]["intervals"][20]["mean_power_mw"] is None
-    revise_plant(*scope, name="Rebuilt", dc_capacity_mw=100, export_limit_mw=80)
+    revise_plant(*scope, PlantParameters(name="Rebuilt", dc_capacity_mw=100, export_limit_mw=80))
     changed = plant_outlook(*scope, target_date=day, resolution_minutes=30)
     assert (
         "outage_configuration_changed"

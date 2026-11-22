@@ -14,6 +14,7 @@ LOCATION_REQUEST: DetailShape = {"request_id": INTEGER}
 # The reason is written for the customer and read by every member of the plant's workspace.
 REVIEW_REASON: DetailShape = {"reason": TEXT}
 AUDIT_DETAILS: Mapping[str, DetailShape] = {
+    AuditAction.REGION_CREATED: {},
     AuditAction.REGION_RENAMED: {},
     AuditAction.LOCATION_CHANGE_REQUESTED: LOCATION_REQUEST,
     AuditAction.LOCATION_CHANGE_APPROVED: LOCATION_REQUEST,

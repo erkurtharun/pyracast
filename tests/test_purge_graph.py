@@ -91,6 +91,7 @@ FOREIGN_KEYS = {
     ("plants.PlantConfiguration", "plant"): ORDERED,
     ("plants.PlantConfiguration", "region"): ORDERED,
     ("plants.PlantEvent", "plant"): ORDERED,
+    ("plants.PlantSubmission", "base_configuration"): ORDERED,
     ("plants.PlantSubmission", "plant"): ORDERED,
     ("plants.ProductionObservation", "configuration"): ORDERED,
     ("plants.ProductionObservation", "plant"): ORDERED,

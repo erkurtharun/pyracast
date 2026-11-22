@@ -70,7 +70,8 @@ async function workspace(
                         current_configuration: configured
                             ? configuration
                             : null,
-                        submission: configured ? null : configuration,
+                        parameters: configuration,
+                        parameters_revision: 1,
                     },
                 },
             ]);
