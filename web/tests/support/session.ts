@@ -79,6 +79,23 @@ export async function holdReload(page: Page) {
     return { reached, release };
 }
 
+// Refuses the next document load of the address shown now, so the document that asked for it
+// stays and ends the test.
+export async function refuseReload(page: Page) {
+    const shown = new URL(page.url()).pathname;
+    let refuse!: () => void;
+    const refused = new Promise<void>((resolve) => (refuse = resolve));
+    await page.route(
+        (url) => url.pathname === shown,
+        async (route) => {
+            if (!route.request().isNavigationRequest()) return route.fallback();
+            refuse();
+            return route.abort("aborted");
+        },
+    );
+    return { refused };
+}
+
 export function isMarked(page: Page) {
     return page.evaluate(() => "documentMarker" in window);
 }
@@ -111,6 +128,14 @@ export function pendingInvitation(page: Page) {
 
 export function focusWindow(page: Page) {
     return page.evaluate(() => window.dispatchEvent(new Event("focus")));
+}
+
+export function restoreFromCache(page: Page) {
+    return page.evaluate(() =>
+        window.dispatchEvent(
+            new PageTransitionEvent("pageshow", { persisted: true }),
+        ),
+    );
 }
 
 export async function tagObserver(page: Page) {

@@ -2,13 +2,17 @@ import { expect, test, type Page } from "./support/test";
 import { errorBody } from "./support/errors";
 import { mockApi } from "./support/workspace";
 import {
+    changedNotice,
     expiredNotice,
     firstAccount,
     focusWindow,
     isMarked,
     markDocument,
     pendingInvitation,
+    restoreFromCache,
+    secondUser,
     serveSession,
+    sessionAnswer,
     type Account,
 } from "./support/session";
 
@@ -302,4 +306,54 @@ test("a sign-in with a pending invitation lands on the invitation", async ({
         page.getByRole("button", { name: "Accept invitation", exact: true }),
     ).toBeVisible();
     await expect(page).toHaveURL("/app/invitation/");
+});
+
+test("a reload after a sign-out whose confirmation failed takes the tab's pending invitation with it", async ({
+    page,
+}) => {
+    const account: { current: Account } = { current: firstAccount };
+    let readFails = false;
+    await mockApi(page);
+    await page.route("**/api/session/", (route) =>
+        readFails
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody("busy", "The session could not be read."),
+              })
+            : route.fulfill({ json: sessionAnswer(account.current, null) }),
+    );
+    const server = await signOutServer(page, account);
+    server.failing = false;
+    await page.route("**/api/auth/browser/v1/auth/login", (route) => {
+        account.current = firstAccount;
+        return route.fallback();
+    });
+    await openWithInvitation(page);
+    readFails = true;
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(
+        page.getByText("The session could not be read."),
+    ).toBeVisible();
+    readFails = false;
+    await page.reload();
+    await expect(welcome(page)).toBeVisible();
+    await expect(page.getByText(expiredNotice)).toHaveCount(0);
+    expect(await pendingInvitation(page)).toBeNull();
+    await signInLandsOnWorkspaces(page);
+});
+
+test("a tab restored after another user signed in drops its pending invitation and tells once that the session changed", async ({
+    page,
+}) => {
+    let account: Account = firstAccount;
+    await invitedTab(page, () => account);
+    await markDocument(page);
+    account = { user: secondUser, tag: "tag-b" };
+    await restoreFromCache(page);
+    await expect(page.getByText(changedNotice)).toBeVisible();
+    expect(await isMarked(page)).toBe(false);
+    expect(await pendingInvitation(page)).toBeNull();
+    await page.reload();
+    await expect(plants(page)).toBeVisible();
+    await expect(page.getByText(changedNotice)).toHaveCount(0);
 });

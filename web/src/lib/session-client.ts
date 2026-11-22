@@ -32,7 +32,14 @@ const clockTickMs = 30_000;
 // The last session tag any tab of this browser observed. A write is an observation of a session
 // read, never a new value, so tabs that read crossing answers converge.
 export const observedTagKey = "pyracast.sessionTag";
-const replacedKey = "pyracast.sessionReplaced";
+// The signed-in owner this tab's document last showed, and how a sign-out begun here treats the
+// pending invitation. The next document compares its first answer with it.
+const shownOwnerKey = "pyracast.shownOwner";
+type ShownOwner = {
+    owner: string;
+    signOut?: "keepInvitation" | "clearInvitation";
+};
+type PreviousEnd = { notice?: "ended" | "changed"; clearInvitation: boolean };
 
 let state: SessionState = {
     ended: false,
@@ -52,6 +59,7 @@ let generation = 0;
 let adopted: { mark: Mark; session: Session } | undefined;
 let confirming: Promise<Tag> | undefined;
 let signingOut = false;
+let clearTabInvitation = () => {};
 const listeners = new Set<() => void>();
 
 export function sessionState() {
@@ -115,22 +123,55 @@ export function confirmIdleSession(now: number) {
         loadSession().catch(() => {});
 }
 
-function takeReplacedMark() {
+// The tab's pending invitation lives in a feature module, which this store cannot import.
+export function clearInvitationWith(clear: () => void) {
+    clearTabInvitation = clear;
+}
+
+function readShownOwner(): ShownOwner | undefined {
     try {
-        const marked = window.sessionStorage.getItem(replacedKey) !== null;
-        window.sessionStorage.removeItem(replacedKey);
-        return marked;
+        const value: unknown = JSON.parse(
+            window.sessionStorage.getItem(shownOwnerKey) ?? "null",
+        );
+        return isShownOwner(value) ? value : undefined;
     } catch {
-        return false;
+        return undefined;
     }
 }
 
-function markReplaced() {
+function isShownOwner(value: unknown): value is ShownOwner {
+    if (typeof value !== "object" || value === null) return false;
+    const { owner, signOut } = value as Record<string, unknown>;
+    return (
+        typeof owner === "string" &&
+        (signOut === undefined ||
+            signOut === "keepInvitation" ||
+            signOut === "clearInvitation")
+    );
+}
+
+function recordShownOwner(shown: ShownOwner | undefined) {
     try {
-        window.sessionStorage.setItem(replacedKey, "1");
+        if (shown)
+            window.sessionStorage.setItem(shownOwnerKey, JSON.stringify(shown));
+        else window.sessionStorage.removeItem(shownOwnerKey);
     } catch {
         return;
     }
+}
+
+// Another first owner than the one the tab last showed means that session ended while no
+// document looked, unless a sign-out began here.
+function previousEnd(owner: string | null): PreviousEnd | undefined {
+    const shown = readShownOwner();
+    recordShownOwner(owner === null ? undefined : { owner });
+    if (!shown || shown.owner === owner) return undefined;
+    if (shown.signOut)
+        return { clearInvitation: shown.signOut === "clearInvitation" };
+    return {
+        notice: owner === null ? "ended" : "changed",
+        clearInvitation: true,
+    };
 }
 
 function tagOf(session: Session | undefined): Tag {
@@ -168,12 +209,13 @@ export function adoptSession(session: Session) {
     const owner = sessionOwner(session) ?? null;
     if (documentOwner === undefined) {
         documentOwner = owner;
-        const replacedBefore = takeReplacedMark();
+        const ended = previousEnd(owner);
+        if (ended?.clearInvitation) clearTabInvitation();
         state = {
             ...state,
             session,
-            ended: replacedBefore && !session.user,
-            changed: replacedBefore && Boolean(session.user),
+            ended: ended?.notice === "ended",
+            changed: ended?.notice === "changed",
         };
     } else
         state = {
@@ -187,15 +229,6 @@ export function adoptSession(session: Session) {
     generation += 1;
     adopted = { mark: mark(), session };
     notify();
-}
-
-export function endDocument(): { clearInvitation: boolean } {
-    if (!documentOwner) return { clearInvitation: false };
-    const leaving = state.signOut;
-    if (leaving.status === "idle") markReplaced();
-    return {
-        clearInvitation: leaving.status === "idle" || !leaving.keepInvitation,
-    };
 }
 
 function mark(): Mark {
@@ -274,8 +307,15 @@ function setSignOut(signOut: SignOutState) {
 // One sign-out request, for the session this tab adopted; when another tab changed the session
 // meanwhile, the server refuses it and the tab shows the session the browser now holds.
 export async function signOut({ keepInvitation = false } = {}) {
-    const shown = Boolean(state.session?.user);
-    if (shown) setSignOut({ status: "pending", keepInvitation });
+    const owner = sessionOwner(state.session);
+    const shown = owner !== undefined;
+    if (shown) {
+        recordShownOwner({
+            owner,
+            signOut: keepInvitation ? "keepInvitation" : "clearInvitation",
+        });
+        setSignOut({ status: "pending", keepInvitation });
+    }
     signingOut = true;
     try {
         await authRequest("auth/session", "DELETE");

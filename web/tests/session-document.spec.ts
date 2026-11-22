@@ -10,6 +10,8 @@ import {
     markDocument,
     markedTenantRequests,
     navigationType,
+    refuseReload,
+    restoreFromCache,
     secondUser,
     serveSession,
     tagObserver,
@@ -183,6 +185,37 @@ test("a sign-in completed in another window ends in a fresh document", async ({
     await expectFreshDocument(page);
 });
 
+test("without session storage an expired session ends in one fresh document without a notice", async ({
+    page,
+}) => {
+    await page.addInitScript(() =>
+        Object.defineProperty(window, "sessionStorage", {
+            get() {
+                throw new DOMException("Storage is blocked.", "SecurityError");
+            },
+        }),
+    );
+    let account: Account = firstAccount;
+    await mockApi(page);
+    await serveSession(page, () => account);
+    await page.goto(address);
+    await expect(plants(page)).toBeVisible();
+    const mark = () =>
+        page.evaluate(() => Object.assign(window, { documentMarker: true }));
+    await mark();
+    account = null;
+    await focusWindow(page);
+    await expect(welcome(page)).toBeVisible();
+    expect(await isMarked(page)).toBe(false);
+    await expect(page.getByText(expiredNotice)).toHaveCount(0);
+    await mark();
+    const read = page.waitForResponse("**/api/session/");
+    await focusWindow(page);
+    await read;
+    await expect(welcome(page)).toBeVisible();
+    expect(await isMarked(page)).toBe(true);
+});
+
 test("a first load that is signed in stays the document it loaded as", async ({
     page,
 }) => {
@@ -201,20 +234,14 @@ test("a document restored from the back-forward cache reloads", async ({
 }) => {
     await signedInDocument(page, () => firstAccount);
     const reloaded = page.waitForEvent("load");
-    await page.evaluate(() =>
-        window.dispatchEvent(
-            new PageTransitionEvent("pageshow", { persisted: true }),
-        ),
-    );
+    await restoreFromCache(page);
     await reloaded;
     await expect(plants(page)).toBeVisible();
     await expectFreshDocument(page, "tag-a");
+    await expect(page.getByText(changedNotice)).toHaveCount(0);
 });
 
-test("an expired session reloads over a staged correction without asking", async ({
-    page,
-}) => {
-    let account: Account = firstAccount;
+async function stagedCorrection(page: Page, account: () => Account) {
     const questions: string[] = [];
     page.on("dialog", (dialog) => {
         questions.push(dialog.type());
@@ -222,7 +249,7 @@ test("an expired session reloads over a staged correction without asking", async
     });
     await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
     await mockApi(page);
-    await serveSession(page, () => account);
+    await serveSession(page, account);
     await page.route("**/api/tenants/", (route) =>
         route.fulfill({
             json: {
@@ -284,12 +311,60 @@ test("an expired session reloads over a staged correction without asking", async
         page.getByRole("region", { name: "Correction request", exact: true }),
     ).toBeVisible();
     await markDocument(page);
+    return questions;
+}
+
+test("an expired session reloads over a staged correction without asking", async ({
+    page,
+}) => {
+    let account: Account = firstAccount;
+    const questions = await stagedCorrection(page, () => account);
     account = null;
     await focusWindow(page);
     await expect(welcome(page)).toBeVisible();
     await expect(page.getByText(expiredNotice)).toBeVisible();
     expect(await isMarked(page)).toBe(false);
     expect(questions).toEqual([]);
+});
+
+test("a restored document hides a staged correction before it reloads and does not ask", async ({
+    page,
+}) => {
+    const questions = await stagedCorrection(page, () => firstAccount);
+    await page.evaluate(() =>
+        window.addEventListener("beforeunload", () =>
+            window.sessionStorage.setItem(
+                "shownAtUnload",
+                document.body.innerText,
+            ),
+        ),
+    );
+    await restoreFromCache(page);
+    await expect(
+        page.getByRole("button", { name: "Suggest correction for 08:00" }),
+    ).toBeVisible();
+    expect(await isMarked(page)).toBe(false);
+    expect(questions).toEqual([]);
+    const shown = await page.evaluate(() =>
+        window.sessionStorage.getItem("shownAtUnload"),
+    );
+    expect(shown).not.toBeNull();
+    expect(shown).not.toContain("Correction request");
+    expect(shown).not.toContain("East array");
+});
+
+test("a restored document asks for a fresh load with only the loading state shown", async ({
+    page,
+}) => {
+    await signedInDocument(page, () => firstAccount);
+    const { refused } = await refuseReload(page);
+    await restoreFromCache(page);
+    await refused;
+    await expect(
+        page.getByRole("progressbar", { name: "Loading…" }),
+    ).toBeVisible();
+    await expect(plants(page)).toHaveCount(0);
+    expect(await isMarked(page)).toBe(true);
 });
 
 const calibrationRun = answer("CalibrationOutput", {

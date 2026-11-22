@@ -15,8 +15,8 @@ import { reloadPage } from "@/lib/on-demand";
 import { routes } from "@/lib/routes";
 import { browserErrors } from "@/i18n/browser";
 import {
+    clearInvitationWith,
     confirmIdleSession,
-    endDocument,
     isCurrent,
     loadSession,
     observedTagKey,
@@ -38,6 +38,7 @@ import { SessionLanguage, useSessionLanguage } from "./session-language";
 import { Notice } from "@/ui/ui";
 
 if (typeof window !== "undefined") captureInstallPrompt();
+clearInvitationWith(clearWorkspaceInvitation);
 
 export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);
@@ -50,8 +51,9 @@ export function AppRoot({ children }: { children: ReactNode }) {
         handoff.status === "ready" &&
         language.status === "ready";
     useFocusSessionRead(ready);
-    useRestoredDocumentReload();
-    useDocumentReplacement(replaced);
+    const restored = useRestoredDocument();
+    const ending = replaced || restored;
+    useDocumentReload(ending);
     const current = useCurrentSession(session, ready, fail, clear);
     const unconfirmed = useSessionUnconfirmed();
     return (
@@ -59,7 +61,7 @@ export function AppRoot({ children }: { children: ReactNode }) {
             <SessionLanguage value={language}>
                 <LiveRegion>
                     <IdleSessionCheck />
-                    {replaced ? (
+                    {ending ? (
                         <Bootstrap retry={retry} />
                     ) : leaving.status !== "idle" ? (
                         <SigningOut state={leaving} />
@@ -237,23 +239,24 @@ function useCurrentSession(
     return current;
 }
 
-// The reload runs after the replaced document's screens and their leave listeners are gone.
-function useDocumentReplacement(replaced: boolean) {
+// The reload runs after the ending document's screens and their leave listeners are gone.
+function useDocumentReload(ending: boolean) {
     useEffect(() => {
-        if (!replaced) return;
-        if (endDocument().clearInvitation) clearWorkspaceInvitation();
-        reloadPage();
-    }, [replaced]);
+        if (ending) reloadPage();
+    }, [ending]);
 }
 
-function useRestoredDocumentReload() {
+// A document restored from the back-forward cache may show a session that ended meanwhile.
+function useRestoredDocument() {
+    const [restored, setRestored] = useState(false);
     useEffect(() => {
-        const restored = (event: PageTransitionEvent) => {
-            if (event.persisted) reloadPage();
+        const restore = (event: PageTransitionEvent) => {
+            if (event.persisted) setRestored(true);
         };
-        window.addEventListener("pageshow", restored);
-        return () => window.removeEventListener("pageshow", restored);
+        window.addEventListener("pageshow", restore);
+        return () => window.removeEventListener("pageshow", restore);
     }, []);
+    return restored;
 }
 
 function IdleSessionCheck() {
