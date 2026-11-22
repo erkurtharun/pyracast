@@ -13,7 +13,7 @@ MANAGED_VERSION = rf"{MANAGED_NAME}/versions/[0-9]+"
 # Release values go into release.env, which Compose reads literally; each pattern stays inside
 # release_environment.VALUE.
 DOMAIN = r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}"
-EMAIL = r"[a-zA-Z0-9.:/_+%-]+@[a-zA-Z0-9.:/_+%-]+\.[a-zA-Z0-9.:/_+%-]+"
+EMAIL = r"[a-zA-Z0-9.:/_+%-]+@[a-zA-Z0-9:/_+%-]+(?:\.[a-zA-Z0-9:/_+%-]+)+"
 
 
 class HostConfigError(ValueError):
