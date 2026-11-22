@@ -21,6 +21,7 @@ from pyracast.forecasts.scheduler import SLOT_FINAL_ERRORS
 from pyracast.forecasts.timing import (
     ForecastTiming,
     armed_again_by_validation,
+    awaits_validation,
     forecast_timing,
     latest_forecast_job,
     latest_forecast_slot,
@@ -165,7 +166,11 @@ def _jobs_still_sent(
             sent.setdefault(due, job)
     latest = latest_forecast_job(binding.pk, now).first()
     if latest is not None and armed_again_by_validation(
-        latest, timing, binding.region.timezone, due
+        latest,
+        timing,
+        binding.region.timezone,
+        due,
+        awaited=awaits_validation(binding, binding.provider_account),
     ):
         sent[latest.scheduled_for] = latest
     return sent

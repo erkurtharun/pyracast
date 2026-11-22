@@ -30,6 +30,7 @@ from pyracast.forecasts.quota import (
 )
 from pyracast.forecasts.timing import (
     armed_again_by_validation,
+    awaits_validation,
     forecast_timing,
     latest_forecast_job,
     latest_forecast_slot,
@@ -140,6 +141,7 @@ def validate_binding(
             and _reserve_taken_meanwhile(binding, account, attempt, committed_at)
         )
         if current_key and not reserve_taken:
+            awaited = awaits_validation(SiteBinding.objects.get(pk=binding.pk), account)
             binding.validated_at = now
             binding.validated_credential_revision = account.credential_revision
             binding.health = BindingHealth.HEALTHY
@@ -150,7 +152,7 @@ def validate_binding(
                 and account.enabled
                 and account.authorized_at is not None
             ):
-                _rearm_after_validation(binding, region, account, committed_at)
+                _rearm_after_validation(binding, region, account, committed_at, awaited=awaited)
             record_audit(
                 actor=actor,
                 region=region,
@@ -190,7 +192,12 @@ def _record_refusal(binding: SiteBinding) -> None:
 
 
 def _rearm_after_validation(
-    binding: SiteBinding, region: Region, account: ProviderAccount, recovered_at: datetime
+    binding: SiteBinding,
+    region: Region,
+    account: ProviderAccount,
+    recovered_at: datetime,
+    *,
+    awaited: bool,
 ) -> None:
     timing = forecast_timing(
         binding,
@@ -201,7 +208,9 @@ def _rearm_after_validation(
         return
     due = latest_forecast_slot(recovered_at, region.timezone, timing.times, timing.effective_from)
     latest = latest_forecast_job(binding.pk, recovered_at).select_for_update().first()
-    if latest is not None and armed_again_by_validation(latest, timing, region.timezone, due):
+    if latest is not None and armed_again_by_validation(
+        latest, timing, region.timezone, due, awaited=awaited
+    ):
         latest.status = CollectionJobStatus.PENDING
         latest.available_at = recovered_at
         latest.attempts = 0

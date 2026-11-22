@@ -7,7 +7,7 @@ from django.conf import settings
 from django.db.models import QuerySet
 
 from pyracast.collection_window import SLOT_SEARCH_DAYS
-from pyracast.connections.models import SiteBinding
+from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
@@ -65,15 +65,30 @@ def on_the_schedule(job: CollectionJob, timing: ForecastTiming, timezone: str) -
     )
 
 
-def armed_again_by_validation(
-    job: CollectionJob, timing: ForecastTiming, timezone: str, due: datetime | None
-) -> bool:
-    """A successful validation reopens its binding's latest forecast job refused for the key
-    while the schedule in force still collects it. One from before the schedule took effect (a
-    restore, an edit) stays ended, and so does one older than the due slot, which the scheduler
-    opens instead."""
+def awaits_validation(binding: SiteBinding, account: ProviderAccount) -> bool:
+    """A validation of the binding can still reopen its job refused for the key: the binding is
+    not validated with the account's key, or that key is recorded as rejected."""
     return (
-        job.status == CollectionJobStatus.FAILED
+        binding.validated_credential_revision != account.credential_revision
+        or account.authentication_failed_revision == account.credential_revision
+    )
+
+
+def armed_again_by_validation(
+    job: CollectionJob,
+    timing: ForecastTiming,
+    timezone: str,
+    due: datetime | None,
+    *,
+    awaited: bool,
+) -> bool:
+    """A successful validation its binding `awaited` reopens the binding's latest forecast job
+    refused for the key while the schedule in force still collects it. One from before the
+    schedule took effect (a restore, an edit) stays ended, and so does one older than the due
+    slot, which the scheduler opens instead."""
+    return (
+        awaited
+        and job.status == CollectionJobStatus.FAILED
         and job.last_error == CollectionJobError.PROVIDER_AUTHENTICATION_FAILED
         and job.scheduled_for >= timing.effective_from
         and on_the_schedule(job, timing, timezone)
