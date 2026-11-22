@@ -1,8 +1,9 @@
 "use client";
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 import { api } from "@/lib/api/client";
 import { routes } from "@/lib/routes";
-import { signOut, useSessionState } from "@/lib/session-client";
+import { sessionState, signOut, useSessionState } from "@/lib/session-client";
 import { AsyncButton } from "@/ui/form";
 import { InvitationDetails, type PreviewState } from "./invitation-preview";
 import { clearWorkspaceInvitation } from "./workspace-invitation";
@@ -16,6 +17,21 @@ export function AcceptInvitation({
 }) {
     const t = useTranslations("WorkspaceMembers");
     const { session } = useSessionState();
+    const [accepting, setAccepting] = useState(false);
+    const accept = async () => {
+        setAccepting(true);
+        try {
+            await api.post("/api/invitations/accept/", {
+                body: { token: invitationToken },
+            });
+        } catch (error) {
+            setAccepting(false);
+            throw error;
+        }
+        if (sessionState().signOut.status !== "idle") return;
+        clearWorkspaceInvitation();
+        window.location.replace(routes.workspaces());
+    };
     return (
         <main className="auth-page">
             <section className="auth-card">
@@ -26,13 +42,7 @@ export function AcceptInvitation({
                     <AsyncButton
                         permitted
                         errorTitle={t("acceptFailed")}
-                        onClick={async () => {
-                            await api.post("/api/invitations/accept/", {
-                                body: { token: invitationToken },
-                            });
-                            clearWorkspaceInvitation();
-                            window.location.replace(routes.workspaces());
-                        }}
+                        onClick={accept}
                     >
                         {t("accept")}
                     </AsyncButton>
@@ -41,6 +51,7 @@ export function AcceptInvitation({
                     <button
                         type="button"
                         className="button secondary"
+                        disabled={accepting}
                         onClick={() =>
                             void signOut({ keepInvitation: true }).catch(
                                 () => {},
