@@ -340,12 +340,15 @@ def inspect_container(docker: str, name: str) -> Container | None:
     (details,) = json.loads(result.stdout)
     mounts = details.get("Mounts") or []
     running = details["State"]["Running"] is True
-    # A running container's effective mapping; a stopped one only has the requested bindings.
-    bindings = (
-        (details.get("NetworkSettings") or {}).get("Ports")
-        if running
-        else (details.get("HostConfig") or {}).get("PortBindings")
-    ) or {}
+    host_config = details.get("HostConfig") or {}
+    # A running container's effective mapping; a stopped one only has the requested bindings,
+    # which Docker ignores on the host network.
+    if running:
+        bindings = (details.get("NetworkSettings") or {}).get("Ports") or {}
+    elif host_config.get("NetworkMode") == "host":
+        bindings = {}
+    else:
+        bindings = host_config.get("PortBindings") or {}
     pgdata = next(
         (
             value.removeprefix("PGDATA=")

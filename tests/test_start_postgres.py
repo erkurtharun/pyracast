@@ -409,10 +409,13 @@ def inspected(running: bool, volumes: list[str], command: list[str]) -> str:
 
 
 def published(
-    details: str, requested: list[dict[str, str]], effective: list[dict[str, str]]
+    details: str,
+    requested: list[dict[str, str]],
+    effective: list[dict[str, str]],
+    network: str = "bridge",
 ) -> str:
     (container,) = json.loads(details)
-    container["HostConfig"] = {"PortBindings": {"5432/tcp": requested}}
+    container["HostConfig"] = {"PortBindings": {"5432/tcp": requested}, "NetworkMode": network}
     container["NetworkSettings"] = {"Ports": {"5432/tcp": effective} if effective else {}}
     return json.dumps([container])
 
@@ -571,7 +574,10 @@ def test_a_running_container_names_the_port_docker_allocated_for_its_loopback_bi
         (False, [{"HostIp": "::1", "HostPort": "55433"}], []),
         (
             True,
-            [{"HostIp": "127.0.0.1", "HostPort": "55433"}],
+            [
+                {"HostIp": "127.0.0.1", "HostPort": "55433"},
+                {"HostIp": "127.0.0.1", "HostPort": "55434"},
+            ],
             [
                 {"HostIp": "127.0.0.1", "HostPort": "55433"},
                 {"HostIp": "127.0.0.1", "HostPort": "55434"},
@@ -587,6 +593,21 @@ def test_a_container_without_one_numeric_ipv4_loopback_port_is_refused_without_a
     effective: list[dict[str, str]],
 ) -> None:
     details = published(inspected(running, ["data"], ["postgres"]), requested, effective)
+    commands = fake_docker(monkeypatch, {"pyracast-postgres": details})
+
+    with pytest.raises(RuntimeError, match="does not publish only loopback port 55432") as refusal:
+        start_postgres.provision_docker("docker", "55432", (), volume="data")
+
+    assert "PGPORT" not in str(refusal.value)
+    assert commands == []
+
+
+@pytest.mark.parametrize("port", ["55433", "55432"])
+def test_a_stopped_container_on_the_host_network_publishes_no_port(
+    monkeypatch: pytest.MonkeyPatch, port: str
+) -> None:
+    requested = [{"HostIp": "127.0.0.1", "HostPort": port}]
+    details = published(inspected(False, ["data"], ["postgres"]), requested, [], network="host")
     commands = fake_docker(monkeypatch, {"pyracast-postgres": details})
 
     with pytest.raises(RuntimeError, match="does not publish only loopback port 55432") as refusal:
