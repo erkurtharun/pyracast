@@ -118,9 +118,6 @@ PINS: dict[str, list[Text | ActionInput]] = {
         Text("README.md", rf"CPython \*\*{VERSION}\*\*"),
         Text("README.md", rf"--python {VERSION}"),
         Text("AGENTS.md", rf"CPython {VERSION}"),
-        Text("docs/ARCHITECTURE.md", rf"CPython \*\*{VERSION}\*\*"),
-        Text("docs/ARCHITECTURE.md", rf"^Python {VERSION} is fixed"),
-        Text("docs/ARCHITECTURE.md", rf"\[Python {VERSION}\]"),
         Text("docs/DEPLOYMENT.md", rf"Python {VERSION} and uv"),
         Text("docs/STACK.md", rf"CPython {VERSION}"),
     ],
@@ -152,12 +149,10 @@ PINS: dict[str, list[Text | ActionInput]] = {
         Text("scripts/start_postgres.py", r'^THROWAWAY_ARCHIVE_VERSION = "(\d+\.\d+)"$'),
         Text("docs/DEPLOYMENT.md", r"PostgreSQL (\d+\.\d+) on Alpine"),
         Text("docs/STACK.md", r"PostgreSQL (\d+\.\d+) \(production image and CI tests\)"),
-        Text("docs/ARCHITECTURE.md", r"CI tests run production's (\d+\.\d+)"),
     ],
     "PostgreSQL in development": [
         Text("scripts/start_postgres.py", r'"postgres:(\d+\.\d+)@'),
         Text("scripts/start_postgres.py", r'^ARCHIVE_VERSION = "(\d+\.\d+)"$'),
-        Text("docs/ARCHITECTURE.md", r"PostgreSQL (\d+\.\d+) is the verified"),
         Text("docs/STACK.md", r"and (\d+\.\d+) \(development cluster\)"),
     ],
     "RabbitMQ": [
