@@ -130,7 +130,8 @@ gcloud storage buckets update "gs://$PROJECT_ID-pyracast-tfstate" --project="$PR
 cp infra/terraform/terraform.tfvars.example infra/terraform/terraform.tfvars
 ```
 
-Edit `terraform.tfvars`: `project_id`, `domain`, `acme_email` (also the alert address) and your
+Edit `terraform.tfvars`: `project_id`, `domain`, `acme_email` (also the alert address; the host
+settings need its domain to be dot-separated labels) and your
 account in `operator_members`; keep region and zone consistent. Secret replication is
 immutable: when moving an existing deployment, set `secret_replica_location` to its original
 region. A fork changes `github_repository`, `github_repository_id` and `github_owner_id`.
@@ -598,7 +599,7 @@ python3 /opt/pyracast/releases/<release>/deploy/runtime_secrets.py /etc/pyracast
 ## Verification boundary
 
 CI builds, scans and smoke-tests the exact production images on a disposable Compose stack
-(`deploy/smoke.sh`), runs the installer against its failure modes (`deploy/test-release.sh`) and
+(`deploy/smoke.sh`, whose TLS probes set TLS 1.2 as their floor), runs the installer against its failure modes (`deploy/test-release.sh`) and
 the broker downgrade (`deploy/test-broker-rollback.sh`), and validates Terraform without
 provisioning ([release-pipeline](flows/release-pipeline.md),
 [developer-quality-gate](flows/developer-quality-gate.md)). `tests/test_operations_contracts.py`
