@@ -58,6 +58,7 @@ export default defineConfig([
         "playwright-report/**",
         "test-results/**",
         "integration-results/**",
+        "production-results/**",
         "coverage/**",
         ".dev/**",
         "next-env.d.ts",

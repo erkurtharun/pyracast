@@ -4,12 +4,15 @@
         "playwright.config.ts",
         "tests/**/*.spec.ts",
         "integration/**/*.spec.ts",
-        "testing/coverage-reporter.ts"
+        "production/**/*.spec.ts",
+        "testing/coverage-reporter.ts",
+        "testing/front.ts"
     ],
     "project": [
         "src/**/*.{ts,tsx}",
         "tests/**/*.ts",
         "integration/**/*.ts",
+        "production/**/*.ts",
         "testing/**/*.{ts,mjs}",
         "eslint/**/*.mjs"
     ],

@@ -45,6 +45,7 @@ PIPELINE_FILES = frozenset(
         "web/package.json",
         "web/playwright.config.ts",
         "web/playwright.integration.config.ts",
+        "web/playwright.production.config.ts",
         "web/tests/support/server.ts",
         "web/tsconfig.json",
     }

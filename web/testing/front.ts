@@ -1,0 +1,118 @@
+import { readFileSync } from "node:fs";
+import http from "node:http";
+import path from "node:path";
+
+const WORKER_ADDRESS = "/app/sw.js";
+const CONTROL_PREFIX = "/__front/";
+const UNAVAILABLE = "No server answers behind the test front.";
+const withdrawal = readFileSync(
+    path.resolve(import.meta.dirname, "sw-withdraw.js"),
+);
+
+type Script = "worker" | "withdrawal";
+type State = { script: Script; upstream: URL };
+const initial: State = {
+    script: "worker",
+    upstream: new URL(required("FRONT_UPSTREAM")),
+};
+let state = { ...initial };
+
+function required(name: string) {
+    const value = process.env[name];
+    if (!value) throw new Error(`Set ${name} for the test front.`);
+    return value;
+}
+
+function pathOf(request: http.IncomingMessage) {
+    return new URL(request.url ?? "/", "http://front").pathname;
+}
+
+async function bodyOf(request: http.IncomingMessage) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk as Buffer);
+    return Buffer.concat(chunks).toString("utf8");
+}
+
+function apply(setting: string, value: string) {
+    if (setting === "script" && (value === "worker" || value === "withdrawal"))
+        state.script = value;
+    else if (setting === "upstream" && URL.canParse(value))
+        state.upstream = new URL(value);
+    else return false;
+    return true;
+}
+
+async function control(
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+) {
+    const setting = pathOf(request).slice(CONTROL_PREFIX.length);
+    if (request.method === "DELETE" && setting === "state")
+        state = { ...initial };
+    else if (request.method === "PUT" && !apply(setting, await bodyOf(request)))
+        return response.writeHead(400).end();
+    response
+        .writeHead(200, { "Content-Type": "application/json" })
+        .end(JSON.stringify({ ...state, upstream: state.upstream.origin }));
+}
+
+function withoutBodyHeaders(headers: http.IncomingHttpHeaders) {
+    const kept = { ...headers };
+    for (const name of [
+        "content-encoding",
+        "content-length",
+        "etag",
+        "last-modified",
+        "transfer-encoding",
+    ])
+        delete kept[name];
+    return kept;
+}
+
+function forward(request: http.IncomingMessage, response: http.ServerResponse) {
+    const withdrawn =
+        state.script === "withdrawal" && pathOf(request) === WORKER_ADDRESS;
+    const headers = { ...request.headers };
+    if (withdrawn) {
+        delete headers["if-none-match"];
+        delete headers["if-modified-since"];
+    }
+    const upstream = http.request(
+        {
+            hostname: state.upstream.hostname,
+            port: state.upstream.port,
+            path: request.url,
+            method: request.method,
+            headers,
+        },
+        (answer) => {
+            const status = answer.statusCode ?? 502;
+            if (!withdrawn) {
+                response.writeHead(status, answer.headers);
+                answer.pipe(response);
+                return;
+            }
+            answer.resume();
+            response
+                .writeHead(status, {
+                    ...withoutBodyHeaders(answer.headers),
+                    "content-length": String(withdrawal.length),
+                })
+                .end(withdrawal);
+        },
+    );
+    upstream.on("error", () => {
+        if (response.headersSent) response.destroy();
+        else
+            response
+                .writeHead(503, { "Content-Type": "text/plain; charset=utf-8" })
+                .end(UNAVAILABLE);
+    });
+    request.pipe(upstream);
+}
+
+http.createServer((request, response) => {
+    if (pathOf(request).startsWith(CONTROL_PREFIX))
+        void control(request, response);
+    else forward(request, response);
+}).listen(Number(required("FRONT_PORT")), "127.0.0.1");
