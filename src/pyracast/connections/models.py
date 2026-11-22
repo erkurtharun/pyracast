@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.utils.translation import gettext_lazy
 
 from pyracast.connections.identity import canonical_account_identity
 from pyracast.db import choices_check
@@ -17,9 +18,9 @@ class PowerBasis(models.TextChoices):
 
 
 class BindingHealth(models.TextChoices):
-    UNKNOWN = "unknown", "Unknown"
-    HEALTHY = "healthy", "Healthy"
-    ERROR = "error", "Error"
+    UNKNOWN = "unknown", gettext_lazy("Unknown")
+    HEALTHY = "healthy", gettext_lazy("Healthy")
+    ERROR = "error", gettext_lazy("Error")
 
 
 MAX_DAILY_QUOTA = 10

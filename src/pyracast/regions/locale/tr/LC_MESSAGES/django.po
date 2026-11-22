@@ -23,12 +23,6 @@ msgstr "En fazla 200 karakterlik bir santral adı girin."
 msgid "A reason of at most 1000 characters is required."
 msgstr "Gerekçe en fazla 1000 karakter olmalıdır."
 
-msgid "A region name of at most 200 characters is required."
-msgstr "En fazla 200 karakterlik bir konum adı girin."
-
-msgid "A replacement affects every plant using the selected account."
-msgstr "Değişiklik, seçili hesabı kullanan tüm santralleri etkiler."
-
 msgid "A timezone-aware ISO 8601 timestamp is required."
 msgstr "Saat dilimi içeren bir ISO 8601 zamanı girin."
 
@@ -66,17 +60,11 @@ msgstr "Gelişmiş referans ayarları"
 msgid "All awaiting approval"
 msgstr "Onay bekleyenlerin tümü"
 
-msgid "All checks clear"
-msgstr "Tüm denetimler başarılı"
-
 msgid "All operations"
 msgstr "Tüm işlemler"
 
 msgid "An IANA timezone is required."
 msgstr "Geçerli bir IANA saat dilimi girin."
-
-msgid "An approved current region and at least one time are required."
-msgstr "Güncel ve onaylı bir konum ile en az bir saat gereklidir."
 
 msgid "At least one time is required."
 msgstr "En az bir saat gereklidir."
@@ -108,9 +96,6 @@ msgstr "Bağlamadan önce santralin güncel teknik yapılandırmasını onaylay�
 
 msgid "Approved"
 msgstr "Onaylandı"
-
-msgid "Ask the member to correct the saved recipient addresses."
-msgstr "Üyeden kayıtlı alıcı adreslerini düzeltmesini isteyin."
 
 msgid "Attempts"
 msgstr "Denemeler"
@@ -153,12 +138,6 @@ msgstr "Kapasiteler sonlu ve sıfırdan büyük olmalıdır."
 
 msgid "Change EPİAŞ connection"
 msgstr "EPİAŞ bağlantısını değiştir"
-
-msgid "Check"
-msgstr "Denetim"
-
-msgid "Check deployment mail credentials."
-msgstr "Dağıtımdaki e-posta kimlik bilgilerini denetleyin."
 
 msgid "Check notification worker availability and the delivery deadline."
 msgstr ""
@@ -326,20 +305,8 @@ msgstr "E-posta kimlik doğrulama hataları"
 msgid "Email delivery"
 msgstr "E-posta teslimi"
 
-msgid "Email needing attention"
-msgstr "İşlem gerektiren e-postalar"
-
-msgid "Email reminder settings"
-msgstr "E-posta hatırlatma ayarları"
-
 msgid "Email reminders"
 msgstr "E-posta hatırlatmaları"
-
-msgid "Emails with partial forecasts"
-msgstr "Kısmi tahmin içeren e-postalar"
-
-msgid "Emails without saved forecasts"
-msgstr "Kayıtlı tahmin bulunmayan e-postalar"
 
 msgid "English"
 msgstr "English"
@@ -355,9 +322,6 @@ msgstr "Santralin kimliğini doğrulamak için 16 karakterli EIC kodunu girin."
 
 msgid "Epias provider failure"
 msgstr "EPİAŞ sağlayıcı hatası"
-
-msgid "Epias response identity mismatch"
-msgstr "EPİAŞ yanıt kimliği eşleşmedi"
 
 msgid "Error"
 msgstr "Hata"
@@ -420,9 +384,6 @@ msgstr "Geçmiş veriler için bütçe ayrıldı"
 msgid "History incomplete"
 msgstr "Geçmiş veriler eksik"
 
-msgid "History not supported"
-msgstr "Geçmiş veriler desteklenmiyor"
-
 msgid "History window closed"
 msgstr "Geçmiş veri toplama aralığı kapandı"
 
@@ -438,17 +399,11 @@ msgstr "Kurulum tarihi"
 msgid "Interrupted collections"
 msgstr "Kesintiye uğrayan veri toplama işleri"
 
-msgid "Interrupted connection"
-msgstr "Bağlantı kesintiye uğradı"
-
 msgid "Interrupted emails"
 msgstr "Kesintiye uğrayan e-postalar"
 
 msgid "Interrupted production collection"
 msgstr "Kesintiye uğrayan üretim verisi toplama işleri"
-
-msgid "Interrupted send"
-msgstr "Gönderim kesintiye uğradı"
 
 msgid "Invalid email recipients"
 msgstr "Geçersiz e-posta alıcıları"
@@ -525,9 +480,6 @@ msgstr ""
 "hatırlatmalarını duraklatır. Listeleri korunur; liste kısaltıldığında veya "
 "sınır artırıldığında sonraki hatırlatmalar devam eder."
 
-msgid "Mail authentication failed"
-msgstr "E-posta kimlik doğrulaması başarısız"
-
 msgid "Mail outcome uncertain"
 msgstr "E-posta sonucu belirsiz"
 
@@ -556,9 +508,6 @@ msgstr "Kaçırılan e-posta zamanları"
 
 msgid "Missed schedule"
 msgstr "Planlanan zaman kaçırıldı"
-
-msgid "Missing recipient"
-msgstr "Alıcı eksik"
 
 msgid "Mounting"
 msgstr "Montaj"
@@ -660,9 +609,6 @@ msgstr "Üretim kayıtları yerel gece yarısını aşmamalıdır."
 msgid "Observed energy must be finite and nonnegative."
 msgstr "Ölçülen enerji sonlu, sıfır veya pozitif olmalıdır."
 
-msgid "Ok"
-msgstr "Başarılı"
-
 msgid "Onboarding"
 msgstr "Kurulum"
 
@@ -762,9 +708,6 @@ msgstr "Platform yönetimi"
 msgid "Platform-wide limits."
 msgstr "Platform genelindeki sınırlar."
 
-msgid "Preference or authority changed"
-msgstr "Tercih veya yetki değişti"
-
 msgid "Previous"
 msgstr "Önceki"
 
@@ -858,9 +801,6 @@ msgstr "Beklenmeyen sağlayıcı hatası"
 msgid "Pyracast operations"
 msgstr "Pyracast işlemleri"
 
-msgid "Queued"
-msgstr "Sırada"
-
 msgid "Quota exhausted"
 msgstr "Kota tükendi"
 
@@ -945,9 +885,6 @@ msgstr "Hatırlatıcı saatleri SS:DD biçiminde olmalıdır."
 msgid "Replace connection"
 msgstr "Bağlantıyı değiştir"
 
-msgid "Replace the private key, then validate the connection."
-msgstr "Özel anahtarı değiştirin, ardından bağlantıyı doğrulayın."
-
 msgid "Reported production"
 msgstr "Bildirilen üretim"
 
@@ -990,9 +927,6 @@ msgstr "%(name)s için inceleme ve kurulum"
 msgid "Review and set up provider"
 msgstr "Sağlayıcıyı incele ve kur"
 
-msgid "Review dispatcher status"
-msgstr "Dağıtıcı durumunu incele"
-
 msgid "Review progress"
 msgstr "İnceleme ilerlemesi"
 
@@ -1020,14 +954,8 @@ msgstr ""
 msgid "Review the plant collection history and approved connection."
 msgstr "Santralin veri toplama geçmişini ve onaylı bağlantısını inceleyin."
 
-msgid "Review the plant connection and recorded error."
-msgstr "Santral bağlantısını ve kayıtlı hatayı inceleyin."
-
 msgid "Review the recipient limit"
 msgstr "Alıcı sınırını inceleyin"
-
-msgid "Review the reported-production connection."
-msgstr "Bildirilen üretim bağlantısını inceleyin."
 
 msgid "Review the validation or approval message."
 msgstr "Doğrulama veya onay mesajını inceleyin."
@@ -1161,9 +1089,6 @@ msgstr "Etkin kalibrasyon değişti; yeni bir karşılaştırma isteyin."
 msgid ""
 "The current provider connection is validated. The plant can now be approved."
 msgstr "Güncel sağlayıcı bağlantısı doğrulandı. Santral artık onaylanabilir."
-
-msgid "The durable dispatcher recovers expired leases."
-msgstr "Kalıcı dağıtıcı, süresi dolan iş sahipliklerini kurtarır."
 
 msgid "The local issuance cutoff is ambiguous or does not exist."
 msgstr ""
@@ -1329,15 +1254,8 @@ msgstr "Yapılacak"
 msgid "Tracking"
 msgstr "Takip sistemli"
 
-msgid "Türkçe"
-msgstr "Türkçe"
-
 msgid "Uncertain"
 msgstr "Belirsiz"
-
-msgid "Uncertain transmission must be reconciled before any manual resend."
-msgstr ""
-"Elle yeniden göndermeden önce belirsiz iletim sonucu kesinleştirilmelidir."
 
 msgid "Unknown"
 msgstr "Bilinmiyor"
@@ -1405,9 +1323,6 @@ msgstr "Veri toplamaya devam etmeden önce güncel özel anahtarı doğrulayın.
 msgid "Verification"
 msgstr "Doğrulama"
 
-msgid "Wait for provider recovery; preserve the shared daily quota."
-msgstr "Sağlayıcının düzelmesini bekleyin; paylaşılan günlük kotayı koruyun."
-
 msgid "Workspace"
 msgstr "Çalışma alanı"
 
@@ -1419,9 +1334,6 @@ msgstr "konum değişikliği"
 
 msgid "of"
 msgstr "/"
-
-msgid "plant"
-msgstr "santral"
 
 msgid ""
 "queues the first forecast. Customers see data only after it has been saved."
@@ -2211,9 +2123,6 @@ msgstr "İşlemler"
 
 msgid "Account deactivated"
 msgstr "Hesap devre dışı"
-
-msgid "Viewer"
-msgstr "İzleyici"
 
 msgid "Make administrator"
 msgstr "Yönetici yap"
@@ -3395,3 +3304,15 @@ msgstr "Kalibrasyon çalışması sayfaları"
 
 msgid "Email delivery pages"
 msgstr "E-posta teslim sayfaları"
+
+msgid "Validation"
+msgstr "Doğrulama"
+
+msgid "Site settings check"
+msgstr "Saha ayarları kontrolü"
+
+msgid "Forecast check"
+msgstr "Tahmin kontrolü"
+
+msgid "Provider wait cleared. Queued collection can resume within the remaining quota."
+msgstr "Sağlayıcı beklemesi kaldırıldı. Sıradaki toplama kalan kota içinde sürebilir."

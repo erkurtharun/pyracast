@@ -36,17 +36,17 @@ class CollectionJobStatus(models.TextChoices):
 
 
 class RequestPurpose(models.TextChoices):
-    FORECAST = "forecast", "Forecast"
-    ESTIMATED_ACTUALS = "estimated_actuals", "Estimated actuals"
-    VALIDATION = "validation", "Validation"
-    INSPECT_SETTINGS = "inspect_settings", "Site settings check"
-    INSPECT_FORECAST = "inspect_forecast", "Forecast check"
+    FORECAST = "forecast", gettext_lazy("Forecast")
+    ESTIMATED_ACTUALS = "estimated_actuals", gettext_lazy("Estimated actuals")
+    VALIDATION = "validation", gettext_lazy("Validation")
+    INSPECT_SETTINGS = "inspect_settings", gettext_lazy("Site settings check")
+    INSPECT_FORECAST = "inspect_forecast", gettext_lazy("Forecast check")
 
 
 class RequestOutcome(models.TextChoices):
-    UNCERTAIN = "uncertain", "Uncertain"
-    SUCCEEDED = "succeeded", "Succeeded"
-    FAILED = "failed", "Failed"
+    UNCERTAIN = "uncertain", gettext_lazy("Uncertain")
+    SUCCEEDED = "succeeded", gettext_lazy("Succeeded")
+    FAILED = "failed", gettext_lazy("Failed")
 
 
 class SnapshotSourceKind(models.TextChoices):
