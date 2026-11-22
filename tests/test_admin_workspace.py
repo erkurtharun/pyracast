@@ -458,7 +458,6 @@ def test_only_new_provider_accounts_require_a_daily_limit(mode: str) -> None:
             external_account_id="New account",
             api_key="synthetic-key",
             authorization_reference="Authorized use",
-            confirm_key_rotation=True,
         ),
     )
     assert response.status_code == (302 if mode == "existing" else 400)

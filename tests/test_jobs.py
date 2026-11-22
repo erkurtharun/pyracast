@@ -12,7 +12,6 @@ from pyracast.background import clock as monotonic_clock
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts.jobs import collect as jobs
 from pyracast.forecasts.jobs import publish as publication
 from pyracast.forecasts.jobs.claim import LEASE_DURATION, Failure, Lease, claim, retry
@@ -32,6 +31,7 @@ from pyracast.plants.approval import ReviewDecision, approve_region, decide_revi
 from pyracast.regions.models import AuditEvent, Region
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate, collect, publish
+from tests.support.providers import replace_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -244,7 +244,7 @@ def test_stale_binding_is_rejected_before_network(change: str) -> None:
     elif change == "revision":
         Region.objects.filter(pk=system.region.pk).update(revision=2)
     elif change == "credential":
-        rotate_secret(system.admin, system.account.pk, "test-only-new-key")
+        replace_key(system.admin, system.account.pk, "test-only-new-key")
     else:
         ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
     job = CollectionJob.objects.get()
@@ -456,7 +456,7 @@ def test_publication_holds_account_lock_against_credential_rotation(
                 with connection.cursor() as cursor:
                     cursor.execute("SET LOCAL lock_timeout = '100ms'")
                 with pytest.raises(OperationalError):
-                    rotate_secret(system.admin, system.account.pk, "test-only-new-key")
+                    replace_key(system.admin, system.account.pk, "test-only-new-key")
         finally:
             rotation_blocked.set()
             connection.close()

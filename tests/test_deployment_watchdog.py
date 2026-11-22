@@ -734,7 +734,12 @@ def key_usage(*, signs_certificates: bool) -> x509.KeyUsage:
     )
 
 
-def test_certificate_validity_reads_the_served_certificate(tmp_path: Path) -> None:
+class ServedCertificate(NamedTuple):
+    server: ssl.SSLContext
+    authority: str
+
+
+def served_certificate(tmp_path: Path) -> ServedCertificate:
     now = datetime.datetime.now(datetime.UTC).replace(microsecond=0)
     authority_key = ec.generate_private_key(ec.SECP256R1())
     authority_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Watchdog test CA")])
@@ -784,10 +789,10 @@ def test_certificate_validity_reads_the_served_certificate(tmp_path: Path) -> No
     )
     server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     server.load_cert_chain(chain, private)
-    client = ssl.create_default_context(
-        cadata=authority.public_bytes(serialization.Encoding.PEM).decode()
-    )
+    return ServedCertificate(server, authority.public_bytes(serialization.Encoding.PEM).decode())
 
+
+def probe_served(server: ssl.SSLContext, authority: str) -> tuple[float, float]:
     with socket.create_server(("127.0.0.1", 0)) as listener:
 
         def serve() -> None:
@@ -800,13 +805,42 @@ def test_certificate_validity_reads_the_served_certificate(tmp_path: Path) -> No
 
         thread = threading.Thread(target=serve)
         thread.start()
-        remaining, lifetime = watchdog.certificate_validity(
-            "localhost", listener.getsockname()[:2], client
+        validity = watchdog.certificate_validity(
+            "localhost", listener.getsockname()[:2], authority=authority
         )
         thread.join(timeout=10)
+    return validity
+
+
+def test_certificate_validity_reads_the_served_certificate(tmp_path: Path) -> None:
+    served = served_certificate(tmp_path)
+
+    remaining, lifetime = probe_served(served.server, served.authority)
 
     assert lifetime == 90 * DAY
     assert abs(remaining - 10 * DAY) < 120
+
+
+def test_the_certificate_probe_requires_tls_1_2_whatever_the_host_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    served = served_certificate(tmp_path)
+    create_default_context = ssl.create_default_context
+    built: list[ssl.SSLContext] = []
+
+    def host_default(*, cadata: str | None = None) -> ssl.SSLContext:
+        context = create_default_context(cadata=cadata)
+        context.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
+        built.append(context)
+        return context
+
+    monkeypatch.setattr(ssl, "create_default_context", host_default)
+
+    remaining, lifetime = probe_served(served.server, served.authority)
+
+    assert lifetime == 90 * DAY
+    assert abs(remaining - 10 * DAY) < 120
+    assert [context.minimum_version for context in built] == [ssl.TLSVersion.TLSv1_2]
 
 
 def test_no_command_starts_after_the_deadline(monkeypatch: pytest.MonkeyPatch) -> None:

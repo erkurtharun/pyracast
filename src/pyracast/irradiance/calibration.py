@@ -1,6 +1,6 @@
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from itertools import pairwise
 from math import fsum, sqrt
 from typing import Any
@@ -10,6 +10,8 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.irradiance.fitting import fit_quadratic
 from pyracast.irradiance.inverse import QuadraticModel, reconstruct_ghi
 from pyracast.irradiance.pairs import PairedDataset, PairedInterval
+
+HALF_HOUR = timedelta(minutes=30)
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,11 @@ def _complete_days(
     omitted = []
     for day, rows in sorted(groups.items()):
         start, end = local_day_bounds(day, timezone)
+        if (start - rows[0].start) % HALF_HOUR:
+            raise ValueError(
+                f"Local midnight in {timezone} is off the half-hour interval grid, so no local "
+                "day can be complete."
+            )
         if (
             rows[0].start == start
             and rows[-1].end == end

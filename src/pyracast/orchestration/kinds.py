@@ -5,6 +5,7 @@ from functools import partial
 from dramatiq import Actor, Broker
 
 from pyracast.background.actor import job_actor
+from pyracast.forecasts.revalidation import deliver_revalidation
 from pyracast.forecasts.runtime import deliver
 from pyracast.metering.runtime import deliver_epias
 from pyracast.notifications.runtime import deliver_notification, deliver_outbound_mail
@@ -29,7 +30,8 @@ CALIBRATION = JobKind("calibrate_plant", "calibration", deliver_calibration)
 REMINDER = JobKind("send_forecast_reminder", MAIL_QUEUE, deliver_notification)
 OUTBOUND_MAIL = JobKind("send_outbound_mail", MAIL_QUEUE, deliver_outbound_mail)
 METERING = JobKind("collect_epias", "epias", deliver_epias)
-KINDS = (COLLECTION, CALIBRATION, REMINDER, OUTBOUND_MAIL, METERING)
+REVALIDATION = JobKind("revalidate_provider_account", "default", deliver_revalidation)
+KINDS = (COLLECTION, CALIBRATION, REMINDER, OUTBOUND_MAIL, METERING, REVALIDATION)
 QUEUES = tuple(dict.fromkeys(kind.queue for kind in KINDS))
 # The mail queue has a worker service of its own (deploy/compose.yaml).
 WORKER_QUEUES = tuple(queue for queue in QUEUES if queue != MAIL_QUEUE)

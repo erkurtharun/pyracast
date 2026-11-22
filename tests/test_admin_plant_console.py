@@ -1,5 +1,9 @@
+import html
+import json
 import re
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from django.db.models import QuerySet
@@ -26,6 +30,8 @@ from tests.support.api import verified_admin
 from tests.support.domain import NOW, FakeAdapter, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def site_values(**changes: str) -> dict[str, str]:
@@ -120,55 +126,29 @@ def test_plant_values_are_judged_by_the_site_input_and_the_operation(
 
 NOT_A_NUMBER = "A valid number is required."
 
-# The web's single-value table (web/tests/site-forms-model.spec.ts), row for row. Both ignore
-# spaces around a value, as a value copied from a sheet often carries one.
-ACCEPTED_COORDINATES = [
-    ("latitude", "41,0082", 41.0082),
-    ("latitude", "41.0082", 41.0082),
-    ("longitude", "17,5", 17.5),
-    ("longitude", "17.5", 17.5),
-    ("latitude", "-36,9", -36.9),
-    ("latitude", "-33,8688", -33.8688),
-    ("latitude", "-33.8688", -33.8688),
-    ("longitude", "-33,8688", -33.8688),
-    ("longitude", "-33.8688", -33.8688),
-    ("latitude", "1,234", 1.234),
-    ("latitude", "0", 0),
-    ("latitude", "90", 90),
-    ("latitude", "-90,000", -90),
-    ("longitude", "-180", -180),
-    ("longitude", "179,999999", 179.999999),
-    ("longitude", "180,0", 180),
-    ("latitude", " 41,0082", 41.0082),
-    ("latitude", "41,0082 ", 41.0082),
-]
+# The single-value table the web's model spec (web/tests/site-forms-model.spec.ts) reads too.
+COORDINATE_VALUES: list[dict[str, Any]] = json.loads(
+    (ROOT / "web" / "tests" / "support" / "coordinate-values.json").read_text(encoding="utf-8")
+)
 
+
+def console_refusal(axis: str, reason: str) -> str:
+    bound = 90 if axis == "latitude" else 180
+    return {
+        "empty": "This field is required.",
+        "not-a-number": NOT_A_NUMBER,
+        "above-range": f"Ensure this value is less than or equal to {bound}.",
+        "below-range": f"Ensure this value is greater than or equal to -{bound}.",
+    }[reason]
+
+
+ACCEPTED_COORDINATES = [
+    (row["axis"], row["text"], row["value"]) for row in COORDINATE_VALUES if "value" in row
+]
 REFUSED_COORDINATES = [
-    ("latitude", "", "This field is required."),
-    ("latitude", "41,00,82", NOT_A_NUMBER),
-    ("latitude", "41,0082.5", NOT_A_NUMBER),
-    ("latitude", "41.0082,5", NOT_A_NUMBER),
-    ("latitude", "1.234,5", NOT_A_NUMBER),
-    ("latitude", "1,234.5", NOT_A_NUMBER),
-    ("latitude", "1 234", NOT_A_NUMBER),
-    ("latitude", "41, 0082", NOT_A_NUMBER),
-    ("latitude", "+41,0082", NOT_A_NUMBER),
-    ("latitude", "--41", NOT_A_NUMBER),
-    ("latitude", "41-", NOT_A_NUMBER),
-    ("latitude", "\u221241", NOT_A_NUMBER),
-    ("latitude", "41,", NOT_A_NUMBER),
-    ("latitude", ",5", NOT_A_NUMBER),
-    ("latitude", "041,5", NOT_A_NUMBER),
-    ("latitude", "4e1", NOT_A_NUMBER),
-    ("latitude", "NaN", NOT_A_NUMBER),
-    ("latitude", "Infinity", NOT_A_NUMBER),
-    ("latitude", "90,1", "Ensure this value is less than or equal to 90."),
-    ("latitude", "-90.000001", "Ensure this value is greater than or equal to -90."),
-    ("latitude", "410082", "Ensure this value is less than or equal to 90."),
-    ("longitude", "180,5", "Ensure this value is less than or equal to 180."),
-    ("longitude", "-181", "Ensure this value is greater than or equal to -180."),
-    ("longitude", "175,0,1", NOT_A_NUMBER),
-    ("latitude", "\u0664\u0661", NOT_A_NUMBER),
+    (row["axis"], row["text"], console_refusal(row["axis"], row["reason"]))
+    for row in COORDINATE_VALUES
+    if "reason" in row
 ]
 
 
@@ -308,6 +288,50 @@ def test_details_shown_at_full_precision_are_saved_back_without_a_new_revision()
     assert unchanged.status_code == 302
     assert "Nothing changed." in client.get(unchanged["Location"]).content.decode()
     assert PlantConfiguration.objects.get(plant=plant).revision == 1
+
+
+def shown_form(page: str) -> dict[str, str]:
+    """What a browser posts from the details page's untouched form."""
+    fields = {
+        name: html.unescape(value)
+        for name, value in re.findall(r'<input [^>]*name="([^"]+)"[^>]*value="([^"]*)"', page)
+    }
+    for name, options in re.findall(r'<select name="([^"]+)"[^>]*>(.*?)</select>', page, re.S):
+        selected = re.search(r'<option value="([^"]*)" selected>', options)
+        assert selected is not None
+        fields[name] = selected.group(1)
+    return {**fields, "reason": ""}
+
+
+# Python writes the smaller of these floats with an exponent, which the form's number rule refuses.
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"latitude": "41.0082", "longitude": "-28.9784", "dc_capacity_mw": "130"},
+        {"latitude": "0", "longitude": "-29", "surface_tilt_degrees": "0"},
+        {"latitude": "0.00005", "longitude": "-0.00001", "dc_capacity_mw": "0.00005"},
+        {"latitude": "-0.000001", "longitude": "0.0001", "inverter_capacity_mw": "0.00002"},
+        {"export_limit_mw": "0.00003", "surface_tilt_degrees": "0.00004"},
+        {"surface_azimuth_degrees": "0.00006"},
+    ],
+)
+def test_details_are_shown_as_plain_numbers_and_saved_back_unchanged(
+    values: dict[str, str],
+) -> None:
+    tenant = Tenant.objects.create(name="Console customer")
+    client, _ = verified_admin()
+    created = client.post(f"/admin/workspaces/{tenant.pk}/plants/new/", site_values(**values))
+    assert created.status_code == 302
+    region = Region.objects.get(tenant=tenant)
+    stored = (region.latitude, region.longitude, region.revision)
+    url = f"/admin/plants/{region.pk}/details/"
+    form = shown_form(client.get(url).content.decode())
+    assert {name: form[name] for name in values} == values
+    unchanged = client.post(url, form)
+    assert unchanged.status_code == 302
+    assert "Nothing changed." in client.get(unchanged["Location"]).content.decode()
+    region.refresh_from_db()
+    assert (region.latitude, region.longitude, region.revision) == stored
 
 
 def test_a_location_correction_returns_the_plant_to_review_with_both_audit_events() -> None:

@@ -38,7 +38,15 @@ from tests.support.invariants import (
     violations,
 )
 from tests.support.metering import connected
-from tests.support.migrations import checks, constraints, forward, leaf_nodes, migrate, triggers
+from tests.support.migrations import (
+    checks,
+    constraints,
+    forward,
+    leaf_nodes,
+    migrate,
+    row_values,
+    triggers,
+)
 from tests.support.plant_operations import make_plant, request_run
 from tests.support.plant_training import actual_snapshot_for
 
@@ -207,10 +215,9 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     )
     valid = _tuples()
     del valid["forecasts_collectionjob", released.pk]
-    # The delivery's preparation metadata moves into typed columns at the leaf.
+    stored_account = row_values(ProviderAccount.objects.filter(pk=system.account.pk))
+    stored_binding = row_values(SiteBinding.objects.filter(pk=system.binding.pk))
     del valid["notifications_notificationdelivery", delivery.pk]
-    stored_account = ProviderAccount.objects.values().get(pk=system.account.pk)
-    stored_binding = SiteBinding.objects.values().get(pk=system.binding.pk)
     assert set(audit()) == {f"forecasts_collectionjob: {LEASE_RULES['forecasts_collectionjob']}"}
 
     forward()
@@ -233,9 +240,14 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
         token,
         NOW,
     )
+    assert (
+        row_values(ProviderAccount.objects.filter(pk=system.account.pk), stored_account)
+        == stored_account
+    )
+    assert row_values(SiteBinding.objects.filter(pk=system.binding.pk), stored_binding) == (
+        stored_binding
+    )
     assert (delivery.forecast_kind, delivery.prepared_at) == ("unavailable", NOW)
-    assert ProviderAccount.objects.values().get(pk=system.account.pk) == stored_account
-    assert SiteBinding.objects.values().get(pk=system.binding.pk) == stored_binding
     assert violations("connections_provideraccount", PROVIDER_ACCOUNT_RULE) == 0
     assert violations("connections_sitebinding", SITE_BINDING_RULE) == 0
     assert ProductionObservation.objects.get(pk=correction.pk).supersedes_id == original.pk
@@ -411,7 +423,7 @@ def test_provider_migration_refuses_accounts_and_bindings_no_writer_produces(
     stored: dict[str, object] = dict(rows.values().get())
     migrate(PREVIOUS["connections"])
     rows.update(**values)
-    changed = rows.values().get()
+    changed = row_values(rows)
     table = model._meta.db_table
     assert {label.partition(":")[0] for label in audit()} == {table}
 
@@ -419,7 +431,7 @@ def test_provider_migration_refuses_accounts_and_bindings_no_writer_produces(
         forward()
 
     assert not checks(table) & NEW_CHECKS[table]
-    assert rows.values().get() == changed
+    assert row_values(rows) == changed
     rows.update(**{field: stored[field] for field in values})
     forward()
     assert NEW_CHECKS[table] <= checks(table)

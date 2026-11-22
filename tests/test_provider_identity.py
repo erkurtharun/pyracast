@@ -4,10 +4,12 @@ from threading import Barrier
 import pytest
 from django.contrib.auth.models import User
 from django.db import IntegrityError, connection, connections, transaction
+from django.db.models.signals import pre_save
 
 from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import create_account
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
+from pyracast.errors import ConflictError
 from pyracast.forecasts.models import RequestPurpose
 from pyracast.forecasts.quota import QuotaExceededError, reserve_account_request
 from pyracast.regions.models import AuditEvent
@@ -90,9 +92,9 @@ def test_dotted_and_dotless_turkish_identities_keep_distinct_accounts() -> None:
     admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     accounts = [
         create_account(
-            admin, provider="fixture", external_account_id=identity, api_key=provider_key()
+            admin, provider="fixture", external_account_id=identity, api_key=provider_key(name)
         )
-        for identity in ("I", "\u0130", "\u0131")
+        for identity, name in (("I", "LATIN"), ("\u0130", "DOTTED"), ("\u0131", "DOTLESS"))
     ]
     assert len({account.pk for account in accounts}) == 3
     assert [account.external_account_id for account in accounts] == ["i", "i\u0307", "\u0131"]
@@ -135,3 +137,54 @@ def test_account_index_uses_builtin_unicode_collation() -> None:
             ("pg_unicode_fast", "b", True, True),
             ("pg_unicode_fast", "b", True, True),
         ]
+
+
+@pytest.mark.parametrize("require_new", [False, True])
+def test_account_created_by_a_racing_writer_is_returned_or_refused(require_new: bool) -> None:
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
+    raced: list[int] = []
+
+    def insert_in_own_connection() -> int:
+        try:
+            return ProviderAccount.objects.create(
+                provider="fixture",
+                external_account_id="STRASSE",
+                authorization_reference="race",
+                authorized_by=admin,
+                authorized_at=NOW,
+            ).pk
+        finally:
+            connections.close_all()
+
+    def insert_competitor(**_: object) -> None:
+        if raced:
+            return
+        raced.append(0)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            raced[0] = pool.submit(insert_in_own_connection).result()
+
+    pre_save.connect(insert_competitor, sender=ProviderAccount, weak=False)
+    try:
+        if require_new:
+            with pytest.raises(ConflictError):
+                create_account(
+                    admin,
+                    provider="fixture",
+                    external_account_id="Straße",
+                    api_key=provider_key(),
+                    daily_quota=1,
+                    require_new=True,
+                )
+        else:
+            returned = create_account(
+                admin,
+                provider="fixture",
+                external_account_id="Straße",
+                api_key=provider_key(),
+                daily_quota=1,
+            )
+            assert returned.pk == raced[0]
+    finally:
+        pre_save.disconnect(insert_competitor, sender=ProviderAccount)
+    assert ProviderAccount.objects.count() == 1
+    assert not AuditEvent.objects.filter(action="provider_account_created").exists()

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import re
+from decimal import Decimal
 from functools import cache
 from typing import TYPE_CHECKING, Any, cast
 
@@ -77,7 +78,12 @@ def _text(value: object) -> str:
     if value is None:
         return ""
     text = str(value)
-    return text.removesuffix(".0") if isinstance(value, float) else text
+    if not isinstance(value, float):
+        return text
+    # The form's number rule refuses an exponent, which str() writes below 1e-4 and from 1e16.
+    if "e" in text:
+        text = format(Decimal(text), "f")
+    return text.removesuffix(".0")
 
 
 class SiteForm(forms.Form):

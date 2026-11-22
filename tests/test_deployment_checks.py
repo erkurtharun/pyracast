@@ -101,6 +101,7 @@ def test_the_shipped_compose_file_and_runtime_secret_pass_every_deployment_check
         pytest.param(
             {"PYRACAST_HOSTS": "localhost,127.0.0.1"}, "accounts.E005", id="host-not-allowed"
         ),
+        pytest.param({"PYRACAST_FIXTURE_PROVIDER": "1"}, "accounts.E006", id="fixture-provider"),
     ],
 )
 def test_each_deployment_check_refuses_its_setting_changed_in_the_compose_file(
@@ -119,3 +120,10 @@ def test_the_mail_check_refuses_a_runtime_secret_without_a_public_relay(
     deployed: Callable[..., list[tuple[str, int]]],
 ) -> None:
     assert deployed({"PYRACAST_EMAIL_HOST": None}) == [("accounts.E001", 40)]
+
+
+@override_settings(DEBUG=True, PYRACAST_FIXTURE_PROVIDER=True)
+def test_the_fixture_provider_check_leaves_a_debug_runtime_alone() -> None:
+    assert "accounts.E006" not in {
+        message.id for message in run_checks(include_deployment_checks=True)
+    }

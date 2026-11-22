@@ -25,6 +25,24 @@ PROVIDERS = {
 }
 
 
+# The endpoints django-allauth calls with PROVIDERS: (scheme, host, path) -> (provider, endpoint).
+PROVIDER_ENDPOINTS = {
+    ("https", "oauth2.googleapis.com", "/token"): ("google", "token"),
+    ("https", "www.googleapis.com", "/oauth2/v2/userinfo"): ("google", "profile"),
+    ("https", "login.microsoftonline.com", "/common/oauth2/v2.0/token"): ("microsoft", "token"),
+    ("https", "graph.microsoft.com", "/v1.0/me"): ("microsoft", "profile"),
+}
+PROVIDER_TOKEN = {"access_token": "test-access-token", "token_type": "Bearer", "expires_in": 3600}
+
+
+def provider_endpoint(url: str) -> tuple[str, str]:
+    parts = urlsplit(url)
+    endpoint = PROVIDER_ENDPOINTS.get((parts.scheme, parts.netloc, parts.path))
+    if endpoint is None:
+        raise AssertionError(f"Unexpected provider URL: {url}")
+    return endpoint
+
+
 class ProviderRedirectParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -113,20 +131,21 @@ def serve_provider_profile(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     def request(
         self: requests.Session, method: str, url: str, *args: Any, **kwargs: Any
     ) -> requests.Response:
+        provider, endpoint = provider_endpoint(url)
         response = requests.Response()
         response.status_code = 200
         response.headers["content-type"] = "application/json"
         identity_keys = (
             {"id", "mail", "userPrincipalName", "jobTitle"}
-            if "graph.microsoft.com" in url
+            if provider == "microsoft"
             else {"sub", "email", "email_verified", "hd", "jobTitle"}
         )
         before_profile = profile.get("_before_profile")
-        if not url.endswith("/token") and before_profile is not None:
+        if endpoint == "profile" and before_profile is not None:
             before_profile()
         response._content = json.dumps(
-            {"access_token": "test-access-token", "token_type": "Bearer", "expires_in": 3600}
-            if url.endswith("/token")
+            PROVIDER_TOKEN
+            if endpoint == "token"
             else {key: value for key, value in profile.items() if key in identity_keys}
         ).encode()
         return response

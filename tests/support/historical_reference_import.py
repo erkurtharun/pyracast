@@ -1,5 +1,5 @@
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -8,17 +8,33 @@ from django.utils import timezone
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.secrets import encrypt_secret
-from pyracast.forecasts.historical_import import (
-    HistoricalSourceSettings,
-    import_historical_reference,
-)
+from pyracast.forecasts.historical_upload import import_historical_upload, parse_historical_upload
 from pyracast.forecasts.models import HistoricalReferenceImport
 from tests.support.domain import NOW, System, make_system
 
+REFERENCE = "Authorized test historical export; declared model settings verified"
 
-def source_settings(**updates: Any) -> HistoricalSourceSettings:
-    return (
-        HistoricalSourceSettings(
+
+@dataclass(frozen=True)
+class SourceSettings:
+    product: str
+    unit: str
+    timestamp_convention: str
+    period: str
+    latitude: float
+    longitude: float
+    capacity_kw: float
+    dc_capacity_kw: float
+    tilt_degrees: float
+    azimuth_degrees: float
+    losses_percent: float
+    mounting_type: str
+    source_reference: str
+
+
+def source_settings(**updates: Any) -> SourceSettings:
+    return replace(
+        SourceSettings(
             product="historical_rooftop_pv",
             unit="kW",
             timestamp_convention="period_end",
@@ -31,10 +47,9 @@ def source_settings(**updates: Any) -> HistoricalSourceSettings:
             azimuth_degrees=0,
             losses_percent=0,
             mounting_type="fixed",
-            source_reference="Authorized test historical export; declared model settings verified",
-        )
-        if not updates
-        else replace(source_settings(), **updates)
+            source_reference=REFERENCE,
+        ),
+        **updates,
     )
 
 
@@ -74,13 +89,20 @@ def power_file(tmp_path: Path, rows: object | None = None) -> Path:
     return path
 
 
-def archive(system: System, path: Path, **updates: Any) -> HistoricalReferenceImport:
-    return import_historical_reference(
+def archive(
+    system: System, path: Path, *, reference: str = REFERENCE, **metadata: Any
+) -> HistoricalReferenceImport:
+    content = path.read_bytes()
+    if metadata:
+        content = json.dumps(json.loads(content) | metadata).encode()
+    record, _ = import_historical_upload(
         system.admin,
         system.tenant.pk,
         system.region.pk,
         system.binding.pk,
-        path,
-        source_settings(**updates),
-        trusted_root=path.parent,
+        parse_historical_upload(content, path.name),
+        path.name,
+        settings_confirmed=True,
+        source_reference=reference,
     )
+    return record

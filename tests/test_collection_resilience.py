@@ -6,7 +6,6 @@ import pytest
 from pyracast.api.errors import exception_handler
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.operations import rotate_secret
 from pyracast.epias import AUTH_URL, EpiasClient, EpiasDay, EpiasError, EpiasPlant
 from pyracast.forecasts.jobs.claim import LEASE_DURATION, claim
 from pyracast.forecasts.jobs.collect import persist_snapshot
@@ -34,7 +33,7 @@ from pyracast.weather_data import WeatherData
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate, collect, publish
 from tests.support.metering import connected
-from tests.support.providers import TARGET, binding_for
+from tests.support.providers import TARGET, binding_for, replace_key
 from tests.support.weather_collection import WeatherFixture
 
 
@@ -171,7 +170,7 @@ def test_authentication_block_preserves_account_and_clears_by_credential_revisio
     with pytest.raises(RequestDeferredError) as caught:
         reserve_account_request(system.account, NOW, purpose=RequestPurpose.VALIDATION)
     assert caught.value.available_at is None
-    rotate_secret(system.admin, system.account.pk, "test-only-replacement")
+    replace_key(system.admin, system.account.pk, "test-only-replacement")
     system.account.refresh_from_db()
     assert reserve_account_request(system.account, NOW, purpose=RequestPurpose.VALIDATION)
     assert system.account.authentication_failed_revision != system.account.credential_revision
@@ -189,7 +188,7 @@ def test_obsolete_responses_cannot_block_rotated_credentials_or_shorten_cooldown
     record_provider_failure(system.account, ProviderError("private", status_code=429), NOW)
     system.account.refresh_from_db()
     assert system.account.request_blocked_until == first_until
-    rotate_secret(system.admin, system.account.pk, "test-only-replacement")
+    replace_key(system.admin, system.account.pk, "test-only-replacement")
     record_provider_failure(original_account, first_error, NOW)
     record_provider_failure(original_account, ProviderError("private", status_code=403), NOW)
     system.account.refresh_from_db()

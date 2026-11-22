@@ -1,9 +1,11 @@
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
 from dramatiq.brokers.stub import StubBroker
 
 from pyracast.background.deadlines import ACTORS
+from pyracast.background.failures import PhaseOutcome
 from pyracast.forecasts.models import DispatcherPhase
 from pyracast.orchestration import dispatcher, kinds
 from pyracast.orchestration.kinds import KINDS, QUEUES, WORKER_QUEUES, register_actors
@@ -24,15 +26,22 @@ def test_the_dispatcher_publishes_every_job_kind_in_exactly_one_stored_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     received: dict[str, list[object]] = {}
-    for name in (
-        "dispatch_notifications",
-        "dispatch_collections",
-        "dispatch_calibrations",
-        "dispatch_epias",
+
+    def publisher(name: str, result: object) -> Callable[..., object]:
+        def publish(*actors: object) -> object:
+            received[name] = list(actors)
+            return result
+
+        return publish
+
+    for name, result in (
+        ("dispatch_notifications", 0),
+        ("dispatch_collections", PhaseOutcome(published=0)),
+        ("dispatch_revalidations", 0),
+        ("dispatch_calibrations", 0),
+        ("dispatch_epias", 0),
     ):
-        monkeypatch.setattr(
-            dispatcher, name, lambda *actors, name=name: received.setdefault(name, list(actors))
-        )
+        monkeypatch.setattr(dispatcher, name, publisher(name, result))
     for step in ("purge_expired", "warn_before_purge"):
         monkeypatch.setattr(dispatcher, step, MagicMock())
     monkeypatch.setattr(dispatcher, "RETENTION", ())

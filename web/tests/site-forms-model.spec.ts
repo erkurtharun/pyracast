@@ -5,6 +5,7 @@ import {
     coordinatePair,
     coordinatePattern,
     coordinateValue,
+    type CoordinateAxis,
     sameLocation,
     supportedZones,
     zoneChoices,
@@ -16,6 +17,19 @@ import {
 } from "../src/features/portfolio/onboarding-steps";
 import { matchesSearch } from "../src/features/portfolio/portfolio-search";
 import { coordinatePastes } from "./support/coordinate-pastes";
+import coordinateRows from "./support/coordinate-values.json";
+
+// The console's form is held to the same table (tests/test_admin_plant_console.py). Spaces around
+// a value are ignored on both sides: a value copied from a sheet often carries one.
+const coordinateValues = coordinateRows.map((row) => ({
+    ...row,
+    axis: coordinateAxis(row.axis),
+}));
+
+function coordinateAxis(name: string): CoordinateAxis {
+    if (name === "latitude" || name === "longitude") return name;
+    throw new Error(`${name} is no coordinate axis`);
+}
 
 test("a pasted text fills both coordinates only when it is a pair of coordinates in range", () => {
     for (const paste of coordinatePastes)
@@ -34,77 +48,19 @@ test("a pasted text that is no pair is one latitude or refused by the latitude f
 });
 
 test("a single coordinate with one decimal comma or point is that number", () => {
-    const accepted = [
-        ["latitude", "41,0082", 41.0082],
-        ["latitude", "41.0082", 41.0082],
-        ["longitude", "17,5", 17.5],
-        ["longitude", "17.5", 17.5],
-        ["latitude", "-36,9", -36.9],
-        ["latitude", "-33,8688", -33.8688],
-        ["latitude", "-33.8688", -33.8688],
-        ["longitude", "-33,8688", -33.8688],
-        ["longitude", "-33.8688", -33.8688],
-        ["latitude", "1,234", 1.234],
-        ["latitude", "0", 0],
-        ["latitude", "90", 90],
-        ["latitude", "-90,000", -90],
-        ["longitude", "-180", -180],
-        ["longitude", "179,999999", 179.999999],
-        ["longitude", "180,0", 180],
-        // Spaces around a value are ignored, as the console's form does: a value copied from a
-        // sheet often carries one.
-        ["latitude", " 41,0082", 41.0082],
-        ["latitude", "41,0082 ", 41.0082],
-    ] as const;
-    for (const [axis, text, value] of accepted)
-        expect(coordinateValue(axis, text), text).toBe(value);
+    for (const { axis, text, value } of coordinateValues)
+        if (value !== undefined)
+            expect(coordinateValue(axis, text), text).toBe(value);
 });
 
-const refusedCoordinates = [
-    ["latitude", ""],
-    ["latitude", "41,00,82"],
-    ["latitude", "41,0082.5"],
-    ["latitude", "41.0082,5"],
-    ["latitude", "1.234,5"],
-    ["latitude", "1,234.5"],
-    ["latitude", "1 234"],
-    ["latitude", "41, 0082"],
-    ["latitude", "+41,0082"],
-    ["latitude", "--41"],
-    ["latitude", "41-"],
-    ["latitude", "−41"],
-    ["latitude", "41,"],
-    ["latitude", ",5"],
-    ["latitude", "041,5"],
-    ["latitude", "4e1"],
-    ["latitude", "NaN"],
-    ["latitude", "Infinity"],
-    ["latitude", "90,1"],
-    ["latitude", "-90.000001"],
-    ["latitude", "410082"],
-    ["longitude", "180,5"],
-    ["longitude", "-181"],
-    ["longitude", "175,0,1"],
-] as const;
-
 test("a coordinate that is not one plain number in range is refused", () => {
-    for (const [axis, text] of refusedCoordinates)
-        expect(coordinateValue(axis, text), text).toBeNaN();
+    for (const { axis, text, reason } of coordinateValues)
+        if (reason !== undefined)
+            expect(coordinateValue(axis, text), text).toBeNaN();
 });
 
 test("the coordinate field's pattern accepts exactly the values the rule accepts", () => {
-    const samples = [
-        ...refusedCoordinates,
-        ["latitude", "41,0082"],
-        ["latitude", "-90"],
-        ["latitude", "-33,8688"],
-        ["longitude", "-33.8688"],
-        ["longitude", "17,5"],
-        ["longitude", "-179.5"],
-        ["latitude", " 41,0082"],
-        ["latitude", "41,0082 "],
-    ] as const;
-    for (const [axis, text] of samples) {
+    for (const { axis, text } of coordinateValues) {
         // Browsers compile a pattern attribute whole, with the v flag.
         const field = new RegExp(`^(?:${coordinatePattern(axis)})$`, "v");
         expect(field.test(text), text).toBe(

@@ -14,7 +14,7 @@ from pyracast.accounts.stored_secrets import (
     stored_secrets,
 )
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
+from pyracast.connections.secrets import api_key_fingerprints, decrypt_api_key, encrypt_secret
 
 
 class SecretRotationError(Exception):
@@ -65,13 +65,16 @@ def reencrypt_secrets(*, verify: bool = False) -> tuple[int, int]:
     if unreadable:
         raise SecretRotationError("Unreadable or malformed secrets", unreadable, 1)
     for account in accounts:
+        api_key = decrypt_api_key(account.encrypted_api_key)
         try:
-            account.encrypted_api_key = encrypt_secret(decrypt_api_key(account.encrypted_api_key))
+            account.encrypted_api_key = encrypt_secret(api_key)
         except ValidationError:
             raise SecretRotationError(
                 "Unreadable or malformed secrets", [f"{PROVIDERS} {account.pk}"], 1
             ) from None
-        account.save(update_fields=["encrypted_api_key"])
+        if account.api_key_fingerprint is not None:
+            account.api_key_fingerprint = api_key_fingerprints(api_key)[0]
+        account.save(update_fields=["encrypted_api_key", "api_key_fingerprint"])
     adapter = MFAAdapter()
     for authenticator in authenticators:
         data = authenticator.data.copy()
