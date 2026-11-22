@@ -339,12 +339,12 @@ def test_an_outbound_mail_interrupted_after_its_marker_is_uncertain_and_keeps_it
     stored.update(transmit_started_at=now)
     later = now + LEASE + timedelta(seconds=1)
 
-    assert outbox.pending_mail_ids(later) == [mail.pk]
+    assert pending_mail_ids(later) == [mail.pk]
     assert outbox._claim(mail.pk, later) is None
     assert lease_of(stored) == ("uncertain", 1, first[1])
     assert stored.get().last_error == "interrupted_send"
     assert lease_violations()["notifications_outboundmail"] == 0
-    assert outbox.pending_mail_ids(later) == []
+    assert pending_mail_ids(later) == []
     assert outbox._claim(mail.pk, later) is None
     assert lease_of(stored) == ("uncertain", 1, first[1])
 
