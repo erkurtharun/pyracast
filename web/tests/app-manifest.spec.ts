@@ -78,8 +78,8 @@ test("the app manifest declares one fixed identity under /app/ and nothing else"
         display: "standalone",
         theme_color: token("forest"),
         background_color: token("cream"),
-        icons: [192, 512].flatMap((size) =>
-            ["any", "maskable"].map((purpose) => ({
+        icons: ["any", "maskable"].flatMap((purpose) =>
+            [192, 512].map((size) => ({
                 src: `icons/${purpose}-${size}.png`,
                 sizes: `${size}x${size}`,
                 purpose,
