@@ -100,8 +100,7 @@ test("pages and unknown files under /app/ keep the page headers", async ({
         expect(headers["content-security-policy"], address).toMatch(
             /script-src 'self' 'nonce-[^']+' 'strict-dynamic'/,
         );
-        if (productionServer)
-            expect(headers["cache-control"], address).toBe("private, no-store");
+        expect(headers["cache-control"], address).toContain("no-store");
         expect(headers["x-robots-tag"], address).toBe("noindex, nofollow");
     }
 });
