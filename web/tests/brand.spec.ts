@@ -2,19 +2,74 @@ import { test, expect } from "./support/test";
 import type { Locator } from "@playwright/test";
 import { accessibilityViolations } from "./support/accessibility";
 import { mockApi } from "./support/workspace";
+import artwork from "./support/brand-artwork.json";
 
-const ink = { light: "#09383a", dark: "#f4f2e8" };
+const { colours } = artwork;
+const ink = { light: colours.dark, dark: colours.light };
+
+function drawing(svg: SVGElement | HTMLElement) {
+    return {
+        viewBox: svg.getAttribute("viewBox"),
+        shapes: [...svg.querySelectorAll("path, rect")].map((shape) => {
+            const transform: string[] = [];
+            let fill: string | null = null;
+            for (
+                let node: Element | null = shape;
+                node && node !== svg;
+                node = node.parentElement
+            ) {
+                const own = node.getAttribute("transform");
+                if (own) transform.unshift(own);
+                fill ??= node.getAttribute("fill");
+            }
+            return {
+                transform,
+                fill: fill?.toLowerCase(),
+                d:
+                    shape.getAttribute("d") ??
+                    `${shape.getAttribute("width")}x${shape.getAttribute("height")}`,
+            };
+        }),
+    };
+}
+
+function logoDrawing(surface: keyof typeof ink) {
+    const { logo, mark } = artwork;
+    return {
+        viewBox: logo.viewBox,
+        shapes: [
+            { transform: [logo.mark], fill: colours.sun, d: mark.sun },
+            { transform: [logo.mark], fill: ink[surface], d: mark.bar },
+            ...logo.letters.map(([letter, d]) => ({
+                transform: [logo.wordmark, letter],
+                fill: ink[surface],
+                d,
+            })),
+        ],
+    };
+}
 
 async function expectLogo(place: Locator, surface: keyof typeof ink) {
     const logo = place.getByRole("img", { name: "Pyracast", exact: true });
     await expect(logo).toHaveCount(1);
     await expect(logo).toBeVisible();
-    await expect(logo.locator('path[fill="#ffb545"]')).toHaveCount(1);
-    await expect(logo.locator(`[fill="${ink[surface]}"]`)).toHaveCount(2);
-    await expect(logo.locator("path")).toHaveCount(10);
+    expect(await logo.evaluate(drawing)).toEqual(logoDrawing(surface));
     const box = (await logo.boundingBox())!;
     expect(box.width / box.height).toBeCloseTo(518 / 101, 1);
 }
+
+test("the favicon draws the kit mark on its dark tile", async ({ page }) => {
+    const { favicon } = artwork;
+    await page.goto("/icon.svg");
+    expect(await page.locator("svg").evaluate(drawing)).toEqual({
+        viewBox: favicon.viewBox,
+        shapes: [
+            { transform: [], fill: colours.dark, d: favicon.size },
+            { transform: [favicon.mark], fill: colours.sun, d: favicon.sun },
+            { transform: [favicon.mark], fill: colours.light, d: favicon.bar },
+        ],
+    });
+});
 
 test("the first paint of the application already draws the logo for light surfaces", async ({
     browser,

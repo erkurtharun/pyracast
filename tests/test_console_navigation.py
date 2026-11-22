@@ -1,4 +1,6 @@
 import json
+import re
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -11,6 +13,10 @@ from tests.support.admin_setup import admin_system, setup_input
 from tests.support.api import verified_admin
 
 pytestmark = pytest.mark.django_db
+ROOT = Path(__file__).resolve().parents[1]
+ARTWORK = json.loads(
+    (ROOT / "web" / "tests" / "support" / "brand-artwork.json").read_text(encoding="utf-8")
+)
 DEEP_LINK = "/admin/plants/7/?tab=review"
 HOSTILE = [
     "https://elsewhere.example/admin/",
@@ -145,8 +151,24 @@ def test_the_console_rail_draws_the_brand_mark_beside_its_name() -> None:
     page = client.get(reverse("admin:index")).content.decode()
 
     rail = page.split('<a class="brand"', 1)[1].split("</a>", 1)[0]
-    assert '<path class="brand-mark-sun" d="M0 48a48 48 0 0 1 96 0Z"/>' in rail
-    assert '<path class="brand-mark-bar" d="M0 53H99L86 72H21V112H0Z"/>' in rail
+    mark = ARTWORK["mark"]
+    assert re.findall(r"<svg [^>]*viewBox=\"([^\"]+)\"|<(\w+)([^>]*)>", rail) == [
+        ("0 0 99 112", "", ""),
+        ("", "path", f' class="brand-mark-sun" d="{mark["sun"]}"/'),
+        ("", "path", f' class="brand-mark-bar" d="{mark["bar"]}"/'),
+        ("", "span", ""),
+    ]
+    stylesheet = (ROOT / "src/pyracast/regions/static/pyracast/admin-workspace.css").read_text(
+        encoding="utf-8"
+    )
+    tokens = dict(re.findall(r"^\s*(--[\w-]+): (#\w+);$", stylesheet, re.MULTILINE))
+    fills = dict(
+        re.findall(r"^\.brand-mark-(\w+) \{\n    fill: var\((--[\w-]+)\);", stylesheet, re.M)
+    )
+    assert {part: tokens[token] for part, token in fills.items()} == {
+        "sun": ARTWORK["colours"]["sun"],
+        "bar": ARTWORK["colours"]["light"],
+    }
     assert 'aria-hidden="true"' in rail
     assert "Pyracast operations" in rail
 
