@@ -10,6 +10,7 @@ from django.db import transaction
 from django.db.models import Case, F, Q, Value, When
 from django.utils import timezone
 
+from pyracast.background.claims import claim_unless_contended
 from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS, LAST_REQUEST_START
 from pyracast.background.failures import BACK_OFF, log_failure
@@ -292,7 +293,9 @@ def run_epias_job(
 ) -> bool:
     clock = Clock(now or timezone.now())
     deadline = clock.started + LAST_REQUEST_START.total_seconds()
-    lease = claim_epias_job(job_id, clock.entered)
+    lease = claim_unless_contended(
+        "collect_epias", job_id, lambda: claim_epias_job(job_id, clock.entered)
+    )
     if lease is None:
         return False
     try:

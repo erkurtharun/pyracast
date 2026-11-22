@@ -5,13 +5,14 @@ from enum import StrEnum
 
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.db.models import Q, QuerySet
 from django.utils import timezone
 from dramatiq import Actor
 
 from pyracast import providers
 from pyracast.background.actor import fresh_connections
+from pyracast.background.claims import left_unclaimed
 from pyracast.background.clock import Clock
 from pyracast.background.deadlines import ACTORS, LAST_REQUEST_START
 from pyracast.background.failures import queue_full
@@ -43,6 +44,8 @@ class RevalidationOutcome(StrEnum):
     KEY_REJECTED = "key_rejected"
     STOPPED = "stopped"
     LEASE_LOST = "lease_lost"
+    # The run could not lock the account; the account is due again when the dispatch's lease ends.
+    CONTENDED = "contended"
 
 
 def stale_bindings(account: ProviderAccount) -> QuerySet[SiteBinding]:
@@ -165,7 +168,12 @@ def revalidate_account(
     replaced it, within the requests the current plants and its own forecasts leave. `claim` is
     the lease the dispatcher took for this run; a run whose lease moved on does nothing."""
     clock = Clock(now)
-    account = _take_lease(account_id, claim, now)
+    try:
+        account = _take_lease(account_id, claim, now)
+    except DatabaseError as error:
+        if not left_unclaimed(error, ACTOR, account_id):
+            raise
+        return RevalidationOutcome.CONTENDED
     if account is None:
         return RevalidationOutcome.LEASE_LOST
     bindings = list(stale_bindings(account))

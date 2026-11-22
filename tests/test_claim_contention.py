@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import OutboundMail, Tenant
+from pyracast.background.claims import claim_unless_contended
 from pyracast.connections import operations
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts import runtime as collection_runtime
@@ -171,6 +172,36 @@ def test_a_revalidation_delivery_behind_a_held_account_lock_keeps_its_dispatch_l
     assert len(contended_lines(pyracast_logs, REVALIDATION.actor, system.account.pk)) == 1
     assert f"account_id={system.account.pk} outcome=contended" in pyracast_logs.text
     assert claim_due_revalidations(lease) == [system.account.pk]
+
+
+@pytest.mark.parametrize(
+    "cause", [psycopg.errors.LockNotAvailable(), psycopg.errors.DeadlockDetected()]
+)
+def test_a_claim_that_waited_too_long_or_lost_a_deadlock_leaves_the_job_unclaimed(
+    cause: Exception, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    def claim() -> object:
+        raise database_error(cause)
+
+    assert claim_unless_contended(COLLECTION.actor, 7, claim) is None
+    assert contended_lines(pyracast_logs, COLLECTION.actor, 7) == [
+        f"job_claim_contended kind=collect_forecast job_id=7 error_type={type(cause).__name__}"
+    ]
+
+
+@pytest.mark.parametrize("cause", [psycopg.errors.QueryCanceled(), None])
+def test_a_claim_that_failed_for_another_database_reason_still_raises(
+    cause: Exception | None, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    error = database_error(cause)
+
+    def claim() -> object:
+        raise error
+
+    with pytest.raises(OperationalError) as raised:
+        claim_unless_contended(COLLECTION.actor, 7, claim)
+    assert raised.value is error
+    assert contended_lines(pyracast_logs, COLLECTION.actor, 7) == []
 
 
 def test_a_lock_timeout_after_a_calibration_claim_still_fails_its_delivery(
