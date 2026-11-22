@@ -86,7 +86,7 @@ sequenceDiagram
 - Single use: `accepted_at` and `accepted_by` are set under the row lock. A retry by the accepting account while it is still a member answers like the first call; every other account gets 400.
 - Role: the invitation's. A user who is already a member keeps the existing membership and role for a viewer invitation and the invitation is still consumed. An administrator invitation raises the account to `admin` and writes a `WorkspaceAdminChange`.
 - Signup and acceptance are separate: an invited signup creates only a user, so an invitation that closes between them leaves an account without any workspace.
-- Closed invitations stay as rows; no code path of this flow deletes them (see `member-invitation`).
+- No code path of this flow deletes invitations. A closed invitation is deleted 90 days after it closed, and by account erasure (see `member-invitation`); its token is then unknown.
 - Security log: acceptance writes `invitation_accepted` (and `workspace_admin_reassigned` for an administrator invitation). A refusal of a known invitation writes `invitation_denied` with the reason, at most once a minute per actor, invitation and reason; an unknown token writes none.
 - The token lives in a URL fragment so it is not sent to the server; the query form is not read.
 - The preview names the inviter only while that account is an active member, and shows an accepted invitation only to the account that accepted it, so it does not reveal whether an address has an account.

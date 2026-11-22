@@ -4,26 +4,27 @@ A developer or operator runs `scripts/calibrate_irradiance.py` from the reposito
 
 ## Entry points
 
-- Command: `uv run --locked python scripts/calibrate_irradiance.py --power P --weather W --capacity-kw C [--timezone TZ] --output DIR` (`main`). `--timezone` defaults to `Europe/Istanbul`.
-- Library: `pyracast.irradiance.calibration.calibrate`, `pyracast.irradiance.pairs.load_pairs`, `pyracast.irradiance.fitting.fit_quadratic`, `pyracast.irradiance.inverse.reconstruct_ghi`. Outside tests, only the script imports `calibrate` and `load_pairs`, and only `calibrate` imports `fit_quadratic` and `reconstruct_ghi`. The loaders `load_json_file` and `load_power` and the power types of `pairs.py` are shared with the historical reference import and upload, which this flow does not cover.
+- Command: `uv run --locked python scripts/calibrate_irradiance.py --power P --weather W --capacity-kw C [--timezone TZ] --output DIR [--overwrite]` (`main`). `--timezone` defaults to `Europe/Istanbul`.
+- Library: `pyracast.irradiance.calibration.calibrate`, `pyracast.irradiance.pairs.load_pairs`, `pyracast.irradiance.fitting.fit_quadratic`, `pyracast.irradiance.inverse.reconstruct_ghi`. Outside tests, only the script imports `calibrate` and `load_pairs`, and only `calibrate` imports `fit_quadratic` and `reconstruct_ghi`. The strict JSON loader `load_json_file` and the power types live in `pyracast.irradiance.solcast_export`, shared with the historical reference import, which this flow does not cover.
 - Actor: a person at a shell. No screen, endpoint, worker, scheduler or CI job calls it. Runtime on the 40 MB reference case is about 4 s.
 
 ## Sequence
 
 ```mermaid
 flowchart TD
-    A["main: parse arguments"] --> B["load_pairs: resolve both paths inside the working directory"]
+    A["main: parse arguments, check capacity and timezone"] -->|"invalid capacity or timezone, existing outputs without --overwrite"| X1
+    A --> B["load_pairs: resolve both paths inside the working directory"]
     B -->|"outside, missing, not .json, bad JSON or schema"| X1["parser.error: exit 2"]
     B --> C["validate rows, then pair each PT30M power row with six contiguous PT5M weather rows by UTC bounds"]
     C -->|"invalid value, overlap or unsorted"| X1
     C --> D["calibrate: group intervals by local day, keep only gap-free complete days"]
-    D -->|"unknown timezone, fewer than 10 complete days"| X2["uncaught exception: traceback, exit 1"]
+    D -->|"midnight off the half-hour grid, fewer than 10 complete days"| X1
     D --> E["split days chronologically 60 / 20 / rest: train, validation, test"]
     E --> F["fit_quadratic on train days only: QR with reorthogonalization"]
-    F -->|"bad capacity, fewer than 6 eligible pairs, rank deficient, overflow"| X2
+    F -->|"fewer than 6 eligible pairs, rank deficient, overflow"| X1
     F --> G["reconstruct_ghi for every paired interval, including partial days"]
     G --> H["metrics per partition: identifiable intervals, baseline vs inverse"]
-    H --> I["mkdir output, write model.json, metrics.json, predictions.csv, print summary"]
+    H --> I["write model.json, metrics.json, predictions.csv in a sibling staging directory, move each into the output, print summary"]
 ```
 
 ## Data
@@ -41,17 +42,18 @@ flowchart TD
 
 - No user, tenant or role check: filesystem access of the invoking account is the only control.
 - `load_json_file` resolves each input with symlinks and requires it to sit under the working directory (`Path.cwd()`) and end in `.json`. The script cannot pass another trusted root; library callers can.
-- The output directory is not restricted and existing files in it are overwritten.
+- The output directory is not restricted; existing outputs are replaced only with `--overwrite`.
 
 ## Failure paths
 
 | Condition | Result |
 | --- | --- |
 | Input missing, outside the working directory, symlink out, not a regular `.json` file | Exit 2: `Input must be an existing JSON file within the trusted directory` |
-| Malformed JSON, missing `estimated_actuals`, wrong `period`, naive or bad `period_end`, non-numeric or non-finite value, negative `pv_power_rooftop`, `ghi` or `snow_soiling_rooftop` (or soiling above 100; `air_temp` has no bounds), overlapping or unsorted rows | Exit 2 with the `ValueError` message; no output directory is created |
-| Fewer than ten complete local days (always so in a zone whose midnight is off the half-hour grid, such as `Asia/Kathmandu`), fewer than six eligible training pairs, rank-deficient features, coefficient overflow | Uncaught `ValueError` traceback, exit 1, no output directory |
-| `--capacity-kw` zero, negative, infinite or `nan`; unknown `--timezone` | Uncaught `ValueError` or `ZoneInfoNotFoundError` traceback, exit 1, no output directory; both are checked only after the inputs are parsed |
-| Output path not writable, or a failure between the three writes | `OSError` (or `ValueError` from `allow_nan=False`) traceback; a partial set of files may remain |
+| `--capacity-kw` not a finite positive number; `--timezone` not an IANA zone | Exit 2 before any input is read |
+| An output file already exists and `--overwrite` is missing | Exit 2 naming the existing files; nothing read or written |
+| Malformed JSON (also duplicate keys, nonfinite numbers, NUL characters, nesting too deep), missing `estimated_actuals`, wrong `period`, naive or bad `period_end`, non-numeric or non-finite value, negative `pv_power_rooftop`, `ghi` or `snow_soiling_rooftop` (or soiling above 100; `air_temp` has no bounds), overlapping or unsorted rows | Exit 2 with the `ValueError` message; no output directory is created |
+| A zone whose local midnight is off the half-hour grid (such as `Asia/Kathmandu`), fewer than ten complete local days, fewer than six eligible training pairs, rank-deficient features, coefficient overflow | Exit 2 with the `ValueError` message, no output |
+| Output path not writable, or a failure while staging | `OSError` (or `ValueError` from `allow_nan=False`) traceback; the staging directory is removed and earlier outputs stay as they were |
 
 ## Rules and invariants
 
@@ -60,11 +62,11 @@ flowchart TD
 - The model is fitted on train days only and is never refitted on validation or test. Validation is reported but selects nothing.
 - Fit rows need positive power, all six native GHI values above 25 W/m² and snow transmission of at least 0.05. `training_sample_count` counts these pairs, not days.
 - `reconstruct_ghi` uses power, temperature and snow only; reference GHI is never an input. A paired interval is "identifiable" only with positive power, positive reference GHI and an inverse estimate. Daily error is partial energy over those intervals; the report hard-codes `full_day_total_validated` and `forecast_transfer_validated` to false.
-- Output is not atomic and not versioned: `schema_version` 1 sits only in `model.json`.
+- Output is published whole: all three files are written in a staging directory beside the output and each is moved into place with `os.replace`, so an interrupted write leaves no mix of runs. It is not versioned: `schema_version` 1 sits only in `model.json`.
 
 ## Tests
 
-- `tests/test_irradiance_calibration.py`: split and no-refit property, partial and DST days, ten-day and rank-deficiency failures, missing-reason counts, and two subprocess tests of the script (file contents, and exit 2 for inputs outside the working directory with no output created).
+- `tests/test_irradiance_calibration.py`: split and no-refit property, partial and DST days, ten-day and rank-deficiency failures, missing-reason counts, and two subprocess tests of the script (file contents, and exit 2 for inputs outside the working directory with no output created). `tests/test_calibration_cli.py`: outputs and summary, `--overwrite`, capacity and timezone refusals before reading, the off-grid zone named, staging beside a relative output, refusals without outputs.
 - `tests/test_irradiance_pairs.py`: UTC alignment, weighted means, hashes, gaps, field validation, missing, directory and non-JSON inputs, working-directory and symlink confinement.
 - `tests/test_irradiance_fitting.py` and `tests/test_irradiance_inverse.py`: fit accuracy, scaling, overflow and rank guards; every inverse rejection reason and the forward round trip.
-- Gaps: the script's traceback paths (capacity, timezone, too few days, off-grid zones), partial output after a write failure, and the documented reference case, whose input files are git-ignored. `tests/test_evaluation.py` covers `pyracast/evaluation.py`, which this flow does not use. No Playwright coverage applies.
+- Gaps: a write failure while staging, and the documented reference case, whose input files are git-ignored. `tests/test_evaluation.py` covers `pyracast/evaluation.py`, which this flow does not use. No Playwright coverage applies.

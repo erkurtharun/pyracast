@@ -1,6 +1,6 @@
 # Collection and delivery health report
 
-The host watchdog (at most every five minutes), an operator running `pyracast check_delivery_health`, and a platform administrator opening the console Overview, Operations or filtered Plants pages all read the same typed report, `orchestration.delivery_health.HealthReport`. It reads dispatcher progress and the state of collection, reminder, outbound mail, EPIAS and calibration jobs, provider accounts, regions and reminder schedules, plus the broker queues, and has `healthy` true only when every alarm counter is zero, every dispatcher phase succeeded within the allowed lag, the broker answers and every work queue is declared. The command prints the report as JSON and exits non-zero when unhealthy; the console renders the same counters as grouped health checks.
+The host watchdog (at most every five minutes), an operator running `pyracast check_delivery_health`, and a platform administrator opening the console Overview, Operations or filtered Plants pages all read the same typed report, `orchestration.delivery_health.HealthReport`. It reads dispatcher progress and the state of collection, reminder, outbound mail, EPIAS and calibration jobs, provider accounts, regions and reminder schedules, plus the broker queues, and has `healthy` true only when every alarm counter is zero, every dispatcher phase succeeded within the allowed lag, the broker answers and every work queue is declared. The command prints the report as JSON, with `alarms` naming each alarm counter above zero, and exits non-zero when unhealthy; the watchdog turns a failing report into one `pyracast_delivery_unhealthy` event, and the console renders the same counters as grouped health checks.
 
 ## Entry points
 
@@ -29,13 +29,13 @@ sequenceDiagram
     C->>H: "now, lag, broker"
     H->>DB: "phases, jobs, mail, accounts, regions, forecasts, schedules, requests"
     H-->>C: report
-    C-->>W: JSON on stdout
+    C-->>W: "JSON alone on stdout, log records on stderr"
     alt non-zero exit
         C-->>W: "CommandError or crash, exit 1"
-        W->>L: "pyracast_runtime_unhealthy reason=delivery_health"
+        W->>L: "pyracast_delivery_unhealthy alarms, dispatch_phases, broker_unreachable, missing_queues"
     end
     opt exec outlasts the watchdog deadline
-        W->>L: "pyracast_runtime_unhealthy step=delivery outcome=timeout"
+        W->>L: "pyracast_watchdog_step_failed step=delivery outcome=timeout"
     end
     A->>H: "GET overview or operations, lag 5 min"
     H-->>A: report
@@ -52,7 +52,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `forecasts_dispatcherstatus` | R (W by dispatcher) | One row per phase: attempted, succeeded, last error code, `duration_ms`, `published`; the Operations workers panel shows them |
 | `forecasts_collectionjob`, `metering_epiascollectionjob`, `plants_calibrationrun` | R | Waiting, running or last-24h failed jobs of regions outside the trash |
-| `notifications_notificationdelivery` | R | Waiting, sending or last-24h deliveries, including prepared message kind and completeness |
+| `notifications_notificationdelivery` | R | Waiting, sending or last-24h deliveries; the unavailable, partial and saved-forecast checks read the typed `forecast_kind` and `forecast_complete`. The delivery table of `delivery_health.TABLES` defers `prepared_message`, so no check or console list selects the rendered mail |
 | `notifications_outboundmail` | R | Waiting, sending, last-24h failed and uncertain mail |
 | `notifications_reminderschedule`, recipient rows and ties, `accounts_membership`, `account_emailaddress` | R | Enabled schedules of approved regions; recipients validated in Python after at most three statements for all tenants, members read only for workspaces whose schedules include them or tie an address |
 | `connections_provideraccount` | R | Cooldown and authentication-failed revision of enabled accounts used by approved regions |
@@ -77,15 +77,15 @@ sequenceDiagram
 | A queue the broker has not declared | Its channel closes alone; the queue reads as `missing` (counts `null`, `dead_letters_missing` for the dead-letter queue) while other counts stay. A missing work queue fails the report (nothing consumes it); a missing dead-letter queue does not |
 | Database unreachable | Unhandled exception, exit 1, no JSON (watchdog sees it as unhealthy); console page fails with a server error |
 | A statement runs longer than 10 s | The command fails inside its slot, exit 1 |
-| Command outlasts the watchdog's remaining time | `TimeoutExpired`, event `pyracast_runtime_unhealthy` with `step=delivery` and `outcome=timeout`, exit 1 |
-| Non-zero exit inside watchdog | Event `pyracast_runtime_unhealthy` with `reason=delivery_health`, output discarded, other steps continue |
+| Command outlasts the watchdog's remaining time | `TimeoutExpired`, event `pyracast_watchdog_step_failed` with `step=delivery` and `outcome=timeout`, exit 1 |
+| Non-zero exit inside watchdog | Event `pyracast_delivery_unhealthy` with the report's `alarms`, `unhealthy_dispatch_phases` (as `dispatch_phases`), `broker_unreachable` and `missing_queues`; other steps continue. Stdout that is not a report object with those fields, or whose `broker.queues` is not a mapping of queue states, gives `outcome: unreadable` with `exit_status`. Stderr is not parsed |
 | `?issue=` key unknown, on another page's scope, or its count is zero (summary omits zero counts) | Page renders unfiltered, no filter chip |
 | Operations `?issue=` for a plant-scoped key | Every job and dispatch section is hidden (section derived from the link fragment) |
 
 ## Rules and invariants
 
 - Unhealthy phase: no row, `succeeded_at` null or older than `now - lag`, or non-empty `last_error`. A failed run keeps the earlier `succeeded_at`; a failed status write leaves the row to go stale. A phase that records `items_failed:<n>` is unhealthy.
-- Waiting work is `pending` or `retry` with `available_at` older than the lag for collections and reminders, and `pending` only for EPIAS jobs, which have no `retry` status. Interrupted is `running` or `sending` with an expired lease (a null lease on those statuses cannot be stored). A calibration run is overdue a lag after its claim may take it; a requeued run is queued, never overdue.
+- Waiting work is `pending` or `retry` with `available_at` older than the lag for collections and reminders, and `pending` only for EPIAS jobs, which have no `retry` status. Interrupted is `running` or `sending` with an expired lease (a null lease on those statuses cannot be stored). A calibration run is overdue a lag after its claim may take it, and never before a lag after it started waiting (`available_at`, set at creation and at each requeue; null reads as its creation).
 - Failed and uncertain outcomes and delivery-shaped counters look back 24 hours by scheduled or finish time. A later success does not clear them.
 - Informational counters never affect `healthy`: `saved_forecast_notifications`, `paused_notifications` (last-24h `skipped` deliveries with `recipient_limit_exceeded`, `no_recipients` or `invalid_recipient`, so a customer's own over-limit or empty list does not page the operator) and `queued_calibrations` and `running_calibrations`. A stored invalid address still raises `invalid_reminder_recipients`, which is an alarm. The console still lists paused deliveries as "review", and cooldowns as "delay".
 - Outbound mail: `overdue_outbound_mail` (waiting past the lag, or sending with an expired lease), `failed_outbound_mail` and `uncertain_outbound_mail` (last day, never resent) are alarms; the console links them to the outbound mail admin list, the uncertain count to the list filtered by `status=uncertain`.
@@ -96,4 +96,5 @@ sequenceDiagram
 
 - `tests/test_delivery_health.py`: phases, counters, leases, credential rotation, recipients, paused deliveries, command JSON and exit, per-statement bound, bounded query budget. `tests/test_delivery_health_contract.py`: every printed key with its type. `tests/test_health_report.py`: calibration checks, provider requests, the broker section (unanswered, lost connection, undeclared and dead-letter queues), stale plants, event mail, the lag argument, a fixed statement count whatever the tenants.
 - `tests/test_health_checks.py` and `tests/test_admin_health.py` (presentation, summary and categories), `tests/test_admin_health_queries.py` (each issue filter equals its counter, 24 h boundary), `tests/test_admin_health_views.py` and `tests/test_admin_health_console.py` (filtered pages, dispatch and workers panels, queues), `tests/test_admin_workspace.py` (non-admins redirected, no provider or email I/O on GET), `tests/test_language.py` (Overview and Operations render in Turkish). Playwright: `web/integration/admin-csp.spec.ts` (filtered Operations page under CSP).
-- `tests/test_deployment_watchdog.py`: the delivery check runs at most every five minutes, a non-zero exit writes `reason=delivery_health`, and a timeout still lets the other steps run.
+- `tests/test_delivery_metadata.py`: the checks and the console read the typed metadata of deliveries whose rendered mail was cleared, and no health or history query selects `prepared_message`.
+- `tests/test_deployment_watchdog.py`: the delivery check runs at most every five minutes, a non-zero exit writes `pyracast_delivery_unhealthy` with the failing fields or `outcome: unreadable`, and a timeout still lets the other steps run.

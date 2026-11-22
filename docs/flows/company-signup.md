@@ -81,7 +81,7 @@ sequenceDiagram
 - `starting` opens the request's one transaction before the input is validated; user, address, tenant, membership and language commit together, the code intent is stored in it and the session holding the code is saved before the commit, so a failed save queues no mail. A failure after the user insert rolls everything back.
 - Every `POST auth/signup` not refused by a rate limit answers no sooner than `PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS` (1 s) after it reaches the middleware `SignupMinimumAnswerTime`. The wait runs after the commit; a 429 and other methods answer at once. An address with an account hashes the password like a new account.
 - Code verification logs the user in when the pending stage belongs to the same user; the pending code and the sign-in step rest on the new account's credential state (`accounts/processes.py`). The process lasts 10 minutes from signup and is not extended by a resend; 3 wrong attempts in total; 3 resends, each replacing the code.
-- A race can leave two unverified accounts for one mailbox; the first to prove the mailbox by password reset owns it. A signup that never signed in and proved no address is removed with its own empty workspace seven days after `date_joined` by the dispatcher's retention phase (`accounts.retention.reclaim_abandoned_signups`).
+- A race can leave two unverified accounts for one mailbox; the first to prove the mailbox by password reset owns it. An active signup that never signed in and proved no address is removed with its own empty workspace seven days after `date_joined` by the dispatcher's retention phase (`accounts.retention.reclaim_abandoned_signups`).
 
 ## Tests
 

@@ -109,13 +109,14 @@ sections and a row here.
 | Flow | Covers |
 | --- | --- |
 | [platform-admin-bootstrap](platform-admin-bootstrap.md) | Create a platform administrator and reset an authenticator by CLI |
+| [account-erasure](account-erasure.md) | Erase an account by anonymization from the CLI |
 | [admin-console-access](admin-console-access.md) | Platform console access: MFA gate, SPA hand-off, confirmation, shared shell and logout |
 | [admin-overview-and-operations](admin-overview-and-operations.md) | Console overview, plant list and operations health |
 | [admin-record-browser](admin-record-browser.md) | Browse platform records in the read-only console lists |
 | [admin-workspace-management](admin-workspace-management.md) | Create and manage workspaces from the console: creation, rename, invitations, member removal |
 | [workspace-admin-reassignment](workspace-admin-reassignment.md) | Reassign the workspace administrator from the console: impact list, transfer, automation shutdown, invitation revocation and role mail |
 | [platform-settings](platform-settings.md) | Set the global recipients-per-plant limit and review the plants it pauses |
-| [provider-credential-recovery](provider-credential-recovery.md) | Rotate a provider API key or clear a provider cooldown |
+| [provider-credential-recovery](provider-credential-recovery.md) | Provider accounts console: replace an API key with automatic revalidation, or clear a provider delay |
 
 ## Operations and delivery
 

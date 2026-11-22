@@ -6,7 +6,7 @@ A Dramatiq delivery of `collect_forecast` executes one `CollectionJob`; the disp
 
 - Actor `collect_forecast` (queue `default`, `max_retries=0`, time limit `deadlines.TIME_LIMIT` = lease minus a 90 s margin) is `orchestration.kinds.COLLECTION`, consumed by `pyracast worker` (`src/pyracast/orchestration/management/commands/worker.py`, default queues `default`, `calibration`, `epias`). Its function `forecasts/runtime.py` `deliver` loads the job (a missing job returns quietly), picks the adapter (`src/pyracast/providers.py` `adapter_for`) and the optional `OpenMeteoProvider`, then calls `forecasts/jobs/collect.py` `collect` with `calculation.calculate` and `plants.publication.PUBLICATION`.
 - Senders: `dispatch_collections` (job ids from `jobs.ready.pending_job_ids`, see `forecast-collection-scheduling`) and `deploy/smoke.sh` (one fixture job through real RabbitMQ). `forecasts/management/commands/fixture_demo.py` calls `collect` directly with `FixtureProvider` and no weather (DEBUG only).
-- No HTTP endpoint, screen or admin action calls `collect` or sends the message. Approval (first job), re-validation after a 401 (`validate_binding` re-arms the latest failed forecast job) and the console cooldown reset (`clear_provider_cooldown`) only change rows that the dispatcher then picks up; results surface through the forecast read flows.
+- No HTTP endpoint, screen or admin action calls `collect` or sends the message. Approval (first job), validation after a 401 or a key replacement (`validate_binding`, also run by the automatic revalidation, re-arms the latest forecast job refused for the key unless it is older than the due slot) and the console delay reset (`clear_provider_cooldown`) only change rows that the dispatcher then picks up; results surface through the forecast read flows.
 - Modules: `jobs/claim.py` (`claim`, `retry`), `jobs/collect.py`, `jobs/publish.py` (`publish`, the `PublicationHooks` protocol), `jobs/ready.py`.
 
 ## Sequence
@@ -93,7 +93,7 @@ sequenceDiagram
 | Condition | Result |
 |---|---|
 | Job row missing | `deliver` returns quietly |
-| Provider not fixture or solcast | `adapter_for` raises in `deliver`; Dramatiq logs it, job row untouched (a pending row is sent again every dispatcher cycle) |
+| Provider not fixture or solcast, or a fixture account while `PYRACAST_FIXTURE_PROVIDER` is off | `adapter_for` raises in `deliver` (`fixture_provider_disabled` for the latter); Dramatiq logs it, job row untouched (a pending row is sent again every dispatcher cycle) |
 | Job terminal, not yet due, actively leased, or another estimated-actuals job of the binding running | `claim` returns None, nothing written |
 | `retry_until` passed at claim | `failed`, `history_window_closed`; no attempt taken |
 | `retry_until` passed at reservation or just before the request | `failed`, `history_window_closed`; the attempt is returned, and a reservation already inserted is marked `failed` but still counted |

@@ -51,7 +51,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `auth_user` | R | Actor looked up by the command; the operation requires an active staff superuser |
 | `regions_region` | R, lock | Tenant-scoped, non-trashed region; locked first |
-| `connections_provideraccount`, `connections_sitebinding` | R, lock | The binding must belong to the region and pass `_validate_authorized_binding`; its settings are compared with the export's |
+| `connections_provideraccount`, `connections_sitebinding` | R, lock | The binding must belong to the region and pass the reference gates of `forecasts.trust.reference_problems` (the historical import's gates); its settings are compared with the export's |
 | `forecasts_collectionjob` | R/W | Read for the binding's approval collection (`timing.approval_job`) and for taken slots; one `succeeded` job per restored row with the exported slot, target date, availability, retry bound, attempts and last error; id, binding and creation time are not taken |
 | `forecasts_forecastsnapshot` | R/W | One snapshot per restored row with the exported acquisition (`raw_payload` plus a `snapshot_restore` record, intervals, coverage, availability, weather payload); read for the day report |
 | `forecasts_forecastresult` | W | Forecast rows only: payload and `daily_payloads` calculated for the binding, `published_at` = the snapshot's availability |
@@ -81,7 +81,7 @@ sequenceDiagram
 
 ## Rules and invariants
 
-- Lock order is region, provider account, then binding; the same as `historical_import`. Concurrent runs serialize on the region lock, and the binding's unique collection slot (`collectionjob_binding_endpoint_scheduled_for_uniq`) stores each snapshot once.
+- Lock order is region, provider account, then binding; the historical import locks only the region, so they cannot deadlock. Concurrent runs serialize on the region lock, and the binding's unique collection slot (`collectionjob_binding_endpoint_scheduled_for_uniq`) stores each snapshot once.
 - A restored acquisition is identified by its endpoint and job slot, not by the exported snapshot id, which restarts with each database. A row already restored carries the `snapshot_restore` record; a later reset keeps the earlier record under `previous`.
 - Rows are stored in order of collection time and snapshot id. Restored jobs lie before the binding's approval collection, so the binding's own schedule starts at its approval collection (`forecast_timing`): restoring creates no backfill, leaves the approval acquisition to run and does not hold reminders back. A retry window still open at approval stays with the binding's own schedule, because the scheduler's nightly lookup would take a restored job of it for tonight's collection.
 - The acquisition is stored exactly as exported, including missing power; only `weather_error` is not carried. A forecast's result is calculated again for the binding and published at the snapshot's availability; no plant issuance is created. Restoring does not call the provider and writes no `RequestAttempt`.

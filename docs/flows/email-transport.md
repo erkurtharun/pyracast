@@ -50,7 +50,7 @@ sequenceDiagram
 
 | Table | R/W | What |
 |---|---|---|
-| `notifications_outboundmail` | R/W | Written by the request (`pending`); the worker leases it, sets `attempts`, `transmit_started_at`, `status`, `last_error`, `finished_at` and erases `sealed_code` on every end. Ended intents are deleted 7 days after `finished_at` |
+| `notifications_outboundmail` | R/W | Written by the request (`pending`); the worker leases it, sets `attempts`, `transmit_started_at`, `status`, `last_error`, `finished_at` and erases `sealed_code` on every end. Ended intents are deleted 7 days after `finished_at`; the closed-invitation sweep and account erasure delete the mail of the invitations they delete (flows `member-invitation`, `account-erasure`) |
 | `accounts_workspaceinvitation` | W | `delivery_status` set to `sent`, `failed` or `uncertain` when the intent ends; the token digest is minted at send time |
 | `notifications_notificationdelivery` | R/W | Reminder only: `recipients`, `message_token` (stable `Message-ID`), `transmit_started_at`, `status`, `last_error`, `sent_at`, `attempts` (owned by `reminder-delivery`) |
 | `accounts_tenant`, `notifications_notificationsettings`, `regions_region` | R (row lock) | `_mark_transmit` locks them before writing a reminder's transmit marker |

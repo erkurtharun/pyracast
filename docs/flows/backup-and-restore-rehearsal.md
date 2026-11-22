@@ -77,7 +77,8 @@ sequenceDiagram
 | Hourly run meets a busy lock for 600 s or `release-blocked` | `pyracast_backup_skipped` (`lock_timeout` or `release_blocked`), exit 75, which the unit counts as success. |
 | Prerelease records cannot be written | The archive is deleted, the backup fails. |
 | SIGTERM (unit timeout, stop) | Unwinds with cleanup and reports `pyracast_backup_failed` with `reason=terminated`. |
-| Daily copy fails | Warning `pyracast_backup_daily_copy_failed`; the hourly backup still succeeded. |
+| Daily copy fails | Warning `pyracast_backup_daily_copy_failed` (alerted); the hourly backup still succeeded. |
+| `daily_backups` neither true nor false | Read outside the host contract, so the dump still runs without a daily copy; then `pyracast_backup_setting_invalid`. An hourly run says whether its backup was kept or skipped and exits 1; a prerelease backup warns and succeeds, since it does not use the setting. |
 | Pointer older than 90 minutes of uptime | Watchdog reports `pyracast_backup_failed` (`last_verified_backup_older_than_90_minutes`) while no release is blocked. |
 | Invalid bucket name, unreadable host config or missing `backup_bucket` | `ValueError`, `OSError` or `KeyError`, same failure event and exit 1. |
 | Rehearsal lock held by another rehearsal for 5 s | "Another restore rehearsal holds its lock", exit 2, record unchanged. |
@@ -90,7 +91,7 @@ sequenceDiagram
 - Objects are written with `ifGenerationMatch=0` and a fresh uuid, so no backup can overwrite another. Success means the bucket returned the md5 and size of the local file; only then is the pointer replaced, from either kind.
 - The rehearsal reads one release (`/opt/pyracast/current` resolved once) and the image its Compose configuration names, so it runs the same PostgreSQL build; it restores with owners and privileges, then proves roles (the runtime role cannot write `django_migrations`), equal row counts, `migrate --check` (`--plan` for a prerelease dump) and a decrypted stored secret. Leftovers of a killed run are swept first.
 - A rehearsal downloads within the object's size, the free-space floor and its deadline, and starts only with memory and disk room beside the running site. While it holds `/var/lib/pyracast/rehearsal.lock`, `release_state.py prune` removes nothing.
-- Every `pyracast_backup_failed` entry matches the `backup` log-based alert policy (`infra/terraform/monitoring.tf`), which emails the operator at most once per hour; rehearsal events are warnings without a policy.
+- `pyracast_backup_failed`, `pyracast_backup_setting_invalid`, `pyracast_backup_daily_copy_failed` and the watchdog's `pyracast_rehearsal_unhealthy` each have their own log-match policy (`infra/terraform/monitoring.tf`), which emails the operator at most once per hour; successes, `pyracast_backup_skipped` and `pyracast_rehearsal_failed` alert nowhere (`deploy/operations_events.py`).
 - The recovery point is one hour while hourly backups succeed. There is no WAL archiving; objects are recoverable for seven days.
 
 ## Tests

@@ -44,7 +44,7 @@ sequenceDiagram
 
 | Table | R/W | What |
 |---|---|---|
-| `notifications_outboundmail` | W (request), R/W (worker) | One intent per mail: `kind`, `recipient`, `language`, `owner_language`, `context` (strings only), `sealed_code`, `expires_at`, status and lease. Ended intents are deleted 7 days after they end. The table also holds invitation and workspace event mail (flow `email-transport`) |
+| `notifications_outboundmail` | W (request), R/W (worker) | One intent per mail: `kind`, `recipient`, `language`, `owner_language`, `context` (strings only), `sealed_code`, `expires_at`, status and lease. The retention phase deletes ended intents 7 days after `finished_at`, at most 500 per dispatcher cycle, oldest first; account erasure deletes the intents whose `recipient`, `from_email`, `to_email` or `deleted_email` equals an address of the erased account, compared whole and case-insensitively (flow `account-erasure`). The table also holds invitation and workspace event mail (flow `email-transport`) |
 | `accounts_userlanguagepreference` | R | Saved language of the recipient. Written by signup, `/api/session/language/` and the admin language switch. |
 | `account_emailaddress` | R | Notification recipient (primary address, else `auth_user.email`; `email_changed` names the old address); the worker finds the account of a verified address when the context names no user. |
 | `django_session` | none here | Code, attempts and `resend_count` are written by the triggering flow before the mail is stored. |

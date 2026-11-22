@@ -6,7 +6,7 @@ An operator runs `terraform plan` and `apply` in `infra/terraform` (normally fro
 
 - Operator commands `terraform -chdir=infra/terraform init -backend-config=...`, `plan -out=production.tfplan`, `apply production.tfplan`, `output -json github_environment_variables` (procedure in `docs/DEPLOYMENT.md`, "Create the infrastructure").
 - Inputs: `infra/terraform/variables.tf` (validated variables), `terraform.tfvars.example`, `backend.hcl.example` (partial `backend "gcs" {}` in `versions.tf`). The local `terraform.tfvars`, `backend.hcl`, `*.tfplan` and `.terraform/` are git-ignored.
-- Resources: `main.tf` (APIs, network, firewalls, registry, secrets, bucket, disk, optional disk snapshots, VM), `iam.tf` (service accounts, roles, audit logs, WIF, optional image-rescan identity), `monitoring.tf` (email channel, uptime check, alert policies), `outputs.tf`.
+- Resources: `main.tf` (APIs, network, firewalls, registry, secrets, bucket, disk, optional disk snapshots, VM), `iam.tf` (service accounts, roles, audit logs, WIF, optional image-rescan identity), `monitoring.tf` (email channel, uptime check, log-based metrics, alert policies, security log bucket and sink), `outputs.tf`.
 - VM trigger: Compute Engine runs `metadata.startup-script` (`templates/startup.sh.tftpl`, with `templates/network-guard.sh` embedded) on every boot.
 - CI: `.github/workflows/ci.yml`, job "Deployment configuration and containers", steps "Validate Terraform without cloud credentials or backend access" and "Verify the boot script on a stubbed host without cloud access" (`deploy/test-boot.sh`). Dependabot (`.github/dependabot.yml`) proposes provider pin changes in `versions.tf` and `.terraform.lock.hcl`.
 
@@ -106,7 +106,7 @@ No PostgreSQL table is read or written. The stores that carry this flow's state:
 | apt, Docker key or repository failure, a key without the published fingerprint, or a pinned version the apt repository does not carry | Script stops at the failing line, later steps unchanged; previously enabled units still start at boot with the old files |
 | The pinned packages or the Docker configuration need a change while a release holds the lock | Script exits 1 (run it again); a pending marker keeps the Docker restart due |
 | Network guard exits non-zero | `docker.service` fails in `ExecStartPre`, so `pyracast.service` (`Requires=`) does not start: fail closed |
-| `/var/lib/pyracast/release-blocked` present | `pyracast.service` is skipped by `ConditionPathExists`; the backup skips its run and the watchdog checks capacity only; no alert |
+| `/var/lib/pyracast/release-blocked` present | `pyracast.service` is skipped by `ConditionPathExists`; the backup skips its run and the watchdog checks capacity and the block's age only; `pyracast_release_blocked` alerts once the block is older than an hour |
 | Pinned runtime or database secret version missing or unreadable | `runtime_secrets.py` fails and the `pyracast_secrets_failed` alert fires; the first release aborts in `install-release.sh` before maintenance, later `pyracast.service` fails in `ExecStartPre` |
 | Readiness unreachable (no release yet, DNS-only record, outage) | Uptime alert email after two or more checker locations fail for 5 minutes (inferred) |
 | A `GCP_*` variable empty in GitHub, a malformed `GCP_ARTIFACT_REPOSITORY`, `GCP_INSTANCE`, `GCP_ZONE` or `GCP_MIGRATION_SECRET_VERSION` | Release step "Validate deployment configuration" exits 1 before cloud authentication. Other values are only checked for emptiness and fail later at authentication or Secret Manager access |
@@ -124,7 +124,7 @@ No PostgreSQL table is read or written. The stores that carry this flow's state:
 - Docker, containerd and Compose are exact apt versions for Ubuntu 24.04 `noble` amd64, installed only when missing and held with `apt-mark hold`; the repository key must carry its published fingerprint. `vm_image` defaults to an unpinned image family. Terraform and the provider are pinned exactly.
 - Registry cleanup starts in dry-run (`artifact_cleanup_dry_run`); it deletes versions older than 30 days but keeps the 20 newest versions and all `production*` tags. Tags are mutable.
 - Backup bucket: versioning on and one `Delete` rule at age 7 days for every generation, so no backup outlives seven days; soft delete disabled; the runtime account cannot delete. Off by default: `backup_retention_days`, `backup_daily_tier` (`daily/` objects kept 30 days, the 7-day rule limited to `postgres/`, `daily_backups` in `host.json`) and `data_disk_snapshot_days`.
-- Log-based alerts fire on the `pyracast_*` events in log `pyracast-operations`; a missing watchdog heartbeat and seven thresholds on the security lines the `api` service logs in blocking mode alert too. The single email channel uses `acme_email`.
+- Each alerted `pyracast_*` event in log `pyracast-operations` has its own log-match policy (`local.operations_alerts`, following `deploy/operations_events.py`); repeated container restarts, a missing watchdog heartbeat and seven thresholds on the `pyracast.security` lines of the application containers alert too. A sink routes those security lines to the log bucket `pyracast-security`, kept 365 days. The single email channel uses `acme_email`.
 - APIs are never disabled on destroy (`disable_on_destroy = false`).
 
 ## Tests

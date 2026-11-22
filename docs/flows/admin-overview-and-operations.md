@@ -6,7 +6,7 @@ A platform administrator (active superuser with live TOTP or recovery-code proof
 
 - `GET /admin/` -> `pyracast.platform_admin.site.PlatformAdminSite.landing` -> `index` -> `pyracast.platform_admin.read_models.overview_context`, template `admin/workspace/overview.html`.
 - `GET /admin/plants/?q=&status=&page=&issue=&location_change=` -> `pyracast.platform_admin.pages.plants` -> `plant_list_context`, template `plants.html`.
-- `GET /admin/operations/?issue=` -> `pages.operations` -> `operations_context` (which calls `recent_work_context`), template `operations.html`.
+- `GET /admin/operations/?issue=&window=&collections_page=&deliveries_page=&metering_page=&calibrations_page=` -> `pages.operations` -> `operations_context` (which calls `work_pages`), template `operations.html` with `work_pager.html` per list.
 - Builders: `pyracast.orchestration.delivery_health` (`CHECKS`, `delivery_health`, `listed`, `read_broker`; also used by command `check_delivery_health`, whose dispatcher input is written by `record_dispatch_phase` in `orchestration/dispatcher.py`) and `pyracast.platform_admin.health` (`PRESENTATION`, `summarize_health`). Templates live in `pyracast/regions/templates/admin/workspace/` (`health.html` is included by overview and operations). No SPA screen or `/api/` endpoint is involved.
 - The same shell also holds the workspace pages, plant review and settings (`admin-workspace-management`, `plant-approval`, `platform-settings`).
 
@@ -36,7 +36,7 @@ sequenceDiagram
         end
         W->>DB: "overview: status counts, 6 pending, 6 location requests, 8 audit events"
         W->>DB: "plants: annotated regions, 20 per page"
-        W->>DB: "operations: 20 newest rows per job table, request counts"
+        W->>DB: "operations: one page of 20 per job list, last 24 h and open rows by default, request counts"
         W-->>V: "context dict"
         V-->>A: "200 HTML"
     end
@@ -69,7 +69,7 @@ The message broker is read on Operations only (queue message, consumer and dead-
 |---|---|
 | Anonymous, member, staff without superuser, inactive, no live MFA proof, or session expired or idle (`SessionLifetime` logs out) | 302 to `/admin/login/?next=...`, then the hand-off back to the requested console path after sign-in |
 | POST to any of the three pages | Without a CSRF token 403; a denied visitor gets the 302 above; a permitted administrator without a recent confirmation the 403 confirmation page, otherwise 405 |
-| `status` not a review status, `page` invalid, `q` over 200 characters or `issue` over 80 | Status ignored, `Paginator.get_page` gives page 1 for non-numbers and the last page when out of range, long values truncated silently |
+| `status` not a review status, `page` or a `<list>_page` invalid, `q` over 200 characters or `issue` over 80 | Status ignored, `Paginator.get_page` gives page 1 for non-numbers and the last page when out of range, long values truncated silently; a `window` other than `all` reads as the default |
 | `issue` unknown, or the key of another page's scope (plants take `plants` checks, operations take `collections`, `deliveries`, `metering`, `calibrations` checks) | Ignored: no banner, unfiltered page |
 | `issue` is a check of the page's own scope with count 0 | Banner at zero and an empty filtered list or table |
 | `issue=dispatch` on operations while all phases are healthy | Ignored |
@@ -82,13 +82,14 @@ The message broker is read on Operations only (queue message, consumer and dead-
 - One `HealthReport` feeds the overview, operations, the plant filters and the CLI. The console uses the dispatcher heartbeat lag (5 minutes, `DISPATCH_LAG`); the CLI accepts `--max-lag-minutes`. The plant list reads only the filtered check (`listed`), not the whole report; its banner count is the number of listed plants.
 - Windows: failed, missed, paused, unavailable, partial and mail-authentication outcomes look back 24 hours by `scheduled_for` (outbound mail by `finished_at`, calibrations by `completed_at`); overdue and interrupted work has no lower bound. An active region (approved, enabled account, collection not disabled) is stale when its newest saved forecast `collected_at` is older than 26 hours or missing. A phase is unhealthy when it never succeeded, succeeded before `now - lag`, or carries `last_error`.
 - Summary tone precedence is action, then delay, then review. Checks that are not alarms (`saved_forecast_notifications`, `queued_calibrations`, `running_calibrations`) are never listed; `paused_notifications` does not affect `healthy` but appears as a "review" check linking to the paused deliveries. Broker, missing-queue and `dispatch` checks come first, in that order, when present. Mail checks link to the outbound mail list of the record browser.
-- Counts and lists differ in unit for account checks: `provider_cooldowns` and `blocked_provider_credentials` count provider accounts, the filtered plant list shows every affected region. `invalid_reminder_recipients` counts current schedules. The plant list says why each plant is listed; Operations says "Showing N of M" for a filtered section.
-- Connection badge precedence: Not configured, Needs attention, Provider delay, Needs validation, Healthy. It describes the binding of the current revision and is independent of approval status and freshness. Uncertain mail reads "Acceptance unknown", `sent` reads "Accepted by email service". No page offers retry, requeue or resend. Tables show 20 rows, newest by `created_at` (collections, calibrations) or `scheduled_for` (emails, EPİAŞ), not the most severe. Status and error labels come from the translated model vocabularies.
+- Counts and lists differ in unit for account checks: `provider_cooldowns` and `blocked_provider_credentials` count provider accounts, the filtered plant list shows every affected region. `invalid_reminder_recipients` counts current schedules. The plant list says why each plant is listed; each Operations list says "Showing first–last of total".
+- Connection badge precedence: Not configured, Needs attention, Provider delay, Needs validation, Healthy. It describes the binding of the current revision and is independent of approval status and freshness. Uncertain mail reads "Acceptance unknown", `sent` reads "Accepted by email service". No page offers retry, requeue or resend. Status and error labels come from the translated model vocabularies.
+- Operations lists (`WORK_ORDER`, `OPEN_WORK`): each pages by 20 (`<list>_page`), newest first by `created_at` (collections, calibrations) or `scheduled_for` (emails, EPİAŞ), not the most severe. The unfiltered page shows rows of the last 24 hours by that column plus every open row (collections pending, retry or running; deliveries pending, retry, sending or uncertain; EPİAŞ pending or running; calibrations pending or running) unless `window=all`; the window links keep the rest of the query and start each list again at page 1. A filtered page reads only its own list, with all rows of the check and no window bar; so does the dispatch check, which shows no list.
 - The overview counts approved, pending and suspended plants, plants needing attention and pending location changes (linked to `plants/?location_change=pending`).
 
 ## Tests
 
 - `tests/test_admin_workspace.py`: access matrix across identities, GET pages without provider or mail I/O, status counts, connection badges, operations rows and dispatch phases, oldest-pending queue, plant name fallback.
-- `tests/test_admin_health.py` (checks, tone, links), `tests/test_admin_health_queries.py` (filters match counter boundaries), `tests/test_admin_health_views.py` (filtered views, labels), `tests/test_admin_health_console.py` (own checks only, empty filtered list, "Showing N of M", workers panel, undeclared queues, calibrations, check time), `tests/test_delivery_health.py` (report, phases, query budget, CLI), `tests/test_operation_labels.py`, `tests/test_language.py`, `tests/test_admin_console_wording.py`.
+- `tests/test_admin_health.py` (checks, tone, links), `tests/test_admin_health_queries.py` (filters match counter boundaries), `tests/test_admin_health_views.py` (filtered views, labels), `tests/test_admin_health_console.py` (own checks only, empty filtered list, 24 h window and open rows, pages of 20, window links, workers panel, undeclared queues, calibrations, check time), `tests/test_delivery_health.py` (report, phases, query budget, CLI), `tests/test_operation_labels.py`, `tests/test_language.py`, `tests/test_admin_console_wording.py`.
 - Playwright `web/integration/admin-csp.spec.ts`: MFA sign-in, overview, link into a filtered operations view, plants search, axe, CSP and 320 px width.
 - Gaps: provider-account events on the overview, a permitted POST to the three pages, and any browser check of the overview counts.

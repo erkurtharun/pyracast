@@ -53,8 +53,8 @@ sequenceDiagram
 
 | Table | R/W | What |
 |---|---|---|
-| `django_session` | R every request carrying a session cookie; W on login, logout, flow state, activity refresh (at most once per 60 s); D by revocation and the retention purge | `authenticated_at`, `last_activity_at`, the tag and the authority record live in the payload |
-| `usersessions_usersession` | W on login, at the first request of a session lacking its device record, then at most once a minute; D on sign-out, revocation, `DELETE auth/sessions`, stale rows and orphans in the purge | allauth device list: ip, user agent, `last_seen_at` |
+| `django_session` | R every request carrying a session cookie; W on login, logout, flow state, activity refresh (at most once per 60 s); D by revocation, the retention sweep (at `expire_date`, at most 500 a cycle) and account erasure | `authenticated_at`, `last_activity_at`, the tag and the authority record live in the payload |
+| `usersessions_usersession` | W on login, at the first request of a session lacking its device record, then at most once a minute; D on sign-out, revocation, `DELETE auth/sessions`, rows without a session in the retention sweep, account erasure | allauth device list: ip, user agent, `last_seen_at` |
 | (advisory lock) | W | `pg_advisory_lock` per session cookie on the default connection for the whole request |
 | `auth_user`, `mfa_authenticator` | `auth_user` `FOR UPDATE` | Revocation and key rotation of one account serialise on the account row; `mfa_authenticator` is read for `can_admin` via `has_mfa_evidence` |
 

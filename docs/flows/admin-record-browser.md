@@ -48,7 +48,7 @@ sequenceDiagram
 | accounts_tenant, accounts_workspaceadminchange, accounts_workspacememberremoval | R | Workspace rows and the two workspace ledgers |
 | connections_sitebinding, forecasts_collectionjob, forecasts_forecastresult, forecasts_requestattempt, forecasts_dispatcherstatus, regions_auditevent, regions_region, regions_regionlocationchangerequest | R | List and detail rows; detail pages also load the rows behind displayed foreign keys |
 | plants_plant, plants_plantconfiguration, plants_productionobservation, plants_calibrationrun, plants_calibrationactivation, plants_plantevent | R | Same |
-| notifications_notificationdelivery, notifications_deliveryrecipient, notifications_notificationsettings, notifications_outboundmail | R | Delivery detail shows the listed `fields` only (no lease or prepared message) and its recipient addresses; outbound mail shows kind, recipient, status, attempts, error and timestamps, never the sealed code or context |
+| notifications_notificationdelivery, notifications_deliveryrecipient, notifications_notificationsettings, notifications_outboundmail | R | Delivery list and detail defer `prepared_message` and show the listed `fields` only (no lease) and the recipient addresses; outbound mail shows kind, recipient, status, attempts, error and timestamps, never the sealed code or context |
 | django_admin_log | R | History pages. Written by workspace creation and rename (`Tenant`) and by recipient-limit changes (`NotificationSettings`), so only those histories hold entries |
 | django_session, usersessions_usersession | R/W | Per-request session and MFA evidence; `SessionLifetime` refreshes the activity marker |
 | auth_user, mfa_authenticator | R | Role flags and evidence for the site gate |

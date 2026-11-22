@@ -4,7 +4,7 @@ A workspace member opens Production > Comparison on a plant, picks a basis (arch
 
 ## Entry points
 
-- Screen: `web/src/features/forecast/forecast-performance.tsx` `ForecastPerformance` (form) and `PerformanceResults` (`useApiQuery`, no poll), mounted by `features/plant/workspace/production-section.tsx` `ProductionSection` on tab `production`, view `comparison`, keyed by configuration id. The screen opens on "Forecast accuracy" (archived issuances); "Model check" is the historical model; the cutoff sits under "Advanced". CSV: `ui/csv-download.tsx` `CsvDownload`; the chart of absolute daily error is `features/forecast/daily-accuracy-chart.tsx`.
+- Screen: `web/src/features/forecast/forecast-performance.tsx` `ForecastPerformance` (form) and `PerformanceResults` (`useApiQuery`, no poll), loaded on demand and mounted by `features/plant/workspace/production-section.tsx` `ProductionSection` on tab `production`, view `comparison`, keyed by configuration id. The screen opens on "Forecast accuracy" (archived issuances); "Model check" is the historical model; the cutoff sits under "Advanced". CSV: `ui/csv-download.tsx` `CsvDownload`; the chart of absolute daily error is `features/forecast/daily-accuracy-chart.tsx`.
 - `GET /api/tenants/{t}/regions/{r}/plants/{p}/performance/` -> `pyracast.plants.api.PerformanceView.get` -> `pyracast.plants.performance.forecast_performance`. Query (`PerformanceQuery`): `start_date`, `end_date`, `daylight_only`, `comparison`, `issuance_cutoff`. Actors: administrator and viewer; no command, script or job.
 
 ## Sequence

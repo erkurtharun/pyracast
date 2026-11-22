@@ -62,7 +62,7 @@ sequenceDiagram
 | `postgres/<stamp>-prereset-<uuid>.dump` and `.solcast.jsonl.gz` in the backup bucket | W, R | Uploaded by `prepare`; `restore` downloads an object (and a pre-reset archive's export) it has no record for |
 | `/var/lib/pyracast/reset/<object>.dump`, `<object>.json` and the export | W, R | The kept archive, its record (object name, SHA-256, row count per table, export object, SHA-256 and row count) and the export |
 | `/var/lib/pyracast/reset/session.json` | W, R | Marker identity, object, release commit and whether the database was replaced (synced before `DROP DATABASE`; the installer records it through `release_record.py` right before `migrate`). Current only while the marker holds the same identity; removed by `abort`, `restore` and a successful release, which also removes the `-prerelease-` files |
-| `/var/lib/pyracast/release-blocked` | W, R | Written with a session identity and synced by `prepare` (`restore` adds one to an empty marker); the installer keeps an existing marker's content and removes it on success; removed by `abort` and `restore` after readiness |
+| `/var/lib/pyracast/release-blocked` | W, R | Written with a session identity and synced by `prepare` (`restore` adds one to an empty marker); the installer keeps an existing marker's content and file time (the watchdog counts a block from that file time) and removes it on success; removed by `abort` and `restore` after readiness |
 | RabbitMQ queues | W | Purged by `reset` and `restore`, dead-letter queues included |
 
 ## Authorization

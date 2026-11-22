@@ -8,8 +8,8 @@ An operator promotes a new `PYRACAST_SECRET_KEY` with `deploy/host_secrets.py ro
 - Command `pyracast check_secrets [--require-primary]` (`pyracast.accounts.management.commands.check_secrets`): reads only. Exit 0 when every stored secret decrypts, 1 when one is unreadable or malformed or only one of the two secret tables exists, 2 with `--require-primary` when one still needs a fallback key. `deploy/install-release.sh` runs it without the flag, with the release's staged secrets, before maintenance. Both commands share `pyracast.accounts.stored_secrets`.
 - `deploy/host_secrets.py rotate secret-key` and `drop-fallbacks` edit the local runtime secret file (flow `secret-provisioning`).
 - Passive decrypt paths that make the fallback window work: `pyracast.connections.secrets` `decrypt_api_key` (used by `pyracast.providers` `_request` on every Solcast call) and `pyracast.accounts.mfa` `MFAAdapter.decrypt` (wired by `MFA_ADAPTER` in `pyracast.settings`, on every TOTP or recovery-code check).
-- Writers that always use the running process's primary key: `encrypt_secret` from `pyracast.connections.operations` `create_account` and `rotate_secret`, and `MFAAdapter.encrypt` from allauth TOTP activation and recovery-code generation.
-- Shared cipher: `pyracast.encryption` `secret_cipher`. Settings source: `PYRACAST_SECRET_KEY` and `PYRACAST_SECRET_KEY_FALLBACKS` in `pyracast.settings`, delivered through `deploy/runtime_secrets.py` into `runtime.env`.
+- Writers that always use the running process's primary key: `encrypt_secret` from `pyracast.connections.operations` `create_account` and `replace_api_key` (with `api_key_fingerprints`), and `MFAAdapter.encrypt` from allauth TOTP activation and recovery-code generation.
+- Shared derivation: `pyracast.encryption` `derived_keys` (one key per configured application key, primary first), used by `secret_cipher` and by the key fingerprint. Settings source: `PYRACAST_SECRET_KEY` and `PYRACAST_SECRET_KEY_FALLBACKS` in `pyracast.settings`, delivered through `deploy/runtime_secrets.py` into `runtime.env`.
 
 ## Sequence
 
@@ -33,8 +33,8 @@ sequenceDiagram
         C-->>O: "CommandError, exit 1, rows named by table and id"
     end
     loop each provider account
-        C->>K: "decrypt_api_key then encrypt_secret"
-        C->>D: "UPDATE encrypted_api_key only"
+        C->>K: "decrypt_api_key then encrypt_secret, fingerprint under the primary key"
+        C->>D: "UPDATE encrypted_api_key and api_key_fingerprint"
     end
     loop each authenticator
         C->>K: "MFAAdapter decrypt then encrypt per field"
@@ -54,7 +54,7 @@ sequenceDiagram
 
 | Table | R/W | What |
 |---|---|---|
-| `connections_provideraccount` | R/W | Every row with a non-empty `encrypted_api_key`, enabled or not, is locked and rewritten (`encrypted:v1:` plus Fernet token). `credential_revision`, cooldown and quota columns are untouched. |
+| `connections_provideraccount` | R/W | Every row with a non-empty `encrypted_api_key`, enabled or not, is locked and rewritten (`encrypted:v1:` plus Fernet token); a stored `api_key_fingerprint` is recomputed under the new primary key, an empty one stays empty. `credential_revision`, cooldown and quota columns are untouched. |
 | `mfa_authenticator` | R/W | `type` totp: `data.secret`. `type` recovery_codes: `data.migrated_codes` items when present, otherwise `data.seed` (`mfa:v1:` plus token). `used_mask`, `viewed_at` and other keys are copied unchanged. WebAuthn rows are not selected. |
 
 ## Authorization
@@ -81,13 +81,13 @@ sequenceDiagram
 - All-or-nothing: one `transaction.atomic` over both tables; the exception handler deliberately maps errors to a fixed message that names rows but no secret text. Provider rows are locked before authenticator rows, and every secret is proved readable under those locks before the first write.
 - The command rewrites every row, including rows already under the primary key, so a rerun is safe.
 - Row locks block every writer that locks a provider account and the account locks of sign-in and credential writes (`accounts.processes.account_state`) until commit; a blocked writer fails after `lock_timeout=5s`. A process still running the old primary key can write old-key ciphertext after the run, which breaks once the fallback is removed. Restart every container (`api`, `worker`, `notifications`, `dispatcher`) with the new key before running.
-- Domain separation: provider and MFA keys use different HKDF `info` contexts, so ciphertexts are not interchangeable. The first key in `secret_cipher` encrypts, every key may decrypt; `primary_only` reads with the first key alone.
-- Unlike `rotate_secret`, no `credential_revision` increment and no `AuditEvent`, so bindings validated against the revision stay valid and a 401 block tied to `authentication_failed_revision` stays in place.
+- Domain separation: provider keys, key fingerprints and MFA secrets use different HKDF `info` contexts, so ciphertexts are not interchangeable. The first key in `secret_cipher` encrypts, every key may decrypt; `primary_only` reads with the first key alone. While a fallback is configured, a key already held by another account is refused by its fingerprint under every configured key.
+- Unlike `replace_api_key`, no `credential_revision` increment and no `AuditEvent`, so bindings validated against the revision stay valid and a 401 block tied to `authentication_failed_revision` stays in place.
 - Rewriting authenticator `data` changes the credential state of every account with an authenticator (`accounts.processes.account_state` digests everything but `used_mask` and `viewed_at`), so their pending sign-in and code steps and recent reauthentications end.
 - `PYRACAST_SECRET_KEY_FALLBACKS` is split on whitespace; keys containing spaces are not supported. `SECRET_KEY` also feeds Django's session auth hash and the historical-upload preview signature; both accept fallbacks, and the command does not touch them.
 
 ## Tests
 
-- `tests/test_secret_reencryption.py` (end-to-end rotation of provider key, TOTP and both recovery-code layouts; rollback with a corrupted TOTP and no echo of the value), `tests/test_secret_checks.py` (`check_secrets`, malformed rows named without values, `--require-primary`, `--verify` and its rollback), `tests/test_host_secrets.py` (`rotate secret-key`, `drop-fallbacks`).
+- `tests/test_secret_reencryption.py` (end-to-end rotation of provider key, TOTP and both recovery-code layouts; rollback with a corrupted TOTP and no echo of the value), `tests/test_secret_checks.py` (`check_secrets`, malformed rows named without values, `--require-primary`, `--verify` and its rollback), `tests/test_host_secrets.py` (`rotate secret-key`, `drop-fallbacks`), `tests/test_provider_key_fingerprint.py` (fingerprints across a fallback and a re-encryption).
 - `deploy/test-release.sh` mode `check-secrets` pins that a failing `check_secrets` ends the release before maintenance.
 - Gaps: no test through the `pyracast` console script or real `docker compose exec`; no case that `reencrypt_secrets` leaves a WebAuthn row untouched; no lock or concurrent-writer case; no empty-`SECRET_KEY` case; no deployment-level test that `PYRACAST_SECRET_KEY_FALLBACKS` survives `runtime_files`.

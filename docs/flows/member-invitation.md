@@ -87,7 +87,7 @@ sequenceDiagram
 - One open invitation per address: a new invitation sets `revoked_at` and `revoked_reason` `superseded` on every open invitation of that address in the workspace, expired ones included; an administrator invitation also closes every open administrator invitation. `WorkspaceInvitation.state_at` derives the state; `expires_at` is the natural deadline and never moves. Cancel stores reason `cancelled`; member removal and administrator reassignment close with `member_removed` and `administrator_changed`.
 - Resend takes an open invitation of this workspace (pending or expired) and issues a new one with the same address and role under the same budgets; the old one becomes superseded.
 - No token exists until the mailer sends: it mints one, stores only its digest and renders the link into the message. An invitation closed before the send is skipped (`invitation_unavailable`) and stays `pending`; a send that fails before transmission is retried with a new token.
-- Mail language is the language chosen in the console form, else the administrator's saved language, else the request language, never the invitee's. No code path of this flow deletes rows.
+- Mail language is the language chosen in the console form, else the administrator's saved language, else the request language, never the invitee's. The requests of this flow delete no rows. The retention phase deletes an invitation, after its mail, 90 days after it closed (accepted, revoked or past `expires_at`; `accounts.retention.purge_closed_invitations`), and account erasure deletes the invitations addressed to an address of the erased account or accepted by it (flow `account-erasure`).
 
 ## Tests
 

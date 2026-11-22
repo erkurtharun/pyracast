@@ -4,7 +4,7 @@ Every dispatcher cycle runs the `retention` phase, whose first step hard-deletes
 
 ## Entry points
 
-- Command: `pyracast dispatch --loop` (`pyracast.orchestration.management.commands.dispatch` `Command.handle`) runs `pyracast.orchestration.dispatcher` `run`; its `_retention` calls `pyracast.trash.purge_expired` first, before the purge warning (`pyracast.purge_warning`) and the account and mail sweeps. Retention is the fourth of five phases (notifications, collection, calibration, retention, metering). The loop polls every 30 s. Without `--loop` one cycle runs and a failed phase raises `CommandError` after the other phases.
+- Command: `pyracast dispatch --loop` (`pyracast.orchestration.management.commands.dispatch` `Command.handle`) runs `pyracast.orchestration.dispatcher` `run`; its `_retention` calls `pyracast.trash.purge_expired` first, before the purge warning (`pyracast.purge_warning`) and the bounded sweeps of `pyracast.retention.RETENTION` (sessions, abandoned sign-ups, finished mail, closed invitations, rendered reminder mail; see `dispatcher-cycle`). Retention is the fourth of five phases (notifications, collection, calibration, retention, metering). The loop polls every 30 s. Without `--loop` one cycle runs and a failed phase raises `CommandError` after the other phases.
 - Internals: `purge_expired` calls `_purge_expired_region` per region, which calls `_purge_region`, which calls `_purge_plant` for the region's plant. A naive `now` raises `ValidationError`.
 - Screen: none triggers it. `web/src/features/trash/recycle-bin.tsx` `RecycleBin` shows `purge_after` and disables restore when `restore_blocker` is set (`pyracast.api.trash` `TrashedRegionOutput`); a purged row vanishes on the next list load.
 - Actor: the dispatcher process with the application database role. No user, tenant or queue message is involved.
@@ -24,8 +24,8 @@ sequenceDiagram
         alt restored or already purged
             P->>P: skip
         else still expired
-            P->>D: "first time: set purge_started_at"
-            P->>D: "lock the plant, then provider accounts"
+            P->>D: "lock the plant; first time: set purge_started_at, purge_plant_ids, purge_bindings"
+            P->>D: "lock provider accounts"
             P->>D: "delete in chunks: plant history, deliveries and schedules; null request-attempt links"
             P->>D: "delete archive, jobs, imports, bindings, audit rows, region"
             alt budget spent
@@ -48,7 +48,7 @@ sequenceDiagram
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `regions_region`, `plants_plant` | R/W | Regions by `deleted_at` or `purge_started_at`, locked `FOR UPDATE` with their plant; `purge_started_at` set; deleted last |
+| `regions_region`, `plants_plant` | R/W | Regions by `deleted_at` or `purge_started_at`, locked `FOR UPDATE` with their plant; the first purge transaction sets `purge_started_at` with what it found, `purge_plant_ids` and `purge_bindings` (`provider:account:site`), all three set or none (`region_purge_found_chk`); deleted last |
 | `connections_provideraccount` | R | Locked `FOR UPDATE` (pk order) for the region's bindings; never deleted |
 | `forecasts_requestattempt` | W | `job` and `binding` set to NULL; rows kept so quota counters do not reset |
 | `forecasts_collectionjob`, `forecasts_forecastsnapshot`, `forecasts_forecastresult`, `forecasts_referencecapacitynormalization`, `forecasts_historicalreferenceimport` | W | Region archive, deleted in the order normalization, result, snapshot, job, import |
@@ -81,7 +81,7 @@ sequenceDiagram
 - Work per call is bounded: at most 100 regions (`PURGE_BATCH_SIZE`) and 200 chunk statements (`PURGE_STATEMENT_BUDGET`) across them. A region that exhausts the budget commits the consistent prefix it reached and resumes first on the next cycle, before regions not yet started, lowest pk first. A backlog drains over several cycles.
 - Lock order is region, plant, provider accounts by pk, the same relative order as the collection commit (region, job, plant, account). Locking the region first serializes against restore, trash and worker commits; plant rows are deleted only by `_purge_plant` under that lock. The tenant row is not locked. Cyclic links are cleared first (`approved_binding`, `current_configuration`, `comparison_activation`, request-attempt links).
 - Quota is never refunded: the account lock keeps reservations from interleaving, and attempt rows lose only their links. Purging a region removes its audit events, so `region_trashed` history ends with it.
-- A completed purge logs one INFO record `trash_purged` after commit (region, tenant, deletion time, plant and binding ids; no name, place or key). A purge that runs out of budget logs nothing until the region is gone. A failed status write is logged as `dispatch_monitoring_failed`.
+- A completed purge logs one INFO record `trash_purged` after commit (region, tenant, deletion time, plant and binding ids; no name, place or key), read from `purge_plant_ids` and `purge_bindings`, so a purge over several cycles names everything it removed and the purged plant count comes from the same list. A purge that runs out of budget logs nothing until the region is gone. A failed status write is logged as `dispatch_monitoring_failed`.
 
 ## Tests
 

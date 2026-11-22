@@ -4,7 +4,7 @@ A workspace administrator picks a CSV of completed 30 or 60 minute energy interv
 
 ## Entry points
 
-- Screen: `web/src/features/production/production-import.tsx` `ProductionImport`, mounted by `web/src/features/production/production-history.tsx` `ProductionHistory` only when `canManage` and a current configuration id exist. Parser: `web/src/lib/production.ts` `parseProduction`.
+- Screen: `web/src/features/production/production-import.tsx` `ProductionImport`, mounted by `web/src/features/production/production-history.tsx` `ProductionHistory` only when `canManage` and a current configuration id exist. Parser: `web/src/lib/production.ts` `parseProduction`, which takes its messages from the `ProductionCsv` translator of `ProductionImport`.
 - `POST /api/tenants/{t}/regions/{r}/plants/{p}/production/preview/` -> `pyracast.plants.api.ProductionPreviewView` -> `production_changes.preview_production`.
 - `POST .../production/changes/` -> `ProductionChangesView` -> `production_changes.change_production` (the commit step; shared with inline edits in `production-history`).
 - Command `import_production` (`--username --plant-id --configuration-id --unit --file`) -> `production_changes.import_observations`. There is no REST endpoint for it.

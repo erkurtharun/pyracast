@@ -4,11 +4,11 @@ A workspace administrator asks to move a plant's `Region` (coordinates and IANA 
 
 ## Entry points
 
-- Screen: `RegionSettings` and `LocationRequests` (`web/src/features/plant/region-settings.tsx`), reached from Settings > Location in `PlantWorkspace`; `ActionForm` (`web/src/ui/form.tsx`) is read-only unless `useCanManageWorkspace()` is true. The screen shows the latest outcome with the operator's note and a Withdraw button while a request is pending.
+- Screen: `RegionSettings` and `LocationRequests` (`web/src/features/plant/region-settings.tsx`), reached from Settings > Location in `PlantWorkspace`; `ActionForm` (`web/src/ui/form.tsx`) is read-only unless `useCanManageWorkspace()` is true. The screen shows the latest outcome with the operator's note and a Withdraw button while a request is pending. The coordinate and zone fields are those of the add-plant wizard (`CoordinateField`, `TimezoneField`, `coordinateValue`), so a decimal comma, a pasted pair and the zone list follow the rules of `site-onboarding`.
 - `GET|POST /api/tenants/{t}/regions/{r}/location-change-requests/` -> `LocationChangeRequestsView` (`pyracast/api/views.py`) with `LocationChangeInput` and `LocationChangeOutput`. Actor: workspace administrator (POST, throttled under `submission`), any member (GET). The view calls `request_location_change` (`pyracast/regions/operations.py`).
 - `POST .../location-change-requests/{id}/withdraw/` -> `LocationChangeWithdrawView` -> `withdraw_location_change`. Actor: workspace administrator.
-- Review: panel "Location change requests" on the plant page (`regions/templates/admin/regions/region/setup.html`, filled by `review_context`) with an optional note, Approve and Reject buttons that post `approve_location` or `reject_location` to `POST /admin/plants/{region}/decision/` -> `pyracast/platform_admin/plant_review.py` `decision` -> `approve_location_change` / `reject_location_change`. The overview queue (`overview_context`) and the plant list filter only link to that page. The changelist of `RegionLocationChangeRequest` is read-only.
-- Console correction: `correct_location` (platform administrator) runs a request and its approval in one transaction from the plant details page (`plant-configuration-revision`); it is refused while a request is pending.
+- Review: panel "Location change requests" on the plant page (`regions/templates/admin/regions/region/setup.html`, filled by `review_context`) showing the great-circle distance of the move (`read_models.distance_km`, on a sphere of the mean Earth radius) and, when the zone changes, a callout that plant days, collection times and reminders follow the new zone, with an optional note, Approve and Reject buttons that post `approve_location` or `reject_location` to `POST /admin/plants/{region}/decision/` -> `pyracast/platform_admin/plant_review.py` `decision` -> `approve_location_change` / `reject_location_change`. The overview queue (`overview_context`) and the plant list filter only link to that page. The changelist of `RegionLocationChangeRequest` is read-only.
+- Console correction: `correct_location` (platform administrator) runs a request and its approval in one transaction from the plant details page (`plant-configuration-revision`); it is refused while a request is pending. Its Latitude and Longitude read a coordinate by the wizard's number rule (`platform_admin.plants.coordinate_number`) and split a pasted pair by its pair rule (`admin-workspace.js`). A save that also changes technical details of a blocked plant is refused whole; a location-only correction of a suspended plant returns it to review.
 
 ## Sequence
 
@@ -27,7 +27,7 @@ sequenceDiagram
         V-->>UI: "401, 403, 404 not_found or 400 invalid_request"
     else input accepted
         V->>O: request_location_change
-        O->>O: "validate_location before BEGIN: range, IANA timezone"
+        O->>O: "validate_location before BEGIN: range, available zone"
         O->>DB: "BEGIN, lock tenant row, check admin membership, lock region row"
         alt unknown timezone (before BEGIN), revision differs, other pending request, location unchanged or target taken
             O-->>V: "invalid_request, region_revision_changed, location_change_already_pending, location_unchanged or location_already_exists"
@@ -82,9 +82,9 @@ sequenceDiagram
 | Non-member, viewer on POST or withdraw, missing CSRF token | 403 `membership_required`, `workspace_admin_required`, `csrf_failed` |
 | Region of another tenant, trashed or unknown; withdraw of an unknown or foreign request | 404 `not_found` |
 | Unknown or missing field, coordinate out of range, timezone over 100 or reason over 1000 characters, `expected_revision` below 1 | 400 `invalid_request` with `fields` |
-| Unknown IANA timezone | 400 `invalid_request`, `fields.timezone` |
+| A zone outside the available IANA zones (`regions.operations.available_zones`) | 400 `invalid_request`, `fields.timezone` |
 | Stale `expected_revision` / other pending request | 409 `region_revision_changed` / `location_change_already_pending` |
-| Unchanged location / target held by another active location or requested by another pending request | 400 `location_unchanged` / `location_already_exists` |
+| Unchanged location / target held by another active location or requested by another pending request | 400 `location_unchanged` / `location_already_exists`, body `LocationRefusal` naming the holding or requesting location in `region_id` |
 | Withdraw of an approved or rejected request | 409 `location_change_already_reviewed` |
 | Lock wait over 5 s | API 503 `busy` with `Retry-After: 1`; the console redirects with "Another change to this record is in progress" |
 | Console decision: invalid form, unknown or foreign request id | 302 with "Choose a review action..." or "The review could not be applied..." |
@@ -101,5 +101,5 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_region_editing.py`: API boundary and validation, idempotent replay, trashed region, request rebased by a binding replacement (also concurrently on PostgreSQL), approval guards against a revision mismatch, new-binding requirement, concurrent requests and approvals on PostgreSQL, purge. `tests/test_location_change_workflow.py`: occupied and requested targets, withdrawal, decision refusals and their order, direct move of a never-approved plant, decision note. `tests/test_location_correction.py`: console correction. Also `tests/test_admin_workspace.py` (panel and queue), `tests/test_console_actions.py` (decision form), `tests/test_console_step_up.py` (recent confirmation), `tests/test_site_onboarding.py`, `tests/test_domain.py`, `tests/test_workspace_authorization.py`. `tests/e2e/test_admin_csp_spec.py` runs `web/integration/admin-csp.spec.ts` on a request seeded by `tests/support/browser.py` and asserts the rejection. Playwright: `web/tests/regions.spec.ts` (mocked API, retry, pending tag, withdraw).
+- `tests/test_region_editing.py`: API boundary and validation, idempotent replay, trashed region, request rebased by a binding replacement (also concurrently on PostgreSQL), approval guards against a revision mismatch, new-binding requirement, concurrent requests and approvals on PostgreSQL, purge. `tests/test_location_change_workflow.py`: occupied and requested targets, withdrawal, decision refusals and their order, direct move of a never-approved plant, decision note. `tests/test_location_correction.py`: console correction. Also `tests/test_admin_workspace.py` (panel and queue), `tests/test_console_actions.py` (decision form), `tests/test_console_step_up.py` (recent confirmation), `tests/test_site_onboarding.py`, `tests/test_domain.py`, `tests/test_workspace_authorization.py`. `tests/e2e/test_admin_csp_spec.py` runs `web/integration/admin-csp.spec.ts` on a request seeded by `tests/support/browser.py` and asserts the rejection. `tests/test_admin_plant_console.py` (console decimal commas, suspended correction), `tests/test_admin_workspace.py` (distance and zone callout). Playwright: `web/tests/regions.spec.ts` (mocked API, retry, pending tag, withdraw), `web/tests/site-setup.spec.ts` (request zones, decimal commas, pasted pairs).
 - Gaps: nothing asserts that queued work stops after approval; approval from `rejected` or `suspended` is untested.
