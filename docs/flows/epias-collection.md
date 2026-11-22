@@ -85,7 +85,7 @@ sequenceDiagram
 | Queue holds 1,000 or more messages | Publication is skipped with a `publication_skipped` warning; ids stay in the database |
 | Settlement lookup fails with `EpiasError` | `settlement_plant_id` stays null, the failure is logged (`epias_settlement_lookup_failed`) and the check is retried after 1 hour; finding nothing or an ambiguous EIC stamps `settlement_checked_at` = now and retries after 1 day, inside the window |
 | Job or a parent row missing, job not due, leased or terminal | `claim_epias_job` returns None, nothing written |
-| Lock timeout or deadlock in `claim_epias_job` | The delivery ends normally with `job_claim_contended` (`worker-runtime`); the job stays `pending` for the next metering phase |
+| Lock timeout or deadlock in `claim_epias_job` | The delivery ends normally with `job_claim_contended` (`worker-runtime`); the job is left as it was for a later metering phase |
 | Connection disabled or changed, configuration replaced, location trashed, region binding not current, schedule disabled (windowed jobs) | `superseded`, terminal |
 | Past `retry_until` at claim, before the request or in `pending_epias_ids` | `failed`, `retry_window_expired` (a credential error stays the job's error) |
 | Job claimed again after three attempts, for example after its third lease expired (yesterday's nightly job is exempt) | `failed`, `attempts_exhausted` |
