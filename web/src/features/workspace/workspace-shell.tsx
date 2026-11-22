@@ -27,6 +27,7 @@ import { LanguageSelect } from "@/ui/language-select";
 import { Empty, Notice, RefreshFailed } from "@/ui/ui";
 import { WorkspaceAccess } from "@/ui/workspace-access";
 import { RecentDeletionProvider } from "@/features/trash/recent-deletion";
+import { InstallApp } from "./install-app";
 
 const rememberedKey = "pyracast.workspace";
 const Workspace = createContext<{
@@ -249,6 +250,7 @@ export function WorkspaceShell({
                         ↪
                     </button>
                 </div>
+                <InstallApp />
             </aside>
             <div className="main-wrap">
                 <header className="topbar">

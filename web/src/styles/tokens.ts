@@ -35,6 +35,8 @@ export const brandProperties = {
 
 export const imageShades = { "--amber-296": "#fec369" } as const;
 
+export const appWindowColour = brand.forest;
+
 export const illustrationColours = {
     grid: "#dedfd3",
     axis: "#c4ccbd",
