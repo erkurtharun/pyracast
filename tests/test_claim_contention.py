@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
@@ -51,11 +52,24 @@ def state(model: type[Model], pk: int, fields: tuple[str, ...] = LEASED) -> tupl
     return tuple(model._default_manager.values_list(*fields).get(pk=pk))
 
 
-def contended_lines(logs: pytest.LogCaptureFixture, kind: str, job_id: int) -> list[str]:
+def contended_lines(
+    logs: pytest.LogCaptureFixture, kind: str, job_id: int
+) -> list[tuple[int, str]]:
     return [
-        record.getMessage()
+        (record.levelno, record.getMessage())
         for record in logs.records
         if record.getMessage().startswith(f"job_claim_contended kind={kind} job_id={job_id} ")
+    ]
+
+
+def contended(
+    kind: str, job_id: int, error_type: str = "LockNotAvailable"
+) -> list[tuple[int, str]]:
+    return [
+        (
+            logging.WARNING,
+            f"job_claim_contended kind={kind} job_id={job_id} error_type={error_type}",
+        )
     ]
 
 
@@ -79,7 +93,9 @@ def test_a_collection_delivery_behind_a_held_region_lock_ends_and_collects_once_
 
     assert state(CollectionJob, job.pk) == before
     assert not RequestAttempt.objects.filter(job=job).exists()
-    assert len(contended_lines(pyracast_logs, COLLECTION.actor, job.pk)) == 1
+    assert contended_lines(pyracast_logs, COLLECTION.actor, job.pk) == contended(
+        COLLECTION.actor, job.pk
+    )
     assert job.pk in pending_job_ids(NOW)
 
     COLLECTION.deliver(job.pk)
@@ -99,7 +115,9 @@ def test_a_calibration_delivery_behind_a_held_workspace_lock_ends_without_claimi
         CALIBRATION.deliver(run.pk)
 
     assert state(CalibrationRun, run.pk, LEASED[:4]) == before
-    assert len(contended_lines(pyracast_logs, CALIBRATION.actor, run.pk)) == 1
+    assert contended_lines(pyracast_logs, CALIBRATION.actor, run.pk) == contended(
+        CALIBRATION.actor, run.pk
+    )
     assert pending_calibration_ids(NOW) == [run.pk]
 
 
@@ -115,7 +133,9 @@ def test_a_reminder_delivery_behind_a_held_workspace_lock_ends_without_claiming(
         REMINDER.deliver(delivery.pk)
 
     assert state(NotificationDelivery, delivery.pk) == before
-    assert len(contended_lines(pyracast_logs, REMINDER.actor, delivery.pk)) == 1
+    assert contended_lines(pyracast_logs, REMINDER.actor, delivery.pk) == contended(
+        REMINDER.actor, delivery.pk
+    )
     assert pending_notification_ids(SLOT) == [delivery.pk]
 
 
@@ -125,14 +145,21 @@ def test_an_outbound_mail_delivery_behind_a_held_mail_lock_ends_without_claiming
     system = make_system()
     invite_workspace_member(system.member, system.tenant.pk, "guest@example.com")
     mail = OutboundMail.objects.get()
-    before = state(OutboundMail, mail.pk)
+    published: list[int] = []
+    now = timezone.now()
+    assert outbox.publish_due_mail(published.append, now) == 1
+    before = state(OutboundMail, mail.pk, (*LEASED, "published_at"))
 
     with row_locked_elsewhere(OutboundMail, mail.pk), short_lock_timeout():
         OUTBOUND_MAIL.deliver(mail.pk)
 
-    assert state(OutboundMail, mail.pk) == before
-    assert len(contended_lines(pyracast_logs, OUTBOUND_MAIL.actor, mail.pk)) == 1
-    assert outbox.pending_mail_ids(timezone.now()) == [mail.pk]
+    assert state(OutboundMail, mail.pk, (*LEASED, "published_at")) == before
+    assert contended_lines(pyracast_logs, OUTBOUND_MAIL.actor, mail.pk) == contended(
+        OUTBOUND_MAIL.actor, mail.pk
+    )
+    assert outbox.publish_due_mail(published.append, now + outbox.REPUBLISH_AFTER / 2) == 0
+    assert outbox.publish_due_mail(published.append, now + outbox.REPUBLISH_AFTER) == 1
+    assert published == [mail.pk, mail.pk]
 
 
 def test_a_metering_delivery_behind_a_held_region_lock_ends_without_claiming(
@@ -148,7 +175,9 @@ def test_a_metering_delivery_behind_a_held_region_lock_ends_without_claiming(
         METERING.deliver(job.pk)
 
     assert state(EpiasCollectionJob, job.pk) == before
-    assert len(contended_lines(pyracast_logs, METERING.actor, job.pk)) == 1
+    assert contended_lines(pyracast_logs, METERING.actor, job.pk) == contended(
+        METERING.actor, job.pk
+    )
     assert job.pk in pending_epias_ids(NOW)
 
 
@@ -176,7 +205,9 @@ def test_a_revalidation_delivery_behind_a_held_account_lock_keeps_its_dispatch_l
 
     assert adapters == []
     assert state(ProviderAccount, system.account.pk, ("revalidation_due_at",)) == (lease,)
-    assert len(contended_lines(pyracast_logs, REVALIDATION.actor, system.account.pk)) == 1
+    assert contended_lines(pyracast_logs, REVALIDATION.actor, system.account.pk) == contended(
+        REVALIDATION.actor, system.account.pk
+    )
     assert f"account_id={system.account.pk} outcome=contended" in pyracast_logs.text
     assert claim_due_revalidations(lease) == [system.account.pk]
 
@@ -208,9 +239,9 @@ def test_a_claim_that_waited_too_long_or_lost_a_deadlock_leaves_the_job_unclaime
         raise database_error(cause)
 
     assert claim_unless_contended(COLLECTION.actor, 7, claim) is None
-    assert contended_lines(pyracast_logs, COLLECTION.actor, 7) == [
-        f"job_claim_contended kind=collect_forecast job_id=7 error_type={type(cause).__name__}"
-    ]
+    assert contended_lines(pyracast_logs, COLLECTION.actor, 7) == contended(
+        "collect_forecast", 7, type(cause).__name__
+    )
 
 
 @pytest.mark.parametrize("cause", [psycopg.errors.QueryCanceled(), None])
