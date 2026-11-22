@@ -398,7 +398,10 @@ def test_shared_account_protects_slots_on_both_local_dates_within_utc_day() -> N
     configure_schedule(
         system.member, system.tenant.pk, other.pk, enabled=True, times=["18:00"], now=NOW
     )
-    assert remaining_forecast_requests(system.account, NIGHT) == 3
+    # Both of the first plant's slots of the UTC day (13:00 and 22:00) and the other's 15:00 keep
+    # their starts; each plant's due slot of the previous day (22:00 and 15:00, never sent) counts
+    # against that day's bound, which only the approval jobs used.
+    assert remaining_forecast_requests(system.account, NIGHT) == 5
 
 
 @pytest.mark.parametrize("boundary", ["account_lock", "before_http"])

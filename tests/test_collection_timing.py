@@ -1,5 +1,6 @@
 import itertools
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -22,18 +23,22 @@ from pyracast.forecasts.models import (
 )
 from pyracast.forecasts.quota import (
     BindingDayExhaustedError,
+    ForecastBudgetReservedError,
     QuotaExceededError,
     ScheduleDisabledError,
     reserve_request,
 )
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
+from pyracast.forecasts.validation import validate_binding
 from pyracast.provider_retry import next_provider_day
 from pyracast.regions.models import Region
 from tests.support.budget_reference import reference_forecast_requests
 from tests.support.collection_schedule import HistoricalFixture
-from tests.support.domain import NOW, FakeAdapter, System, make_system
+from tests.support.domain import NOW, FakeAdapter, System, make_system, provider_key
 from tests.support.jobs import calculate, collect
+from tests.support.providers import replace_key
+from tests.support.revalidation import spend_until, used
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -57,7 +62,8 @@ MOMENTS = (
 class JobState:
     """The planned job at a moment: an attempt made then or `attempted` earlier, a stored
     answer, a lease ending `lease` after the moment, available only after the UTC day, its claims,
-    the account's key recorded as rejected, a saved schedule taking effect after its slot."""
+    the account's key recorded as rejected, a saved schedule taking effect after its slot, carried
+    to the provider day after its slot, another job of its slot's UTC day sent."""
 
     status: str
     last_error: str = ""
@@ -70,6 +76,8 @@ class JobState:
     attempts: int = 0
     rejected: bool = False
     before_effective: bool = False
+    carried: bool = False
+    day_used: bool = False
 
 
 HELD, ENDED_LEASE = timedelta(minutes=1), timedelta(minutes=-1)
@@ -102,6 +110,9 @@ JOB_STATES = (
     JobState("stale", "quota_exhausted", attempt="failed"),
     JobState("stale", "binding_not_current", attempt="succeeded", answered=True),
     JobState("running", attempt="succeeded", lease=HELD),
+    JobState("retry", "quota_exhausted", carried=True),
+    JobState("retry", "provider_server_error", attempt="failed", carried=True),
+    JobState("retry", "quota_exhausted", carried=True, day_used=True),
 )
 
 
@@ -117,14 +128,37 @@ def arrange_planned_job(
             effective_from=planned.scheduled_for + timedelta(minutes=30)
         )
     ForecastSnapshot.objects.filter(job=planned).delete()
-    RequestAttempt.objects.filter(job=planned).delete()
+    sibling = planned.scheduled_for - timedelta(hours=1)
+    RequestAttempt.objects.filter(job__scheduled_for__in=(planned.scheduled_for, sibling)).delete()
+    CollectionJob.objects.filter(scheduled_for=sibling).delete()
+    if state.day_used:
+        RequestAttempt.objects.create(
+            provider_account=system.account,
+            binding=system.binding,
+            job=CollectionJob.objects.create(
+                binding=system.binding,
+                endpoint="forecasts",
+                scheduled_for=sibling,
+                target_date=sibling.date() + timedelta(days=1),
+                available_at=sibling,
+                status="succeeded",
+            ),
+            utc_day=sibling.date(),
+            created_at=sibling,
+            purpose="forecast",
+            outcome="succeeded",
+        )
+    if state.late:
+        available = next_provider_day(moment) + timedelta(hours=1)
+    elif state.carried:
+        available = next_provider_day(planned.scheduled_for)
+    else:
+        available = planned.scheduled_for
     CollectionJob.objects.filter(pk=planned.pk).update(
         status=state.status,
         last_error=state.last_error,
         attempts=state.attempts,
-        available_at=next_provider_day(moment) + timedelta(hours=1)
-        if state.late
-        else planned.scheduled_for,
+        available_at=available,
         lease_token=None if state.lease is None else uuid.uuid4(),
         lease_expires_at=None if state.lease is None else moment + state.lease,
     )
@@ -233,7 +267,7 @@ def test_the_forecast_budget_equals_its_reference_across_schedules_and_job_state
             account, moment
         ), (schedule, quota, state, moment)
         compared += 1
-    assert compared == 1200
+    assert compared == 1380
 
 
 def jobs_created(moments: list[datetime]) -> set[tuple[str, datetime, object, datetime | None]]:
@@ -387,7 +421,7 @@ def test_a_job_past_the_daily_bound_rests_for_its_slot_after_an_edited_clock() -
     assert_next_slot_collects(system, refused.scheduled_for + timedelta(days=1))
 
 
-def test_a_job_past_the_daily_bound_rests_for_its_slot_under_one_clock() -> None:
+def test_a_job_sent_after_utc_midnight_leaves_its_plant_the_next_slot_under_one_clock() -> None:
     system = make_system(approved=True)
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=10)
     CollectionSchedule.objects.create(
@@ -406,23 +440,169 @@ def test_a_job_past_the_daily_bound_rests_for_its_slot_under_one_clock() -> None
     CollectionJob.objects.filter(pk=late.pk).update(status="succeeded")
     slot = late_slot + timedelta(days=1)
 
-    dispatch_round(slot)
+    # The late job counts against the bound of its slot's day, so the next slot keeps its start.
+    assert remaining_forecast_requests(system.account, delayed) == 1
+    published = dispatch_round(slot)
 
-    refused = CollectionJob.objects.get(
+    collected = CollectionJob.objects.get(
         binding=system.binding, endpoint="forecasts", scheduled_for=slot
     )
-    assert (refused.status, refused.last_error, refused.attempts) == ("stale", "quota_exhausted", 0)
-    midnight = next_provider_day(slot)
-    assert_rests_for_its_slot(
-        system,
-        refused,
-        [
-            *rounds_from(slot + timedelta(seconds=30), 6),
-            *rounds_from(midnight - timedelta(seconds=60), 5),
-        ],
-    )
-    assert forecast_requests_on(system.binding, midnight) == 0
+    assert collected.pk in published
+    assert (collected.status, collected.attempts) == ("succeeded", 1)
+    assert forecast_requests_on(system.binding, slot) == 2
     assert_next_slot_collects(system, slot + timedelta(days=1))
+
+
+CARRY_QUOTA = 4
+CARRIED_SLOT = datetime(2026, 11, 9, 18, tzinfo=UTC)
+NEXT_DAY_SLOTS = (datetime(2026, 11, 10, 3, tzinfo=UTC), datetime(2026, 11, 10, 18, tzinfo=UTC))
+
+
+def refused_for_the_used_up_quota(system: System) -> datetime:
+    spend_until(system, CARRIED_SLOT, CARRY_QUOTA)
+    dispatch_round(CARRIED_SLOT)
+    carried = carried_job(system)
+    assert (carried.status, carried.last_error) == ("retry", "quota_exhausted")
+    spend_until(system, carried.available_at, 1)
+    return carried.available_at
+
+
+def throttled_until_the_next_day(system: System) -> datetime:
+    ProviderAccount.objects.filter(pk=system.account.pk).update(
+        request_blocked_until=datetime(2026, 11, 10, 0, 10, tzinfo=UTC)
+    )
+    dispatch_round(CARRIED_SLOT)
+    carried = carried_job(system)
+    assert (carried.status, carried.last_error) == ("retry", "provider_throttled")
+    spend_until(system, carried.available_at, 1)
+    return carried.available_at
+
+
+def opened_by_a_validation_on_the_next_day(system: System) -> datetime:
+    replace_key(system.admin, system.account.pk, provider_key("NEW"))
+    dispatch_round(CARRIED_SLOT)
+    moment = datetime(2026, 11, 10, 0, 30, tzinfo=UTC)
+    validate_binding(system.admin, system.binding.pk, FakeAdapter(), moment)
+    enqueue_due(moment)
+    carried = carried_job(system)
+    assert (carried.status, used(system, moment)) == ("pending", 1)
+    assert not RequestAttempt.objects.filter(job=carried).exists()
+    return max(moment, carried.available_at)
+
+
+def carried_job(system: System) -> CollectionJob:
+    return CollectionJob.objects.get(
+        binding=system.binding, endpoint="forecasts", scheduled_for=CARRIED_SLOT
+    )
+
+
+@pytest.mark.parametrize(
+    "carry",
+    [
+        refused_for_the_used_up_quota,
+        throttled_until_the_next_day,
+        opened_by_a_validation_on_the_next_day,
+    ],
+)
+def test_a_forecast_carried_into_the_next_day_leaves_that_days_slots_their_room(
+    carry: Callable[[System], datetime],
+) -> None:
+    system = make_system(approved=True)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=CARRY_QUOTA)
+    CollectionSchedule.objects.create(
+        region=system.region, times=["06:00", "21:00"], effective_from=NOW - timedelta(days=1)
+    )
+    moment = carry(system)
+
+    # One request of the next day is used; the carried job and both slots of the day need three.
+    assert remaining_forecast_requests(account_of(system), moment) == 3
+    dispatch_round(moment)
+
+    carried = carried_job(system)
+    assert carried.status == "succeeded"
+    assert RequestAttempt.objects.filter(job=carried, utc_day=moment.date()).count() == 1
+    assert remaining_forecast_requests(account_of(system), moment) == 2
+    with pytest.raises(ForecastBudgetReservedError):
+        reserve_request(
+            system.binding,
+            moment,
+            purpose=RequestPurpose.ESTIMATED_ACTUALS,
+            keep_forecast_reserve=True,
+        )
+    for slot in NEXT_DAY_SLOTS:
+        dispatch_round(slot)
+        job = CollectionJob.objects.get(
+            binding=system.binding, endpoint="forecasts", scheduled_for=slot
+        )
+        assert (job.status, job.attempts) == ("succeeded", 1), slot
+        assert RequestAttempt.objects.get(job=job).created_at.date() == slot.date()
+    assert used(system, moment) == CARRY_QUOTA
+
+
+def account_of(system: System) -> ProviderAccount:
+    return ProviderAccount.objects.get(pk=system.account.pk)
+
+
+def test_a_carried_job_whose_slot_day_is_used_up_ends_without_a_request() -> None:
+    system = make_system(approved=True)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=10)
+    CollectionJob.objects.update(status="succeeded")
+    sent, edited = (
+        CollectionJob.objects.create(
+            binding=system.binding,
+            endpoint="forecasts",
+            scheduled_for=slot,
+            target_date=slot.date() + timedelta(days=1),
+            available_at=slot,
+        )
+        for slot in (CARRIED_SLOT, CARRIED_SLOT + timedelta(hours=2))
+    )
+    reserve_request(system.binding, CARRIED_SLOT, purpose=RequestPurpose.FORECAST, job=sent)
+    CollectionJob.objects.filter(pk=sent.pk).update(status="succeeded")
+    later = next_provider_day(CARRIED_SLOT)
+    CollectionJob.objects.filter(pk=edited.pk).update(available_at=later)
+
+    # The day of both slots allows one start, so only the next day's slot is still needed.
+    assert remaining_forecast_requests(account_of(system), later) == 1
+    assert not collect(edited.pk, HistoricalFixture(later), calculate, later)
+
+    edited.refresh_from_db()
+    assert (edited.status, edited.last_error, edited.attempts) == ("stale", "quota_exhausted", 0)
+    assert not RequestAttempt.objects.filter(job=edited).exists()
+
+
+def test_a_utc_day_with_one_slot_more_than_its_clocks_skips_the_last_without_holding_room() -> None:
+    system = make_system(approved=True)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=10)
+    Region.objects.filter(pk=system.region.pk).update(timezone="America/New_York")
+    SiteBinding.objects.filter(pk=system.binding.pk).update(timezone="America/New_York")
+    CollectionSchedule.objects.create(
+        region=system.region, times=["19:30"], effective_from=NOW - timedelta(days=1)
+    )
+    # New York moves to summer time on 2027-03-14: the 19:30 slots of 03-13 and 03-14 both fall
+    # on the UTC day 03-14.
+    first, last = (
+        CollectionJob.objects.create(
+            binding=system.binding,
+            endpoint="forecasts",
+            scheduled_for=slot,
+            target_date=slot.date() + timedelta(days=1),
+            available_at=slot,
+        )
+        for slot in (
+            datetime(2027, 3, 14, 0, 30, tzinfo=UTC),
+            datetime(2027, 3, 14, 23, 30, tzinfo=UTC),
+        )
+    )
+    binding = SiteBinding.objects.select_related("provider_account", "region").get(
+        pk=system.binding.pk
+    )
+    reserve_request(binding, first.scheduled_for, purpose=RequestPurpose.FORECAST, job=first)
+    CollectionJob.objects.filter(pk=first.pk).update(status="succeeded")
+
+    assert remaining_forecast_requests(account_of(system), first.scheduled_for) == 0
+    with pytest.raises(BindingDayExhaustedError):
+        reserve_request(binding, last.scheduled_for, purpose=RequestPurpose.FORECAST, job=last)
 
 
 SLOT_FINAL = {CollectionJobError.QUOTA_EXHAUSTED, CollectionJobError.SCHEDULE_DISABLED}

@@ -1,3 +1,4 @@
+from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -56,18 +57,23 @@ def approved_bindings(account: ProviderAccount) -> QuerySet[SiteBinding]:
     )
 
 
+def slot_day(slot: datetime) -> date:
+    """The UTC day whose bound a forecast job of the slot counts against, whenever it is sent."""
+    return slot.astimezone(UTC).date()
+
+
 def forecast_starts(binding_id: int, timing: ForecastTiming, utc_day: date) -> int:
-    """Forecast jobs the binding started on the UTC day; claim admits `len(timing.times)`."""
-    earlier = RequestAttempt.objects.filter(job_id=OuterRef("job_id"), utc_day__lt=utc_day)
+    """Sent forecast jobs of the binding's slots in the UTC day; claim admits
+    `len(timing.times)`."""
+    day_start = datetime.combine(utc_day, datetime.min.time(), UTC)
     return (
         RequestAttempt.objects.filter(
             binding_id=binding_id,
             purpose=RequestPurpose.FORECAST,
-            utc_day=utc_day,
-            job__isnull=False,
+            job__scheduled_for__gte=day_start,
+            job__scheduled_for__lt=day_start + timedelta(days=1),
         )
         .exclude(job_id=timing.first_job_id)
-        .exclude(Exists(earlier))
         .values("job_id")
         .distinct()
         .count()
@@ -177,18 +183,25 @@ def _jobs_still_sent(
 
 
 def forecast_need(binding: SiteBinding, now: datetime, daily_quota: int) -> int:
-    """Forecast requests the binding still sends in the UTC day of `now`, as claim admits them."""
+    """Forecast requests the binding still sends in the UTC day of `now`, as claim admits them: a
+    job not sent yet needs a start of its slot's UTC day, also when it is carried past that day."""
     schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
     timing = forecast_timing(binding, schedule, daily_quota=daily_quota)
     if timing is None:
         return 0
     sent = _jobs_still_sent(binding, timing, now, scheduled=schedule is not None)
     free = started_jobs(timing, [job.pk for job in sent.values() if job is not None])
-    starts = sum(1 for job in sent.values() if job is None or job.pk not in free)
-    left = max(
-        len(timing.times) - forecast_starts(binding.pk, timing, now.astimezone(UTC).date()), 0
+    starts = Counter(
+        slot_day(slot) for slot, job in sent.items() if job is None or job.pk not in free
     )
-    return len(sent) - starts + min(starts, left)
+    return (
+        len(sent)
+        - starts.total()
+        + sum(
+            min(count, max(len(timing.times) - forecast_starts(binding.pk, timing, day), 0))
+            for day, count in starts.items()
+        )
+    )
 
 
 def remaining_forecast_requests(

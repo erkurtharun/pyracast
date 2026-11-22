@@ -1,3 +1,4 @@
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -37,8 +38,9 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
     claims left, and ready by its time or at once if it is throttled and its account's delay was
     cleared. A job refused for the key costs one where the current schedule collects it while a
     validation can still reopen it: these plants are validated with the current key, so only
-    while that key is recorded as rejected. Starts per UTC day are bounded as claim admits
-    them."""
+    while that key is recorded as rejected. A job not sent before, other than the approval job,
+    needs a start of the UTC day its slot falls on, even when it is sent on a later day: each
+    such day starts no more jobs of its slots than there are clocks."""
     day_start = datetime.combine(now.astimezone(UTC).date(), datetime.min.time(), UTC)
     day_end = day_start + timedelta(days=1)
     total = 0
@@ -145,19 +147,24 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         ever_sent = set(
             RequestAttempt.objects.filter(job__binding=binding).values_list("job_id", flat=True)
         )
-        starts = sum(
-            1
-            for job in needed.values()
+        starts = Counter(
+            slot.astimezone(UTC).date()
+            for slot, job in needed.items()
             if job is None or (job.pk != first_id and job.pk not in ever_sent)
         )
-        started = {
-            attempt.job_id
-            for attempt in RequestAttempt.objects.filter(
-                binding=binding, purpose="forecast", utc_day=day_start.date(), job__isnull=False
-            ).exclude(job_id=first_id)
-            if not RequestAttempt.objects.filter(
-                job_id=attempt.job_id, utc_day__lt=day_start.date()
-            ).exists()
-        }
-        total += len(needed) - starts + min(starts, max(len(clocks) - len(started), 0))
+        asked = set(
+            RequestAttempt.objects.filter(job__binding=binding, purpose="forecast").values_list(
+                "job_id", flat=True
+            )
+        )
+        started = Counter(
+            job.scheduled_for.astimezone(UTC).date()
+            for job in jobs
+            if job.pk != first_id and job.pk in asked
+        )
+        total += (
+            len(needed)
+            - starts.total()
+            + sum(min(count, max(len(clocks) - started[day], 0)) for day, count in starts.items())
+        )
     return total

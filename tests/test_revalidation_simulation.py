@@ -12,6 +12,7 @@ from pyracast.forecasts.models import CollectionJob, CollectionSchedule, Request
 from pyracast.forecasts.revalidation import revalidate_account, stale_bindings
 from pyracast.forecasts.timing import forecast_timing
 from pyracast.local_time import local_slot
+from pyracast.provider_retry import next_provider_day
 from tests.support.collection_schedule import HistoricalFixture
 from tests.support.domain import NOW, FakeAdapter, System, provider_key
 from tests.support.providers import replace_key
@@ -21,6 +22,7 @@ from tests.support.revalidation import (
     assert_current_plants_keep_their_forecasts,
     assert_the_step_kept_the_reserve,
     collecting_account,
+    current_plants,
     dispatch_round,
     last_request,
     spend_until,
@@ -47,8 +49,9 @@ class Ending:
 
 @dataclass
 class Case:
-    """`lost` names the forecast job a provider failure on a fully booked day costs and the moment
-    it is refused for the used-up quota; `endings` are the jobs that failure touches."""
+    """`lost` names the forecast job a provider failure on a fully booked day delays to the next
+    provider day and the moment it is refused for the used-up quota; `endings` are the jobs that
+    failure touches."""
 
     timezone: str
     clocks: list[list[str]]
@@ -96,7 +99,8 @@ EAST_CLOCKS = [["06:00", "16:00"], ["16:00"], ["09:30"], ["06:00", "21:00"]]
 CASES = [
     # East of UTC, key replaced before the day's slots: 6 clocks and 4 waiting plants on 10. The
     # provider fails the first plant's forecast of D2 13:00 UTC; its retry takes the day's last
-    # request, so the fourth plant's forecast of 18:00 UTC is refused for the used-up quota.
+    # request, so the fourth plant's forecast of 18:00 UTC is refused for the used-up quota and
+    # sent at the next provider day's start.
     pytest.param(
         Case(
             "Europe/Istanbul",
@@ -107,13 +111,13 @@ CASES = [
             lost=(3, utc(D2, 18), utc(D2, 18)),
             endings=(
                 Ending(0, utc(D2, 13), "succeeded", "", 2),
-                Ending(3, utc(D2, 18), "stale", "forecast_superseded", 0),
+                Ending(3, utc(D2, 18), "succeeded", "", 1),
             ),
         ),
         id="east-replaced-before-the-slots",
     ),
     # As above, with the provider failing the day's last forecast, of 18:00 UTC: its retry is
-    # refused for the used-up quota.
+    # refused for the used-up quota and sent at the next provider day's start.
     pytest.param(
         Case(
             "Europe/Istanbul",
@@ -122,7 +126,7 @@ CASES = [
             utc(D1, 0, 30),
             failing_at=utc(D2, 18),
             lost=(3, utc(D2, 18), utc(D2, 20, 2)),
-            endings=(Ending(3, utc(D2, 18), "stale", "forecast_superseded", 1),),
+            endings=(Ending(3, utc(D2, 18), "succeeded", "", 2),),
         ),
         id="east-failed-on-the-last-slot",
     ),
@@ -152,19 +156,63 @@ CASES = [
 ]
 
 
-def slots(case: Case) -> list[datetime]:
-    """The forecast slots of the simulated days, and the moment a failed forecast retries."""
+def plant_slots(case: Case, clocks: list[str]) -> set[datetime]:
     zone = ZoneInfo(case.timezone)
     days = [D1 - timedelta(days=1), D1, D2, D3, D3 + timedelta(days=1)]
+    return {
+        slot
+        for day in days
+        for clock in clocks
+        if (slot := local_slot(day, clock, zone)) is not None and utc(D1, 0) <= slot < END
+    }
+
+
+def slots(case: Case) -> list[datetime]:
+    """The forecast slots of the simulated days, the moment a failed forecast retries and the
+    start of each provider day after D1, when a forecast refused for the used-up quota is ready
+    again. D1 starts at its first slot, which collects the setup's backlog of D0."""
     return sorted(
-        {
-            slot
-            for day in days
-            for clock in {clock for clocks in case.clocks for clock in clocks}
-            if (slot := local_slot(day, clock, zone)) is not None and utc(D1, 0) <= slot < END
-        }
+        plant_slots(case, [clock for clocks in case.clocks for clock in clocks])
         | ({case.failing_at + RETRY_AFTER} if case.failing_at is not None else set())
+        | {next_provider_day(utc(day, 0)) for day in (D1, D2)}
     )
+
+
+def assert_every_slot_after_a_carried_forecast_is_collected_at_its_time(
+    plants: list[SiteBinding], case: Case, awaiting: set[tuple[int, datetime]]
+) -> None:
+    """A forecast job first sent on a later UTC day than its slot's leaves its plant every slot
+    from that day on, each collected in its own rounds. Excused are the jobs the case's provider
+    failure touches and slots whose rounds end while the plant awaits revalidation (`awaiting`
+    holds the plant and round moments it was not current at)."""
+    excused = {(plants[ending.plant].pk, ending.slot) for ending in case.endings}
+    closing = max(ROUND_OFFSETS)
+    for binding, clocks in zip(plants, case.clocks, strict=True):
+        first: dict[int, tuple[datetime, datetime]] = {}
+        for job_id, slot, made in (
+            RequestAttempt.objects.filter(binding=binding, purpose="forecast", job__isnull=False)
+            .order_by("created_at", "pk")
+            .values_list("job_id", "job__scheduled_for", "created_at")
+        ):
+            first.setdefault(job_id, (slot, made))
+        carried = [made for slot, made in first.values() if made.date() > slot.date()]
+        if not carried:
+            continue
+        since = utc(min(carried).date(), 0)
+        for slot in sorted(plant_slots(case, clocks)):
+            if (
+                slot < since
+                or slot + closing >= END
+                or (binding.pk, slot) in excused
+                or (binding.pk, slot + closing) in awaiting
+            ):
+                continue
+            job = CollectionJob.objects.get(
+                binding=binding, endpoint="forecasts", scheduled_for=slot
+            )
+            assert job.status == "succeeded", (binding.pk, slot, job.status, job.last_error)
+            assert job.pk in first, (binding.pk, slot)
+            assert slot <= first[job.pk][1] <= slot + closing, (binding.pk, slot, first[job.pk])
 
 
 def assert_no_forecast_was_refused_for_a_used_up_quota(
@@ -174,10 +222,10 @@ def assert_no_forecast_was_refused_for_a_used_up_quota(
     moment: datetime,
     refused: dict[int, datetime],
 ) -> None:
-    """A forecast refused for the used-up quota is allowed only where its plant's starts of the
-    day are used up as well (claim's day bound refuses it anyway), or as the one forecast the
-    case's provider failure costs that provider day; none is refused for the reserve, which holds
-    back other requests only."""
+    """A forecast refused for the used-up quota is allowed only where its plant's starts of its
+    slot's UTC day are used up as well (claim's day bound refuses it anyway), or as the one
+    forecast the case's provider failure delays that provider day; none is refused for the
+    reserve, which holds back other requests only."""
     assert not CollectionJob.objects.filter(
         binding__provider_account=system.account,
         endpoint="forecasts",
@@ -202,7 +250,9 @@ def assert_no_forecast_was_refused_for_a_used_up_quota(
             job.binding, CollectionSchedule.objects.filter(region_id=job.binding.region_id).first()
         )
         assert timing is not None
-        assert forecast_starts(job.binding.pk, timing, moment.date()) >= len(timing.times), (
+        assert forecast_starts(job.binding.pk, timing, job.scheduled_for.date()) >= len(
+            timing.times
+        ), (
             job.scheduled_for,
             moment,
         )
@@ -252,6 +302,7 @@ def test_the_scheduler_claim_and_revalidation_keep_the_reserve_over_three_provid
     replaced = False
     revalidated_at: datetime | None = None
     refused: dict[int, datetime] = {}
+    awaiting: set[tuple[int, datetime]] = set()
     while True:
         due = [
             *rounds[:1],
@@ -268,6 +319,8 @@ def test_the_scheduler_claim_and_revalidation_keep_the_reserve_over_three_provid
             claim = account(system).revalidation_due_at
             run_at = moment
         elif rounds and rounds[0] == moment:
+            current = {binding.pk for binding in current_plants(system)}
+            awaiting |= {(binding.pk, moment) for binding in plants if binding.pk not in current}
             dispatch_round(rounds.pop(0), Provider(case, moment))
         else:
             assert claim is not None
@@ -282,6 +335,7 @@ def test_the_scheduler_claim_and_revalidation_keep_the_reserve_over_three_provid
         assert_no_forecast_was_refused_for_a_used_up_quota(system, plants, case, moment, refused)
         assert_no_provider_day_exceeds_the_quota(system)
 
+    assert_every_slot_after_a_carried_forecast_is_collected_at_its_time(plants, case, awaiting)
     assert replaced
     if sum(map(len, case.clocks)) + len(plants) <= case.quota:
         assert revalidated_at is not None
