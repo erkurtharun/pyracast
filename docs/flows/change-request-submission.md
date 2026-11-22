@@ -88,7 +88,7 @@ sequenceDiagram
 - The draft locks the day navigation while it exists (`production-history`). A refusal keeps it: an item is named from its `changes.<n>` fields, or as stale (its revision changed or it can no longer be staged) once the day is read again; a refused `reason` is shown at its field and other field errors that name no item in the draft's notice. A reason of only spaces is refused at its field before sending.
 - The server accepts a second request of a member for an interval or outage that already holds their own pending request (the marker names the latest), and requests of different members for one interval. The screen does not: such an interval or outage offers only "Waiting for approval – view" (no "Suggest correction", no outage change, resolution or cancellation), and a draft cannot stage that interval (`proposal.ts` `canStage`).
 - Authority follows the membership row id: a removed and re-invited viewer loses old requests; an administrator transfer keeps the id, so a promoted author can still withdraw.
-- `unread` means own, approved or rejected, `outcome_seen_at` empty; GET never marks it, `seen` on a pending or withdrawn request is a 200 no-op, seen-all marks only the actor's own unread requests, and a withdrawn request cannot carry `outcome_seen_at` (check constraint).
+- `unread` means own, approved or rejected, `outcome_seen_at` empty; reads never mark it, but opening one's own unread decided request in the inbox posts `seen` once (a failed post keeps the detail and its Mark as read button), `seen` on a pending or withdrawn request is a 200 no-op, seen-all marks only the actor's own unread requests, and a withdrawn request cannot carry `outcome_seen_at` (check constraint).
 
 ## Tests
 
