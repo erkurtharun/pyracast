@@ -28,7 +28,7 @@ sequenceDiagram
     else ID and EIC pair not listed
         V-->>A: "400 form error"
     else pair listed
-        O->>DB: "BEGIN, lock Region, Plant, admin User, connection, recheck, return if identical, upsert (revision+1, supersede open jobs if it existed), PlantEvent epias_connected, EpiasConnectionRevision, 90 day jobs, 12 month jobs if settlement found, COMMIT"
+        O->>DB: "BEGIN, lock admin User (no key update), Region, Plant, connection, recheck, return if identical, upsert (revision+1, supersede open jobs if it existed), PlantEvent epias_connected, EpiasConnectionRevision, 90 day jobs, 12 month jobs if settlement found, COMMIT"
         V-->>A: "302 to the plant page"
     end
     A->>V: "POST epias_disconnect"
@@ -50,7 +50,7 @@ sequenceDiagram
 | `metering_epiascollectionjob` | R/W | Backfill rows created `pending` by `get_or_create`; open rows set `superseded` on a changed connect and on disconnect |
 | `metering_epiassnapshot` | R | Counted for `archived_days`, `complete_through` and settlement dates in the status |
 | `plants_plantevent` | W | `epias_connected` and `epias_disconnected` audit rows with provider ID, EIC, revision |
-| `regions_region`, `plants_plant`, `auth_user` | R, `FOR UPDATE` | Existence, trash state, actor still an active superuser |
+| `auth_user`, `regions_region`, `plants_plant` | R, `FOR NO KEY UPDATE` (user), `FOR UPDATE` | Actor still an active superuser, existence, trash state |
 | `plants_plantconfiguration`, `connections_sitebinding`, `connections_provideraccount` | R | Configuration still current (`configuration_is_current`), not locked |
 | `accounts_membership` | R | Member check for GET |
 | `forecasts_collectionschedule` | R | Decides whether the first previous-day job gets a nightly retry deadline |
@@ -79,7 +79,7 @@ sequenceDiagram
 
 ## Rules and invariants
 
-- Provider calls run before the transaction; admin, trash state and configuration are rechecked under the lock. Lock order is Region, Plant, User, connection, jobs; workers take Region, Plant, connection, job.
+- Provider calls run before the transaction; admin, trash state and configuration are rechecked under the lock. Lock order is the acting administrator's User row (`FOR NO KEY UPDATE`), Region, Plant, connection, jobs, the order of member removal and account erasure; workers take Region, Plant, connection, job.
 - A connect that changes the enabled state, provider ID, EIC or settlement ID raises `revision` (a first connect starts at 1), supersedes open jobs and queues the whole backfill again; a disabled connection is reused. An identical connect returns before any write.
 - Initial jobs are unique per slot with `scheduled_for = max(connection.updated_at, configuration.created_at)`. Only the previous-day job gets a retry deadline, and only when that slot lies inside the nightly window and no disabled schedule exists.
 - With no settlement match the connection is saved with `settlement_plant_id` null; the scheduler looks again once a day inside the nightly window and then queues the 12 months, without an audit event (`epias-collection`).
