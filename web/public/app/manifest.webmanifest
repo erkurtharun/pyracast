@@ -5,8 +5,8 @@
     "start_url": "/app/",
     "scope": "/app/",
     "display": "standalone",
-    "theme_color": "#143c32",
-    "background_color": "#f6f7f3",
+    "theme_color": "#09383a",
+    "background_color": "#f9f7f2",
     "icons": [
         {
             "src": "icons/any-192.png",

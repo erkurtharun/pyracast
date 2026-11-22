@@ -3,6 +3,7 @@ import path from "node:path";
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import { mockApi, user } from "./support/workspace";
+import { brand } from "../src/styles/tokens";
 
 const manifest = JSON.parse(
     readFileSync(
@@ -37,6 +38,7 @@ test("workspace pages link the manifest, the touch icon and the theme colour", a
         "href",
         "/app/icons/apple-touch-icon.png",
     );
+    expect(manifest.theme_color).toBe(brand.forest);
     await expect(links.themeColour).toHaveAttribute(
         "content",
         manifest.theme_color,
