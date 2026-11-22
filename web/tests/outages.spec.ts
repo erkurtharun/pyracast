@@ -1,6 +1,13 @@
 import { expect, test, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
-import { answer, tenantRow, type Mock } from "./support/workspace";
+import {
+    answer,
+    mockApi,
+    paged,
+    tenantRow,
+    user,
+    type Mock,
+} from "./support/workspace";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import { errorBody } from "./support/errors";
@@ -689,4 +696,341 @@ test.describe("in a browser zone west of the plant", () => {
             starts_at: "2026-11-11T08:00:00.000Z",
         });
     });
+});
+
+type OutageRow = Schemas["IncidentListOutput"];
+
+function listedOutage(
+    id: number,
+    title: string,
+    pending: number | null,
+): OutageRow {
+    return {
+        id,
+        revision: 2,
+        kind: "inverter",
+        title,
+        notes: "",
+        starts_at: "2026-11-09T08:00:00Z",
+        ends_at: null,
+        available_dc_mw: null,
+        available_inverter_mw: null,
+        available_export_mw: null,
+        status: "active",
+        declared_configuration_id: 31,
+        created_at: "2026-11-09T08:10:00Z",
+        updated_at: "2026-11-09T08:10:00Z",
+        pending_request_id: pending,
+    };
+}
+
+function memberList(held: number | null = null) {
+    return answer("IncidentPage", {
+        ...paged([
+            listedOutage(4, "Inverter offline", held === 4 ? 9 : null),
+            listedOutage(5, "Export limited", null),
+        ]),
+        can_propose: true,
+        proposal_unavailable_reason: null,
+    });
+}
+
+// A member whose clock runs, so the outage list is read again when the page regains focus.
+async function memberOutages(
+    page: Page,
+    read: () => Promise<ReturnType<typeof memberList>>,
+) {
+    await page.clock.install({ time: new Date("2026-11-10T12:00:00Z") });
+    await mockApi(page);
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: { user, language: "en", csrf_token: "signed-token" },
+        }),
+    );
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([
+                tenantRow({ id: 1, name: "Workspace", role: "viewer" }),
+            ]),
+        }),
+    );
+    await page.route("**/change-requests/?*", (route) =>
+        route.fulfill({ json: paged([]) }),
+    );
+    await page.route("**/api/**/outages/", async (route) =>
+        route.fulfill({ json: await read() }),
+    );
+}
+
+async function openOutages(page: Page) {
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Outages", exact: true }).click();
+}
+
+async function readOnFocus(page: Page) {
+    await page.clock.runFor(5_000);
+    await page.evaluate(() =>
+        document.dispatchEvent(
+            new Event("visibilitychange", { bubbles: true }),
+        ),
+    );
+}
+
+function outageCard(page: Page, title: string) {
+    return page.locator("article").filter({
+        has: page.getByRole("heading", { name: title }),
+    });
+}
+
+// A route waits at the gate until the test opens it; `reached` settles once a request waits there.
+function gate() {
+    let open!: () => void;
+    let arrive!: () => void;
+    const opened = new Promise<void>((resolve) => {
+        open = resolve;
+    });
+    const reached = new Promise<void>((resolve) => {
+        arrive = resolve;
+    });
+    return {
+        open,
+        reached,
+        async pass() {
+            arrive();
+            await opened;
+        },
+    };
+}
+
+const heldText =
+    "A request of yours for this outage now waits for approval. Withdraw it before proposing another change.";
+
+test("while a resolution is sent and the list reloads after it, no other proposal of the screen can be opened or sent", async ({
+    page,
+}) => {
+    const answered = gate();
+    const reload = gate();
+    let sent = false;
+    const submissions: unknown[] = [];
+    await memberOutages(page, async () => {
+        if (sent) await reload.pass();
+        return memberList(sent ? 4 : null);
+    });
+    await page.route("**/change-requests/incidents/", async (route) => {
+        submissions.push(route.request().postDataJSON());
+        await answered.pass();
+        sent = true;
+        await route.fulfill({ status: 201, json: {} });
+    });
+    await openOutages(page);
+    const inverter = outageCard(page, "Inverter offline");
+    const other = outageCard(page, "Export limited");
+    await inverter
+        .getByRole("button", { name: "Submit resolution", exact: true })
+        .click();
+    await inverter
+        .getByRole("button", { name: "Send for approval", exact: true })
+        .click();
+    await answered.reached;
+
+    const quiet = async () => {
+        await expect(
+            inverter.getByRole("button", { name: "Saving…", exact: true }),
+        ).toBeDisabled();
+        await expect(
+            inverter.getByRole("button", {
+                name: "Suggest changes",
+                exact: true,
+            }),
+        ).toHaveCount(0);
+        await expect(
+            inverter.getByText("Request cancellation", { exact: true }),
+        ).toHaveCount(0);
+        for (const name of ["Suggest changes", "Submit resolution"])
+            await expect(
+                other.getByRole("button", { name, exact: true }),
+            ).toBeDisabled();
+        await expect(
+            page.getByRole("button", { name: "Submit outage", exact: true }),
+        ).toBeDisabled();
+    };
+    await quiet();
+    answered.open();
+    await reload.reached;
+    await quiet();
+    reload.open();
+    await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
+    await expect(
+        other.getByRole("button", { name: "Suggest changes", exact: true }),
+    ).toBeEnabled();
+    expect(submissions).toHaveLength(1);
+});
+
+test("an outage editor that is sending cannot be replaced by a new outage", async ({
+    page,
+}) => {
+    const answered = gate();
+    const submissions: unknown[] = [];
+    await memberOutages(page, async () => memberList());
+    await page.route("**/change-requests/incidents/", async (route) => {
+        submissions.push(route.request().postDataJSON());
+        await answered.pass();
+        await route.fulfill({ status: 201, json: {} });
+    });
+    await openOutages(page);
+    await outageCard(page, "Inverter offline")
+        .getByRole("button", { name: "Suggest changes", exact: true })
+        .click();
+    const editor = page.getByRole("region", { name: "Edit outage" });
+    await editor.getByLabel("Incident title").fill("Inverter replaced");
+    await editor
+        .getByRole("button", { name: "Send for approval", exact: true })
+        .click();
+    await answered.reached;
+    const submit = page.getByRole("button", {
+        name: "Submit outage",
+        exact: true,
+    });
+    await expect(submit).toBeDisabled();
+    await expect(
+        editor.getByRole("button", { name: "Saving…", exact: true }),
+    ).toBeDisabled();
+    answered.open();
+    await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
+    await expect(editor).toHaveCount(0);
+    await expect(submit).toBeEnabled();
+    expect(submissions).toEqual([
+        expect.objectContaining({
+            action: "update",
+            incident_id: 4,
+            values: expect.objectContaining({ title: "Inverter replaced" }),
+        }),
+    ]);
+});
+
+test("a resolution form whose outage comes to wait for the member's own request keeps what was typed, cannot send and does not reopen by itself", async ({
+    page,
+}) => {
+    let held: number | null = null;
+    const submissions: unknown[] = [];
+    await memberOutages(page, async () => memberList(held));
+    await page.route("**/change-requests/incidents/", (route) => {
+        submissions.push(route.request().postDataJSON());
+        return route.fulfill({ status: 201, json: {} });
+    });
+    await openOutages(page);
+    const inverter = outageCard(page, "Inverter offline");
+    await inverter
+        .getByRole("button", { name: "Submit resolution", exact: true })
+        .click();
+    const resolvedAt = inverter.getByLabel("Resolved at", { exact: true });
+    await resolvedAt.fill("2026-11-10T14:00");
+
+    held = 4;
+    await readOnFocus(page);
+    const pending = inverter.getByRole("link", {
+        name: "Waiting for approval: view the request for Inverter offline",
+    });
+    await expect(pending).toBeVisible();
+    await expect(
+        inverter.getByRole("status").filter({ hasText: heldText }),
+    ).toBeVisible();
+    await expect(resolvedAt).toHaveValue("2026-11-10T14:00");
+    await expect(
+        inverter.getByRole("button", {
+            name: "Send for approval",
+            exact: true,
+        }),
+    ).toHaveCount(0);
+    const close = inverter.getByRole("button", { name: "Close", exact: true });
+    await expect(close).toBeFocused();
+
+    held = null;
+    await readOnFocus(page);
+    await expect(pending).toHaveCount(0);
+    await expect(resolvedAt).toHaveValue("2026-11-10T14:00");
+    await expect(
+        inverter.getByRole("button", {
+            name: "Send for approval",
+            exact: true,
+        }),
+    ).toHaveCount(0);
+    await close.click();
+    await expect(resolvedAt).toHaveCount(0);
+    await readOnFocus(page);
+    await expect(
+        inverter.getByRole("button", {
+            name: "Submit resolution",
+            exact: true,
+        }),
+    ).toBeVisible();
+    await expect(resolvedAt).toHaveCount(0);
+    expect(submissions).toHaveLength(0);
+});
+
+test("a conflict answer that already carries the member's own request holds the editor before the list reloads", async ({
+    page,
+}) => {
+    const reload = gate();
+    let conflicted = false;
+    const submissions: unknown[] = [];
+    const current: OutageRow = {
+        ...listedOutage(4, "Changed meanwhile", 9),
+        revision: 3,
+    };
+    await memberOutages(page, async () => {
+        if (!conflicted) return memberList();
+        await reload.pass();
+        return { ...memberList(4), results: [current] };
+    });
+    await page.route("**/change-requests/incidents/", async (route) => {
+        submissions.push(route.request().postDataJSON());
+        conflicted = true;
+        await route.fulfill({
+            status: 409,
+            json: answer("IncidentConflict", {
+                ...errorBody(
+                    "incident_revision_changed",
+                    "The outage changed. Review its current values and save again.",
+                ),
+                current,
+            }),
+        });
+    });
+    await openOutages(page);
+    await outageCard(page, "Inverter offline")
+        .getByRole("button", { name: "Suggest changes", exact: true })
+        .click();
+    const editor = page.getByRole("region", { name: "Edit outage" });
+    await editor.getByLabel("Incident title").fill("Inverter replaced");
+    await editor
+        .getByRole("button", { name: "Send for approval", exact: true })
+        .click();
+    await reload.reached;
+
+    await expect(
+        editor.getByRole("alert").filter({
+            hasText: "Someone changed this outage after you opened it.",
+        }),
+    ).toBeVisible();
+    await expect(
+        editor.getByRole("status").filter({ hasText: heldText }),
+    ).toBeVisible();
+    await expect(
+        editor.getByRole("button", { name: "Send for approval", exact: true }),
+    ).toHaveCount(0);
+    await expect(editor.getByLabel("Incident title")).toHaveValue(
+        "Inverter replaced",
+    );
+    reload.open();
+    await expect(
+        page.getByRole("link", {
+            name: "Waiting for approval: view the request for Changed meanwhile",
+        }),
+    ).toBeVisible();
+    await expect(
+        editor.getByRole("button", { name: "Send for approval", exact: true }),
+    ).toHaveCount(0);
+    expect(submissions).toHaveLength(1);
 });
