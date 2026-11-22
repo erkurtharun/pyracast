@@ -1,6 +1,7 @@
 "use client";
 import type { CSSProperties } from "react";
 import { brandProperties } from "@/styles/tokens";
+import "@/styles/tokens.css";
 import "./globals.css";
 import en from "../../messages/en/shell.json";
 import tr from "../../messages/tr/shell.json";
