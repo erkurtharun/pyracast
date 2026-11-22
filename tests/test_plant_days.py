@@ -1,5 +1,7 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
+from threading import Event
 from typing import Any, cast
 
 import pytest
@@ -10,11 +12,13 @@ from django.test import Client, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from pyracast.accounts.audit import logger as security_logger
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.errors import DomainError, ErrorCode
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
+from pyracast.plants import api as plants_api
 from pyracast.plants import plant_days as plant_days_module
 from pyracast.plants.operations import create_plant
 from pyracast.plants.parameters import PlantParameters
@@ -668,6 +672,66 @@ def test_an_exhausted_forecast_budget_leaves_the_days_read_answering(
         assert client.get(plant_path(system, plant, "forecast"), forecast).status_code == 429
         assert client.get(plant_path(system, plant)).status_code == 200
         assert client.get(plant_path(system, plant)).status_code == 200
+
+
+def held_read(
+    monkeypatch: pytest.MonkeyPatch, outcome: Exception | None
+) -> tuple[Event, Event]:
+    entered, release = Event(), Event()
+    read = plants_api.plant_days
+
+    def held(*scope: Any) -> object:
+        if not entered.is_set():
+            entered.set()
+            assert release.wait(30)
+            if outcome is not None:
+                raise outcome
+        return read(*scope)
+
+    monkeypatch.setattr(plants_api, "plant_days", held)
+    return entered, release
+
+
+def status_of(user: User, path: str) -> int:
+    try:
+        client = Client(raise_request_exception=False)
+        client.force_login(user)
+        return client.get(path).status_code
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    ("outcome", "first_status"), [(None, 200), (RuntimeError("defect"), 500)], ids=["ended", "failed"]
+)
+def test_one_days_read_at_a_time_and_the_next_after_it_ended_or_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    outcome: Exception | None,
+    first_status: int,
+) -> None:
+    monkeypatch.setattr(security_logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(security_logger, "propagate", False)
+    caplog.set_level(logging.INFO, logger="pyracast.security")
+    system, plant = make_plant(monkeypatch)
+    viewer = client_for(viewer_of(system))
+    path = plant_path(system, plant)
+    entered, release = held_read(monkeypatch, outcome)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(status_of, system.member, path)
+        try:
+            assert entered.wait(30)
+            caplog.clear()
+            meanwhile = viewer.get(path)
+            events = [record for record in caplog.records if record.name == "pyracast.security"]
+        finally:
+            release.set()
+        assert first.result(timeout=60) == first_status
+    assert meanwhile.status_code == 429
+    assert meanwhile.json()["code"] == "throttled"
+    assert meanwhile["Retry-After"] == "5"
+    assert events == []
+    assert viewer.get(path).status_code == 200
 
 
 def test_the_days_scope_admits_120_reads_an_hour() -> None:
