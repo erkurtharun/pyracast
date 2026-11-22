@@ -8,6 +8,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.activation import activate_calibration
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 from tests.support.domain import System
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
@@ -45,9 +46,7 @@ def reference_transition(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Plant",
-        dc_capacity_mw=130,
-        export_limit_mw=100,
+        PlantParameters(name="Plant", dc_capacity_mw=130, export_limit_mw=100),
     )
     system.binding = new
     if with_latest:

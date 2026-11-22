@@ -19,6 +19,7 @@ from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.api.permissions import ROUTE_POLICIES, RoutePolicy
 from pyracast.api.session import SessionView
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from tests.support.api import verified_admin
 from tests.support.domain import make_system
 
@@ -240,7 +241,10 @@ def concrete(route: str, ids: dict[str, int]) -> str:
 def test_each_role_meets_the_route_policy(route: str, method: str) -> None:
     system = make_system()
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=10
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=10),
     )
     access = POLICIES[route][method][0]
     present = {"tenant_id": system.tenant.pk, "region_id": system.region.pk, "plant_id": plant.pk}
@@ -295,12 +299,16 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
                 status for status in operation["responses"] if status.startswith(("4", "5"))
             )
     error = {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
-    conflict = {"application/json": {"schema": {"$ref": "#/components/schemas/IncidentConflict"}}}
-    assert schema["components"]["schemas"]["IncidentConflict"]["properties"].keys() == {
-        "code",
-        "message",
-        "current",
-    }
+    conflicts = [
+        {"application/json": {"schema": {"$ref": f"#/components/schemas/{name}"}}}
+        for name in ("IncidentConflict", "PlantConflict")
+    ]
+    for name in ("IncidentConflict", "PlantConflict"):
+        assert schema["components"]["schemas"][name]["properties"].keys() == {
+            "code",
+            "message",
+            "current",
+        }
     assert documented[("/api/session/", "get")] == []
     assert documented[("/api/session/language/", "post")] == ["400", "403", "415"]
     assert documented[("/api/tenants/", "get")] == ["401", "404"]
@@ -333,7 +341,10 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
                 assert "415" in responses
             for status, response in responses.items():
                 if status.startswith(("4", "5")) or status == "default":
-                    assert response["content"] == (conflict if status == "409" else error)
+                    if status == "409":
+                        assert response["content"] in conflicts
+                    else:
+                        assert response["content"] == error
 
 
 def test_a_request_that_bypassed_the_url_resolver_is_refused() -> None:

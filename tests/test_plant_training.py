@@ -24,6 +24,7 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.numerics import FitResult, fit_calibration
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.training import LEASE_DURATION, pending_calibration_ids, run_calibration
 from pyracast.regions.models import Region
@@ -254,8 +255,7 @@ def test_revision_or_approval_change_during_fit_cannot_publish(
                 system.tenant.pk,
                 system.region.pk,
                 plant.pk,
-                name="Changed",
-                dc_capacity_mw=140,
+                PlantParameters(name="Changed", dc_capacity_mw=140),
             )
         else:
             Region.objects.filter(pk=system.region.pk).update(status="suspended")

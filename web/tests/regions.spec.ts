@@ -21,7 +21,7 @@ test("renames a plant without changing its location", async ({ page }) => {
                 name: "New name",
                 dc_capacity_mw: 5,
             });
-            current = { ...plant, name: "New name" };
+            current = { ...plant, name: "New name", parameters_revision: 2 };
             await route.fulfill({ json: current });
         },
     );

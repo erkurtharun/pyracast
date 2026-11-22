@@ -18,6 +18,7 @@ from pyracast.plants.automation import (
 from pyracast.plants.management.commands import activate_calibration as command
 from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from tests.support.calibration_automation import evaluated_run, promote
 from tests.support.domain import NOW, System
 from tests.support.plant_operations import make_plant, ready_run, request_run
@@ -77,7 +78,7 @@ def test_runs_of_a_revised_configuration_read_as_previous_and_open_runs_as_not_r
 ) -> None:
     system, plant, active, _ = two_candidates(monkeypatch)
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    revise_plant(*scope, name="Changed", dc_capacity_mw=140)
+    revise_plant(*scope, PlantParameters(name="Changed", dc_capacity_mw=140))
     plant.refresh_from_db()
     open_run = request_run(system, plant)
     client = Client()
@@ -109,8 +110,7 @@ def test_activating_a_previous_configuration_run_refuses_with_the_blocker_the_de
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Changed",
-        dc_capacity_mw=140,
+        PlantParameters(name="Changed", dc_capacity_mw=140),
     )
     client = Client()
     client.force_login(system.member)
