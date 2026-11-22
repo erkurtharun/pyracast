@@ -34,7 +34,7 @@ sequenceDiagram
         API-->>UI: "401, 403, 404 or 400"
     end
     API->>Auto: "set_calibration_automation"
-    Auto->>DB: "BEGIN, lock the acting person when enabling, lock tenant and recheck admin, lock region, plant"
+    Auto->>DB: "BEGIN, locks in the lock order (rules), recheck admin under the tenant lock"
     alt "enable without current approved configuration"
         API-->>UI: "400 configuration_unavailable or configuration_changed"
     else "lock wait over 5 s"
@@ -48,7 +48,7 @@ sequenceDiagram
     API-->>UI: "200 status, panel remounts, run list reloads"
     loop "each dispatcher cycle, phase calibration"
         Disp->>Auto: "prepare_due_calibrations(now), at most 100 plants"
-        Auto->>DB: "per plant one transaction, read the enabler, lock that person, tenant, region, plant, membership"
+        Auto->>DB: "per plant one transaction, locks in the lock order (rules)"
         alt "another enabler once the plant is locked"
             Auto->>DB: "nothing decided, the plant stays due"
         else "enabler no longer an active admin"
@@ -61,7 +61,7 @@ sequenceDiagram
         Disp->>DB: "pending_calibration_ids, oldest 100"
         Disp->>W: "calibrate_plant(run id)"
     end
-    W->>DB: "claim under locks, build and fit without locks, publish under fresh enabler, tenant, region, plant, run locks"
+    W->>DB: "claim under locks, build and fit without locks, publish under locks in the lock order"
     W->>Auto: "attempt_promotion in a savepoint of the transaction that ends the run"
     alt "a guard fails or the promotion raises"
         Auto->>DB: "PlantEvent calibration_automatic_skipped with reason"
@@ -81,7 +81,7 @@ sequenceDiagram
 | `plants_calibrationrun` | R/W | Latest run of the current configuration and open runs on enable; `status`, `factor`, `result`, `assessment`, `dataset_manifest`, window and holdout dates for the guards; `prepare_calibration` inserts pending runs |
 | `plants_calibrationactivation` | R/W | Latest activation per configuration and the run's `comparison_activation` (incumbent checks); automatic promotion appends a row with null `actor` |
 | `plants_plantevent` | R/W | Writes `calibration_automation_enabled/disabled` (`cause`: `toggle`, `manual_activation`, `reset`, `configuration_revised`, `workspace_disabled`), `calibration_automatic_skipped` (reason, origin, `enabled_by_id`), `calibration_automatically_activated` and, from `prepare_calibration`, `calibration_scheduled`; GET reads the newest skip or automatic activation and the newest disable event |
-| `accounts_membership`, `auth_user`, `accounts_tenant`, `regions_region` | R | Enabler authorization (the person locked `FOR NO KEY UPDATE`, active accounts only, before the tenant; the membership `FOR UPDATE OF` itself under the tenant), lock order, soft-deletion checks |
+| `accounts_membership`, `auth_user`, `accounts_tenant`, `regions_region` | R | Enabler authorization and lock order (rules), soft-deletion checks |
 | `plants_plantconfiguration`, `connections_sitebinding`, `connections_provideraccount` | R | `configuration_is_current` and `binding_is_current` |
 | Production, EPIAS snapshot and connection (`metering_epiasconnection`) and incident tables | R | Read by `prepare_calibration` and `activation_blocker` (see `calibration-run`) |
 
@@ -89,7 +89,7 @@ sequenceDiagram
 
 - GET: `RoutePolicy` (`api/permissions.py`) admits any active member, including viewers (403 `membership_required` otherwise); `ScopedView.plant_queryset` scopes region to tenant and plant to region, both non-deleted (404).
 - PATCH: session authentication enforces CSRF, then `RoutePolicy` admits only active workspace administrators of the URL tenant (a platform superuser without that membership is refused). `set_calibration_automation` repeats the check with `tenant_membership(role=ADMIN, lock=True)` after locking the tenant row. The UI disables the checkbox for viewers (`useCanManageWorkspace`), a convenience only.
-- Promotion and daily preparation are authorized by the stored enabler, not by the caller: `_authorized` requires that user to be active and an `admin` member of the plant's tenant; where a transaction decides on it, the person and the membership are locked (lock order below), so a concurrent deactivation or demotion is seen; disabling locks no person. The GET status evaluates the same rule without locks.
+- Promotion and daily preparation are authorized by the stored enabler, not by the caller: `_authorized` requires that user to be active and an `admin` member of the plant's tenant, checked in the lock order below. The GET status evaluates the same rule without locks.
 - `disable_workspace_automation` requires an active platform superuser (`require_platform_admin`); it is reached only through `reassign_workspace_admin`, whose console page requires `has_platform_admin_session` (staff, superuser and verified MFA).
 
 ## Failure paths
