@@ -14,6 +14,7 @@ LAYERS: tuple[tuple[str, ...], ...] = (
         "irradiance",
         "languages",
         "local_time",
+        "log_lines",
         "provider_retry",
         "shutdown",
         "solar",
@@ -28,7 +29,7 @@ LAYERS: tuple[tuple[str, ...], ...] = (
     ("plants",),
     ("incidents", "metering"),
     ("change_requests", "notifications"),
-    ("trash", "purge_warning"),
+    ("trash", "purge_warning", "retention", "erasure"),
     ("orchestration",),
     ("http",),
     ("platform_admin",),
@@ -83,9 +84,12 @@ BACK_EDGES: dict[tuple[str, str], str] = {
     ("forecasts.acquisition", "plants.forecast_sources"): "snapshot replay lives in plants",
     (
         "forecasts.historical_import",
+        "plants.models",
+    ): "an import checks the configurations of the plants it feeds",
+    (
+        "forecasts.historical_import",
         "plants.preparation",
     ): "an import prepares calibrations of its plants",
-    ("forecasts.historical_upload", "plants.models"): "an upload previews the plants it feeds",
     (
         "forecasts.history",
         "plants.forecast_archive",

@@ -19,7 +19,13 @@ from pyracast.accounts.audit import SecurityEvent, record_refusal
 from pyracast.accounts.authorization import has_platform_admin_session
 from pyracast.accounts.security import has_mfa_evidence
 from pyracast.errors import ErrorCode
-from pyracast.platform_admin import access, pages, plant_review, tenant_views
+from pyracast.platform_admin import (
+    access,
+    pages,
+    plant_review,
+    provider_accounts,
+    tenant_views,
+)
 from pyracast.platform_admin.failures import contained
 from pyracast.platform_admin.forms import ConfirmationForm
 from pyracast.platform_admin.historical import historical_import
@@ -43,6 +49,7 @@ _REPLACED_SITE_ROUTES = {
 }
 PLANT = "plants/<int:region_id>/"
 WORKSPACE = "workspaces/<int:tenant_id>/"
+ACCOUNT = "provider-accounts/<int:account_id>/"
 
 
 class PlatformAdminSite(admin.AdminSite):
@@ -149,6 +156,26 @@ class PlatformAdminSite(admin.AdminSite):
                 "workspace_member_removal",
             ),
             (f"{WORKSPACE}plants/new/", partial(new_plant, site=self), "workspace_plant_new"),
+            (
+                "provider-accounts/",
+                partial(provider_accounts.accounts, site=self),
+                "workspace_provider_accounts",
+            ),
+            (
+                ACCOUNT,
+                partial(provider_accounts.account, site=self),
+                "workspace_provider_account",
+            ),
+            (
+                f"{ACCOUNT}key/",
+                partial(provider_accounts.key_replacement, site=self),
+                "workspace_provider_account_key",
+            ),
+            (
+                f"{ACCOUNT}delay/",
+                partial(provider_accounts.delay_clearance, site=self),
+                "workspace_provider_account_delay",
+            ),
             ("password_change/", RedirectView.as_view(url="/app/account/"), "password_change"),
         )
         return [

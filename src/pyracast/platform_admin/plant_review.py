@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, cast
 
 from django import forms
@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db.models import QuerySet
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.template.response import TemplateResponse
 from django.utils import timezone
@@ -19,10 +19,10 @@ from rest_framework.exceptions import ValidationError as APIValidationError
 
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
-from pyracast.connections.recovery import clear_provider_cooldown
 from pyracast.connections.setup import SetupOutcome, save_provider_setup
 from pyracast.epias import EpiasCredentialsError, EpiasError
 from pyracast.errors import ConflictError, DomainError, ErrorCode
+from pyracast.forecasts.models import HistoricalReferenceImport
 from pyracast.forecasts.quota import QuotaExceededError, RequestDeferredError
 from pyracast.forecasts.validation import validate_binding
 from pyracast.metering.models import EpiasConnection
@@ -34,7 +34,8 @@ from pyracast.plants.approval import (
     approval_blockers,
     approve_region,
     decide_review,
-    declaration_fingerprint,
+    declarations,
+    fingerprint_of,
 )
 from pyracast.plants.models import Plant, PlantSubmission
 from pyracast.plants.operations import configuration_is_current
@@ -108,16 +109,13 @@ def _setup_initial(region: Region, binding: SiteBinding | None) -> dict[str, Any
 
 
 def _action_initial(region: Region, binding: SiteBinding | None) -> dict[str, Any]:
-    blocked_until = binding.provider_account.request_blocked_until if binding else None
     validated_at = binding.validated_at if binding else None
     return {
         "expected_revision": region.revision,
         "binding_id": binding.pk if binding else None,
         "credential_revision": binding.provider_account.credential_revision if binding else None,
-        "expected_cooldown_until": blocked_until.isoformat() if blocked_until else "",
         "expected_validated_at": validated_at.isoformat() if validated_at else "",
         "expected_status": region.status,
-        "declaration": declaration_fingerprint(region.pk),
     }
 
 
@@ -193,22 +191,24 @@ def configure(request: HttpRequest, page: PlantPage) -> Notice | None:
     form = page.setup_form
 
     @sensitive_variables()
-    def save() -> Notice:
-        outcome = save_provider_setup(
-            _actor(request),
-            page.region.pk,
-            expected_revision=form.cleaned_data["expected_revision"],
-            expected_binding_id=form.cleaned_data["expected_binding_id"],
-            account=form.account(),
-            binding=form.binding(),
-        )
+    def save() -> Notice | None:
+        try:
+            outcome = save_provider_setup(
+                _actor(request),
+                page.region.pk,
+                expected_revision=form.cleaned_data["expected_revision"],
+                expected_binding_id=form.cleaned_data["expected_binding_id"],
+                account=form.account(),
+                binding=form.binding(),
+            )
+        except ValidationError as refusal:
+            if not hasattr(refusal, "error_dict"):
+                raise
+            form.add_error(None, refusal)
+            return None
         if outcome == SetupOutcome.SAVED:
             return messages.SUCCESS, _(
                 "Private provider setup saved. Validate the connection before approval."
-            )
-        if outcome == SetupOutcome.KEY_REPLACED:
-            return messages.SUCCESS, _(
-                "API key replaced. Validate the connection to resume collection."
             )
         return messages.INFO, _("Nothing changed.")
 
@@ -258,26 +258,6 @@ def approve(request: HttpRequest, page: PlantPage) -> Notice | None:
                 "Plant approved. The first saved forecast is being prepared."
             )
         return messages.INFO, _("This plant is already approved.")
-
-    return _applied(form, run)
-
-
-def clear_cooldown(request: HttpRequest, page: PlantPage) -> Notice | None:
-    form = page.action_form
-    form.fields["provider_recovered"].required = True
-
-    def run() -> Notice:
-        current = form.current_binding(page.region)
-        if not clear_provider_cooldown(
-            _actor(request),
-            current.provider_account_id,
-            form.cleaned_data["credential_revision"],
-            expected_blocked_until=form.cleaned_data["expected_cooldown_until"],
-        ):
-            return messages.INFO, _("There is no provider wait to clear.")
-        return messages.SUCCESS, _(
-            "Provider wait cleared. Queued collection can resume within the remaining quota."
-        )
 
     return _applied(form, run)
 
@@ -346,7 +326,6 @@ ACTIONS: dict[str, Action] = {
     "configure": configure,
     "validate": validate,
     "approve": approve,
-    "clear_cooldown": clear_cooldown,
     "epias_connect": epias_connect,
     "epias_disconnect": epias_disconnect,
 }
@@ -356,20 +335,35 @@ def _render(request: HttpRequest, site: PlatformAdminSite, page: PlantPage) -> T
     binding = page.binding
     plant = page.plant
     blockers = approval_blockers(binding, binding.provider_account) if binding else []
+    # One read feeds what the page shows, the plant name its headings carry and the hash its
+    # approval sends.
+    shown = declarations(page.region.pk)
+    page.action_form.show_declaration(fingerprint_of(shown))
+    try:
+        review = review_context(page.region.pk)
+    except Region.DoesNotExist as missing:
+        raise Http404 from missing
+    review["plant_summary"] = replace(
+        review["plant_summary"],
+        plant_name=next((plant.name for plant, _ in shown), page.region.name),
+    )
     return TemplateResponse(
         request,
         "admin/regions/region/setup.html",
         {
             **site.each_context(request),
-            **review_context(page.region.pk),
+            **review,
             "workspace_section": "plants",
             "title": _("Review and set up %(name)s") % {"name": page.region.name},
             "region": page.region,
             "plants": page.plants,
-            "submissions": PlantSubmission.objects.filter(plant__in=page.plants).select_related(
-                "plant", "submitted_by"
-            ),
+            "declarations": [
+                (plant, record, isinstance(record, PlantSubmission)) for plant, record in shown
+            ],
             "binding": binding,
+            "imports": HistoricalReferenceImport.objects.filter(binding__region=page.region)
+            .select_related("imported_by")
+            .order_by("-created_at", "-pk")[:20],
             "active_provider_delay": bool(
                 binding
                 and binding.provider_account.request_blocked_until

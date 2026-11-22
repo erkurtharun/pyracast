@@ -1,3 +1,4 @@
+import hashlib
 import json
 import time
 from typing import Any, cast
@@ -264,4 +265,30 @@ def test_upload_validation_blocks_all_writes(monkeypatch: pytest.MonkeyPatch, in
         )
         assert response.status_code == 400
         assert not response.json()["can_save"]
+    assert not HistoricalReferenceImport.objects.exists()
+
+
+def test_a_save_with_file_conflicts_is_refused_even_with_a_signed_preview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = system_for_import(monkeypatch)
+    client, _ = verified_admin()
+    url = reverse("admin:workspace_historical_import", args=(system.region.pk,))
+    identity = signing.loads(preview(client, url)["token"], salt=PREVIEW_SALT)
+    conflicting = export_file(power=1e6)
+    identity["digest"] = hashlib.sha256(conflicting.read()).hexdigest()
+    conflicting.seek(0)
+
+    response = client.post(
+        url,
+        {
+            "action": "save",
+            "file": conflicting,
+            "preview_token": signing.dumps(identity, salt=PREVIEW_SALT, compress=True),
+            "settings_confirmed": "on",
+        },
+    )
+
+    assert response.status_code == 400
+    assert b"Resolve the file conflicts before importing." in response.content
     assert not HistoricalReferenceImport.objects.exists()

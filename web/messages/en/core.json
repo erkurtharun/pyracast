@@ -212,7 +212,11 @@
         "useAnotherAddress": "Use another address",
         "emailCodeExpired": "The code is no longer valid. Request a new one.",
         "emailChangeCancelled": "The address change was cancelled.",
-        "emailChanged": "{email} is now your address."
+        "emailChanged": "{email} is now your address.",
+        "shownOf": "{shown} of {total} plants shown",
+        "needAttention": "{attention, plural, one {# plant needs attention.} other {# plants need attention.}}",
+        "attentionReason": "Needs attention: {reason}",
+        "awaitingSetup": "Waiting for an administrator to finish setup"
     },
     "Common": {
         "unexpected": "Something went wrong.",
@@ -223,27 +227,8 @@
         "refreshFailed": "Could not refresh; showing data from {time}.",
         "retry": "Try again",
         "actionFailed": "The action could not be completed",
-        "working": "Working…"
-    },
-    "AppError": {
-        "title": "This page could not be displayed",
-        "description": "Something went wrong while showing this page. Try again; if the problem continues, reload the page.",
-        "retry": "Try again"
-    },
-    "Language": {
-        "label": "Language",
-        "saving": "Saving…",
-        "failed": "Language could not be saved. Please try again."
-    },
-    "Errors": {
-        "request": "Request failed ({status}). Please try again.",
-        "invalidResponse": "The server returned an invalid response. Please try again.",
-        "reference": "Reference: {reference}",
-        "network": "Could not reach the server. Check your connection and try again.",
-        "unconfirmed": "The server did not confirm the change. Reload to check whether it was saved.",
-        "sessionChanged": "The session changed in another tab. The page now shows the current session.",
-        "invalidPage": "The server returned an invalid next page.",
-        "unexpected": "Something went wrong. Please try again."
+        "working": "Working…",
+        "changedField": "{field}: {before} → {after}"
     },
     "ProductionCsv": {
         "size": "Choose a CSV no larger than 2 MiB.",
@@ -490,6 +475,16 @@
             "schedule_disabled": "Data collection is turned off for this plant.",
             "quota_too_low": "The provider allowance leaves no request for forecasts; only the daily history is collected.",
             "provider_unavailable": "The provider is not accepting requests right now; collection continues automatically."
+        },
+        "SiteAttention": {
+            "setup_incomplete": "Setup is not complete.",
+            "review_rejected": "Not approved. Edit the plant and resubmit it.",
+            "suspended": "Suspended. Forecasts are paused.",
+            "connection_unavailable": "The data connection needs Pyracast support."
+        },
+        "PlantEditBlock": {
+            "suspended": "The plant is suspended, so its technical details cannot change. Contact Pyracast support to resume it.",
+            "connection_unavailable": "The plant's data connection needs attention from Pyracast support, so its technical details cannot change yet."
         }
     }
 }

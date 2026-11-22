@@ -14,6 +14,7 @@ from pyracast.background.deadlines import (
 )
 from pyracast.environment import load_environment
 from pyracast.local_time import CLOCK_PATTERN
+from pyracast.log_lines import LINE_FORMAT
 
 load_environment()
 
@@ -30,6 +31,8 @@ PYRACAST_RABBITMQ_URL = os.environ.get("PYRACAST_RABBITMQ_URL", "")
 SECRET_KEY = os.environ.get("PYRACAST_SECRET_KEY", "")
 SECRET_KEY_FALLBACKS = os.environ.get("PYRACAST_SECRET_KEY_FALLBACKS", "").split()
 DEBUG = os.environ.get("PYRACAST_DEBUG") == "1"
+# The synthetic provider answers outside development only where a deployment opts in (the smoke).
+PYRACAST_FIXTURE_PROVIDER = DEBUG or os.environ.get("PYRACAST_FIXTURE_PROVIDER") == "1"
 ALLOWED_HOSTS = os.environ.get("PYRACAST_HOSTS", "localhost,127.0.0.1").split(",")
 CSRF_TRUSTED_ORIGINS = os.environ.get("PYRACAST_CSRF_ORIGINS", "").split()
 ROOT_URLCONF = "pyracast.urls"
@@ -297,6 +300,8 @@ SPECTACULAR_SETTINGS = {
         "SelectionStateEnum": "pyracast.plants.activation.SelectionState",
         "ActivationBlockerEnum": "pyracast.plants.activation.ActivationBlocker",
         "AutomationCauseEnum": "pyracast.plants.automation_state.AutomationCause",
+        "PlantEditBlockEnum": "pyracast.plants.operations.PlantEditBlock",
+        "SiteAttentionEnum": "pyracast.plants.sites.SiteAttention",
         "IncidentKindEnum": "pyracast.incidents.models.IncidentKind",
         "IncidentStatusEnum": "pyracast.incidents.models.IncidentStatus",
         "NotificationDeliveryStatusEnum": (
@@ -406,32 +411,38 @@ MAILERS = {"default": _mailer}
 # A command run through `docker compose exec` writes to its own stream, which the log driver
 # never sees; deployments point this at PID 1's stdout so every security line is shipped.
 _security_log_path = os.environ.get("PYRACAST_SECURITY_LOG_PATH")
+LOGGING_CONFIG = "pyracast.log_lines.configure"
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {"standard": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"}},
+    "formatters": {
+        "standard": {"class": "pyracast.log_lines.LineFormatter", "format": LINE_FORMAT}
+    },
     "handlers": {
+        # stdout belongs to what a command prints, such as the health check's JSON document.
         "console": {
-            "class": "logging.StreamHandler",
+            "class": "pyracast.log_lines.LineHandler",
             "formatter": "standard",
-            "stream": "ext://sys.stdout",
+            "stream": "ext://sys.stderr",
         },
         "discard": {"class": "logging.NullHandler"},
         "security": (
             {
-                "class": "logging.FileHandler",
+                "class": "pyracast.log_lines.LineFileHandler",
                 "formatter": "standard",
                 "filename": _security_log_path,
                 "delay": True,
             }
             if _security_log_path
             else {
-                "class": "logging.StreamHandler",
+                "class": "pyracast.log_lines.LineHandler",
                 "formatter": "standard",
                 "stream": "ext://sys.stdout",
             }
         ),
     },
+    # Records of loggers configured nowhere else, which Python would print without a format.
+    "root": {"handlers": ["console"], "level": "WARNING"},
     "loggers": {
         "pyracast": {
             "handlers": ["console"],

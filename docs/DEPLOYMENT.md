@@ -471,11 +471,28 @@ fixtures do not establish provider access or inbox delivery.
   cache. Logging is best effort: the API logs in blocking mode, but the gcplogs
   client can still drop entries on overflow or outage; the other containers log
   nonblocking. `pyracast.security` lines, including those of `exec` commands, go to
-  the container stream through `PYRACAST_SECURITY_LOG_PATH`. Log-based alerts in
+  the container stream through `PYRACAST_SECURITY_LOG_PATH`. The other application records and
+  warnings, and Gunicorn's error records, go to stderr, Gunicorn's access lines to stdout, so a
+  command's stdout carries only what it prints, such as the health check's JSON document that
+  the watchdog reads. Every record of the application
+  and of Gunicorn starts one line, `DATE TIME LEVEL LOGGER MESSAGE`, and indents every further
+  line (a line break in a message or traceback, or about 4 KiB of UTF-8), so text a request
+  carries never starts a line. Each line, at most 4096 bytes with its line break, is written by a
+  call of its own, so the lines of processes writing at once alternate but never mix. A sink
+  routes the lines whose logger is `pyracast.security`, and only those of the containers that
+  write them (`api`, `worker`, `notifications`, `dispatcher`, `migrate`), to the log bucket
+  `pyracast-security` in the Terraform region, which keeps them 365 days; `_Default` keeps its
+  own copy for 30 days, so recent lines are searched as usual.
+  For older ones, refine the Logs Explorer scope to that bucket or run `gcloud logging read
+  'FILTER' --bucket=pyracast-security --location=REGION --view=_AllLogs --freshness=365d`.
+  Storage beyond 30 days costs 0.01 USD per GiB a month; the volume is small. A line carries
+  the event, ids, counts, the client IP and a keyed `subject` instead of an email address, and
+  never a name; an erased account's lines keep its id, the client IP and the keyed `subject`
+  until they expire, the IP for the whole period because a security record needs it. Log-based alerts in
   `monitoring.tf` count them; the release does not apply Terraform, so after a
   change there run the `plan`/`apply` commands above and confirm the policies
   under Monitoring → Alerting. Durable job/audit records remain in PostgreSQL. API logs omit query strings and
-  referrers. A 500 `server_error` answer carries a `request_id`; search the logs for its
+  referrers; an access line is `... INFO gunicorn.access METHOD PATH STATUS SECONDS`. A 500 `server_error` answer carries a `request_id`; search the logs for its
   `api_server_error` traceback. A 503 `request_timeout` reference identifies an
   `api_request_timeout` traceback. Database error detail can appear in either log.
   Inspect `docker compose ... ps`, `logs --tail 100` and
@@ -511,6 +528,17 @@ fixtures do not establish provider access or inbox delivery.
   below says what each failure leaves and how to recover. A rerun of the verified
   release after remediation also clears the marker on success. Never use
   `migrate --fake` or automatically reverse migrations.
+- **Account erasure** cannot be undone. In the `api` container, `pyracast erase_account
+  --account ID` is a dry run that lists the rows erasure would change; take a backup
+  (`sudo systemctl start pyracast-backup.service`, then check the upload), then add
+  `--execute`. It anonymizes the account in place and refuses while the account
+  administers a workspace or is the last active platform administrator. The dry run
+  briefly takes the same locks as the erasure; a run that meets a held lock changes
+  nothing and says to run it again. An address another account holds verified is left out
+  (both runs print how many): its mail, invitations, sessions and cache entries age out
+  with retention or expiry, while its reminder entries that other members or an
+  administrator still hold and its delivery recipient rows stay. Backups keep the erased
+  data until they expire.
 - **Rollback:** prefer a reviewed Git revert on `main`, successful CI and Release.
   This deploys the former behavior with the current database. Only do this after
   confirming schema compatibility. An incompatible schema change needs a forward
@@ -602,6 +630,61 @@ fixtures do not establish provider access or inbox delivery.
   removes the rest (the next one does while a rehearsal runs); never run volume
   pruning in production. Monitor registry/backup/log retention and adjust
   deliberately to control cost.
+
+### Alert events
+
+The host scripts write these events to the `pyracast-operations` log; `deploy/operations_events.py`
+holds the list and the alerted ones have a policy in `monitoring.tf`. Lines carry ids, states and
+counts only. `sudo python3 /opt/pyracast/current/deploy/operations_events.py --test-alert EVENT`
+writes one sample line with `test: true` and changes nothing else; it exits 1 when the line could
+not be written. Never delete `release-blocked` by hand.
+
+Every alerted event has its own log-match policy, with its own hourly notification limit and a text
+pointing to its row below. Once Google charges for alerting (no sooner than 2027-09-01), each
+log-based policy costs 0.35 USD a month. Repeated restarts alert on a count instead: see
+`pyracast_runtime_restarted`. An alert on a count of lines (repeated restarts, each security
+alert) closes by itself once its window holds no line, so a later burst alerts again. Its window
+is a minute longer than it says (an hour, ten minutes), because the condition must hold for the
+minute Monitoring retests it; so the lines of the full hour or ten minutes count. The
+policies on counters (repeated restarts, the heartbeat, each security alert) then cost 0.35 USD a
+month each for their metric reference plus 0.50 USD per million points their condition returns,
+far below one cent a day for their one series; a log-match condition returns no points. A test alert of an event with its own policy opens an incident on
+that policy and uses its hourly notification limit; a test alert of any other event only writes
+the log line. Test lines never count as a watchdog heartbeat or a restart.
+
+| Event | Means | Check first | Recover |
+| --- | --- | --- | --- |
+| `pyracast_watchdog_heartbeat` | One watchdog run ended; `state` says how. Its absence for 15 minutes alerts | `systemctl status pyracast-watchdog.timer` | Start the timer; a down VM needs a start |
+| `pyracast_watchdog_step_failed` | One watchdog check (`step`) timed out or raised; the line names only the step, the outcome and the error type | The other lines of the same run | Run that step by hand as listed below the table to see its error; the other checks still ran |
+| `pyracast_host_capacity` | Disk or memory is low | `df -h`, `free -m` | Free or grow the disk; find the process holding memory |
+| `pyracast_runtime_unhealthy` | A container stays unhealthy after the restart, PostgreSQL or RabbitMQ is unhealthy (`services`), or `pyracast.service` is failed or inactive while no release or stop holds the release lock (`unit_state`) | `docker compose ... ps`, `logs --tail 100 SERVICE`; `systemctl status pyracast.service` | Fix the cause; `systemctl restart pyracast` once it is gone |
+| `pyracast_runtime_restarted` | The watchdog restarted `services` and they recovered. One line notifies nobody; three runs that restart containers within an hour raise the repeated-restarts alert (counted in total, not per service). A test alert writes a test line, which that count leaves out, so it can neither raise nor hide the alert | The container's last exit: `docker inspect --format '{{.State.ExitCode}} {{.State.OOMKilled}} {{.State.FinishedAt}}' CONTAINER`; memory: `free -m`, `docker stats --no-stream`; the release that preceded the first restart: the release log, `readlink /opt/pyracast/current` | Fix what the exit names; if the loop began with a release, release a fix or revert |
+| `pyracast_delivery_unhealthy` | The delivery health check failed: `alarms` with counts, `dispatch_phases`, `broker_unreachable`, `missing_queues`; `outcome: unreadable` when it printed no report | The Operations page, `pyracast check_delivery_health` in `api` | Restart the worker or dispatcher it names; correct the data the check lists |
+| `pyracast_release_blocked` | A release has kept the site in maintenance for `hours` since the attempt that began the block; the marker records its revision and UTC start, which later attempts keep | "A release that fails during maintenance" below, the release log | Rerun the verified release or follow the printed recovery |
+| `pyracast_certificate_expiring` | The origin certificate renewal is failing | Gateway logs, port 80 reachability | Fix the ACME challenge; the gateway renews by itself |
+| `pyracast_origin_pull_unenforced` | Port 443 accepts a handshake without the edge certificate | Gateway logs, its edge TLS option | Redeploy the release; check `origin_pull_ca` |
+| `pyracast_backup_succeeded` | A dump was uploaded | None | None |
+| `pyracast_backup_skipped` | A release held the lock or stayed blocked | Whether a release runs | None; the next hour backs up |
+| `pyracast_backup_failed` | A dump failed, was stopped, or the last verified one is older than 90 minutes | `journalctl -u pyracast-backup.service`, the bucket | Fix the cause; `systemctl start pyracast-backup.service`; release nothing before one succeeds |
+| `pyracast_backup_setting_invalid` | `daily_backups` in `/etc/pyracast/host.json` is neither true nor false. An hourly run ends failed: one that took its backup kept it, a skipped one took none; a pre-release backup only warns | The file and `backup_daily_tier` in Terraform | Rewrite the file from Terraform's value with `sudo google_metadata_script_runner startup` |
+| `pyracast_backup_daily_copied` | The day's first backup was copied under `daily/` | None | None |
+| `pyracast_backup_daily_copy_failed` | The hourly dump succeeded, its daily copy did not (`error`) | The bucket and its IAM | The next hour retries |
+| `pyracast_rehearsal_passed` | A restore rehearsal passed | None | None |
+| `pyracast_rehearsal_failed` | A rehearsal failed in `step` | `journalctl -u pyracast-rehearsal.service` | Fix the step; `systemctl start pyracast-rehearsal.service` |
+| `pyracast_rehearsal_unhealthy` | The last rehearsal failed or none passed within eight days | `/var/lib/pyracast/last-rehearsal.json` | As for `pyracast_rehearsal_failed` |
+| `pyracast_secrets_failed` | A release's environment files were not prepared (`category`, `secret`) | The release log, `journalctl -u pyracast.service` | Fix the secret version or permission it names; release again |
+
+A failed watchdog step by hand, in `/opt/pyracast/current` with
+`compose=(docker compose --env-file deploy/release.env -f deploy/compose.yaml)`:
+
+- `capacity`: `df -h / /var/lib/pyracast` and `grep Mem /proc/meminfo`.
+- `release_blocked`, `backup_age`, `rehearsal`: read `/var/lib/pyracast/release-blocked`,
+  `last-backup.json` or `last-rehearsal.json`.
+- `unit`: `systemctl is-active pyracast.service`.
+- `runtime`: `"${compose[@]}" ps --all`, then `docker inspect` of the containers it lists.
+- `delivery`: `"${compose[@]}" exec -T api pyracast check_delivery_health`.
+- `certificate`: `openssl s_client -connect 127.0.0.1:8443 -servername DOMAIN </dev/null | openssl x509 -noout -dates`.
+- `origin_pull`: `python3 deploy/probe_origin_pull.py DOMAIN --attempts 1`.
 
 ## Database reset and restore
 

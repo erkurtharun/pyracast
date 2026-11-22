@@ -148,16 +148,16 @@ not an accuracy reference.
 ## Operations
 
 In `/admin/`, **Overview** lists pending reviews, **Plants** searches plant/company
-records, **Operations** shows collection and email outcomes, and **Settings**
-controls the shared recipient limit. To approve a plant, review its declaration,
+records, **Provider accounts** shows each account's plants and request budget,
+**Operations** shows collection and email outcomes, and **Settings** controls the
+shared recipient limit. To approve a plant, review its declaration,
 select an authorized Solcast account, save verified reference settings, then
 **Validate connection** and **Approve plant**. Validation consumes account quota;
 saving setup does not. Approval queues collection for the worker.
 
 Solcast account authorization and Toolkit settings require operator evidence.
 The application encrypts write-only API keys and never creates provider accounts.
-Leaving an existing key blank preserves it; replacing a shared key requires explicit
-confirmation and invalidates validation without resetting quota.
+A key is replaced on its provider account page; its plants then revalidate within quota.
 
 Customers configure forecast times in **Data collection**, EP?A? IDs in
 **Automatic production**, calibration in **Calibration**, and saved-forecast emails
@@ -213,8 +213,8 @@ operator workflows; inspect their `--help` for required declarations and limits:
 | `import_production` | Atomically import interval energy CSV for a pinned configuration |
 | `calibrate_plant` | Queue a durable fit; `--run` executes it locally without RabbitMQ |
 | `activate_calibration` | Activate an eligible candidate or restore `--baseline` |
-| `import_historical_reference` | Archive an authorized export and verified settings manifest |
-| `normalize_reference_capacity` | Create an explicitly authorized capacity-only derived acquisition |
+| `import_historical_reference` | Archive an authorized JSON or CSV export through the console upload checks |
+| `normalize_reference_capacity` | Create an explicitly authorized capacity-only derived acquisition (`--dry-run` first) |
 
 Import paths must stay inside the repository. Use an ignored local directory.
 Production CSV values are interval energy, never instantaneous MW or cumulative

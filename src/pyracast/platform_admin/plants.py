@@ -1,18 +1,20 @@
 import hashlib
 import json
+import re
+from decimal import Decimal
 from functools import cache
 from typing import TYPE_CHECKING, Any, cast
-from zoneinfo import available_timezones
 
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.models import User
 from django.db import models, transaction
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 from django.views.decorators.http import require_http_methods
+from rest_framework import serializers
 
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.accounts.models import Tenant
@@ -22,14 +24,14 @@ from pyracast.plants.models import (
     MeasurementBasis,
     MountingType,
     Plant,
-    PlantSubmission,
 )
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import declaration, declared_parameters
 from pyracast.plants.site_api import SiteInput
 from pyracast.plants.sites import submit_site
 from pyracast.platform_admin.forms import form_data, form_page, submitted
 from pyracast.regions.models import LocationChangeStatus, Region, RegionLocationChangeRequest
-from pyracast.regions.operations import canonical_coordinate, correct_location
+from pyracast.regions.operations import available_zones, canonical_coordinate, correct_location
 
 if TYPE_CHECKING:
     from django_stubs_ext import StrOrPromise
@@ -37,12 +39,11 @@ if TYPE_CHECKING:
     from pyracast.platform_admin.site import PlatformAdminSite
 
 SITE_FIELDS = frozenset(SiteInput().fields)
-PARAMETERS = ("name", *CONFIGURATION_PARAMETERS)
 
 
 @cache
 def timezone_options() -> tuple[str, ...]:
-    return tuple(sorted(available_timezones()))
+    return tuple(sorted(available_zones()))
 
 
 def _number(
@@ -56,6 +57,19 @@ def _number(
     )
 
 
+# The workspace's coordinate fields read a value the same way (web site-location.ts
+# coordinateValue); the bounds stay with RegionInput and its messages.
+COORDINATE_NUMBER = re.compile(r"-?(?:0|[1-9]\d*)(?:[.,]\d+)?", re.ASCII)
+
+
+def coordinate_number(text: str) -> float:
+    if not COORDINATE_NUMBER.fullmatch(text):
+        raise forms.ValidationError(
+            serializers.FloatField.default_error_messages["invalid"], code="invalid"
+        )
+    return float(text.replace(",", "."))
+
+
 def _choices(vocabulary: type[models.TextChoices]) -> list[tuple[str, StrOrPromise]]:
     return [(value, gettext_lazy(label)) for value, label in vocabulary.choices]
 
@@ -64,7 +78,12 @@ def _text(value: object) -> str:
     if value is None:
         return ""
     text = str(value)
-    return text.removesuffix(".0") if isinstance(value, float) else text
+    if not isinstance(value, float):
+        return text
+    # The form's number rule refuses an exponent, which str() writes below 1e-4 and from 1e16.
+    if "e" in text:
+        text = format(Decimal(text), "f")
+    return text.removesuffix(".0")
 
 
 class SiteForm(forms.Form):
@@ -73,7 +92,6 @@ class SiteForm(forms.Form):
         label=gettext_lazy("Latitude (°)"),
         widget=forms.TextInput(
             attrs={
-                "inputmode": "decimal",
                 "autocomplete": "off",
                 "placeholder": "41.0082",
                 "data-coordinate-pair": "longitude",
@@ -82,9 +100,7 @@ class SiteForm(forms.Form):
     )
     longitude = forms.CharField(
         label=gettext_lazy("Longitude (°)"),
-        widget=forms.TextInput(
-            attrs={"inputmode": "decimal", "autocomplete": "off", "placeholder": "28.9784"}
-        ),
+        widget=forms.TextInput(attrs={"autocomplete": "off", "placeholder": "28.9784"}),
     )
     timezone = forms.CharField(
         label=gettext_lazy("Timezone"),
@@ -112,7 +128,13 @@ class SiteForm(forms.Form):
         required=False,
         help_text=gettext_lazy("Clockwise from north; south is 180."),
     )
-    site: dict[str, Any]
+    site: SiteInput
+
+    def clean_latitude(self) -> float:
+        return coordinate_number(self.cleaned_data["latitude"])
+
+    def clean_longitude(self) -> float:
+        return coordinate_number(self.cleaned_data["longitude"])
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
@@ -124,7 +146,7 @@ class SiteForm(forms.Form):
             }
         )
         if site.is_valid():
-            self.site = dict(site.validated_data)
+            self.site = site
         else:
             for name, errors in site.errors.items():
                 field = name if name in self.fields else None
@@ -143,21 +165,20 @@ class PlantDetailsForm(SiteForm):
 
 
 def plant_details(region: Region, plant: Plant) -> dict[str, Any]:
-    parameters = plant.current_configuration or PlantSubmission.objects.filter(plant=plant).first()
+    record = declaration(plant)
     return {
         "name": plant.name,
         "latitude": region.latitude,
         "longitude": region.longitude,
         "timezone": region.timezone,
-        **{
-            name: getattr(parameters, name) if parameters else None
-            for name in CONFIGURATION_PARAMETERS
-        },
+        **{name: getattr(record, name) if record else None for name in CONFIGURATION_PARAMETERS},
     }
 
 
 def details_version(region: Region, details: dict[str, Any]) -> str:
-    state = json.dumps([region.revision, details], sort_keys=True, default=str)
+    """The review status is part of the version: an approval keeps the revision and the
+    values but turns an edit of the submission into a live configuration."""
+    state = json.dumps([region.revision, region.status, details], sort_keys=True, default=str)
     return hashlib.sha256(state.encode()).hexdigest()
 
 
@@ -167,10 +188,16 @@ def save_plant_details(actor: User, region_id: int, form: PlantDetailsForm) -> t
     with transaction.atomic():
         tenant_id = Region.objects.active().values_list("tenant_id", flat=True).get(pk=region_id)
         Tenant.objects.select_for_update().get(pk=tenant_id)
-        region = Region.objects.get(pk=region_id)
-        plant = Plant.objects.select_related("current_configuration").get(region=region)
-        current = plant_details(region, plant)
-        if details_version(region, current) != form.cleaned_data["expected_version"]:
+        region = Region.objects.active().select_for_update().get(pk=region_id)
+        plant = (
+            Plant.objects.select_for_update(of=("self",))
+            .select_related("current_configuration", "submission")
+            .get(region=region)
+        )
+        if (
+            details_version(region, plant_details(region, plant))
+            != (form.cleaned_data["expected_version"])
+        ):
             raise ConflictError(
                 ErrorCode.CONFLICT,
                 _(
@@ -178,25 +205,31 @@ def save_plant_details(actor: User, region_id: int, form: PlantDetailsForm) -> t
                     "Reload it to see the current details."
                 ),
             )
-        parameters = {name: site[name] for name in PARAMETERS}
-        location = (
-            canonical_coordinate(site["latitude"]),
-            canonical_coordinate(site["longitude"]),
-            site["timezone"],
-        )
-        parameters_changed = parameters != {name: current[name] for name in PARAMETERS}
-        location_changed = location != (region.latitude, region.longitude, region.timezone)
+        parameters = site.parameters()
+        location = site.location()
+        parameters_changed = parameters != declared_parameters(plant)
+        location_changed = (
+            canonical_coordinate(location["latitude"]),
+            canonical_coordinate(location["longitude"]),
+            location["timezone"],
+        ) != (region.latitude, region.longitude, region.timezone)
         if parameters_changed:
-            revise_plant(actor, tenant_id, region.pk, plant.pk, platform=True, **parameters)
+            revise_plant(
+                actor,
+                tenant_id,
+                region.pk,
+                plant.pk,
+                parameters,
+                expected_revision=plant.parameters_revision,
+                platform=True,
+            )
         if location_changed:
             correct_location(
                 actor,
                 region.pk,
                 expected_revision=region.revision,
-                latitude=site["latitude"],
-                longitude=site["longitude"],
-                timezone=site["timezone"],
                 reason=form.cleaned_data["reason"],
+                **location,
             )
     return parameters_changed, location_changed
 
@@ -214,7 +247,13 @@ def new_plant(request: HttpRequest, tenant_id: int, *, site: PlatformAdminSite) 
     )
 
     def create() -> HttpResponse:
-        region = submit_site(cast(User, request.user), tenant.pk, platform=True, **form.site)
+        region = submit_site(
+            cast(User, request.user),
+            tenant.pk,
+            form.site.parameters(),
+            platform=True,
+            **form.site.location(),
+        )
         messages.success(
             request,
             _(
@@ -239,7 +278,9 @@ def plant_details_page(
     request: HttpRequest, region_id: int, *, site: PlatformAdminSite
 ) -> HttpResponse:
     region = get_object_or_404(Region.objects.active().select_related("tenant"), pk=region_id)
-    plant = get_object_or_404(Plant.objects.select_related("current_configuration"), region=region)
+    plant = get_object_or_404(
+        Plant.objects.select_related("current_configuration", "submission"), region=region
+    )
     details = plant_details(region, plant)
     form = PlantDetailsForm(
         form_data(request),
@@ -250,9 +291,12 @@ def plant_details_page(
     )
 
     def save() -> HttpResponse:
-        parameters_changed, location_changed = save_plant_details(
-            cast(User, request.user), region.pk, form
-        )
+        try:
+            parameters_changed, location_changed = save_plant_details(
+                cast(User, request.user), region.pk, form
+            )
+        except (Tenant.DoesNotExist, Region.DoesNotExist, Plant.DoesNotExist) as missing:
+            raise Http404 from missing
         if location_changed:
             messages.success(
                 request,

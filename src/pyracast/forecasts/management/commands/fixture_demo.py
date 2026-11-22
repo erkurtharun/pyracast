@@ -18,6 +18,7 @@ from pyracast.forecasts.validation import validate_binding
 from pyracast.plants.approval import approve_region
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.publication import PUBLICATION
 from pyracast.providers import FixtureProvider
 from pyracast.regions.models import Region
@@ -41,7 +42,10 @@ def _region(actor: User, tenant: Tenant) -> Region:
 def _plant(actor: User, region: Region) -> Plant:
     existing = Plant.objects.filter(region=region).first()
     return existing or create_plant(
-        actor, region.tenant_id, region.pk, name="Synthetic plant", dc_capacity_mw=1
+        actor,
+        region.tenant_id,
+        region.pk,
+        PlantParameters(name="Synthetic plant", dc_capacity_mw=1),
     )
 
 

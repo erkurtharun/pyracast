@@ -1,7 +1,6 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from hashlib import sha256
 from io import StringIO
 from pathlib import Path
@@ -13,27 +12,33 @@ import pytest
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import IntegrityError, close_old_connections, connection, transaction
+from django.db import (
+    IntegrityError,
+    OperationalError,
+    close_old_connections,
+    connection,
+    transaction,
+)
+from psycopg.errors import LockNotAvailable
 
 from pyracast.accounts.models import Tenant
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.coverage import history_day_complete
-from pyracast.forecasts.historical_import import (
-    _validate_binding,
-    import_historical_reference,
-    parse_source_settings,
-)
+from pyracast.forecasts.historical_upload import import_historical_upload, parse_historical_upload
 from pyracast.forecasts.history import select_actual_snapshot
+from pyracast.forecasts.management.commands import import_historical_reference as command
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, HistoricalReferenceImport
+from pyracast.forecasts.trust import PROBLEM_MESSAGES, reference_problems
 from pyracast.irradiance import local_day_bounds
-from pyracast.irradiance.pairs import load_power
+from pyracast.irradiance.solcast_export import load_json_file
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import AuditEvent, Region
 from tests.support.domain import NOW
 from tests.support.historical_reference_import import (
+    REFERENCE,
     archive,
     power_file,
-    source_settings,
     system_for_import,
 )
 from tests.support.invariants import stored_again
@@ -55,7 +60,9 @@ def test_archive_preserves_instants_missingness_and_actual_import_provenance(
     assert record.source_name == path.name
     assert record.content_sha256 == sha256(path.read_bytes()).hexdigest()
     assert record.interval_count == 3
-    assert record.source_settings == asdict(source_settings())
+    assert record.source_settings["product"] == "historical_rooftop_pv"
+    assert record.source_settings["source_reference"] == REFERENCE
+    assert record.source_settings["settings_matched"] is True
     snapshots = list(ForecastSnapshot.objects.filter(job__reference_import=record).order_by("pk"))
     assert len(snapshots) == 2
     first, second = snapshots
@@ -80,7 +87,6 @@ def test_archive_preserves_instants_missingness_and_actual_import_provenance(
         assert snapshot.raw_payload["historical_import"] == {
             "id": record.pk,
             "sha256": record.content_sha256,
-            "source_settings": record.source_settings,
         }
         assert not history_day_complete(snapshot, snapshot.job.target_date, system.binding.timezone)
     assert first.raw_payload["estimated_actuals"][0]["period_end"] == "2026-11-07T22:30:00+02:00"
@@ -108,8 +114,7 @@ def test_idempotence_and_corrections_keep_immutable_versions(
     original_snapshot = ForecastSnapshot.objects.filter(job__reference_import=original).first()
     assert original_snapshot is not None
     assert archive(system, path) == original
-    with pytest.raises(ValidationError, match="different source declaration"):
-        archive(system, path, source_reference="Changed declaration")
+    assert archive(system, path, reference="Changed declaration") == original
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload["estimated_actuals"][0]["pv_power_rooftop"] = 0.2
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -181,52 +186,6 @@ def test_current_native_vintages_keep_latest_available_complete_acquisition_and_
     assert select_actual_snapshot(system.binding, day, NOW) == first
 
 
-@pytest.mark.parametrize("value", [None, {}, {"unit": "kW"}])
-def test_source_declaration_requires_complete_exact_schema(value: object) -> None:
-    with pytest.raises(ValueError, match="complete historical source declaration"):
-        parse_source_settings(value)
-
-
-@pytest.mark.parametrize(
-    ("key", "value"),
-    [
-        ("product", "forecasts"),
-        ("unit", "MW"),
-        ("period", "PT60M"),
-        ("timestamp_convention", "period_start"),
-        ("mounting_type", "tracking"),
-        ("source_reference", ""),
-        ("source_reference", "  "),
-        ("source_reference", 1),
-        ("source_reference", "x" * 1001),
-        ("capacity_kw", True),
-        ("capacity_kw", "1000"),
-        ("capacity_kw", 10**400),
-        ("capacity_kw", float("inf")),
-        ("latitude", -91),
-        ("longitude", 181),
-        ("capacity_kw", 0),
-        ("dc_capacity_kw", 0),
-        ("tilt_degrees", 10),
-        ("azimuth_degrees", -181),
-        ("losses_percent", 100),
-    ],
-)
-def test_source_declaration_rejects_wrong_units_geometry_and_nonfinite_values(
-    key: str,
-    value: object,
-) -> None:
-    with pytest.raises(ValueError, match=r"Unsupported|reference|required|finite|Invalid"):
-        parse_source_settings(asdict(source_settings()) | {key: value})
-
-
-def test_source_declaration_rejects_unknown_fields_and_trims_reference() -> None:
-    with pytest.raises(ValueError, match="complete historical source declaration"):
-        parse_source_settings(asdict(source_settings()) | {"api_key": "not-a-real-secret"})
-    parsed = parse_source_settings(asdict(source_settings(source_reference="  approval  ")))
-    assert parsed.source_reference == "approval"
-
-
 @pytest.mark.parametrize(
     ("key", "value"),
     [
@@ -245,26 +204,31 @@ def test_import_never_rescales_mismatched_source(
     value: object,
 ) -> None:
     system = system_for_import(monkeypatch)
-    with pytest.raises(ValidationError, match="do not match"):
-        archive(system, power_file(tmp_path), **{key: value})
+    metadata: dict[str, Any] = {key: value}
+    with pytest.raises(ValidationError, match="conflicts with the selected reference"):
+        archive(system, power_file(tmp_path), **metadata)
     assert not HistoricalReferenceImport.objects.exists()
     assert not ForecastSnapshot.objects.exists()
 
 
 @pytest.mark.parametrize(
-    ("model", "changes"),
+    ("model", "changes", "problem"),
     [
-        ("account", {"enabled": False}),
-        ("account", {"authorized_at": None}),
-        ("account", {"authorized_by_id": None}),
-        ("account", {"authorization_reference": ""}),
-        ("account", {"provider": "fixture"}),
-        ("account", {"credential_revision": 2}),
-        ("binding", {"validated_at": None, "validated_credential_revision": None}),
-        ("binding", {"capacity_semantics_verified": False}),
-        ("binding", {"settings_verification_reference": ""}),
-        ("region", {"status": "suspended"}),
-        ("region", {"revision": 2}),
+        ("account", {"enabled": False}, "binding_not_current"),
+        ("account", {"authorized_at": None}, "binding_not_current"),
+        ("account", {"authorized_by_id": None}, "account_unattested"),
+        ("account", {"authorization_reference": ""}, "account_unattested"),
+        ("account", {"provider": "fixture"}, "account_not_solcast"),
+        ("account", {"credential_revision": 2}, "binding_not_current"),
+        (
+            "binding",
+            {"validated_at": None, "validated_credential_revision": None},
+            "binding_not_validated",
+        ),
+        ("binding", {"capacity_semantics_verified": False}, "capacity_unverified"),
+        ("binding", {"settings_verification_reference": ""}, "settings_unverified"),
+        ("region", {"status": "suspended"}, "binding_not_current"),
+        ("region", {"revision": 2}, "binding_not_current"),
     ],
 )
 def test_import_requires_current_authorized_validated_binding(
@@ -272,12 +236,14 @@ def test_import_requires_current_authorized_validated_binding(
     monkeypatch: pytest.MonkeyPatch,
     model: str,
     changes: dict[str, Any],
+    problem: str,
 ) -> None:
     system = system_for_import(monkeypatch)
     instance = getattr(system, model)
     type(instance).objects.filter(pk=instance.pk).update(**changes)
-    with pytest.raises(ValidationError, match="current authorized"):
+    with pytest.raises(ValidationError) as refusal:
         archive(system, power_file(tmp_path))
+    assert str(PROBLEM_MESSAGES[problem]) in refusal.value.messages
     assert not HistoricalReferenceImport.objects.exists()
 
 
@@ -285,9 +251,11 @@ def test_dc_power_basis_cannot_authorize_historical_import(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system = system_for_import(monkeypatch)
-    system.binding.power_basis = "dc"
-    with pytest.raises(ValidationError, match="current authorized"):
-        _validate_binding(system.binding, source_settings())
+    binding = SiteBinding.objects.select_related("provider_account", "region").get(
+        pk=system.binding.pk
+    )
+    binding.power_basis = "dc"
+    assert reference_problems(binding) == ("power_basis_not_ac",)
     assert not HistoricalReferenceImport.objects.exists()
 
 
@@ -297,26 +265,30 @@ def test_admin_and_tenant_region_binding_boundaries(
 ) -> None:
     system = system_for_import(monkeypatch)
     path = power_file(tmp_path)
-    args = (system.tenant.pk, system.region.pk, system.binding.pk, path, source_settings())
+    upload = parse_historical_upload(path.read_bytes(), path.name)
+
+    def run(actor: Any, tenant_id: int, binding_id: int = system.binding.pk) -> object:
+        return import_historical_upload(
+            actor,
+            tenant_id,
+            system.region.pk,
+            binding_id,
+            upload,
+            path.name,
+            settings_confirmed=True,
+        )
+
     with pytest.raises(PermissionDenied):
-        import_historical_reference(system.member, *args, trusted_root=tmp_path)
+        run(system.member, system.tenant.pk)
     other = Tenant.objects.create(name="Other")
     with pytest.raises(Region.DoesNotExist):
-        import_historical_reference(system.admin, other.pk, *args[1:], trusted_root=tmp_path)
+        run(system.admin, other.pk)
     Region.objects.filter(pk=system.region.pk).update(deleted_at=NOW)
     with pytest.raises(Region.DoesNotExist):
-        import_historical_reference(system.admin, *args, trusted_root=tmp_path)
+        run(system.admin, system.tenant.pk)
     Region.objects.filter(pk=system.region.pk).update(deleted_at=None)
     with pytest.raises(SiteBinding.DoesNotExist):
-        import_historical_reference(
-            system.admin,
-            system.tenant.pk,
-            system.region.pk,
-            system.binding.pk + 100,
-            path,
-            source_settings(),
-            trusted_root=tmp_path,
-        )
+        run(system.admin, system.tenant.pk, system.binding.pk + 100)
     assert not HistoricalReferenceImport.objects.exists()
 
 
@@ -335,7 +307,7 @@ def test_empty_and_future_intervals_are_not_archived(
     rows: object,
 ) -> None:
     system = system_for_import(monkeypatch)
-    with pytest.raises(ValidationError, match=r"completed|future"):
+    with pytest.raises(ValidationError, match=r"between 1|future"):
         archive(system, power_file(tmp_path, rows))
     assert not HistoricalReferenceImport.objects.exists()
 
@@ -410,14 +382,11 @@ def test_archive_failure_rolls_back_all_days_before_preparation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system = system_for_import(monkeypatch)
-    creator = ForecastSnapshot.objects.create
 
-    def fail_second(**kwargs: Any) -> ForecastSnapshot:
-        if ForecastSnapshot.objects.exists():
-            raise RuntimeError("Injected database publication failure")
-        return creator(**kwargs)
+    def fail(*args: Any, **kwargs: Any) -> list[ForecastSnapshot]:
+        raise RuntimeError("Injected database publication failure")
 
-    monkeypatch.setattr(ForecastSnapshot.objects, "create", fail_second)
+    monkeypatch.setattr(ForecastSnapshot.objects, "bulk_create", fail)
     with pytest.raises(RuntimeError, match="publication failure"):
         archive(system, power_file(tmp_path))
     assert not HistoricalReferenceImport.objects.exists()
@@ -433,7 +402,10 @@ def test_calibration_is_prepared_once_after_whole_archive_commits(
     system = system_for_import(monkeypatch)
     system.binding.refresh_from_db()
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=1),
     )
     path = power_file(tmp_path)
     observed: list[int] = []
@@ -514,53 +486,81 @@ def test_concurrent_imports_publish_one_dataset(
     assert ForecastSnapshot.objects.count() == 2
 
 
-def test_command_reads_trusted_manifest_and_preserves_idempotence(
+def test_command_imports_through_the_upload_operation_and_preserves_idempotence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system = system_for_import(monkeypatch)
     path = power_file(tmp_path)
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps(asdict(source_settings())), encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     args = {
         "username": system.admin.username,
         "tenant_id": system.tenant.pk,
         "region_id": system.region.pk,
-        "binding_id": system.binding.pk,
-        "power_file": path,
-        "manifest": manifest,
+        "file": path,
+        "reference": REFERENCE,
+        "confirm": True,
     }
     output = StringIO()
     call_command("import_historical_reference", **args, stdout=output)
-    assert "3 native intervals" in output.getvalue()
-    call_command("import_historical_reference", **args, stdout=StringIO())
+    assert "3 intervals" in output.getvalue()
+    assert output.getvalue().strip().endswith("; imported.")
+    repeated = StringIO()
+    call_command("import_historical_reference", **args, stdout=repeated)
+    assert "already imported" in repeated.getvalue()
     assert HistoricalReferenceImport.objects.count() == 1
     with pytest.raises(CommandError):
         call_command("import_historical_reference", **(args | {"username": "unknown"}))
     with pytest.raises(CommandError):
         call_command("import_historical_reference", **(args | {"username": system.member.username}))
-    with pytest.raises(CommandError, match="trusted directory"):
+    with pytest.raises(CommandError, match="working directory"):
         call_command(
-            "import_historical_reference", **(args | {"manifest": tmp_path.parent / "outside.json"})
+            "import_historical_reference", **(args | {"file": tmp_path.parent / "outside.json"})
         )
-    manifest.write_text(json.dumps(asdict(source_settings()) | {"unit": "MW"}), encoding="utf-8")
-    with pytest.raises(CommandError, match="Unsupported historical"):
+    Region.objects.filter(pk=system.region.pk).update(status="pending", approved_binding=None)
+    with pytest.raises(CommandError, match="approved reference connection"):
         call_command("import_historical_reference", **args)
 
 
-def test_power_file_root_guard_and_whole_interval_parser(
+def test_a_busy_plant_asks_the_command_to_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system = system_for_import(monkeypatch)
+    path = power_file(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    busy = OperationalError("lock timeout")
+    busy.__cause__ = LockNotAvailable()
+    failures = iter([busy, OperationalError("connection lost")])
+
+    def locked(*args: object, **kwargs: object) -> None:
+        raise next(failures)
+
+    monkeypatch.setattr(command, "import_historical_upload", locked)
+    options = {
+        "username": system.admin.username,
+        "tenant_id": system.tenant.pk,
+        "region_id": system.region.pk,
+        "file": path,
+        "reference": REFERENCE,
+        "confirm": True,
+    }
+    with pytest.raises(CommandError, match="busy"):
+        call_command("import_historical_reference", **options)
+    with pytest.raises(OperationalError):
+        call_command("import_historical_reference", **options)
+
+
+def test_the_export_loader_reads_only_inside_its_trusted_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     path = power_file(tmp_path)
     monkeypatch.chdir(tmp_path)
-    loaded = load_power(path)
-    assert loaded.sha256 == sha256(path.read_bytes()).hexdigest()
-    assert len(loaded.intervals) == len(loaded.raw_rows) == 3
-    assert loaded.intervals[0].start == datetime(2026, 11, 7, 20, tzinfo=UTC)
-    assert loaded.intervals[0].power_kw == 0
+    data, digest = load_json_file(path)
+    assert digest == sha256(path.read_bytes()).hexdigest()
+    assert isinstance(data, dict)
+    assert len(data["estimated_actuals"]) == 3
     outside = tmp_path / "safe"
     outside.mkdir()
     with pytest.raises(ValueError, match="trusted directory"):
-        load_power(path, trusted_root=outside)
+        load_json_file(path, trusted_root=outside)

@@ -22,7 +22,6 @@ from pyracast.calculation import calculate
 from pyracast.connections.models import Provider, ProviderAccount, SiteBinding
 from pyracast.forecasts.actuals import select_archived_actual_source
 from pyracast.forecasts.coverage import intervals_cover_day
-from pyracast.forecasts.historical_import import _validate_authorized_binding
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
@@ -35,6 +34,7 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.projections import prepare_daily_payloads
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.forecasts.timing import approval_job
+from pyracast.forecasts.trust import reference_problems
 from pyracast.plants.preparation import request_region_preparation
 from pyracast.regions.models import Region
 
@@ -611,12 +611,11 @@ def restore_provider_snapshots(
         account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
         binding = SiteBinding.objects.select_for_update().get(pk=binding.pk)
         binding.provider_account = account
-        try:
-            _validate_authorized_binding(binding)
-        except ValidationError as error:
+        binding.region = region
+        if reference_problems(binding):
             raise RestoreRefusedError(
                 "A current authorized and validated Solcast binding is required."
-            ) from error
+            )
         summary = _restore_rows(
             actor,
             binding,

@@ -412,6 +412,19 @@ assert marker, 'The marker holds no identity'
 assert session == {'marker': marker, 'object': sys.argv[3], 'release': 'old', 'replaced': True}, session
 PY
 }
+# The attempt that created the marker recorded its revision and when the block began, in UTC.
+marker_records() {
+  /usr/local/bin/python3 - /var/lib/pyracast/release-blocked "$revision" <<'PY'
+import datetime
+import json
+import sys
+from pathlib import Path
+record = json.loads(Path(sys.argv[1]).read_text())
+assert record['revision'] == sys.argv[2], record
+began = datetime.datetime.fromisoformat(record['started_at'])
+assert began.utcoffset() == datetime.timedelta(0), record
+PY
+}
 for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image public-broker live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready stop-failed switch maintenance-backup migration legacy-migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-replaced maintenance-prepared maintenance-record-invalid record-invalid retry-migration retry-backup recovered cancelled origin-pull origin-pull-edge origin-pull-challenge first-origin-pull first-origin-pull-edge; do
   export MODE RUN=1
   cp /host.json /etc/pyracast/host.json
@@ -427,7 +440,7 @@ PY
   fi
   rm -rf /opt/pyracast/current /opt/pyracast/current.next /opt/pyracast/releases/* /run/pyracast /var/lib/pyracast/reset
   rm -f /var/lib/pyracast/release-blocked /var/lib/pyracast/release-state.json /migration-entered /backup-entered /backup-complete /support-changed /database-initialized
-  rm -f /role /app-running /resumed-with /switched-while-running /first-session.json
+  rm -f /role /app-running /resumed-with /switched-while-running /first-session.json /first-marker
   rm -rf /units /continue /follow-cancelled /run/pyracast-release-*
   mkdir /units
   # deploy/reset_database.py leaves its session identity in the marker and the site stopped.
@@ -506,6 +519,9 @@ PY
     [[ "$result" == 43 ]]
     session_names postgres/fixture-prerelease-1.dump
     cp "$session" /first-session.json
+    marker_records
+    cp /var/lib/pyracast/release-blocked /first-marker
+    touch -d @946684800 /var/lib/pyracast/release-blocked
     next_run 2
   elif [[ $MODE == recovered ]]; then
     # A release fails in migrate and the printed restore brings the data back from the archive
@@ -517,6 +533,8 @@ PY
     recovery_point_kept 1
     next_run 2
     [[ "$result" == 45 ]]
+    # The restore removed the first block's marker; this attempt began a new block.
+    marker_records
     no_prerelease_files
     recover abort
     grep -Fq 'The previous release serves again and the marker is removed.' /recovered
@@ -704,6 +722,9 @@ PY
         if [[ $MODE == retry-* ]]; then
           # The second run kept the first run's recovery point; the helper refuses the second dump.
           cmp /first-session.json "$session"
+          # It also kept the first run's record and file time, so the block counts from its start.
+          cmp /first-marker /var/lib/pyracast/release-blocked
+          [[ "$(stat -c %Y /var/lib/pyracast/release-blocked)" == 946684800 ]]
           refused=0
           /usr/local/bin/python3 "$new_release/deploy/reset_database.py" /etc/pyracast/host.json \
             restore --confirm postgres/fixture-prerelease-2.dump 2>/refused || refused=$?

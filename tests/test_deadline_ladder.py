@@ -18,6 +18,7 @@ from dramatiq.brokers.stub import StubBroker
 from pyracast import outbound
 from pyracast.background import broker as broker_module
 from pyracast.background import deadlines
+from pyracast.forecasts import revalidation
 from pyracast.forecasts.jobs import claim as collection_jobs
 from pyracast.forecasts.jobs.ready import pending_job_ids
 from pyracast.metering import jobs as metering_jobs
@@ -151,6 +152,7 @@ def test_job_leases_are_the_ladder_leases() -> None:
     assert deadlines.ACTORS["collect_forecast"].lease == collection_jobs.LEASE_DURATION
     assert deadlines.ACTORS["collect_epias"].lease == metering_jobs.LEASE_DURATION
     assert deadlines.ACTORS["calibrate_plant"].lease == training.LEASE_DURATION
+    assert deadlines.ACTORS["revalidate_provider_account"].lease == revalidation.LEASE
     assert deadlines.ACTORS["send_forecast_reminder"].lease == notification_jobs.LEASE_DURATION
     assert deadlines.ACTORS["send_outbound_mail"].lease == outbox.LEASE_DURATION
 

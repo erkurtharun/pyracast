@@ -1,1 +1,17 @@
-{ "/app": 800947 }
+{
+    "tolerancePercent": 1,
+    "firstLoad": {
+        "/app": 648175,
+        "/app/w/[tenantId]": 682550,
+        "/app/w/[tenantId]/plants/[siteId]/[section]": 760625
+    },
+    "onDemand": {
+        "Calibrations": 15147,
+        "Outages": 13242,
+        "ProductionSection": 20548,
+        "ForecastPerformance": 7130,
+        "english": 68996,
+        "turkish": 74996
+    },
+    "otherOnDemand": 13994
+}

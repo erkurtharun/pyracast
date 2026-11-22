@@ -3,7 +3,8 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from functools import cache
+from zoneinfo import available_timezones
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -24,6 +25,7 @@ from pyracast.connections.models import (
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import (
+    NAME_MAX_LENGTH,
     AuditAction,
     AuditEvent,
     LocationChangeStatus,
@@ -59,11 +61,45 @@ def require_available_location(
     )
     if exclude_region_id is not None:
         regions = regions.exclude(pk=exclude_region_id)
-    if regions.filter(
-        location_latitude=Decimal(str(canonical_coordinate(latitude))),
-        location_longitude=Decimal(str(canonical_coordinate(longitude))),
-    ).exists():
-        raise DomainError(ErrorCode.LOCATION_ALREADY_EXISTS)
+    occupant = (
+        regions.filter(
+            location_latitude=Decimal(str(canonical_coordinate(latitude))),
+            location_longitude=Decimal(str(canonical_coordinate(longitude))),
+        )
+        .values_list("pk", flat=True)
+        .first()
+    )
+    if occupant is not None:
+        raise _location_taken(occupant)
+
+
+def _location_taken(region_id: int) -> DomainError:
+    """Names the plant of the same workspace that holds the location, so it can be opened."""
+    return DomainError(ErrorCode.LOCATION_ALREADY_EXISTS, details={"region_id": region_id})
+
+
+@cache
+def available_zones() -> frozenset[str]:
+    """ZoneInfo also opens keys outside this set, such as `right/UTC` with leap seconds or a
+    Windows path spelling, which other hosts cannot open."""
+    return frozenset(available_timezones())
+
+
+def require_name(name: str) -> str:
+    name = name.strip()
+    if not name or len(name) > NAME_MAX_LENGTH:
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST,
+            _("A plant name of at most 200 characters is required."),
+            field="name",
+        )
+    if "\x00" in name:
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST,
+            _("A plant name cannot contain a null character."),
+            field="name",
+        )
+    return name
 
 
 def validate_location(latitude: float, longitude: float, timezone: str) -> None:
@@ -79,12 +115,10 @@ def validate_location(latitude: float, longitude: float, timezone: str) -> None:
             _("Longitude must be between -180 and 180 degrees."),
             field="longitude",
         )
-    try:
-        ZoneInfo(timezone)
-    except (ZoneInfoNotFoundError, ValueError) as exc:
+    if timezone not in available_zones():
         raise DomainError(
             ErrorCode.INVALID_REQUEST, _("An IANA timezone is required."), field="timezone"
-        ) from exc
+        )
 
 
 def submit_region(
@@ -98,27 +132,26 @@ def submit_region(
     platform: bool = False,
 ) -> Region:
     validate_location(latitude, longitude, timezone)
-    if not name.strip() or len(name) > 200:
-        raise DomainError(
-            ErrorCode.INVALID_REQUEST,
-            _("A region name of at most 200 characters is required."),
-            field="name",
-        )
+    name = require_name(name)
     with transaction.atomic():
         authorize_workspace_admin(actor, tenant_id, platform=platform)
         require_available_location(tenant_id, latitude, longitude)
-        return Region.objects.create(
+        region = Region.objects.create(
             tenant_id=tenant_id,
-            name=name.strip(),
+            name=name,
             latitude=canonical_coordinate(latitude),
             longitude=canonical_coordinate(longitude),
             timezone=timezone,
         )
+        record_audit(
+            actor=actor, region=region, action=AuditAction.REGION_CREATED, revision=region.revision
+        )
+        return region
 
 
 def _require_free_target(tenant_id: int, latitude: float, longitude: float, region: Region) -> None:
     require_available_location(tenant_id, latitude, longitude, exclude_region_id=region.pk)
-    if (
+    requester = (
         RegionLocationChangeRequest.objects.filter(
             active_region("region__"),
             region__tenant_id=tenant_id,
@@ -133,9 +166,11 @@ def _require_free_target(tenant_id: int, latitude: float, longitude: float, regi
             target_latitude=Decimal(str(latitude)),
             target_longitude=Decimal(str(longitude)),
         )
-        .exists()
-    ):
-        raise DomainError(ErrorCode.LOCATION_ALREADY_EXISTS)
+        .values_list("region_id", flat=True)
+        .first()
+    )
+    if requester is not None:
+        raise _location_taken(requester)
 
 
 def _awaits_first_setup(region: Region) -> bool:

@@ -29,6 +29,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region
@@ -164,7 +165,7 @@ def test_configuration_revision_requires_renewed_automation_choice(
     system, plant = make_plant(monkeypatch)
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     set_calibration_automation(*scope, enabled=True)
-    revise_plant(*scope, name="Changed", dc_capacity_mw=140)
+    revise_plant(*scope, PlantParameters(name="Changed", dc_capacity_mw=140))
     plant.refresh_from_db()
     assert not plant.automatic_calibration_enabled
     assert plant.next_calibration_check_at is None
@@ -604,7 +605,7 @@ def test_auto_promotion_rejects_stale_incumbent_and_configuration(
     set_calibration_automation(*scope, enabled=True)
     assert not promote(plant.pk, candidate)
     assert "changed" in PlantEvent.objects.latest("pk").details["reason"]
-    revise_plant(*scope, name="Changed", dc_capacity_mw=140)
+    revise_plant(*scope, PlantParameters(name="Changed", dc_capacity_mw=140))
     set_calibration_automation(*scope, enabled=True)
     assert not promote(plant.pk, candidate)
     assert PlantEvent.objects.latest("pk").details["reason"] == "configuration_changed"

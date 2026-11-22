@@ -42,15 +42,7 @@ test("an older pending submission cannot replace a saved technical update", asyn
 }) => {
     await page.clock.install();
     await mockApi(page);
-    const submission = {
-        ...plant.current_configuration,
-        id: 1,
-        dc_capacity_mw: 5,
-        mounting_type: "unknown",
-        surface_tilt_degrees: null,
-        surface_azimuth_degrees: null,
-    };
-    const pending = { ...plant, current_configuration: null, submission };
+    const pending = { ...plant, current_configuration: null };
     let requestStarted!: () => void;
     let release!: () => void;
     const observed = new Promise<void>((resolve) => {
@@ -61,10 +53,12 @@ test("an older pending submission cannot replace a saved technical update", asyn
     });
     let hold = false;
     let serverCapacity = 5;
+    let serverRevision = 1;
     await page.route("**/sites/", async (route) => {
         const snapshot = {
             ...pending,
-            submission: { ...submission, dc_capacity_mw: serverCapacity },
+            parameters: { ...plant.parameters, dc_capacity_mw: serverCapacity },
+            parameters_revision: serverRevision,
         };
         if (hold) {
             requestStarted();
@@ -78,7 +72,8 @@ test("an older pending submission cannot replace a saved technical update", asyn
         route.fulfill({
             json: {
                 ...pending,
-                submission: { ...submission, dc_capacity_mw: 6.25 },
+                parameters: { ...plant.parameters, dc_capacity_mw: 6.25 },
+                parameters_revision: 2,
             },
         }),
     );
@@ -113,6 +108,7 @@ test("an older pending submission cannot replace a saved technical update", asyn
     await expect(capacity).toHaveValue("6.25");
     hold = false;
     serverCapacity = 6.25;
+    serverRevision = 2;
     const confirmed = page.waitForResponse("**/sites/");
     await page.clock.fastForward(120_000);
     await (await confirmed).finished();
@@ -125,6 +121,7 @@ test("an older pending submission cannot replace a saved technical update", asyn
             ),
     );
     serverCapacity = 7;
+    serverRevision = 3;
     const updated = page.waitForResponse("**/sites/");
     await page.clock.fastForward(120_000);
     await (await updated).finished();
@@ -133,6 +130,172 @@ test("an older pending submission cannot replace a saved technical update", asyn
         .getByRole("button", { name: "Technical details", exact: true })
         .click();
     await expect(capacity).toHaveValue("7");
+});
+
+test("technical details shown before a reload ends follow the reloaded revision", async ({
+    page,
+}) => {
+    await page.clock.install();
+    await mockApi(page);
+    let reloaded = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let started!: () => void;
+    const reloading = new Promise<void>((resolve) => {
+        started = resolve;
+    });
+    await page.route("**/sites/", async (route) => {
+        if (reloaded) {
+            started();
+            await gate;
+        }
+        await route.fulfill({
+            json: paged([
+                {
+                    ...region,
+                    plant: reloaded
+                        ? {
+                              ...plant,
+                              parameters: {
+                                  ...plant.parameters,
+                                  dc_capacity_mw: 7,
+                              },
+                              parameters_revision: 2,
+                          }
+                        : plant,
+                },
+            ]),
+        });
+    });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const capacity = page.getByLabel("DC nameplate capacity (MW)");
+    await expect(capacity).toHaveValue("5");
+    reloaded = true;
+    const answered = page.waitForResponse("**/sites/");
+    await page.clock.fastForward(120_000);
+    await reloading;
+    release();
+    await (await answered).finished();
+    await expect(capacity).toHaveValue("7");
+});
+
+const conflictMessage =
+    "The technical details changed after you opened them. Check the values and save again.";
+
+function elsewhere(revision: number, dc_capacity_mw: number) {
+    return {
+        ...plant,
+        parameters: { ...plant.parameters, dc_capacity_mw },
+        parameters_revision: revision,
+    };
+}
+
+test("saves from older revisions in a row keep every edit and name what changed", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const answers = [elsewhere(2, 6), elsewhere(3, 8)];
+    const bodies: Record<string, unknown>[] = [];
+    await page.route("**/plants/21/", (route) => {
+        if (route.request().method() !== "PUT") return route.fallback();
+        bodies.push(route.request().postDataJSON());
+        const current = answers[bodies.length - 1];
+        return current
+            ? route.fulfill({
+                  status: 409,
+                  json: {
+                      ...errorBody("plant_parameters_changed", conflictMessage),
+                      current,
+                  },
+              })
+            : route.fulfill({
+                  json: {
+                      ...elsewhere(4, 8),
+                      parameters: {
+                          ...elsewhere(4, 8).parameters,
+                          export_limit_mw: 3,
+                      },
+                  },
+              });
+    });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const save = page.getByRole("button", { name: "Save configuration" });
+    const capacity = page.getByLabel("DC nameplate capacity (MW)");
+    const exportLimit = page.getByLabel("Grid export limit (MW, optional)");
+    await exportLimit.fill("3");
+    await save.click();
+    await expect(page.locator("main").getByRole("alert")).toContainText(
+        conflictMessage,
+    );
+    await expect(
+        page.getByText("DC nameplate capacity (MW): 5 → 6"),
+    ).toBeVisible();
+    await expect(capacity).toHaveValue("6");
+    await expect(exportLimit).toHaveValue("3");
+    await save.click();
+    await expect(
+        page.getByText("DC nameplate capacity (MW): 5 → 8"),
+    ).toBeVisible();
+    await expect(capacity).toHaveValue("8");
+    await expect(exportLimit).toHaveValue("3");
+    await save.click();
+    await expect.poll(() => bodies.length).toBe(3);
+    expect(bodies.map((body) => body.expected_revision)).toEqual([1, 2, 3]);
+    expect(bodies[2]).toMatchObject({
+        dc_capacity_mw: 8,
+        export_limit_mw: 3,
+    });
+    await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
+    await expect(
+        page.getByText(/DC nameplate capacity \(MW\): 5 →/),
+    ).toHaveCount(0);
+});
+
+test("a value both sides changed keeps the typed one beside the server's", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const bodies: Record<string, unknown>[] = [];
+    await page.route("**/plants/21/", (route) => {
+        if (route.request().method() !== "PUT") return route.fallback();
+        bodies.push(route.request().postDataJSON());
+        return bodies.length === 1
+            ? route.fulfill({
+                  status: 409,
+                  json: {
+                      ...errorBody("plant_parameters_changed", conflictMessage),
+                      current: elsewhere(2, 6),
+                  },
+              })
+            : route.fulfill({ json: elsewhere(3, 7) });
+    });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const capacity = page.getByLabel("DC nameplate capacity (MW)");
+    await capacity.fill("7");
+    await page.getByRole("button", { name: "Save configuration" }).click();
+    await expect(page.locator("main").getByRole("alert")).toContainText(
+        conflictMessage,
+    );
+    await expect(
+        page.getByText(
+            "DC nameplate capacity (MW): 5 → 6 (your entry 7 is kept)",
+        ),
+    ).toBeVisible();
+    await expect(capacity).toHaveValue("7");
+    await page.getByRole("button", { name: "Save configuration" }).click();
+    await expect.poll(() => bodies.length).toBe(2);
+    expect(bodies[1]).toMatchObject({
+        expected_revision: 2,
+        dc_capacity_mw: 7,
+    });
 });
 
 for (const section of ["Forecast", "Settings"] as const) {
@@ -155,13 +318,6 @@ for (const section of ["Forecast", "Settings"] as const) {
             ...plant,
             name: "New plant",
             current_configuration: null,
-            submission: {
-                ...plant.current_configuration,
-                id: 1,
-                mounting_type: "unknown",
-                surface_tilt_degrees: null,
-                surface_azimuth_degrees: null,
-            },
         };
         const currentPlant = () =>
             approved ? { ...plant, name: "New plant" } : pendingPlant;
@@ -219,8 +375,11 @@ for (const section of ["Forecast", "Settings"] as const) {
             page.getByText(/Awaiting administrator approval/),
         ).toBeVisible();
         await expect(
-            page.getByRole("heading", { name: "No forecast for this day yet" }),
+            page.getByRole("list", { name: "Next steps" }),
         ).toBeVisible();
+        await expect(
+            page.getByRole("heading", { name: "No forecast for this day yet" }),
+        ).toHaveCount(0);
         if (section === "Settings") {
             await page
                 .getByRole("button", { name: "Settings", exact: true })

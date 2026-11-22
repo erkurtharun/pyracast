@@ -54,20 +54,35 @@ if (setupForm instanceof HTMLFormElement) {
       setupForm.querySelectorAll("[data-new-account-required] input").forEach((field) => {
         field.required = mode === "new";
       });
-      const apiKey = setupForm.elements.namedItem(setupForm.dataset.apiKeyName);
-      if (apiKey instanceof HTMLInputElement) apiKey.required = mode === "new";
     };
     setupForm.addEventListener("change", syncAccountGroups);
     syncAccountGroups();
   }
 }
 
-const coordinateNumber = /^-?\d+(?:\.\d+)?$/;
+// The workspace's pair rule (web/src/features/portfolio/site-location.ts); one table of pasted
+// texts pins both. A pair is split at a semicolon, at a comma followed by white space or at white
+// space; a bare comma only when both parts hold a decimal point or the second starts with a
+// minus; and each part must be a latitude or longitude in range, as the workspace fields take it.
+const coordinatePatterns = [
+  /^-?(?:90(?:[.,]0+)?|[1-8]?\d(?:[.,]\d+)?)$/u,
+  /^-?(?:180(?:[.,]0+)?|(?:1[0-7]\d|[1-9]?\d)(?:[.,]\d+)?)$/u,
+];
+function pairParts(input) {
+  if (input.includes(";")) return input.split(";").map((part) => part.trim());
+  if (/,\s/.test(input)) return input.split(/,\s+/).map((part) => part.trim());
+  if (/\s/.test(input)) return input.split(/\s+/);
+  const parts = input.split(",");
+  const splits =
+    parts.length === 2 &&
+    (parts.every((part) => part.includes(".")) || parts[1].startsWith("-"));
+  return splits ? parts : [input];
+}
 function parseCoordinatePair(text) {
-  const input = text.trim();
-  const separated = input.split(/[,;]/);
-  const pair = separated.length === 1 ? input.split(/\s+/) : separated.map((value) => value.trim());
-  return pair.length === 2 && pair.every((value) => coordinateNumber.test(value)) ? pair : null;
+  const pair = pairParts(text.trim());
+  return pair.length === 2 && pair.every((value, axis) => coordinatePatterns[axis].test(value))
+    ? pair
+    : null;
 }
 
 document.querySelectorAll("[data-coordinate-pair]").forEach((latitude) => {

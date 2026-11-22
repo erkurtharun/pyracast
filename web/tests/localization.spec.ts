@@ -8,6 +8,7 @@ import { accessibilityViolations } from "./support/accessibility";
 import { mockApi, user, region, plant, paged } from "./support/workspace";
 import { messages } from "../src/i18n/messages";
 import { parseProduction } from "../src/lib/production";
+import { csvTexts } from "./support/production-csv";
 import { errorBody } from "./support/errors";
 
 type Language = "en" | "tr";
@@ -424,10 +425,12 @@ test("all translated messages are valid ICU and preserve keys and interpolation 
 test("CSV validation is localized while ISO timestamps, units and values remain unchanged", () => {
     const csv =
         "starts_at,ends_at,energy_kwh,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T10:00:00+03:00,1234.5,valid,meter";
-    expect(parseProduction(csv, "tr")).toEqual(parseProduction(csv, "en"));
-    expect(() => parseProduction(csv.replace("1234.5", "-1"), "tr")).toThrow(
-        "Satır 2: enerji sıfır veya pozitif bir sayı olmalı.",
+    expect(parseProduction(csv, csvTexts("tr"))).toEqual(
+        parseProduction(csv, csvTexts("en")),
     );
+    expect(() =>
+        parseProduction(csv.replace("1234.5", "-1"), csvTexts("tr")),
+    ).toThrow("Satır 2: enerji sıfır veya pozitif bir sayı olmalı.");
 });
 
 test("Turkish plant search and capacity formatting follow the selected language", async ({
@@ -442,8 +445,8 @@ test("Turkish plant search and capacity formatting follow the selected language"
                     plant: {
                         ...plant,
                         name: "IŞIK GES",
-                        current_configuration: {
-                            ...plant.current_configuration,
+                        parameters: {
+                            ...plant.parameters,
                             dc_capacity_mw: 1234.5,
                         },
                     },

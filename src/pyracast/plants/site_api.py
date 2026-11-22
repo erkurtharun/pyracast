@@ -8,16 +8,19 @@ from rest_framework.generics import GenericAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from pyracast.api.schema import LOCATION_REFUSAL
 from pyracast.api.serializers import RegionInput
 from pyracast.notifications.overview import reminder_summaries
 from pyracast.notifications.serializers import ReminderSummaryOutput
+from pyracast.plants.operations import PlantEditBlock
 from pyracast.plants.serializers import PlantInput, PlantOutput
-from pyracast.plants.sites import Site, site_queryset, sites, submit_site
+from pyracast.plants.sites import Site, SiteAttention, site_queryset, sites, submit_site
 from pyracast.regions.models import Region, RegionStatus
 
 
 class SiteInput(RegionInput, PlantInput):
-    pass
+    def location(self) -> dict[str, Any]:
+        return {name: self.validated_data[name] for name in ("latitude", "longitude", "timezone")}
 
 
 class SiteOutput(serializers.Serializer[Site]):
@@ -37,6 +40,18 @@ class SiteOutput(serializers.Serializer[Site]):
         source="region.review_reason", allow_null=True, read_only=True
     )
     plant = PlantOutput(allow_null=True, read_only=True)
+    attention = serializers.ChoiceField(
+        choices=SiteAttention.choices,
+        allow_null=True,
+        read_only=True,
+        help_text="The first thing the plant needs from the customer; none when nothing.",
+    )
+    edit_blocked_reason = serializers.ChoiceField(
+        choices=PlantEditBlock.choices,
+        allow_null=True,
+        read_only=True,
+        help_text="Why the plant's technical details cannot change now; none when they can.",
+    )
     reminder = serializers.SerializerMethodField()
 
     @extend_schema_field(ReminderSummaryOutput(allow_null=True))
@@ -58,9 +73,11 @@ class SitesView(GenericAPIView[Region]):
         )
         return self.get_paginated_response(rows.data)
 
-    @extend_schema(request=SiteInput, responses={201: SiteOutput})
+    @extend_schema(request=SiteInput, responses={201: SiteOutput, 400: LOCATION_REFUSAL})
     def post(self, request: Request, tenant_id: int) -> Response:
         data = SiteInput(data=request.data)
         data.is_valid(raise_exception=True)
-        region = submit_site(cast(User, request.user), tenant_id, **data.validated_data)
+        region = submit_site(
+            cast(User, request.user), tenant_id, data.parameters(), **data.location()
+        )
         return Response(SiteOutput(sites([region])[0]).data, status=201)

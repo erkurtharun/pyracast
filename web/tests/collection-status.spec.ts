@@ -199,7 +199,7 @@ const plantStates = [
         reason: "not_approved",
         label: "Waiting for approval",
         sentence:
-            "Awaiting administrator approval. Your plant details are saved; forecasts become available after the data connection is approved and collection succeeds.",
+            "Awaiting administrator approval. Your plant details are saved.",
         resubmit: false,
     },
     {

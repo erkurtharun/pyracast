@@ -1,19 +1,21 @@
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date
-from math import isfinite
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import Max
 from django.utils import timezone
-from django.utils.translation import gettext
+from django.utils.translation import gettext, gettext_lazy
 
 from pyracast.accounts.authorization import authorize_workspace_admin, tenant_membership
 from pyracast.accounts.models import WorkspaceRole
 from pyracast.connections.currency import binding_is_current
 from pyracast.connections.models import SiteBinding
-from pyracast.errors import DomainError, ErrorCode
+from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.plants.automation_state import AutomationCause, set_automation_state
 from pyracast.plants.calibration_runs import (
     OPEN_STATUSES,
@@ -25,18 +27,25 @@ from pyracast.plants.calibration_runs import (
 )
 from pyracast.plants.events import record_plant_event
 from pyracast.plants.models import (
-    CONFIGURATION_PARAMETERS,
     CalibrationRun,
-    MeasurementBasis,
-    MountingType,
     Plant,
     PlantConfiguration,
     PlantEventAction,
     PlantSubmission,
     ProductionObservation,
 )
+from pyracast.plants.parameters import PlantParameters, declaration, declared_parameters
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus
+
+if TYPE_CHECKING:
+    from django_stubs_ext import StrPromise
+
+
+class StaleParametersError(ConflictError):
+    def __init__(self, current: Plant) -> None:
+        super().__init__(ErrorCode.PLANT_PARAMETERS_CHANGED)
+        self.current = current
 
 
 def configuration_is_current(configuration: PlantConfiguration) -> bool:
@@ -47,15 +56,42 @@ def configuration_is_current(configuration: PlantConfiguration) -> bool:
     ).exists() and binding_is_current(configuration.binding)
 
 
-def _binding(region: Region) -> SiteBinding:
-    if region.approved_binding_id is None:
-        raise ValidationError(gettext("An approved current provider binding is required."))
-    binding = SiteBinding.objects.select_related("provider_account").get(
-        pk=region.approved_binding_id, region=region
-    )
-    if not binding_is_current(binding):
-        raise ValidationError(gettext("An approved current provider binding is required."))
-    return binding
+class PlantEditBlock(models.TextChoices):
+    SUSPENDED = "suspended"
+    CONNECTION_UNAVAILABLE = "connection_unavailable"
+
+
+EDIT_BLOCK_MESSAGES: Mapping[PlantEditBlock, StrPromise] = {
+    PlantEditBlock.SUSPENDED: gettext_lazy(
+        "The plant is suspended, so its technical details cannot change. "
+        "Contact Pyracast support to resume it."
+    ),
+    PlantEditBlock.CONNECTION_UNAVAILABLE: gettext_lazy(
+        "The plant's data connection needs attention from Pyracast support, "
+        "so its technical details cannot change yet."
+    ),
+}
+
+
+def plant_edit_block(region: Region) -> PlantEditBlock | None:
+    """Why a plant's declared values cannot change now; reads the region's approved binding
+    and its provider account, so a list loads them with the region."""
+    if region.status == RegionStatus.SUSPENDED:
+        return PlantEditBlock.SUSPENDED
+    binding = region.approved_binding
+    if region.status == RegionStatus.APPROVED and (
+        binding is None or not binding_is_current(binding, region)
+    ):
+        return PlantEditBlock.CONNECTION_UNAVAILABLE
+    return None
+
+
+def _editable_binding(region: Region) -> SiteBinding | None:
+    """The approved binding a change is saved against, or None while the plant is in review."""
+    block = plant_edit_block(region)
+    if block is not None:
+        raise DomainError(ErrorCode.PLANT_EDIT_BLOCKED, EDIT_BLOCK_MESSAGES[block])
+    return region.approved_binding
 
 
 def current_configuration(plant: Plant) -> PlantConfiguration:
@@ -67,45 +103,6 @@ def current_configuration(plant: Plant) -> PlantConfiguration:
     if not configuration_is_current(configuration):
         raise DomainError(ErrorCode.CONFIGURATION_CHANGED)
     return configuration
-
-
-def _validate_configuration(
-    name: str,
-    dc_capacity_mw: float,
-    inverter_capacity_mw: float | None,
-    export_limit_mw: float | None,
-    measurement_basis: str,
-    mounting_type: str,
-    surface_tilt_degrees: float | None,
-    surface_azimuth_degrees: float | None,
-) -> None:
-    if not name.strip() or len(name.strip()) > 200:
-        raise ValidationError(gettext("A plant name of at most 200 characters is required."))
-    for value in (dc_capacity_mw, inverter_capacity_mw, export_limit_mw):
-        if value is not None and (isinstance(value, bool) or not isfinite(value) or value <= 0):
-            raise ValidationError(gettext("Capacities must be finite and positive."))
-    if measurement_basis not in MeasurementBasis.values:
-        raise ValidationError(gettext("Unsupported meter basis."))
-    if mounting_type not in MountingType.values:
-        raise ValidationError(gettext("Unsupported mounting type."))
-    for angle, bound, exclusive in (
-        (surface_tilt_degrees, 90, False),
-        (surface_azimuth_degrees, 360, True),
-    ):
-        if angle is not None and (
-            isinstance(angle, bool)
-            or not isfinite(angle)
-            or angle < 0
-            or angle > bound
-            or (exclusive and angle == bound)
-        ):
-            raise ValidationError(
-                gettext("Surface angles must be finite and inside the allowed bounds.")
-            )
-    if mounting_type != MountingType.FIXED and (
-        surface_tilt_degrees is not None or surface_azimuth_degrees is not None
-    ):
-        raise ValidationError(gettext("Only fixed mounting permits surface angles."))
 
 
 def _save_configuration(actor: User, plant: Plant, values: dict[str, object]) -> None:
@@ -137,7 +134,6 @@ def _save_configuration(actor: User, plant: Plant, values: dict[str, object]) ->
 
 
 def _rename(actor: User, plant: Plant, region: Region, name: str) -> None:
-    name = name.strip()
     if plant.name == name:
         return
     record_plant_event(
@@ -156,50 +152,29 @@ def _rename(actor: User, plant: Plant, region: Region, name: str) -> None:
         )
 
 
+def _locked_plant(**lookup: object) -> Plant:
+    return (
+        Plant.objects.select_for_update(of=("self",))
+        .select_related("submission", "current_configuration")
+        .get(**lookup)
+    )
+
+
 def create_plant(
     actor: User,
     tenant_id: int,
     region_id: int,
+    parameters: PlantParameters,
     *,
-    name: str,
-    dc_capacity_mw: float,
-    inverter_capacity_mw: float | None = None,
-    export_limit_mw: float | None = None,
-    measurement_basis: str = MeasurementBasis.NET_EXPORT,
-    mounting_type: str = MountingType.UNKNOWN,
-    surface_tilt_degrees: float | None = None,
-    surface_azimuth_degrees: float | None = None,
     platform: bool = False,
 ) -> Plant:
-    _validate_configuration(
-        name,
-        dc_capacity_mw,
-        inverter_capacity_mw,
-        export_limit_mw,
-        measurement_basis,
-        mounting_type,
-        surface_tilt_degrees,
-        surface_azimuth_degrees,
-    )
     with transaction.atomic():
         authorize_workspace_admin(actor, tenant_id, platform=platform)
         region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         if Plant.objects.filter(region=region).exists():
             raise DomainError(ErrorCode.LOCATION_ALREADY_HAS_PLANT)
-        plant = Plant.objects.create(region=region, name=name.strip())
-        _save_plant_parameters(
-            actor,
-            plant,
-            region,
-            name=name,
-            dc_capacity_mw=dc_capacity_mw,
-            inverter_capacity_mw=inverter_capacity_mw,
-            export_limit_mw=export_limit_mw,
-            measurement_basis=measurement_basis,
-            mounting_type=mounting_type,
-            surface_tilt_degrees=surface_tilt_degrees,
-            surface_azimuth_degrees=surface_azimuth_degrees,
-        )
+        plant = Plant.objects.create(region=region, name=parameters.name)
+        _save_plant_parameters(actor, plant, region, parameters, expected_revision=None)
         return plant
 
 
@@ -208,115 +183,109 @@ def revise_plant(
     tenant_id: int,
     region_id: int,
     plant_id: int,
+    parameters: PlantParameters,
     *,
-    name: str,
-    dc_capacity_mw: float,
-    inverter_capacity_mw: float | None = None,
-    export_limit_mw: float | None = None,
-    measurement_basis: str = MeasurementBasis.NET_EXPORT,
-    mounting_type: str = MountingType.UNKNOWN,
-    surface_tilt_degrees: float | None = None,
-    surface_azimuth_degrees: float | None = None,
+    expected_revision: int | None = None,
     platform: bool = False,
 ) -> Plant:
-    _validate_configuration(
-        name,
-        dc_capacity_mw,
-        inverter_capacity_mw,
-        export_limit_mw,
-        measurement_basis,
-        mounting_type,
-        surface_tilt_degrees,
-        surface_azimuth_degrees,
-    )
+    """`expected_revision` is the parameter revision the change was made from; a different
+    change saved since then refuses it. None overwrites, as the operator command does unless
+    it is given a revision."""
+    return revise_plant_outcome(
+        actor,
+        tenant_id,
+        region_id,
+        plant_id,
+        parameters,
+        expected_revision=expected_revision,
+        platform=platform,
+    ).plant
+
+
+@dataclass(frozen=True)
+class PlantRevision:
+    """`before` is the parameters revision the save started from under the plant's lock."""
+
+    plant: Plant
+    before: int
+    changed: bool
+
+
+def revise_plant_outcome(
+    actor: User,
+    tenant_id: int,
+    region_id: int,
+    plant_id: int,
+    parameters: PlantParameters,
+    *,
+    expected_revision: int | None = None,
+    platform: bool = False,
+) -> PlantRevision:
     with transaction.atomic():
         authorize_workspace_admin(actor, tenant_id, platform=platform)
         region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
-        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
-        _save_plant_parameters(
-            actor,
-            plant,
-            region,
-            name=name,
-            dc_capacity_mw=dc_capacity_mw,
-            inverter_capacity_mw=inverter_capacity_mw,
-            export_limit_mw=export_limit_mw,
-            measurement_basis=measurement_basis,
-            mounting_type=mounting_type,
-            surface_tilt_degrees=surface_tilt_degrees,
-            surface_azimuth_degrees=surface_azimuth_degrees,
-        )
-        return plant
+        plant = _locked_plant(pk=plant_id, region=region)
+        before = plant.parameters_revision
+        changed = _save_plant_parameters(actor, plant, region, parameters, expected_revision)
+        return PlantRevision(plant, before, changed)
 
 
 def _save_plant_parameters(
     actor: User,
     plant: Plant,
     region: Region,
-    *,
-    name: str,
-    dc_capacity_mw: float,
-    inverter_capacity_mw: float | None,
-    export_limit_mw: float | None,
-    measurement_basis: str,
-    mounting_type: str,
-    surface_tilt_degrees: float | None,
-    surface_azimuth_degrees: float | None,
-) -> None:
-    parameters: dict[str, object] = {
-        "dc_capacity_mw": dc_capacity_mw,
-        "inverter_capacity_mw": inverter_capacity_mw,
-        "export_limit_mw": export_limit_mw,
-        "measurement_basis": measurement_basis,
-        "mounting_type": mounting_type,
-        "surface_tilt_degrees": surface_tilt_degrees,
-        "surface_azimuth_degrees": surface_azimuth_degrees,
-    }
-    # A rejected declaration is edited before the plant is resubmitted for review.
-    if (
-        region.status in (RegionStatus.PENDING, RegionStatus.REJECTED)
-        and plant.current_configuration_id is None
-    ):
-        _rename(actor, plant, region, name)
-        if PlantSubmission.objects.filter(plant=plant, **parameters).exists():
-            return
-        PlantSubmission.objects.update_or_create(
-            plant=plant, defaults={**parameters, "submitted_by": actor}
-        )
-        record_plant_event(plant_id=plant.pk, actor=actor, action=PlantEventAction.SUBMISSION_SAVED)
-        return
-    values = {"binding": _binding(region), **parameters}
-    _rename(actor, plant, region, name)
-    current_id = plant.current_configuration_id
-    if (
-        current_id is not None
-        and PlantConfiguration.objects.filter(pk=current_id, **values).exists()
-    ):
-        return
-    _save_configuration(actor, plant, values)
+    parameters: PlantParameters,
+    expected_revision: int | None,
+) -> bool:
+    """Returns whether the save wrote anything."""
+    binding = _editable_binding(region)
+    current = declared_parameters(plant)
+    configuration = plant.current_configuration
+    rebound = binding is not None and (
+        configuration is None or configuration.binding_id != binding.pk
+    )
+    if current == parameters and not rebound:
+        return False
+    if current != parameters and expected_revision not in (None, plant.parameters_revision):
+        raise StaleParametersError(plant)
+    _rename(actor, plant, region, parameters.name)
+    if current is None or current.declared() != parameters.declared() or rebound:
+        if binding is None:
+            _submit(actor, plant, parameters)
+        else:
+            _save_configuration(actor, plant, {"binding": binding, **parameters.declared()})
+    if current is not None and current != parameters:
+        plant.parameters_revision += 1
+        plant.save(update_fields=("parameters_revision",))
+    return True
+
+
+def _submit(actor: User, plant: Plant, parameters: PlantParameters) -> None:
+    """Records the declaration for the plant's review; approval activates it."""
+    plant.submission, _ = PlantSubmission.objects.update_or_create(
+        plant=plant,
+        defaults={
+            **parameters.declared(),
+            "submitted_by": actor,
+            "base_configuration_id": plant.current_configuration_id,
+        },
+    )
+    record_plant_event(plant_id=plant.pk, actor=actor, action=PlantEventAction.SUBMISSION_SAVED)
 
 
 def activate_submitted_plants(actor: User, region: Region, binding: SiteBinding) -> None:
-    plants = Plant.objects.select_for_update().filter(region=region)
-    for plant in plants:
-        parameters: PlantConfiguration | PlantSubmission
-        if plant.current_configuration_id is not None:
-            parameters = PlantConfiguration.objects.get(pk=plant.current_configuration_id)
-            if parameters.binding_id == binding.pk:
-                continue
-        else:
-            submission = PlantSubmission.objects.filter(plant=plant).first()
-            if submission is None:
-                raise DomainError(ErrorCode.PLANT_SUBMISSION_REQUIRED)
-            parameters = submission
-        _save_configuration(
-            actor,
-            plant,
-            {
-                "binding": binding,
-                **{name: getattr(parameters, name) for name in CONFIGURATION_PARAMETERS},
-            },
-        )
+    for plant in (
+        Plant.objects.select_for_update(of=("self",))
+        .select_related("submission", "current_configuration")
+        .filter(region=region)
+    ):
+        record = declaration(plant)
+        if record is None:
+            raise DomainError(ErrorCode.PLANT_SUBMISSION_REQUIRED)
+        if isinstance(record, PlantConfiguration) and record.binding_id == binding.pk:
+            continue
+        parameters = PlantParameters.of(plant.name, record)
+        _save_configuration(actor, plant, {"binding": binding, **parameters.declared()})
 
 
 def request_calibration(

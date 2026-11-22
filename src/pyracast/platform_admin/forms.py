@@ -41,6 +41,10 @@ CONSOLE_MESSAGES = {
         "A location request is waiting for review. "
         "Approve or reject it before correcting the location."
     ),
+    ErrorCode.PLANT_EDIT_BLOCKED: gettext_lazy(
+        "Technical details cannot change while the plant is suspended or its data connection "
+        "is not current. Approve the plant again or validate its connection first."
+    ),
 }
 _REJECTED_KEY = gettext_lazy(
     "The provider rejected the API key. Enter the current key for this account, "
@@ -76,6 +80,7 @@ _FAILURES_WITHOUT_STATUS = {
     "unsafe_provider_response": _UNREADABLE_ANSWER,
     "provider_response_too_large": _UNREADABLE_ANSWER,
     "fixture_account_required": _UNSUPPORTED_ACCOUNT,
+    "fixture_provider_disabled": _UNSUPPORTED_ACCOUNT,
     "unsupported_provider": _UNSUPPORTED_ACCOUNT,
 }
 _FAILURES_BY_STATUS = {
@@ -183,14 +188,7 @@ class ProviderSetupForm(forms.Form):
         strip=False,
         widget=forms.PasswordInput(render_value=False, attrs={"autocomplete": "new-password"}),
         label=gettext_lazy("Solcast API key"),
-        help_text=gettext_lazy(
-            "Write only. Required for a new account; leave blank to keep an existing key."
-        ),
-    )
-    confirm_key_rotation = forms.BooleanField(
-        required=False,
-        label=gettext_lazy("Confirm replacement of the selected account's key"),
-        help_text=gettext_lazy("A replacement affects every plant using the selected account."),
+        help_text=gettext_lazy("Write only. An existing account's key is replaced on its page."),
     )
     authorization_reference = forms.CharField(
         required=False,
@@ -276,12 +274,6 @@ class ProviderSetupForm(forms.Form):
                 self.add_error("api_key", _("Enter an API key for the new account."))
         elif data.get("account_mode") == "existing" and not data.get("existing_account"):
             self.add_error("existing_account", _("Select an authorized provider account."))
-        if (
-            data.get("account_mode") == "existing"
-            and data.get("api_key")
-            and not data.get("confirm_key_rotation")
-        ):
-            self.add_error("confirm_key_rotation", _("Confirm replacing the shared account key."))
         return data
 
     @sensitive_variables()
@@ -295,7 +287,7 @@ class ProviderSetupForm(forms.Form):
                 authorization_reference=data["authorization_reference"],
             )
         account_id, revision = data["existing_account"].split(":")
-        return ExistingAccount(int(account_id), int(revision), data["api_key"])
+        return ExistingAccount(int(account_id), int(revision))
 
     def binding(self) -> BindingSpec:
         return BindingSpec(**{name: self.cleaned_data[name] for name in BINDING_FIELDS})
@@ -305,16 +297,23 @@ class BindingActionForm(forms.Form):
     expected_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     binding_id = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     credential_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
-    expected_cooldown_until = forms.DateTimeField(required=False, widget=forms.HiddenInput)
     expected_validated_at = forms.DateTimeField(required=False, widget=forms.HiddenInput)
     expected_status = forms.ChoiceField(
         choices=RegionStatus.choices, required=False, widget=forms.HiddenInput
     )
     declaration = forms.CharField(max_length=64, required=False, widget=forms.HiddenInput)
-    provider_recovered = forms.BooleanField(
-        required=False,
-        label=gettext_lazy("The provider has confirmed that this account can make requests again"),
-    )
+
+    def show_declaration(self, fingerprint: str) -> None:
+        """Carries the hash of the declarations the page shows, also on a page shown again after
+        a refused action, so an approval from the page approves the values on the screen."""
+        if self.is_bound:
+            # A QueryDict holds a list per key; unpacking it into a dict renders each list.
+            data = QueryDict(mutable=True)
+            data.update(self.data)
+            data["declaration"] = fingerprint
+            self.data = data
+        else:
+            self.initial = {**self.initial, "declaration": fingerprint}
 
     def current_binding(self, region: Region) -> SiteBinding:
         data = self.cleaned_data

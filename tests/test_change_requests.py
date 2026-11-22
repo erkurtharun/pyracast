@@ -29,6 +29,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.measurements import select_measurements, selection_fingerprint
 from pyracast.plants.models import ProductionObservation
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
     ProductionAction,
@@ -318,7 +319,7 @@ def test_incident_overlap_and_configuration_change_are_derived_conflicts(
         request_detail(case.system.member, case.system.tenant.pk, request.pk)["conflict"]
         is not None
     )
-    revise_plant(*case.scope(case.system.member), name="Plant", dc_capacity_mw=150)
+    revise_plant(*case.scope(case.system.member), PlantParameters(name="Plant", dc_capacity_mw=150))
     with pytest.raises(ConflictError, match="configuration changed"):
         approve(case, request)
     detail = request_detail(case.system.member, case.system.tenant.pk, request.pk)

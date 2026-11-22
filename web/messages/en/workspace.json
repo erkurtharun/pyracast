@@ -13,7 +13,7 @@
         "longitude": "Longitude (°)",
         "checkYourPlantDetails": "Check your plant details",
         "plant": "Plant",
-        "timezone": "Timezone",
+        "timezone": "Time zone",
         "inverterACCapacity": "Inverter AC capacity",
         "unknown": "Unknown",
         "gridExportLimit": "Grid export limit",
@@ -33,11 +33,20 @@
         "geometry": " · tilt {tilt}° · azimuth {azimuth}°",
         "description": "Enter your site and equipment details. An administrator connects the data source and approves collection.",
         "examplePlantName": "e.g. Antalya solar park",
-        "ianaTimezone": "IANA timezone",
         "locationHelp": "Use the plant's coordinates and local timezone for daily forecasts.",
         "dcNameplate": "DC nameplate",
         "acGeneration": "AC generation",
-        "approvalNotice": "Your plant will wait for administrator approval. Approval and forecast availability are shown separately."
+        "approvalNotice": "Your plant will wait for administrator approval. Approval and forecast availability are shown separately.",
+        "rejectedSetup": "Pyracast did not approve this location yet. Add its technical details, then resubmit the plant for review from its page.",
+        "keptLocation": "Location: {latitude}°, {longitude}° · {timezone}",
+        "inBin": "{name} is in the recycle bin",
+        "inBinHelp": "Restore it to keep its saved data and history, or add a new plant at this location.",
+        "inBinMore": "{count, plural, one {# more plant from this location is} other {# more plants from this location are}} in the recycle bin.",
+        "restore": "Restore {name}",
+        "restoring": "Restoring…",
+        "addNewPlant": "Add a new plant",
+        "unableToRestore": "Unable to restore this plant.",
+        "openExisting": "Open the existing plant"
     },
     "PlantConfiguration": {
         "plantName": "Plant name",
@@ -79,7 +88,6 @@
         "dataCollection": "Data collection",
         "emailReminders": "Email reminders",
         "saveConfiguration": "Save configuration",
-        "deletePlant": "Delete plant",
         "productionViews": "Production views",
         "comparison": "Comparison",
         "approvalStatus": "Plant status: {status}. Contact Pyracast support at {contact} to resume collection.",
@@ -91,16 +99,24 @@
         "localDates": "Dates in plant time",
         "loadingGeneration": "Loading generation forecast…",
         "loadingIrradiance": "Loading irradiance forecast…",
-        "awaitingApproval": "Awaiting administrator approval. Your plant details are saved; forecasts become available after the data connection is approved and collection succeeds.",
+        "loadingSection": "Loading section…",
+        "awaitingApproval": "Awaiting administrator approval. Your plant details are saved.",
         "minutes30": "30 minutes",
         "minutes60": "60 minutes",
         "selectDateInRange": "Choose a local day from {min} to {max} for this data source.",
         "calibrationChangeNote": "Changes may replace pending calibration.",
         "approvalDetailsRequired": "Complete technical details to request approval.",
-        "deletionHelp": "Move this plant, its location and associated history to the recycle bin for 30 days.",
         "calibrationUnavailable": "Calibration becomes available after administrator approval and matched production history.",
         "actuals": "Actuals",
-        "plantTime": "Times on this plant are in plant time: {zone}."
+        "plantTime": "Times on this plant are in plant time: {zone}.",
+        "nextSteps": "Next steps",
+        "nextReview": "Pyracast checks the plant details and connects its data source.",
+        "nextForecasts": "After approval, forecasts appear here and are collected on schedule.",
+        "nextSettings": "Until then you can correct the technical details or the location in Settings.",
+        "deletion": "Deletion",
+        "serverChanges": "Changed by someone else meanwhile:",
+        "editKept": "(your entry {value} is kept)",
+        "editDropped": "{field}: your entry {value} no longer applies and was dropped."
     },
     "RegionSettings": {
         "plantLocation": "Plant location",
@@ -113,17 +129,17 @@
         "currentLocation": "Current location: {latitude}°, {longitude}° · {timezone}",
         "location": "{latitude}°, {longitude}° · {timezone}",
         "approvalHelp": "A location change requires administrator approval and a new connection verification.",
-        "ianaTimezone": "IANA timezone",
         "latestApproved": "Location change approved on {date}. Forecasts pause until the new connection is approved.",
         "latestRejected": "Location change rejected on {date}.",
         "latestWithdrawn": "Location change withdrawn on {date}.",
         "decisionNote": "Note: {reason}",
-        "withdraw": "Withdraw request"
+        "withdraw": "Withdraw request",
+        "timezone": "Time zone"
     },
     "RegionWorkspace": {
         "allPlants": "All plants",
         "loadingPlant": "Loading plant...",
-        "plantUnavailable": "Plant setup is pending.",
+        "plantUnavailable": "Waiting for an administrator to finish setup.",
         "siteUnavailable": "This plant is not available."
     },
     "Reminders": {
@@ -229,7 +245,6 @@
         "staleEdit": "Someone changed this outage after you opened it. Your entries are kept.",
         "staleApply": "Changed meanwhile (now revision {revision}). Save again to apply your change to this version, or discard it.",
         "staleClosed": "This outage is now {status}, so your change cannot be applied.",
-        "changedField": "{field}: {before} → {after}",
         "discardEdit": "Discard my change",
         "status": "Status",
         "cancelledOutages": "{count, plural, one {# cancelled entry} other {# cancelled entries}}"
@@ -276,14 +291,18 @@
         "noDeletedPlants": "No deleted plants",
         "nothingToRestore": "Nothing to restore.",
         "confirmMove": "Move {name} to the recycle bin?",
-        "restored": "{name} restored. Find it in Plants.",
+        "restored": "{name} restored.",
         "restore": "Restore {name}",
-        "deletionHelp": "Collection will stop. You can restore this plant and its saved data for 30 days. After that, they are permanently deleted.",
-        "retentionHelp": "Deleted plants and their data are kept for 30 days.",
+        "deletionHelp": "Collection and email reminders stop, and the days in the bin get no forecasts. You can restore this plant and its saved data for 30 days; after that, they are permanently deleted.",
+        "retentionHelp": "Deleted plants and their saved data are kept for 30 days.",
         "blockers": {
             "trash_retention_expired": "The 30-day restore period has ended.",
             "location_already_exists": "Another plant now uses this location. Move or delete that plant first."
-        }
+        },
+        "openPlant": "Open plant",
+        "movedToBin": "{name} is in the recycle bin.",
+        "undo": "Undo",
+        "dismiss": "Dismiss"
     },
     "WorkspaceMembers": {
         "title": "Members",
@@ -411,5 +430,10 @@
         "withdrawHelp": "To revise a submission, withdraw it and send a new one.",
         "unread": "Unread outcome",
         "intervals": "{count, plural, one {# interval} other {# intervals}}"
+    },
+    "CoordinateField": {
+        "latitude": "A latitude from -90 to 90, such as 41.0082 or 41,0082.",
+        "longitude": "A longitude from -180 to 180, such as 28.9784 or 28,9784.",
+        "pasteHint": "Paste a pair such as 41.0082, 28.9784 into Latitude to fill both."
     }
 }

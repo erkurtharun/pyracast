@@ -11,24 +11,25 @@ from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
 from pyracast.errors import ConflictError, ErrorCode
+from pyracast.forecasts.budget import validations_in_flight
 from pyracast.forecasts.models import (
-    CollectionEndpoint,
-    CollectionJob,
-    CollectionJobError,
     CollectionJobStatus,
+    CollectionSchedule,
     RequestAttempt,
     RequestOutcome,
     RequestPurpose,
 )
 from pyracast.forecasts.quota import record_provider_failure, reserve_request
+from pyracast.forecasts.timing import (
+    armed_again_by_validation,
+    forecast_timing,
+    latest_forecast_job,
+    latest_forecast_slot,
+)
 from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditAction, Region, RegionStatus, active_region
 
 logger = logging.getLogger(__name__)
-
-# An unanswered validation attempt younger than this is still in flight: it outlasts the
-# whole-request read deadline of a provider answer (outbound.READ_DEADLINE_SECONDS).
-VALIDATION_IN_FLIGHT = timedelta(minutes=1)
 
 
 def refuses_binding(error: ProviderError) -> bool:
@@ -38,13 +39,21 @@ def refuses_binding(error: ProviderError) -> bool:
 
 
 def validate_binding(
-    actor: User, binding_id: int, adapter: ProviderAdapter, now: datetime
+    actor: User,
+    binding_id: int,
+    adapter: ProviderAdapter,
+    now: datetime,
+    *,
+    credential_revision: int | None = None,
 ) -> SiteBinding:
+    """`credential_revision` names the key the caller validates for; another one refuses."""
     started = time.monotonic()
     require_platform_admin(actor)
     binding = SiteBinding.objects.select_related("provider_account").get(
         active_region("region__"), pk=binding_id
     )
+    if credential_revision not in {None, binding.provider_account.credential_revision}:
+        raise ValidationError("Configuration changed during validation.")
     if binding.provider_account.provider == Provider.SOLCAST and (
         not binding.settings_verification_reference or binding.installation_date is None
     ):
@@ -58,12 +67,7 @@ def validate_binding(
             raise ConflictError(
                 ErrorCode.CONFLICT, gettext("This provider binding is no longer current.")
             )
-        if RequestAttempt.objects.filter(
-            binding=binding,
-            purpose=RequestPurpose.VALIDATION,
-            outcome=RequestOutcome.UNCERTAIN,
-            created_at__gt=now - VALIDATION_IN_FLIGHT,
-        ).exists():
+        if validations_in_flight(now).filter(binding=binding).exists():
             raise ConflictError(
                 ErrorCode.CONFLICT,
                 gettext(
@@ -71,7 +75,14 @@ def validate_binding(
                     "Reload the page in a minute to see the result."
                 ),
             )
-        attempt = reserve_request(binding, now, purpose=RequestPurpose.VALIDATION)
+        # Validating an approved plant never takes a request a current plant's forecast needs.
+        attempt = reserve_request(
+            binding,
+            now,
+            purpose=RequestPurpose.VALIDATION,
+            keep_forecast_reserve=current.status == RegionStatus.APPROVED,
+            credential_revision=binding.provider_account.credential_revision,
+        )
     try:
         adapter.validate(binding)
     except ProviderError as exc:
@@ -86,7 +97,7 @@ def validate_binding(
             outcome=RequestOutcome.FAILED, http_status=exc.status_code
         )
         if refuses_binding(exc):
-            SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
+            _record_refusal(binding)
         record_audit(
             actor=actor,
             region=binding.region,
@@ -102,54 +113,60 @@ def validate_binding(
             binding.provider_account, exc, now + timedelta(seconds=time.monotonic() - started)
         )
         raise
-    RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.SUCCEEDED)
     with transaction.atomic():
         region = Region.objects.select_for_update().get(pk=binding.region_id)
         account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
+        # Under the account lock, so a reservation sees this validation in flight or its plant
+        # validated (budget.remaining_forecast_requests).
+        RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.SUCCEEDED)
         if (
-            region.deleted_at is not None
-            or region.revision != binding.region_revision
-            or (account.credential_revision != binding.provider_account.credential_revision)
+            region.deleted_at is None
+            and region.revision == binding.region_revision
+            and account.credential_revision == binding.provider_account.credential_revision
         ):
-            raise ValidationError("Configuration changed during validation.")
-        binding.validated_at = now
-        binding.validated_credential_revision = account.credential_revision
-        binding.health = BindingHealth.HEALTHY
-        binding.save(update_fields=("validated_at", "validated_credential_revision", "health"))
-        if (
-            region.status == RegionStatus.APPROVED
-            and region.approved_binding_id == binding.pk
-            and account.enabled
-            and account.authorized_at is not None
-        ):
-            _rearm_after_validation(binding, now + timedelta(seconds=time.monotonic() - started))
-        record_audit(
-            actor=actor,
-            region=region,
-            action=AuditAction.CONNECTION_VALIDATED,
-            revision=region.revision,
-            details={"binding_id": binding.pk},
-        )
-    return binding
+            binding.validated_at = now
+            binding.validated_credential_revision = account.credential_revision
+            binding.health = BindingHealth.HEALTHY
+            binding.save(update_fields=("validated_at", "validated_credential_revision", "health"))
+            if (
+                region.status == RegionStatus.APPROVED
+                and region.approved_binding_id == binding.pk
+                and account.enabled
+                and account.authorized_at is not None
+            ):
+                _rearm_after_validation(
+                    binding, region, now + timedelta(seconds=time.monotonic() - started)
+                )
+            record_audit(
+                actor=actor,
+                region=region,
+                action=AuditAction.CONNECTION_VALIDATED,
+                revision=region.revision,
+                details={"binding_id": binding.pk},
+            )
+            return binding
+    raise ValidationError("Configuration changed during validation.")
 
 
-def _rearm_after_validation(binding: SiteBinding, recovered_at: datetime) -> None:
-    latest = (
-        CollectionJob.objects.select_for_update()
-        .filter(
-            binding=binding,
-            endpoint=CollectionEndpoint.FORECASTS,
-            reference_import__isnull=True,
-            scheduled_for__lte=recovered_at,
+def _record_refusal(binding: SiteBinding) -> None:
+    # A refusal of a superseded key never overwrites the health a newer key established.
+    with transaction.atomic():
+        account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
+        if account.credential_revision == binding.provider_account.credential_revision:
+            SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
+
+
+def _rearm_after_validation(binding: SiteBinding, region: Region, recovered_at: datetime) -> None:
+    timing = forecast_timing(binding, CollectionSchedule.objects.filter(region=region).first())
+    due = (
+        None
+        if timing is None
+        else latest_forecast_slot(
+            recovered_at, region.timezone, timing.times, timing.effective_from
         )
-        .order_by("-scheduled_for", "-pk")
-        .first()
     )
-    if (
-        latest is not None
-        and latest.status == CollectionJobStatus.FAILED
-        and latest.last_error == CollectionJobError.PROVIDER_AUTHENTICATION_FAILED
-    ):
+    latest = latest_forecast_job(binding.pk, recovered_at).select_for_update().first()
+    if latest is not None and armed_again_by_validation(latest, due):
         latest.status = CollectionJobStatus.PENDING
         latest.available_at = recovered_at
         latest.attempts = 0

@@ -1,4 +1,5 @@
 from datetime import date
+from html.parser import HTMLParser
 
 from django.urls import reverse
 
@@ -59,6 +60,7 @@ VALIDATION_FAILURES: tuple[tuple[str, int | None, str], ...] = (
     ("provider_response_too_large", None, UNREADABLE_ANSWER),
     ("unsupported_provider", None, UNSUPPORTED_ACCOUNT),
     ("fixture_account_required", None, UNSUPPORTED_ACCOUNT),
+    ("fixture_provider_disabled", None, UNSUPPORTED_ACCOUNT),
 )
 
 
@@ -76,6 +78,42 @@ def admin_system() -> System:
 def review_fields(system: System) -> dict[str, object]:
     snapshot = review_snapshot(system.region.pk)
     return {"expected_status": snapshot.status, "declaration": snapshot.declaration}
+
+
+class _Forms(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.forms: list[tuple[dict[str, str], set[str]]] = []
+        self._inside = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "form":
+            self.forms.append(({}, set()))
+            self._inside = True
+            return
+        values = dict(attrs)
+        name, value = values.get("name"), values.get("value") or ""
+        if not self._inside or name is None:
+            return
+        hidden, actions = self.forms[-1]
+        if tag == "input" and values.get("type") == "hidden" and name != "csrfmiddlewaretoken":
+            hidden[name] = value
+        if name == "action":
+            actions.add(value)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form":
+            self._inside = False
+
+
+def form_fields(content: bytes, action: str) -> dict[str, str]:
+    """The hidden inputs of the one form that submits `action`, as the strings a browser posts.
+    The CSRF token is left out: the test client does not check it and each render masks it."""
+    parser = _Forms()
+    parser.feed(content.decode())
+    forms = [hidden for hidden, actions in parser.forms if action in actions]
+    assert len(forms) == 1, forms
+    return forms[0]
 
 
 def setup_url(system: System) -> str:

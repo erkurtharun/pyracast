@@ -1,0 +1,28 @@
+{
+    "Bootstrap": {
+        "retry": "Tekrar dene",
+        "loading": "Yükleniyor…"
+    },
+    "AppError": {
+        "title": "Bu sayfa görüntülenemedi",
+        "description": "Bu sayfa gösterilirken bir sorun oluştu. Tekrar deneyin; sorun sürerse sayfayı yenileyin.",
+        "retry": "Tekrar dene"
+    },
+    "Language": {
+        "label": "Dil",
+        "saving": "Kaydediliyor…",
+        "failed": "Dil kaydedilemedi. Tekrar deneyin.",
+        "unavailable": "Dil yüklenemedi. Tekrar denemek için sayfayı yenileyin.",
+        "reload": "Sayfayı yenile"
+    },
+    "Errors": {
+        "request": "İstek başarısız oldu ({status}). Tekrar deneyin.",
+        "invalidResponse": "Sunucu geçersiz bir yanıt döndürdü. Tekrar deneyin.",
+        "reference": "Referans: {reference}",
+        "network": "Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.",
+        "unconfirmed": "Sunucu değişikliği onaylamadı. Kaydedilip kaydedilmediğini görmek için sayfayı yenileyin.",
+        "sessionChanged": "Oturum başka bir sekmede değişti. Sayfa artık geçerli oturumu gösteriyor.",
+        "invalidPage": "Sunucu geçersiz bir sonraki sayfa döndürdü.",
+        "unexpected": "Bir sorun oluştu. Lütfen yeniden deneyin."
+    }
+}

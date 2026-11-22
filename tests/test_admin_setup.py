@@ -13,11 +13,11 @@ from django.utils.html import escape
 
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import rotate_secret
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from pyracast.connections.setup import SetupOutcome, save_provider_setup
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.plants.models import Plant, PlantConfiguration
+from pyracast.plants.parameters import PlantParameters
 from pyracast.platform_admin.forms import BindingActionForm, ProviderSetupForm
 from pyracast.provider_retry import retryable_status
 from pyracast.providers import SolcastProvider
@@ -25,6 +25,7 @@ from pyracast.regions.models import AuditEvent, Region
 from tests.support.admin_setup import (
     VALIDATION_FAILURES,
     admin_system,
+    form_fields,
     review_fields,
     setup_input,
     setup_url,
@@ -32,6 +33,7 @@ from tests.support.admin_setup import (
 )
 from tests.support.api import verified_admin
 from tests.support.domain import NOW, FakeAdapter, System, make_system
+from tests.support.providers import replace_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -76,7 +78,7 @@ def test_admin_can_review_configure_validate_and_approve_without_exposing_key(
     assert b"4.2" in response.content
     assert b"Solcast setup for this plant" in response.content
     assert b"shared key and quota" in response.content
-    assert b"every plant using the selected account" in response.content
+    assert b"shared by every plant using that account" in response.content
     assert system.account.encrypted_api_key.encode() not in response.content
     listing = client.get("/admin/regions/region/")
     assert setup_url(system).encode() in listing.content
@@ -213,7 +215,6 @@ def test_provider_setup_requires_a_private_key_and_offers_no_environment_referen
             "api_key",
         ),
         ({"existing_account": ""}, "existing_account"),
-        ({"api_key": "never-render-this"}, "confirm_key_rotation"),
         ({"capacity_kw": "nan"}, "capacity_kw"),
         ({"capacity_semantics_verified": ""}, "capacity_semantics_verified"),
         ({"account_mode": "invalid"}, "account_mode"),
@@ -232,37 +233,17 @@ def test_invalid_setup_preserves_safe_fields_and_never_renders_secrets(
     assert ProviderAccount.objects.count() == SiteBinding.objects.count() == 1
 
 
-def test_existing_key_can_be_rotated_and_invalid_site_rolls_back_rotation() -> None:
+def test_a_refused_setup_page_carries_the_hidden_values_of_a_fresh_page() -> None:
     system = admin_system()
+    submitted_plant(system)
     client, _ = verified_admin()
-    response = client.post(
-        setup_url(system), setup_input(system, api_key="replacement-key", confirm_key_rotation=True)
-    )
-    assert response.status_code == 302
-    system.account.refresh_from_db()
-    system.region.refresh_from_db()
-    system.binding = SiteBinding.objects.get(
-        region=system.region, region_revision=system.region.revision
-    )
-    assert system.account.credential_revision == 2
-    assert decrypt_api_key(system.account.encrypted_api_key) == "replacement-key"
-    assert client.post(setup_url(system), setup_input(system)).status_code == 302
-    system.region.refresh_from_db()
-    system.account.refresh_from_db()
-    system.binding = SiteBinding.objects.get(
-        region=system.region, region_revision=system.region.revision
-    )
-    assert system.account.credential_revision == 2
-    assert (
-        client.post(
-            setup_url(system),
-            setup_input(system, api_key="rollback-key", confirm_key_rotation=True, capacity_kw=0),
-        ).status_code
-        == 400
-    )
-    system.account.refresh_from_db()
-    assert decrypt_api_key(system.account.encrypted_api_key) == "replacement-key"
-    assert SiteBinding.objects.count() == 2
+    fresh = client.get(setup_url(system))
+
+    refused = client.post(setup_url(system), setup_input(system, capacity_kw="nan"))
+
+    assert refused.status_code == 400
+    for action in ("configure", "validate"):
+        assert form_fields(refused.content, action) == form_fields(fresh.content, action)
 
 
 def test_stale_setup_and_action_revisions_are_rejected() -> None:
@@ -289,7 +270,7 @@ def test_stale_setup_and_action_revisions_are_rejected() -> None:
     assert not RequestAttempt.objects.exists()
     form = ProviderSetupForm(setup_input(system))
     assert form.is_valid(), form.errors
-    rotate_secret(system.admin, system.account.pk, "rotated-key")
+    replace_key(system.admin, system.account.pk, "rotated-key")
     with pytest.raises(ValidationError, match="account changed"):
         save_setup(form, system)
     action = BindingActionForm(action_input(system, "validate"))
@@ -464,11 +445,15 @@ def test_stale_action_fields_ask_for_a_reload_without_naming_form_keys() -> None
 
 def test_a_missing_recovery_confirmation_is_named_by_its_label() -> None:
     system = admin_system()
-    system.account.request_blocked_until = timezone.now() + timedelta(hours=1)
+    until = timezone.now() + timedelta(hours=1)
+    system.account.request_blocked_until = until
     system.account.save(update_fields=("request_blocked_until",))
     client, _ = verified_admin()
 
-    response = client.post(setup_url(system), action_input(system, "clear_cooldown"))
+    response = client.post(
+        reverse("admin:workspace_provider_account_delay", args=(system.account.pk,)),
+        {"expected_revision": 1, "expected_blocked_until": until.isoformat()},
+    )
 
     assert response.status_code == 400
     html = response.content.decode()
@@ -535,7 +520,12 @@ def approved_admin_system() -> tuple[System, list[int]]:
     system.binding.installation_date = date(2020, 1, 1)
     system.binding.settings_verification_reference = "Verified synthetic site settings"
     system.binding.save(update_fields=("installation_date", "settings_verification_reference"))
-    create_plant(system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1)
+    create_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=1),
+    )
     Plant.objects.update(
         automatic_calibration_enabled=True,
         automatic_calibration_enabled_by=system.member,
@@ -587,16 +577,20 @@ def test_identical_setup_save_changes_nothing() -> None:
     assert system.account.credential_revision == 1
 
 
-def test_key_only_setup_save_rotates_key_and_keeps_approval() -> None:
+def test_replacing_the_key_on_the_account_page_keeps_the_plant_setup_and_approval() -> None:
     system, configurations = approved_admin_system()
     client, actor = verified_admin()
     response = client.post(
-        setup_url(system),
-        unchanged_setup_input(system, api_key="replacement-key", confirm_key_rotation=True),
+        reverse("admin:workspace_provider_account_key", args=(system.account.pk,)),
+        {
+            "expected_revision": 1,
+            "api_key": "replacement-key",
+            "confirm_replacement": "on",
+        },
         follow=True,
     )
     assert response.status_code == 200
-    assert b"API key replaced. Validate the connection to resume collection." in response.content
+    assert b"API key replaced." in response.content
     assert_setup_kept(system, configurations)
     system.account.refresh_from_db()
     assert system.account.credential_revision == 2

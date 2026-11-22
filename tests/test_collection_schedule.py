@@ -34,7 +34,7 @@ from pyracast.regions.models import AuditEvent, Region
 from tests.support.collection_schedule import HistoricalFixture, no_calculation
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate, collect
-from tests.support.providers import binding_for
+from tests.support.providers import binding_for, replace_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
 NIGHT = NOW.replace(hour=0)
@@ -576,13 +576,12 @@ def test_schedule_disable_during_request_preserves_authorized_acquisition() -> N
 
 
 def test_history_revalidation_rearms_stale_job_without_resetting_attempts() -> None:
-    from pyracast.connections.operations import rotate_secret
     from pyracast.forecasts.validation import validate_binding
 
     system = make_system(approved=True)
     enqueue_due(NIGHT)
     history = CollectionJob.objects.get(endpoint="estimated_actuals")
-    rotate_secret(system.admin, system.account.pk, "test-only-revalidated-key")
+    replace_key(system.admin, system.account.pk, "test-only-revalidated-key")
     assert not collect(history.pk, HistoricalFixture(), no_calculation, NIGHT)
     history.refresh_from_db()
     assert history.status == "stale"

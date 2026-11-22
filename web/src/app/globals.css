@@ -171,6 +171,9 @@ textarea:focus-visible,
     margin-top: var(--space-5);
     color: var(--neutral-49);
 }
+.sidebar .language-control .text-button {
+    color: inherit;
+}
 .sidebar .language-select select {
     color: var(--neutral-49);
     background: var(--green-796);
@@ -569,6 +572,13 @@ button.context-label:hover {
 .region-card p {
     margin-bottom: var(--space-5);
     font-size: 13px;
+}
+.region-card .attention {
+    padding: var(--space-1-5) var(--space-2-5);
+    border: 1px solid var(--amber-218);
+    border-radius: var(--radius);
+    background: var(--amber-51);
+    color: var(--amber-714);
 }
 .region-card-bottom {
     display: flex;

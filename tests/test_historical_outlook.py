@@ -14,6 +14,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import ForecastIssuance, PlantConfiguration
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
 from tests.support.errors import raises_code
@@ -105,7 +106,7 @@ def test_eligible_archived_forecast_survives_a_later_configuration(
     publish_snapshot(snapshot_for(system, DAY))
     args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     archived = plant_outlook(*args, target_date=DAY, resolution_minutes=60)
-    revise_plant(*args, name="Revised", dc_capacity_mw=260, export_limit_mw=200)
+    revise_plant(*args, PlantParameters(name="Revised", dc_capacity_mw=260, export_limit_mw=200))
     result = plant_outlook(*args, target_date=DAY, resolution_minutes=60)
     assert result["configuration_id"] == original_id
     expected = dict(cast(dict[str, Any], archived["result"]))
@@ -223,9 +224,7 @@ def test_past_actuals_follow_configuration_at_day_start_after_binding_change(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Revised",
-        dc_capacity_mw=130,
-        export_limit_mw=100,
+        PlantParameters(name="Revised", dc_capacity_mw=130, export_limit_mw=100),
     )
     assert revised.current_configuration_id != old_configuration_id
     args = (system.member, system.tenant.pk, system.region.pk, plant.pk)

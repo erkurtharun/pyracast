@@ -51,6 +51,16 @@ export const plant = {
         export_limit_mw: null,
         measurement_basis: "net_export",
     },
+    parameters: {
+        dc_capacity_mw: 5,
+        inverter_capacity_mw: 4,
+        export_limit_mw: null,
+        measurement_basis: "net_export",
+        mounting_type: "unknown",
+        surface_tilt_degrees: null,
+        surface_azimuth_degrees: null,
+    },
+    parameters_revision: 1,
 } satisfies Mock<Schemas["PlantOutput"]>;
 export const user = {
     id: 1,
@@ -172,8 +182,8 @@ export async function mockApi(
                         ...plant,
                         ...route.request().postDataJSON(),
                         current_configuration: null,
-                        submission: {
-                            ...plant.current_configuration,
+                        parameters: {
+                            ...plant.parameters,
                             ...route.request().postDataJSON(),
                         },
                     },
@@ -331,6 +341,8 @@ export async function mockApi(
                       collected_at: null,
                       issued_at: null,
                   });
+        else if (path.endsWith("/trash/regions/"))
+            data = answer("PaginatedTrashedRegionOutputList", paged([]));
         else if (path === "/api/invitations/preview/") data = invitationPreview;
         else throw new Error(`Unmocked API: ${method} ${path}`);
         await route.fulfill({ json: data });

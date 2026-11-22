@@ -9,10 +9,15 @@ from pyracast.connections.models import ProviderAccount
 from pyracast.connections.recovery import clear_provider_cooldown
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.regions.models import AuditEvent
-from tests.support.admin_setup import admin_system, setup_url
+from tests.support.admin_setup import admin_system
 from tests.support.api import verified_admin
+from tests.support.domain import System
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+
+def account_url(system: System, action: str = "") -> str:
+    return f"/admin/provider-accounts/{system.account.pk}/{action}"
 
 
 class HiddenFields(HTMLParser):
@@ -42,18 +47,18 @@ def test_confirmed_admin_recovery_is_audited_and_keeps_quota_and_authentication_
         outcome="uncertain",
     )
     client, admin = verified_admin()
-    response = client.get(setup_url(system))
+    response = client.get(account_url(system))
     assert b"Clear confirmed provider delay" in response.content
     fields = HiddenFields()
     fields.feed(response.content.decode())
-    expected = datetime.fromisoformat(fields.values["expected_cooldown_until"])
+    expected = datetime.fromisoformat(fields.values["expected_blocked_until"])
     assert expected == until
     assert expected.microsecond == 123456
-    payload = {**fields.values, "action": "clear_cooldown"}
-    assert client.post(setup_url(system), payload).status_code == 400
+    payload = fields.values
+    assert client.post(account_url(system, "delay/"), payload).status_code == 400
     system.account.refresh_from_db()
     assert system.account.request_blocked_until is not None
-    response = client.post(setup_url(system), {**payload, "provider_recovered": "on"})
+    response = client.post(account_url(system, "delay/"), {**payload, "provider_recovered": "on"})
     assert response.status_code == 302
     account = ProviderAccount.objects.get(pk=system.account.pk)
     assert account.request_blocked_until is None
@@ -119,13 +124,13 @@ def test_stale_confirmation_cannot_clear_a_newer_provider_delay() -> None:
     system.account.request_blocked_until = original
     system.account.save(update_fields=("request_blocked_until",))
     client, _ = verified_admin()
-    response = client.get(setup_url(system))
+    response = client.get(account_url(system))
     fields = HiddenFields()
     fields.feed(response.content.decode())
     newer = original + timedelta(hours=2)
     ProviderAccount.objects.filter(pk=system.account.pk).update(request_blocked_until=newer)
     response = client.post(
-        setup_url(system), {**fields.values, "action": "clear_cooldown", "provider_recovered": "on"}
+        account_url(system, "delay/"), {**fields.values, "provider_recovered": "on"}
     )
     assert response.status_code == 400
     system.account.refresh_from_db()

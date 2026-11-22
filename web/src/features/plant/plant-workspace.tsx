@@ -1,18 +1,19 @@
 "use client";
 import { useTranslations } from "next-intl";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import type { Plant, PlantScope, Region } from "@/lib/api";
+import { Suspense, useState } from "react";
+import type { Plant, PlantScope, Site } from "@/lib/api";
 import { useRefresh } from "@/lib/api/query";
 import { plantDay } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
+import { sectionUnavailable } from "@/lib/on-demand";
 import {
     plantView,
     routes,
     type PlantAddress,
     type PlantSection,
 } from "@/lib/routes";
-import { Calibrations } from "@/features/calibration/calibrations";
 import { OwnPendingRequests } from "@/features/inbox/operational-inbox";
 import { ViewNav } from "@/ui/action";
 import { ExportPlant } from "@/ui/export-plant";
@@ -20,7 +21,6 @@ import { usePageTitle } from "@/ui/page-title";
 import { Notice } from "@/ui/ui";
 import { StatusTag } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
-import { Outages } from "./outages";
 import { ReviewNotice } from "./review-notice";
 import {
     ForecastSection,
@@ -28,8 +28,23 @@ import {
 } from "./workspace/forecast-section";
 import { latestPlant } from "./workspace/latest-plant";
 import { usePlantNavigation } from "./workspace/navigation";
-import { ProductionSection } from "./workspace/production-section";
 import { SettingsSection } from "./workspace/settings-section";
+
+const Calibrations = dynamic(() =>
+    import("@/features/calibration/calibrations").then(
+        (module) => module.Calibrations,
+        sectionUnavailable,
+    ),
+);
+const Outages = dynamic(() =>
+    import("./outages").then((module) => module.Outages, sectionUnavailable),
+);
+const ProductionSection = dynamic(() =>
+    import("./workspace/production-section").then(
+        (module) => module.ProductionSection,
+        sectionUnavailable,
+    ),
+);
 
 export function PlantWorkspace({
     plant,
@@ -42,7 +57,7 @@ export function PlantWorkspace({
     plant: Plant;
     scope: PlantScope;
     timezone: string;
-    region: Region;
+    region: Site;
     section: PlantSection;
     address: PlantAddress;
 }) {
@@ -63,6 +78,8 @@ export function PlantWorkspace({
     const portfolio = routes.portfolio(scope.tenant_id);
     const changed = () => refresh.workspace(scope.tenant_id);
     const configuration = currentPlant.current_configuration;
+    // The review notice lists what happens next; an empty forecast would only repeat it.
+    const awaitsFirstApproval = region.status === "pending" && !configuration;
     usePageTitle(`${t(tab)} · ${currentPlant.name} | Pyracast`);
     return (
         <ExportPlant
@@ -107,62 +124,66 @@ export function PlantWorkspace({
                 current={tab}
                 onSelect={navigation.selectTab}
             />
-            {tab === "forecast" ? (
-                <ForecastSection
-                    scope={scope}
-                    timezone={timezone}
-                    configurationId={configuration?.id}
-                    view={forecastView}
-                    date={address.date ?? plantDay(timezone, 1)}
-                    baseDate={navigation.base.date}
-                    leaving={navigation.leaving("forecast")}
-                    options={forecastOptions}
-                    onOptions={setForecastOptions}
-                    show={navigation.show}
-                />
-            ) : tab === "outages" ? (
-                <Outages
-                    configuration={configuration}
-                    scope={scope}
-                    timezone={timezone}
-                    onChanged={changed}
-                />
-            ) : tab === "settings" ? (
-                <SettingsSection
-                    plant={currentPlant}
-                    scope={scope}
-                    region={region}
-                    timezone={timezone}
-                    view={plantView("settings", address)}
-                    leaving={navigation.leaving("settings")}
-                    show={navigation.show}
-                    onSaved={setSavedPlant}
-                    onChanged={changed}
-                    onDeleted={async () => {
-                        await changed();
-                        router.push(portfolio);
-                    }}
-                />
-            ) : tab === "production" ? (
-                <ProductionSection
-                    scope={scope}
-                    timezone={timezone}
-                    configurationId={configuration?.id}
-                    view={plantView("production", address)}
-                    day={address.date}
-                    baseDay={navigation.base.date}
-                    leaving={navigation.leaving("production")}
-                    show={navigation.show}
-                    onSaved={changed}
-                />
-            ) : !configuration ? (
-                <Notice>{t("calibrationUnavailable")}</Notice>
-            ) : (
-                <Calibrations
-                    key={`calibration-${configuration.id}`}
-                    scope={scope}
-                />
-            )}
+            <Suspense fallback={<p role="status">{t("loadingSection")}</p>}>
+                {tab === "forecast" ? (
+                    awaitsFirstApproval ? null : (
+                        <ForecastSection
+                            scope={scope}
+                            timezone={timezone}
+                            configurationId={configuration?.id}
+                            view={forecastView}
+                            date={address.date ?? plantDay(timezone, 1)}
+                            baseDate={navigation.base.date}
+                            leaving={navigation.leaving("forecast")}
+                            options={forecastOptions}
+                            onOptions={setForecastOptions}
+                            show={navigation.show}
+                        />
+                    )
+                ) : tab === "outages" ? (
+                    <Outages
+                        configuration={configuration}
+                        scope={scope}
+                        timezone={timezone}
+                        onChanged={changed}
+                    />
+                ) : tab === "settings" ? (
+                    <SettingsSection
+                        plant={currentPlant}
+                        scope={scope}
+                        region={region}
+                        timezone={timezone}
+                        view={plantView("settings", address)}
+                        leaving={navigation.leaving("settings")}
+                        show={navigation.show}
+                        onSaved={setSavedPlant}
+                        onChanged={changed}
+                        onDeleted={async () => {
+                            await changed();
+                            router.push(portfolio);
+                        }}
+                    />
+                ) : tab === "production" ? (
+                    <ProductionSection
+                        scope={scope}
+                        timezone={timezone}
+                        configurationId={configuration?.id}
+                        view={plantView("production", address)}
+                        day={address.date}
+                        baseDay={navigation.base.date}
+                        leaving={navigation.leaving("production")}
+                        show={navigation.show}
+                        onSaved={changed}
+                    />
+                ) : !configuration ? (
+                    <Notice>{t("calibrationUnavailable")}</Notice>
+                ) : (
+                    <Calibrations
+                        key={`calibration-${configuration.id}`}
+                        scope={scope}
+                    />
+                )}
+            </Suspense>
         </ExportPlant>
     );
 }

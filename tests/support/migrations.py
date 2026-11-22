@@ -1,7 +1,9 @@
+from collections.abc import Collection
 from typing import Any
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
+from django.db.models import Model, QuerySet
 
 
 def leaf_nodes() -> list[tuple[str, str]]:
@@ -10,6 +12,23 @@ def leaf_nodes() -> list[tuple[str, str]]:
 
 def migrate(*targets: tuple[str, str]) -> None:
     MigrationExecutor(connection).migrate(list(targets))
+
+
+def row_values(rows: QuerySet[Model], fields: Collection[str] | None = None) -> dict[str, Any]:
+    """The one row's values in the columns its table has at the current migration state."""
+    with connection.cursor() as cursor:
+        present = {
+            column.name
+            for column in connection.introspection.get_table_description(
+                cursor, rows.model._meta.db_table
+            )
+        }
+    names = [
+        field.attname
+        for field in rows.model._meta.concrete_fields
+        if field.column in present and (fields is None or field.attname in fields)
+    ]
+    return rows.values(*names).get()
 
 
 def forward() -> None:

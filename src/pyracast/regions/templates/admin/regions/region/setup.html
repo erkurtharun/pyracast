@@ -17,6 +17,7 @@
     <div class="panel-head"><h2 id="historical-title">{% translate "Historical Solcast data" %}</h2></div>
     <p class="row-meta">{% translate "Check and import an authorized historical JSON or CSV export for this plant." %}</p>
     <a class="btn btn--quiet" href="{% url 'admin:workspace_historical_import' region.pk %}">{% translate "Import historical data" %}</a>
+    {% if imports %}<ul>{% for record in imports %}<li>{{ record.source_name }} · {% translate "Intervals" %}: {{ record.interval_count }} · <time datetime="{{ record.created_at|date:'c' }}">{{ record.created_at|date:"j M Y, H:i T" }}</time> · {{ record.imported_by.get_username }}</li>{% endfor %}</ul>{% endif %}
   </section>
   {% if setup_form.errors or action_form.errors or epias_form.errors %}
     <section class="notice notice--error" role="alert" tabindex="-1" data-error-summary aria-labelledby="errors-title">
@@ -64,8 +65,10 @@
               <div><dt>{% translate "Requested timezone" %}</dt><dd>{{ change.timezone }}</dd></div>
               <div><dt>{% translate "Requested by" %}</dt><dd>{{ change.requested_by|default:_("Unknown") }} · <time datetime="{{ change.created_at|date:'c' }}">{{ change.created_at|date:"j M Y, H:i T" }}</time></dd></div>
               <div><dt>{% translate "Based on revision" %}</dt><dd>{{ change.base_revision }}</dd></div>
+              <div><dt>{% translate "Distance of the move" %}</dt><dd>{{ change.distance_km|floatformat:1 }} km</dd></div>
               <div class="facts-wide"><dt>{% translate "Reason" %}</dt><dd>{{ change.reason|default:_("No reason given") }}</dd></div>
             </dl>
+            {% if change.timezone_changes %}<p class="callout callout--warn">{% blocktranslate with old=region.timezone new=change.timezone %}The time zone changes from {{ old }} to {{ new }}: plant days, collection times and reminders follow the new zone.{% endblocktranslate %}</p>{% endif %}
             <p class="callout callout--warn">{% translate "Accepting the new location removes approval. Set up, validate and approve a replacement connection before collection resumes." %}</p>
             <form method="post" action="{% url 'admin:workspace_decision' region.pk %}">
               {% csrf_token %}
@@ -93,40 +96,29 @@
       <div><dt>{% translate "Local timezone" %}</dt><dd>{{ region.timezone }}</dd></div>
       <div><dt>{% translate "Location revision" %}</dt><dd>{{ region.revision }}</dd></div>
     </dl>
-    {% for submission in submissions %}
-      <h3>{{ submission.plant.name }}</h3>
-      <dl class="facts">
-        <div><dt>{% translate "DC nameplate" %}</dt><dd>{{ submission.dc_capacity_mw }} MW</dd></div>
-        <div><dt>{% translate "Inverter AC capacity" %}</dt><dd>{{ submission.inverter_capacity_mw|default_if_none:_("Unknown") }}{% if submission.inverter_capacity_mw != None %} MW{% endif %}</dd></div>
-        <div><dt>{% translate "Grid export limit" %}</dt><dd>{{ submission.export_limit_mw|default_if_none:_("Unknown") }}{% if submission.export_limit_mw != None %} MW{% endif %}</dd></div>
-        <div><dt>{% translate "Measurement point" %}</dt><dd>{% translate submission.get_measurement_basis_display %}</dd></div>
-        <div><dt>{% translate "Mounting" %}</dt><dd>{% translate submission.get_mounting_type_display %}</dd></div>
-        <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ submission.surface_tilt_degrees|default_if_none:_("Unknown") }}{% if submission.surface_tilt_degrees != None %}°{% endif %} / {{ submission.surface_azimuth_degrees|default_if_none:_("Unknown") }}{% if submission.surface_azimuth_degrees != None %}°{% endif %}</dd></div>
-        <div><dt>{% translate "Submitted by" %}</dt><dd>{{ submission.submitted_by.username }} · <time datetime="{{ submission.created_at|date:'c' }}">{{ submission.created_at|date:"j M Y, H:i T" }}</time></dd></div>
-        <div><dt>{% translate "Last changed" %}</dt><dd><time datetime="{{ submission.updated_at|date:'c' }}">{{ submission.updated_at|date:"j M Y, H:i T" }}</time></dd></div>
-      </dl>
-    {% empty %}
-      {% for plant in plants %}
-        <h3>{{ plant.name }}</h3>
-        {% with configuration=plant.current_configuration %}
-          {% if configuration %}
-            <dl class="facts">
-              <div><dt>{% translate "DC nameplate" %}</dt><dd>{{ configuration.dc_capacity_mw }} MW</dd></div>
-              <div><dt>{% translate "Inverter AC capacity" %}</dt><dd>{{ configuration.inverter_capacity_mw|default_if_none:_("Unknown") }}{% if configuration.inverter_capacity_mw != None %} MW{% endif %}</dd></div>
-              <div><dt>{% translate "Grid export limit" %}</dt><dd>{{ configuration.export_limit_mw|default_if_none:_("Unknown") }}{% if configuration.export_limit_mw != None %} MW{% endif %}</dd></div>
-              <div><dt>{% translate "Measurement point" %}</dt><dd>{% translate configuration.get_measurement_basis_display %}</dd></div>
-              <div><dt>{% translate "Mounting" %}</dt><dd>{% translate configuration.get_mounting_type_display %}</dd></div>
-              <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ configuration.surface_tilt_degrees|default_if_none:_("Unknown") }}{% if configuration.surface_tilt_degrees != None %}°{% endif %} / {{ configuration.surface_azimuth_degrees|default_if_none:_("Unknown") }}{% if configuration.surface_azimuth_degrees != None %}°{% endif %}</dd></div>
-              <div><dt>{% translate "Configuration revision" %}</dt><dd>{{ configuration.revision }}</dd></div>
-              <div><dt>{% translate "Saved" %}</dt><dd><time datetime="{{ configuration.created_at|date:'c' }}">{{ configuration.created_at|date:"j M Y, H:i T" }}</time></dd></div>
-            </dl>
+    {% for plant, record, submitted in declarations %}
+      <h3>{{ plant.name }}{% if submitted %} <span class="badge">{% translate "Awaiting approval" %}</span>{% endif %}</h3>
+      {% if record %}
+        <dl class="facts">
+          <div><dt>{% translate "DC nameplate" %}</dt><dd>{{ record.dc_capacity_mw }} MW</dd></div>
+          <div><dt>{% translate "Inverter AC capacity" %}</dt><dd>{{ record.inverter_capacity_mw|default_if_none:_("Unknown") }}{% if record.inverter_capacity_mw != None %} MW{% endif %}</dd></div>
+          <div><dt>{% translate "Grid export limit" %}</dt><dd>{{ record.export_limit_mw|default_if_none:_("Unknown") }}{% if record.export_limit_mw != None %} MW{% endif %}</dd></div>
+          <div><dt>{% translate "Measurement point" %}</dt><dd>{% translate record.get_measurement_basis_display %}</dd></div>
+          <div><dt>{% translate "Mounting" %}</dt><dd>{% translate record.get_mounting_type_display %}</dd></div>
+          <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ record.surface_tilt_degrees|default_if_none:_("Unknown") }}{% if record.surface_tilt_degrees != None %}°{% endif %} / {{ record.surface_azimuth_degrees|default_if_none:_("Unknown") }}{% if record.surface_azimuth_degrees != None %}°{% endif %}</dd></div>
+          {% if submitted %}
+            <div><dt>{% translate "Submitted by" %}</dt><dd>{{ record.submitted_by.username }} · <time datetime="{{ record.created_at|date:'c' }}">{{ record.created_at|date:"j M Y, H:i T" }}</time></dd></div>
+            <div><dt>{% translate "Last changed" %}</dt><dd><time datetime="{{ record.updated_at|date:'c' }}">{{ record.updated_at|date:"j M Y, H:i T" }}</time></dd></div>
           {% else %}
-            <p class="empty">{% translate "No saved technical configuration or customer submission." %}</p>
+            <div><dt>{% translate "Configuration revision" %}</dt><dd>{{ record.revision }}</dd></div>
+            <div><dt>{% translate "Saved" %}</dt><dd><time datetime="{{ record.created_at|date:'c' }}">{{ record.created_at|date:"j M Y, H:i T" }}</time></dd></div>
           {% endif %}
-        {% endwith %}
-      {% empty %}
-        <p class="empty">{% translate "No plant has been submitted for this location." %}</p>
-      {% endfor %}
+        </dl>
+      {% else %}
+        <p class="empty">{% translate "No saved technical configuration or customer submission." %}</p>
+      {% endif %}
+    {% empty %}
+      <p class="empty">{% translate "No plant has been submitted for this location." %}</p>
     {% endfor %}
   </section>
 
@@ -135,7 +127,7 @@
     {% if binding %}
       <h3>{% translate "Saved connection" %}</h3>
       <dl class="facts facts--tinted">
-        <div><dt>{% translate "Account" %}</dt><dd>{{ binding.provider_account.provider }} · {{ binding.provider_account.external_account_id }}</dd></div>
+        <div><dt>{% translate "Account" %}</dt><dd><a href="{% url 'admin:workspace_provider_account' binding.provider_account_id %}">{{ binding.provider_account.provider }} · {{ binding.provider_account.external_account_id }}</a></dd></div>
         <div><dt>{% translate "Resource ID" %}</dt><dd>{{ binding.site_id }}</dd></div>
         <div><dt>{% translate "Connection" %}</dt><dd>{% translate plant_summary.connection %} {% translate "· key revision" %} {{ binding.provider_account.credential_revision }}</dd></div>
         <div><dt>{% translate "Last validation" %}</dt><dd>{% if binding.validated_at %}<time datetime="{{ binding.validated_at|date:'c' }}">{{ binding.validated_at|date:"j M Y, H:i T" }}</time>{% else %}{% translate "Not validated" %}{% endif %}</dd></div>
@@ -143,28 +135,19 @@
       {% if active_provider_delay %}
         <div class="callout callout--warn">
           <h3>{% translate "Provider request delay" %}</h3>
-          <p>{% translate "Requests wait until" %} <time datetime="{{ binding.provider_account.request_blocked_until|date:'c' }}">{{ binding.provider_account.request_blocked_until|date:"j M Y, H:i T" }}</time>{% translate ". Clear this delay only after confirming recovery with the provider. The daily request budget is preserved." %}</p>
-          <form method="post" class="form">
-            {% csrf_token %}
-            {% for field in action_form.hidden_fields %}{{ field }}{% endfor %}
-            <div class="field field--check{% if action_form.provider_recovered.errors %} field--error{% endif %}">
-              {{ action_form.provider_recovered.as_field_group }}
-            </div>
-            <div class="form-actions">
-              <button type="submit" name="action" value="clear_cooldown" class="btn btn--quiet">{% translate "Clear confirmed provider delay" %}</button>
-            </div>
-          </form>
+          <p>{% translate "Requests wait until" %} <time datetime="{{ binding.provider_account.request_blocked_until|date:'c' }}">{{ binding.provider_account.request_blocked_until|date:"j M Y, H:i T" }}</time>.</p>
+          <a class="btn btn--quiet" href="{% url 'admin:workspace_provider_account' binding.provider_account_id %}">{% translate "Manage the provider account" %}</a>
         </div>
       {% endif %}
     {% endif %}
 
     {% if binding %}<details class="disclosure"{% if setup_form.is_bound %} open{% endif %}><summary>{% translate "Replace connection" %}</summary>{% endif %}
-    <form method="post" class="form" data-setup-form data-account-mode-name="{{ setup_form.account_mode.html_name }}" data-api-key-name="{{ setup_form.api_key.html_name }}">
+    <form method="post" class="form" data-setup-form data-account-mode-name="{{ setup_form.account_mode.html_name }}">
       {% csrf_token %}
       <input type="hidden" name="action" value="configure">
       {% for field in setup_form.hidden_fields %}{{ field }}{{ field.errors }}{% endfor %}
       {{ setup_form.non_field_errors }}
-      <p class="callout">{% if binding %}{% translate "Saving a changed setup creates a new pending revision that must be validated and approved again. Saving the same setup changes nothing; a new API key must be validated again." %} {% translate "The selected account's key and daily quota are shared by every plant using that account." %}{% else %}{% translate "Saving creates a pending revision that must be validated and approved." %}{% endif %}</p>
+      <p class="callout">{% if binding %}{% translate "Saving a changed setup creates a new pending revision that must be validated and approved again. Saving the same setup changes nothing." %} {% translate "The selected account's key and daily quota are shared by every plant using that account." %}{% else %}{% translate "Saving creates a pending revision that must be validated and approved." %}{% endif %}</p>
 
       <fieldset class="group">
         <legend>{% translate "Solcast account" %}</legend>
@@ -189,16 +172,9 @@
             <div class="field field--wide{% if setup_form.authorization_reference.errors %} field--error{% endif %}" data-new-account-required>
               {{ setup_form.authorization_reference.as_field_group }}
             </div>
-          </div>
-        </div>
-        <div class="field{% if setup_form.api_key.errors %} field--error{% endif %}">
-          {{ setup_form.api_key.as_field_group }}
-        </div>
-        <div class="subgroup" data-account-group="existing">
-          <p class="subgroup-title">{% translate "Key replacement for an existing account" %}</p>
-          <p class="callout callout--warn">{% translate "Entering a key above replaces the selected account's key for every plant that shares it. Leave the key blank to keep the current one." %}</p>
-          <div class="field field--check{% if setup_form.confirm_key_rotation.errors %} field--error{% endif %}">
-            {{ setup_form.confirm_key_rotation.as_field_group }}
+            <div class="field field--wide{% if setup_form.api_key.errors %} field--error{% endif %}" data-new-account-required>
+              {{ setup_form.api_key.as_field_group }}
+            </div>
           </div>
         </div>
       </fieldset>

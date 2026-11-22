@@ -64,6 +64,7 @@ class Host:
         self.unit = "active"
         self.snapshots = [HEALTHY]
         self.delivery: int | BaseException = 0
+        self.delivery_output = "{}"
         self.lock_free = True
         self.held = False
         self.on_lock: Callable[[], None] = lambda: None
@@ -103,7 +104,7 @@ class Host:
         if "check_delivery_health" in command:
             if isinstance(self.delivery, BaseException):
                 raise self.delivery
-            return subprocess.CompletedProcess(command, self.delivery, "{}", "")
+            return subprocess.CompletedProcess(command, self.delivery, self.delivery_output, "")
         return subprocess.CompletedProcess(command, 0, "", "")
 
     @contextmanager
@@ -176,10 +177,10 @@ def test_timed_out_delivery_check_still_checks_backup_age_and_capacity(watched: 
     assert watched.names() == [
         "pyracast_host_capacity",
         "pyracast_backup_failed",
-        "pyracast_runtime_unhealthy",
+        "pyracast_watchdog_step_failed",
         "pyracast_watchdog_heartbeat",
     ]
-    assert watched.details("pyracast_runtime_unhealthy") == [
+    assert watched.details("pyracast_watchdog_step_failed") == [
         {"step": "delivery", "outcome": "timeout"}
     ]
     assert watched.heartbeat() == {"state": "ok"}
@@ -211,7 +212,7 @@ def test_a_failing_compose_call_is_reported_without_skipping_other_checks(
     watched.free["/"] = 5
 
     assert watchdog.main() == 1
-    assert watched.details("pyracast_runtime_unhealthy") == [
+    assert watched.details("pyracast_watchdog_step_failed") == [
         {"step": "runtime", "outcome": "error", "error_type": "CalledProcessError"}
     ]
     assert "pyracast_host_capacity" in watched.names()
@@ -324,16 +325,130 @@ def test_blocked_release_reports_heartbeat_and_capacity_without_touching_contain
     assert watched.heartbeat() == {"state": "blocked"}
 
 
-@pytest.mark.parametrize("unit", ["inactive", "failed", "activating"])
-def test_inactive_application_unit_is_reported_without_recovery(watched: Host, unit: str) -> None:
+@pytest.mark.parametrize(
+    ("age", "events"),
+    [
+        (3600 - 60, []),
+        (3600 + 180, [{"hours": 1.1}]),
+        (5 * DAY, [{"hours": 120.0}]),
+    ],
+)
+def test_a_release_blocked_for_longer_than_an_hour_is_reported_with_its_age(
+    watched: Host, age: float, events: list[dict[str, object]]
+) -> None:
+    watched.blocked.touch()
+    stamp = time.time() - age
+    os.utime(watched.blocked, (stamp, stamp))
+
+    assert watchdog.main() == 0
+    assert watched.details("pyracast_release_blocked") == events
+    assert watched.heartbeat() == {"state": "blocked"}
+
+
+@pytest.mark.parametrize(
+    ("began", "events"),
+    [
+        (30 * 60, []),
+        (90 * 60, [{"hours": 1.5}]),
+        (DAY, [{"hours": 24.0}]),
+    ],
+)
+def test_a_block_counts_from_the_attempt_that_began_it_while_later_attempts_follow(
+    watched: Host, began: float, events: list[dict[str, object]]
+) -> None:
+    start = datetime.datetime.fromtimestamp(time.time() - began, datetime.UTC)
+    watched.blocked.write_text(
+        json.dumps({"revision": "a" * 40, "started_at": start.strftime("%Y-%m-%dT%H:%M:%SZ")})
+        + "\n"
+    )
+    # Attempts every half hour; the latest one ten minutes ago.
+    latest = time.time() - 10 * 60
+    os.utime(watched.blocked, (latest, latest))
+
+    assert watchdog.main() == 0
+    assert watched.details("pyracast_release_blocked") == events
+    assert watched.heartbeat() == {"state": "blocked"}
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "",
+        "3f2a9c0d4e5b6a7f8091a2b3c4d5e6f7\n",
+        "1234\n",
+        "[]",
+        '{"revision": "abc"}',
+        '{"started_at": 7}',
+        '{"started_at": "yesterday"}',
+        '{"started_at": "2026-11-20T10:00:00"}',
+    ],
+)
+def test_a_marker_without_a_recorded_start_counts_from_its_file_time(
+    watched: Host, content: str
+) -> None:
+    watched.blocked.write_text(content)
+    stamp = time.time() - 2 * 3600
+    os.utime(watched.blocked, (stamp, stamp))
+
+    assert watchdog.main() == 0
+    assert watched.details("pyracast_release_blocked") == [{"hours": 2.0}]
+
+
+def test_a_block_that_ends_while_it_is_checked_is_not_reported(
+    watched: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def ended() -> os.stat_result:
+        raise FileNotFoundError(watched.blocked)
+
+    monkeypatch.setattr(
+        host,
+        "RELEASE_BLOCKED",
+        SimpleNamespace(exists=lambda: True, read_text=ended, stat=ended),
+    )
+
+    assert watchdog.main() == 0
+    assert watched.names() == ["pyracast_watchdog_heartbeat"]
+    assert watched.heartbeat() == {"state": "blocked"}
+
+
+@pytest.mark.parametrize(
+    ("unit", "reported"), [("inactive", True), ("failed", True), ("activating", False)]
+)
+def test_inactive_application_unit_is_reported_without_recovery(
+    watched: Host, unit: str, reported: bool
+) -> None:
     watched.unit = unit
     watched.snapshots = [states(worker="exited")]
     watched.backed_up(age=3 * 3600)
 
     assert watchdog.main() == 0
-    assert [command[0] for command in watched.commands] == ["systemctl"]
-    assert watched.names() == ["pyracast_backup_failed", "pyracast_watchdog_heartbeat"]
+    assert {command[0] for command in watched.commands} == {"systemctl"}
+    assert watched.names() == [
+        "pyracast_backup_failed",
+        *(["pyracast_runtime_unhealthy"] if reported else []),
+        "pyracast_watchdog_heartbeat",
+    ]
+    assert watched.details("pyracast_runtime_unhealthy") == (
+        [{"unit_state": unit}] if reported else []
+    )
     assert watched.heartbeat() == {"state": "unit_failed", "unit_state": unit}
+
+
+@pytest.mark.parametrize("meanwhile", ["release_running", "release_blocked", "unit_started"])
+def test_a_stopped_unit_is_not_reported_while_a_release_holds_or_changes_it(
+    watched: Host, meanwhile: str
+) -> None:
+    watched.unit = "inactive"
+    if meanwhile == "release_running":
+        watched.lock_free = False
+    elif meanwhile == "release_blocked":
+        watched.on_lock = watched.blocked.touch
+    else:
+        watched.on_lock = lambda: setattr(watched, "unit", "active")
+
+    assert watchdog.main() == 0
+    assert "pyracast_runtime_unhealthy" not in watched.names()
+    assert watched.heartbeat() == {"state": "unit_failed", "unit_state": "inactive"}
 
 
 @pytest.mark.parametrize(("age", "runs"), [(60, False), (watchdog.DELIVERY_INTERVAL_SECONDS, True)])
@@ -347,7 +462,7 @@ def test_delivery_check_runs_at_most_every_five_minutes(
 
     watchdog.main()
     assert bool(watched.compose("pyracast", "check_delivery_health")) is runs
-    assert ({"reason": "delivery_health"} in watched.details("pyracast_runtime_unhealthy")) is runs
+    assert bool(watched.details("pyracast_delivery_unhealthy")) is runs
     assert (watched.delivery_checked.stat().st_mtime > stamp + 1) is runs
 
 
@@ -355,7 +470,75 @@ def test_first_delivery_check_runs_and_records_its_time(watched: Host) -> None:
     watchdog.main()
     assert watched.compose("pyracast", "check_delivery_health")
     assert watched.delivery_checked.exists()
+    assert "pyracast_delivery_unhealthy" not in watched.names()
+
+
+def test_an_unhealthy_delivery_report_names_its_failing_checks_and_counts(watched: Host) -> None:
+    watched.delivery = 1
+    watched.delivery_output = json.dumps(
+        {
+            "healthy": False,
+            "alarms": {"overdue_collections": 2, "failed_calibrations": 1},
+            "overdue_collections": 2,
+            "paused_notifications": 4,
+            "unhealthy_dispatch_phases": ["collection"],
+            "broker": {
+                "reachable": True,
+                "queues": {
+                    "collections": {"missing": True, "messages": 0},
+                    "notifications": {"missing": False, "messages": 3},
+                },
+            },
+        }
+    )
+
+    assert watchdog.main() == 0
+    assert watched.details("pyracast_delivery_unhealthy") == [
+        {
+            "alarms": {"overdue_collections": 2, "failed_calibrations": 1},
+            "dispatch_phases": ["collection"],
+            "broker_unreachable": False,
+            "missing_queues": ["collections"],
+        }
+    ]
     assert "pyracast_runtime_unhealthy" not in watched.names()
+
+
+def test_an_unreachable_broker_is_named_by_the_delivery_alert(watched: Host) -> None:
+    watched.delivery = 1
+    watched.delivery_output = json.dumps(
+        {"alarms": {}, "unhealthy_dispatch_phases": [], "broker": {"reachable": False}}
+    )
+
+    watchdog.main()
+    assert watched.details("pyracast_delivery_unhealthy") == [
+        {"alarms": {}, "dispatch_phases": [], "broker_unreachable": True, "missing_queues": []}
+    ]
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "",
+        "not json",
+        "[]",
+        '{"unhealthy_dispatch_phases": [], "broker": {"reachable": true}}',
+        '{"alarms": [], "unhealthy_dispatch_phases": [], "broker": {"reachable": true}}',
+        '{"alarms": {}, "unhealthy_dispatch_phases": "collection", "broker": {}}',
+        '{"alarms": {}, "unhealthy_dispatch_phases": [], "broker": "down"}',
+        '{"alarms": {}, "unhealthy_dispatch_phases": [], "broker": {"queues": []}}',
+        '{"alarms": {}, "unhealthy_dispatch_phases": [], "broker": {"queues": null}}',
+        '{"alarms": {}, "unhealthy_dispatch_phases": [], "broker": {"queues": {"default": "x"}}}',
+    ],
+)
+def test_a_delivery_check_without_a_readable_report_says_so(watched: Host, output: str) -> None:
+    watched.delivery = 1
+    watched.delivery_output = output
+
+    assert watchdog.main() == 0
+    assert watched.details("pyracast_delivery_unhealthy") == [
+        {"outcome": "unreadable", "exit_status": 1}
+    ]
 
 
 def step_wall_clock(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
@@ -551,7 +734,12 @@ def key_usage(*, signs_certificates: bool) -> x509.KeyUsage:
     )
 
 
-def test_certificate_validity_reads_the_served_certificate(tmp_path: Path) -> None:
+class ServedCertificate(NamedTuple):
+    server: ssl.SSLContext
+    authority: str
+
+
+def served_certificate(tmp_path: Path) -> ServedCertificate:
     now = datetime.datetime.now(datetime.UTC).replace(microsecond=0)
     authority_key = ec.generate_private_key(ec.SECP256R1())
     authority_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Watchdog test CA")])
@@ -601,10 +789,10 @@ def test_certificate_validity_reads_the_served_certificate(tmp_path: Path) -> No
     )
     server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     server.load_cert_chain(chain, private)
-    client = ssl.create_default_context(
-        cadata=authority.public_bytes(serialization.Encoding.PEM).decode()
-    )
+    return ServedCertificate(server, authority.public_bytes(serialization.Encoding.PEM).decode())
 
+
+def probe_served(server: ssl.SSLContext, authority: str) -> tuple[float, float]:
     with socket.create_server(("127.0.0.1", 0)) as listener:
 
         def serve() -> None:
@@ -617,13 +805,42 @@ def test_certificate_validity_reads_the_served_certificate(tmp_path: Path) -> No
 
         thread = threading.Thread(target=serve)
         thread.start()
-        remaining, lifetime = watchdog.certificate_validity(
-            "localhost", listener.getsockname()[:2], client
+        validity = watchdog.certificate_validity(
+            "localhost", listener.getsockname()[:2], authority=authority
         )
         thread.join(timeout=10)
+    return validity
+
+
+def test_certificate_validity_reads_the_served_certificate(tmp_path: Path) -> None:
+    served = served_certificate(tmp_path)
+
+    remaining, lifetime = probe_served(served.server, served.authority)
 
     assert lifetime == 90 * DAY
     assert abs(remaining - 10 * DAY) < 120
+
+
+def test_the_certificate_probe_requires_tls_1_2_whatever_the_host_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    served = served_certificate(tmp_path)
+    create_default_context = ssl.create_default_context
+    built: list[ssl.SSLContext] = []
+
+    def host_default(*, cadata: str | None = None) -> ssl.SSLContext:
+        context = create_default_context(cadata=cadata)
+        context.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
+        built.append(context)
+        return context
+
+    monkeypatch.setattr(ssl, "create_default_context", host_default)
+
+    remaining, lifetime = probe_served(served.server, served.authority)
+
+    assert lifetime == 90 * DAY
+    assert abs(remaining - 10 * DAY) < 120
+    assert [context.minimum_version for context in built] == [ssl.TLSVersion.TLSv1_2]
 
 
 def test_no_command_starts_after_the_deadline(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -38,7 +38,13 @@ from pyracast.plants.models import Plant
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import Region
 from tests.support.account_sessions import totp_clock, with_totp
-from tests.support.admin_setup import admin_system, review_fields, setup_input, submitted_plant
+from tests.support.admin_setup import (
+    admin_system,
+    form_fields,
+    review_fields,
+    setup_input,
+    submitted_plant,
+)
 from tests.support.api import verified_admin
 from tests.support.auth_lifecycle import totp_code
 from tests.support.domain import FakeAdapter, System, make_system
@@ -151,24 +157,40 @@ def approve(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) -> 
     )
 
 
-def clear_cooldown(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) -> Form:
+def clear_delay(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) -> Form:
     system = admin_system()
     blocked_until = timezone.now() + timedelta(hours=2)
     ProviderAccount.objects.filter(pk=system.account.pk).update(request_blocked_until=blocked_until)
-    url = plant_url(system.region)
+    url = reverse("admin:workspace_provider_account", args=(system.account.pk,))
     return Form(
         url,
-        url,
-        binding_action(
-            system,
-            "clear_cooldown",
-            expected_cooldown_until=blocked_until.isoformat(),
-            provider_recovered="on",
-        ),
+        f"{url}delay/",
+        {
+            "expected_revision": system.account.credential_revision,
+            "expected_blocked_until": blocked_until.isoformat(),
+            "provider_recovered": "on",
+        },
         system.account,
         lambda: (
             ProviderAccount.objects.get(pk=system.account.pk).request_blocked_until == blocked_until
         ),
+    )
+
+
+def key_replacement(monkeypatch: pytest.MonkeyPatch, client: Client, operator: User) -> Form:
+    system = admin_system()
+    original = system.account.encrypted_api_key
+    url = reverse("admin:workspace_provider_account", args=(system.account.pk,))
+    return Form(
+        url,
+        f"{url}key/",
+        {
+            "expected_revision": system.account.credential_revision,
+            "api_key": "replacement-key",
+            "confirm_replacement": "on",
+        },
+        system.account,
+        lambda: ProviderAccount.objects.get(pk=system.account.pk).encrypted_api_key == original,
     )
 
 
@@ -420,7 +442,8 @@ FORMS: dict[str, Callable[[pytest.MonkeyPatch, Client, User], Form]] = {
     "configure": configure,
     "validate": validate,
     "approve": approve,
-    "clear_cooldown": clear_cooldown,
+    "clear_delay": clear_delay,
+    "key_replacement": key_replacement,
     "epias_connect": epias_connect,
     "epias_disconnect": epias_disconnect,
     "historical_save": historical_save,
@@ -544,23 +567,16 @@ def test_a_stale_validation_page_spends_no_second_request(
     monkeypatch.setattr(SolcastProvider, "validate", lambda self, binding: None)
     client, _ = verified_admin()
     page = client.get(plant_url(system.region))
-    fields = {
-        name: page.context["action_form"][name].value()
-        for name in page.context["action_form"].fields
-    }
-    data = {
-        key: value
-        for key, value in fields.items()
-        if value is not None and key != "provider_recovered"
-    }
+    data = {**form_fields(page.content, "validate"), "action": "validate"}
 
-    first = client.post(plant_url(system.region), {**data, "action": "validate"})
-    second = client.post(plant_url(system.region), {**data, "action": "validate"})
+    first = client.post(plant_url(system.region), data)
+    second = client.post(plant_url(system.region), data)
 
     assert first.status_code == 302
     assert second.status_code == 400
     assert RequestAttempt.objects.count() == 1
     assert "validated after this page opened" in second.content.decode()
+    assert {**form_fields(second.content, "validate"), "action": "validate"} == data
 
 
 def turkish(client: Client, path: str) -> str:
