@@ -86,6 +86,12 @@ def acting_on_judged_confirmation() -> Iterator[None]:
         _confirmation_judged.reset(token)
 
 
+def _ensure_lock_notice(credentials: dict[str, Any]) -> None:
+    address = str(credentials.get("email") or "").strip().lower()
+    if address:
+        enqueue_lock_notice(address, language=mail_language(), lifetime=NOTICE_LIFETIME)
+
+
 class AccountAdapter(DefaultAccountAdapter):
     _client_failure: RateLimitUsage | None = None
     _login_failed_rl_usage: RateLimitUsage | None = None
@@ -143,7 +149,7 @@ class AccountAdapter(DefaultAccountAdapter):
             record_security_event(SecurityEvent.LOGIN_LOCKED, request=request, address=address)
             history = failure_history(request, key)
             if history is not None and locked_on_finished_failures(history):
-                self._ensure_lock_notice(credentials)
+                _ensure_lock_notice(credentials)
             raise self.validation_error("too_many_login_attempts")
 
     def authenticate(self, request: HttpRequest, **credentials: Any) -> User | None:
@@ -265,9 +271,4 @@ class AccountAdapter(DefaultAccountAdapter):
         # are never released.
         self._client_failure = self._login_failed_rl_usage = None
         if history is not None and locked_on_finished_failures(history):
-            self._ensure_lock_notice(credentials)
-
-    def _ensure_lock_notice(self, credentials: dict[str, Any]) -> None:
-        address = str(credentials.get("email") or "").strip().lower()
-        if address:
-            enqueue_lock_notice(address, language=mail_language(), lifetime=NOTICE_LIFETIME)
+            _ensure_lock_notice(credentials)
