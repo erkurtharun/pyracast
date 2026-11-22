@@ -357,24 +357,6 @@ main#main {
     letter-spacing: 0.12em;
     text-transform: uppercase;
 }
-.context-label {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    border: 0;
-    border-radius: 6px;
-    padding: var(--space-1) 0;
-    margin-bottom: var(--space-1);
-    margin-right: var(--space-3);
-    background: transparent;
-    color: var(--muted);
-    font-size: 12px;
-    text-align: left;
-}
-button.context-label:hover {
-    color: var(--teal);
-    text-decoration: underline;
-}
 .button {
     display: inline-flex;
     align-items: center;
@@ -673,8 +655,7 @@ button.context-label:hover {
 }
 .field input,
 .field select,
-.field textarea,
-.meter-input {
+.field textarea {
     width: 100%;
     min-width: 0;
     min-height: 46px;
@@ -905,11 +886,6 @@ fieldset {
 .section-heading .button-group > details {
     margin: 0;
     border: 0;
-}
-.date-field {
-    width: 180px;
-    max-width: 100%;
-    margin: 0;
 }
 .forecast-stats {
     margin-bottom: var(--space-4);
@@ -1310,16 +1286,6 @@ pre,
     white-space: normal;
     overflow-wrap: anywhere;
 }
-.meter-input {
-    width: calc(100% - 32px);
-    max-width: 130px;
-    min-width: 45px;
-    padding: var(--space-2);
-}
-.meter-input:disabled {
-    background: var(--cream);
-    cursor: not-allowed;
-}
 .trash-list {
     list-style: none;
     margin: 0;
@@ -1487,22 +1453,6 @@ pre,
     flex-wrap: wrap;
     gap: var(--space-1-5) var(--space-3);
 }
-.plant-status {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-3) var(--space-5);
-    padding: var(--space-4) var(--space-5);
-    margin-bottom: var(--space-6-5);
-    border: 1px solid var(--green-161);
-    border-radius: 12px;
-    background: var(--neutral-55);
-    font-size: 13px;
-    overflow-wrap: anywhere;
-}
-.plant-status p {
-    margin: 0;
-}
 .subnav {
     display: flex;
     flex-wrap: wrap;
@@ -1524,17 +1474,6 @@ pre,
     background: var(--teal-soft);
     color: var(--teal-dark);
     font-weight: 600;
-}
-.pending-setup {
-    max-width: 760px;
-    padding: var(--space-9);
-    margin: 0 auto var(--space-6-5);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--white);
-}
-.pending-setup > p {
-    max-width: 60ch;
 }
 .auth-page {
     min-height: 100dvh;
@@ -1890,18 +1829,6 @@ pre,
     .stat > span {
         font-size: 12px;
     }
-    .capacity-stats {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    .capacity-stats .stat {
-        padding: var(--space-2-75) var(--space-2-25);
-    }
-    .capacity-stats .stat strong {
-        font-size: 24px;
-    }
-    .capacity-stats .stat > span {
-        font-size: 11px;
-    }
     .region-grid {
         grid-template-columns: 1fr;
         gap: var(--space-2-5);
@@ -1964,11 +1891,6 @@ pre,
     .chart-axis {
         font-size: 11px;
         gap: var(--space-2);
-    }
-    .meter-input {
-        min-height: 44px;
-        font-size: 16px;
-        padding: var(--space-1-5);
     }
     .auth-page {
         padding: var(--space-6) var(--space-4);
@@ -2034,8 +1956,7 @@ pre,
     .sidebar .brand {
         font-size: 25px;
     }
-    .stats,
-    .capacity-stats {
+    .stats {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .stat strong {
@@ -2081,12 +2002,6 @@ pre,
     }
     .review-grid {
         grid-template-columns: minmax(0, 1fr);
-    }
-    .pending-setup {
-        padding: var(--space-6) var(--space-5);
-    }
-    .plant-status {
-        padding: var(--space-4);
     }
     .subnav button {
         flex: 1 1 calc(50% - 8px);
@@ -2135,9 +2050,6 @@ pre,
     }
     .stat {
         padding: var(--space-2-75);
-    }
-    .capacity-stats .stat strong {
-        font-size: 21px;
     }
     .auth-page {
         padding: var(--space-3);
@@ -2270,8 +2182,7 @@ pre,
     max-width: 100%;
     height: auto;
 }
-.mfa-manual-details,
-.identity-details {
+.mfa-manual-details {
     min-width: 0;
     margin: var(--space-4) 0;
     padding: var(--space-1) var(--space-3-5);
@@ -2279,29 +2190,23 @@ pre,
     border-radius: 12px;
     background: var(--surface);
 }
-.identity-details {
-    margin: 0;
-}
 .password-disclosure {
     margin: 0;
     border: 0;
 }
-.account-disclosure > summary,
-.identity-details > summary {
+.account-disclosure > summary {
     display: flex;
     align-items: center;
     gap: var(--space-2-5);
     width: 100%;
 }
-.account-disclosure > summary::before,
-.identity-details > summary::before {
+.account-disclosure > summary::before {
     content: "›";
     flex-shrink: 0;
     font-size: 22px;
     line-height: 1;
 }
-.account-disclosure[open] > summary::before,
-.identity-details[open] > summary::before {
+.account-disclosure[open] > summary::before {
     transform: rotate(90deg);
 }
 .account-disclosure > summary h2 {
@@ -2309,8 +2214,7 @@ pre,
     margin: 0;
     color: var(--ink);
 }
-.mfa-manual-details > summary,
-.identity-details > summary {
+.mfa-manual-details > summary {
     display: flex;
     align-items: center;
     min-height: 44px;
@@ -2320,8 +2224,7 @@ pre,
     font-weight: 600;
     cursor: pointer;
 }
-.mfa-manual-details[open] > .mfa-details-body,
-.identity-details[open] > .identity-details-body {
+.mfa-manual-details[open] > .mfa-details-body {
     padding: var(--space-3) 0 var(--space-3-5);
     border-top: 1px solid var(--line);
 }
@@ -2369,11 +2272,6 @@ pre,
     font-variant-numeric: tabular-nums;
     text-align: center;
     overflow-wrap: anywhere;
-}
-.identity-details-body > form + form {
-    margin-top: var(--space-5);
-    padding-top: var(--space-5);
-    border-top: 1px solid var(--line);
 }
 @media (max-width: 480px) {
     .mfa-qr-frame {
