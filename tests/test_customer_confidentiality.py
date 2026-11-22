@@ -244,6 +244,7 @@ CUSTOMER_FIELDS = {
     "partial_energy_mj_m2",
     "partial_energy_mwh",
     "pending_jobs",
+    "pending_request_id",
     "pending_review_count",
     "performance_index",
     "performance_ratio",

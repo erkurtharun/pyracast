@@ -2,7 +2,14 @@ import { expect, test, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import type { components } from "../src/lib/schema";
 import { errorBody } from "./support/errors";
-import { mockApi, paged, region, user, tenantRow } from "./support/workspace";
+import {
+    answer,
+    mockApi,
+    paged,
+    region,
+    user,
+    tenantRow,
+} from "./support/workspace";
 
 async function setup(page: Page) {
     await page.clock.setFixedTime(new Date("2026-01-08T12:00:00Z"));
@@ -54,7 +61,13 @@ async function setup(page: Page) {
         route.fulfill({ json: calibration }),
     );
     await page.route("**/api/**/outages/", (route) =>
-        route.fulfill({ json: paged([]) }),
+        route.fulfill({
+            json: answer("IncidentPage", {
+                ...paged([]),
+                can_propose: false,
+                proposal_unavailable_reason: "admin_edits_directly",
+            }),
+        }),
     );
     await page.route("**/trash/regions/", (route) =>
         route.fulfill({
@@ -232,6 +245,7 @@ async function setup(page: Page) {
                                   }
                                 : null,
                         edit_unavailable_reason: null,
+                        pending_request_id: null,
                     };
                 }),
             } satisfies components["schemas"]["ProductionHistoryOutput"],
