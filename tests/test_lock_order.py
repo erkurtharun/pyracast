@@ -56,6 +56,15 @@ PERSON_ROW_STATEMENTS = (
     re.compile(r'UPDATE "auth_user" SET "\w+" = %s(?:, "\w+" = %s)* WHERE (?P<rows>.+)'),
     re.compile(r'DELETE FROM "auth_user" WHERE (?P<rows>.+)'),
 )
+MEMBERSHIP_ONLY_LOCK = re.compile(
+    r'SELECT "accounts_membership"\."\w+"(?:, "accounts_membership"\."\w+")*'
+    r' FROM "accounts_membership" INNER JOIN "auth_user"'
+    r' ON \("accounts_membership"\."user_id" = "auth_user"\."id"\)'
+    r' WHERE \((?:"accounts_membership"\."\w+" = %s|"auth_user"\."is_active")'
+    r'(?: AND (?:"accounts_membership"\."\w+" = %s|"auth_user"\."is_active"))*\)'
+    r'(?: ORDER BY "accounts_membership"\."id" ASC)?(?: LIMIT \d+)?'
+    r' FOR UPDATE OF "accounts_membership"'
+)
 PERSON_ROWS = re.compile(
     r'"auth_user"\."id" = %s|"auth_user"\."id" IN \(%s(?:, %s)*\)'
     r'|\((?:"auth_user"\."\w+" AND )*"auth_user"\."id" = %s(?: AND "auth_user"\."\w+")*\)'
@@ -64,7 +73,7 @@ PERSON_ROWS = re.compile(
 
 def acquired_tables(sql: str) -> frozenset[str]:
     text = sql.casefold()
-    if ACQUIRING_WORD.search(text) is None:
+    if ACQUIRING_WORD.search(text) is None or MEMBERSHIP_ONLY_LOCK.fullmatch(sql):
         return frozenset()
     if ESCAPED_NAME in text:
         return GUARDED
@@ -326,6 +335,30 @@ def unless_named(alice: User) -> Case:
     )
 
 
+def lock_a_membership_joined_to(alice: User, respell: Callable[[str], str]) -> None:
+    memberships = Membership.objects.select_for_update(of=("self",))
+    sql, params = memberships.filter(user=alice, user__is_active=True).query.sql_with_params()
+    raw(respell(sql), *params)
+
+
+def aliased_person(sql: str) -> str:
+    return sql.replace('INNER JOIN "auth_user" ON', 'INNER JOIN "auth_user" "person" ON').replace(
+        '"auth_user"."', '"person"."'
+    )
+
+
+def locked_person(sql: str) -> str:
+    return sql.replace('OF "accounts_membership"', 'OF "accounts_membership", "auth_user"')
+
+
+def joined_tenant(sql: str) -> str:
+    return sql.replace(
+        " WHERE (",
+        ' INNER JOIN "accounts_tenant"'
+        ' ON ("accounts_membership"."tenant_id" = "accounts_tenant"."id") WHERE (',
+    )
+
+
 STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
     "lock workspace": lambda alice, bob, tenant: list(
         Tenant.objects.select_for_update().filter(pk=tenant.pk)
@@ -387,6 +420,26 @@ STEPS: dict[str, Callable[[User, User, Tenant], object]] = {
     ),
     "lock a membership joined to alice": lambda alice, bob, tenant: list(
         Membership.objects.select_for_update(of=("self",)).filter(user=alice, user__is_active=True)
+    ),
+    "lock a membership and alice joined to it": lambda alice, bob, tenant: (
+        lock_a_membership_joined_to(alice, locked_person)
+    ),
+    "lock a membership joined to alice without a target list": lambda alice, bob, tenant: list(
+        Membership.objects.select_for_update().filter(user=alice, user__is_active=True)
+    ),
+    "lock alice joined to her membership": lambda alice, bob, tenant: list(
+        User.objects.select_for_update(of=("self",)).filter(
+            membership__tenant=tenant, membership__user=alice, is_active=True
+        )
+    ),
+    "lock a membership joined to an aliased alice": lambda alice, bob, tenant: (
+        lock_a_membership_joined_to(alice, aliased_person)
+    ),
+    "lock a membership joined to alice in lower case": lambda alice, bob, tenant: (
+        lock_a_membership_joined_to(alice, str.lower)
+    ),
+    "lock a membership joined to alice and its workspace": lambda alice, bob, tenant: (
+        lock_a_membership_joined_to(alice, joined_tenant)
     ),
     "write a missing person": lambda alice, bob, tenant: User.objects.filter(pk=0).update(
         first_name="Renamed"
@@ -484,7 +537,12 @@ def test_a_person_row_is_held_only_after_a_whole_id_filter_matched_it(
         "lock alice in a subquery",
         "lock alice in raw lower case",
         "write alice in raw lower case",
-        "lock a membership joined to alice",
+        "lock a membership and alice joined to it",
+        "lock a membership joined to alice without a target list",
+        "lock alice joined to her membership",
+        "lock a membership joined to an aliased alice",
+        "lock a membership joined to alice in lower case",
+        "lock a membership joined to alice and its workspace",
         "lock bob through an iterator",
         "lock bob in a lateral derived table",
         "lock bob with a comment inside the locking clause",
@@ -498,6 +556,13 @@ def test_an_unproven_person_lock_or_write_after_a_workspace_lock_is_late(step: s
 @pytest.mark.parametrize("step", ["read alice", "read alice in raw lower case"])
 def test_a_person_read_without_a_lock_after_a_workspace_lock_is_not_late(step: str) -> None:
     assert late_statements("lock workspace", step) == 0
+
+
+def test_the_membership_lock_joined_to_a_person_acquires_no_person() -> None:
+    order = detected("lock workspace", "lock a membership joined to alice")
+
+    assert order.late == []
+    assert PERSON not in order.locked
 
 
 def test_a_workspace_write_orders_a_later_person_write_like_a_workspace_lock() -> None:
