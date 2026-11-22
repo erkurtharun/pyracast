@@ -73,7 +73,7 @@ sequenceDiagram
 | Workspace administrator submits a valid body | 403 `admin_edits_directly`, "Workspace members submit requests; administrators edit directly." |
 | Unknown field, bad type, blank or over-500 reason (trimmed), no interval or over 100 intervals | 400 `invalid_request` with field errors |
 | Operation rules (interval not completed or aligned, overlap, over 31 local days, production configuration or binding not current, revert without manual value, incident fields) | 400 `invalid_request`, or the incident code (`incident_overlap`, `incident_starts_in_future`, `incident_closed`, ...) |
-| New outage on a plant without a current configuration, or at the pending limit (decided by `outage_proposal_refusal` before the values are validated) | 400 `configuration_unavailable`, or 409 `pending_request_limit` |
+| New outage on a plant without a current configuration, or at the pending limit (decided by `outage_proposal_refusal` after the request shape is validated and a replay is answered, before the outage's own rules are checked) | 400 `configuration_unavailable`, or 409 `pending_request_limit` |
 | Region, plant, configuration or incident missing, trashed or elsewhere; request not own or its location trashed | 404 `not_found` |
 | Same key with another payload / 20 pending on this plant / withdraw after a decision | 409 `idempotency_key_reused` / `pending_request_limit` / `request_already_closed` |
 | Stale incident `expected_revision` | 409 `incident_revision_changed` with the `current` incident |
