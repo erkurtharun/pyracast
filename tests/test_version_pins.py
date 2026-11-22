@@ -321,7 +321,8 @@ def test_a_postgresql_minor_is_read_from_an_image_source(text: str) -> None:
 
 def stack_postgresql_minors(stack: str, major: str) -> set[str]:
     """Every minor of `major` in the PostgreSQL row and section of the stack reference, whatever
-    surrounds it; other majors (the driver, linked framework releases) are not server versions."""
+    surrounds it, and every version after the product's name, whatever its major; other numbers
+    (the driver, linked framework releases) are not server versions."""
     lines = stack.splitlines()
     start = lines.index("## PostgreSQL")
     end = next(
@@ -331,7 +332,7 @@ def stack_postgresql_minors(stack: str, major: str) -> set[str]:
     text = "\n".join(
         [*(line for line in lines if line.startswith("| PostgreSQL |")), *lines[start:end]]
     )
-    return {
+    return postgresql_minors(text) | {
         f"{found}.{minor}"
         for found, minor in re.findall(r"(?<!\d)(?<!\d\.)(\d+)\.(\d+)(?!\d)", text)
         if found == major
@@ -347,10 +348,13 @@ def stack_reference() -> tuple[str, str, str]:
 
 def with_postgresql_line(line: str) -> tuple[str, str, str]:
     """The stack reference with `line` in its PostgreSQL section, or in place of the version
-    cell's start when `line` begins with it; `{other}` is another minor of the production major."""
+    cell's start when `line` begins with it; `{other}` is another minor of the production major,
+    `{older}` a minor of the previous major."""
     stack, production, major = stack_reference()
     other = f"{major}.{int(production.split('.')[1]) + 1}"
-    filled = line.format(major=major, other=other, production=production)
+    filled = line.format(
+        major=major, other=other, older=f"{int(major) - 1}.9", production=production
+    )
     cell = f"PostgreSQL {production} in every cluster"
     page = (
         stack.replace(cell, filled, 1)
@@ -379,6 +383,22 @@ def test_another_minor_of_the_production_major_in_the_stack_postgresql_text_is_r
     page, other, major = with_postgresql_line(line)
 
     assert other in stack_postgresql_minors(page, major)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Development runs PostgreSQL {older}.",
+        "Development runs **PostgreSQL** `{older}`.",
+        "PostgreSQL {production} in every cluster, development PostgreSQL {older}",
+    ],
+)
+def test_a_version_after_the_postgresql_name_in_the_stack_text_is_read_whatever_its_major(
+    line: str,
+) -> None:
+    page, _, major = with_postgresql_line(line)
+
+    assert f"{int(major) - 1}.9" in stack_postgresql_minors(page, major)
 
 
 @pytest.mark.parametrize(
