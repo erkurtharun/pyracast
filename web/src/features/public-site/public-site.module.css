@@ -1,5 +1,5 @@
 .site {
-    --paper: var(--cream-35);
+    --paper: var(--cream-39);
     --ink: var(--forest);
     --muted: var(--neutral-624);
     --green: var(--green-722);
@@ -49,7 +49,7 @@
     color: inherit;
 }
 .site a:focus-visible {
-    outline: 3px solid var(--amber-690);
+    outline: 3px solid var(--amber-684);
     outline-offset: 5px;
     border-radius: 3px;
 }

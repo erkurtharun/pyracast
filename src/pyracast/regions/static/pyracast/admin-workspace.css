@@ -16,17 +16,17 @@
     --forest: #09383a;
     --forest-a30: #09383a4d;
     --amber: #ffb545;
-    --amber-61: #fef3e1;
-    --amber-231: #f3ce95;
-    --amber-290: #ffc46b;
-    --amber-690: #9e5f00;
+    --amber-65: #fef2df;
+    --amber-220: #eecfa0;
+    --amber-296: #fec369;
+    --amber-684: #a16100;
     --amber-755: #7d4b00;
     --cream: #f4f2e8;
-    --cream-35: #f9f8f3;
+    --cream-39: #f9f7f2;
     --rail-ink: #dbe8e1;
     --rail-hover: rgba(255, 255, 255, 0.08);
-    --rail-pressed: rgba(255, 255, 255, 0.12);
-    --rail-current: rgba(255, 255, 255, 0.14);
+    --rail-pressed: rgba(255, 255, 255, 0.125);
+    --rail-current: rgba(255, 255, 255, 0.145);
     --rail-rule: rgba(255, 255, 255, 0.18);
     --rail-line: rgba(255, 255, 255, 0.4);
     --radius: 16px;
@@ -47,7 +47,7 @@ html {
 }
 body {
     margin: 0;
-    background: var(--cream-35);
+    background: var(--cream-39);
     color: var(--ink);
     font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 16px;
@@ -113,6 +113,9 @@ a:hover {
 }
 .skip-link:focus {
     transform: none;
+}
+.skip-link:focus-visible {
+    outline-color: var(--white);
 }
 
 .shell {
@@ -204,7 +207,7 @@ a:hover {
     color: var(--white);
 }
 .rail-nav a[aria-current] {
-    border-left-color: var(--amber-290);
+    border-left-color: var(--amber-296);
     background: var(--rail-current);
     color: var(--white);
     font-weight: 700;
@@ -507,8 +510,8 @@ a.stat:hover {
 .badge--retry,
 .badge--running,
 .badge--sending {
-    border-color: var(--amber-231);
-    background: var(--amber-61);
+    border-color: var(--amber-220);
+    background: var(--amber-65);
     color: var(--amber-755);
 }
 .badge--suspended,
@@ -517,8 +520,8 @@ a.stat:hover {
 .badge--uncertain,
 .badge--stale,
 .badge--unavailable {
-    border-color: var(--amber-690);
-    background: var(--amber-61);
+    border-color: var(--amber-684);
+    background: var(--amber-65);
     color: var(--amber-755);
 }
 .badge--suspended::before,
@@ -789,8 +792,8 @@ a.stat:hover {
 }
 .notice--warning,
 .callout--warn {
-    border-color: var(--amber-690);
-    background: var(--amber-61);
+    border-color: var(--amber-684);
+    background: var(--amber-65);
 }
 .notice--error,
 .callout--danger {

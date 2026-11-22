@@ -124,7 +124,7 @@ test("the logo's surfaces take the brand palette", async ({ page }) => {
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     await expect(page.locator("body")).toHaveCSS(
         "background-color",
-        "rgb(249, 248, 243)",
+        "rgb(249, 247, 242)",
     );
     await expect(page.getByRole("complementary")).toHaveCSS(
         "background-color",
@@ -133,7 +133,7 @@ test("the logo's surfaces take the brand palette", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("banner").locator("..")).toHaveCSS(
         "background-color",
-        "rgb(249, 248, 243)",
+        "rgb(249, 247, 242)",
     );
 });
 

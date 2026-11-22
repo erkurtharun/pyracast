@@ -2,7 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { ESLint } from "eslint";
 import { expect, test } from "@playwright/test";
-import { brand, brandProperties } from "../src/styles/tokens";
+import { brand, brandProperties, imageShades } from "../src/styles/tokens";
 
 const web = path.resolve();
 const eslint = new ESLint({ cwd: web });
@@ -156,21 +156,184 @@ test("scripts take colours from the tokens module", async () => {
 
 const kitArtwork = "src/app/icon.svg";
 
-function hsl(hex: string) {
-    const [r, g, b] = [1, 3, 5].map(
+function channels(hex: string) {
+    return [1, 3, 5].map(
         (start) => Number.parseInt(hex.slice(start, start + 2), 16) / 255,
     ) as [number, number, number];
+}
+
+function hsl(hex: string) {
+    const [r, g, b] = channels(hex);
     const high = Math.max(r, g, b);
     const low = Math.min(r, g, b);
     const chroma = high - low;
+    const lightness = (high + low) / 2;
     const sector =
         high === r
             ? ((g - b) / chroma + 6) % 6
             : high === g
               ? (b - r) / chroma + 2
               : (r - g) / chroma + 4;
-    return { hue: chroma === 0 ? 0 : sector * 60, lightness: (high + low) / 2 };
+    return {
+        hue: chroma === 0 ? 0 : sector * 60,
+        saturation:
+            chroma === 0 ? 0 : chroma / (1 - Math.abs(2 * lightness - 1)),
+        lightness,
+    };
 }
+
+function hex(hue: number, saturation: number, lightness: number) {
+    const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+    const second = chroma * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const sector = Math.floor(hue / 60);
+    const [r, g, b] = [
+        [chroma, second, 0],
+        [second, chroma, 0],
+        [0, chroma, second],
+        [0, second, chroma],
+        [second, 0, chroma],
+        [chroma, 0, second],
+    ][sector]!;
+    const lowest = lightness - chroma / 2;
+    return `#${[r, g, b]
+        .map((value) =>
+            Math.round((value! + lowest) * 255)
+                .toString(16)
+                .padStart(2, "0"),
+        )
+        .join("")}`;
+}
+
+function contrast(first: string, second: string) {
+    const [high, low] = [first, second]
+        .map((colour) => {
+            const [r, g, b] = channels(colour).map((value) =>
+                value <= 0.04045
+                    ? value / 12.92
+                    : ((value + 0.055) / 1.055) ** 2.4,
+            ) as [number, number, number];
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        })
+        .sort((a, b) => b - a) as [number, number];
+    return (high + 0.05) / (low + 0.05);
+}
+
+const families = {
+    forest: { kit: brand.forest, old: "#143c32" },
+    amber: { kit: brand.amber, old: "#a56a12" },
+    cream: { kit: brand.cream, old: "#f6f7f3" },
+};
+
+type Shade = string;
+type Pairing = { pair: [Shade, Shade]; before: [string, string] };
+
+const derivation: Record<string, { from: string; keeps?: Pairing }> = {
+    "--forest-822": {
+        from: "#20483c",
+        keeps: {
+            pair: ["--cream", "--forest-822"],
+            before: ["#f4f7ee", "#20483c"],
+        },
+    },
+    "--amber-65": { from: "#fbf3e2" },
+    "--amber-69": { from: "#f7f1e4" },
+    "--amber-220": { from: "#e6d2a8" },
+    "--amber-296": { from: "#efc778" },
+    "--amber-300": { from: "#d2c293" },
+    "--amber-329-a0": { from: "#e8bd6e00" },
+    "--amber-329-a20": { from: "#e8bd6e33" },
+    "--amber-600": {
+        from: "#a17537",
+        keeps: {
+            pair: ["--amber-600", "#edf0e5"],
+            before: ["#a17537", "#edf0e5"],
+        },
+    },
+    "--amber-684": {
+        from: "#a56a12",
+        keeps: {
+            pair: ["--amber-684", "#e8ecdf"],
+            before: ["#946827", "#e8ecdf"],
+        },
+    },
+    "--amber-755": {
+        from: "#7a4d08",
+        keeps: {
+            pair: ["--amber-755", "--amber-65"],
+            before: ["#7a4d08", "#fbf3e2"],
+        },
+    },
+    "--cream-39": { from: "#f6f7f3" },
+    "--cream-45": {
+        from: "#f6f7f3",
+        keeps: {
+            pair: ["#ffffff", "--cream-45"],
+            before: ["#ffffff", "#f6f7f3"],
+        },
+    },
+};
+
+const shades: Record<string, string> = { ...brandProperties, ...imageShades };
+
+function ruleShade(name: string, lightness: number) {
+    const [, family] = /^--(\w+)-/.exec(name)!;
+    const { kit, old } = families[family as keyof typeof families];
+    const { from } = derivation[name]!;
+    const saturation = Math.min(
+        1,
+        (hsl(from).saturation * hsl(kit).saturation) / hsl(old).saturation,
+    );
+    return hex(hsl(kit).hue, saturation, lightness) + from.slice(7);
+}
+
+function measured(pairing: Pairing, name: string, value: string) {
+    const [first, second] = pairing.pair.map((colour) =>
+        colour === name
+            ? value
+            : colour.startsWith("--")
+              ? shades[colour]!
+              : colour,
+    ) as [string, string];
+    return contrast(first, second);
+}
+
+test("every brand shade is the kit's colour or follows the token rule, and each exception keeps its pairing", () => {
+    expect(Object.keys(derivation).sort()).toEqual(
+        Object.keys(shades)
+            .filter((name) => /-\d/.test(name))
+            .sort(),
+    );
+    for (const [name, value] of Object.entries(shades)) {
+        const [, family, number, alpha] =
+            /^--(forest|amber|cream)(?:-(\d+))?(?:-a(\d+))?$/.exec(name)!;
+        if (alpha !== undefined)
+            expect(
+                Math.round((Number.parseInt(value.slice(7), 16) / 255) * 100),
+                name,
+            ).toBe(Number(alpha));
+        if (number === undefined) {
+            expect(value.slice(0, 7), name).toBe(
+                families[family as keyof typeof families].kit,
+            );
+            continue;
+        }
+        expect(value, name).toBe(ruleShade(name, 1 - Number(number) / 1000));
+        const { from, keeps } = derivation[name]!;
+        const oldNumber = Math.round(1000 * (1 - hsl(from).lightness));
+        if (keeps === undefined) {
+            expect(Number(number), name).toBe(oldNumber);
+            continue;
+        }
+        const floor = contrast(...keeps.before);
+        expect(measured(keeps, name, value), name).toBeGreaterThanOrEqual(
+            floor,
+        );
+        expect(
+            measured(keeps, name, ruleShade(name, 1 - oldNumber / 1000)),
+            name,
+        ).toBeLessThan(floor);
+    }
+});
 
 async function sourceFiles() {
     const entries = await readdir(path.join(web, "src"), {
@@ -186,15 +349,8 @@ async function sourceFiles() {
         );
 }
 
-test("the brand families are written once, in the tokens module", async () => {
-    const stylesheet = await readFile(
-        path.join(web, "src/styles/tokens.css"),
-        "utf8",
-    );
-    expect(stylesheet.match(/--(?:forest|amber|cream)[\w-]*(?=:)/g)).toBeNull();
-    const values = Object.values(brandProperties).map((value) =>
-        value.slice(0, 7),
-    );
+test("the brand shades are written once, in the tokens module", async () => {
+    const values = Object.values(shades).map((value) => value.slice(0, 7));
     const written: string[] = [];
     for (const file of await sourceFiles()) {
         if (file === "src/styles/tokens.ts" || file === kitArtwork) continue;
@@ -207,25 +363,42 @@ test("the brand families are written once, in the tokens module", async () => {
     expect(written).toEqual([]);
 });
 
-test("every brand shade takes its kit colour's hue and is named by its lightness", () => {
-    for (const [name, value] of Object.entries(brandProperties)) {
-        const [, family, number, alpha] =
-            /^--(forest|amber|cream)(?:-(\d+))?(?:-a(\d+))?$/.exec(name)!;
-        const kit = brand[family as keyof typeof brand];
-        if (number === undefined) {
-            expect(value, name).toBe(kit);
-            continue;
-        }
-        const shade = hsl(value);
-        expect(Math.abs(shade.hue - hsl(kit).hue), name).toBeLessThan(2);
-        expect(Math.round(1000 * (1 - shade.lightness)), name).toBe(
-            Number(number),
-        );
-        if (alpha === undefined) expect(value, name).toHaveLength(7);
-        else
-            expect(
-                Math.round((Number.parseInt(value.slice(7), 16) / 255) * 100),
-                name,
-            ).toBe(Number(alpha));
+test("the root document carries exactly the brand shades a stylesheet reads", async () => {
+    const read = new Set<string>();
+    for (const file of await sourceFiles())
+        if (file.endsWith(".css"))
+            for (const [, name] of (
+                await readFile(path.join(web, file), "utf8")
+            ).matchAll(/var\(\s*(--[\w-]+)/g))
+                read.add(name!);
+    expect(
+        Object.keys(brandProperties).filter((name) => !read.has(name)),
+    ).toEqual([]);
+    expect(Object.keys(imageShades).filter((name) => read.has(name))).toEqual(
+        [],
+    );
+});
+
+test("the console's brand tokens are the shades of the tokens module", async () => {
+    const stylesheet = await readFile(
+        path.join(
+            web,
+            "../src/pyracast/regions/static/pyracast/admin-workspace.css",
+        ),
+        "utf8",
+    );
+    const [, root] = /^:root \{\n([^}]*)\n\}/.exec(stylesheet)!;
+    const tokens = [
+        ...root!.matchAll(/^\s*(--(?:forest|amber|cream)[\w-]*): (#\w+);$/gm),
+    ];
+    expect(tokens.length).toBeGreaterThan(3);
+    for (const [, name, value] of tokens) {
+        const [, family, number] =
+            /^--(forest|amber|cream)(?:-(\d+))?(?:-a\d+)?$/.exec(name!)!;
+        if (number === undefined)
+            expect(value!.slice(0, 7), name).toBe(
+                families[family as keyof typeof families].kit,
+            );
+        else expect(value, name).toBe(shades[name!]);
     }
 });

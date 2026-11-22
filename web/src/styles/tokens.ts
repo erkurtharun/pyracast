@@ -1,4 +1,3 @@
-// Colours and spacing for places that cannot read CSS custom properties: SVG presentation attributes, generated images and the QR code.
 export const qrColours = { background: "#ffffff", foreground: "#000000" };
 
 export const brand = {
@@ -11,19 +10,21 @@ export const brandProperties = {
     "--forest": brand.forest,
     "--forest-822": "#144547",
     "--amber": brand.amber,
-    "--amber-61": "#fef3e1",
+    "--amber-65": "#fef2df",
     "--amber-69": "#f9f0e2",
-    "--amber-231": "#f3ce95",
-    "--amber-290": "#ffc46b",
+    "--amber-220": "#eecfa0",
     "--amber-300": "#dabb8b",
     "--amber-329-a0": "#f7bb5f00",
     "--amber-329-a20": "#f7bb5f33",
     "--amber-600": "#a47328",
-    "--amber-690": "#9e5f00",
+    "--amber-684": "#a16100",
     "--amber-755": "#7d4b00",
     "--cream": brand.cream,
-    "--cream-35": "#f9f8f3",
+    "--cream-39": "#f9f7f2",
+    "--cream-45": "#f8f6ef",
 } as const;
+
+export const imageShades = { "--amber-296": "#fec369" } as const;
 
 export const illustrationColours = {
     forecast: "#28664e",
@@ -36,7 +37,7 @@ export const illustrationColours = {
 export const socialImageColours = {
     background: brand.forest,
     text: brand.cream,
-    accent: brandProperties["--amber-290"],
+    accent: imageShades["--amber-296"],
     muted: "#c7d9cc",
 };
 
