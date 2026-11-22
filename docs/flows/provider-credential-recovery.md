@@ -77,7 +77,7 @@ sequenceDiagram
 | Run: key replaced or lease moved on during the run | Outcome `stopped` or `lease_lost`; the due time the newer replacement or dispatch set is kept |
 | Run: 401, or the account's 401 block | `key_rejected`, due time cleared |
 | Run: a stored provider delay / used-up quota / a provider answer that is unreachable, throttled or failing | `waiting`, due at the delay's end / the next UTC day / after `RETRY_DELAY` (15 minutes) |
-| Run: a plant refused for the forecast reserve | The run goes on with later plants; when it reaches its end it is `waiting` until the earlier of `AFTER_THE_SLOT` (30 s) after the account's next forecast slot following its first refusal and the next UTC day, or until the run's end if that is later. A later plant's outcome that ends the run sets its own due time |
+| Run: a plant refused for the forecast reserve | The run goes on with later plants; a run that reaches its end is `waiting`, due when room may be free again (`revalidation._after_the_next_slot`). A later plant's outcome that ends the run sets its own due time |
 | Run: the account row cannot be locked at `_take_lease` (lock timeout or deadlock) | Outcome `contended`: nothing written, the delivery ends normally (`job_claim_contended`, `worker-runtime`), the dispatch lease stays and the account is due again when it ends (5 minutes) |
 | Run: a plant refused by the provider (403, 404, non-retryable) / by a validation rule | That plant gets `error` health / keeps its health; the run goes on |
 
