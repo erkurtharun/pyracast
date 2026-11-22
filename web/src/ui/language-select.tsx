@@ -23,6 +23,8 @@ export function LanguageSelect() {
         | { status: "idle" | "saving" | "unavailable" }
         | { status: "error"; target: Language }
     >({ status: "idle" });
+    if (state.status === "error" && state.target === locale)
+        setState({ status: "idle" });
     const mounted = useRef(false);
     useEffect(() => {
         mounted.current = true;
@@ -70,13 +72,14 @@ export function LanguageSelect() {
                             try {
                                 await loadCatalogue(language);
                             } catch {
-                                setState({ status: "unavailable" });
+                                if (mounted.current)
+                                    setState({ status: "unavailable" });
                                 return;
                             }
-                            // A choice made for a session that has ended, or on a control that has
-                            // gone, must not be saved for the session shown now.
+                            // A control that has gone updates nothing; a choice made for a session
+                            // that has ended is neither saved nor reported for the session shown now.
+                            if (!mounted.current) return;
                             if (
-                                !mounted.current ||
                                 sessionOwner(sessionState().session) !== owner
                             ) {
                                 setState({ status: "idle" });
@@ -88,9 +91,16 @@ export function LanguageSelect() {
                                         body: { language },
                                     }),
                                 );
-                                setState({ status: "idle" });
+                                if (mounted.current)
+                                    setState({ status: "idle" });
                             } catch {
-                                setState({ status: "error", target: language });
+                                if (!mounted.current) return;
+                                setState(
+                                    sessionOwner(sessionState().session) !==
+                                        owner
+                                        ? { status: "idle" }
+                                        : { status: "error", target: language },
+                                );
                             }
                         })()
                     }
@@ -106,9 +116,7 @@ export function LanguageSelect() {
             {state.status === "saving" && (
                 <span role="status">{t("saving")}</span>
             )}
-            {state.status === "error" && state.target !== locale && (
-                <p role="alert">{t("failed")}</p>
-            )}
+            {state.status === "error" && <p role="alert">{t("failed")}</p>}
             {unavailable && (
                 <>
                     <p role="alert">{t("unavailable")}</p>
