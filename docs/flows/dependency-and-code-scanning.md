@@ -68,9 +68,10 @@ No database table is read or written. Artifacts:
 | Condition | Result |
 | --- | --- |
 | Any Python advisory in any group or extra, or a pin pip-audit cannot collect (`--strict`) | Job `audit` fails |
-| An npm advisory (any severity, dev dependencies included) that `web/audit-exceptions.json` does not accept for its package, an exception without a reason, past its expiry date or no longer reported, or a malformed file or report | `npm_audit.py` prints each failure and exits 1; the browser scenarios after it do not run |
+| An npm advisory (any severity, dev dependencies included) that `web/audit-exceptions.json` does not accept for its package, an exception without a reason, past its expiry date or no longer reported, a malformed file or report, an exception with a date not in canonical `YYYY-MM-DD` form or a blank advisory or package, or a second exception for the same advisory and package | `npm_audit.py` prints each failure and exits 1; the browser scenarios after it do not run |
 | An image has a HIGH or CRITICAL finding, fixed or not, that `deploy/image-scan-exceptions.json` does not accept for exactly that service, id and package until the end date (UTC day) | `check_image_scans.py` prints every unaccepted finding and exits "Image scan gate failed: N high or critical findings and M exception problems."; CI `deployment`, Release `scan` or the rescan fails |
 | Exception without a reason, expired, no longer reported, malformed, duplicated or the file missing | Same gate, "Image scan gate failed: ..." |
+| A finding whose `VulnerabilityID` or `PkgName` is not text | The gate fails with "`<service>`: `<field>` of a finding is not text." |
 | Report is for another or non-`sha256:` image id, has no OS family, an empty `Results` list or no packages, or a service report is missing | Same gate: "scan does not match the selected immutable image", "image inventory is missing" or "package inventory is missing" |
 | Report without a `Results` or `Metadata` key | Same gate, naming the missing key ("Image scan gate failed: 'Results'") |
 | Wrong argument count, Compose config error, an image reference `jq` cannot read from the rendered Compose file, or a Trivy error | `scan-images.sh` exits non-zero under `set -e` (usage: exit 2) before the checker runs |
