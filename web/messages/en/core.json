@@ -212,6 +212,12 @@
         "attentionReason": "Needs attention: {reason}",
         "awaitingSetup": "Waiting for an administrator to finish setup"
     },
+    "InstallApp": {
+        "install": "Install app",
+        "browserMenu": "Open the browser menu and choose Install or Add to Home screen.",
+        "homeScreen": "Tap Share, then Add to Home Screen.",
+        "dock": "In Safari, choose File > Add to Dock."
+    },
     "Common": {
         "unexpected": "Something went wrong.",
         "saveFailed": "We couldn’t save your changes",

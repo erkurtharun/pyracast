@@ -10,6 +10,7 @@ import {
 } from "react";
 import { displayMessage } from "@/lib/api/errors";
 import { createQueryClient, QueryOwner } from "@/lib/api/query";
+import { captureInstallPrompt } from "@/lib/install-prompt";
 import { reloadPage } from "@/lib/on-demand";
 import { browserErrors } from "@/i18n/browser";
 import {
@@ -26,6 +27,8 @@ import { LiveRegion } from "@/ui/live-region";
 import { useLanguageHandoff } from "./language-handoff";
 import { SessionLanguage, useSessionLanguage } from "./session-language";
 import { Notice } from "@/ui/ui";
+
+if (typeof window !== "undefined") captureInstallPrompt();
 
 export function AppRoot({ children }: { children: ReactNode }) {
     const [client] = useState(createQueryClient);

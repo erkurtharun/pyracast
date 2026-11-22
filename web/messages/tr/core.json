@@ -212,6 +212,12 @@
         "attentionReason": "İlgi bekliyor: {reason}",
         "awaitingSetup": "Kurulumu bir yöneticinin tamamlaması bekleniyor"
     },
+    "InstallApp": {
+        "install": "Uygulamayı yükle",
+        "browserMenu": "Tarayıcı menüsünü açın ve Yükle ya da Ana ekrana ekle seçeneğini seçin.",
+        "homeScreen": "Paylaş'a, ardından Ana Ekrana Ekle'ye dokunun.",
+        "dock": "Safari'de Dosya > Dock'a Ekle'yi seçin."
+    },
     "Common": {
         "unexpected": "Bir sorun oluştu.",
         "saveFailed": "Değişiklikler kaydedilemedi",
