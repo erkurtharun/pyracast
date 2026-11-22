@@ -30,6 +30,7 @@ from pyracast.plants.operations import (
     request_calibration,
     revise_plant,
 )
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production_changes import (
     ObservationImportResult,
     ObservationInput,
@@ -152,10 +153,9 @@ def test_configuration_revision_and_activation_history(monkeypatch: pytest.Monke
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="New",
-        dc_capacity_mw=140,
-        inverter_capacity_mw=105,
-        export_limit_mw=100,
+        PlantParameters(
+            name="New", dc_capacity_mw=140, inverter_capacity_mw=105, export_limit_mw=100
+        ),
     )
     pending.refresh_from_db()
     first.refresh_from_db()
@@ -197,9 +197,11 @@ def test_invalid_configuration_is_atomic(
     values: dict[str, Any] = {"name": "Plant", "dc_capacity_mw": 130}
     values.update(arguments)
     with pytest.raises(ValidationError):
-        create_plant(system.member, system.tenant.pk, system.region.pk, **values)
+        create_plant(system.member, system.tenant.pk, system.region.pk, PlantParameters(**values))
     with pytest.raises(ValidationError):
-        revise_plant(system.member, system.tenant.pk, system.region.pk, plant.pk, **values)
+        revise_plant(
+            system.member, system.tenant.pk, system.region.pk, plant.pk, PlantParameters(**values)
+        )
     assert Plant.objects.count() == PlantConfiguration.objects.count() == 1
 
 
@@ -223,12 +225,14 @@ def test_geometry_revisions_preserve_explicit_unknowns_and_prior_settings(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Fixed",
-        dc_capacity_mw=130,
-        export_limit_mw=100,
-        mounting_type="fixed",
-        surface_tilt_degrees=90,
-        surface_azimuth_degrees=359.9,
+        PlantParameters(
+            name="Fixed",
+            dc_capacity_mw=130,
+            export_limit_mw=100,
+            mounting_type="fixed",
+            surface_tilt_degrees=90,
+            surface_azimuth_degrees=359.9,
+        ),
     ).current_configuration
     assert fixed is not None
     assert (fixed.mounting_type, fixed.surface_tilt_degrees, fixed.surface_azimuth_degrees) == (
@@ -241,10 +245,9 @@ def test_geometry_revisions_preserve_explicit_unknowns_and_prior_settings(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Tracking",
-        dc_capacity_mw=130,
-        export_limit_mw=100,
-        mounting_type="tracking",
+        PlantParameters(
+            name="Tracking", dc_capacity_mw=130, export_limit_mw=100, mounting_type="tracking"
+        ),
     ).current_configuration
     assert tracking is not None
     assert (
@@ -267,9 +270,7 @@ def test_geometry_revisions_preserve_explicit_unknowns_and_prior_settings(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Unknown fixed angles",
-        dc_capacity_mw=1,
-        mounting_type="fixed",
+        PlantParameters(name="Unknown fixed angles", dc_capacity_mw=1, mounting_type="fixed"),
     ).current_configuration
     assert partial is not None
     assert partial.surface_tilt_degrees is None
@@ -282,17 +283,38 @@ def test_tenant_and_binding_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
     other = Tenant.objects.create(name="Other")
     Membership.objects.create(user=stranger, tenant=other, role=WorkspaceRole.ADMIN)
     with pytest.raises(PermissionDenied):
-        create_plant(stranger, system.tenant.pk, system.region.pk, name="X", dc_capacity_mw=1)
+        create_plant(
+            stranger,
+            system.tenant.pk,
+            system.region.pk,
+            PlantParameters(name="X", dc_capacity_mw=1),
+        )
     with pytest.raises(Region.DoesNotExist):
-        revise_plant(stranger, other.pk, system.region.pk, plant.pk, name="X", dc_capacity_mw=1)
+        revise_plant(
+            stranger,
+            other.pk,
+            system.region.pk,
+            plant.pk,
+            PlantParameters(name="X", dc_capacity_mw=1),
+        )
     Region.objects.filter(pk=system.region.pk).update(status="suspended")
     with pytest.raises(ValidationError):
-        create_plant(system.member, system.tenant.pk, system.region.pk, name="X", dc_capacity_mw=1)
+        create_plant(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            PlantParameters(name="X", dc_capacity_mw=1),
+        )
     with pytest.raises(ValidationError):
         request_run(system, plant)
     Region.objects.filter(pk=system.region.pk).update(approved_binding=None)
     with pytest.raises(ValidationError):
-        create_plant(system.member, system.tenant.pk, system.region.pk, name="X", dc_capacity_mw=1)
+        create_plant(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            PlantParameters(name="X", dc_capacity_mw=1),
+        )
 
 
 def test_observation_replay_units_zero_and_atomic_overlap(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -344,7 +366,10 @@ def test_new_configuration_accepts_old_meter_history_and_future_batch_rolls_back
     monkeypatch.setattr(timezone, "now", lambda: NOW)
     system = make_system(approved=True)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="New", dc_capacity_mw=130
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="New", dc_capacity_mw=130),
     )
     configuration = plant.current_configuration
     assert configuration is not None
@@ -525,8 +550,7 @@ def test_configless_plant_cannot_activate_and_historical_imports_keep_revision(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Revised",
-        dc_capacity_mw=140,
+        PlantParameters(name="Revised", dc_capacity_mw=140),
     )
     import_observations(
         system.member,
@@ -594,9 +618,7 @@ def test_identical_save_keeps_configuration_calibration_and_jobs(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name=" Plant ",
-        dc_capacity_mw=130.0,
-        export_limit_mw=100,
+        PlantParameters(name=" Plant ", dc_capacity_mw=130.0, export_limit_mw=100),
     )
     plant.refresh_from_db()
     pending.refresh_from_db()
@@ -620,9 +642,7 @@ def test_rename_only_updates_plant_and_region_names(monkeypatch: pytest.MonkeyPa
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name=" Renamed ",
-        dc_capacity_mw=130,
-        export_limit_mw=100,
+        PlantParameters(name=" Renamed ", dc_capacity_mw=130, export_limit_mw=100),
     )
     system.region.refresh_from_db()
     assert (renamed.name, system.region.name) == ("Renamed", "Renamed")
@@ -646,7 +666,7 @@ def test_plant_put_unchanged_returns_same_configuration(monkeypatch: pytest.Monk
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/"
     response = client.put(
         path,
-        {"name": "Plant", "dc_capacity_mw": 130, "export_limit_mw": 100},
+        {"name": "Plant", "dc_capacity_mw": 130, "export_limit_mw": 100, "expected_revision": 1},
         content_type="application/json",
     )
     assert response.status_code == 200
@@ -703,11 +723,13 @@ def test_a_change_of_any_saved_configuration_field_creates_a_revision(
         "export_limit_mw": 100,
         "mounting_type": "fixed",
     }
-    base = revise_plant(system.member, system.tenant.pk, system.region.pk, plant.pk, **submission)
+    base = revise_plant(
+        system.member, system.tenant.pk, system.region.pk, plant.pk, PlantParameters(**submission)
+    )
     assert base.current_configuration is not None
     submission.update(CONFIGURATION_FIELD_CHANGES[field](system, base))
     revised = revise_plant(
-        system.member, system.tenant.pk, system.region.pk, plant.pk, **submission
+        system.member, system.tenant.pk, system.region.pk, plant.pk, PlantParameters(**submission)
     )
     configuration = revised.current_configuration
     assert configuration is not None
@@ -727,16 +749,21 @@ def test_rename_to_the_region_name_leaves_the_region_unchanged(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Site",
-        dc_capacity_mw=130,
-        export_limit_mw=100,
+        PlantParameters(name="Site", dc_capacity_mw=130, export_limit_mw=100),
     )
     assert renamed.name == "Site"
     assert PlantEvent.objects.get(action="plant_renamed").details == {"old": "Plant", "new": "Site"}
     assert not AuditEvent.objects.filter(action="region_renamed").exists()
 
 
-SUBMISSION_FIELDS_OUTSIDE_SAVE = {"id", "plant", "submitted_by", "created_at", "updated_at"}
+SUBMISSION_FIELDS_OUTSIDE_SAVE = {
+    "id",
+    "plant",
+    "submitted_by",
+    "base_configuration",
+    "created_at",
+    "updated_at",
+}
 
 
 def pending_submission(system: System) -> tuple[Plant, dict[str, Any]]:
@@ -746,7 +773,9 @@ def pending_submission(system: System) -> tuple[Plant, dict[str, Any]]:
         "export_limit_mw": 100,
         "mounting_type": "fixed",
     }
-    plant = create_plant(system.member, system.tenant.pk, system.region.pk, **submission)
+    plant = create_plant(
+        system.member, system.tenant.pk, system.region.pk, PlantParameters(**submission)
+    )
     assert plant.current_configuration_id is None
     return plant, submission
 
@@ -762,7 +791,7 @@ def test_identical_pending_save_keeps_submission_attribution_and_events() -> Non
     plant, submission = pending_submission(system)
     other = second_workspace_admin(system)
     events = PlantEvent.objects.count()
-    revise_plant(other, system.tenant.pk, system.region.pk, plant.pk, **submission)
+    revise_plant(other, system.tenant.pk, system.region.pk, plant.pk, PlantParameters(**submission))
     saved = PlantSubmission.objects.get(plant=plant)
     assert saved.submitted_by_id == system.member.pk
     assert PlantEvent.objects.count() == events
@@ -773,7 +802,11 @@ def test_rename_only_pending_save_renames_plant_and_region_without_resubmitting(
     plant, submission = pending_submission(system)
     other = second_workspace_admin(system)
     revise_plant(
-        other, system.tenant.pk, system.region.pk, plant.pk, **{**submission, "name": " New "}
+        other,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        PlantParameters(**{**submission, "name": " New "}),
     )
     plant.refresh_from_db()
     system.region.refresh_from_db()
@@ -798,7 +831,7 @@ def test_a_change_of_any_submitted_field_resubmits(field: str) -> None:
     plant, submission = pending_submission(system)
     other = second_workspace_admin(system)
     submission.update(CONFIGURATION_FIELD_CHANGES[field](system, plant))
-    revise_plant(other, system.tenant.pk, system.region.pk, plant.pk, **submission)
+    revise_plant(other, system.tenant.pk, system.region.pk, plant.pk, PlantParameters(**submission))
     saved = PlantSubmission.objects.get(plant=plant)
     assert saved.submitted_by_id == other.pk
     assert PlantEvent.objects.filter(action="submission_saved", actor=other).count() == 1

@@ -16,6 +16,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.measurements import latest_measurement_day, select_measurements
 from pyracast.plants.models import ProductionObservation
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
     ObservationInput,
@@ -184,9 +185,7 @@ def test_current_configuration_and_meter_basis_boundaries(monkeypatch: pytest.Mo
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="New",
-        dc_capacity_mw=130,
-        measurement_basis="ac_generation",
+        PlantParameters(name="New", dc_capacity_mw=130, measurement_basis="ac_generation"),
     )
     plant.refresh_from_db()
     config = plant.current_configuration

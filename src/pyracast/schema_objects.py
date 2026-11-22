@@ -436,6 +436,14 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "Stored EPIAS snapshots",
         ("metering", "0003_lease_check_and_snapshot_trigger"),
     ),
+    CompositeForeignKey(
+        "plantsubmission_base_configuration_plant_fk",
+        "plants_plantsubmission",
+        ("base_configuration_id", "plant_id"),
+        "plants_plantconfiguration",
+        ("id", "plant_id"),
+        ("plants", "0007_plant_parameters_revision"),
+    ),
     RowTrigger(
         "productionobservation_revision_guard",
         "plants_productionobservation",

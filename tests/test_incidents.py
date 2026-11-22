@@ -15,6 +15,7 @@ from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.incidents.operations import save_incident
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant, revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.trash import RETENTION, purge_expired, restore_region, trash_region
 from tests.support.domain import make_system
 from tests.support.trash_operations import sibling
@@ -25,7 +26,10 @@ pytestmark = pytest.mark.django_db(transaction=True)
 def test_incident_api_revision_and_historical_evidence() -> None:
     system = make_system(approved=True)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=10
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=10),
     )
     client = Client()
     client.force_login(system.member)
@@ -88,7 +92,10 @@ def test_incident_api_revision_and_historical_evidence() -> None:
 def test_validation_and_overlap() -> None:
     system = make_system(approved=True)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=10
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=10),
     )
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     start = timezone.now() - timedelta(hours=3)
@@ -125,7 +132,10 @@ def test_validation_and_overlap() -> None:
 def test_concurrent_overlaps_are_serialized() -> None:
     system = make_system(approved=True)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=10
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=10),
     )
     barrier = Barrier(2)
     start = timezone.now() - timedelta(hours=1)
@@ -161,7 +171,10 @@ def test_concurrent_overlaps_are_serialized() -> None:
 def test_incident_updates_and_validation() -> None:
     system = make_system(approved=True)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=10
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=10),
     )
     client = Client()
     client.force_login(system.member)
@@ -229,7 +242,10 @@ def test_incident_updates_and_validation() -> None:
 def test_active_incident_reconfirmation_uses_current_configuration() -> None:
     system = make_system(approved=True)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=10
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=10),
     )
     client = Client()
     client.force_login(system.member)
@@ -244,7 +260,7 @@ def test_active_incident_reconfirmation_uses_current_configuration() -> None:
     }
     initial = client.post(url, payload, content_type="application/json").json()
     first_revision = IncidentRevision.objects.get(incident_id=initial["id"])
-    revised = revise_plant(*scope, name="PV", dc_capacity_mw=5)
+    revised = revise_plant(*scope, PlantParameters(name="PV", dc_capacity_mw=5))
     detail = f"{url}{initial['id']}/"
     rejected = client.put(
         detail, payload | {"expected_revision": 1}, content_type="application/json"
@@ -268,7 +284,7 @@ def test_active_incident_reconfirmation_uses_current_configuration() -> None:
         content_type="application/json",
     )
     assert resolved.status_code == 200
-    revise_plant(*scope, name="PV", dc_capacity_mw=3)
+    revise_plant(*scope, PlantParameters(name="PV", dc_capacity_mw=3))
     corrected = client.put(
         detail,
         payload
@@ -286,11 +302,17 @@ def test_active_incident_reconfirmation_uses_current_configuration() -> None:
 def test_incident_history_survives_restore_and_is_purged_with_plant() -> None:
     system = make_system(approved=True)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=10
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=10),
     )
     other_region, _ = sibling(system)
     other = create_plant(
-        system.member, system.tenant.pk, other_region.pk, name="Other", dc_capacity_mw=10
+        system.member,
+        system.tenant.pk,
+        other_region.pk,
+        PlantParameters(name="Other", dc_capacity_mw=10),
     )
     parent = (system.member, system.tenant.pk, system.region.pk)
     start = timezone.now() - timedelta(hours=2)
@@ -330,7 +352,10 @@ def test_incident_history_survives_restore_and_is_purged_with_plant() -> None:
 def test_active_incident_update_requires_current_configuration() -> None:
     system = make_system(approved=True)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=10
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=10),
     )
     parent = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     values: dict[str, Any] = dict(

@@ -20,6 +20,7 @@ from pyracast.notifications.operations import configure_reminders
 from pyracast.plants import activation, operations
 from pyracast.plants.automation import set_calibration_automation
 from pyracast.plants.models import Plant, PlantEvent
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.plants.sites import submit_site
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
@@ -56,7 +57,10 @@ pytestmark = pytest.mark.django_db(transaction=True)
 def test_viewer_cannot_mutate_any_workspace_endpoint(method: str, suffix: str) -> None:
     system = make_system(approved=True)
     plant = operations.create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=1),
     )
     viewer = User.objects.create_user(username="viewer")
     Membership.objects.create(user=viewer, tenant=system.tenant)
@@ -93,15 +97,16 @@ def mutation_calls(system: System, actor: User, plant: Plant) -> list[Callable[[
         lambda: submit_site(
             actor,
             tenant_id,
-            name="New",
+            PlantParameters(name="New", dc_capacity_mw=1),
             latitude=41,
             longitude=30,
             timezone="UTC",
-            dc_capacity_mw=1,
         ),
-        lambda: operations.create_plant(actor, tenant_id, region_id, name="New", dc_capacity_mw=1),
+        lambda: operations.create_plant(
+            actor, tenant_id, region_id, PlantParameters(name="New", dc_capacity_mw=1)
+        ),
         lambda: operations.revise_plant(
-            actor, tenant_id, region_id, plant_id, name="Changed", dc_capacity_mw=2
+            actor, tenant_id, region_id, plant_id, PlantParameters(name="Changed", dc_capacity_mw=2)
         ),
         lambda: import_observations(
             actor,
@@ -148,7 +153,10 @@ def mutation_calls(system: System, actor: User, plant: Plant) -> list[Callable[[
 def test_application_mutations_require_current_workspace_administrator(identity: str) -> None:
     system = make_system(approved=True)
     plant = operations.create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=1),
     )
     if identity in {"demoted", "inactive"}:
         actor = system.member

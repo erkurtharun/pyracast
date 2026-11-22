@@ -17,6 +17,7 @@ from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from pyracast.connections.setup import SetupOutcome, save_provider_setup
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.plants.models import Plant, PlantConfiguration
+from pyracast.plants.parameters import PlantParameters
 from pyracast.platform_admin.forms import BindingActionForm, ProviderSetupForm
 from pyracast.provider_retry import retryable_status
 from pyracast.providers import SolcastProvider
@@ -24,6 +25,7 @@ from pyracast.regions.models import AuditEvent, Region
 from tests.support.admin_setup import (
     VALIDATION_FAILURES,
     admin_system,
+    form_fields,
     review_fields,
     setup_input,
     setup_url,
@@ -229,6 +231,19 @@ def test_invalid_setup_preserves_safe_fields_and_never_renders_secrets(
     assert field in response.context["setup_form"].errors
     assert b"never-render-this" not in response.content
     assert ProviderAccount.objects.count() == SiteBinding.objects.count() == 1
+
+
+def test_a_refused_setup_page_carries_the_hidden_values_of_a_fresh_page() -> None:
+    system = admin_system()
+    submitted_plant(system)
+    client, _ = verified_admin()
+    fresh = client.get(setup_url(system))
+
+    refused = client.post(setup_url(system), setup_input(system, capacity_kw="nan"))
+
+    assert refused.status_code == 400
+    for action in ("configure", "validate"):
+        assert form_fields(refused.content, action) == form_fields(fresh.content, action)
 
 
 def test_stale_setup_and_action_revisions_are_rejected() -> None:
@@ -505,7 +520,12 @@ def approved_admin_system() -> tuple[System, list[int]]:
     system.binding.installation_date = date(2020, 1, 1)
     system.binding.settings_verification_reference = "Verified synthetic site settings"
     system.binding.save(update_fields=("installation_date", "settings_verification_reference"))
-    create_plant(system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1)
+    create_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=1),
+    )
     Plant.objects.update(
         automatic_calibration_enabled=True,
         automatic_calibration_enabled_by=system.member,

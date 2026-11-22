@@ -38,7 +38,13 @@ from pyracast.plants.models import Plant
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import Region
 from tests.support.account_sessions import totp_clock, with_totp
-from tests.support.admin_setup import admin_system, review_fields, setup_input, submitted_plant
+from tests.support.admin_setup import (
+    admin_system,
+    form_fields,
+    review_fields,
+    setup_input,
+    submitted_plant,
+)
 from tests.support.api import verified_admin
 from tests.support.auth_lifecycle import totp_code
 from tests.support.domain import FakeAdapter, System, make_system
@@ -561,23 +567,16 @@ def test_a_stale_validation_page_spends_no_second_request(
     monkeypatch.setattr(SolcastProvider, "validate", lambda self, binding: None)
     client, _ = verified_admin()
     page = client.get(plant_url(system.region))
-    fields = {
-        name: page.context["action_form"][name].value()
-        for name in page.context["action_form"].fields
-    }
-    data = {
-        key: value
-        for key, value in fields.items()
-        if value is not None and key != "provider_recovered"
-    }
+    data = {**form_fields(page.content, "validate"), "action": "validate"}
 
-    first = client.post(plant_url(system.region), {**data, "action": "validate"})
-    second = client.post(plant_url(system.region), {**data, "action": "validate"})
+    first = client.post(plant_url(system.region), data)
+    second = client.post(plant_url(system.region), data)
 
     assert first.status_code == 302
     assert second.status_code == 400
     assert RequestAttempt.objects.count() == 1
     assert "validated after this page opened" in second.content.decode()
+    assert {**form_fields(second.content, "validate"), "action": "validate"} == data
 
 
 def turkish(client: Client, path: str) -> str:

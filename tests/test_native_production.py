@@ -9,6 +9,7 @@ from django.test import Client
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import ProductionObservation
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
     ObservationInput,
@@ -155,7 +156,11 @@ def test_native_earlier_configuration_correction_is_shown_apart_and_reentry_afte
     restored = write(system, plant, [edit(start, 3, revision_id=tombstone)])["ids"][0]
     assert ProductionObservation.objects.get(pk=restored).supersedes_id == tombstone
     revise_plant(
-        system.member, system.tenant.pk, system.region.pk, plant.pk, name="New", dc_capacity_mw=150
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        PlantParameters(name="New", dc_capacity_mw=150),
     )
     plant.refresh_from_db()
     result = production_history(plant, start_date=DAY, end_date=DAY, native_intervals=True)

@@ -55,13 +55,20 @@ function keys(node: unknown, prefix = ""): string[] {
         : [prefix.slice(0, -1)];
 }
 
-test("both languages carry the same message keys", async () => {
-    for (const name of ["core", "workspace", "forecast"]) {
+test("both languages carry the same message files and keys", async () => {
+    const [english, turkish] = await Promise.all(
+        ["en", "tr"].map(async (language) =>
+            (await readdir(path.join(web, "messages", language))).sort(),
+        ),
+    );
+    expect(turkish).toEqual(english);
+    expect(english).toContain("shell.json");
+    for (const name of english!) {
         const [en, tr] = await Promise.all(
             ["en", "tr"].map(async (language) =>
                 JSON.parse(
                     await readFile(
-                        path.join(web, "messages", language, `${name}.json`),
+                        path.join(web, "messages", language, name),
                         "utf8",
                     ),
                 ),

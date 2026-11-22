@@ -16,6 +16,7 @@ from pyracast.forecasts.models import (
 from pyracast.plants import forecast_archive
 from pyracast.plants.models import ForecastIssuance, Plant
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from tests.support.domain import NOW, FakeAdapter, System
 from tests.support.invariants import stored_again
 from tests.support.jobs import collect, publish
@@ -143,9 +144,7 @@ def test_configuration_changed_during_preparation_cannot_receive_the_old_output(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Reconfigured",
-        dc_capacity_mw=150,
-        export_limit_mw=100,
+        PlantParameters(name="Reconfigured", dc_capacity_mw=150, export_limit_mw=100),
     )
     assert publish(lease, snapshot, {}, NOW, prepared_issuances=prepared)
     assert ForecastResult.objects.filter(snapshot=snapshot).exists()

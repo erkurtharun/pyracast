@@ -1,5 +1,5 @@
 from collections import Counter
-from collections.abc import Collection, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
 from dataclasses import dataclass
 from functools import reduce
 from operator import or_
@@ -14,7 +14,7 @@ from django.contrib.auth.models import User
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
 from django.db import OperationalError, connection, models, transaction
-from django.db.models import Exists, F, OuterRef, Q
+from django.db.models import Exists, F, Func, OuterRef, Q
 from django.db.models.expressions import RawSQL
 from django.db.models.fields.json import KT
 from django.db.models.functions import Collate, Lower
@@ -47,9 +47,9 @@ from pyracast.regions.models import Region
 
 # Mail that names an address the account changed away from or removed, beside its current one.
 ADDRESS_HISTORY_MAIL = (OutboundMailKind.EMAIL_CHANGED, OutboundMailKind.EMAIL_DELETED)
-# PostgreSQL's built-in full Unicode case mapping. In every database locale it lower-cases a
-# letter as Python's `str.lower` does, for every letter of Unicode 16; the authentication cache
-# match below names it in its SQL.
+# PostgreSQL's built-in full Unicode case mapping. In every database locale it lower-cases and
+# case-folds a letter as Python's `str.lower` and `str.casefold` do, for every letter of
+# Unicode 16; the authentication cache match below names it in its SQL.
 CASE_MAPPING = "pg_unicode_fast"
 MAIL_NAMES = ("named_recipient", *(f"named_{key}" for key in MAIL_ADDRESS_KEYS))
 # Rows of unexpired sessions read per round trip while looking for pending flows.
@@ -139,6 +139,11 @@ def _folded(expression: Any) -> Lower:
     return Lower(Collate(expression, CASE_MAPPING))
 
 
+def _keyed(expression: Any) -> Func:
+    # `recipient_key` of a stored account address, which carries no surrounding space.
+    return Func(Collate(expression, CASE_MAPPING), function="casefold")
+
+
 def _normalized(values: Collection[object]) -> set[str]:
     # The same rule as `_folded`, on the Python side.
     return {value.strip().lower() for value in values if isinstance(value, str) and value.strip()}
@@ -152,10 +157,10 @@ def _holders(account_id: int) -> models.QuerySet[EmailAddress]:
     return EmailAddress.objects.filter(verified=True).exclude(user_id=account_id)
 
 
-def _unheld(account_id: int, folded: str) -> Q:
+def _unheld(account_id: int, folded: str, fold: Callable[[Any], Func] = _folded) -> Q:
     # Evaluated by the statement that locks or deletes the row: an address another account
     # verified while erasure waited for a lock counts as held there.
-    held = _holders(account_id).annotate(address=_folded("email")).filter(address=OuterRef(folded))
+    held = _holders(account_id).annotate(address=fold("email")).filter(address=OuterRef(folded))
     return Q(~Exists(held))
 
 
@@ -193,19 +198,22 @@ def _ties(account_id: int) -> models.QuerySet[ReminderRecipientTie]:
 
 def _entries(account_id: int, addresses: Collection[str]) -> models.QuerySet[ReminderRecipient]:
     """Reminder entries of the addresses no other account holds verified, and the entries tied
-    only to the account's memberships, whatever address they hold."""
+    only to the account's memberships, whatever address they hold. An entry keeps the address
+    as an administrator typed it, so it is matched and checked for a holder by its key."""
     ties = ReminderRecipientTie.objects.filter(recipient=OuterRef("pk"))
     ours = _memberships(account_id)
-    return ReminderRecipient.objects.alias(folded=_folded("address")).filter(
-        Q(key__in={recipient_key(address) for address in addresses}) & _unheld(account_id, "folded")
+    return ReminderRecipient.objects.filter(
+        Q(key__in={recipient_key(address) for address in addresses})
+        & _unheld(account_id, "key", _keyed)
         | Q(Exists(ties.filter(membership_id__in=ours)))
         & ~Exists(ties.exclude(membership_id__in=ours))
     )
 
 
 def _delivered(account_id: int, addresses: Collection[str]) -> models.QuerySet[DeliveryRecipient]:
-    return DeliveryRecipient.objects.alias(folded=_folded("address")).filter(
-        Q(key__in={recipient_key(address) for address in addresses}) & _unheld(account_id, "folded")
+    return DeliveryRecipient.objects.filter(
+        Q(key__in={recipient_key(address) for address in addresses})
+        & _unheld(account_id, "key", _keyed)
     )
 
 
@@ -266,9 +274,10 @@ def _forget_recipients(
     )
     _count(changes, ReminderRecipient.objects.filter(pk__in=entries).delete())
     _count(changes, ReminderRecipientTie.objects.filter(pk__in=ties).delete())
-    changes["notifications.ReminderSchedule"] += ReminderSchedule.objects.filter(
+    if revised := ReminderSchedule.objects.filter(
         pk__in={*entries.values(), *ties.values()}
-    ).update(revision=F("revision") + 1)
+    ).update(revision=F("revision") + 1):
+        changes["notifications.ReminderSchedule"] += revised
     delivered = _locked(
         _delivered(account_id, addresses).filter(delivery__schedule__region__in=regions)
     )
@@ -279,13 +288,16 @@ def _forget_mail(account_id: int, addresses: Collection[str], changes: Counter[s
     invitations = WorkspaceInvitation.objects.alias(folded=_folded("email")).filter(
         Q(folded__in=addresses) & _unheld(account_id, "folded") | Q(accepted_by_id=account_id)
     )
-    # Mail before its invitation, each in id order: the order of the mail worker.
-    mail = _locked(_mail().filter(_naming(account_id, addresses) | Q(invitation__in=invitations)))
-    _count(changes, OutboundMail.objects.filter(pk__in=mail).delete())
+    # Mail before its invitation, each in id order: the order of the mail worker. Each delete
+    # applies the guards again: a lock statement that waited for a row still decides on the
+    # addresses held when it began.
+    named = _naming(account_id, addresses) | Q(invitation__in=invitations)
+    mail = _locked(_mail().filter(named))
+    _count(changes, _mail().filter(named, pk__in=mail).delete())
     # An invitation whose mail was queued after that lock stays: deleting it would delete the
     # mail out of that order.
     unmailed = invitations.exclude(Exists(OutboundMail.objects.filter(invitation=OuterRef("pk"))))
-    _count(changes, WorkspaceInvitation.objects.filter(pk__in=_locked(unmailed)).delete())
+    _count(changes, invitations.filter(pk__in=_locked(unmailed)).delete())
     # The addresses no other account holds verified when this statement runs, as one JSON array.
     holding = RawSQL(
         "jsonb_path_exists(lower(value::text COLLATE pg_unicode_fast)::jsonb, "
@@ -413,15 +425,16 @@ def _erase(account_id: int) -> Erasure:
         )
     ).values("pk")
     # Workspaces before their regions, the order of administrator changes, member removals
-    # and reminder writers: an administrator assignment that commits first is seen below.
-    _locked(
+    # and reminder writers: an administrator assignment that commits first is seen below. A
+    # region is locked only with its workspace.
+    workspaces = _locked(
         Tenant.objects.filter(
             Q(pk__in=Membership.objects.filter(user_id=account_id).values("tenant_id"))
             | Q(pk__in=Region.objects.filter(pk__in=regions).values("tenant_id"))
         )
     )
     _refuse_administrator(account_id)
-    locked_regions = _locked(Region.objects.filter(pk__in=regions))
+    locked_regions = _locked(Region.objects.filter(pk__in=regions, tenant_id__in=list(workspaces)))
     changes: Counter[str] = Counter()
     _forget_recipients(account_id, addresses, list(locked_regions), changes)
     _forget_mail(account_id, addresses, changes)
