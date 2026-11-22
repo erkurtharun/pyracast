@@ -81,7 +81,7 @@ A signed-in 403 also writes an `authorization_denied` or `csrf_refused` security
 
 ## Rules and invariants
 
-- Lock order ([decision record](../ARCHITECTURE.md#tenancy-and-authorization)): a person's account rows before the workspace rows, which start at `accounts_tenant`, then region, plant, request rows. Member removal checks the caller and the target without locks, so an outsider never queues for the tenant lock, then locks the member's account rows (`lock_account`) and checks both again under the tenant lock. A write's role check is repeated under the tenant lock, so a reassignment waits for in-flight writers and later writers see the new admin.
+- Lock order ([decision record](../ARCHITECTURE.md#tenancy-and-authorization)): a person's account rows before the workspace rows, which start at `accounts_tenant`, then region, plant, request rows. Member removal checks caller and target before locking, so an outsider never queues for the tenant lock, then locks the member's account rows (`lock_account`) and rechecks the target under the tenant lock. A write's role check is repeated under the tenant lock, so a reassignment waits for in-flight writers and later writers see the new admin.
 - The policy is only a first gate; correctness depends on the repeat inside the operation.
 - A proposal is bound to the membership id, so a removed and re-added member cannot recover old authorship. `lock_timeout` is 5 s, `statement_timeout` 60 s (`background/deadlines.py`, `DATABASES` in `src/pyracast/settings.py`).
 - Role strings are `admin` and `viewer`; "member" in a policy means any active membership.
