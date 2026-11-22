@@ -242,18 +242,13 @@
         "support_required": "{days} / {minimum} gerekli",
         "training_selection": "Eğitim sırasındaki seçim (katsayı {factor})",
         "values": {
-            "uncalibrated": "Kalibrasyonsuz",
             "quality": "Kalite",
             "source_incomplete": "Kaynak verisi eksik",
             "incomplete_day": "Eksik gün",
             "outside_required_windows": "Gerekli zaman aralıklarının dışında",
             "uninformative_training": "Yetersiz bilgi sağlayan eğitim verisi",
             "zero_production_training_days": "Sıfır üretimli eğitim günleri",
-            "censored_training": "Sınırlandırılmış eğitim verisi",
-            "valid": "Geçerli",
-            "outage": "Kesinti",
-            "curtailed": "Kısıntı",
-            "invalid": "Geçersiz"
+            "censored_training": "Sınırlandırılmış eğitim verisi"
         },
         "unknown_value": "Diğer ({value})",
         "status_messages": {

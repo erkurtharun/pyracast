@@ -242,18 +242,13 @@
         "support_required": "{days} / {minimum} required",
         "training_selection": "Selection at training (factor {factor})",
         "values": {
-            "uncalibrated": "uncalibrated",
             "quality": "quality",
             "source_incomplete": "source incomplete",
             "incomplete_day": "incomplete day",
             "outside_required_windows": "outside required windows",
             "uninformative_training": "uninformative training",
             "zero_production_training_days": "zero production training days",
-            "censored_training": "censored training",
-            "valid": "valid",
-            "outage": "outage",
-            "curtailed": "curtailed",
-            "invalid": "invalid"
+            "censored_training": "censored training"
         },
         "unknown_value": "{value}",
         "status_messages": {

@@ -238,31 +238,77 @@ function webCodes(file: string, literals: Set<string>) {
     });
 }
 
-// The codes a family can label: every lower-case code a string literal of the backend or a screen
-// holds, and every Python f-string that composes one. Migrations freeze retired values.
-function codePatterns(root: string): RegExp[] {
+export type Producers = Readonly<Record<string, readonly string[]>>;
+
+// The modules, from the repository root, whose literals can produce each code family; a code
+// another module holds labels nothing. An enumeration counts where its values are written.
+const PRODUCERS: Producers = {
+    "Calibrations.values": ["src/pyracast/plants/numerics.py"],
+    "Calibrations.status_messages": ["src/pyracast/plants/models.py"],
+    "Calibrations.reasons": ["src/pyracast/plants/numerics.py"],
+    "CalibrationAutomation.reasons": [
+        "src/pyracast/plants/automation.py",
+        "src/pyracast/plants/calibration_runs.py",
+        "src/pyracast/errors.py",
+    ],
+    "ForecastPerformance.reasons": ["src/pyracast/plants/performance.py"],
+    "Forecast.qualityFlags": [
+        "src/pyracast/calculation.py",
+        "src/pyracast/forecasts/intraday.py",
+        "src/pyracast/irradiance/__init__.py",
+        "src/pyracast/plants/automatic_forecast.py",
+        "src/pyracast/plants/forecast_sources.py",
+        "src/pyracast/plants/forecasting.py",
+        "src/pyracast/plants/history.py",
+        "src/pyracast/plants/incident_forecasts.py",
+        "src/pyracast/plants/numerics.py",
+        "web/src/features/forecast/panel/model.ts",
+    ],
+    "Outages.proposalReasons": [
+        "src/pyracast/errors.py",
+        "web/src/features/plant/outage/model.ts",
+    ],
+    "ProductionHistory.reasons": [
+        "src/pyracast/plants/production.py",
+        "src/pyracast/errors.py",
+    ],
+};
+
+// Every lower-case code a string literal of the modules holds, and every Python f-string that
+// composes one.
+function codePatterns(root: string, modules: readonly string[]): RegExp[] {
     const literals = new Set<string>();
     const composed = new Set<string>();
-    const backend = path.join(root, "src", "pyracast");
-    for (const file of files(backend, /\.py$/))
-        if (
-            !path.relative(backend, file).split(path.sep).includes("migrations")
-        )
+    for (const producer of modules) {
+        const file = path.join(root, producer);
+        if (producer.endsWith(".py"))
             pythonCodes(readFileSync(file, "utf8"), literals, composed);
-    for (const file of files(path.join(root, "web", "src"), /\.tsx?$/))
-        webCodes(file, literals);
+        else webCodes(file, literals);
+    }
     return [...literals, ...composed].map((code) => new RegExp(`^${code}$`));
 }
 
-export function unusedKeys(web: string, messages: object): string[] {
+export function unusedKeys(
+    web: string,
+    messages: object,
+    producers: Producers = PRODUCERS,
+): string[] {
     const use = keyUse(web);
-    const codes = codePatterns(path.join(web, ".."));
+    const root = path.join(web, "..");
+    const codes = new Map(
+        [...use.families].map((family) => [
+            family,
+            codePatterns(root, producers[family] ?? []),
+        ]),
+    );
     return messageKeys(messages).filter((key) => {
         if (key.startsWith(`${ENUMS}.`) || use.used.has(key)) return false;
         const family = [...use.families].find((name) =>
             key.startsWith(`${name}.`),
         );
         const code = family && key.slice(family.length + 1);
-        return !code || !codes.some((pattern) => pattern.test(code));
+        return (
+            !code || !codes.get(family)?.some((pattern) => pattern.test(code))
+        );
     });
 }

@@ -6,6 +6,12 @@ import { keyUse, unusedKeys } from "./support/message-keys";
 import { messages } from "../src/i18n/messages";
 
 const web = path.resolve(__dirname, "..");
+const flagProducers = {
+    "Forecast.qualityFlags": [
+        "web/src/flags.ts",
+        "src/pyracast/forecasts/flags.py",
+    ],
+};
 
 function tree(files: Record<string, string>, parent = tmpdir()): string {
     mkdirSync(parent, { recursive: true });
@@ -26,7 +32,7 @@ test("every translation call names its namespace and keys in a form the key chec
     expect(keyUse(web).unresolved).toEqual([]);
 });
 
-test("a code named only in a comment, a docstring or a migration labels nothing", () => {
+test("a code named only in a comment, a docstring or a module that is not its producer labels nothing", () => {
     const root = tree({
         "web/src/flags.ts": [
             "declare function useCodeLabel(namespace: string): (code: string) => string;",
@@ -47,17 +53,21 @@ test("a code named only in a comment, a docstring or a migration labels nothing"
     });
     try {
         expect(
-            unusedKeys(path.join(root, "web"), {
-                Forecast: {
-                    qualityFlags: {
-                        provider_error: "provider error",
-                        weather_request_failed: "weather request failed",
-                        unvalidated: "unvalidated",
-                        stale: "stale",
-                        stale_source: "stale source",
+            unusedKeys(
+                path.join(root, "web"),
+                {
+                    Forecast: {
+                        qualityFlags: {
+                            provider_error: "provider error",
+                            weather_request_failed: "weather request failed",
+                            unvalidated: "unvalidated",
+                            stale: "stale",
+                            stale_source: "stale source",
+                        },
                     },
                 },
-            }),
+                flagProducers,
+            ),
         ).toEqual([
             "Forecast.qualityFlags.provider_error",
             "Forecast.qualityFlags.weather_request_failed",
@@ -81,9 +91,13 @@ test("a checkout below a directory named migrations still reads the backend's co
     );
     try {
         expect(
-            unusedKeys(path.join(root, "web"), {
-                Forecast: { qualityFlags: { unvalidated: "unvalidated" } },
-            }),
+            unusedKeys(
+                path.join(root, "web"),
+                {
+                    Forecast: { qualityFlags: { unvalidated: "unvalidated" } },
+                },
+                flagProducers,
+            ),
         ).toEqual([]);
     } finally {
         rmSync(parent, { recursive: true, force: true });
@@ -101,10 +115,36 @@ test("a code a screen writes as a template literal without substitution labels i
     });
     try {
         expect(
-            unusedKeys(path.join(root, "web"), {
-                Forecast: { qualityFlags: { stale: "stale" } },
-            }),
+            unusedKeys(
+                path.join(root, "web"),
+                {
+                    Forecast: { qualityFlags: { stale: "stale" } },
+                },
+                flagProducers,
+            ),
         ).toEqual([]);
+    } finally {
+        rmSync(root, { recursive: true, force: true });
+    }
+});
+
+test("a code labels its key only where a module named as the family's producer holds it", () => {
+    const root = tree({
+        "web/src/flags.ts": [
+            "declare function useCodeLabel(namespace: string): (code: string) => string;",
+            'export const label = useCodeLabel("Calibrations.values");',
+        ].join("\n"),
+        "src/pyracast/plants/numerics.py": 'EXCLUSIONS = {"quality": 0}\n',
+        "src/pyracast/plants/models.py": 'STATES = ["valid", "outage"]\n',
+    });
+    try {
+        expect(
+            unusedKeys(
+                path.join(root, "web"),
+                { Calibrations: { values: { quality: "q", valid: "v" } } },
+                { "Calibrations.values": ["src/pyracast/plants/numerics.py"] },
+            ),
+        ).toEqual(["Calibrations.values.valid"]);
     } finally {
         rmSync(root, { recursive: true, force: true });
     }
