@@ -1,11 +1,11 @@
 # View a production day and correct intervals
 
-A workspace member opens a plant's Production tab and sees one local day of native 30 or 60 minute intervals, each with its effective value, source and provider original. A workspace administrator saves or reverts one interval, which appends an immutable revision, records a plant event and requests a calibration run. A viewer reaches the same table but proposes instead (`change-request-submission`).
+A workspace member opens a plant's Production tab and sees one local day of native 30 or 60 minute intervals, each with its effective value, source and provider original. A workspace administrator saves or reverts one interval, which appends an immutable revision, records a plant event and requests a calibration run. Any other member stages corrected intervals of the shown day into a draft and sends them as one request (`change-request-submission`).
 
 ## Entry points
 
-- `web/src/features/production/production-history.tsx` `ProductionHistory` (mounted by `web/src/features/plant/workspace/production-section.tsx` `ProductionSection`, which `PlantWorkspace` loads on demand as in `plant-portfolio`, for `/app/w/{tenant}/plants/{region}/production/?date=`, key per configuration): date navigation, a 30 s poll through the query layer (paused while an editor is open or the tab is hidden, never overlapping), `save`, `reloadEditor`, `web/src/features/production/history/source-details.tsx` (`production-source/` of `epias-connection`), client-side CSV of the day (disabled until the reload after a save has answered), `ProductionImport` for admins (`production-csv-import`).
-- `GET /api/tenants/{t}/regions/{r}/plants/{p}/production/` -> `pyracast.plants.api.ProductionView` -> `pyracast.plants.production.production_history`. The UI always sends `start_date = end_date`, `native_intervals=true`. Actors: any member.
+- `web/src/features/production/production-history.tsx` `ProductionHistory` (mounted by `web/src/features/plant/workspace/production-section.tsx` `ProductionSection`, which `PlantWorkspace` loads on demand as in `plant-portfolio`, for `/app/w/{tenant}/plants/{region}/production/?date=`, key per configuration): date navigation, a 30 s poll through the query layer (paused while an editor is open or the tab is hidden, never overlapping), `save`, `reloadEditor`, the screen state `web/src/features/production/history/screen.ts` (shown day, access, full-day view, editor, draft with its reason and send state; one rule per event), the draft `web/src/features/production/history/proposal-draft.tsx`, `web/src/features/production/history/source-details.tsx` (`production-source/` of `epias-connection`), client-side CSV of the day (disabled until the reload after a save has answered), `ProductionImport` for admins (`production-csv-import`).
+- `GET /api/tenants/{t}/regions/{r}/plants/{p}/production/` -> `pyracast.plants.api.ProductionView` -> `pyracast.plants.production.production_history`, then `pyracast.change_requests.queries.with_own_pending_requests` adds `pending_request_id` per interval. The UI always sends `start_date = end_date`, `native_intervals=true`. Actors: any member.
 - `POST .../production/changes/` -> `ProductionChangesView` -> `pyracast.plants.production_changes.change_production`. Actor: workspace administrator. `approve_request` (`change-request-review`) calls `change_production` directly; `production-import.tsx` posts its CSV commit to this same endpoint.
 - No command, job or external call; the requested calibration run is prepared after commit or by the dispatcher's calibration phase (`calibration-run`).
 
@@ -19,7 +19,7 @@ sequenceDiagram
     participant DB as PostgreSQL
     UI->>API: "GET production/ on load, date change, save, and every 30 s while visible with no editor open"
     API->>DB: "membership, region, plant, heads, providers, outages, reference"
-    API-->>UI: "200 days, intervals with can_edit and can_propose"
+    API-->>UI: "200 days, intervals with can_edit, can_propose and pending_request_id"
     UI->>API: "Save or Use provider value sends POST production/changes/ with CSRF, expected_revision_id"
     alt anonymous, bad CSRF, not administrator or bad body
         API-->>UI: "401 not_authenticated, 403 or 400 invalid_request"
@@ -50,6 +50,7 @@ sequenceDiagram
 | `metering_epiassnapshot`, `metering_epiascollectionjob`, `metering_epiasconnection` | R | Provider hours, identity filter and job check, disconnect state |
 | `forecasts_forecastsnapshot` | R | Estimated-actuals bounds and reference availability per interval |
 | `incidents_plantincident`, `incidents_incidentrevision` | R | Outage overlay on the effective value |
+| `change_requests_changerequest`, `change_requests_productionchangeitem` | R | One read-only statement: the actor's own pending production requests and their items, for `pending_request_id` |
 | `plants_plantevent` | W | `production_changed` with `origin`, `configuration_id`, `created_ids`, `unchanged`, `file_name`, `file_sha256`, only when a row was created |
 | `plants_plant` (`calibration_preparation_due_at`) | W | `request_preparation` marks the plant in the write transaction and tries once after commit; the dispatcher's calibration phase prepares what is left |
 
@@ -76,7 +77,7 @@ sequenceDiagram
 | Tenant, region or plant lock wait over 5 s | 503 `busy`, `Retry-After: 1`; the editor enters the same failed state as for 409 |
 | Statement over 60 s; deadlock | 503 `request_timeout`; 503 `database_conflict` |
 | Any other database error | 500 `server_error` |
-| Interval stops being editable under an open draft | UI state `orphaned`: draft read-only, Cancel only |
+| Interval stops being editable under an open editor, or comes to hold the member's own pending request | UI state `orphaned`: values read-only, the cause stated, Cancel only |
 
 ## Rules and invariants
 
@@ -86,10 +87,12 @@ sequenceDiagram
 - A write is replayed, not refused, when its token was already superseded by the identical value it asks for: it changes nothing and answers like the first call, so a retry after a lost response succeeds. A batch that mixes replayed and new changes is a 409.
 - Lock timeout is 5 s and statement timeout 60 s (`DATABASES` options).
 - The preparation attempt runs after commit; when it fails the save stands, the failure is logged and the plant is retried an hour later.
+- Each interval's `pending_request_id` is the actor's latest own pending production request with an item overlapping it; the table shows it as "Waiting for approval – view", linking to that request's inbox detail.
+- A member's draft belongs to its day: while it exists the day navigation is locked, and when Back or a link shows another day the screen offers to return to the draft's day or to discard the draft, staging and sending nothing meanwhile; leaving the page with an unsent draft asks first (`beforeunload`). While a request is sent nothing can be staged, edited or removed; a draft holding an interval that now waits for the member's own request cannot be sent until that item is removed. Editing a staged item outside daylight shows the full day, discarding closes any editor, and staging, updating and removing an item are announced. A day change closes an idle editor, so a day whose read failed can be refreshed; a promotion to administrator drops the draft.
 - Day total is null unless every daylight window is covered; polar night requires the whole local day. The default screen view keeps daylight intervals and the producing range; inline edits record source `operator`. The table labels a value by its `source_kind` (settlement, provisional, manual); the stored `source` text appears only in the CSV download.
 
 ## Tests
 
-- `tests/test_production_changes.py` (batch atomicity, stale 409, permissions, concurrent winner, database constraints), `tests/test_production_writes.py` (replay, mixed batch, preview without locks, event details, capacity confirmation, earlier-configuration corrections), `tests/test_production_history.py`, `tests/test_native_production.py`, `tests/test_production_read_consistency.py`, `tests/test_read_query_budgets.py`, `tests/test_daylight_journal.py`; `tests/test_calibration_requests.py` (a save commits while preparation raises); `tests/test_api_contention.py` (503 mapping); `tests/test_route_policy.py`.
-- End to end: `tests/e2e/test_workspace_spec.py` runs `web/integration/workspace.spec.ts` against live Django (set, set, revert, set) and checks the revision chain. `web/tests/epias-production.spec.ts`, `journal-date.spec.ts`, `journal-timezone.spec.ts`, `production-history-model.spec.ts`, `production-export.spec.ts`, `change-requests.spec.ts` mock the API with `page.route`.
+- `tests/test_production_changes.py` (batch atomicity, stale 409, permissions, concurrent winner, database constraints), `tests/test_production_writes.py` (replay, mixed batch, preview without locks, event details, capacity confirmation, earlier-configuration corrections), `tests/test_production_history.py`, `tests/test_native_production.py`, `tests/test_production_read_consistency.py`, `tests/test_read_query_budgets.py`, `tests/test_daylight_journal.py`, `tests/test_own_pending_markers.py` (`pending_request_id`: own, latest, other members and workspaces, read only, fixed query count); `tests/test_calibration_requests.py` (a save commits while preparation raises); `tests/test_api_contention.py` (503 mapping); `tests/test_route_policy.py`.
+- End to end: `tests/e2e/test_workspace_spec.py` runs `web/integration/workspace.spec.ts` against live Django (set, set, revert, set) and checks the revision chain. `web/tests/epias-production.spec.ts`, `journal-date.spec.ts`, `journal-timezone.spec.ts`, `production-history-model.spec.ts`, `production-export.spec.ts`, `change-requests.spec.ts` mock the API with `page.route`; `production-screen-model.spec.ts` meets every screen state with every event and control, `production-proposal-model.spec.ts` covers staging and refusals.
 - Gaps: no test that a save leaves a pending `CalibrationRun`; no 503 test on this endpoint itself.
