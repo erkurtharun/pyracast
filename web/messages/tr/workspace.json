@@ -252,6 +252,8 @@
         "staleEdit": "Siz açtıktan sonra bu kesinti başka biri tarafından değiştirildi. Girdileriniz korunuyor.",
         "staleApply": "Bu arada değişenler (şimdi {revision}. sürüm). Değişikliğinizi bu sürüme uygulamak için yeniden kaydedin ya da bırakın.",
         "staleClosed": "Bu kesintinin durumu artık: {status}. Değişikliğiniz uygulanamaz.",
+        "staleChanged": "Bu arada değişenler (şimdi {revision}. sürüm).",
+        "targetRemoved": "Bu kesinti artık listede yok. Değişikliğiniz uygulanamaz.",
         "discardEdit": "Değişikliğimi bırak",
         "status": "Durum",
         "cancelledOutages": "{count, plural, one {# iptal edilmiş kayıt} other {# iptal edilmiş kayıt}}"

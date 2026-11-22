@@ -252,6 +252,8 @@
         "staleEdit": "Someone changed this outage after you opened it. Your entries are kept.",
         "staleApply": "Changed meanwhile (now revision {revision}). Save again to apply your change to this version, or discard it.",
         "staleClosed": "This outage is now {status}, so your change cannot be applied.",
+        "staleChanged": "Changed meanwhile (now revision {revision}).",
+        "targetRemoved": "This outage is no longer listed, so your change cannot be applied.",
         "discardEdit": "Discard my change",
         "status": "Status",
         "cancelledOutages": "{count, plural, one {# cancelled entry} other {# cancelled entries}}"

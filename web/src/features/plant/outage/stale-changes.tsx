@@ -7,6 +7,7 @@ import { useLabel } from "@/ui/vocabulary";
 import {
     changedFields,
     type Outage,
+    type OutageControls,
     type OutageField,
     type Stale,
 } from "./model";
@@ -22,14 +23,15 @@ const FIELD_LABELS = {
     notes: "notes",
 } as const satisfies Record<Exclude<OutageField, "status">, string>;
 
+// Says what changed; why a held workflow cannot send any more is its hold notice's to say.
 export function StaleChanges({
     stale,
-    closed,
+    controls,
     timezone,
     onDiscard,
 }: {
     stale: Stale;
-    closed: boolean;
+    controls: OutageControls;
     timezone: string;
     onDiscard: () => void;
 }) {
@@ -59,11 +61,9 @@ export function StaleChanges({
     return (
         <div className="notice" role="status">
             <p>
-                {closed
-                    ? t("staleClosed", {
-                          status: label("IncidentStatus", current.status),
-                      })
-                    : t("staleApply", { revision: current.revision })}
+                {controls.editable
+                    ? t("staleApply", { revision: current.revision })
+                    : t("staleChanged", { revision: current.revision })}
             </p>
             <ChangedFields
                 changes={changedFields(before, current).map((field) => ({
@@ -76,6 +76,7 @@ export function StaleChanges({
             <button
                 className="button secondary"
                 type="button"
+                disabled={!controls.close}
                 onClick={onDiscard}
             >
                 {t("discardEdit")}

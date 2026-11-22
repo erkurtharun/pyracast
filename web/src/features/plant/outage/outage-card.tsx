@@ -75,7 +75,9 @@ export function OutageCard({
     return (
         <article className="provenance">
             <div className="section-heading">
-                <h3>{outage.title}</h3>
+                <h3 tabIndex={-1} data-outage={outage.id}>
+                    {outage.title}
+                </h3>
                 <StatusTag group="IncidentStatus" value={outage.status} />
             </div>
             <p>
@@ -118,6 +120,8 @@ export function OutageCard({
                 <div className="button-group">
                     <button
                         className="button secondary"
+                        data-opens="update"
+                        data-outage={outage.id}
                         disabled={!controls.acts}
                         onClick={() => onOpen("update")}
                     >
@@ -126,6 +130,8 @@ export function OutageCard({
                     {outage.status === "active" && (
                         <button
                             className="button secondary"
+                            data-opens="resolve"
+                            data-outage={outage.id}
                             disabled={!controls.acts}
                             onClick={() => onOpen("resolve")}
                         >
@@ -152,6 +158,8 @@ export function OutageCard({
                     {/* The screen decides whether the cancellation is open, so the summary asks it instead of toggling. */}
                     <summary
                         ref={summary}
+                        data-opens="cancel"
+                        data-outage={outage.id}
                         aria-disabled={!controls.acts || undefined}
                         onClick={(event) => {
                             event.preventDefault();
@@ -211,7 +219,7 @@ function ResolveOutageForm({
             {stale && (
                 <StaleChanges
                     stale={stale}
-                    closed={outage.status !== "active"}
+                    controls={controls}
                     timezone={timezone}
                     onDiscard={onClose}
                 />
@@ -219,6 +227,8 @@ function ResolveOutageForm({
             {hold && <Notice>{hold}</Notice>}
             <ActionForm
                 permitted={controls.editable}
+                pending={!controls.acts}
+                success={null}
                 submit={direct ? t("saveResolution") : proposals("send")}
                 onSubmit={async (data) => {
                     const ends = plantInstant(data, "ends_at", timezone, t);
@@ -274,7 +284,7 @@ function CancelOutageForm({
             {stale && (
                 <StaleChanges
                     stale={stale}
-                    closed={outage.status === "cancelled"}
+                    controls={controls}
                     timezone={timezone}
                     onDiscard={onDiscard}
                 />
@@ -282,6 +292,8 @@ function CancelOutageForm({
             {hold && <Notice>{hold}</Notice>}
             <ActionForm
                 permitted={controls.editable}
+                pending={!controls.acts}
+                success={null}
                 submit={direct ? t("cancelOutage") : proposals("send")}
                 onSubmit={async (data) => {
                     await onSubmit({

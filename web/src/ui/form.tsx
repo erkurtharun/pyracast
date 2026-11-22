@@ -356,6 +356,7 @@ export function ActionForm({
     submit,
     onSubmit,
     permitted,
+    pending,
     errorTitle,
     success,
     variant = "primary",
@@ -366,6 +367,9 @@ export function ActionForm({
     onSubmit: (data: FormData) => Promise<void>;
     onEdit?: () => void;
     permitted?: boolean;
+    // An owner that tracks its own request says here whether it is still unanswered, so a form mounted again
+    // while it runs shows it and cannot send it twice.
+    pending?: boolean;
     errorTitle?: string;
     success?: string | null;
     variant?: Variant;
@@ -375,6 +379,7 @@ export function ActionForm({
     const canManage = useCanManageWorkspace();
     const canSubmit = permitted ?? canManage;
     const [state, setState] = useState<FormState>({ status: "idle" });
+    const busy = pending ?? state.status === "pending";
     const running = useRef(false);
     const errorRef = useRef<HTMLDivElement>(null);
     const formRef = useRef<HTMLFormElement>(null);
@@ -392,7 +397,7 @@ export function ActionForm({
             onSubmit={(event) =>
                 void (async () => {
                     event.preventDefault();
-                    if (!canSubmit || running.current) return;
+                    if (!canSubmit || busy || running.current) return;
                     running.current = true;
                     const data = new FormData(event.currentTarget);
                     setState({ status: "pending" });
@@ -429,7 +434,7 @@ export function ActionForm({
                 />
             )}
             <FormErrors value={state.status === "error" ? state.fields : {}}>
-                <fieldset disabled={!canSubmit || state.status === "pending"}>
+                <fieldset disabled={!canSubmit || busy}>
                     {children}
                     {canSubmit && (
                         <div className="form-footer">
@@ -437,9 +442,7 @@ export function ActionForm({
                                 className={buttonClass(variant)}
                                 type="submit"
                             >
-                                {state.status === "pending"
-                                    ? t("saving")
-                                    : submit}
+                                {busy ? t("saving") : submit}
                             </button>
                             <span className="form-status" aria-live="polite">
                                 {state.status === "success" && success !== null

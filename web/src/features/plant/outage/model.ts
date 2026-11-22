@@ -28,8 +28,11 @@ export type Live = {
     configured: boolean;
 };
 
-// A member's workflow is held once its outage holds their own pending request or they reach the limit, and stays held until closed.
-export type Hold = "held" | "pending_request_limit";
+// Why an open workflow cannot send: a member's outage holds their own pending request or they reached the limit, or
+// anyone's outage was cancelled, resolved (for a resolution) or left the list. A workflow stays held until closed.
+export type Hold = "held" | "pending_request_limit" | Ending;
+
+export type Ending = "cancelled" | "resolved" | "removed";
 
 export type Phase =
     { status: "idle" } | { status: "sending" } | { status: "held"; hold: Hold };
@@ -83,18 +86,26 @@ const sending = (workflow: Workflow | null) =>
 const targetOf = (workflow: Workflow | null) =>
     workflow && workflow.kind !== "create" ? workflow.outage.id : null;
 
-// A version that ended meanwhile takes no resolution, and a cancelled one takes no change at all.
-function ended(workflow: Workflow) {
-    if (workflow.kind === "create") return false;
-    return workflow.kind === "resolve"
-        ? workflow.outage.status !== "active"
-        : workflow.outage.status === "cancelled";
+export const isEnding = (hold: Hold | null): hold is Ending =>
+    hold === "cancelled" || hold === "resolved" || hold === "removed";
+
+// An outage that is gone or cancelled takes no change at all, and one no longer active takes no resolution.
+function endingOf(
+    kind: Target["kind"],
+    row: Outage | undefined,
+): Ending | null {
+    if (!row) return "removed";
+    if (row.status === "cancelled") return "cancelled";
+    return kind === "resolve" && row.status !== "active" ? "resolved" : null;
 }
 
+// An ending holds anyone; only a member is held by their own request or the limit.
 function holdOf(workflow: Workflow, live: Live): Hold | null {
-    if (live.direct) return null;
     const id = targetOf(workflow);
     const row = live.offer?.results.find((row) => row.id === id);
+    const ending =
+        workflow.kind === "create" ? null : endingOf(workflow.kind, row);
+    if (ending || live.direct) return ending;
     if (row?.pending_request_id != null) return "held";
     return atLimit(live) ? "pending_request_limit" : null;
 }
@@ -117,8 +128,7 @@ export function outageControls(
             )
             .map((row) => row.id),
     );
-    const free =
-        !!workflow && workflow.phase.status !== "held" && !ended(workflow);
+    const free = !!workflow && workflow.phase.status !== "held";
     return {
         create: live.direct ? live.configured : !!live.offer?.can_propose,
         acts: !busy,
@@ -143,16 +153,18 @@ export function reduceOutages(
     switch (event.type) {
         case "open": {
             const derived = outageControls(screen, event.live);
+            const { target } = event;
             const allowed =
-                event.target.kind === "create"
+                target.kind === "create"
                     ? derived.create
-                    : derived.offered.has(event.target.outage.id);
-            if (!derived.acts || !allowed || isOpen(workflow, event.target))
+                    : derived.offered.has(target.outage.id) &&
+                      !endingOf(target.kind, target.outage);
+            if (!derived.acts || !allowed || isOpen(workflow, target))
                 return screen;
             return {
                 submitted: false,
                 workflow: {
-                    ...event.target,
+                    ...target,
                     phase: { status: "idle" },
                     attempt: null,
                     stale: null,
@@ -165,17 +177,15 @@ export function reduceOutages(
             return { ...screen, workflow: null };
         case "discard":
             if (!workflow?.stale || sending(workflow)) return screen;
+            // A held workflow cannot send, so discarding its change leaves nothing to start again.
+            if (workflow.phase.status === "held")
+                return { ...screen, workflow: null };
             return {
                 ...screen,
                 workflow: { ...workflow, stale: null, form: workflow.form + 1 },
             };
         case "send": {
-            if (
-                !workflow ||
-                workflow.phase.status !== "idle" ||
-                ended(workflow)
-            )
-                return screen;
+            if (workflow?.phase.status !== "idle") return screen;
             // The same payload sent again keeps its key, so the server recognises a retried proposal.
             const attempt =
                 workflow.attempt?.payload === event.payload
@@ -194,14 +204,22 @@ export function reduceOutages(
             if (!sending(workflow)) return screen;
             return { workflow: null, submitted: event.proposed };
         case "sendFailed": {
-            if (!workflow || !sending(workflow)) return screen;
-            const current =
-                event.current?.id === targetOf(workflow) ? event.current : null;
-            if (!current || workflow.kind === "create")
+            if (workflow?.phase.status !== "sending") return screen;
+            const { current } = event;
+            // Only a conflict about the outage the workflow sends against moves it to that outage's current version.
+            if (
+                workflow.kind === "create" ||
+                current?.id !== workflow.outage.id
+            )
                 return {
                     ...screen,
                     workflow: { ...workflow, phase: { status: "idle" } },
                 };
+            const hold =
+                endingOf(workflow.kind, current) ??
+                (!event.direct && current.pending_request_id != null
+                    ? "held"
+                    : null);
             return {
                 ...screen,
                 workflow: {
@@ -211,17 +229,20 @@ export function reduceOutages(
                         before: workflow.stale?.before ?? workflow.outage,
                         current,
                     },
-                    phase:
-                        !event.direct && current.pending_request_id != null
-                            ? { status: "held", hold: "held" }
-                            : { status: "idle" },
+                    phase: hold ? { status: "held", hold } : { status: "idle" },
                 },
             };
         }
         case "rowsLoaded": {
-            if (workflow?.phase.status !== "idle") return screen;
+            if (!workflow || sending(workflow)) return screen;
             const hold = holdOf(workflow, event.live);
-            if (!hold) return screen;
+            // Only an ending replaces a hold, and nothing replaces an ending.
+            if (
+                !hold ||
+                (workflow.phase.status === "held" &&
+                    (isEnding(workflow.phase.hold) || !isEnding(hold)))
+            )
+                return screen;
             return {
                 ...screen,
                 workflow: { ...workflow, phase: { status: "held", hold } },

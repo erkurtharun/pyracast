@@ -119,7 +119,7 @@ export function OutageEditor({
             {stale && (
                 <StaleChanges
                     stale={stale}
-                    closed={outage?.status === "cancelled"}
+                    controls={controls}
                     timezone={timezone}
                     onDiscard={onClose}
                 />
@@ -127,6 +127,8 @@ export function OutageEditor({
             {hold && <Notice>{hold}</Notice>}
             <ActionForm
                 permitted={controls.editable}
+                pending={!controls.acts}
+                success={null}
                 submit={
                     direct
                         ? outage
