@@ -128,7 +128,7 @@ export function Auth({
             );
         completion
             .then(async (completed) => {
-                if (completed === "signedIn") return;
+                if (completed === "signedIn" || !active) return;
                 refused = completed === "refused";
                 const result = await authRequest("auth/session", "GET");
                 if (!active) return;
