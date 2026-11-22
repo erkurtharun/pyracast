@@ -12,11 +12,10 @@ export type Draft = {
     expectedRevision: number | null;
 };
 
-export type EditorIssue =
-    "invalid_energy" | { message: string; implausible: boolean };
+type EditorIssue = "invalid_energy" | { message: string; implausible: boolean };
 
 // Why an editor can no longer act: its interval went away, holds the member's own request, or its day is not shown.
-export type OrphanCause = "unavailable" | "held" | "day_left";
+type OrphanCause = "unavailable" | "held" | "day_left";
 
 export type Editor =
     | { status: "closed" }

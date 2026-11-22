@@ -4,7 +4,7 @@ import { ApiError } from "@/lib/api/errors";
 import type { components } from "@/lib/schema";
 
 export type Outage = components["schemas"]["IncidentOutput"];
-export type OutageInput = components["schemas"]["IncidentInput"];
+type OutageInput = components["schemas"]["IncidentInput"];
 export type OutageRow = components["schemas"]["IncidentListOutput"];
 
 export type OutageChange =
@@ -15,7 +15,7 @@ export type OutageChange =
 
 export type Stale = { before: Outage; current: Outage };
 
-export type Offer = {
+type Offer = {
     can_propose: boolean;
     proposal_unavailable_reason: string | null;
     results: readonly OutageRow[];
@@ -34,10 +34,10 @@ export type Hold = "held" | "pending_request_limit" | Ending;
 
 export type Ending = "cancelled" | "resolved" | "removed";
 
-export type Phase =
+type Phase =
     { status: "idle" } | { status: "sending" } | { status: "held"; hold: Hold };
 
-export type Target =
+type Target =
     | { kind: "create" }
     | { kind: "update" | "resolve" | "cancel"; outage: Outage };
 
@@ -346,7 +346,7 @@ export function staleVersion(error: unknown, id: number): OutageRow | null {
     return isOutage(current) && current.id === id ? current : null;
 }
 
-export const OUTAGE_FIELDS = [
+const OUTAGE_FIELDS = [
     "status",
     "kind",
     "title",

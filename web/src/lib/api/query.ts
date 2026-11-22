@@ -94,7 +94,7 @@ export function sameRequest(before: QueryKey, after: QueryKey) {
 }
 
 // A refusal of the reader or a missing resource: rows read before it are no longer shown.
-export function isDenied(error: unknown) {
+function isDenied(error: unknown) {
     return (
         error instanceof ApiError &&
         (error.status === 403 || error.status === 404)
