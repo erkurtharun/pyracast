@@ -12,6 +12,7 @@ from pyracast.change_requests.operations import submit_incident, submit_producti
 from pyracast.incidents.operations import save_incident
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production_changes import ProductionChange
 from tests.support.budgets import assert_scale_invariant, captured_statements
 from tests.support.change_request_boundaries import (
@@ -86,9 +87,7 @@ def _other_workspace_plant(case: RequestCase) -> tuple[System, Plant]:
         other.member,
         other.tenant.pk,
         other.region.pk,
-        name="Other plant",
-        dc_capacity_mw=130,
-        export_limit_mw=100,
+        PlantParameters(name="Other plant", dc_capacity_mw=130, export_limit_mw=100),
     )
     assert plant.current_configuration_id is not None
     PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(

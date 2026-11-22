@@ -1,5 +1,4 @@
-from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
 from typing import Any, cast
 
 from django.contrib.auth.models import User
@@ -8,9 +7,10 @@ from rest_framework import serializers
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from pyracast.api import errors
 from pyracast.api.serializers import FiniteFloat, InputSerializer
 from pyracast.change_requests.queries import outage_proposal, own_pending_outages
-from pyracast.errors import ConflictError, ErrorCode
+from pyracast.errors import ErrorCode
 from pyracast.incidents import operations
 from pyracast.incidents.models import IncidentKind, IncidentStatus, PlantIncident
 from pyracast.plants.api import ScopedView
@@ -99,18 +99,13 @@ def outage_rows(
     )
 
 
-@contextmanager
-def current_on_conflict(actor: User, tenant_id: int) -> Iterator[None]:
-    """A stale write answers with the version it lost to as the actor's outage list shows it;
-    the caller is already authorized."""
-    try:
-        yield
-    except operations.StaleIncidentError as error:
-        current = error.current
-        raise ConflictError(
-            error.code,
-            details={"current": outage_rows(actor, tenant_id, current.plant_id, [current])[0]},
-        ) from error
+def current_on_conflict(actor: User, tenant_id: int) -> AbstractContextManager[None]:
+    """A stale outage write answers with the outage it lost to as the actor's outage list shows
+    it; the caller is already authorized."""
+    return errors.current_on_conflict(
+        operations.StaleIncidentError,
+        lambda stale: outage_rows(actor, tenant_id, stale.current.plant_id, [stale.current])[0],
+    )
 
 
 class IncidentPage(serializers.Serializer[dict[str, Any]]):

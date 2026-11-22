@@ -11,6 +11,7 @@ import {
     type CsvExport,
 } from "../src/lib/exports";
 import { parseProduction } from "../src/lib/production";
+import { csvTexts } from "./support/production-csv";
 import type { components } from "../src/lib/schema";
 
 type Schemas = components["schemas"];
@@ -153,7 +154,10 @@ test("a production export is imported again without edits", () => {
         interval("2026-11-10T05:00:00Z", "2026-11-10T05:30:00Z", 0.5),
         interval("2026-11-10T05:30:00Z", "2026-11-10T06:00:00Z", 0.25),
     ]);
-    const parsed = parseProduction(csvDocument(file.header, file.rows));
+    const parsed = parseProduction(
+        csvDocument(file.header, file.rows),
+        csvTexts(),
+    );
     expect(parsed.unit).toBe("MWh");
     expect(parsed.observations).toEqual([
         {
@@ -192,10 +196,10 @@ test("an aggregated interval of mixed qualities is exported as shown and refused
         '"2026-11-10T08:00:00+03:00","2026-11-10T09:00:00+03:00",0.75,"mixed","multiple_manual","Europe/Istanbul"',
     );
     const text = csvDocument(file.header, file.rows);
-    expect(() => parseProduction(text)).toThrow(
+    expect(() => parseProduction(text, csvTexts())).toThrow(
         "Row 2: this interval combines stored intervals of different qualities; correct those intervals at their stored resolution instead.",
     );
-    expect(() => parseProduction(text, "tr")).toThrow(
+    expect(() => parseProduction(text, csvTexts("tr"))).toThrow(
         "Satır 2: bu aralık farklı veri niteliğindeki kayıtlı aralıkları birleştiriyor; bunun yerine o aralıkları kayıtlı çözünürlükte düzeltin.",
     );
 });

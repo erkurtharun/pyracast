@@ -770,7 +770,8 @@ export interface components {
             review_fingerprint: string;
         };
         /**
-         * @description * `region_renamed` - Plant location renamed
+         * @description * `region_created` - Plant submitted
+         *     * `region_renamed` - Plant location renamed
          *     * `location_change_requested` - Location change requested
          *     * `location_change_approved` - Location change approved
          *     * `location_change_rejected` - Location change rejected
@@ -795,6 +796,7 @@ export interface components {
          * @enum {string}
          */
         AuditActionEnum:
+            | "region_created"
             | "region_renamed"
             | "location_change_requested"
             | "location_change_approved"
@@ -1560,6 +1562,7 @@ export interface components {
          *     * `incumbent_changed` - Incumbent Changed
          *     * `calibration_not_activatable` - Calibration Not Activatable
          *     * `review_reason_required` - Review Reason Required
+         *     * `plant_parameters_changed` - Plant Parameters Changed
          * @enum {string}
          */
         ErrorCode:
@@ -1643,7 +1646,8 @@ export interface components {
             | "outage_history_changed"
             | "incumbent_changed"
             | "calibration_not_activatable"
-            | "review_reason_required";
+            | "review_reason_required"
+            | "plant_parameters_changed";
         /**
          * @description * `current` - current
          *     * `stale` - stale
@@ -2427,6 +2431,11 @@ export interface components {
             | "latest-published-pre-daylight-issuance-v1"
             | "native-then-authorized-scale-complete-actuals-v4"
             | "native-estimated-actuals-coverage-v1";
+        PlantConflict: {
+            code: components["schemas"]["ErrorCode"];
+            message: string;
+            current: components["schemas"]["PlantOutput"];
+        };
         /**
          * @description * `submission_saved` - Submission saved
          *     * `configuration_created` - Configuration created
@@ -2545,9 +2554,26 @@ export interface components {
             region_id: number;
             current_configuration:
                 components["schemas"]["ConfigurationOutput"] | null;
-            submission: components["schemas"]["PlantSubmissionOutput"] | null;
+            /** @description The declared values: those awaiting approval, else the current configuration. */
+            readonly parameters:
+                components["schemas"]["PlantParametersOutput"] | null;
+            readonly parameters_revision: number;
             /** Format: date-time */
             readonly created_at: string;
+        };
+        PlantParametersOutput: {
+            /** Format: double */
+            dc_capacity_mw: number;
+            /** Format: double */
+            inverter_capacity_mw: number | null;
+            /** Format: double */
+            export_limit_mw: number | null;
+            measurement_basis: components["schemas"]["MeasurementBasisEnum"];
+            mounting_type: components["schemas"]["MountingTypeEnum"];
+            /** Format: double */
+            surface_tilt_degrees: number | null;
+            /** Format: double */
+            surface_azimuth_degrees: number | null;
         };
         PlantResultConfigurationOutput: {
             id: number;
@@ -2560,22 +2586,24 @@ export interface components {
             export_limit_mw: number | null;
             measurement_basis: string;
         };
-        PlantSubmissionOutput: {
-            readonly id: number;
+        PlantRevisionInput: {
+            name: string;
             /** Format: double */
-            readonly dc_capacity_mw: number;
+            dc_capacity_mw: number;
             /** Format: double */
-            readonly inverter_capacity_mw: number | null;
+            inverter_capacity_mw?: number | null;
             /** Format: double */
-            readonly export_limit_mw: number | null;
-            readonly measurement_basis: components["schemas"]["MeasurementBasisEnum"];
-            readonly mounting_type: components["schemas"]["MountingTypeEnum"];
+            export_limit_mw?: number | null;
+            /** @default net_export */
+            measurement_basis: components["schemas"]["MeasurementBasisEnum"];
+            /** @default unknown */
+            mounting_type: components["schemas"]["MountingTypeEnum"];
             /** Format: double */
-            readonly surface_tilt_degrees: number | null;
+            surface_tilt_degrees?: number | null;
             /** Format: double */
-            readonly surface_azimuth_degrees: number | null;
-            /** Format: date-time */
-            readonly created_at: string;
+            surface_azimuth_degrees?: number | null;
+            /** @description The parameters_revision the change was made from. */
+            expected_revision: number;
         };
         /**
          * @description * `ac` - AC
@@ -4980,7 +5008,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PlantInput"];
+                "application/json": components["schemas"]["PlantRevisionInput"];
             };
         };
         responses: {
@@ -5026,6 +5054,14 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlantConflict"];
                 };
             };
             /** @description Send the request as JSON. */

@@ -344,10 +344,12 @@ export function ActionForm({
     errorTitle,
     success,
     variant = "primary",
+    onEdit,
 }: {
     children: ReactNode;
     submit: string;
     onSubmit: (data: FormData) => Promise<void>;
+    onEdit?: () => void;
     permitted?: boolean;
     errorTitle?: string;
     success?: string | null;
@@ -369,6 +371,7 @@ export function ActionForm({
             ref={formRef}
             className={canSubmit ? undefined : "readonly-form"}
             onChange={() => {
+                onEdit?.();
                 if (state.status === "success") setState({ status: "idle" });
             }}
             onSubmit={(event) =>

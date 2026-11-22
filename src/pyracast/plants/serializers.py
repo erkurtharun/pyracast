@@ -1,3 +1,4 @@
+from dataclasses import fields as dataclass_fields
 from typing import Any
 
 from django.utils.dateparse import parse_datetime
@@ -15,6 +16,7 @@ from pyracast.api.serializers import (
     WeatherReferenceOutput,
 )
 from pyracast.change_requests.models import ProductionChangeAction
+from pyracast.errors import ErrorCode
 from pyracast.plants.activation import ActivationBlocker, SelectionState, selection_state
 from pyracast.plants.automation_state import AutomationCause
 from pyracast.plants.models import (
@@ -30,8 +32,15 @@ from pyracast.plants.models import (
     PlantSubmission,
     ProductionObservation,
 )
+from pyracast.plants.parameters import (
+    AZIMUTH_LIMIT_DEGREES,
+    TILT_MAX_DEGREES,
+    PlantParameters,
+    declaration,
+)
 from pyracast.plants.performance import DayReason, SelectionPolicy
 from pyracast.plants.production_changes import PRODUCTION_BATCH_LIMIT
+from pyracast.regions.models import NAME_MAX_LENGTH
 
 
 class AwareDateTime(serializers.DateTimeField):
@@ -50,7 +59,7 @@ class AwareDateTime(serializers.DateTimeField):
 
 
 class PlantInput(InputSerializer):
-    name = serializers.CharField(max_length=200)
+    name = serializers.CharField(max_length=NAME_MAX_LENGTH)
     dc_capacity_mw = FiniteFloat(min_value=0, above=0)
     inverter_capacity_mw = FiniteFloat(
         min_value=0, above=0, allow_null=True, required=False, default=None
@@ -65,10 +74,10 @@ class PlantInput(InputSerializer):
         choices=MountingType.choices, default=MountingType.UNKNOWN
     )
     surface_tilt_degrees = FiniteFloat(
-        min_value=0, max_value=90, allow_null=True, required=False, default=None
+        min_value=0, max_value=TILT_MAX_DEGREES, allow_null=True, required=False, default=None
     )
     surface_azimuth_degrees = FiniteFloat(
-        min_value=0, below=360, allow_null=True, required=False, default=None
+        min_value=0, below=AZIMUTH_LIMIT_DEGREES, allow_null=True, required=False, default=None
     )
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
@@ -81,6 +90,30 @@ class PlantInput(InputSerializer):
                 {"mounting_type": [gettext("Only fixed mounting permits surface angles.")]}
             )
         return attrs
+
+    def parameters(self) -> PlantParameters:
+        return PlantParameters(
+            **{
+                field.name: self.validated_data[field.name]
+                for field in dataclass_fields(PlantParameters)
+            }
+        )
+
+
+class PlantRevisionInput(PlantInput):
+    expected_revision = serializers.IntegerField(
+        min_value=1, help_text="The parameters_revision the change was made from."
+    )
+
+
+class PlantParametersOutput(serializers.Serializer[PlantSubmission | PlantConfiguration]):
+    dc_capacity_mw = serializers.FloatField()
+    inverter_capacity_mw = serializers.FloatField(allow_null=True)
+    export_limit_mw = serializers.FloatField(allow_null=True)
+    measurement_basis = serializers.ChoiceField(choices=MeasurementBasis.choices)
+    mounting_type = serializers.ChoiceField(choices=MountingType.choices)
+    surface_tilt_degrees = serializers.FloatField(allow_null=True)
+    surface_azimuth_degrees = serializers.FloatField(allow_null=True)
 
 
 class ConfigurationOutput(serializers.ModelSerializer[PlantConfiguration]):
@@ -101,32 +134,36 @@ class ConfigurationOutput(serializers.ModelSerializer[PlantConfiguration]):
         read_only_fields = fields
 
 
-class PlantSubmissionOutput(serializers.ModelSerializer[PlantSubmission]):
+class PlantOutput(serializers.ModelSerializer[Plant]):
+    region_id = serializers.IntegerField()
+    current_configuration = ConfigurationOutput(allow_null=True)
+    parameters = serializers.SerializerMethodField(
+        help_text="The declared values: those awaiting approval, else the current configuration."
+    )
+
+    @extend_schema_field(PlantParametersOutput(allow_null=True))
+    def get_parameters(self, plant: Plant) -> dict[str, Any] | None:
+        record = declaration(plant)
+        return None if record is None else dict(PlantParametersOutput(record).data)
+
     class Meta:
-        model = PlantSubmission
+        model = Plant
         fields = (
             "id",
-            "dc_capacity_mw",
-            "inverter_capacity_mw",
-            "export_limit_mw",
-            "measurement_basis",
-            "mounting_type",
-            "surface_tilt_degrees",
-            "surface_azimuth_degrees",
+            "name",
+            "region_id",
+            "current_configuration",
+            "parameters",
+            "parameters_revision",
             "created_at",
         )
         read_only_fields = fields
 
 
-class PlantOutput(serializers.ModelSerializer[Plant]):
-    region_id = serializers.IntegerField()
-    current_configuration = ConfigurationOutput(allow_null=True)
-    submission = PlantSubmissionOutput(allow_null=True)
-
-    class Meta:
-        model = Plant
-        fields = ("id", "name", "region_id", "current_configuration", "submission", "created_at")
-        read_only_fields = fields
+class PlantConflict(serializers.Serializer[dict[str, Any]]):
+    code = serializers.ChoiceField(choices=ErrorCode.choices)
+    message = serializers.CharField()
+    current = PlantOutput()
 
 
 class ObservationRow(InputSerializer):

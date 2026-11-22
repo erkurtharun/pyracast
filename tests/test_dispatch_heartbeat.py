@@ -17,11 +17,10 @@ def test_dispatcher_touches_its_heartbeat_before_every_cycle_even_after_a_failed
     monkeypatch.setattr(command, "record_dispatch_phase", MagicMock())
     monkeypatch.setattr(command, "make_broker", MagicMock)
     stub_actors(monkeypatch)
+    monkeypatch.setattr(command, "RETENTION", ())
     for name in (
         "purge_expired",
-        "sweep_accounts",
         "warn_before_purge",
-        "purge_finished_mail",
         "publish_outbound_mail",
         "dispatch_calibrations",
         "dispatch_notifications",
@@ -61,11 +60,10 @@ def test_the_heartbeat_is_renewed_only_after_the_broker_answers(
         lambda: RabbitmqBroker(url="amqp://broker.invalid/", confirm_delivery=True),
     )
     monkeypatch.setattr(command, "record_dispatch_phase", MagicMock())
+    monkeypatch.setattr(command, "RETENTION", ())
     for name in (
         "purge_expired",
-        "sweep_accounts",
         "warn_before_purge",
-        "purge_finished_mail",
         "publish_outbound_mail",
         "dispatch_calibrations",
         "dispatch_notifications",

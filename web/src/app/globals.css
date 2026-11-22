@@ -171,6 +171,9 @@ textarea:focus-visible,
     margin-top: var(--space-5);
     color: var(--neutral-49);
 }
+.sidebar .language-control .text-button {
+    color: inherit;
+}
 .sidebar .language-select select {
     color: var(--neutral-49);
     background: var(--green-796);

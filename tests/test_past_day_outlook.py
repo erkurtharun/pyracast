@@ -7,6 +7,7 @@ from pyracast.plants.activation import activate_calibration, reset_calibration
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import CalibrationRun, Plant
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from tests.support.domain import NOW, System
 from tests.support.plant_operations import make_plant, ready_run, saved_actuals
 
@@ -129,9 +130,7 @@ def test_past_day_uses_the_current_declaration_when_its_binding_archived_the_day
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name="Plant",
-        dc_capacity_mw=65,
-        export_limit_mw=100,
+        PlantParameters(name="Plant", dc_capacity_mw=65, export_limit_mw=100),
     )
     result = _past(system, plant)
     payload = cast(dict[str, Any], result["result"])

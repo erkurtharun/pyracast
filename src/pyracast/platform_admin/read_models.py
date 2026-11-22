@@ -401,9 +401,9 @@ def recent_work_context(
             "review_url": reverse("admin:workspace_plant", args=(row.schedule.region_id,)),
             "forecast_status": (
                 _("Forecast unavailable")
-                if (row.prepared_message or {}).get("kind") == PreparedMessageKind.UNAVAILABLE
+                if row.forecast_kind == PreparedMessageKind.UNAVAILABLE
                 else _("Partial forecast")
-                if (row.prepared_message or {}).get("tomorrow_complete") is False
+                if row.forecast_complete is False
                 else ""
             ),
         }

@@ -17,7 +17,7 @@ from pyracast.plants.approval import ReviewDecision, approve_region, review_snap
 from pyracast.plants.models import PlantSubmission
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 from pyracast.regions.operations import configure_binding, submit_region
-from tests.support.admin_setup import admin_system, submitted_plant
+from tests.support.admin_setup import admin_system, form_fields, submitted_plant
 from tests.support.api import verified_admin
 from tests.support.concurrency import behind_open_transaction
 from tests.support.domain import FakeAdapter, System, make_system
@@ -95,12 +95,8 @@ def console_notices(client: Client, url: str, data: dict[str, object]) -> list[s
 
 
 def approval_post(client: Client, region: Region) -> dict[str, object]:
-    form = client.get(reverse("admin:workspace_plant", args=(region.pk,))).context["action_form"]
-    values = {name: form[name].value() for name in form.fields}
-    return {
-        **{name: value for name, value in values.items() if value is not None},
-        "action": "approve",
-    }
+    page = client.get(reverse("admin:workspace_plant", args=(region.pk,)))
+    return {**form_fields(page.content, "validate"), "action": "approve"}
 
 
 def status_of(region: Region) -> str:
@@ -270,7 +266,7 @@ def test_a_rejected_plant_accepts_edits_of_its_declaration() -> None:
 
     response = client.put(
         plant_url(system, plant.pk),
-        {"name": plant.name, "dc_capacity_mw": 5.5},
+        {"name": plant.name, "dc_capacity_mw": 5.5, "expected_revision": plant.parameters_revision},
         content_type="application/json",
     )
 
@@ -439,7 +435,12 @@ def test_reject_read_edit_resubmit_and_approve_through_the_real_api() -> None:
     read = site_row(customer, system)
     edited = customer.put(
         plant_url(system, plant.pk),
-        {"name": plant.name, "dc_capacity_mw": 3.9, "inverter_capacity_mw": 3.5},
+        {
+            "name": plant.name,
+            "dc_capacity_mw": 3.9,
+            "inverter_capacity_mw": 3.5,
+            "expected_revision": read["plant"]["parameters_revision"],
+        },
         content_type="application/json",
     )
     resubmitted = customer.post(

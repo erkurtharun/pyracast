@@ -91,6 +91,7 @@
         "localDates": "Tarihler santral saatinde",
         "loadingGeneration": "Elektrik üretimi tahmini yükleniyor…",
         "loadingIrradiance": "Işınım tahmini yükleniyor…",
+        "loadingSection": "Bölüm yükleniyor…",
         "awaitingApproval": "Yönetici onayı bekleniyor. Santral bilgileriniz kaydedildi; tahminler veri bağlantısı onaylandıktan ve veri toplama başarılı olduktan sonra kullanılabilir.",
         "minutes30": "30 dakika",
         "minutes60": "60 dakika",
@@ -100,7 +101,10 @@
         "deletionHelp": "Bu santrali, konumunu ve ilişkili geçmişini 30 günlüğüne geri dönüşüm kutusuna taşıyın.",
         "calibrationUnavailable": "Kalibrasyon, yönetici onayı ve eşleşen üretim geçmişinden sonra kullanılabilir.",
         "actuals": "Gerçekleşen",
-        "plantTime": "Bu santraldeki saatler santral saatindedir: {zone}."
+        "plantTime": "Bu santraldeki saatler santral saatindedir: {zone}.",
+        "serverChanges": "Bu arada başka biri tarafından değiştirilenler:",
+        "editKept": "(girdiğiniz {value} korunuyor)",
+        "editDropped": "{field}: girdiğiniz {value} artık geçerli olmadığı için kaldırıldı."
     },
     "RegionSettings": {
         "plantLocation": "Santral konumu",
@@ -235,7 +239,6 @@
         "staleEdit": "Siz açtıktan sonra bu kesinti başka biri tarafından değiştirildi. Girdileriniz korunuyor.",
         "staleApply": "Bu arada değişenler (şimdi {revision}. sürüm). Değişikliğinizi bu sürüme uygulamak için yeniden kaydedin ya da bırakın.",
         "staleClosed": "Bu kesintinin durumu artık: {status}. Değişikliğiniz uygulanamaz.",
-        "changedField": "{field}: {before} → {after}",
         "discardEdit": "Değişikliğimi bırak",
         "status": "Durum",
         "cancelledOutages": "{count, plural, one {# iptal edilmiş kayıt} other {# iptal edilmiş kayıt}}"

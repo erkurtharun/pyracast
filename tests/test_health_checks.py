@@ -54,7 +54,10 @@ def test_overdue_and_interrupted_jobs_are_jobs_their_owners_publish() -> None:
             status=status,
             lease_token=None if lease is None else uuid.uuid4(),
             lease_expires_at=lease,
-            prepared_message={"kind": "current", "tomorrow_complete": True},
+            prepared_message={"format": "plain", "subject": "Forecast", "body": "Forecast"},
+            forecast_kind="current",
+            forecast_complete=True,
+            prepared_at=late,
         )
         freeze(delivery, ["recipient@example.com"])
     window = Window(NOW, LAG)

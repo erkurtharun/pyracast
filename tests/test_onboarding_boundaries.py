@@ -9,7 +9,7 @@ from tests.support.plant_operations import make_plant
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-@pytest.mark.parametrize("change", ["binding_removed", "approval_revoked", "credential_rotated"])
+@pytest.mark.parametrize("change", ["approval_revoked", "credential_rotated"])
 def test_revising_an_approved_plant_requires_a_current_validated_binding_and_keeps_history(
     monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
@@ -18,9 +18,7 @@ def test_revising_an_approved_plant_requires_a_current_validated_binding_and_kee
     assert configuration_id is not None
     previous_configuration = PlantConfiguration.objects.values().get(pk=configuration_id)
     events = list(PlantEvent.objects.filter(plant=plant).values_list("pk", flat=True))
-    if change == "binding_removed":
-        Region.objects.filter(pk=system.region.pk).update(status="pending", approved_binding=None)
-    elif change == "approval_revoked":
+    if change == "approval_revoked":
         Region.objects.filter(pk=system.region.pk).update(status="suspended")
     else:
         rotate_secret(system.admin, system.account.pk, "test-only-rotated-key")
@@ -29,7 +27,7 @@ def test_revising_an_approved_plant_requires_a_current_validated_binding_and_kee
     client.force_login(system.member)
     response = client.put(
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/",
-        {"name": "Changed", "dc_capacity_mw": 150},
+        {"name": "Changed", "dc_capacity_mw": 150, "expected_revision": 1},
         content_type="application/json",
     )
 

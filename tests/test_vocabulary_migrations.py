@@ -57,6 +57,9 @@ NEW_CHECKS = {
         "prepared_message__kind",
     ): "notificationdelivery_prepared_kind_chk",
 }
+# The kind leaves the message for a typed column, which carries its own check, at the leaf.
+MOVED_KIND_CHECK = "notificationdelivery_prepared_kind_chk"
+DELIVERY_VOCABULARY = ("notifications", "0002_delivery_vocabulary_checks")
 UNAVAILABLE_MESSAGE = {
     "format": "plain",
     "kind": "unavailable",
@@ -181,7 +184,7 @@ def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
 
     forward()
 
-    assert _installed() == set(NEW_CHECKS.values())
+    assert _installed() == set(NEW_CHECKS.values()) - {MOVED_KIND_CHECK}
     assert CollectionJob.objects.get(pk=job.pk).endpoint == "forecasts"
     assert RequestAttempt.objects.get(pk=attempt.pk).purpose == "validation"
     assert PlantEvent.objects.get(pk=event.pk).action == event.action
@@ -191,9 +194,16 @@ def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
     assert IncidentChange.objects.get(pk=created.pk).kind == "inverter"
     assert IncidentChange.objects.get(pk=cancelled.pk).kind == ""
     delivery.refresh_from_db()
-    assert (delivery.last_error, delivery.prepared_message) == (
+    assert (
+        delivery.last_error,
+        delivery.prepared_message,
+        delivery.forecast_kind,
+        delivery.prepared_at,
+    ) == (
         "mail_rejected",
-        UNAVAILABLE_MESSAGE,
+        {key: UNAVAILABLE_MESSAGE[key] for key in ("format", "subject", "body")},
+        "unavailable",
+        NOW,
     )
     migrate(*INITIAL.values())
     assert not _installed()
@@ -255,7 +265,10 @@ def test_vocabulary_migration_refuses_prepared_messages_outside_the_vocabulary(
 
     assert repr(value) in str(refused.value)
     assert NEW_CHECKS[table, lookup] not in checks(table)
-    assert stored.get().prepared_message == {**UNAVAILABLE_MESSAGE, key: value}
+    assert stored.values_list("prepared_message", flat=True).get() == {
+        **UNAVAILABLE_MESSAGE,
+        key: value,
+    }
     stored.update(prepared_message=UNAVAILABLE_MESSAGE)
-    forward()
+    migrate(DELIVERY_VOCABULARY)
     assert NEW_CHECKS[table, lookup] in checks(table)

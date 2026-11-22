@@ -9,6 +9,7 @@ from rest_framework.generics import GenericAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from pyracast.api.errors import current_on_conflict
 from pyracast.change_requests.queries import with_own_pending_requests
 from pyracast.plants import operations
 from pyracast.plants.activation import (
@@ -46,9 +47,11 @@ from pyracast.plants.serializers import (
     ObservationImportOutput,
     PerformanceOutput,
     PerformanceQuery,
+    PlantConflict,
     PlantForecastOutput,
     PlantInput,
     PlantOutput,
+    PlantRevisionInput,
     ProductionCommitInput,
     ProductionHistoryOutput,
     ProductionPreviewOutput,
@@ -100,10 +103,7 @@ class PlantsView(ScopedView[Plant]):
         data = PlantInput(data=request.data)
         data.is_valid(raise_exception=True)
         plant = operations.create_plant(
-            cast(User, request.user),
-            kwargs["tenant_id"],
-            kwargs["region_id"],
-            **data.validated_data,
+            cast(User, request.user), kwargs["tenant_id"], kwargs["region_id"], data.parameters()
         )
         return Response(PlantOutput(plant).data, status=201)
 
@@ -111,12 +111,19 @@ class PlantsView(ScopedView[Plant]):
 class PlantView(ScopedView[Plant]):
     serializer_class = PlantOutput
 
-    @extend_schema(request=PlantInput, responses=PlantOutput)
+    @extend_schema(request=PlantRevisionInput, responses={200: PlantOutput, 409: PlantConflict})
     def put(self, request: Request, **_kwargs: Any) -> Response:
         scope = self.scope()
-        data = PlantInput(data=request.data)
+        data = PlantRevisionInput(data=request.data)
         data.is_valid(raise_exception=True)
-        plant = operations.revise_plant(*scope, **data.validated_data)
+        with current_on_conflict(
+            operations.StaleParametersError, lambda stale: PlantOutput(stale.current).data
+        ):
+            plant = operations.revise_plant(
+                *scope,
+                data.parameters(),
+                expected_revision=data.validated_data["expected_revision"],
+            )
         return Response(PlantOutput(plant).data)
 
 

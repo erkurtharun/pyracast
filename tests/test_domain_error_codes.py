@@ -12,6 +12,7 @@ from pyracast.errors import DomainError
 from pyracast.incidents.operations import finish_incident, save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from tests.support.domain import make_system
 from tests.support.plant_operations import make_plant
 from tests.support.provisional_measurements import DAY
@@ -35,7 +36,10 @@ def post(client: Client, path: str, data: dict[str, Any], language: str = "en") 
 def test_outage_rules_answer_their_own_codes_and_fields() -> None:
     system = make_system(approved=True)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=1),
     )
     client = signed_in(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/outages/"
@@ -238,7 +242,10 @@ def test_workspace_refusals_answer_their_own_codes() -> None:
 def test_outage_operations_key_each_invalid_value_by_field() -> None:
     system = make_system(approved=True)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=1),
     )
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     start = timezone.now() - timedelta(hours=2)

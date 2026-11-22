@@ -1,10 +1,18 @@
 "use client";
 import { useTranslations } from "next-intl";
+import dynamic from "next/dynamic";
 import type { PlantScope } from "@/lib/api";
+import { sectionUnavailable } from "@/lib/on-demand";
 import type { PlantAddress, PlantView } from "@/lib/routes";
-import { ForecastPerformance } from "@/features/forecast/forecast-performance";
 import { ProductionHistory } from "@/features/production/production-history";
 import { ViewNav } from "@/ui/action";
+
+const ForecastPerformance = dynamic(() =>
+    import("@/features/forecast/forecast-performance").then(
+        (module) => module.ForecastPerformance,
+        sectionUnavailable,
+    ),
+);
 
 export function ProductionSection({
     scope,

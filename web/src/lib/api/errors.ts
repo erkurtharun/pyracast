@@ -119,6 +119,7 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     incumbent_changed: true,
     calibration_not_activatable: true,
     review_reason_required: true,
+    plant_parameters_changed: true,
 };
 
 export function displayMessage(error: unknown, fallback: string): string {

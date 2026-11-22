@@ -18,6 +18,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production import production_history
 from pyracast.regions.models import Region
 from tests.support.concurrency import row_locked_elsewhere, short_lock_timeout
@@ -290,7 +291,11 @@ def test_earlier_configuration_correction_stays_visible_without_entering_totals(
     start, _ = local_day_bounds(DAY, system.binding.timezone)
     saved = write(system, plant, [edit(start, 2)])["ids"][0]
     revise_plant(
-        system.member, system.tenant.pk, system.region.pk, plant.pk, name="New", dc_capacity_mw=150
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        PlantParameters(name="New", dc_capacity_mw=150),
     )
     plant.refresh_from_db()
     for native in (True, False):
