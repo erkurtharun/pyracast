@@ -3,6 +3,8 @@ linter: qodana-js
 withinDocker: false
 
 # Run as `qodana scan --only-directory web --config qodana-js.yaml`.
+# The scan looks for defects that ESLint, the type check and knip do not report; layout and
+# naming stay with the formatter and ESLint.
 failureConditions:
   severityThresholds:
     critical: 0
@@ -14,8 +16,36 @@ profile:
   inspections:
     - inspection: VulnerableLibrariesLocal
       enabled: true
-    - group: "category:JavaScript and TypeScript"
+    - inspection: JSUnresolvedReference
       enabled: true
+    - inspection: JSValidateTypes
+      enabled: true
+    - inspection: JSCheckFunctionSignatures
+      enabled: true
+    - inspection: JSDeprecatedSymbols
+      enabled: true
+    - group: "category:JavaScript and TypeScript/Unused symbols"
+      enabled: true
+    - group: "category:JavaScript and TypeScript/Probable bugs"
+      enabled: true
+    - group: "category:JavaScript and TypeScript/Bitwise operation issues"
+      enabled: true
+    - inspection: ConditionalExpressionWithIdenticalBranchesJS
+      enabled: true
+    - inspection: DuplicateConditionJS
+      enabled: true
+    - inspection: IfStatementWithIdenticalBranchesJS
+      enabled: true
+    - inspection: SuspiciousTypeOfGuard
+      enabled: true
+    - group: "category:RegExp"
+      enabled: true
+    # Prefers relative paths that the import boundaries in eslint.config.mjs refuse.
+    - inspection: ES6PreferShortImport
+      enabled: false
+    # A failed response thrown into its handler's catch shares the failure path by design.
+    - inspection: ExceptionCaughtLocallyJS
+      enabled: false
 
 include:
   - name: Eslint

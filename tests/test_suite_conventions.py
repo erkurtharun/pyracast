@@ -180,3 +180,32 @@ def test_each_language_scan_enables_dependency_vulnerability_inspections(name: s
         and inspection.get("enabled") is True
         for inspection in configuration["profile"]["inspections"]
     )
+
+
+def test_the_web_scan_adds_defect_inspections_to_the_recommended_profile_not_style_groups() -> None:
+    configuration = yaml.safe_load((TESTS.parent / "qodana-js.yaml").read_text(encoding="utf-8"))
+    enabled = [item for item in configuration["profile"]["inspections"] if item.get("enabled")]
+    groups = {item["group"] for item in enabled if "group" in item}
+    inspections = {item["inspection"] for item in enabled if "inspection" in item}
+
+    assert configuration["profile"]["base"]["name"] == "qodana.recommended"
+    assert "category:JavaScript and TypeScript" not in groups
+    assert (
+        not {
+            f"category:JavaScript and TypeScript/{name}"
+            for name in ("Code style issues", "Function metrics", "Naming conventions")
+        }
+        & groups
+    )
+    assert {
+        "JSUnresolvedReference",
+        "JSValidateTypes",
+        "JSCheckFunctionSignatures",
+        "JSDeprecatedSymbols",
+    } <= inspections
+    assert {
+        "category:JavaScript and TypeScript/Unused symbols",
+        "category:JavaScript and TypeScript/Probable bugs",
+        "category:RegExp",
+    } <= groups
+    assert {"name": "Eslint"} in configuration["include"]
