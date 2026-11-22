@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime
 from functools import partial
 from math import isfinite
@@ -48,7 +49,36 @@ MAX_PROMOTION_FAILURES = 3
 logger = logging.getLogger(__name__)
 
 
-def _authorized(plant: Plant, *, lock: bool = False) -> bool:
+@dataclass(frozen=True)
+class Enabler:
+    """The enabling person read before the workspace's rows, locked while the account is active."""
+
+    user_id: int | None
+    active: bool
+
+
+def lock_person(user_id: int | None) -> Enabler:
+    # A person's row before a workspace's rows, the order of the account processes. No key
+    # update: it keeps the account active until commit, and a workspace writer that commits a
+    # row naming this person does not wait for it.
+    active = (
+        user_id is not None
+        and User.objects.select_for_update(no_key=True).filter(pk=user_id, is_active=True).exists()
+    )
+    return Enabler(user_id, active)
+
+
+def lock_enabler(plant_id: int) -> Enabler:
+    """Lock the plant's enabling person before its workspace; once the plant is locked, a
+    different enabler there means that this round decides nothing."""
+    return lock_person(
+        Plant.objects.filter(pk=plant_id)
+        .values_list("automatic_calibration_enabled_by_id", flat=True)
+        .first()
+    )
+
+
+def _authorized(plant: Plant, enabler: Enabler | None = None) -> bool:
     actor_id = plant.automatic_calibration_enabled_by_id
     if actor_id is None:
         return False
@@ -58,11 +88,10 @@ def _authorized(plant: Plant, *, lock: bool = False) -> bool:
         tenant_id=plant.region.tenant_id,
         role=WorkspaceRole.ADMIN,
     )
-    if lock:
-        if not User.objects.select_for_update().filter(pk=actor_id, is_active=True).exists():
-            return False
-        members = members.select_for_update()
-    return members.exists()
+    if enabler is None:
+        return members.exists()
+    # The membership row only: `exists()` would drop OF and lock the joined person too.
+    return enabler.active and members.select_for_update(of=("self",)).first() is not None
 
 
 def _last_attempt(plant: Plant) -> PlantEvent | None:
@@ -145,6 +174,7 @@ def set_calibration_automation(
     actor: User, tenant_id: int, region_id: int, plant_id: int, *, enabled: bool
 ) -> Plant:
     with transaction.atomic():
+        enabler = lock_person(actor.pk) if enabled else None
         tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         region = Region.objects.active().select_for_update().get(pk=region_id, tenant_id=tenant_id)
         plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
@@ -153,7 +183,7 @@ def set_calibration_automation(
         set_automation_state(
             plant, actor, enabled=enabled, cause=AutomationCause.TOGGLE, now=timezone.now()
         )
-        if enabled:
+        if enabler is not None:
             latest = (
                 CalibrationRun.objects.filter(
                     plant=plant, configuration_id=plant.current_configuration_id
@@ -169,7 +199,7 @@ def set_calibration_automation(
                     plant=plant, status__in=OPEN_STATUSES
                 ).exists()
             ):
-                promote_automatic_calibration(plant, latest, timezone.now())
+                promote_automatic_calibration(plant, latest, timezone.now(), enabler)
             request_preparation([plant.pk])
         return plant
 
@@ -260,11 +290,19 @@ def _metric(value: object) -> float | None:
     return float(value) if isfinite(value) and value >= 0 else None
 
 
-def promote_automatic_calibration(plant: Plant, run: CalibrationRun, now: datetime) -> bool:
-    if not plant.automatic_calibration_enabled:
+def promote_automatic_calibration(
+    plant: Plant, run: CalibrationRun, now: datetime, enabler: Enabler
+) -> bool:
+    """The caller holds the plant lock and `enabler`, locked before the workspace's rows. When the
+    plant has another enabler by now, nothing is decided: the preparation the caller requests
+    decides with that one."""
+    if (
+        not plant.automatic_calibration_enabled
+        or plant.automatic_calibration_enabled_by_id != enabler.user_id
+    ):
         return False
     reason: str | None
-    if not _authorized(plant, lock=True):
+    if not _authorized(plant, enabler):
         reason = "authorization_revoked"
     elif not configuration_is_current(run.configuration):
         reason = "configuration_changed"
@@ -281,11 +319,11 @@ def promote_automatic_calibration(plant: Plant, run: CalibrationRun, now: dateti
     return True
 
 
-def attempt_promotion(plant: Plant, run: CalibrationRun, now: datetime) -> bool:
+def attempt_promotion(plant: Plant, run: CalibrationRun, now: datetime, enabler: Enabler) -> bool:
     """Promote in a savepoint; a raising promotion is recorded as skip promotion_failed."""
     try:
         with transaction.atomic():
-            promote_automatic_calibration(plant, run, now)
+            promote_automatic_calibration(plant, run, now, enabler)
     except Exception as error:
         log_failure(logger, "calibration_promotion_failed", error, run=run.pk)
         record_automatic_skip(plant, run.pk, "promotion_failed")
@@ -323,14 +361,19 @@ def _undecided_candidate(plant: Plant) -> CalibrationRun | None:
     return None if decided else run
 
 
-def promote_undecided_candidate(plant_id: int, now: datetime) -> bool:
-    """Promote a ready candidate whose promotion is undecided; the caller holds the plant lock.
+def promote_undecided_candidate(plant_id: int, now: datetime, enabler: Enabler) -> bool:
+    """Promote a ready candidate whose promotion is undecided; the caller holds the plant lock
+    and its enabler.
 
     False while a raising promotion has attempts left: the caller retries later.
     """
     plant = Plant.objects.select_related("region").get(pk=plant_id)
     run = _undecided_candidate(plant) if plant.automatic_calibration_enabled else None
-    return run is None or attempt_promotion(plant, run, now) or _undecided_candidate(plant) is None
+    return (
+        run is None
+        or attempt_promotion(plant, run, now, enabler)
+        or _undecided_candidate(plant) is None
+    )
 
 
 def prepare_due_calibrations(now: datetime, limit: int = 100) -> list[int]:
@@ -362,15 +405,16 @@ def _due_plants(now: datetime) -> PlantQuerySet:
 def _prepare_due(row: tuple[int, int, int], now: datetime) -> int | None:
     plant_id, region_id, tenant_id = row
     with transaction.atomic():
+        enabler = lock_enabler(plant_id)
         Tenant.objects.select_for_update().get(pk=tenant_id)
         region = Region.objects.select_for_update().filter(pk=region_id).first()
         if region is None or region.deleted_at is not None:
             return None
         plant = _due_plants(now).select_for_update().filter(pk=plant_id).first()
-        if plant is None:
+        if plant is None or plant.automatic_calibration_enabled_by_id != enabler.user_id:
             return None
         run = None
-        if _authorized(plant, lock=True):
+        if _authorized(plant, enabler):
             run = prepare_calibration(plant.pk, now)
         elif not _paused(plant):
             record_automatic_skip(plant, None, "authorization_revoked")

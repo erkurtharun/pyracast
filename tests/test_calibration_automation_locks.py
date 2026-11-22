@@ -157,11 +157,11 @@ def passed_to(system: System, plant: Plant, successor: User) -> list[Callable[[]
 def changed_at_the_workspace_lock(
     monkeypatch: pytest.MonkeyPatch, owner: object, step: str, *changes: Callable[[], object]
 ) -> None:
-    # The changes commit on another connection when `owner.step` first locks a workspace, after
-    # every read and lock it takes before that one.
+    # The changes commit on another connection when the first call of `owner.step` first locks a
+    # workspace, after every read and lock that call takes before that one.
     original = getattr(owner, step)
     locking = Tenant.objects.select_for_update
-    pending: list[Callable[[], object]] = []
+    unsent, pending = list(changes), list[Callable[[], object]]()
 
     def lock(*args: Any, **kwargs: Any) -> Any:
         due, pending[:] = list(pending), []
@@ -170,7 +170,8 @@ def changed_at_the_workspace_lock(
         return locking(*args, **kwargs)
 
     def stepped(*args: Any, **kwargs: Any) -> Any:
-        pending.extend(changes)
+        pending.extend(unsent)
+        unsent.clear()
         return original(*args, **kwargs)
 
     monkeypatch.setattr(Tenant.objects, "select_for_update", lock)
@@ -226,6 +227,6 @@ def test_a_publication_whose_enabler_changed_meanwhile_leaves_the_candidate_to_i
     assert not CalibrationActivation.objects.exists()
     assert automatic_skips(plant) == []
     assert plant.calibration_preparation_due_at is not None
-    assert preparation.prepare_requested_calibrations(NOW) == []
+    assert preparation.prepare_requested_calibrations(NOW + timedelta(minutes=1)) == []
     assert CalibrationActivation.objects.get().calibration_id == run.pk
     assert automatic_skips(plant) == []

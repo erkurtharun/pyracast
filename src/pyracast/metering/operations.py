@@ -34,8 +34,9 @@ def member_plant(plant_id: int, actor: User) -> Plant:
 
 def _lock_platform_admin(actor: User) -> None:
     # The person's account before the workspace's rows, the order of member removal and erasure;
-    # the lock keeps the actor a platform administrator until the change commits.
-    require_platform_admin(User.objects.select_for_update().get(pk=actor.pk))
+    # the lock keeps the actor a platform administrator until the change commits. No key update:
+    # a workspace writer that commits a row naming this person does not wait for it.
+    require_platform_admin(User.objects.select_for_update(no_key=True).get(pk=actor.pk))
 
 
 @dataclass(frozen=True)

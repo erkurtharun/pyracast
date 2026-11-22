@@ -4,9 +4,7 @@ from django.db import transaction
 
 from pyracast.accounts.models import Tenant
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.automation import (
-    promote_automatic_calibration,
-)
+from pyracast.plants.automation import lock_enabler, promote_automatic_calibration
 from pyracast.plants.calibration_data import current_source_validation
 from pyracast.plants.models import (
     CalibrationRun,
@@ -68,10 +66,11 @@ def evaluated_run(system: System, plant: Plant) -> CalibrationRun:
 def promote(plant_id: int, run: CalibrationRun) -> bool:
     with transaction.atomic():
         identity = Plant.objects.select_related("region").get(pk=plant_id)
+        enabler = lock_enabler(plant_id)
         Tenant.objects.select_for_update().get(pk=identity.region.tenant_id)
         Region.objects.select_for_update().get(pk=identity.region_id)
         plant = Plant.objects.select_for_update().get(pk=plant_id)
-        return promote_automatic_calibration(plant, run, NOW)
+        return promote_automatic_calibration(plant, run, NOW, enabler)
 
 
 def import_fit_history(system: System, plant: Plant) -> None:
