@@ -7,7 +7,7 @@ import pytest
 
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts.budget import forecast_starts
+from pyracast.forecasts.budget import forecast_starts, remaining_forecast_requests
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.revalidation import revalidate_account, stale_bindings
 from pyracast.forecasts.timing import forecast_timing
@@ -19,24 +19,45 @@ from tests.support.revalidation import (
     ROUND_OFFSETS,
     account,
     assert_current_plants_keep_their_forecasts,
+    assert_the_step_kept_the_reserve,
     collecting_account,
     dispatch_round,
+    last_request,
+    spend_until,
+    used,
     utc,
 )
 
 pytestmark = pytest.mark.django_db(transaction=True)
 D1, D2, D3 = (NOW.date() + timedelta(days=offset) for offset in range(1, 4))
 END = utc(D3 + timedelta(days=1), 0)
+RETRY_AFTER = timedelta(hours=2)
+
+
+@dataclass(frozen=True)
+class Ending:
+    """How a plant's forecast job of a slot ends, and the requests it sent."""
+
+    plant: int
+    slot: datetime
+    status: str
+    last_error: str
+    requests: int
 
 
 @dataclass
 class Case:
+    """`lost` names the forecast job a provider failure on a fully booked day costs and the moment
+    it is refused for the used-up quota; `endings` are the jobs that failure touches."""
+
     timezone: str
     clocks: list[list[str]]
     quota: int
     replaced_at: datetime
     revoked_at: datetime | None = None
     failing_at: datetime | None = None
+    lost: tuple[int, datetime, datetime] | None = None
+    endings: tuple[Ending, ...] = ()
     failed: bool = field(default=False, init=False)
     refused: bool = field(default=False, init=False)
 
@@ -60,7 +81,9 @@ class Provider(HistoricalFixture):
         if self.now == self.case.failing_at and not self.case.failed:
             self.case.failed = True
             raise ProviderError(
-                "provider_request_failed", status_code=503, retry_after_seconds=7200
+                "provider_request_failed",
+                status_code=503,
+                retry_after_seconds=int(RETRY_AFTER.total_seconds()),
             )
         return super().fetch(binding, target_date)
 
@@ -69,17 +92,39 @@ class Provider(HistoricalFixture):
         return super().fetch_history(binding, target_date, days)
 
 
+EAST_CLOCKS = [["06:00", "16:00"], ["16:00"], ["09:30"], ["06:00", "21:00"]]
 CASES = [
-    # East of UTC, key replaced before the day's slots: 6 clocks and 4 waiting plants on 10.
+    # East of UTC, key replaced before the day's slots: 6 clocks and 4 waiting plants on 10. The
+    # provider fails the first plant's forecast of D2 13:00 UTC; its retry takes the day's last
+    # request, so the fourth plant's forecast of 18:00 UTC is refused for the used-up quota.
     pytest.param(
         Case(
             "Europe/Istanbul",
-            [["06:00", "16:00"], ["16:00"], ["09:30"], ["06:00", "21:00"]],
+            EAST_CLOCKS,
             10,
             utc(D1, 0, 30),
             failing_at=utc(D2, 13),
+            lost=(3, utc(D2, 18), utc(D2, 18)),
+            endings=(
+                Ending(0, utc(D2, 13), "succeeded", "", 2),
+                Ending(3, utc(D2, 18), "stale", "forecast_superseded", 0),
+            ),
         ),
         id="east-replaced-before-the-slots",
+    ),
+    # As above, with the provider failing the day's last forecast, of 18:00 UTC: its retry is
+    # refused for the used-up quota.
+    pytest.param(
+        Case(
+            "Europe/Istanbul",
+            EAST_CLOCKS,
+            10,
+            utc(D1, 0, 30),
+            failing_at=utc(D2, 18),
+            lost=(3, utc(D2, 18), utc(D2, 20, 2)),
+            endings=(Ending(3, utc(D2, 18), "stale", "forecast_superseded", 1),),
+        ),
+        id="east-failed-on-the-last-slot",
     ),
     # West of UTC, the key revoked before the 11:00 UTC slot and replaced before 23:45 UTC:
     # 6 clocks and 4 waiting plants on 10.
@@ -108,6 +153,7 @@ CASES = [
 
 
 def slots(case: Case) -> list[datetime]:
+    """The forecast slots of the simulated days, and the moment a failed forecast retries."""
     zone = ZoneInfo(case.timezone)
     days = [D1 - timedelta(days=1), D1, D2, D3, D3 + timedelta(days=1)]
     return sorted(
@@ -117,21 +163,41 @@ def slots(case: Case) -> list[datetime]:
             for clock in {clock for clocks in case.clocks for clock in clocks}
             if (slot := local_slot(day, clock, zone)) is not None and utc(D1, 0) <= slot < END
         }
+        | ({case.failing_at + RETRY_AFTER} if case.failing_at is not None else set())
     )
 
 
 def assert_no_forecast_was_refused_for_a_used_up_quota(
-    system: System, moment: datetime, checked: set[int]
+    system: System,
+    plants: list[SiteBinding],
+    case: Case,
+    moment: datetime,
+    refused: dict[int, datetime],
 ) -> None:
     """A forecast refused for the used-up quota is allowed only where its plant's starts of the
-    day are used up as well (claim's day bound refuses it anyway)."""
-    refused = CollectionJob.objects.filter(
+    day are used up as well (claim's day bound refuses it anyway), or as the one forecast the
+    case's provider failure costs that provider day; none is refused for the reserve, which holds
+    back other requests only."""
+    assert not CollectionJob.objects.filter(
+        binding__provider_account=system.account,
+        endpoint="forecasts",
+        last_error="history_budget_reserved",
+    ).exists(), moment
+    jobs = CollectionJob.objects.filter(
         binding__provider_account=system.account,
         endpoint="forecasts",
         status="retry",
         last_error="quota_exhausted",
-    ).exclude(pk__in=checked)
-    for job in refused.select_related("binding__provider_account"):
+    ).exclude(pk__in=refused)
+    for job in jobs.select_related("binding__provider_account"):
+        refused[job.pk] = moment
+        if (
+            case.lost is not None
+            and case.failing_at is not None
+            and (job.binding_id, job.scheduled_for) == (plants[case.lost[0]].pk, case.lost[1])
+            and moment.date() == case.failing_at.date()
+        ):
+            continue
         timing = forecast_timing(
             job.binding, CollectionSchedule.objects.filter(region_id=job.binding.region_id).first()
         )
@@ -140,7 +206,6 @@ def assert_no_forecast_was_refused_for_a_used_up_quota(
             job.scheduled_for,
             moment,
         )
-        checked.add(job.pk)
 
 
 def assert_no_provider_day_exceeds_the_quota(system: System) -> None:
@@ -152,6 +217,29 @@ def assert_no_provider_day_exceeds_the_quota(system: System) -> None:
     assert max(days.values(), default=0) <= account(system).daily_quota, days
 
 
+def assert_the_failure_cost_one_forecast(
+    system: System, plants: list[SiteBinding], case: Case, refused: dict[int, datetime]
+) -> None:
+    if case.failing_at is None:
+        return
+    assert case.lost is not None
+    assert used(system, case.failing_at) == case.quota
+    index, slot, refused_at = case.lost
+    lost = CollectionJob.objects.get(
+        binding=plants[index], endpoint="forecasts", scheduled_for=slot
+    )
+    assert refused.get(lost.pk) == refused_at
+    for ending in case.endings:
+        job = CollectionJob.objects.get(
+            binding=plants[ending.plant], endpoint="forecasts", scheduled_for=ending.slot
+        )
+        assert (job.status, job.last_error, RequestAttempt.objects.filter(job=job).count()) == (
+            ending.status,
+            ending.last_error,
+            ending.requests,
+        ), ending
+
+
 @pytest.mark.parametrize("case", CASES)
 def test_the_scheduler_claim_and_revalidation_keep_the_reserve_over_three_provider_days(
     case: Case,
@@ -161,19 +249,22 @@ def test_the_scheduler_claim_and_revalidation_keep_the_reserve_over_three_provid
     rounds = sorted({slot + offset for slot in slots(case) for offset in ROUND_OFFSETS})
     run_at: datetime | None = None
     claim: datetime | None = None
+    replaced = False
     revalidated_at: datetime | None = None
-    checked: set[int] = set()
+    refused: dict[int, datetime] = {}
     while True:
-        moments = [
+        due = [
             *rounds[:1],
             *([run_at] if run_at is not None else []),
-            *([case.replaced_at] if claim is None else []),
+            *([] if replaced else [case.replaced_at]),
         ]
-        moment = min(moments)
+        moment = min(due, default=END)
         if moment >= END:
             break
-        if claim is None and moment == case.replaced_at:
+        since = last_request()
+        if not replaced and moment == case.replaced_at:
             replace_key(system.admin, system.account.pk, provider_key("NEW"))
+            replaced = True
             claim = account(system).revalidation_due_at
             run_at = moment
         elif rounds and rounds[0] == moment:
@@ -187,12 +278,56 @@ def test_the_scheduler_claim_and_revalidation_keep_the_reserve_over_three_provid
             claim = run_at = account(system).revalidation_due_at
             if revalidated_at is None and not stale_bindings(account(system)).exists():
                 revalidated_at = moment
-        assert_current_plants_keep_their_forecasts(system, moment)
-        assert_no_forecast_was_refused_for_a_used_up_quota(system, moment, checked)
+        assert_the_step_kept_the_reserve(system, moment, since)
+        assert_no_forecast_was_refused_for_a_used_up_quota(system, plants, case, moment, refused)
         assert_no_provider_day_exceeds_the_quota(system)
 
+    assert replaced
     if sum(map(len, case.clocks)) + len(plants) <= case.quota:
         assert revalidated_at is not None
         assert revalidated_at < utc(case.replaced_at.date() + timedelta(days=2), 0)
     assert case.failing_at is None or case.failed
     assert case.revoked_at is None or case.refused
+    assert_the_failure_cost_one_forecast(system, plants, case, refused)
+
+
+def collected_with_a_server_error(clocks: list[str], slots: list[datetime]) -> System:
+    """One current plant on quota 10 whose slots are collected while the provider fails the
+    forecast request of the last of them."""
+    system, _plants = collecting_account([clocks], replaced=False)
+    failing = Case("Europe/Istanbul", [], 10, END, failing_at=slots[-1])
+    for moment in sorted(slot + offset for slot in slots for offset in ROUND_OFFSETS):
+        dispatch_round(moment, Provider(failing, moment))
+    return system
+
+
+def test_the_reserve_check_fails_a_history_request_that_took_a_retrys_room() -> None:
+    system = collected_with_a_server_error(["06:00", "16:00"], [utc(D1, 3), utc(D1, 13)])
+    moment = utc(D1, 13, 30)
+    assert (used(system, moment), remaining_forecast_requests(account(system), moment)) == (5, 1)
+    since = last_request()
+
+    spend_until(system, moment, 10)
+
+    # 5 used and the retry left 4 on 10; history requests took 5, the retry's room among them.
+    with pytest.raises(AssertionError):
+        assert_the_step_kept_the_reserve(system, moment, since)
+    with pytest.raises(AssertionError):
+        assert_current_plants_keep_their_forecasts(system, moment)
+
+
+def test_the_reserve_check_holds_no_room_for_a_failed_forecast_a_later_slot_superseded() -> None:
+    system = collected_with_a_server_error(["06:00", "12:00", "16:00"], [utc(D1, 3), utc(D1, 9)])
+    moment = utc(D1, 13)
+    spend_until(system, moment, 10)
+    since = last_request()
+
+    # The job of 09:00 UTC still waits for its retry, but claim ends it for the slot of 13:00, due
+    # now and alone still needed. No failed job is sent again: 10 + 1 > 10 has no excuse.
+    failed = CollectionJob.objects.get(
+        binding=system.binding, endpoint="forecasts", scheduled_for=utc(D1, 9)
+    )
+    assert (failed.status, failed.last_error) == ("retry", "provider_server_error")
+    assert remaining_forecast_requests(account(system), moment) == 1
+    with pytest.raises(AssertionError):
+        assert_the_step_kept_the_reserve(system, moment, since)

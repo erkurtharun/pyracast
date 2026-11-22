@@ -3,25 +3,44 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 
+from pyracast.background.deadlines import ACTORS
+from pyracast.background.retry_policy import PROVIDER_JOB
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
+from pyracast.forecasts.models import (
+    CollectionJob,
+    CollectionSchedule,
+    ForecastSnapshot,
+    RequestAttempt,
+)
 from pyracast.local_time import local_slot
 from pyracast.regions.models import active_region
 
 REOPENS_NOT = {"quota_exhausted", "schedule_disabled"}
+WORKER_LEASE = ACTORS["collect_forecast"].lease
+
+
+def at_a_kept_clock(
+    job: CollectionJob, zone: ZoneInfo, clocks: list[str], first_id: int, effective: datetime
+) -> bool:
+    return (job.pk == first_id and job.scheduled_for >= effective) or (
+        job.scheduled_for.astimezone(zone).strftime("%H:%M") in clocks
+    )
 
 
 def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
-    """The forecast budget as computed before collection timing had one function, with the due
-    slot the scheduler opens again, the starts per UTC day claim admits, and no job older than
-    the due slot that claim ends unsent."""
+    """The forecast budget as computed before collection timing had one function. Each slot of
+    the UTC day still to come, and the due slot the scheduler opens again, costs a request unless
+    a job already sits at it. A job whose provider answer is stored costs nothing more. A job a
+    worker runs under its lease costs one unless the request it made since it was taken is out
+    and not refused. Any other open job costs one when claim would take it before the day ends:
+    not older than the due slot, at a clock of the saved schedule (or the approval job), with
+    claims left, and ready by its time or at once if it is throttled and its account's delay was
+    cleared. A job refused for the key costs one where the current schedule collects it while a
+    validation can still reopen it: these plants are validated with the current key, so only
+    while that key is recorded as rejected. Starts per UTC day are bounded as claim admits
+    them."""
     day_start = datetime.combine(now.astimezone(UTC).date(), datetime.min.time(), UTC)
     day_end = day_start + timedelta(days=1)
-    attempted = set(
-        RequestAttempt.objects.filter(provider_account=account, utc_day=day_start.date())
-        .exclude(job_id=None)
-        .values_list("job_id", flat=True)
-    )
     total = 0
     bindings = SiteBinding.objects.filter(
         active_region("region__"),
@@ -48,11 +67,9 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         effective = max(first_slot, schedule.effective_from) if schedule else first_slot
         jobs = list(CollectionJob.objects.filter(binding=binding, endpoint="forecasts"))
         by_slot = {job.scheduled_for: job for job in jobs}
-        paid_or_terminal = {
-            job.scheduled_for
-            for job in jobs
-            if job.pk in attempted or job.status in {"succeeded", "failed", "stale"}
-        }
+        answered = set(
+            ForecastSnapshot.objects.filter(job__in=jobs).values_list("job_id", flat=True)
+        )
         zone = ZoneInfo(binding.region.timezone)
         local_today = now.astimezone(zone).date()
         passed = [
@@ -64,11 +81,31 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         due = max(passed, default=None)
         needed: dict[datetime, CollectionJob | None] = {}
         for job in jobs:
-            superseded = due is not None and job.scheduled_for < due
+            if job.status not in {"pending", "retry", "running"} or job.pk in answered:
+                continue
             if (
-                (job.status == "running" or (job.status in {"pending", "retry"} and not superseded))
-                and job.pk not in attempted
-                and job.available_at < day_end
+                job.status == "running"
+                and job.lease_expires_at is not None
+                and job.lease_expires_at > now
+            ):
+                out = RequestAttempt.objects.filter(
+                    job=job,
+                    created_at__gte=job.lease_expires_at - WORKER_LEASE,
+                    outcome__in=("uncertain", "succeeded"),
+                ).exists()
+                if not out:
+                    needed[job.scheduled_for] = job
+                continue
+            superseded = due is not None and job.scheduled_for < due
+            spent = job.retry_until is None and job.attempts >= PROVIDER_JOB.max_attempts
+            released = (job.status, job.last_error) == ("retry", "provider_throttled") and (
+                account.request_blocked_until is None
+            )
+            if (
+                not superseded
+                and not spent
+                and (schedule is None or at_a_kept_clock(job, zone, clocks, first_id, effective))
+                and (released or job.available_at < day_end)
             ):
                 needed[job.scheduled_for] = job
         day = day_start.astimezone(zone).date()
@@ -79,7 +116,7 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
                 if (
                     slot is not None
                     and max(now, effective, day_start) <= slot < day_end
-                    and slot not in paid_or_terminal
+                    and slot not in by_slot
                 ):
                     needed.setdefault(slot, None)
             day += timedelta(days=1)
@@ -88,7 +125,7 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
             if due_job is None or (
                 due_job.status == "stale"
                 and due_job.last_error not in REOPENS_NOT
-                and due_job.pk not in attempted
+                and due_job.pk not in answered
             ):
                 needed.setdefault(due, due_job)
         latest = max(
@@ -98,7 +135,10 @@ def reference_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         )
         if (
             latest is not None
+            and account.authentication_failed_revision == account.credential_revision
             and (latest.status, latest.last_error) == ("failed", "provider_authentication_failed")
+            and latest.scheduled_for >= effective
+            and at_a_kept_clock(latest, zone, clocks, first_id, effective)
             and (due is None or latest.scheduled_for >= due)
         ):
             needed[latest.scheduled_for] = latest

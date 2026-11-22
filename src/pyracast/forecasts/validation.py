@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -11,7 +11,11 @@ from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
 from pyracast.errors import ConflictError, ErrorCode
-from pyracast.forecasts.budget import validations_in_flight
+from pyracast.forecasts.budget import (
+    VALIDATION_IN_FLIGHT,
+    remaining_forecast_requests,
+    validations_in_flight,
+)
 from pyracast.forecasts.models import (
     CollectionJobStatus,
     CollectionSchedule,
@@ -19,9 +23,14 @@ from pyracast.forecasts.models import (
     RequestOutcome,
     RequestPurpose,
 )
-from pyracast.forecasts.quota import record_provider_failure, reserve_request
+from pyracast.forecasts.quota import (
+    ForecastBudgetReservedError,
+    record_provider_failure,
+    reserve_request,
+)
 from pyracast.forecasts.timing import (
     armed_again_by_validation,
+    awaits_validation,
     forecast_timing,
     latest_forecast_job,
     latest_forecast_slot,
@@ -76,11 +85,12 @@ def validate_binding(
                 ),
             )
         # Validating an approved plant never takes a request a current plant's forecast needs.
+        keep_forecast_reserve = current.status == RegionStatus.APPROVED
         attempt = reserve_request(
             binding,
             now,
             purpose=RequestPurpose.VALIDATION,
-            keep_forecast_reserve=current.status == RegionStatus.APPROVED,
+            keep_forecast_reserve=keep_forecast_reserve,
             credential_revision=binding.provider_account.credential_revision,
         )
     try:
@@ -116,14 +126,22 @@ def validate_binding(
     with transaction.atomic():
         region = Region.objects.select_for_update().get(pk=binding.region_id)
         account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
+        committed_at = now + timedelta(seconds=time.monotonic() - started)
         # Under the account lock, so a reservation sees this validation in flight or its plant
         # validated (budget.remaining_forecast_requests).
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.SUCCEEDED)
-        if (
+        current_key = (
             region.deleted_at is None
             and region.revision == binding.region_revision
             and account.credential_revision == binding.provider_account.credential_revision
-        ):
+        )
+        reserve_taken = (
+            current_key
+            and keep_forecast_reserve
+            and _reserve_taken_meanwhile(binding, account, attempt, committed_at)
+        )
+        if current_key and not reserve_taken:
+            awaited = awaits_validation(SiteBinding.objects.get(pk=binding.pk), account)
             binding.validated_at = now
             binding.validated_credential_revision = account.credential_revision
             binding.health = BindingHealth.HEALTHY
@@ -134,9 +152,7 @@ def validate_binding(
                 and account.enabled
                 and account.authorized_at is not None
             ):
-                _rearm_after_validation(
-                    binding, region, now + timedelta(seconds=time.monotonic() - started)
-                )
+                _rearm_after_validation(binding, region, account, committed_at, awaited=awaited)
             record_audit(
                 actor=actor,
                 region=region,
@@ -145,7 +161,26 @@ def validate_binding(
                 details={"binding_id": binding.pk},
             )
             return binding
+    if reserve_taken:
+        raise ForecastBudgetReservedError
     raise ValidationError("Configuration changed during validation.")
+
+
+def _reserve_taken_meanwhile(
+    binding: SiteBinding, account: ProviderAccount, attempt: RequestAttempt, committed_at: datetime
+) -> bool:
+    """An answer committed after its validation stopped counting as in flight may find the
+    forecasts its plant needs booked by a request admitted meanwhile; its own request stays
+    counted."""
+    if committed_at - attempt.created_at < VALIDATION_IN_FLIGHT:
+        return False
+    used = RequestAttempt.objects.filter(
+        provider_account=account, utc_day=committed_at.astimezone(UTC).date()
+    ).count()
+    return (
+        used + remaining_forecast_requests(account, committed_at, validating=binding)
+        > account.daily_quota
+    )
 
 
 def _record_refusal(binding: SiteBinding) -> None:
@@ -156,17 +191,26 @@ def _record_refusal(binding: SiteBinding) -> None:
             SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
 
 
-def _rearm_after_validation(binding: SiteBinding, region: Region, recovered_at: datetime) -> None:
-    timing = forecast_timing(binding, CollectionSchedule.objects.filter(region=region).first())
-    due = (
-        None
-        if timing is None
-        else latest_forecast_slot(
-            recovered_at, region.timezone, timing.times, timing.effective_from
-        )
+def _rearm_after_validation(
+    binding: SiteBinding,
+    region: Region,
+    account: ProviderAccount,
+    recovered_at: datetime,
+    *,
+    awaited: bool,
+) -> None:
+    timing = forecast_timing(
+        binding,
+        CollectionSchedule.objects.filter(region=region).first(),
+        daily_quota=account.daily_quota,
     )
+    if timing is None:
+        return
+    due = latest_forecast_slot(recovered_at, region.timezone, timing.times, timing.effective_from)
     latest = latest_forecast_job(binding.pk, recovered_at).select_for_update().first()
-    if latest is not None and armed_again_by_validation(latest, due):
+    if latest is not None and armed_again_by_validation(
+        latest, timing, region.timezone, due, awaited=awaited
+    ):
         latest.status = CollectionJobStatus.PENDING
         latest.available_at = recovered_at
         latest.attempts = 0

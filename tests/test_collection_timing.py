@@ -1,5 +1,7 @@
 import itertools
+import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from threading import Barrier
 from zoneinfo import ZoneInfo
@@ -14,6 +16,7 @@ from pyracast.forecasts.models import (
     CollectionJob,
     CollectionJobError,
     CollectionSchedule,
+    ForecastSnapshot,
     RequestAttempt,
     RequestPurpose,
 )
@@ -48,12 +51,103 @@ MOMENTS = (
     NOW + timedelta(hours=8),
     NOW + timedelta(hours=11),
 )
+
+
+@dataclass(frozen=True)
+class JobState:
+    """The planned job at a moment: an attempt made then or `attempted` earlier, a stored
+    answer, a lease ending `lease` after the moment, available only after the UTC day, its claims,
+    the account's key recorded as rejected, a saved schedule taking effect after its slot."""
+
+    status: str
+    last_error: str = ""
+    attempt: str | None = None
+    attempted: timedelta = timedelta(0)
+    answered: bool = False
+    lease: timedelta | None = None
+    late: bool = False
+    blocked: bool = False
+    attempts: int = 0
+    rejected: bool = False
+    before_effective: bool = False
+
+
+HELD, ENDED_LEASE = timedelta(minutes=1), timedelta(minutes=-1)
 JOB_STATES = (
-    ("pending", False),
-    ("retry", True),
-    ("failed", False),
-    ("succeeded", True),
+    JobState("pending"),
+    JobState("retry", attempt="uncertain"),
+    JobState("failed"),
+    JobState("succeeded", attempt="uncertain"),
+    JobState("retry", "provider_server_error", attempt="failed"),
+    JobState("retry", "publication_failure", attempt="succeeded", answered=True),
+    JobState("retry", "provider_throttled", attempt="failed", late=True, blocked=True),
+    JobState("retry", "provider_throttled", attempt="failed", late=True),
+    JobState("failed", "provider_authentication_failed", attempt="failed"),
+    JobState("stale", "binding_not_current", attempt="failed"),
+    JobState("running", lease=HELD),
+    JobState("running", attempt="uncertain", lease=HELD),
+    JobState("running", attempt="uncertain", attempted=timedelta(minutes=-10), lease=HELD),
+    JobState("running", attempt="uncertain", lease=ENDED_LEASE),
+    JobState(
+        "running", attempt="failed", attempted=timedelta(minutes=-10), lease=ENDED_LEASE, attempts=3
+    ),
+    JobState("failed", "provider_authentication_failed", attempt="failed", rejected=True),
+    JobState(
+        "failed",
+        "provider_authentication_failed",
+        attempt="failed",
+        rejected=True,
+        before_effective=True,
+    ),
+    JobState("stale", "quota_exhausted", attempt="failed"),
+    JobState("stale", "binding_not_current", attempt="succeeded", answered=True),
+    JobState("running", attempt="succeeded", lease=HELD),
 )
+
+
+def arrange_planned_job(
+    system: System, planned: CollectionJob, state: JobState, moment: datetime
+) -> None:
+    ProviderAccount.objects.filter(pk=system.account.pk).update(
+        request_blocked_until=moment + timedelta(days=2) if state.blocked else None,
+        authentication_failed_revision=1 if state.rejected else None,
+    )
+    if state.before_effective:
+        CollectionSchedule.objects.filter(region=system.region).update(
+            effective_from=planned.scheduled_for + timedelta(minutes=30)
+        )
+    ForecastSnapshot.objects.filter(job=planned).delete()
+    RequestAttempt.objects.filter(job=planned).delete()
+    CollectionJob.objects.filter(pk=planned.pk).update(
+        status=state.status,
+        last_error=state.last_error,
+        attempts=state.attempts,
+        available_at=next_provider_day(moment) + timedelta(hours=1)
+        if state.late
+        else planned.scheduled_for,
+        lease_token=None if state.lease is None else uuid.uuid4(),
+        lease_expires_at=None if state.lease is None else moment + state.lease,
+    )
+    if state.attempt is not None:
+        made = moment + state.attempted
+        RequestAttempt.objects.create(
+            provider_account=system.account,
+            binding=system.binding,
+            job=planned,
+            utc_day=made.date(),
+            created_at=made,
+            purpose="forecast",
+            outcome=state.attempt,
+        )
+    if state.answered:
+        ForecastSnapshot.objects.create(
+            job=planned,
+            binding=system.binding,
+            raw_payload={},
+            normalized_intervals=[],
+            collected_at=moment,
+            source_kind="forecast",
+        )
 
 
 def second_binding(system: System) -> SiteBinding:
@@ -83,9 +177,34 @@ def second_binding(system: System) -> SiteBinding:
     return binding
 
 
+def unapproved_binding(system: System) -> None:
+    """A binding of another configuration of the system's approved region, validated with the
+    current key, that the region's approval does not name."""
+    binding = SiteBinding.objects.create(
+        region=system.region,
+        provider_account=system.account,
+        region_revision=2,
+        site_id="unapproved",
+        capacity_kw=1,
+        latitude=41,
+        longitude=29,
+        timezone=system.region.timezone,
+        validated_at=NOW,
+        validated_credential_revision=1,
+    )
+    CollectionJob.objects.create(
+        binding=binding,
+        endpoint="forecasts",
+        scheduled_for=NOW,
+        target_date=NOW.date() + timedelta(days=1),
+        available_at=NOW,
+    )
+
+
 def test_the_forecast_budget_equals_its_reference_across_schedules_and_job_states() -> None:
     system = make_system(approved=True)
     second_binding(system)
+    unapproved_binding(system)
     slot = datetime(2026, 11, 9, 18, 0, tzinfo=UTC)
     planned = CollectionJob.objects.create(
         binding=system.binding,
@@ -95,7 +214,7 @@ def test_the_forecast_budget_equals_its_reference_across_schedules_and_job_state
         available_at=slot,
     )
     compared = 0
-    for schedule, quota, (status, attempted), moment in itertools.product(
+    for schedule, quota, state, moment in itertools.product(
         SCHEDULES, (2, 3, 10), JOB_STATES, MOMENTS
     ):
         CollectionSchedule.objects.filter(region=system.region).delete()
@@ -108,23 +227,13 @@ def test_the_forecast_budget_equals_its_reference_across_schedules_and_job_state
                 effective_from=NOW + offset,
             )
         ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=quota)
-        CollectionJob.objects.filter(pk=planned.pk).update(status=status)
-        RequestAttempt.objects.filter(job=planned).delete()
-        if attempted:
-            RequestAttempt.objects.create(
-                provider_account=system.account,
-                binding=system.binding,
-                job=planned,
-                utc_day=moment.date(),
-                created_at=moment,
-                purpose="forecast",
-            )
+        arrange_planned_job(system, planned, state, moment)
         account = ProviderAccount.objects.get(pk=system.account.pk)
         assert remaining_forecast_requests(account, moment) == reference_forecast_requests(
             account, moment
-        ), (schedule, quota, status, attempted, moment)
+        ), (schedule, quota, state, moment)
         compared += 1
-    assert compared == 240
+    assert compared == 1200
 
 
 def jobs_created(moments: list[datetime]) -> set[tuple[str, datetime, object, datetime | None]]:
