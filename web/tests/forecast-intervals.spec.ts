@@ -193,7 +193,7 @@ const sourceFlagLabels = {
         panel: "Source & quality",
         labels: [
             "saved forecast, historical estimates pending",
-            "estimates for completed intervals, forecast for the rest",
+            "estimates for completed intervals where available, forecast elsewhere",
             "combined estimate updates",
             "assumed tracking geometry",
             "plant geometry not modeled",
@@ -203,7 +203,7 @@ const sourceFlagLabels = {
         panel: "Kaynak ve kalite",
         labels: [
             "Kayıtlı tahmin, geçmiş veri bekleniyor",
-            "Tamamlanan aralıklarda uydu/model tahmini, kalanında öngörü",
+            "Tamamlanan aralıklarda varsa uydu/model tahmini, diğer aralıklarda öngörü",
             "Birleştirilmiş gerçekleşen tahmini güncellemeleri",
             "Varsayılan takip sistemi geometrisi",
             "Santral geometrisi modellenmedi",

@@ -1,7 +1,7 @@
 {
     "Forecast": {
         "updated_estimates_and_forecast": "Gerçekleşen tahmini + öngörü",
-        "updated_estimates_and_forecast_explanation": "Tamamlanan aralıklarda uydu/model tahminleri, kalanında öngörü. Sayaç ölçümü değildir.",
+        "updated_estimates_and_forecast_explanation": "Tamamlanan aralıklarda varsa uydu/model tahminleri, diğer aralıklarda öngörü. Sayaç ölçümü değildir.",
         "estimate_update": "Gerçekleşen tahmini {id}: alınma {date}",
         "no_estimated_actuals_for_this_day": "Bu güne ait gerçekleşen üretim tahmini yok",
         "estimated_actuals_are_not_available_for_this": "Bu güne ait gerçekleşen üretim tahminleri henüz mevcut değil. Arşivlenmiş bir tahmini veya başka bir tarihi deneyin.",
@@ -109,7 +109,7 @@
             "outage_configuration_changed": "Kesinti yapılandırması değişti",
             "unknown_outage_impact": "Kesinti etkisi bilinmiyor",
             "forecast_fallback": "Kayıtlı tahmin, geçmiş veri bekleniyor",
-            "mixed_estimated_actuals_and_forecast": "Tamamlanan aralıklarda uydu/model tahmini, kalanında öngörü",
+            "mixed_estimated_actuals_and_forecast": "Tamamlanan aralıklarda varsa uydu/model tahmini, diğer aralıklarda öngörü",
             "mixed_estimated_actual_vintages": "Birleştirilmiş gerçekleşen tahmini güncellemeleri",
             "assumed_tracker_geometry": "Varsayılan takip sistemi geometrisi",
             "geometry_not_modeled": "Santral geometrisi modellenmedi",
