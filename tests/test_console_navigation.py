@@ -139,6 +139,18 @@ def test_read_pages_refuse_writes(name: str) -> None:
     assert client.post(reverse(name)).status_code == 405
 
 
+def test_the_console_rail_draws_the_brand_mark_beside_its_name() -> None:
+    client, _ = verified_admin()
+
+    page = client.get(reverse("admin:index")).content.decode()
+
+    rail = page.split('<a class="brand"', 1)[1].split("</a>", 1)[0]
+    assert '<path fill="#ffb545" d="M0 48a48 48 0 0 1 96 0Z"/>' in rail
+    assert '<path fill="#f4f2e8" d="M0 53H99L86 72H21V112H0Z"/>' in rail
+    assert 'aria-hidden="true"' in rail
+    assert "Pyracast operations" in rail
+
+
 def test_a_successful_plant_setup_reports_success() -> None:
     system = admin_system()
     client, _ = verified_admin()
