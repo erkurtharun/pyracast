@@ -1,12 +1,17 @@
 import time
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts.budget import forecast_starts, remaining_forecast_requests, started_jobs
+from pyracast.forecasts.budget import (
+    forecast_starts,
+    remaining_forecast_requests,
+    slot_day,
+    started_jobs,
+)
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -55,11 +60,10 @@ def deferral(account: ProviderAccount, now: datetime) -> RequestDeferredError | 
     return None
 
 
-def _admit_forecast(
-    binding: SiteBinding, account: ProviderAccount, job: CollectionJob, utc_day: date
-) -> None:
-    """A binding starts at most as many forecast jobs per UTC day as it has clocks, however often
-    they are edited; a job counts on the UTC day of its first request, so its retries and the
+def _admit_forecast(binding: SiteBinding, account: ProviderAccount, job: CollectionJob) -> None:
+    """A binding sends at most as many forecast jobs of its slots in a UTC day as it has clocks,
+    however often they are edited. A job counts against its slot's UTC day even when it is first
+    sent on a later day, so it never takes a start from that day's own slots; its retries and the
     approval collection are free."""
     timing = forecast_timing(
         binding,
@@ -70,7 +74,7 @@ def _admit_forecast(
         raise ScheduleDisabledError
     if job.pk in started_jobs(timing, [job.pk]):
         return
-    if forecast_starts(binding.pk, timing, utc_day) >= len(timing.times):
+    if forecast_starts(binding.pk, timing, slot_day(job.scheduled_for)) >= len(timing.times):
         raise BindingDayExhaustedError
 
 
@@ -110,7 +114,7 @@ def reserve_account_request(
         if used >= account.daily_quota:
             raise QuotaExceededError
         if job is not None and binding is not None and purpose == RequestPurpose.FORECAST:
-            _admit_forecast(binding, account, job, utc_day)
+            _admit_forecast(binding, account, job)
         if (
             keep_forecast_reserve
             or (job is not None and purpose == RequestPurpose.ESTIMATED_ACTUALS)
