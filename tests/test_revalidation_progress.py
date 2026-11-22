@@ -107,7 +107,7 @@ def test_plants_booking_the_quota_are_revalidated_as_slots_pass_without_losing_a
         Run(utc(D3, 13) + AFTER_THE_SLOT, DONE, None, 5),
     ]
     assert [revision(plant) for plant in plants] == [2] * 5
-    assert unsucceeded_forecasts(plants, utc(D1, 0)) == {(3, utc(D2, 13))}
+    assert unsucceeded_forecasts(plants, utc(D1, 0)) == set()
 
 
 def test_a_single_waiting_plant_whose_forecast_is_due_waits_for_the_next_provider_day() -> None:
@@ -136,20 +136,23 @@ def test_a_used_up_quota_waits_for_the_next_provider_day_even_before_a_slot() ->
     assert revision(waiting) == 1
 
 
-def test_the_previous_days_due_slot_is_counted_only_within_the_starts_claim_admits() -> None:
+def test_the_previous_days_due_slot_counts_against_its_day_and_leaves_the_next_its_slot() -> None:
     system, (waiting,) = collecting_account([["16:00"]])
     start = utc(D2, 0)
 
-    assert remaining_forecast_requests(account(system), start) == 2
+    # The validation, the due slot of D1 13:00 against D1's start and D2 13:00 against D2's.
+    assert remaining_forecast_requests(account(system), start) == 3
     runs = run_revalidations(system, slots_of([D2], [13]), start, utc(D3, 0))
 
     assert runs == [Run(start, DONE, None, 1)]
-    forecasts = RequestAttempt.objects.filter(binding=waiting, purpose="forecast", utc_day=D2)
-    assert list(forecasts.values_list("job__scheduled_for", flat=True)) == [utc(D1, 13)]
-    refused = CollectionJob.objects.get(
-        binding=waiting, endpoint="forecasts", scheduled_for=utc(D2, 13)
-    )
-    assert (refused.status, refused.last_error) == ("stale", "quota_exhausted")
+    forecasts = RequestAttempt.objects.filter(
+        binding=waiting, purpose="forecast", utc_day=D2
+    ).order_by("pk")
+    assert list(forecasts.values_list("job__scheduled_for", flat=True)) == [
+        utc(D1, 13),
+        utc(D2, 13),
+    ]
+    assert unsucceeded_forecasts([waiting], utc(D1, 0)) == set()
 
 
 def test_a_plant_whose_need_completes_the_quota_waits_without_costing_a_current_forecast() -> None:
@@ -219,11 +222,17 @@ def test_a_plant_refused_for_the_old_key_before_a_passed_slot_is_revalidated_on_
     runs = run_revalidations(system, slots_of([D2, D3], [13]), utc(D2, 12), utc(D4, 0))
 
     # D2 12:00: 1 + 1 + 2 > 2, the refused job is the due slot's and comes back; after D2 13:00
-    # 1 + 1 + 1 > 2 with only the due slot of D2 13:00; D3 00:00: 0 + 1 + 1 = 2.
-    assert [(run.outcome, run.current) for run in runs] == [(WAITING, 0), (WAITING, 0), (DONE, 1)]
-    assert runs[-1].at == utc(D3, 0)
+    # 1 + 1 + 1 > 2 with only the due slot of D2 13:00; D3 00:00: 0 + 1 + 2 > 2, that due slot
+    # against D2's start and D3 13:00 against D3's; after D3 13:00: 0 + 1 + 1 = 2.
+    assert [(run.outcome, run.current) for run in runs] == [
+        (WAITING, 0),
+        (WAITING, 0),
+        (WAITING, 0),
+        (DONE, 1),
+    ]
+    assert runs[-1].at == utc(D3, 13) + AFTER_THE_SLOT
     assert_the_due_slot_was_collected_once_and_the_older_job_stays_ended(
-        plant, refused, utc(D2, 13)
+        plant, refused, utc(D3, 13)
     )
 
 
@@ -534,9 +543,11 @@ def test_plants_with_a_clock_late_in_the_utc_day_are_revalidated_right_after_it(
     for run in runs:
         assert run.due is None or run.at < run.due <= utc(run.at.date() + timedelta(days=1), 0)
     after = AFTER_THE_SLOT
+    # D1 00:30: each validated plant still sends its slot of D0 23:45 against D0's start, so a
+    # third would need 2 + 1 + 6 + 3 > 10.
     assert runs == [
-        Run(utc(D1, 0, 30), WAITING, utc(D1, 11) + after, 3),
-        Run(utc(D1, 11) + after, WAITING, utc(D1, 23, 45) + after, 3),
+        Run(utc(D1, 0, 30), WAITING, utc(D1, 11) + after, 2),
+        Run(utc(D1, 11) + after, WAITING, utc(D1, 23, 45) + after, 2),
         Run(utc(D1, 23, 45) + after, WAITING, utc(D2, 0), 3),
         Run(utc(D2, 0), WAITING, utc(D2, 11) + after, 4),
         Run(utc(D2, 11) + after, WAITING, utc(D2, 23, 45) + after, 4),
@@ -546,6 +557,7 @@ def test_plants_with_a_clock_late_in_the_utc_day_are_revalidated_right_after_it(
         Run(utc(D3, 23, 45) + after, DONE, None, 5),
     ]
     assert [revision(plant) for plant in plants] == [2] * 5
+    assert unsucceeded_forecasts(plants, utc(D1, 0)) == set()
 
 
 class SlowlyFailingPreparation(FakeAdapter):
