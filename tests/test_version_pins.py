@@ -308,6 +308,50 @@ def test_ci_clusters_run_the_production_postgresql_image() -> None:
     assert start_postgres.PRODUCTION_DOCKERFILE == ROOT / "deploy/postgres/Dockerfile"
 
 
+def postgresql_minors(text: str) -> set[str]:
+    # Up to four marks between the name and the version: a code span, emphasis, a parenthesis.
+    return set(re.findall(r"postgres(?:ql)?[^\w\n]{0,4}(\d+\.\d+)(?!\d)", text, re.I))
+
+
+def version_cell_minors(cell: str) -> set[str]:
+    server = re.sub(r"psycopg\W*\d+(?:\.\d+)*", "", cell, flags=re.I)
+    return set(re.findall(r"(?<![\d.])(\d+\.\d+)(?:\.\d+)?(?!\.?\d)", server))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Development runs PostgreSQL `18.6`.",
+        "| Backups | PostgreSQL **18.6** dumps |",
+        "the PostgreSQL (18.6) client",
+        "PostgreSQL: 18.6",
+        "FROM postgres:18.6-alpine",
+    ],
+)
+def test_a_postgresql_minor_is_read_through_markdown_and_punctuation(text: str) -> None:
+    assert postgresql_minors(text) == {"18.6"}
+
+
+@pytest.mark.parametrize(
+    "text", ["[PostgreSQL docs](https://www.postgresql.org/docs/18/index.html)", "within 18.x"]
+)
+def test_a_major_or_a_link_names_no_postgresql_minor(text: str) -> None:
+    assert postgresql_minors(text) == set()
+
+
+@pytest.mark.parametrize(
+    ("cell", "minors"),
+    [
+        (" PostgreSQL 18.7 in every cluster; psycopg 3.3.9 ", {"18.7"}),
+        (" PostgreSQL 18.7 and 18.6; psycopg 3.3.9 ", {"18.7", "18.6"}),
+        (" PostgreSQL 18.7, development 18.6. ", {"18.7", "18.6"}),
+        (" PostgreSQL 18.7.1; psycopg 3.3.9; CI 18.6 ", {"18.7", "18.6"}),
+    ],
+)
+def test_every_server_minor_of_the_version_cell_is_read(cell: str, minors: set[str]) -> None:
+    assert version_cell_minors(cell) == minors
+
+
 def test_no_image_source_or_stack_reference_names_another_postgresql_minor() -> None:
     production = single("PostgreSQL in production and CI")
 
@@ -315,9 +359,7 @@ def test_no_image_source_or_stack_reference_names_another_postgresql_minor() -> 
         (found.relative_to(ROOT).as_posix(), version)
         for path in (*IMAGE_SOURCES, "docs/STACK.md")
         for found in ROOT.glob(path)
-        for version in re.findall(
-            r"postgres(?:ql)?:? ?(\d+\.\d+)\b", found.read_text(encoding="utf-8"), re.I
-        )
+        for version in postgresql_minors(found.read_text(encoding="utf-8"))
         if version != production
     } == set()
 
@@ -325,11 +367,8 @@ def test_no_image_source_or_stack_reference_names_another_postgresql_minor() -> 
 def test_the_stack_reference_names_only_the_production_postgresql_minor() -> None:
     stack = (ROOT / "docs/STACK.md").read_text(encoding="utf-8").splitlines()
     (row,) = (line for line in stack if line.startswith("| PostgreSQL |"))
-    server = row.split("|")[2].split("; psycopg")[0]
 
-    assert set(re.findall(r"(?<![\d.])(\d+\.\d+)(?:\.\d+)?(?![\d.])", server)) == {
-        single("PostgreSQL in production and CI")
-    }
+    assert version_cell_minors(row.split("|")[2]) == {single("PostgreSQL in production and CI")}
 
 
 def test_the_build_backend_range_admits_the_pinned_uv() -> None:
