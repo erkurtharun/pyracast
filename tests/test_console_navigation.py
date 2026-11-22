@@ -152,12 +152,23 @@ def test_the_console_rail_draws_the_brand_mark_beside_its_name() -> None:
 
     rail = page.split('<a class="brand"', 1)[1].split("</a>", 1)[0]
     mark = ARTWORK["mark"]
-    assert re.findall(r"<svg [^>]*viewBox=\"([^\"]+)\"|<(\w+)([^>]*)>", rail) == [
-        ("0 0 99 112", "", ""),
-        ("", "path", f' class="brand-mark-sun" d="{mark["sun"]}"/'),
-        ("", "path", f' class="brand-mark-bar" d="{mark["bar"]}"/'),
-        ("", "span", ""),
+    elements = re.findall(r"<(\w+)([^>]*)>", rail)
+    assert [tag for tag, _ in elements] == ["svg", "path", "path", "span"]
+    assert elements[1:] == [
+        ("path", f' class="brand-mark-sun" d="{mark["sun"]}"/'),
+        ("path", f' class="brand-mark-bar" d="{mark["bar"]}"/'),
+        ("span", ""),
     ]
+    root = elements[0][1]
+    assert re.fullmatch(r'(\s[\w-]+="[^"]*")*', root)
+    assert dict(re.findall(r'\s([\w-]+)="([^"]*)"', root)) == {
+        "class": "brand-mark",
+        "viewBox": mark["viewBox"],
+        "width": "25",
+        "height": "28",
+        "aria-hidden": "true",
+        "focusable": "false",
+    }
     stylesheet = (ROOT / "src/pyracast/regions/static/pyracast/admin-workspace.css").read_text(
         encoding="utf-8"
     )

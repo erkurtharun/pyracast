@@ -9,8 +9,15 @@ const ink = { light: colours.dark, dark: colours.light };
 
 function drawing(svg: SVGElement | HTMLElement) {
     return {
-        viewBox: svg.getAttribute("viewBox"),
-        shapes: [...svg.querySelectorAll("path, rect")].map((shape) => {
+        root: Object.fromEntries(
+            [...svg.attributes]
+                .filter(({ name }) => name !== "width" && name !== "height")
+                .map(({ name, value }) => [name, value]),
+        ),
+        others: [...svg.querySelectorAll(":not(g, path)")].map(
+            (element) => element.tagName,
+        ),
+        shapes: [...svg.querySelectorAll("path")].map((shape) => {
             const transform: string[] = [];
             let fill: string | null = null;
             for (
@@ -25,9 +32,7 @@ function drawing(svg: SVGElement | HTMLElement) {
             return {
                 transform,
                 fill: fill?.toLowerCase(),
-                d:
-                    shape.getAttribute("d") ??
-                    `${shape.getAttribute("width")}x${shape.getAttribute("height")}`,
+                d: shape.getAttribute("d"),
             };
         }),
     };
@@ -36,7 +41,8 @@ function drawing(svg: SVGElement | HTMLElement) {
 function logoDrawing(surface: keyof typeof ink) {
     const { logo, mark } = artwork;
     return {
-        viewBox: logo.viewBox,
+        root: logo.root,
+        others: [],
         shapes: [
             { transform: [logo.mark], fill: colours.sun, d: mark.sun },
             { transform: [logo.mark], fill: ink[surface], d: mark.bar },
@@ -58,17 +64,10 @@ async function expectLogo(place: Locator, surface: keyof typeof ink) {
     expect(box.width / box.height).toBeCloseTo(518 / 101, 1);
 }
 
-test("the favicon draws the kit mark on its dark tile", async ({ page }) => {
-    const { favicon } = artwork;
-    await page.goto("/icon.svg");
-    expect(await page.locator("svg").evaluate(drawing)).toEqual({
-        viewBox: favicon.viewBox,
-        shapes: [
-            { transform: [], fill: colours.dark, d: favicon.size },
-            { transform: [favicon.mark], fill: colours.sun, d: favicon.sun },
-            { transform: [favicon.mark], fill: colours.light, d: favicon.bar },
-        ],
-    });
+test("the favicon is the kit's favicon file", async ({ request }) => {
+    const response = await request.get("/icon.svg");
+    expect(response.status()).toBe(200);
+    expect(await response.text()).toBe(artwork.favicon);
 });
 
 test("the first paint of the application already draws the logo for light surfaces", async ({
