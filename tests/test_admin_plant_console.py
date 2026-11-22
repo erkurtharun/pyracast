@@ -168,6 +168,7 @@ REFUSED_COORDINATES = [
     ("longitude", "180,5", "Ensure this value is less than or equal to 180."),
     ("longitude", "-181", "Ensure this value is greater than or equal to -180."),
     ("longitude", "175,0,1", NOT_A_NUMBER),
+    ("latitude", "\u0664\u0661", NOT_A_NUMBER),
 ]
 
 
