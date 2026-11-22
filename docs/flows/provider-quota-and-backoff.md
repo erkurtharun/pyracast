@@ -89,7 +89,7 @@ sequenceDiagram
 | Worker: `RequestDeferredError(None)` (credential blocked) | Job `failed`, `provider_authentication_failed`; attempt returned |
 | Worker: `RequestDeferredError(until)` | Job `retry`, `provider_throttled`, `available_at` = now + max(backoff, time to the wait's end) + 0-30 s jitter; attempt returned; a windowed job is `failed` when that reaches `retry_until` |
 | Worker: account disabled or unauthorized, or quota used | `account_unavailable` or `quota_exhausted`, attempt returned; the job waits for the next provider day (UTC midnight plus two minutes), a windowed job is `stale` when that reaches `retry_until` |
-| Worker: forecast job whose slot day's bound is full, or collection disabled after the claim | Job `stale`, `quota_exhausted` or `schedule_disabled`; attempt returned |
+| Worker: a new start of a forecast job beyond its slot day's bound (a job already started is not counted again), or collection disabled after the claim | Start refused; job `stale`, `quota_exhausted` or `schedule_disabled`; attempt returned |
 | Worker: a UTC day holding one slot of a plant more than it has clocks (a daylight-saving change moves a late clock across UTC midnight) | The day bound caps new starts at the clock count in admission order and skips the rest as above; the reserve applies the same cap |
 | Worker: `ForecastBudgetReservedError` (`estimated_actuals` job) | `history_budget_reserved`, attempt returned, next try no sooner than 30 min; `stale` when that reaches `retry_until`, which is always the case for the 15-minute job |
 | `claim` or reservation past `retry_until`, or window closed after reservation | `failed`, `history_window_closed` (the post-reservation case marks the attempt `failed`) |
