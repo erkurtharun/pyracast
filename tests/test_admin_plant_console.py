@@ -120,8 +120,8 @@ def test_plant_values_are_judged_by_the_site_input_and_the_operation(
 
 NOT_A_NUMBER = "A valid number is required."
 
-# The web's single-value table (web/tests/site-forms-model.spec.ts), row for row; the console
-# form strips the text first, so a value with spaces around it is that number here.
+# The web's single-value table (web/tests/site-forms-model.spec.ts), row for row. Both ignore
+# spaces around a value, as a value copied from a sheet often carries one.
 ACCEPTED_COORDINATES = [
     ("latitude", "41,0082", 41.0082),
     ("latitude", "41.0082", 41.0082),

@@ -51,6 +51,10 @@ test("a single coordinate with one decimal comma or point is that number", () =>
         ["longitude", "-180", -180],
         ["longitude", "179,999999", 179.999999],
         ["longitude", "180,0", 180],
+        // Spaces around a value are ignored, as the console's form does: a value copied from a
+        // sheet often carries one.
+        ["latitude", " 41,0082", 41.0082],
+        ["latitude", "41,0082 ", 41.0082],
     ] as const;
     for (const [axis, text, value] of accepted)
         expect(coordinateValue(axis, text), text).toBe(value);
@@ -65,8 +69,6 @@ const refusedCoordinates = [
     ["latitude", "1,234.5"],
     ["latitude", "1 234"],
     ["latitude", "41, 0082"],
-    ["latitude", " 41,0082"],
-    ["latitude", "41,0082 "],
     ["latitude", "+41,0082"],
     ["latitude", "--41"],
     ["latitude", "41-"],
@@ -99,6 +101,8 @@ test("the coordinate field's pattern accepts exactly the values the rule accepts
         ["longitude", "-33.8688"],
         ["longitude", "17,5"],
         ["longitude", "-179.5"],
+        ["latitude", " 41,0082"],
+        ["latitude", "41,0082 "],
     ] as const;
     for (const [axis, text] of samples) {
         // Browsers compile a pattern attribute whole, with the v flag.
