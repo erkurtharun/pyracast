@@ -63,7 +63,6 @@ function subscribeNothing() {
     return () => {};
 }
 
-// GestureEvent exists only in WebKit: Safari on macOS and every browser on iOS and iPadOS.
 function platformSteps(): InstallSteps | null {
     if ("onbeforeinstallprompt" in window) return "browserMenu";
     if (!("GestureEvent" in window)) return null;
