@@ -141,7 +141,10 @@ class IncidentsView(ScopedView[PlantIncident]):
         response.data.update(outage_proposal(actor, tenant_id, plant))
         return response
 
-    @extend_schema(request=IncidentCreate, responses={201: IncidentOutput})
+    @extend_schema(
+        request=IncidentCreate,
+        responses={201: IncidentOutput, 409: {"$ref": "#/components/schemas/Error"}},
+    )
     def post(self, request: Request, **_kwargs: Any) -> Response:
         scope = self.scope()
         data = IncidentCreate(data=request.data)

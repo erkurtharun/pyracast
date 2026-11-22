@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+    alreadySaved,
     attemptPayload,
     INITIAL_OUTAGES,
     outageControls,
@@ -835,6 +836,73 @@ test("a direct creation keeps its key while the values sent stay the same, also 
         "key-3",
     );
     expect(key(edited)).toBe("key-3");
+});
+
+type Values = Extract<OutageChange, { action: "update" }>["values"];
+
+test("a direct edit refused as stale was already saved only when the version it lost to holds every value it sent", () => {
+    const sent: Values = {
+        kind: "grid",
+        title: "Grid trip",
+        notes: "Feeder 2",
+        starts_at: "2026-11-09T08:00:00.000Z",
+        ends_at: "2026-11-09T10:30:00.000Z",
+        available_dc_mw: 2.5,
+        available_inverter_mw: null,
+        available_export_mw: 0,
+    };
+    const current = outage(4, {
+        revision: 3,
+        kind: "grid",
+        title: "Grid trip",
+        notes: "Feeder 2",
+        starts_at: "2026-11-09T08:00:00Z",
+        ends_at: "2026-11-09T13:30:00+03:00",
+        available_dc_mw: 2.5,
+        available_inverter_mw: null,
+        available_export_mw: 0,
+        status: "resolved",
+    });
+    const update = (values: Partial<Values> = {}): OutageChange => ({
+        action: "update",
+        outage: outage(4),
+        values: { ...sent, ...values },
+        reason: "",
+    });
+    expect(alreadySaved(update(), current, true)).toBe(true);
+    expect(alreadySaved(update(), current, false)).toBe(false);
+    expect(alreadySaved(update(), null, true)).toBe(false);
+    const others: Partial<Values>[] = [
+        { kind: "other" },
+        { title: "Grid trips" },
+        { notes: "" },
+        { starts_at: "2026-11-09T08:00:01.000Z" },
+        { ends_at: null },
+        { available_dc_mw: 2 },
+        { available_inverter_mw: 0 },
+        { available_export_mw: null },
+    ];
+    for (const values of others)
+        expect(alreadySaved(update(values), current, true)).toBe(false);
+    expect(
+        alreadySaved(
+            {
+                action: "resolve",
+                outage: outage(4),
+                ends_at: "2026-11-09T10:30:00.000Z",
+                reason: "",
+            },
+            current,
+            true,
+        ),
+    ).toBe(false);
+    expect(
+        alreadySaved(
+            { action: "create", values: sent, reason: "" },
+            current,
+            true,
+        ),
+    ).toBe(false);
 });
 
 test("a conflict moves the workflow to the current version and keeps the version it was opened on", () => {

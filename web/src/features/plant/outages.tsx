@@ -12,6 +12,7 @@ import { Notice } from "@/ui/ui";
 import { useCodeLabel, useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import {
+    alreadySaved,
     attemptPayload,
     INITIAL_OUTAGES,
     isEnding,
@@ -129,12 +130,16 @@ export function Outages({
                 change.action === "create"
                     ? null
                     : staleVersion(error, change.outage.id);
+            if (alreadySaved(change, current, direct)) return finishSent();
             apply({ type: "sendFailed", current, direct });
             if (!current) throw error;
             // The list shows the version the change lost to while the form keeps what was typed.
             void reload();
             throw new DisplayError(t("staleEdit"));
         }
+        return finishSent();
+    }
+    async function finishSent() {
         try {
             await reload();
         } finally {

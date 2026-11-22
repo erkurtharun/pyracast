@@ -6006,6 +6006,14 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description Send the request as JSON. */
             415: {
                 headers: {

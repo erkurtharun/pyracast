@@ -186,7 +186,6 @@ export function reduceOutages(
             };
         case "send": {
             if (workflow?.phase.status !== "idle") return screen;
-            // The same payload sent again keeps its key, so the server recognises a retried proposal or creation.
             const attempt =
                 workflow.attempt?.payload === event.payload
                     ? workflow.attempt
@@ -274,8 +273,38 @@ export function attemptPayload(change: OutageChange, direct: boolean) {
     return JSON.stringify(direct ? change : proposalBody(change));
 }
 
-// An administrator writes the outage, creating it under the attempt's key; any other member proposes the same change
-// for approval under the attempt's key.
+const VALUE_FIELDS = [
+    "kind",
+    "title",
+    "starts_at",
+    "ends_at",
+    "available_dc_mw",
+    "available_inverter_mw",
+    "available_export_mw",
+    "notes",
+] as const satisfies readonly (keyof OutageInput)[];
+
+const comparable = (field: string, value: unknown) =>
+    field.endsWith("_at") && typeof value === "string"
+        ? Date.parse(value)
+        : value;
+
+export function alreadySaved(
+    change: OutageChange,
+    current: Outage | null,
+    direct: boolean,
+): boolean {
+    if (!direct || change.action !== "update" || !current) return false;
+    const { values } = change;
+    return VALUE_FIELDS.every(
+        (field) =>
+            comparable(
+                field,
+                values[field] ?? (field === "notes" ? "" : null),
+            ) === comparable(field, current[field]),
+    );
+}
+
 export async function submitOutageChange(
     scope: PlantScope,
     change: OutageChange,
@@ -353,14 +382,7 @@ export function staleVersion(error: unknown, id: number): OutageRow | null {
 
 const OUTAGE_FIELDS = [
     "status",
-    "kind",
-    "title",
-    "starts_at",
-    "ends_at",
-    "available_dc_mw",
-    "available_inverter_mw",
-    "available_export_mw",
-    "notes",
+    ...VALUE_FIELDS,
 ] as const satisfies readonly (keyof Outage)[];
 
 export type OutageField = (typeof OUTAGE_FIELDS)[number];

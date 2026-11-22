@@ -1,12 +1,15 @@
+import json
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from io import StringIO
 from threading import Barrier
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
 from django.contrib.auth.models import User
+from django.core.management import call_command
 from django.db import close_old_connections, connection
 from django.test import Client
 from django.utils import timezone
@@ -85,23 +88,55 @@ def test_a_repeated_create_with_its_key_answers_with_the_first_outage_and_writes
     assert changes() == 1
 
 
-def test_a_repeat_answers_with_the_outage_as_it_now_stands(monkeypatch: pytest.MonkeyPatch) -> None:
+def edited(client: Client, url: str) -> dict[str, Any]:
+    response = client.put(
+        url,
+        {**outage(), "title": "Inverter replaced", "expected_revision": 1},
+        content_type="application/json",
+    )
+    assert response.status_code == 200, response.content
+    return cast(dict[str, Any], response.json())
+
+
+def resolved(client: Client, url: str) -> dict[str, Any]:
+    ends_at = (timezone.now() - timedelta(hours=1)).replace(microsecond=0).isoformat()
+    response = client.post(
+        f"{url}resolve/",
+        {"expected_revision": 1, "ends_at": ends_at},
+        content_type="application/json",
+    )
+    assert response.status_code == 200, response.content
+    return cast(dict[str, Any], response.json())
+
+
+def cancelled(client: Client, url: str) -> dict[str, Any]:
+    response = client.post(
+        f"{url}cancel/", {"expected_revision": 1}, content_type="application/json"
+    )
+    assert response.status_code == 200, response.content
+    return cast(dict[str, Any], response.json())
+
+
+@pytest.mark.parametrize("change", [edited, resolved, cancelled])
+def test_a_repeat_after_a_later_change_answers_with_the_outage_as_it_now_stands(
+    monkeypatch: pytest.MonkeyPatch,
+    change: Callable[[Client, str], dict[str, Any]],
+) -> None:
     system = make_system(approved=True)
     plant = outage_plant(system)
     client = signed_in(system.member)
     body = outage(uuid4())
     created = client.post(outages_url(system, plant), body, content_type="application/json").json()
-    cancelled = client.post(
-        f"{outages_url(system, plant)}{created['id']}/cancel/",
-        {"expected_revision": 1},
-        content_type="application/json",
-    ).json()
+    current = change(client, f"{outages_url(system, plant)}{created['id']}/")
     changes = counted_outage_changes(monkeypatch)
 
     repeat = client.post(outages_url(system, plant), body, content_type="application/json")
 
     assert repeat.status_code == 201, repeat.content
-    assert repeat.json() == cancelled
+    assert repeat.json() == current
+    assert current["revision"] == 2
+    assert PlantIncident.objects.filter(plant=plant).count() == 1
+    assert IncidentRevision.objects.filter(incident__plant=plant).count() == 2
     assert changes() == 0
 
 
@@ -120,6 +155,17 @@ def test_a_key_sent_again_with_other_values_is_refused() -> None:
     assert edited.status_code == 409, edited.content
     assert edited.json()["code"] == "idempotency_key_reused"
     assert PlantIncident.objects.get(plant=plant).title == "Inverter offline"
+
+
+def test_the_direct_create_declares_its_conflict_with_the_error_body() -> None:
+    output = StringIO()
+    call_command("spectacular", format="openapi-json", stdout=output)
+    path = "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/"
+    conflict = json.loads(output.getvalue())["paths"][path]["post"]["responses"]["409"]
+
+    assert conflict["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/Error"
+    }
 
 
 def test_a_create_without_a_key_is_checked_for_overlap_as_before() -> None:
@@ -156,19 +202,26 @@ def test_the_same_key_by_another_person_is_another_create() -> None:
     plant = outage_plant(system)
     successor = User.objects.create_user(username="successor")
     Membership.objects.create(user=successor, tenant=system.tenant)
-    body = outage(uuid4())
-    signed_in(system.member).post(outages_url(system, plant), body, content_type="application/json")
+    key = uuid4()
+    first = signed_in(system.member).post(
+        outages_url(system, plant),
+        outage(key, ends_at=(timezone.now() - timedelta(hours=1)).isoformat()),
+        content_type="application/json",
+    )
     reassign_workspace_admin(
         system.admin, system.tenant.pk, successor.pk, expected_admin_id=system.member.pk
     )
 
-    repeat = signed_in(successor).post(
-        outages_url(system, plant), body, content_type="application/json"
+    later = signed_in(successor).post(
+        outages_url(system, plant),
+        outage(key, starts_at=(timezone.now() - timedelta(minutes=30)).isoformat()),
+        content_type="application/json",
     )
 
-    assert repeat.status_code == 400, repeat.content
-    assert repeat.json()["code"] == "incident_overlap"
-    assert PlantIncident.objects.filter(plant=plant).count() == 1
+    assert first.status_code == 201, first.content
+    assert later.status_code == 201, later.content
+    assert later.json()["id"] != first.json()["id"]
+    assert PlantIncident.objects.get(pk=later.json()["id"]).created_by == successor
 
 
 def test_concurrent_creates_with_one_key_make_one_outage_and_both_answer_with_it() -> None:

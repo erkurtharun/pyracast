@@ -3796,6 +3796,16 @@
                         },
                         "description": ""
                     },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        },
+                        "description": ""
+                    },
                     "400": {
                         "description": "The request input was refused.",
                         "content": {
