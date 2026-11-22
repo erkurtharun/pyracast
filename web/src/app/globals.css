@@ -86,27 +86,8 @@ textarea:focus-visible,
     z-index: 20;
 }
 .brand {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1-75);
-    font-size: 27px;
-    font-weight: 750;
-    letter-spacing: -1.4px;
-    white-space: nowrap;
-}
-.brand svg {
+    display: block;
     flex-shrink: 0;
-    color: var(--teal);
-}
-.brand-dot {
-    color: var(--amber);
-    margin-left: calc(-1 * var(--space-1-75));
-}
-.sidebar .brand svg {
-    color: var(--green-222);
-}
-.sidebar .brand-dot {
-    color: var(--amber-343);
 }
 .workspace-label {
     margin: var(--space-9) var(--space-0-5) var(--space-2-25);
@@ -1567,12 +1548,6 @@ pre,
     top: 48px;
     left: 56px;
 }
-.auth-story .brand svg {
-    color: var(--green-243);
-}
-.auth-story .brand-dot {
-    color: var(--amber-294);
-}
 .auth-story .eyebrow {
     color: var(--amber-300);
 }
@@ -1761,13 +1736,9 @@ pre,
         border-bottom: 1px solid var(--line);
     }
     .sidebar .brand {
-        font-size: 23px;
-        gap: var(--space-1-25);
+        width: 133px;
+        height: 26px;
         align-self: center;
-    }
-    .sidebar .brand svg {
-        width: 24px;
-        height: 24px;
     }
     .workspace-label,
     .sidebar .avatar,
@@ -1960,7 +1931,7 @@ pre,
     .auth-story {
         padding: var(--space-5) var(--space-6);
     }
-    .auth-story > div:not(.brand) {
+    .auth-story > div {
         display: none;
     }
     .auth-story .brand {
@@ -1981,7 +1952,8 @@ pre,
         grid-column: 3;
     }
     .sidebar .brand {
-        font-size: 25px;
+        width: 144px;
+        height: 28px;
     }
     .stats {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2061,10 +2033,8 @@ pre,
         gap: var(--space-1-5);
     }
     .sidebar .brand {
-        font-size: 21px;
-    }
-    .sidebar .brand svg {
-        width: 22px;
+        width: 123px;
+        height: 24px;
     }
     main#main {
         padding-inline: var(--space-3);

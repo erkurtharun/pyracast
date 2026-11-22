@@ -95,18 +95,11 @@
 .brand {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-2-4);
     min-height: 44px;
-    font-size: 1.75rem;
-    font-weight: 700;
-    letter-spacing: -0.07em;
 }
 .brand svg {
-    color: var(--green);
-    flex-shrink: 0;
-}
-.brandDot {
-    color: var(--amber-633);
+    width: 164px;
+    height: 32px;
 }
 .desktopNav {
     margin-left: auto;
@@ -380,9 +373,10 @@
     display: inline-flex;
     align-items: center;
     min-height: 44px;
-    font-size: 1.5rem;
-    font-weight: 700;
-    letter-spacing: -0.07em;
+}
+.footerBrand svg {
+    width: 133px;
+    height: 26px;
 }
 .footer p {
     font-size: 0.8rem;
@@ -533,8 +527,9 @@
         min-height: 80px;
         gap: var(--space-2) var(--space-4);
     }
-    .brand {
-        font-size: 1.6rem;
+    .brand svg {
+        width: 154px;
+        height: 30px;
     }
     .headerActions {
         gap: var(--space-2) var(--space-4);
@@ -623,13 +618,9 @@
     .headerInner {
         gap: var(--space-2);
     }
-    .brand {
-        font-size: 1.45rem;
-        gap: var(--space-1-4);
-    }
     .brand svg {
-        width: 23px;
-        height: 23px;
+        width: 133px;
+        height: 26px;
     }
     .headerActions {
         gap: var(--space-2) var(--space-2-6);

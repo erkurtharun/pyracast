@@ -94,7 +94,7 @@ function Bootstrap({
     return (
         <main className="auth-page">
             <div className="auth-card">
-                <Brand />
+                <Brand surface="light" />
                 {error ? (
                     <>
                         <Notice error>{error}</Notice>

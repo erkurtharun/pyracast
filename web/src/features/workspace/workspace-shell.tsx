@@ -141,7 +141,7 @@ export function WorkspaceShell({
                 {t("skipContent")}
             </a>
             <aside className="sidebar">
-                <Brand />
+                <Brand surface="dark" />
                 <div className="workspace-label">{t("workspace")}</div>
                 <label className="tenant-select">
                     <span className="sr-only">{t("workspace")}</span>

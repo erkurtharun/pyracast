@@ -9,6 +9,12 @@ export const illustrationColours = {
     halo: "#fbfbf5",
 };
 
+export const logoColours = {
+    sun: "#ffb545",
+    dark: "#09383a",
+    light: "#f4f2e8",
+};
+
 export const socialImageColours = {
     background: "#143c32",
     text: "#f6f7f3",
