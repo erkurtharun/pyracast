@@ -4,15 +4,13 @@
         "playwright.config.ts",
         "tests/**/*.spec.ts",
         "integration/**/*.spec.ts",
-        "testing/coverage-reporter.ts",
-        "tools/feature-folders.mjs"
+        "testing/coverage-reporter.ts"
     ],
     "project": [
         "src/**/*.{ts,tsx}",
         "tests/**/*.ts",
         "integration/**/*.ts",
         "testing/**/*.{ts,mjs}",
-        "tools/**/*.mjs",
         "eslint/**/*.mjs"
     ],
     "playwright": false,
