@@ -678,7 +678,9 @@ test("Back while section changes load leaves the restored section in charge of i
     await settings.requested;
     await page.goBack();
     await expect(page).toHaveURL(/\/production\/$/);
-    await expect(page.getByLabel("Workspace")).toHaveValue("1");
+    await expect(
+        page.getByRole("combobox", { name: "Workspace", exact: true }),
+    ).toHaveValue("1");
     await expect(page.getByRole("main")).not.toBeEmpty();
     await production.release();
     await settings.release();
