@@ -2077,6 +2077,12 @@ test("a member promoted while a draft is open can choose another day", async ({
     role = "admin";
     await page.clock.runFor(120_001);
     await expect(draft(page)).toHaveCount(0);
+    await expect(
+        page.getByRole("status").filter({
+            hasText:
+                "You can now edit production directly, so the correction request you were preparing was discarded.",
+        }),
+    ).toHaveCount(1);
     await expect(previous).toBeEnabled();
     await previous.click();
     await expect(page.getByLabel("Day", { exact: true })).toHaveValue(
