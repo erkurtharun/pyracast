@@ -243,15 +243,20 @@ type EnumerationMembers = {
     enumeration: string;
     definedIn: string;
 };
-type Producer = string | EnumerationMembers;
+type FirstArguments = {
+    module: string;
+    call: string;
+};
+type Producer = string | EnumerationMembers | FirstArguments;
 export type Producers = Readonly<Record<string, readonly Producer[]>>;
 
-// The modules, from the repository root, whose literals can produce each code family, or whose
-// code names members of an enumeration; a code another module holds labels nothing.
+// The modules, from the repository root, whose literals can produce each code family, whose
+// code names members of an enumeration, or whose calls of a result type pass the code first;
+// a code another module holds labels nothing.
 const PRODUCERS: Producers = {
     "Calibrations.values": ["src/pyracast/plants/numerics.py"],
     "Calibrations.status_messages": [
-        "src/pyracast/plants/numerics.py",
+        { module: "src/pyracast/plants/numerics.py", call: "FitResult" },
         {
             module: "src/pyracast/plants/calibration_runs.py",
             enumeration: "CalibrationStatus",
@@ -334,15 +339,30 @@ function enumerationValues(
     });
 }
 
+// The text up to the first comma stands for the first argument, so a comma inside it can only
+// drop a code.
+function firstArgumentValues(root: string, producer: FirstArguments): string[] {
+    const code = readFileSync(path.join(root, producer.module), "utf8");
+    const literals = new Set<string>();
+    const call = new RegExp(`\\b${producer.call}\\(([^,]*)`, "g");
+    for (const [, argument] of code.matchAll(call))
+        if (argument !== undefined) pythonCodes(argument, literals, new Set());
+    return [...literals];
+}
+
 // Every lower-case code a string literal of the modules holds, every Python f-string that
-// composes one, and every enumeration value a producer's code names by its member.
+// composes one, every enumeration value a producer's code names by its member, and every code
+// a producer passes first to its result type.
 function codePatterns(root: string, producers: readonly Producer[]): RegExp[] {
     const literals = new Set<string>();
     const composed = new Set<string>();
     for (const producer of producers) {
         if (typeof producer !== "string") {
-            for (const value of enumerationValues(root, producer))
-                literals.add(value);
+            const values =
+                "call" in producer
+                    ? firstArgumentValues(root, producer)
+                    : enumerationValues(root, producer);
+            for (const value of values) literals.add(value);
             continue;
         }
         const file = path.join(root, producer);

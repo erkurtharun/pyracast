@@ -39,6 +39,21 @@ test("a value of a shared enumeration labels a key only where its producer names
     ]);
 });
 
+test("a literal of the fit module labels a calibration status only where a fit result returns it", () => {
+    expect(
+        unusedKeys(web, {
+            Calibrations: {
+                status_messages: {
+                    censored_training: "censored_training",
+                    insufficient: "insufficient",
+                    ready: "ready",
+                    rejected: "rejected",
+                },
+            },
+        }),
+    ).toEqual(["Calibrations.status_messages.censored_training"]);
+});
+
 test("every translation call names its namespace and keys in a form the key check reads", () => {
     expect(keyUse(web).unresolved).toEqual([]);
 });
