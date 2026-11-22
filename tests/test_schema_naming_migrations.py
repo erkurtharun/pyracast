@@ -15,6 +15,7 @@ from pyracast.forecasts.models import HistoricalReferenceImport
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.plants.models import MountingType
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.operations import submit_region
 from tests.support.change_request_boundaries import (
     approve,
@@ -246,11 +247,13 @@ def populate(monkeypatch: pytest.MonkeyPatch) -> None:
         system.member,
         system.tenant.pk,
         pending.pk,
-        name="Second site",
-        dc_capacity_mw=10,
-        mounting_type=MountingType.FIXED,
-        surface_tilt_degrees=25,
-        surface_azimuth_degrees=180,
+        PlantParameters(
+            name="Second site",
+            dc_capacity_mw=10,
+            mounting_type=MountingType.FIXED,
+            surface_tilt_degrees=25,
+            surface_azimuth_degrees=180,
+        ),
     )
 
 
@@ -285,6 +288,7 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     ]
     for row in after["plants_plant"]:
         del row["calibration_preparation_due_at"]
+    assert all(row.pop("parameters_revision") == 1 for row in after["plants_plant"])
     assert after["regions_region"]
     assert all(row["purge_started_at"] is None for row in after["regions_region"])
     assert [
@@ -293,9 +297,14 @@ def test_upgrade_keeps_every_row_and_builds_the_fresh_catalog(
     for row in after["regions_region"]:
         del row["purge_started_at"]
         del row["purge_warning_sent_at"]
+    assert all(
+        row.pop("purge_plant_ids") is row.pop("purge_bindings") is None
+        for row in after["regions_region"]
+    )
     assert all(row["updated_at"] == row["created_at"] for row in after["plants_plantsubmission"])
     for row in after["plants_plantsubmission"]:
         del row["updated_at"]
+    assert all(row.pop("base_configuration_id") is None for row in after["plants_plantsubmission"])
     assert after["plants_calibrationrun"]
     assert all(row["available_at"] is None for row in after["plants_calibrationrun"])
     for row in after["plants_calibrationrun"]:

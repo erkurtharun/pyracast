@@ -14,6 +14,7 @@ from django.utils import translation
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.errors import DomainError
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.sites import submit_site
 from pyracast.regions import operations
 from pyracast.regions.models import (
@@ -269,11 +270,10 @@ def test_the_administrator_corrects_a_never_approved_plant_without_a_review() ->
     region = submit_site(
         system.member,
         system.tenant.pk,
-        name="Typo",
+        PlantParameters(name="Typo", dc_capacity_mw=1.0),
         latitude=37.0,
         longitude=27.0,
         timezone="Europe/Istanbul",
-        dc_capacity_mw=1.0,
     )
 
     status, body = submit(system, region, reason="Typed the wrong latitude")
@@ -289,6 +289,7 @@ def test_the_administrator_corrects_a_never_approved_plant_without_a_review() ->
         "pending",
     )
     assert list(AuditEvent.objects.filter(region=region).values_list("action", "actor_id")) == [
+        ("region_created", system.member.pk),
         ("location_change_requested", system.member.pk),
         ("location_change_approved", system.member.pk),
     ]

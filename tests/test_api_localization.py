@@ -4,6 +4,7 @@ from django.utils import translation
 
 from pyracast.notifications.models import NotificationSettings
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.operations import request_location_change
 from tests.support.domain import make_system
 from tests.support.errors import raises_code
@@ -108,7 +109,10 @@ def test_reminder_limit_translates_parameters_without_changing_english(
 def test_turkish_forecast_completed_day_validation_preserves_its_code() -> None:
     system = make_system(approved=True)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="PV", dc_capacity_mw=1),
     )
     client = Client()
     client.force_login(system.member)

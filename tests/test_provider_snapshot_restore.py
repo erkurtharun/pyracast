@@ -43,6 +43,7 @@ from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.plants.models import ForecastIssuance
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
 from tests.support.invariants import archived_rows, rewritten_archive_rows
@@ -1171,7 +1172,10 @@ def test_restored_actuals_request_calibration_preparation_after_commit(
 ) -> None:
     system = restore_system(monkeypatch)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=1),
     )
     before = collections_before_reset(system)
     observed: list[int] = []

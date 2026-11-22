@@ -1,20 +1,10 @@
 "use client";
 import { useTranslations } from "next-intl";
-
 import { useState } from "react";
 import type { components } from "@/lib/schema";
 import { Field, Select, formText } from "@/ui/form";
 
-type Configuration = Pick<
-    components["schemas"]["ConfigurationOutput"],
-    | "dc_capacity_mw"
-    | "inverter_capacity_mw"
-    | "export_limit_mw"
-    | "measurement_basis"
-    | "mounting_type"
-    | "surface_tilt_degrees"
-    | "surface_azimuth_degrees"
->;
+export type Configuration = components["schemas"]["PlantParametersOutput"];
 
 function choice<T extends string>(
     value: FormDataEntryValue | null,
@@ -75,6 +65,7 @@ export function PlantConfigurationFields({
                         label={t("plantName")}
                         name="name"
                         defaultValue={name}
+                        maxLength={200}
                         required
                     />
                 )}

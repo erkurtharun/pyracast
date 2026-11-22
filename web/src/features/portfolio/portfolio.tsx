@@ -124,9 +124,7 @@ export function Portfolio() {
                 ) : !sites.data ? null : filtered.length ? (
                     <div className="region-grid">
                         {filtered.map((site) => {
-                            const metadata =
-                                site.plant?.current_configuration ??
-                                site.plant?.submission;
+                            const metadata = site.plant?.parameters;
                             return (
                                 <button
                                     className="region-card"

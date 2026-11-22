@@ -43,7 +43,9 @@ def _location_taken(system: System, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _purge_started(system: System, monkeypatch: pytest.MonkeyPatch) -> None:
-    Region.objects.filter(pk=system.region.pk).update(purge_started_at=NOW)
+    Region.objects.filter(pk=system.region.pk).update(
+        purge_started_at=NOW, purge_plant_ids=[], purge_bindings=[]
+    )
 
 
 BLOCKERS: dict[str, tuple[list[Callable[[System, pytest.MonkeyPatch], None]], str | None]] = {
@@ -131,6 +133,30 @@ def test_a_purge_that_runs_out_of_budget_logs_nothing_until_the_region_is_gone(
 
     assert Region.objects.filter(pk=system.region.pk).exists()
     assert not [record for record in caplog.records if record.msg.startswith("trash_purged")]
+
+
+def test_a_purge_over_several_cycles_logs_what_its_first_cycle_found(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    trash.trash_region(system.member, system.tenant.pk, system.region.pk)
+    caplog.set_level(logging.INFO, logger="pyracast.trash")
+    monkeypatch.setattr("pyracast.trash.PURGE_STATEMENT_BUDGET", 1)
+
+    reports: list[dict[str, int]] = []
+    while Region.objects.filter(pk=system.region.pk).exists():
+        assert len(reports) < 200
+        reports.append(trash.purge_expired(NOW + trash.RETENTION))
+
+    assert len(reports) > 1
+    assert reports[-1] == {"regions": 1, "plants": 1}
+    assert [
+        record.getMessage() for record in caplog.records if record.msg.startswith("trash_")
+    ] == [
+        f"trash_purged kind=region region_id={system.region.pk} tenant_id={system.tenant.pk} "
+        f"deleted_at={NOW.isoformat()} plant_ids=[{plant.pk}] "
+        f"bindings=[fixture:{system.account.pk}:site]"
+    ]
 
 
 def test_a_plant_row_is_deleted_only_by_the_location_purge() -> None:
