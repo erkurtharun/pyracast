@@ -43,7 +43,7 @@ const config = (phase: string): NextConfig => ({
     redirects() {
         return Promise.resolve([
             {
-                source: "/app/:file((?:[^/]+/)*[^/]+\\.\\w+)/",
+                source: "/app/:file(manifest\\.webmanifest|sw\\.js|icons/(?:any|maskable)-(?:192|512)\\.png|icons/apple-touch-icon\\.png)/",
                 destination: "/app/:file",
                 permanent: true,
             },
