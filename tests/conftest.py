@@ -242,6 +242,7 @@ def fresh_throttle_counters() -> None:
 
 @pytest.fixture
 def restored_logging() -> Iterator[None]:
+    # Request it before `capsys`: the handlers it rebuilds must bind the streams capsys restores.
     yield
     configure_logging(django_settings.LOGGING_CONFIG, django_settings.LOGGING)
 
