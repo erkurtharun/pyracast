@@ -4,12 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { api } from "@/lib/api/client";
 import { reloadPage } from "@/lib/on-demand";
-import {
-    adoptSession,
-    sessionOwner,
-    sessionState,
-    useSessionState,
-} from "@/lib/session-client";
+import { adoptSession, useSessionState } from "@/lib/session-client";
 import { loadCatalogue, useCatalogues } from "@/i18n/catalogue";
 import { isLanguage, type Language } from "@/i18n/language";
 
@@ -68,7 +63,6 @@ export function LanguageSelect() {
                             const language = event.target.value;
                             if (!isLanguage(language)) return;
                             setState({ status: "saving" });
-                            const owner = sessionOwner(sessionState().session);
                             try {
                                 await loadCatalogue(language);
                             } catch {
@@ -76,15 +70,9 @@ export function LanguageSelect() {
                                     setState({ status: "unavailable" });
                                 return;
                             }
-                            // A control that has gone updates nothing; a choice made for a session
-                            // that has ended is neither saved nor reported for the session shown now.
+                            // A control that has gone updates nothing; RequireUser unmounts it
+                            // when the session's owner changes.
                             if (!mounted.current) return;
-                            if (
-                                sessionOwner(sessionState().session) !== owner
-                            ) {
-                                setState({ status: "idle" });
-                                return;
-                            }
                             try {
                                 adoptSession(
                                     await api.post("/api/session/language/", {
@@ -94,13 +82,11 @@ export function LanguageSelect() {
                                 if (mounted.current)
                                     setState({ status: "idle" });
                             } catch {
-                                if (!mounted.current) return;
-                                setState(
-                                    sessionOwner(sessionState().session) !==
-                                        owner
-                                        ? { status: "idle" }
-                                        : { status: "error", target: language },
-                                );
+                                if (mounted.current)
+                                    setState({
+                                        status: "error",
+                                        target: language,
+                                    });
                             }
                         })()
                     }
