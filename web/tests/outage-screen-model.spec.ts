@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 import {
+    attemptPayload,
     INITIAL_OUTAGES,
     outageControls,
     reduceOutages,
     type Live,
+    type OutageChange,
     type OutageControls,
     type OutageEvent,
     type OutageRow,
@@ -792,6 +794,47 @@ test("the idempotency key belongs to the open workflow's attempt", () => {
     const reopened = events.openUpdate(events.close(events.fail(changed)));
     expect(reopened.screen.workflow?.attempt).toBeNull();
     expect(key(events.send(reopened))).toBe("key-1");
+});
+
+test("a direct creation keeps its key while the values sent stay the same, also after an unconfirmed send, and an edit gets a new key", () => {
+    const creation = (title: string): OutageChange => ({
+        action: "create",
+        values: {
+            kind: "inverter",
+            title,
+            notes: "",
+            starts_at: "2026-11-09T08:00:00Z",
+            ends_at: null,
+            available_dc_mw: 0,
+            available_inverter_mw: 0,
+            available_export_mw: 0,
+        },
+        reason: "",
+    });
+    const send = (step: Step, change: OutageChange, key: string) =>
+        run(step, {
+            type: "send",
+            payload: attemptPayload(change, true),
+            key,
+        });
+    const key = (step: Step) => step.screen.workflow?.attempt?.key;
+    const first = send(
+        events.openCreate(directStart),
+        creation("Inverter offline"),
+        "key-1",
+    );
+    const again = send(
+        events.fail(first),
+        creation("Inverter offline"),
+        "key-2",
+    );
+    expect(key(again)).toBe("key-1");
+    const edited = send(
+        events.fail(again),
+        creation("Inverter tripped"),
+        "key-3",
+    );
+    expect(key(edited)).toBe("key-3");
 });
 
 test("a conflict moves the workflow to the current version and keeps the version it was opened on", () => {

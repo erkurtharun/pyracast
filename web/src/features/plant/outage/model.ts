@@ -186,7 +186,7 @@ export function reduceOutages(
             };
         case "send": {
             if (workflow?.phase.status !== "idle") return screen;
-            // The same payload sent again keeps its key, so the server recognises a retried proposal.
+            // The same payload sent again keeps its key, so the server recognises a retried proposal or creation.
             const attempt =
                 workflow.attempt?.payload === event.payload
                     ? workflow.attempt
@@ -251,7 +251,7 @@ export function reduceOutages(
     }
 }
 
-export function proposalBody(change: OutageChange) {
+function proposalBody(change: OutageChange) {
     const target =
         change.action === "create"
             ? {}
@@ -270,7 +270,12 @@ export function proposalBody(change: OutageChange) {
     };
 }
 
-// An administrator writes the outage; any other member proposes the same change for approval under the attempt's key.
+export function attemptPayload(change: OutageChange, direct: boolean) {
+    return JSON.stringify(direct ? change : proposalBody(change));
+}
+
+// An administrator writes the outage, creating it under the attempt's key; any other member proposes the same change
+// for approval under the attempt's key.
 export async function submitOutageChange(
     scope: PlantScope,
     change: OutageChange,
@@ -289,7 +294,7 @@ export async function submitOutageChange(
     if (change.action === "create") {
         await api.post(
             "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/",
-            { path: scope, body: change.values },
+            { path: scope, body: { ...change.values, idempotency_key: key } },
         );
         return;
     }

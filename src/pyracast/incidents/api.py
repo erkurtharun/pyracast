@@ -28,6 +28,10 @@ class IncidentInput(InputSerializer):
     available_export_mw = FiniteFloat(min_value=0, allow_null=True, default=None)
 
 
+class IncidentCreate(IncidentInput):
+    idempotency_key = serializers.UUIDField(required=False)
+
+
 class IncidentUpdate(IncidentInput):
     expected_revision = serializers.IntegerField(min_value=1)
 
@@ -137,12 +141,12 @@ class IncidentsView(ScopedView[PlantIncident]):
         response.data.update(outage_proposal(actor, tenant_id, plant))
         return response
 
-    @extend_schema(request=IncidentInput, responses={201: IncidentOutput})
+    @extend_schema(request=IncidentCreate, responses={201: IncidentOutput})
     def post(self, request: Request, **_kwargs: Any) -> Response:
         scope = self.scope()
-        data = IncidentInput(data=request.data)
+        data = IncidentCreate(data=request.data)
         data.is_valid(raise_exception=True)
-        row = operations.save_incident(*scope, **data.validated_data)
+        row = operations.create_incident(*scope, **data.validated_data)
         return Response(IncidentOutput(row).data, status=201)
 
 

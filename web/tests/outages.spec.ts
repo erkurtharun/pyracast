@@ -33,8 +33,11 @@ async function workspace(
         previous: null,
     });
     let incident: Mock<Schemas["IncidentOutput"]> | null = null;
+    let createdUnder: string | undefined;
+    let creations = 0;
     let outageReads = 0;
     let conflict = false;
+    let dropAnswer = false;
     const configuration = {
         id: 31,
         revision: 1,
@@ -135,16 +138,23 @@ async function workspace(
                 return;
             }
             if (method === "POST" && path.endsWith("/outages/")) {
-                expect(body.starts_at).toBe("2026-11-11T08:00:00.000Z");
-                incident = {
-                    ...body,
-                    id: 51,
-                    revision: 1,
-                    declared_configuration_id: configurationChanged ? 30 : 31,
-                    status: body.ends_at ? "resolved" : "active",
-                    created_at: "2026-11-11T12:00:00Z",
-                    updated_at: "2026-11-11T12:00:00Z",
-                };
+                const { idempotency_key, ...values } = body;
+                expect(values.starts_at).toBe("2026-11-11T08:00:00.000Z");
+                if (!incident || idempotency_key !== createdUnder) {
+                    creations++;
+                    createdUnder = idempotency_key;
+                    incident = {
+                        ...values,
+                        id: 51,
+                        revision: 1,
+                        declared_configuration_id: configurationChanged
+                            ? 30
+                            : 31,
+                        status: values.ends_at ? "resolved" : "active",
+                        created_at: "2026-11-11T12:00:00Z",
+                        updated_at: "2026-11-11T12:00:00Z",
+                    };
+                }
             } else {
                 expect(body.expected_revision).toBe(incident?.revision);
                 incident = {
@@ -158,6 +168,11 @@ async function workspace(
                     incident = { ...incident, status: "cancelled" };
             }
             data = incident;
+            if (dropAnswer) {
+                dropAnswer = false;
+                await route.abort("failed");
+                return;
+            }
         } else if (path.endsWith("/forecast/")) {
             const intervals = [0, 2, 0].map((power, index) => ({
                 start: `2026-11-12T${String(index + 8).padStart(2, "0")}:00:00Z`,
@@ -213,8 +228,12 @@ async function workspace(
     return {
         reads: () => outageReads,
         incident: () => incident,
+        creations: () => creations,
         conflict: () => {
             conflict = true;
+        },
+        dropAnswer: () => {
+            dropAnswer = true;
         },
     };
 }
@@ -367,6 +386,53 @@ test("a failed reload after saving keeps the outages until a retry loads them", 
             .filter({ hasText: "Available panels" })
             .getByText("2 MW", { exact: true }),
     ).toBeVisible();
+});
+
+test("a creation saved again after its answer was lost keeps its key and shows one outage, and an edit sends a new key", async ({
+    page,
+}) => {
+    const state = await workspace(page);
+    const keys: unknown[] = [];
+    let reachable = false;
+    await page.route("**/plants/21/outages/", (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        keys.push(route.request().postDataJSON().idempotency_key);
+        return reachable ? route.fallback() : route.abort("failed");
+    });
+    await page.getByRole("button", { name: "Outages", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Report outage", exact: true })
+        .click();
+    await page.getByLabel("Incident title").fill("Inverter disconnected");
+    await page
+        .getByLabel("Started at", { exact: true })
+        .fill("2026-11-11T11:00");
+    await page
+        .getByLabel("Capacity impact")
+        .selectOption({ label: "Total outage" });
+    const save = page.getByRole("button", { name: "Save outage", exact: true });
+    const unconfirmed = page
+        .getByRole("alert")
+        .filter({ hasText: "did not confirm the change" });
+    await save.click();
+    await expect(unconfirmed).toBeVisible();
+    await page.getByLabel("Incident title").fill("Inverter tripped");
+    reachable = true;
+    state.dropAnswer();
+    await save.click();
+    await expect.poll(() => keys.length).toBe(2);
+    await expect(unconfirmed).toBeVisible();
+    await save.click();
+    await expect(
+        page.getByRole("heading", { name: "Inverter tripped", exact: true }),
+    ).toBeVisible();
+    await expect(save).toHaveCount(0);
+    await expect(page.locator("h3[data-outage]")).toHaveCount(1);
+    expect(keys).toHaveLength(3);
+    expect(keys[1]).not.toBe(keys[0]);
+    expect(keys[2]).toBe(keys[1]);
+    expect(typeof keys[1]).toBe("string");
+    expect(state.creations()).toBe(1);
 });
 
 test("unknown impact remains missing and stale edits show a conflict", async ({

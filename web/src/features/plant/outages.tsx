@@ -12,10 +12,10 @@ import { Notice } from "@/ui/ui";
 import { useCodeLabel, useLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import {
+    attemptPayload,
     INITIAL_OUTAGES,
     isEnding,
     outageControls,
-    proposalBody,
     reduceOutages,
     staleVersion,
     submitOutageChange,
@@ -113,7 +113,7 @@ export function Outages({
     async function submit(change: OutageChange) {
         const next = reduceOutages(screen, {
             type: "send",
-            payload: JSON.stringify(direct ? null : proposalBody(change)),
+            payload: attemptPayload(change, direct),
             key: crypto.randomUUID(),
         });
         const attempt = next.workflow?.attempt;
