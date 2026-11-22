@@ -107,7 +107,7 @@ sequenceDiagram
 | Non-member; viewer; admin role lost before the tenant lock | 403 `membership_required`; 403 `workspace_admin_required` |
 | More than 20 requests an hour | 429 `throttled` with `Retry-After` |
 | Region missing, foreign or in the trash, plant missing or foreign, also between the view check and the operation lock | 404 `not_found` |
-| Body fails `CalibrationInput` (missing or unknown field, bad date, id below 1) | 400 `invalid_request` with field errors |
+| Body fails `CalibrationInput` (missing or unknown field, bad date, id below 1) | 400 `invalid_request` with field errors (an unknown field has a message only) |
 | No configuration; configuration or binding not current | 400 `configuration_unavailable`; 400 `configuration_changed` |
 | `configuration_id` not current; not 7 to 90 days or end not before local today | 400 `invalid_request` "Calibration requires the current configuration."; "Use 7 to 90 completed local days." |
 | Another pending or running run with a different window | 400 `invalid_request` "A calibration is already pending." (same configuration and window: 202 with that run, whatever its open status) |

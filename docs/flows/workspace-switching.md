@@ -74,7 +74,7 @@ sequenceDiagram
 | The request carries the tag of another session | 409 `session_changed` from `SessionTagCheck` before the view; the client repeats it once only if a session read shows the same session |
 | User has no membership | 200 with `count` 0; empty state, selector shows "No workspaces", no inbox entry |
 | First load fails | Error notice with a Retry button, no rows |
-| A later poll fails, or a page repeats or leaves `/api/` | Request error or `Common.invalidPage`; previous rows kept with a refresh-failed notice |
+| A later poll fails, or a page repeats or leaves `/api/` | Request error or `Errors.invalidPage`; previous rows kept with a refresh-failed notice |
 | Address names a workspace the user lacks (removed, never joined) | "This workspace is not available to your account"; no fallback to another workspace. A role change applies on the next poll or refetch |
 | Other method | See Authorization |
 
@@ -83,7 +83,7 @@ sequenceDiagram
 - A user has at most one membership per workspace (`membership_tenant_user_uniq`), so the join yields one row per workspace. `membership_tenant_administrator_uniq` is a partial unique index: at most one administrator per workspace.
 - `pending_review_count` is `null` for viewers and a number for administrators; the badge shows `pending + unread` for administrators and `unread` for viewers, for the shown workspace only. `unread_outcome_count` is computed for every role: requests the caller proposed whose `proposer_membership_id` is one of the caller's membership ids on the page, status approved or rejected, `outcome_seen_at` null. Rejoining a workspace therefore does not resurrect old unread outcomes. The rules live in `workspace_counters` and `visible_requests` (`src/pyracast/change_requests/policy.py`).
 - Any authenticated request, including this poll, refreshes `last_activity_at` at most once a minute (`SessionLifetime`), so an open tab never idles out; the 12-hour absolute limit still applies. `docs/ARCHITECTURE.md` states this.
-- At `/app/w/` the workspace is the remembered one (written to `localStorage` whenever a workspace address resolves) or the lowest id across all pages. The selector keeps the Inbox, and Members or Recycle bin when the target role is administrator, and otherwise opens the plant overview. Components keyed by tenant id (`MembersPage`, `RecycleBin`, and `OperationalInbox` by tenant id and role) remount and drop the previous tenant's data.
+- At `/app/w/` the workspace is the remembered one (written to `localStorage` whenever a workspace address resolves) or the lowest id across all pages. The selector keeps the Inbox, and Members or Recycle bin when the target role is administrator, and otherwise opens the plant overview. Components keyed by tenant id (`WorkspaceMembers` in `MembersPage`, `RecycleBin`, and `OperationalInbox` by tenant id and role) remount and drop the previous tenant's data.
 - An automatic redirect yields to a navigation the person started: the shell runs its sidebar and selector navigations in a transition (`useNavigating`), and `Replace` in `workspace-pages.tsx` (the `WorkspaceIndex` redirect and `AdminOnly`) replaces the address only while none is pending, since a later replace would drop the pending push. Without such a navigation the redirect happens as soon as the workspace rows allow it.
 
 ## Tests

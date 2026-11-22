@@ -93,7 +93,7 @@ sequenceDiagram
 
 ## Rules and invariants
 
-- One lock, `/var/lib/pyracast/release.lock`. The watchdog takes it without waiting, only to restart containers; the hourly backup waits for it up to 600 s; `install-release.sh` waits 300 s and `ExecStop` waits for it, then drains within `TimeoutStopSec=960`.
+- One lock, `/var/lib/pyracast/release.lock`. The watchdog takes it without waiting, to read the unit state of a stopped `pyracast.service` and to restart containers; the hourly backup waits for it up to 600 s; `install-release.sh` waits 300 s and `ExecStop` waits for it, then drains within `TimeoutStopSec=960`.
 - Only `pyracast.service` carries `ConditionPathExists=!release-blocked`; while a release is blocked the watchdog checks capacity and sends the heartbeat only. It never recovers while blocked, stopped (heartbeat `unit_failed`) or locked (`lock_busy`).
 - Before recovery `starting` counts as healthy, afterwards only `running` and `healthy`; `restarting` counts as failed. `SERVICES` is a fixed list without `migrate`. Failed existing application containers are restarted first to reset the `on-failure:5` budget, then `up -d --no-deps` starts only the failed services, so a stopped PostgreSQL or RabbitMQ stays stopped.
 - Backup and rehearsal age are uptime since the pointer's mark; a pointer of an earlier boot, or none, counts as old as this boot.

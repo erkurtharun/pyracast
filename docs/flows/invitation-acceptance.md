@@ -93,6 +93,6 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_invitation_acceptance.py` (retry, other accounts, existing member keeps role, concurrent accepts), `tests/test_workspaces.py` (verified matching address, single use, invited signup then accept), `tests/test_invitation_preview.py`, `tests/test_workspace_admin_invitations.py`, `tests/test_invitation_limits.py`, `tests/test_workspace_member_removal.py`.
+- `tests/test_invitation_acceptance.py` (retry, other accounts, existing member keeps role, concurrent accepts), `tests/test_workspaces.py` (verified matching address, single use, invited signup then accept), `tests/test_invitation_preview.py`, `tests/test_workspace_admin_invitations.py`, `tests/test_invitation_limits.py`, `tests/test_workspace_member_removal.py`, `tests/test_workspace_http_failures.py` (anonymous, unknown, over-long and other-address accepts through the shared error contract).
 - `web/tests/workspace-invitations.spec.ts`, `web/tests/workspace-roles.spec.ts`, `web/tests/app-routes.spec.ts` (all mocked API).
-- Gaps: no real-backend Playwright run (`web/integration/` has no invitation spec); no test for signup with a different email or an expired token over HTTP, or for unauthenticated or CSRF-less accept.
+- Gaps: no real-backend Playwright run (`web/integration/` has no invitation spec); no test for signup with a different email or an expired token over HTTP, or for a CSRF-less accept.

@@ -74,7 +74,8 @@ sequenceDiagram
 | CSRF failure on PUT | 403 `csrf_failed` |
 | GET by a non-member (any foreign tenant id); PUT by a non-member or a non-administrator | 403 `membership_required`; 403 `workspace_admin_required` |
 | Region unknown, in another tenant or trashed | 404 `not_found` (on PUT after the shape check, before the stale check and the policy checks) |
-| Any field missing or unknown, bad email, address over 254 characters, bad `HH:MM`, more than 10 times, more than 32767 addresses, language not `en`/`tr` | 400 `invalid_request` with field errors |
+| Unknown field | 400 `invalid_request`, reason in `message` without `fields` |
+| Any field missing, bad email, address over 254 characters, bad `HH:MM`, more than 10 times, more than 32767 addresses, language not `en`/`tr` | 400 `invalid_request` with field errors |
 | `expected_revision` differs from the stored revision | 409 `reminder_schedule_changed` |
 | Duplicate addresses (case-insensitive); enabled with no address and no workspace inclusion | 400 `duplicate_recipients`; `recipient_required` (field `recipients`) |
 | Duplicate times; enabled without times; more times than `daily_quota` (10 without a binding) when the list is longer than the stored one | 400 `duplicate_reminder_times`; `reminder_time_required`; `too_many_reminder_times` (field `times`) |

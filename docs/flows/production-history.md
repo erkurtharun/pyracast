@@ -68,10 +68,10 @@ sequenceDiagram
 | Bad CSRF; non-member (any method) | 403 `csrf_failed`; 403 `membership_required` |
 | Non-administrator POST | 403 `workspace_admin_required` |
 | Location trashed or missing, or in another tenant; `configuration_id` not of this plant or a row vanished before the lock | 404 `not_found` |
-| Unknown field, missing `expected_revision_id`, bad type or quality, `set` without energy, over 2,000 changes; bad query value | 400 `invalid_request` with `fields` |
+| Unknown field, missing `expected_revision_id`, bad type or quality, `set` without energy, over 2,000 changes; bad query value | 400 `invalid_request` with `fields` (an unknown top-level field has a message only) |
 | Query range over 31 days or only one date; interval not completed, misaligned, crossing local midnight, batch over 31 local days; configuration not current, interval of a previous configuration, overlap, revert with nothing to revert | 400 `invalid_request` |
 | A written value above 1.25 times the plant's power ceiling without `confirm_implausible` | 400 `production_implausible`, field `changes`; the editor offers a confirming save |
-| Stale `expected_revision_id` | 409 `production_revision_changed`; the editor keeps the draft and its old token; for administrators Save and Use provider value stay disabled until Reload values or a field edit, which re-enables Save but keeps the stale token, so the next save conflicts again |
+| Stale `expected_revision_id` | 409 `production_revision_changed`; the editor keeps the draft and its old token; for administrators Save and Use provider value stay disabled until Reload values or a field edit, which re-enables both but keeps the stale token, so the next save conflicts again |
 | More than 120 write requests in an hour | 429 `throttled` |
 | Tenant, region or plant lock wait over 5 s | 503 `busy`, `Retry-After: 1`; the editor enters the same failed state as for 409 |
 | Statement over 60 s; deadlock | 503 `request_timeout`; 503 `database_conflict` |

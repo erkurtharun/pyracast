@@ -9,7 +9,7 @@ Every failure under `/api/` answers one JSON body `{code, message, fields?, retr
 - `pyracast.api.middleware.PrivateAPIResponses`: `private, no-store` on every `/api/` response, the contract body for a body-less 405 or 400 and for a JSON error body that lacks `code` and `message` (allauth), and the audit line of an `/api/auth/` 429. `SessionRequestSerialization` (`session_busy`) and `SessionTagCheck` (`session_changed`) answer through `error_json`. `pyracast.api.permissions.RoutePolicy` and `pyracast.api.throttling.RouteThrottle` refuse through the same handler.
 - `pyracast.maintenance` (the gateway's notice service): 503 `maintenance` with `retry_after: 60` while the application is unreachable, and 413 `request_too_large` for a body over the gateway's limit.
 - `pyracast.errors.retryable_database_code`: the lock, deadlock and statement-timeout mapping shared by the API handler and the console (`pyracast.platform_admin.failures.contained`). List views call `paginate_queryset` by hand: tenants, trashed regions, location change requests, sites, plants, calibrations, outages and the change-request inbox.
-- Web: `web/src/lib/api/errors.ts` (`ApiError`, `errorFromResponse`, `displayMessage`), `lib/api/lane.ts` (`send`, `prepared`), `lib/auth-api.ts` `authRequest`, `fetchList` in `lib/api/query.ts`, `useErrorMessage` and `ActionForm` in `web/src/ui/form.tsx`; catalog `Errors` in `web/messages/{en,tr}/core.json`.
+- Web: `web/src/lib/api/errors.ts` (`ApiError`, `errorFromResponse`, `displayMessage`), `lib/api/lane.ts` (`send`, `prepared`), `lib/auth-api.ts` `authRequest`, `fetchList` in `lib/api/query.ts`, `useErrorMessage` and `ActionForm` in `web/src/ui/form.tsx`; catalog `Errors` in `web/messages/{en,tr}/shell.json`.
 
 ## Sequence
 

@@ -70,7 +70,7 @@ None. No table is read or written; the flow only reads and rewrites `request.MET
 | Trust on but `PYRACAST_TRUSTED_PROXY_CIDRS` empty | `ImproperlyConfigured` at middleware load; an invalid CIDR raises `ImproperlyConfigured` naming its setting |
 | `PYRACAST_PUBLIC_ORIGIN` not a bare https origin (http allowed with `DEBUG`) | `ImproperlyConfigured` at middleware load; deploy check `accounts.E002` |
 | Deploy check: proxy trust off, or gateway or edge networks empty or invalid (`accounts.E004`); `CSRF_TRUSTED_ORIGINS` not exactly the public origin, or its host not allowed (`accounts.E005`) | The release is refused before maintenance |
-| Trust on, request from an untrusted peer reaches an allauth rate limit (the client IP header was stripped) | 403 `Unable to determine client IP address`; audit logs record a null IP |
+| Trust on, request from an untrusted peer reaches an allauth rate limit (the client IP header was stripped) | `AccountAdapter.get_client_ip` raises `PermissionDenied`; 403 `permission_denied`; audit logs record a null IP |
 | Auth endpoint answers 429 (rate limit or busy session lock) | audit event `authentication_request_throttled` |
 | CSP report with another content type | 415 through the error contract |
 | CSP report unreadable, of another type or over 16 KiB | 204, nothing logged |

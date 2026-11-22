@@ -50,7 +50,7 @@ sequenceDiagram
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `connections_provideraccount` | R/W | Locked `FOR UPDATE`; replacement writes `encrypted_api_key`, `api_key_fingerprint`, `credential_revision` and `revalidation_due_at`; the run writes only `revalidation_due_at`; clearing writes `request_blocked_until`; `authentication_failed_revision` and `daily_quota` are never touched |
+| `connections_provideraccount` | R/W | Locked `FOR UPDATE`; replacement writes `encrypted_api_key`, `api_key_fingerprint`, `credential_revision` and `revalidation_due_at`; the run writes `revalidation_due_at`, and its validations' `record_provider_failure` writes `authentication_failed_revision` on a 401 and `request_blocked_until` on a 402 or 429 of the current key; clearing writes `request_blocked_until`; `daily_quota` is never touched |
 | `connections_sitebinding` | R/W | The run's validations write `validated_at`, `validated_credential_revision` and `health`; the setup and the approval are unchanged |
 | `forecasts_requestattempt` | R/W | Each revalidation reserves one `validation` request; the account page reads the UTC day's ledger |
 | `forecasts_collectionjob` | R/W | A successful validation of an approved plant re-arms its latest forecast job refused for the key (`timing.armed_again_by_validation`) |

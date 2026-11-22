@@ -4,7 +4,7 @@ The workspace administrator opens the Inbox, lists pending, decided or own chang
 
 ## Entry points
 
-- `web/src/features/workspace/workspace-shell.tsx` shows the Inbox nav item to every member with a badge of `pending_review_count` (admin only) plus `unread_outcome_count` from `GET /api/tenants/` (`pyracast.api.views.TenantsView`, polled every 120 s; see `workspace-switching`). the Inbox route (`workspace-pages.tsx`) renders `web/src/features/inbox/operational-inbox.tsx` `OperationalInbox` at `/app/w/<tenant>/inbox/`, keyed by tenant id and role. After a decision `OperationalInbox` refetches the workspace queries (`useRefresh().workspace`), counters included.
+- `web/src/features/workspace/workspace-shell.tsx` shows the Inbox nav item to every member with a badge of `pending_review_count` (admin only) plus `unread_outcome_count` from `GET /api/tenants/` (`pyracast.api.views.TenantsView`, polled every 120 s; see `workspace-switching`). The Inbox route (`workspace-pages.tsx`) renders `web/src/features/inbox/operational-inbox.tsx` `OperationalInbox` at `/app/w/<tenant>/inbox/`, keyed by tenant id and role. After a decision `OperationalInbox` refetches the workspace queries (`useRefresh().workspace`), counters included.
 - `OperationalInbox` -> its list component `InboxPage` -> `RequestDetail` (with `ProductionProposal`, `IncidentProposal`). Admins pick scope `pending`, `history` or `mine`; members are forced to `mine`.
 - `GET /api/tenants/{t}/change-requests/?scope=&page=` -> `pyracast.change_requests.api.InboxView` (`queries.inbox`, `queries.request_summaries`), polled every 30 s. The optional `plant_id` filter is sent only by `OwnPendingRequests` (`change-request-submission`).
 - `GET /api/tenants/{t}/change-requests/{q}/` -> `DetailView` (`queries.request_detail`), fetched when Details opens and on "Refresh details"; not polled.
@@ -102,7 +102,7 @@ Rejection takes the Tenant, Region, Plant and ChangeRequest locks and the same s
 | Request in another tenant, another member's request, location in the trash | 404 `not_found` |
 | `page` past the last page or not a number | 404 `not_found`; the pager stays, so Previous works |
 | Unknown query or body field, bad `scope`, `plant_id` below 1, missing or over-long `review_fingerprint`, blank or over-long reject reason | 400 `invalid_request` |
-| Same decision repeated | 200 with the existing outcome; the fingerprint is not rechecked and a new rejection reason is ignored |
+| Same decision repeated | 200 with the existing outcome; the body is still validated as above, then the fingerprint is not rechecked and a new rejection reason is ignored |
 | Opposite decision or withdrawn request | 409 `request_already_closed` |
 | Production head or incident revision changed, configuration no longer current, overlap, target incident cancelled, resolve of an already ended incident (update and cancel of an ended incident are allowed) | 409 `request_conflict` with the localized reason; request stays pending |
 | Review values or heads changed since the detail was read | 409 `review_context_changed` |

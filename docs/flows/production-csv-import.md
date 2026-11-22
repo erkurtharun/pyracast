@@ -70,7 +70,7 @@ sequenceDiagram
 | Not signed in | 401 `not_authenticated` |
 | Viewer; foreign tenant; bad CSRF | 403 `workspace_admin_required`; 403 `membership_required`; 403 `csrf_failed` |
 | Unknown region or plant; unknown configuration id or one of another plant | 404 `not_found` |
-| Body fails the serializer (naive timestamp, boolean or negative energy, quality, empty or over 2000 rows, unknown field, unknown action, `set` without energy) | 400 `invalid_request` with `fields` |
+| Body fails the serializer (naive timestamp, boolean or negative energy, quality, empty or over 2000 rows, unknown field, unknown action, `set` without energy) | 400 `invalid_request` with `fields` (an unknown top-level field has a message only) |
 | Configuration not current (revised, region changed, provider account disabled or unauthorized); command checks it only for rows it would insert | 400 `invalid_request`, "requires the current approved configuration" |
 | Not on the local half-hour grid, crosses local midnight, first and last local day 31 or more days apart, overlaps another row or a non-reverted head, head of a previous configuration, revert without a head | 400 `invalid_request`, message without row number |
 | Commit with a value above 1.25 times the plant's power ceiling and no `confirm_implausible` | 400 `production_implausible`, field `changes` |

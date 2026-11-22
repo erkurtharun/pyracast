@@ -72,7 +72,8 @@ No database table is read or written. Artifacts:
 | An image has a HIGH or CRITICAL finding, fixed or not, that `deploy/image-scan-exceptions.json` does not accept for exactly that service, id and package until the end date (UTC day) | `check_image_scans.py` prints every unaccepted finding and exits "Image scan gate failed: N high or critical findings and M exception problems."; CI `deployment`, Release `scan` or the rescan fails |
 | Exception without a reason, expired, no longer reported, malformed, duplicated or the file missing | Same gate, "Image scan gate failed: ..." |
 | Report is for another or non-`sha256:` image id, has no OS family, an empty `Results` list or no packages, or a service report is missing | Same gate: "scan does not match the selected immutable image", "image inventory is missing" or "package inventory is missing" |
-| Wrong argument count, Trivy error, or a report without `Results` (`jq` aborts) | `scan-images.sh` exits non-zero under `set -e` (usage: exit 2) before the checker runs |
+| Report without a `Results` or `Metadata` key | Same gate, naming the missing key ("Image scan gate failed: 'Results'") |
+| Wrong argument count, Compose config error, an image reference `jq` cannot read from the rendered Compose file, or a Trivy error | `scan-images.sh` exits non-zero under `set -e` (usage: exit 2) before the checker runs |
 | Sonar quality gate red or timeout (300 s) | Job `sonar` fails, so the CI run fails and `authorize` finds no passing `CI result` |
 | Sonar variables missing | "Missing Sonar configuration: ..." |
 | `CI result` job missing or not `success` at authorize | "The CI result job of CI run N did not pass" |

@@ -81,6 +81,7 @@ sequenceDiagram
 - Dramatiq prefetches `min(2 x threads, 65535)` messages per queue. Prefetched messages hold no lease until claimed and are requeued on stop. Each deliver function closes every connection after its message, so `CONN_MAX_AGE` (60 s) has no effect in workers.
 - Messages are duplicates by design: the dispatcher re-sends every due or lease-expired id each cycle (it skips a queue holding 1,000 or more messages), and the lease and idempotent publication decide who wins.
 - Dramatiq's `TimeLimit` starts only on `process_boot`, which `Worker.start` never emits; the command emits it, as the `dramatiq` CLI does.
+
 ## Tests
 
 - `tests/test_worker_runtime.py`: the time limit of each actor, the ten-minute drain, a missing broker URL (production process and deployment check), the development fallback, queue depth limits per queue and an unreadable depth. `tests/test_deadline_ladder.py`: the bounds and their relations.

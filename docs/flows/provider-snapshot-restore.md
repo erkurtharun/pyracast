@@ -39,6 +39,8 @@ sequenceDiagram
         Svc->>DB: rollback
     else actuals restored
         Svc->>DB: request calibration preparation, commit
+    else forecasts only
+        Svc->>DB: commit
     end
     Svc-->>Cmd: summary
     Cmd-->>Op: report
@@ -71,7 +73,8 @@ sequenceDiagram
 | Unknown user, region or binding of the tenant, non-administrator, unreadable export file | `CommandError` "Provider snapshot restore failed: ..." with a fixed sentence |
 | Export not readable gzip, or a line that is not a provider snapshot | Refusal naming the line |
 | Binding not current, authorized and validated, or without its approval collection | Refusal, nothing written |
-| A live row that is not a restorable acquisition (kind not matching its endpoint, collected in the future, invalid interval, bad weather payload) or holds no succeeded live job | Refusal naming the line and the field, whole run rolled back |
+| A live row that is not a restorable acquisition (kind not matching its endpoint, collected in the future, invalid interval, bad weather payload) | Refusal naming the line, whole run rolled back |
+| A live row that holds no succeeded live job | Refusal naming the line and the job field, whole run rolled back |
 | A restored slot at or after the binding's approval collection | Refusal naming the line |
 | A provider site setting differs and is not accepted, or an accepted setting does not differ or is missing in a row, or a non-recorded setting is accepted | Refusal naming the settings, nothing written |
 | A restored forecast cannot be calculated | Refusal naming the line, whole run rolled back |

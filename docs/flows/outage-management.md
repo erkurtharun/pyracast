@@ -74,10 +74,11 @@ sequenceDiagram
 | Bad CSRF | 403 `csrf_failed` |
 | Viewer write; non-member | 403 `workspace_admin_required`, `membership_required` (also for an administrator role revoked before the operation's tenant lock) |
 | Unknown or trashed location or plant; unknown incident id for the plant | 404 `not_found` (also when trashed after the view check) |
-| Unknown field, naive timestamp, bad kind, negative or non-finite capacity, blank or long title, long notes, missing or non-positive `expected_revision`, missing resolve `ends_at` | 400 `invalid_request` with `fields` |
+| Unknown field | 400 `invalid_request`, reason in `message` without `fields` |
+| Naive timestamp, bad kind, negative or non-finite capacity, blank or long title, long notes, missing or non-positive `expected_revision`, missing resolve `ends_at` | 400 `invalid_request` with `fields` |
 | Start in the future; end not after start; end after now; capacity above the configuration's ceiling; overlap; edit of a cancelled outage, resolve of a resolved or cancelled one, cancel of a cancelled one; no current configuration to report or reopen against | 400 `incident_starts_in_future`, `incident_ends_before_start`, `incident_ends_in_future`, `incident_capacity_exceeded`, `incident_overlap`, `incident_closed`, `configuration_unavailable` |
 | `expected_revision` differs (checked before the closed checks) | 409 `incident_revision_changed` with the stored outage as `current` |
-| Lock wait over 5 s (`lock_timeout`) | 503 `busy`, `Retry-After: 1` |
+| Lock wait over 5 s (`lock_timeout`); deadlock | 503 `busy`; 503 `database_conflict`; both with `Retry-After: 1` |
 | Statement over 60 s | 503 `request_timeout` with `request_id` |
 | Database constraint violation | Unmapped, 500 `server_error` with `request_id` |
 | UI: future time, nonexistent local time (DST gap), end not after start, no start, reduced capacity without a value | Inline form error, no request |
