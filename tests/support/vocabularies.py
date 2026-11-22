@@ -55,6 +55,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production_changes import (
     ObservationInput,
     ProductionChange,
@@ -292,7 +293,10 @@ def _epias_job(monkeypatch: pytest.MonkeyPatch) -> models.Model:
 def _plant_submission(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     system = make_system()
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=1),
     )
     return PlantSubmission.objects.get(plant=plant)
 
@@ -354,12 +358,11 @@ def _prepared_delivery(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     delivery = ready()
     delivery.prepared_message = {
         "format": PreparedMessageFormat.PLAIN,
-        "kind": PreparedMessageKind.UNAVAILABLE,
         "subject": "Pyracast forecast unavailable",
         "body": "Tomorrow's saved forecast could not be prepared.",
-        "prepared_at": NOW.isoformat(),
     }
-    delivery.save(update_fields=("prepared_message",))
+    delivery.forecast_kind, delivery.prepared_at = PreparedMessageKind.UNAVAILABLE, NOW
+    delivery.save(update_fields=("prepared_message", "forecast_kind", "prepared_at"))
     return delivery
 
 
@@ -424,13 +427,7 @@ STORED_VOCABULARIES = (
         key="format",
         enumeration=PreparedMessageFormat,
     ),
-    StoredVocabulary(
-        NotificationDelivery,
-        "prepared_message",
-        _prepared_delivery,
-        key="kind",
-        enumeration=PreparedMessageKind,
-    ),
+    StoredVocabulary(NotificationDelivery, "forecast_kind", _prepared_delivery),
     StoredVocabulary(OutboundMail, "kind", _outbound_mail, published=False),
     StoredVocabulary(OutboundMail, "status", _outbound_mail, published=False),
     StoredVocabulary(OutboundMail, "language", _outbound_mail),
@@ -522,7 +519,10 @@ def _submit_incident_kind(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], ob
 def _create_plant(monkeypatch: pytest.MonkeyPatch) -> Callable[..., object]:
     system = make_system()
     return lambda **values: create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1, **values
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Plant", dc_capacity_mw=1, **values),
     )
 
 

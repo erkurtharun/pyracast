@@ -23,6 +23,7 @@ from pyracast.plants.calibration_data import build_calibration_dataset
 from pyracast.plants.models import CalibrationRun, Plant
 from pyracast.plants.numerics import evaluate_samples, fit_calibration
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.production_changes import ObservationInput, import_observations
 from pyracast.regions.models import AuditEvent
 from tests.support.domain import NOW, System
@@ -442,7 +443,10 @@ def test_hourly_upload_preserves_native_bounds_and_energy_through_calibration(
 ) -> None:
     system = system_for_import(monkeypatch)
     plant = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Hourly reference", dc_capacity_mw=1
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        PlantParameters(name="Hourly reference", dc_capacity_mw=1),
     )
     configuration = plant.current_configuration
     assert configuration is not None

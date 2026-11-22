@@ -381,7 +381,7 @@ def test_actuals_only_today_renders_when_tomorrow_forecast_is_unavailable(
     assert today["normal"]["provenance"]["source_kind"] == "estimated_actuals"
     assert today["normal"]["provenance"]["source_snapshot_ids"] == [actuals.pk]
     assert tomorrow["normal"] is None
-    assert delivery.prepared_message["tomorrow_complete"] is False
+    assert delivery.forecast_complete is False
     assert delivery.prepared_message["format"] == "xlsx"
 
 
@@ -430,7 +430,7 @@ def test_region_today_mixes_actuals_and_archive_without_selected_tomorrow_foreca
     assert today["provenance"]["source_kind"] == "mixed"
     assert actuals.pk in today["provenance"]["source_snapshot_ids"]
     assert tomorrow is None
-    assert delivery.prepared_message["tomorrow_complete"] is False
+    assert delivery.forecast_complete is False
     assert delivery.prepared_message["format"] == "xlsx"
 
 

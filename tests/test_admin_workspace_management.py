@@ -23,6 +23,7 @@ from pyracast.accounts.models import (
 )
 from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.mail.errors import PermanentlyNotSentError
+from pyracast.plants.parameters import PlantParameters
 from pyracast.plants.sites import submit_site
 from pyracast.regions.models import Region
 from tests.support.api import verified_admin
@@ -48,11 +49,10 @@ def site(owner: User, tenant: Tenant, name: str = "Console site") -> Region:
     return submit_site(
         owner,
         tenant.pk,
-        name=name,
+        PlantParameters(name=name, dc_capacity_mw=1.5),
         latitude=41,
         longitude=29,
         timezone="Europe/Istanbul",
-        dc_capacity_mw=1.5,
     )
 
 

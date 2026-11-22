@@ -21,14 +21,14 @@ msgstr ""
 msgid "A calibration is already pending."
 msgstr "Bekleyen bir kalibrasyon zaten var."
 
+msgid "A plant name cannot contain a null character."
+msgstr "Santral adı boş (NUL) karakter içeremez."
+
 msgid "A plant name of at most 200 characters is required."
 msgstr "En fazla 200 karakterlik bir santral adı girin."
 
 msgid "A reason of at most 1000 characters is required."
 msgstr "Gerekçe en fazla 1000 karakter olmalıdır."
-
-msgid "A region name of at most 200 characters is required."
-msgstr "En fazla 200 karakterlik bir konum adı girin."
 
 msgid "A replacement affects every plant using the selected account."
 msgstr "Değişiklik, seçili hesabı kullanan tüm santralleri etkiler."
@@ -2617,11 +2617,11 @@ msgstr ""
 " tekrar inceleyin."
 
 msgid ""
-"The declared plant details changed after this page opened. Review them again "
-"before approving."
+"The declared plant details changed after this page opened. The details shown "
+"now are the current ones; review them before approving."
 msgstr ""
-"Bu sayfa açıldıktan sonra beyan edilen santral bilgileri değişti. Onaylamadan"
-" önce bunları yeniden inceleyin."
+"Bu sayfa açıldıktan sonra beyan edilen santral bilgileri değişti. Şimdi "
+"gösterilen bilgiler güncel olanlardır; onaylamadan önce bunları inceleyin."
 
 msgid "Validate the current setup and key revision before approval."
 msgstr "Onaydan önce güncel kurulumu ve anahtar revizyonunu doğrulayın."
@@ -2865,6 +2865,13 @@ msgstr "Kayıtlar:"
 
 msgid "View all"
 msgstr "Tümünü gör"
+
+msgid ""
+"The technical details changed after you opened them. Check the values and "
+"save again."
+msgstr ""
+"Teknik bilgiler siz açtıktan sonra değişti. Değerleri kontrol edip yeniden "
+"kaydedin."
 
 msgid "Review calibrations"
 msgstr "Kalibrasyonları incele"

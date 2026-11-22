@@ -18,6 +18,7 @@ from pyracast.plants.operations import (
     create_plant,
     request_calibration,
 )
+from pyracast.plants.parameters import PlantParameters
 from tests.support.domain import NOW, System, make_system
 from tests.support.invariants import stored_again
 
@@ -29,9 +30,7 @@ def make_plant(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant]:
         system.member,
         system.tenant.pk,
         system.region.pk,
-        name="Plant",
-        dc_capacity_mw=130,
-        export_limit_mw=100,
+        PlantParameters(name="Plant", dc_capacity_mw=130, export_limit_mw=100),
     )
     assert plant.current_configuration_id is not None
     PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(

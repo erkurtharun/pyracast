@@ -157,14 +157,17 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
         if (route.request().method() !== "PUT") return route.fallback();
         const body = route.request().postDataJSON();
         bodies.push(body);
+        const { name, expected_revision, ...parameters } = body;
         updated = {
             ...updated,
-            name: body.name,
+            name,
             current_configuration: {
                 ...updated.current_configuration,
-                ...body,
+                ...parameters,
                 id: 31 + bodies.length,
             },
+            parameters: { ...updated.parameters, ...parameters },
+            parameters_revision: expected_revision + 1,
         };
         await route.fulfill({ json: updated });
     });

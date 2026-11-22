@@ -10,6 +10,7 @@ from pyracast.metering.models import EpiasCollectionJob, EpiasConnection
 from pyracast.metering.scheduler import enqueue_connection, enqueue_due_epias_jobs
 from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.operations import revise_plant
+from pyracast.plants.parameters import PlantParameters
 from tests.support.domain import NOW
 from tests.support.metering import NEXT_NIGHT, connected
 from tests.support.metering_settlement import link_settlement
@@ -76,9 +77,7 @@ def test_configuration_revision_enqueues_its_own_ninety_day_history(
         system.tenant.pk,
         system.region.pk,
         plant.pk,
-        name=plant.name,
-        dc_capacity_mw=140,
-        export_limit_mw=100,
+        PlantParameters(name=plant.name, dc_capacity_mw=140, export_limit_mw=100),
     )
     jobs = EpiasCollectionJob.objects.filter(connection=linked)
     assert jobs.filter(configuration_id=prior_configuration_id).count() == 90

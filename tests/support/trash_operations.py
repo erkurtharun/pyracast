@@ -8,6 +8,7 @@ from pyracast.forecasts.models import RequestAttempt
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration, ProductionObservation
 from pyracast.plants.operations import create_plant
+from pyracast.plants.parameters import PlantParameters
 from pyracast.regions.models import Region, RegionStatus
 from tests.support.domain import NOW, System
 from tests.support.production_changes import edit, write
@@ -77,7 +78,10 @@ def sibling(system: System) -> tuple[Region, SiteBinding]:
 def sibling_plant(system: System) -> Plant:
     region, _ = sibling(system)
     plant = create_plant(
-        system.member, system.tenant.pk, region.pk, name="Second plant", dc_capacity_mw=2
+        system.member,
+        system.tenant.pk,
+        region.pk,
+        PlantParameters(name="Second plant", dc_capacity_mw=2),
     )
     assert plant.current_configuration_id is not None
     PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(

@@ -223,7 +223,8 @@
         "refreshFailed": "Yenilenemedi; {time} itibarıyla veriler gösteriliyor.",
         "retry": "Tekrar dene",
         "actionFailed": "İşlem tamamlanamadı",
-        "working": "İşleniyor…"
+        "working": "İşleniyor…",
+        "changedField": "{field}: {before} → {after}"
     },
     "ProductionCsv": {
         "size": "En fazla 2 MiB boyutunda bir CSV seçin.",
