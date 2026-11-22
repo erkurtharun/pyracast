@@ -8,7 +8,6 @@ PACKAGE = Path(__file__).resolve().parents[1] / "src" / "pyracast"
 LAYERS: tuple[tuple[str, ...], ...] = (
     (
         "collection_window",
-        "evaluation",
         "event_details",
         "intervals",
         "irradiance",

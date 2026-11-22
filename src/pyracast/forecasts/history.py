@@ -12,8 +12,8 @@ from pyracast.forecasts.actuals import (
     ACTUAL_COMPOSITION_POLICY,
     archived_actual_irradiance,
     first_complete_actuals,
-    legacy_actual_queryset,
     select_archived_actual_source,
+    single_snapshot_actual_queryset,
 )
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.coverage import history_day_complete
@@ -94,7 +94,9 @@ def select_actual_snapshot(
 ) -> ForecastSnapshot | None:
     start, end = local_day_bounds(target_date, binding.timezone)
     return first_complete_actuals(
-        legacy_actual_queryset(binding, start, end, collected_from=end, as_of=as_of).iterator(),
+        single_snapshot_actual_queryset(
+            binding, start, end, collected_from=end, as_of=as_of
+        ).iterator(),
         target_date,
         binding.timezone,
     )

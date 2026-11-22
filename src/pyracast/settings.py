@@ -185,7 +185,6 @@ ACCOUNT_LOGIN_ON_PASSWORD_RESET = False
 ACCOUNT_LOGIN_TIMEOUT = 900
 # A password sign-up not refused by a rate limit answers no sooner than this after it arrives.
 PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS = 1.0
-PASSWORD_RESET_TIMEOUT = 3600
 HEADLESS_ONLY = True
 HEADLESS_CLIENTS = ("browser",)
 PYRACAST_PUBLIC_ORIGIN = os.environ.get("PYRACAST_PUBLIC_ORIGIN", "http://127.0.0.1:3000").rstrip(
@@ -193,9 +192,7 @@ PYRACAST_PUBLIC_ORIGIN = os.environ.get("PYRACAST_PUBLIC_ORIGIN", "http://127.0.
 )
 HEADLESS_FRONTEND_URLS = {
     "account_login": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
-    "account_confirm_email": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_reset_password": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
-    "account_reset_password_from_key": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_signup": f"{PYRACAST_PUBLIC_ORIGIN}/app/?signup=1",
 }
 HEADLESS_ADAPTER = "pyracast.accounts.social.HeadlessAdapter"

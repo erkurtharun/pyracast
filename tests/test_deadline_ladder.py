@@ -288,7 +288,6 @@ def test_publication_stops_ten_batches_deep() -> None:
         metering_jobs.pending_epias_ids,
         notification_jobs.pending_notification_ids,
         pending_calibration_ids,
-        outbox.pending_mail_ids,
         outbox.publish_due_mail,
     ):
         assert inspect.signature(pending).parameters["limit"].default == deadlines.PUBLISH_BATCH

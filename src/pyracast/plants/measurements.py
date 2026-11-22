@@ -24,10 +24,10 @@ from pyracast.metering.models import (
 )
 from pyracast.plants.forecast_sources import compose_snapshots
 from pyracast.plants.measurement_policy import (
-    LEGACY_MEASUREMENT_POLICY as LEGACY_MEASUREMENT_POLICY,
+    MEASUREMENT_POLICY as MEASUREMENT_POLICY,
 )
 from pyracast.plants.measurement_policy import (
-    MEASUREMENT_POLICY as MEASUREMENT_POLICY,
+    SETTLEMENT_ONLY_MEASUREMENT_POLICY as SETTLEMENT_ONLY_MEASUREMENT_POLICY,
 )
 from pyracast.plants.models import (
     CalibrationRun,
@@ -39,7 +39,7 @@ from pyracast.plants.observations import observation_heads
 
 
 def _source_kinds(policy: str) -> list[str]:
-    if policy == LEGACY_MEASUREMENT_POLICY:
+    if policy == SETTLEMENT_ONLY_MEASUREMENT_POLICY:
         return ["settlement_injection"]
     if policy == MEASUREMENT_POLICY:
         return ["settlement_injection", "realtime_generation"]

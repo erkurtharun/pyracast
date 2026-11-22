@@ -139,11 +139,6 @@ def declaration_fingerprint(region_id: int) -> str:
     return fingerprint_of(declarations(region_id))
 
 
-def review_snapshot(region_id: int) -> ReviewSnapshot:
-    region = Region.objects.active().get(pk=region_id)
-    return ReviewSnapshot(region.status, region.revision, declaration_fingerprint(region_id))
-
-
 def _require_seen(region: Region, seen: ReviewSnapshot | None) -> None:
     if seen is None:
         return
