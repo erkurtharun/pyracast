@@ -99,6 +99,7 @@
         "localDates": "Dates in plant time",
         "loadingGeneration": "Loading generation forecast…",
         "loadingIrradiance": "Loading irradiance forecast…",
+        "loadingSection": "Loading section…",
         "awaitingApproval": "Awaiting administrator approval. Your plant details are saved.",
         "minutes30": "30 minutes",
         "minutes60": "60 minutes",

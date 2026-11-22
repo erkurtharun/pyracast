@@ -1,5 +1,5 @@
 "use client";
-import { useLocale, useTranslations } from "next-intl";
+import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { PlantScope } from "@/lib/api";
 import { api } from "@/lib/api/client";
@@ -51,7 +51,7 @@ export function ProductionImport({
     onSaved: () => void;
 }) {
     const t = useTranslations("ProductionImport");
-    const locale = useLocale();
+    const csvTexts = useTranslations("ProductionCsv");
     const format = useFormat();
     const errorMessage = useErrorMessage();
     const sequence = useRef(0);
@@ -81,7 +81,7 @@ export function ProductionImport({
             return;
         }
         try {
-            const parsed = parseProduction(await file.text(), locale);
+            const parsed = parseProduction(await file.text(), csvTexts);
             const sha256 = await fileSha256(file);
             if (current === sequence.current)
                 setSelection({

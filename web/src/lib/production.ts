@@ -1,8 +1,6 @@
 import Papa from "papaparse";
-import { createTranslator } from "next-intl";
-import { isLanguage } from "@/i18n/language";
+import type core from "../../messages/en/core.json";
 import { DisplayError } from "@/lib/api/errors";
-import { messages } from "@/i18n/messages";
 export const QUALITIES = ["valid", "outage", "curtailed", "invalid"] as const;
 export type Quality = (typeof QUALITIES)[number];
 export function qualityOf(value: string | null | undefined): Quality {
@@ -42,12 +40,12 @@ function energyColumn(fields: string[] = []) {
         : null;
 }
 
-export function parseProduction(text: string, language = "en"): ProductionFile {
-    const locale = isLanguage(language) ? language : "en";
-    const t = createTranslator({
-        locale,
-        messages: messages[locale].ProductionCsv,
-    });
+export type CsvTexts = (
+    key: keyof typeof core.ProductionCsv,
+    values?: Record<string, string | number>,
+) => string;
+
+export function parseProduction(text: string, t: CsvTexts): ProductionFile {
     if (new TextEncoder().encode(text).length > 2 * 1024 * 1024)
         throw new DisplayError(t("size"));
     const parsed = Papa.parse<Record<string, string>>(text, {

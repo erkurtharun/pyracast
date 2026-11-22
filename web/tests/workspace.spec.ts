@@ -2,6 +2,7 @@ import type { Request } from "@playwright/test";
 import { test, expect, type Page } from "./support/test";
 import { accessibilityViolations } from "./support/accessibility";
 import { parseProduction } from "../src/lib/production";
+import { csvTexts } from "./support/production-csv";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import {
@@ -1257,25 +1258,27 @@ test("CSV rejects ambiguous units, offsets, overlaps, invalid energy and oversiz
         "starts_at,ends_at,energy_kwh,energy_mwh,quality,source",
         "starts_at,ends_at,energy_kwh,quality,source,plant",
     ])
-        expect(() => parseProduction(`${columns}\n`)).toThrow(
+        expect(() => parseProduction(`${columns}\n`, csvTexts())).toThrow(
             "energy_kwh or energy_mwh",
         );
     expect(() =>
         parseProduction(
             header + "2026-01-01T09:00:00,2026-01-01T09:30:00,-1,valid,meter",
+            csvTexts(),
         ),
     ).toThrow("timezone-aware");
     expect(() =>
         parseProduction(
             header + "2026-01-01T09:00:00Z,2026-01-01T09:30:00Z,-1,valid,meter",
+            csvTexts(),
         ),
     ).toThrow("non-negative");
     const row = "2026-01-01T09:00:00Z,2026-01-01T09:30:00Z,1,valid,meter";
-    expect(() => parseProduction(header + row + "\n" + row)).toThrow(
-        "overlapping",
-    );
     expect(() =>
-        parseProduction(header + Array(2001).fill(row).join("\n")),
+        parseProduction(header + row + "\n" + row, csvTexts()),
+    ).toThrow("overlapping");
+    expect(() =>
+        parseProduction(header + Array(2001).fill(row).join("\n"), csvTexts()),
     ).toThrow("2,000");
 });
 
@@ -1284,6 +1287,7 @@ test("CSV preserves quoted commas and multiline source fields and rejects missin
     const interval = "2026-01-01T09:00:00Z,2026-01-01T09:30:00Z";
     const parsed = parseProduction(
         header + interval + ',0,valid,"Meter, north\nroof"\r\n',
+        csvTexts(),
     );
     expect(parsed.unit).toBe("kWh");
     expect(parsed.observations).toEqual([
@@ -1295,11 +1299,14 @@ test("CSV preserves quoted commas and multiline source fields and rejects missin
             source: "Meter, north\nroof",
         },
     ]);
-    expect(() => parseProduction(header + interval + ",,valid,meter")).toThrow(
-        "non-negative",
-    );
     expect(() =>
-        parseProduction(header + interval + ',1,valid,"unterminated'),
+        parseProduction(header + interval + ",,valid,meter", csvTexts()),
+    ).toThrow("non-negative");
+    expect(() =>
+        parseProduction(
+            header + interval + ',1,valid,"unterminated',
+            csvTexts(),
+        ),
     ).toThrow("could not be parsed");
 });
 
