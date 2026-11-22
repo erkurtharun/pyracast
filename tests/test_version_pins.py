@@ -224,14 +224,23 @@ def test_development_postgresql_keeps_the_data_location_of_the_production_major(
     assert f'"/var/lib/postgresql/{major}/docker"' in start_postgres
 
 
+SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|"})
+
+
 def apk_commands(dockerfile: str) -> list[list[str]]:
     commands = []
     for instruction in dockerfile.replace("\\\n", " ").splitlines():
-        run = re.fullmatch(r"\s*RUN\s+(.*)", instruction, re.I)
-        if run:
-            command = list(shlex.shlex(run[1], posix=True, punctuation_chars=True))
+        run = re.fullmatch(r"\s*RUN\s+(?:--\S+\s+)*(.*)", instruction, re.I)
+        if run is None:
+            continue
+        command: list[str] = []
+        for token in [*shlex.shlex(run[1], posix=True, punctuation_chars=True), ";"]:
+            if token not in SHELL_SEPARATORS:
+                command.append(token)
+                continue
             if command[:1] == ["apk"]:
                 commands.append(command)
+            command = []
     return commands
 
 
