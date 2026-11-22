@@ -40,6 +40,7 @@ export function captureInstallPrompt() {
 }
 
 export async function promptInstall(event: InstallPromptEvent) {
+    if (prompt.kind !== "saved" || prompt.event !== event) return;
     setPrompt({ kind: "none" });
     await event.prompt();
     const choice = await event.userChoice;

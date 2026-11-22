@@ -92,11 +92,8 @@ function installSteps(page: Page) {
     return page.locator(".sidebar details").filter({ hasText: "Install app" });
 }
 
-test("the install entry uses a saved install event once and disappears after acceptance", async ({
-    page,
-}) => {
-    await openWorkspace(page);
-    const prevented = await page.evaluate(() => {
+function offerInstall(page: Page, outcome: "accepted" | "dismissed") {
+    return page.evaluate((choice) => {
         const event = Object.assign(
             new Event("beforeinstallprompt", { cancelable: true }),
             {
@@ -108,23 +105,58 @@ test("the install entry uses a saved install event once and disappears after acc
                     });
                     return Promise.resolve();
                 },
-                userChoice: Promise.resolve({ outcome: "accepted" }),
+                userChoice: Promise.resolve({ outcome: choice }),
             },
         );
         return !window.dispatchEvent(event);
-    });
-    expect(prevented).toBe(true);
-    const install = page
+    }, outcome);
+}
+
+function installButton(page: Page) {
+    return page
         .locator(".sidebar")
         .getByRole("button", { name: "Install app", exact: true });
+}
+
+function installPrompts(page: Page) {
+    return page.evaluate(
+        () => (window as { installPrompts?: number }).installPrompts,
+    );
+}
+
+test("the install entry uses a saved install event once and disappears after acceptance", async ({
+    page,
+}) => {
+    await openWorkspace(page);
+    expect(await offerInstall(page, "accepted")).toBe(true);
+    const install = installButton(page);
     await install.click();
     await expect(install).toHaveCount(0);
     await expect(installSteps(page)).toHaveCount(0);
-    expect(
-        await page.evaluate(
-            () => (window as { installPrompts?: number }).installPrompts,
-        ),
-    ).toBe(1);
+    expect(await installPrompts(page)).toBe(1);
+});
+
+test("a dismissed install prompt falls back to the browser menu steps", async ({
+    page,
+}) => {
+    await openWorkspace(page);
+    await offerInstall(page, "dismissed");
+    const install = installButton(page);
+    await install.click();
+    await expect(install).toHaveCount(0);
+    await expect(installSteps(page)).toHaveCount(1);
+    expect(await installPrompts(page)).toBe(1);
+});
+
+test("an app installed from the browser menu hides the install entry", async ({
+    page,
+}) => {
+    await openWorkspace(page);
+    await offerInstall(page, "accepted");
+    await expect(installButton(page)).toBeVisible();
+    await page.evaluate(() => window.dispatchEvent(new Event("appinstalled")));
+    await expect(page.locator(".sidebar")).not.toContainText("Install app");
+    expect(await installPrompts(page)).toBeUndefined();
 });
 
 test("without an install event a Chromium browser shows the browser menu steps", async ({
@@ -168,7 +200,7 @@ test("Safari on a Mac shows the Add to Dock steps", async ({ page }) => {
     await expect(steps).toContainText("In Safari, choose File > Add to Dock.");
 });
 
-test("a browser that cannot install shows no install entry", async ({
+test("a browser with neither the install event nor WebKit shows no install entry", async ({
     page,
 }) => {
     await emulateEngine(page, "gecko");
