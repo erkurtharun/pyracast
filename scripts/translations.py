@@ -22,7 +22,8 @@ def _literal(node: ast.expr) -> str | None:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
-def _calls(tree: ast.AST) -> Iterator[Msgid]:
+def _calls(tree: ast.AST, unreadable: list[int]) -> Iterator[Msgid]:
+    """Marked msgids; a contextual call whose context is not a literal adds its line instead."""
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -32,52 +33,67 @@ def _calls(tree: ast.AST) -> Iterator[Msgid]:
         if name in _SINGULAR and arguments and arguments[0] is not None:
             yield None, arguments[0]
         elif name in _CONTEXTUAL and len(arguments) > 1 and arguments[1] is not None:
-            yield arguments[0], arguments[1]
+            if arguments[0] is None:
+                unreadable.append(node.lineno)
+            else:
+                yield arguments[0], arguments[1]
 
 
-def _template_calls(text: str) -> Iterator[Msgid]:
+def _template_calls(text: str, unreadable: list[int]) -> Iterator[Msgid]:
     for match in _TEMPLATE_CALL.finditer(text):
         end = match.end()
         while (end := text.find(")", end) + 1) > 0:
+            lines: list[int] = []
             try:
-                yield from _calls(ast.parse(text[match.start() : end], mode="eval"))
+                yield from _calls(ast.parse(text[match.start() : end], mode="eval"), lines)
             except SyntaxError:
                 continue
+            before = text.count("\n", 0, match.start())
+            unreadable.extend(before + line for line in lines)
             break
 
 
-def source_msgids(root: Path) -> set[Msgid]:
-    """Every msgid the project's Python sources and templates mark for translation."""
+def source_msgids(root: Path) -> tuple[set[Msgid], list[str]]:
+    """Every msgid the project's Python sources and templates mark for translation, and each
+    place whose context is not a literal. Migrations freeze retired labels and mark nothing."""
     package = root / "src" / "pyracast"
     found: set[Msgid] = set()
-    for path in sorted(package.rglob("*.py")):
-        found.update(_calls(ast.parse(path.read_text(encoding="utf-8"))))
+    unreadable: list[str] = []
     for path in sorted(package.rglob("*")):
-        if "templates" in path.parts and path.suffix in {".html", ".txt"}:
-            found.update(_template_calls(templatize(path.read_text(encoding="utf-8"), str(path))))
-    return found
+        lines: list[int] = []
+        if path.suffix == ".py" and "migrations" not in path.relative_to(package).parts:
+            found.update(_calls(ast.parse(path.read_text(encoding="utf-8")), lines))
+        elif "templates" in path.parts and path.suffix in {".html", ".txt"}:
+            text = templatize(path.read_text(encoding="utf-8"), str(path))
+            found.update(_template_calls(text, lines))
+        unreadable += [f"{path.relative_to(root).as_posix()}:{line}" for line in lines]
+    return found, unreadable
 
 
-def _entries(sources: Iterable[Path]) -> dict[Msgid, Path]:
+def _entries(sources: Iterable[Path], *, translated: bool = False) -> dict[Msgid, Path]:
     return {
         (entry.msgctxt, entry.msgid): source
         for source in sources
         for entry in polib.pofile(str(source))
-        if not entry.obsolete
+        if not entry.obsolete and (entry.translated() or not translated)
     }
 
 
 def catalog_problems(root: Path) -> list[str]:
     """Msgids no catalogue translates and catalogue msgids no source uses. A project msgid that
-    one of Django's or allauth's Turkish catalogues also holds overrides their translation."""
+    one of Django's or allauth's Turkish catalogues also translates overrides their translation."""
     project = _entries(sorted(root.glob("src/**/locale/tr/LC_MESSAGES/*.po")))
     upstream = _entries(
-        source
-        for library in (django, allauth)
-        for source in sorted(Path(library.__path__[0]).rglob("locale/tr/LC_MESSAGES/*.po"))
+        (
+            source
+            for library in (django, allauth)
+            for source in sorted(Path(library.__path__[0]).rglob("locale/tr/LC_MESSAGES/*.po"))
+        ),
+        translated=True,
     )
-    used = source_msgids(root)
-    problems = [
+    used, unreadable = source_msgids(root)
+    problems = [f"Unreadable translation context: {place}" for place in unreadable]
+    problems += [
         f"Untranslated msgid: {msgid!r}"
         for context, msgid in sorted(used - project.keys() - upstream.keys(), key=repr)
     ]

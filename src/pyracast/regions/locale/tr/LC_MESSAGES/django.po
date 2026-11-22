@@ -308,9 +308,6 @@ msgstr "E-posta teslimi"
 msgid "Email reminders"
 msgstr "E-posta hatırlatmaları"
 
-msgid "English"
-msgstr "English"
-
 msgid "Enter a location different from the current location."
 msgstr "Mevcut konumdan farklı bir konum girin."
 

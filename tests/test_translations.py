@@ -1,5 +1,6 @@
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import polib
@@ -198,6 +199,64 @@ def test_marks_without_a_call_and_django_catalog_overrides_count_as_used(tmp_pat
     catalog.save(str(source))
 
     assert catalog_problems(tmp_path) == []
+
+
+def test_a_text_marked_only_in_a_migration_keeps_no_catalog_entry(tmp_path: Path) -> None:
+    marked(tmp_path, '_("Saved")\n')
+    migration = tmp_path / "src/pyracast/example/migrations/0001_initial.py"
+    migration.parent.mkdir(parents=True)
+    migration.write_text(
+        'from django.utils.translation import gettext_lazy\nLABEL = gettext_lazy("Retired")\n',
+        encoding="utf-8",
+    )
+    catalogued(tmp_path, ("Saved", "Kaydedildi"), ("Retired", "Emekli"))
+
+    assert catalog_problems(tmp_path) == [
+        "Orphan msgid: src/example/locale/tr/LC_MESSAGES/django.po: 'Retired'"
+    ]
+
+
+def test_a_library_catalog_excuses_only_the_texts_it_translates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marked(tmp_path, '_("Close the fixture")\n_("Retry the fixture")\n')
+    catalogued(tmp_path, ("Fixture draft", "Taslak"))
+    library = tmp_path / "library"
+    upstream = library / "locale/tr/LC_MESSAGES/django.po"
+    upstream.parent.mkdir(parents=True)
+    catalog = polib.POFile()
+    for msgid, msgstr in (
+        ("Close the fixture", "Kapat"),
+        ("Retry the fixture", ""),
+        ("Fixture draft", ""),
+    ):
+        catalog.append(polib.POEntry(msgid=msgid, msgstr=msgstr))
+    catalog.save(str(upstream))
+    monkeypatch.setattr("scripts.translations.allauth", SimpleNamespace(__path__=[str(library)]))
+
+    assert catalog_problems(tmp_path) == [
+        "Untranslated msgid: 'Retry the fixture'",
+        "Orphan msgid: src/example/locale/tr/LC_MESSAGES/django.po: 'Fixture draft'",
+    ]
+
+
+def test_a_contextual_text_whose_context_is_not_a_literal_is_reported(tmp_path: Path) -> None:
+    marked(
+        tmp_path,
+        "from django.utils.translation import pgettext_lazy\n"
+        'CONTEXT = "console"\n'
+        'KIND = pgettext_lazy(CONTEXT, "Remove")\n',
+        '{% translate "Queued" context "console" %}',
+    )
+    catalogued(tmp_path)
+    source = tmp_path / "src/example/locale/tr/LC_MESSAGES/django.po"
+    catalog = polib.pofile(str(source))
+    catalog.append(polib.POEntry(msgctxt="console", msgid="Queued", msgstr="Sirada"))
+    catalog.save(str(source))
+
+    assert catalog_problems(tmp_path) == [
+        "Unreadable translation context: src/pyracast/example.py:4"
+    ]
 
 
 def test_catalog_check_validates_sources_without_writing_and_compile_writes_them(
