@@ -1,6 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { DisplayError } from "@/lib/api/errors";
 import { fromPlantInput, toPlantInput } from "@/lib/format/time";
 import { useFormat } from "@/lib/format/use-format";
@@ -10,11 +10,12 @@ import { Notice } from "@/ui/ui";
 import { useLabel } from "@/ui/vocabulary";
 import {
     capacityImpact,
-    staleVersion,
     type Outage,
     type OutageChange,
+    type OutageControls,
+    type Stale,
 } from "./model";
-import { StaleChanges, type Stale } from "./stale-changes";
+import { StaleChanges } from "./stale-changes";
 
 export type Ceilings = {
     dc_capacity_mw: number;
@@ -60,46 +61,39 @@ export function ProposalReason() {
     );
 }
 
-export function useStaleRecovery(outage: Outage | undefined) {
-    const t = useTranslations("Outages");
-    const [base, setBase] = useState(outage);
-    const [stale, setStale] = useState<Stale | null>(null);
-    const [attempts, setAttempts] = useState(0);
-    return {
-        base,
-        stale,
-        form: attempts,
-        discard: () => {
-            setStale(null);
-            setAttempts((count) => count + 1);
-        },
-        async attempt(write: (base: Outage | undefined) => Promise<void>) {
-            try {
-                await write(base);
-            } catch (error) {
-                const current = base && staleVersion(error, base.id);
-                if (!current) throw error;
-                setStale({ before: stale?.before ?? base, current });
-                setBase(current);
-                throw new DisplayError(t("staleEdit"));
-            }
-        },
-    };
+// A held form is disabled, so a focus inside it, or one lost with a control it disabled, moves to the one control left.
+export function useHeldFocus(
+    hold: string | null,
+    container: RefObject<HTMLElement | null>,
+    control: RefObject<HTMLElement | null>,
+) {
+    useEffect(() => {
+        const active = document.activeElement;
+        if (
+            hold &&
+            (active === document.body || container.current?.contains(active))
+        )
+            control.current?.focus();
+    }, [hold, container, control]);
 }
 
 export function OutageEditor({
     outage,
+    stale,
     timezone,
     ceilings,
     direct,
+    controls,
     hold,
     onSubmit,
     onClose,
 }: {
     outage?: Outage;
+    stale: Stale | null;
     timezone: string;
     ceilings?: Ceilings;
     direct: boolean;
+    controls: OutageControls;
     // Why this editor cannot send any more; it can still be closed.
     hold: string | null;
     onSubmit: (change: OutageChange) => Promise<void>;
@@ -109,21 +103,11 @@ export function OutageEditor({
     const proposals = useTranslations("ChangeRequests");
     const format = useFormat();
     const label = useLabel();
-    const recovery = useStaleRecovery(outage);
     const [impact, setImpact] = useState(capacityImpact(outage));
     const [openedAt] = useState(Date.now);
     const section = useRef<HTMLElement>(null);
     const closeButton = useRef<HTMLButtonElement>(null);
-    useEffect(() => {
-        const active = document.activeElement;
-        // The form is disabled under a hold, so a focus inside it moves to the one control left.
-        if (
-            hold &&
-            (active === document.body || section.current?.contains(active))
-        )
-            closeButton.current?.focus();
-    }, [hold]);
-    const closed = recovery.base?.status === "cancelled";
+    useHeldFocus(hold, section, closeButton);
     const ceiling = (value?: number | null) =>
         value == null
             ? undefined
@@ -132,17 +116,17 @@ export function OutageEditor({
     return (
         <section aria-label={heading} ref={section}>
             <h3>{heading}</h3>
-            {recovery.stale && (
+            {stale && (
                 <StaleChanges
-                    stale={recovery.stale}
-                    closed={closed}
+                    stale={stale}
+                    closed={outage?.status === "cancelled"}
                     timezone={timezone}
                     onDiscard={onClose}
                 />
             )}
             {hold && <Notice>{hold}</Notice>}
             <ActionForm
-                permitted={!closed && !hold}
+                permitted={controls.editable}
                 submit={
                     direct
                         ? outage
@@ -192,19 +176,11 @@ export function OutageEditor({
                         ...capacities,
                     };
                     const reason = formText(data, "reason");
-                    await recovery.attempt((base) =>
-                        onSubmit(
-                            base
-                                ? {
-                                      action: "update",
-                                      outage: base,
-                                      values,
-                                      reason,
-                                  }
-                                : { action: "create", values, reason },
-                        ),
+                    await onSubmit(
+                        outage
+                            ? { action: "update", outage, values, reason }
+                            : { action: "create", values, reason },
                     );
-                    onClose();
                 }}
             >
                 {!direct && <ProposalReason />}
@@ -315,6 +291,7 @@ export function OutageEditor({
                     ref={closeButton}
                     className="button secondary"
                     type="button"
+                    disabled={!controls.close}
                     onClick={onClose}
                 >
                     {t("closeEditor")}

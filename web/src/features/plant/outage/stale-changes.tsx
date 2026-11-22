@@ -4,9 +4,12 @@ import { useFormat } from "@/lib/format/use-format";
 import { MISSING } from "@/lib/format/number";
 import { ChangedFields } from "@/ui/changed-fields";
 import { useLabel } from "@/ui/vocabulary";
-import { changedFields, type Outage, type OutageField } from "./model";
-
-export type Stale = { before: Outage; current: Outage };
+import {
+    changedFields,
+    type Outage,
+    type OutageField,
+    type Stale,
+} from "./model";
 
 const FIELD_LABELS = {
     kind: "kind",

@@ -202,6 +202,7 @@
         "howToReportAnOutage": "How to report an outage",
         "editOutage": "Edit outage",
         "closeEditor": "Close editor",
+        "closeForm": "Close",
         "editorHeld": "A request of yours for this outage now waits for approval. Withdraw it before proposing another change.",
         "loadingOutages": "Loading outages…",
         "downloadOutagesCSV": "Download outages CSV",

@@ -475,14 +475,14 @@ const open4 = {
     close: true,
 };
 const sending4 = { ...open4, acts: false, send: false, close: false };
-const held4 = { ...open4, send: false, editable: false, hold: "held" };
+const held4 = { ...open4, send: false, editable: false, hold: "held" as const };
 const atLimit = {
     ...quiet,
     create: false,
     offered: [],
     editable: false,
     close: true,
-    hold: "pending_request_limit",
+    hold: "pending_request_limit" as const,
 };
 
 test("every state of the outage screen enables only the controls whose event it accepts", () => {
@@ -544,9 +544,8 @@ test("a cancelled outage offers no proposal, and an administrator is offered eve
         outageControls(INITIAL_OUTAGES, { ...admin(), configured: false })
             .create,
     ).toBe(false);
-    expect(outageControls(INITIAL_OUTAGES, member(undefined)).create).toBe(
-        false,
-    );
+    const unread = { offer: undefined, direct: false, configured: true };
+    expect(outageControls(INITIAL_OUTAGES, unread).create).toBe(false);
 });
 
 test("the idempotency key belongs to the open workflow's attempt", () => {

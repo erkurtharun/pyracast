@@ -1,6 +1,6 @@
 "use client";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { PendingApproval } from "@/features/inbox/pending-approval";
 import { DisplayError } from "@/lib/api/errors";
 import { toPlantInput } from "@/lib/format/time";
@@ -8,12 +8,8 @@ import { useFormat } from "@/lib/format/use-format";
 import { ActionForm, CheckboxField, Field, formText } from "@/ui/form";
 import { Notice } from "@/ui/ui";
 import { StatusTag, useLabel } from "@/ui/vocabulary";
-import type { Outage, OutageChange } from "./model";
-import {
-    plantInstant,
-    ProposalReason,
-    useStaleRecovery,
-} from "./outage-editor";
+import type { Outage, OutageChange, OutageControls, Workflow } from "./model";
+import { plantInstant, ProposalReason, useHeldFocus } from "./outage-editor";
 import { StaleChanges } from "./stale-changes";
 
 type Submit = (change: OutageChange) => Promise<void>;
@@ -39,11 +35,14 @@ export function OutageCard({
     pendingRequestId,
     timezone,
     direct,
-    actionable,
+    offered,
+    controls,
+    hold,
     configurationChanged,
-    resolving,
-    onEdit,
-    onResolve,
+    workflow,
+    onOpen,
+    onClose,
+    onDiscard,
     onSubmit,
 }: {
     outage: Outage;
@@ -51,19 +50,28 @@ export function OutageCard({
     pendingRequestId: number | null;
     timezone: string;
     direct: boolean;
-    actionable: boolean;
+    // Whether this card offers its proposal controls; they act only while nothing on the screen is being sent.
+    offered: boolean;
+    controls: OutageControls;
+    hold: string | null;
     configurationChanged: boolean;
-    resolving: boolean;
-    onEdit: () => void;
-    onResolve: (open: boolean) => void;
+    // The screen's open resolution or cancellation when it belongs to this outage.
+    workflow: Workflow | null;
+    onOpen: (kind: "update" | "resolve" | "cancel") => void;
+    onClose: () => void;
+    onDiscard: () => void;
     onSubmit: Submit;
 }) {
     const t = useTranslations("Outages");
     const proposals = useTranslations("ChangeRequests");
     const format = useFormat();
     const label = useLabel();
+    const cancellation = useRef<HTMLDetailsElement>(null);
+    const summary = useRef<HTMLElement>(null);
     const time = (value: string) => format.time(value, timezone);
-    const changeable = actionable && outage.status !== "cancelled";
+    const resolving = workflow?.kind === "resolve" ? workflow : null;
+    const cancelling = workflow?.kind === "cancel" ? workflow : null;
+    useHeldFocus(cancelling && hold, cancellation, summary);
     return (
         <article className="provenance">
             <div className="section-heading">
@@ -106,15 +114,20 @@ export function OutageCard({
                     subject={outage.title}
                 />
             )}
-            {changeable && (
+            {offered && (
                 <div className="button-group">
-                    <button className="button secondary" onClick={onEdit}>
+                    <button
+                        className="button secondary"
+                        disabled={!controls.acts}
+                        onClick={() => onOpen("update")}
+                    >
                         {direct ? t("editReport") : proposals("proposeUpdate")}
                     </button>
                     {outage.status === "active" && (
                         <button
                             className="button secondary"
-                            onClick={() => onResolve(true)}
+                            disabled={!controls.acts}
+                            onClick={() => onOpen("resolve")}
                         >
                             {direct
                                 ? t("resolveOutage")
@@ -123,82 +136,101 @@ export function OutageCard({
                     )}
                 </div>
             )}
-            {changeable && resolving && (
+            {resolving && (
                 <ResolveOutageForm
-                    outage={outage}
+                    workflow={resolving}
                     timezone={timezone}
                     direct={direct}
+                    controls={controls}
+                    hold={hold}
                     onSubmit={onSubmit}
-                    onClose={() => onResolve(false)}
+                    onClose={onClose}
                 />
             )}
-            {changeable && (
-                <details>
-                    <summary>
+            {(offered || cancelling) && (
+                <details ref={cancellation} open={!!cancelling}>
+                    {/* The screen decides whether the cancellation is open, so the summary asks it instead of toggling. */}
+                    <summary
+                        ref={summary}
+                        aria-disabled={!controls.acts || undefined}
+                        onClick={(event) => {
+                            event.preventDefault();
+                            if (cancelling) onClose();
+                            else onOpen("cancel");
+                        }}
+                    >
                         {direct
                             ? t("cancelAnIncorrectEntry")
                             : proposals("proposeCancellation")}
                     </summary>
-                    <CancelOutageForm
-                        key={outage.id}
-                        outage={outage}
-                        timezone={timezone}
-                        direct={direct}
-                        onSubmit={onSubmit}
-                    />
+                    {cancelling && (
+                        <CancelOutageForm
+                            key={cancelling.form}
+                            workflow={cancelling}
+                            timezone={timezone}
+                            direct={direct}
+                            controls={controls}
+                            hold={hold}
+                            onSubmit={onSubmit}
+                            onDiscard={onDiscard}
+                        />
+                    )}
                 </details>
             )}
         </article>
     );
 }
 
-function ResolveOutageForm({
-    outage,
-    timezone,
-    direct,
-    onSubmit,
-    onClose,
-}: {
-    outage: Outage;
+type FormProps = {
+    workflow: Workflow & { outage: Outage };
     timezone: string;
     direct: boolean;
+    controls: OutageControls;
+    hold: string | null;
     onSubmit: Submit;
-    onClose: () => void;
-}) {
+};
+
+function ResolveOutageForm({
+    workflow,
+    timezone,
+    direct,
+    controls,
+    hold,
+    onSubmit,
+    onClose,
+}: FormProps & { onClose: () => void }) {
     const t = useTranslations("Outages");
     const proposals = useTranslations("ChangeRequests");
-    const recovery = useStaleRecovery(outage);
     const [openedAt] = useState(Date.now);
-    const closed = recovery.base?.status !== "active";
+    const container = useRef<HTMLDivElement>(null);
+    const closeButton = useRef<HTMLButtonElement>(null);
+    useHeldFocus(hold, container, closeButton);
+    const { outage, stale } = workflow;
     return (
-        <>
-            {recovery.stale && (
+        <div ref={container}>
+            {stale && (
                 <StaleChanges
-                    stale={recovery.stale}
-                    closed={closed}
+                    stale={stale}
+                    closed={outage.status !== "active"}
                     timezone={timezone}
                     onDiscard={onClose}
                 />
             )}
+            {hold && <Notice>{hold}</Notice>}
             <ActionForm
-                permitted={!closed}
+                permitted={controls.editable}
                 submit={direct ? t("saveResolution") : proposals("send")}
                 onSubmit={async (data) => {
                     const ends = plantInstant(data, "ends_at", timezone, t);
                     if (!ends) throw new DisplayError(t("chooseEndTime"));
-                    const reason = formText(data, "reason");
-                    await recovery.attempt((base) => {
-                        const target = base ?? outage;
-                        if (Date.parse(ends) <= Date.parse(target.starts_at))
-                            throw new DisplayError(t("resolutionAfterStart"));
-                        return onSubmit({
-                            action: "resolve",
-                            outage: target,
-                            ends_at: ends,
-                            reason,
-                        });
+                    if (Date.parse(ends) <= Date.parse(outage.starts_at))
+                        throw new DisplayError(t("resolutionAfterStart"));
+                    await onSubmit({
+                        action: "resolve",
+                        outage,
+                        ends_at: ends,
+                        reason: formText(data, "reason"),
                     });
-                    onClose();
                 }}
             >
                 {!direct && <ProposalReason />}
@@ -210,48 +242,53 @@ function ResolveOutageForm({
                     required
                 />
             </ActionForm>
-        </>
+            <div className="button-group">
+                <button
+                    ref={closeButton}
+                    className="button secondary"
+                    type="button"
+                    disabled={!controls.close}
+                    onClick={onClose}
+                >
+                    {t("closeForm")}
+                </button>
+            </div>
+        </div>
     );
 }
 
 function CancelOutageForm({
-    outage,
+    workflow,
     timezone,
     direct,
+    controls,
+    hold,
     onSubmit,
-}: {
-    outage: Outage;
-    timezone: string;
-    direct: boolean;
-    onSubmit: Submit;
-}) {
+    onDiscard,
+}: FormProps & { onDiscard: () => void }) {
     const t = useTranslations("Outages");
     const proposals = useTranslations("ChangeRequests");
-    const recovery = useStaleRecovery(outage);
-    const closed = recovery.base?.status === "cancelled";
+    const { outage, stale } = workflow;
     return (
         <>
-            {recovery.stale && (
+            {stale && (
                 <StaleChanges
-                    stale={recovery.stale}
-                    closed={closed}
+                    stale={stale}
+                    closed={outage.status === "cancelled"}
                     timezone={timezone}
-                    onDiscard={recovery.discard}
+                    onDiscard={onDiscard}
                 />
             )}
+            {hold && <Notice>{hold}</Notice>}
             <ActionForm
-                key={recovery.form}
-                permitted={!closed}
+                permitted={controls.editable}
                 submit={direct ? t("cancelOutage") : proposals("send")}
                 onSubmit={async (data) => {
-                    const reason = formText(data, "reason");
-                    await recovery.attempt((base) =>
-                        onSubmit({
-                            action: "cancel",
-                            outage: base ?? outage,
-                            reason,
-                        }),
-                    );
+                    await onSubmit({
+                        action: "cancel",
+                        outage,
+                        reason: formText(data, "reason"),
+                    });
                 }}
             >
                 {!direct && <ProposalReason />}

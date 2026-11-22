@@ -738,7 +738,8 @@ function memberList(held: number | null = null) {
 // A member whose clock runs, so the outage list is read again when the page regains focus.
 async function memberOutages(
     page: Page,
-    read: () => Promise<ReturnType<typeof memberList>>,
+    read: () =>
+        ReturnType<typeof memberList> | Promise<ReturnType<typeof memberList>>,
 ) {
     await page.clock.install({ time: new Date("2026-11-10T12:00:00Z") });
     await mockApi(page);
@@ -872,7 +873,7 @@ test("an outage editor that is sending cannot be replaced by a new outage", asyn
 }) => {
     const answered = gate();
     const submissions: unknown[] = [];
-    await memberOutages(page, async () => memberList());
+    await memberOutages(page, () => memberList());
     await page.route("**/change-requests/incidents/", async (route) => {
         submissions.push(route.request().postDataJSON());
         await answered.pass();
@@ -914,7 +915,7 @@ test("a resolution form whose outage comes to wait for the member's own request 
 }) => {
     let held: number | null = null;
     const submissions: unknown[] = [];
-    await memberOutages(page, async () => memberList(held));
+    await memberOutages(page, () => memberList(held));
     await page.route("**/change-requests/incidents/", (route) => {
         submissions.push(route.request().postDataJSON());
         return route.fulfill({ status: 201, json: {} });

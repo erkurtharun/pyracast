@@ -2,10 +2,9 @@
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import type { Plant, PlantScope } from "@/lib/api";
+import { DisplayError } from "@/lib/api/errors";
 import { useApiList } from "@/lib/api/query";
-import type { components } from "@/lib/schema";
 import { outagesExport } from "@/lib/exports";
-import { useProposalKey } from "@/lib/idempotency";
 import { CsvDownload } from "@/ui/csv-download";
 import { useExportPlant } from "@/ui/export-plant";
 import { Resource } from "@/ui/resource";
@@ -13,19 +12,23 @@ import { Notice } from "@/ui/ui";
 import { useCodeLabel } from "@/ui/vocabulary";
 import { useCanManageWorkspace } from "@/ui/workspace-access";
 import {
-    editorHold,
-    proposalActs,
+    INITIAL_OUTAGES,
+    outageControls,
+    proposalBody,
+    reduceOutages,
     staleVersion,
     submitOutageChange,
+    type Live,
+    type Offer,
     type Outage,
     type OutageChange,
-    type OutageEditing,
+    type OutageEvent,
+    type OutageRow,
 } from "./outage/model";
 import { OutageCard } from "./outage/outage-card";
 import { OutageEditor, type Ceilings } from "./outage/outage-editor";
 
 type Configuration = NonNullable<Plant["current_configuration"]>;
-type OutageRow = components["schemas"]["IncidentListOutput"];
 
 export function Outages({
     scope,
@@ -43,15 +46,24 @@ export function Outages({
     const proposals = useTranslations("ChangeRequests");
     const direct = useCanManageWorkspace();
     const plant = useExportPlant();
-    const proposalKey = useProposalKey();
-    const [submitted, setSubmitted] = useState(false);
-    const [editor, setEditor] = useState<OutageEditing>({ status: "closed" });
-    const [resolving, setResolving] = useState<number | null>(null);
+    const [screen, setScreen] = useState(INITIAL_OUTAGES);
+    const [reconciled, setReconciled] = useState<Offer>();
     const [reloads, setReloads] = useState(0);
     const resource = useApiList(
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/",
         { path: scope },
     );
+    const offer = resource.data;
+    const live: Live = { offer, direct, configured: !!configuration };
+    const apply = (event: OutageEvent) =>
+        setScreen((current) => reduceOutages(current, event));
+    if (offer && offer !== reconciled) {
+        setReconciled(offer);
+        apply({ type: "rowsLoaded", live });
+    }
+    const derived = outageControls(screen, live);
+    const { workflow } = screen;
+
     async function reload() {
         setReloads((count) => count + 1);
         try {
@@ -61,20 +73,35 @@ export function Outages({
         }
     }
     async function submit(change: OutageChange) {
-        setSubmitted(false);
+        const next = reduceOutages(screen, {
+            type: "send",
+            payload: JSON.stringify(direct ? null : proposalBody(change)),
+            key: crypto.randomUUID(),
+        });
+        const attempt = next.workflow?.attempt;
+        if (next === screen || !attempt) return;
+        setScreen(next);
         try {
-            await submitOutageChange(scope, change, { proposalKey, direct });
+            await submitOutageChange(scope, change, {
+                key: attempt.key,
+                direct,
+            });
         } catch (error) {
-            // The list shows the version the edit lost to while the form keeps what was typed.
-            if (
-                change.action !== "create" &&
-                staleVersion(error, change.outage.id)
-            )
-                void reload();
-            throw error;
+            const current =
+                change.action === "create"
+                    ? null
+                    : staleVersion(error, change.outage.id);
+            apply({ type: "sendFailed", current, direct });
+            if (!current) throw error;
+            // The list shows the version the change lost to while the form keeps what was typed.
+            void reload();
+            throw new DisplayError(t("staleEdit"));
         }
-        if (!direct) setSubmitted(true);
-        await reload();
+        try {
+            await reload();
+        } finally {
+            apply({ type: "sent", proposed: !direct });
+        }
     }
     const ceilings = (outage?: Outage): Ceilings | undefined =>
         configuration &&
@@ -83,15 +110,10 @@ export function Outages({
             outage.declared_configuration_id === configuration.id)
             ? configuration
             : undefined;
-    const open = (outage?: Outage) => {
-        proposalKey.reset();
-        setSubmitted(false);
-        if (outage && resolving === outage.id) setResolving(null);
-        setEditor({ status: "open", outage });
-    };
-    const offer = resource.data;
-    const canOpen = direct ? !!configuration : !!offer?.can_propose;
-    const hold = editorHold(editor, offer, direct);
+    const hold =
+        derived.hold === "held"
+            ? t("editorHeld")
+            : derived.hold && reason(derived.hold, t("proposalUnavailable"));
     const unavailable = direct
         ? !configuration && t("configurationRequired")
         : offer &&
@@ -100,6 +122,10 @@ export function Outages({
               offer.proposal_unavailable_reason ?? "",
               t("proposalUnavailable"),
           );
+    const editing =
+        workflow?.kind === "create" || workflow?.kind === "update"
+            ? workflow
+            : null;
     const card = (outage: OutageRow) => (
         <OutageCard
             key={outage.id}
@@ -108,19 +134,25 @@ export function Outages({
             pendingRequestId={outage.pending_request_id}
             timezone={timezone}
             direct={direct}
-            actionable={proposalActs(outage, editor, offer, direct)}
+            offered={derived.offered.has(outage.id)}
+            controls={derived}
+            hold={hold}
             configurationChanged={
                 outage.status === "active" &&
                 !!configuration &&
                 outage.declared_configuration_id !== configuration.id
             }
-            resolving={resolving === outage.id}
-            onEdit={() => open(outage)}
-            onResolve={(next) => {
-                proposalKey.reset();
-                setSubmitted(false);
-                setResolving(next ? outage.id : null);
-            }}
+            workflow={
+                (workflow?.kind === "resolve" || workflow?.kind === "cancel") &&
+                workflow.outage.id === outage.id
+                    ? workflow
+                    : null
+            }
+            onOpen={(kind) =>
+                apply({ type: "open", target: { kind, outage }, live })
+            }
+            onClose={() => apply({ type: "close" })}
+            onDiscard={() => apply({ type: "discard" })}
             onSubmit={submit}
         />
     );
@@ -130,8 +162,18 @@ export function Outages({
                 <div>
                     <h2>{t("plantOutages")}</h2>
                 </div>
-                {canOpen && (
-                    <button className="button" onClick={() => open()}>
+                {derived.create && (
+                    <button
+                        className="button"
+                        disabled={!derived.acts}
+                        onClick={() =>
+                            apply({
+                                type: "open",
+                                target: { kind: "create" },
+                                live,
+                            })
+                        }
+                    >
                         {direct
                             ? t("reportOutage")
                             : proposals("proposeOutage")}
@@ -139,27 +181,29 @@ export function Outages({
                 )}
             </div>
             {unavailable && <Notice>{unavailable}</Notice>}
-            {submitted && <Notice>{proposals("submitted")}</Notice>}
+            {screen.submitted && <Notice>{proposals("submitted")}</Notice>}
             {!direct && <p className="fine">{proposals("approvalHelp")}</p>}
             <details>
                 <summary>{t("howToReportAnOutage")}</summary>
                 <p>{t("reportingHelp")}</p>
                 <p className="fine">{t("editingHelp")}</p>
             </details>
-            {editor.status === "open" && (
+            {editing && (
                 <OutageEditor
-                    key={editor.outage?.id ?? "new"}
-                    outage={editor.outage}
-                    timezone={timezone}
-                    ceilings={ceilings(editor.outage)}
-                    direct={direct}
-                    hold={
-                        hold === "held"
-                            ? t("editorHeld")
-                            : hold && reason(hold, t("proposalUnavailable"))
+                    key={editing.kind === "create" ? "new" : editing.outage.id}
+                    outage={
+                        editing.kind === "create" ? undefined : editing.outage
                     }
+                    stale={editing.stale}
+                    timezone={timezone}
+                    ceilings={ceilings(
+                        editing.kind === "create" ? undefined : editing.outage,
+                    )}
+                    direct={direct}
+                    controls={derived}
+                    hold={hold}
                     onSubmit={submit}
-                    onClose={() => setEditor({ status: "closed" })}
+                    onClose={() => apply({ type: "close" })}
                 />
             )}
             <Resource resource={resource} loading={t("loadingOutages")}>
