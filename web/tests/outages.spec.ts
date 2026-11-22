@@ -1442,3 +1442,173 @@ test("an administrator who loses direct access with an editor open on an outage 
         "Inverter replaced",
     );
 });
+
+test("a resolution whose outage someone else cancels while it is sent stays held with what was typed once the send fails", async ({
+    page,
+}) => {
+    const answered = gate();
+    let cancelled = false;
+    await memberOutages(page, () =>
+        cancelled
+            ? memberPage([
+                  cancelledFour(),
+                  listedOutage(5, "Export limited", null),
+              ])
+            : memberList(),
+    );
+    await page.route("**/change-requests/incidents/", async (route) => {
+        await answered.pass();
+        await route.fulfill({
+            status: 503,
+            json: errorBody("busy", "The service is busy."),
+        });
+    });
+    await openOutages(page);
+    const inverter = outageCard(page, "Inverter offline");
+    await inverter
+        .getByRole("button", { name: "Submit resolution", exact: true })
+        .click();
+    const resolvedAt = inverter.getByLabel("Resolved at", { exact: true });
+    await resolvedAt.fill("2026-11-10T14:00");
+    await inverter
+        .getByRole("button", { name: "Send for approval", exact: true })
+        .click();
+    await answered.reached;
+
+    cancelled = true;
+    await readOnFocus(page);
+    await expect(
+        inverter.getByText("Cancelled", { exact: true }),
+    ).toBeVisible();
+    answered.open();
+    await expect(
+        inverter.getByRole("button", { name: "Saving…", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+        inverter.getByRole("status").filter({ hasText: cancelledText }),
+    ).toBeVisible();
+    await expect(resolvedAt).toHaveValue("2026-11-10T14:00");
+    await expect(
+        inverter.getByRole("button", {
+            name: "Send for approval",
+            exact: true,
+        }),
+    ).toHaveCount(0);
+});
+
+test("an administrator demoted while a failing save is sent is held on an outage holding their request", async ({
+    page,
+}) => {
+    const answered = gate();
+    let role: "admin" | "viewer" = "admin";
+    await memberOutages(page, () => memberList(4));
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([tenantRow({ id: 1, name: "Workspace", role })]),
+        }),
+    );
+    await page.route("**/outages/4/", async (route) => {
+        await answered.pass();
+        await route.fulfill({
+            status: 403,
+            json: errorBody(
+                "workspace_admin_required",
+                "Only a workspace administrator can change outages.",
+            ),
+        });
+    });
+    await openOutages(page);
+    await outageCard(page, "Inverter offline")
+        .getByRole("button", { name: "Edit report", exact: true })
+        .click();
+    const editor = page.getByRole("region", { name: "Edit outage" });
+    await editor.getByLabel("Incident title").fill("Inverter replaced");
+    await editor
+        .getByRole("button", { name: "Save outage changes", exact: true })
+        .click();
+    await answered.reached;
+
+    role = "viewer";
+    await readOnFocus(page);
+    await expect(
+        page.getByRole("button", { name: "Submit outage", exact: true }),
+    ).toBeVisible();
+    answered.open();
+    await expect(
+        editor.getByRole("button", { name: "Saving…", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+        editor.getByRole("status").filter({ hasText: heldText }),
+    ).toBeVisible();
+    await expect(
+        editor.getByRole("button", { name: "Send for approval", exact: true }),
+    ).toHaveCount(0);
+    await expect(editor.getByLabel("Incident title")).toHaveValue(
+        "Inverter replaced",
+    );
+});
+
+test("a conflict whose reload repeats the limit already listed while the change was sent holds the editor", async ({
+    page,
+}) => {
+    const answered = gate();
+    let limited = false;
+    const current: OutageRow = {
+        ...listedOutage(4, "Changed meanwhile", null),
+        revision: 3,
+    };
+    await memberOutages(page, () =>
+        limited
+            ? memberPage(
+                  [current, listedOutage(5, "Export limited", null)],
+                  "pending_request_limit",
+              )
+            : memberList(),
+    );
+    await page.route("**/change-requests/incidents/", async (route) => {
+        await answered.pass();
+        await route.fulfill({
+            status: 409,
+            json: answer("IncidentConflict", {
+                ...errorBody(
+                    "incident_revision_changed",
+                    "The outage changed. Review its current values and save again.",
+                ),
+                current,
+            }),
+        });
+    });
+    await openOutages(page);
+    await outageCard(page, "Inverter offline")
+        .getByRole("button", { name: "Suggest changes", exact: true })
+        .click();
+    const editor = page.getByRole("region", { name: "Edit outage" });
+    await editor.getByLabel("Incident title").fill("Inverter replaced");
+    await editor
+        .getByRole("button", { name: "Send for approval", exact: true })
+        .click();
+    await answered.reached;
+
+    limited = true;
+    await readOnFocus(page);
+    await expect(
+        page.getByRole("heading", { name: "Changed meanwhile" }),
+    ).toBeVisible();
+    answered.open();
+    await expect(
+        editor.getByRole("alert").filter({
+            hasText: "Someone changed this outage after you opened it.",
+        }),
+    ).toBeVisible();
+    await expect(
+        editor.getByRole("status").filter({
+            hasText: "Too many of your requests for this plant await approval.",
+        }),
+    ).toBeVisible();
+    await expect(
+        editor.getByRole("button", { name: "Send for approval", exact: true }),
+    ).toHaveCount(0);
+    await expect(editor.getByLabel("Incident title")).toHaveValue(
+        "Inverter replaced",
+    );
+});

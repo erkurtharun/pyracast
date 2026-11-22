@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { ApiError } from "../src/lib/api/errors";
 import { keys } from "../src/lib/api/keys";
 import {
     fetchList,
     invalidate,
+    languagePlaceholder,
     pollInterval,
     sameRequest,
 } from "../src/lib/api/query";
@@ -100,6 +102,51 @@ test("a request read in another language is the same request, one for another pl
         ),
     ).toBe(false);
 });
+
+for (const status of [403, 404])
+    test(`rows whose request was refused with ${status} are not shown again in another language, rows still allowed are`, async () => {
+        const client = new QueryClient({
+            defaultOptions: { queries: { retry: false } },
+        });
+        const read = (locale: string) =>
+            keys.request("1:a", sites, { path: { tenant_id: 5 } }, locale);
+        const english = read("en");
+        const observer = new QueryObserver(client, {
+            queryKey: english,
+            queryFn: () => Promise.resolve("English rows"),
+        });
+        const unsubscribe = observer.subscribe(() => {});
+        const speak = (locale: string) => {
+            const queryKey = read(locale);
+            observer.setOptions({
+                queryKey,
+                queryFn: () => new Promise<string>(() => {}),
+                placeholderData: languagePlaceholder(queryKey),
+            });
+            return observer.getCurrentResult();
+        };
+        try {
+            await expect
+                .poll(() => observer.getCurrentResult().data)
+                .toBe("English rows");
+            const allowed = speak("tr");
+            expect(allowed.data).toBe("English rows");
+            expect(allowed.isPlaceholderData).toBe(true);
+
+            observer.setOptions({
+                queryKey: english,
+                queryFn: () =>
+                    Promise.reject(new ApiError("Refused.", { status })),
+            });
+            await observer.refetch();
+            expect(observer.getCurrentResult().error).toBeInstanceOf(ApiError);
+            const denied = speak("de");
+            expect(denied.data).toBeUndefined();
+            expect(denied.isPlaceholderData).toBe(false);
+        } finally {
+            unsubscribe();
+        }
+    });
 
 function json(body: unknown, status = 200) {
     return new Response(JSON.stringify(body), {
